@@ -236,14 +236,26 @@ the single source of red/green: the Metrics page colors from them
 `target: 80` / `fail_at: 50`, set in `collection.rs::record_coverage_metric`).
 See [theming.md](./theming.md).
 
-Feedback is **advisory — oxplow never blocks**. When an effort's diff coverage
-lands below target, the PostToolUse ride-along fires a **one-shot** nudge
-("coverage X% < 80% target — add tests…") via the same `persist_nudge` +
-`additionalContext` path as the report-less / commit-hygiene nudges, deduped
-per-effort by an in-memory `nudged_coverage` set. (A broader "metric deltas this
-effort" prompt line + gauge-threshold nudges are a tracked follow-up — gauge
-metrics run in the background on-snapshot, not in a hook, so surfacing their
-threshold crossings needs the Stop/prompt path, not the PostToolUse return.)
+Feedback is **advisory — oxplow never blocks**. Two paths:
+
+- **Coverage-target nudge** (PostToolUse). When an effort's diff coverage lands
+  below target, the ride-along fires a **one-shot** nudge ("coverage X% < 80%
+  target — add tests…") via the same `persist_nudge` + `additionalContext` path
+  as the report-less / commit-hygiene nudges, deduped per-effort by an in-memory
+  `nudged_coverage` set.
+- **Effort metric deltas** (UserPromptSubmit, tsk231). `CollectionService::
+  effort_metric_context(thread)` builds a "# Metric deltas (this effort)" block —
+  for every **code** metric (operational `agent.*`/`effort.*`/`task.*` and `event`
+  kinds are skipped) with samples in the open effort's window, it shows
+  `title: baseline → current (Δ ±N)` (first vs last `samples_for_effort`). The
+  first turn a **gauge crosses** its `warn_at`/`fail_at` (`threshold_state`,
+  interpreted via `direction`) the line gets a loud `⚠ crossed fail/warn
+  threshold` marker, **one-shot** per `(effort, metric)` via an in-memory
+  `nudged_gauge` set — on-snapshot gauges run outside any hook, so the crossing
+  can't ride the PostToolUse return; the per-turn prompt context surfaces it
+  instead. The control-plane joins this with the session-context block into the
+  one UserPromptSubmit `additionalContext`. Returns `None` (adds nothing) when no
+  metric moved and no crossing is fresh, so steady-state turns stay quiet.
 
 ## Gotchas
 

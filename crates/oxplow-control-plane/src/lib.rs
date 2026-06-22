@@ -535,19 +535,34 @@ async fn handle_hook_inner(
     // promotions/demotions and append a loud ROLE CHANGE banner.
     if kind == HookKind::UserPromptSubmit {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
-            if let Some(ctx_block) = refreshed_session_context(
+            // Two independent context pieces ride this one additionalContext:
+            // the session-context block (role/stream changes, deduped so it
+            // only re-emits when it actually changes) and the advisory metric
+            // deltas for the open effort (tsk231, recomputed each turn). Join
+            // whatever is present.
+            let ctx_block = refreshed_session_context(
                 &ctx,
                 thread_id,
                 envelope_for_resume.session_id.as_deref(),
             )
-            .await
-            {
+            .await;
+            let metric_block = ctx
+                .services
+                .collection
+                .effort_metric_context(thread_id)
+                .await;
+            let combined: String = [ctx_block, metric_block]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if !combined.is_empty() {
                 return (
                     StatusCode::OK,
                     Json(serde_json::json!({
                         "hookSpecificOutput": {
                             "hookEventName": "UserPromptSubmit",
-                            "additionalContext": ctx_block,
+                            "additionalContext": combined,
                         }
                     })),
                 )

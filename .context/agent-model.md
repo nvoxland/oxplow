@@ -295,7 +295,12 @@ to `runtime.handleHookEnvelope`, which:
    `(removed under Tauri)`. The session-context block refreshes
    on every turn so the agent notices when the user promoted a
    different thread to writer mid-session; the frozen ids in the
-   launch-time system prompt no longer win.
+   launch-time system prompt no longer win. The same `additionalContext`
+   also carries the **effort metric deltas** block when present
+   (`CollectionService::effort_metric_context`, tsk231 — see
+   `.context/metrics.md`): how the open effort's code metrics moved +
+   a one-shot gauge warn/fail crossing marker. The two pieces are joined
+   with a blank line; either may be absent.
 6. For `Stop`: runs `computeStopDirective` (below).
 
 **Side-band hook steps are best-effort by design.** The PostToolUse

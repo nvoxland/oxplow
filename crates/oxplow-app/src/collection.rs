@@ -244,6 +244,13 @@ pub struct CollectionService {
     /// set from `nudged_efforts` so the report-less and coverage-target nudges
     /// don't suppress each other; same ephemeral in-memory dedup.
     nudged_coverage: Arc<std::sync::Mutex<std::collections::HashSet<EffortId>>>,
+    /// `(effort, metric_id)` pairs already surfaced as a gauge warn/fail
+    /// crossing in the effort-metric prompt context (tsk231). Gauge metrics run
+    /// on-snapshot in the background, not in a hook, so their threshold crossing
+    /// can't ride the PostToolUse `additionalContext`; instead the
+    /// UserPromptSubmit context line surfaces it **once** per effort+metric.
+    /// Same ephemeral in-memory dedup.
+    nudged_gauge: Arc<std::sync::Mutex<std::collections::HashSet<(EffortId, i64)>>>,
 }
 
 impl CollectionService {
@@ -272,6 +279,7 @@ impl CollectionService {
             nudged_efforts: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             nudged_commits: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             nudged_coverage: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            nudged_gauge: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -1200,6 +1208,93 @@ impl CollectionService {
         }
     }
 
+    /// Record that `(effort, metric)` had its gauge warn/fail crossing
+    /// surfaced. Returns `true` the first time (caller should surface the loud
+    /// marker), `false` after. One-shot-per-effort+metric anti-nag (tsk231).
+    fn mark_gauge_nudged(&self, effort: &EffortId, metric_id: i64) -> bool {
+        match self.nudged_gauge.lock() {
+            Ok(mut set) => set.insert((*effort, metric_id)),
+            Err(_) => false,
+        }
+    }
+
+    /// The advisory "metric deltas this effort" block for the open effort on
+    /// `thread` (tsk231) — how each code metric's samples moved since the
+    /// effort started, plus a **one-shot** loud marker the first turn a gauge
+    /// crosses its `warn_at`/`fail_at` threshold. Advise-only; returns `None`
+    /// when there's no open effort, no moved metric, and no fresh crossing (so
+    /// steady-state turns add nothing). Surfaced via the UserPromptSubmit
+    /// `additionalContext`, since on-snapshot gauges run outside any hook.
+    pub async fn effort_metric_context(&self, thread: &ThreadId) -> Option<String> {
+        let effort = self.efforts.find_open_for_thread(thread).await.ok()??;
+        let defs = self.metrics.list_definitions().await.ok()?;
+        let mut lines: Vec<String> = Vec::new();
+        for def in defs {
+            // Operational/event metrics (tokens, cost, cycle-time, nudges,
+            // navigation) grow every turn and aren't code-health signals — keep
+            // the line focused on code metrics.
+            if def.kind == "event" || is_operational_metric_key(&def.key) {
+                continue;
+            }
+            let Ok(samples) = self
+                .metrics
+                .samples_for_effort(def.id, effort.id.value())
+                .await
+            else {
+                continue;
+            };
+            // samples_for_effort is time-ASC: first = effort-start baseline,
+            // last = current. (The code metrics relevant here project one
+            // headline sample per run, so first/last are the right anchors.)
+            let (Some(first), Some(last)) = (samples.first(), samples.last()) else {
+                continue;
+            };
+            let baseline = first.value;
+            let current = last.value;
+            let moved = (current - baseline).abs() > f64::EPSILON;
+            let crossing = threshold_state(&def.direction, current, def.warn_at, def.fail_at);
+            let fresh_crossing = crossing.is_some() && self.mark_gauge_nudged(&effort.id, def.id);
+            if !moved && !fresh_crossing {
+                continue;
+            }
+            let mut line = format!(
+                "- {}: {} → {}{}",
+                def.title,
+                fmt_metric_num(baseline),
+                fmt_metric_num(current),
+                fmt_unit_suffix(def.unit.as_deref().unwrap_or("")),
+            );
+            if moved {
+                let delta = current - baseline;
+                line.push_str(&format!(" (Δ {})", fmt_signed(delta)));
+            }
+            if fresh_crossing {
+                if let Some(level) = crossing {
+                    let thresh = if level == "fail" {
+                        def.fail_at
+                    } else {
+                        def.warn_at
+                    };
+                    line.push_str(&format!(
+                        " ⚠ crossed {} threshold{}",
+                        level,
+                        thresh
+                            .map(|t| format!(" ({})", fmt_metric_num(t)))
+                            .unwrap_or_default(),
+                    ));
+                }
+            }
+            lines.push(line);
+        }
+        if lines.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "# Metric deltas (this effort)\n{}\n\n(Advisory — for awareness, not gating.)",
+            lines.join("\n")
+        ))
+    }
+
     /// Commit-hygiene check: after a successful `git commit`, flag any file in
     /// the new HEAD commit that falls OUTSIDE the open effort's changed set
     /// (start-snapshot content vs. working-tree content — the same notion of
@@ -1754,6 +1849,78 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
 
 /// The PostToolUse nudge shown when an effort's diff coverage lands below the
 /// `oxplow.coverage.diff_pct` target (tsk220). Advisory — oxplow never blocks.
+/// Operational metric namespaces (tokens, cost, cycle-time, redo-rate, nudges,
+/// navigation) — these grow every turn and aren't code-health signals, so the
+/// effort-metric prompt context (tsk231) skips them.
+fn is_operational_metric_key(key: &str) -> bool {
+    key.starts_with("agent.") || key.starts_with("effort.") || key.starts_with("task.")
+}
+
+/// Classify a value against a metric's thresholds, interpreted via `direction`.
+/// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
+/// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
+/// "higher" for `lower-better` and "lower" for `higher-better`.
+fn threshold_state(
+    direction: &str,
+    value: f64,
+    warn_at: Option<f64>,
+    fail_at: Option<f64>,
+) -> Option<&'static str> {
+    let worse_when_above = match direction {
+        "lower-better" => true,
+        "higher-better" => false,
+        // neutral / unknown: no threshold semantics.
+        _ => return None,
+    };
+    let crosses = |t: f64| {
+        if worse_when_above {
+            value >= t
+        } else {
+            value <= t
+        }
+    };
+    if let Some(f) = fail_at {
+        if crosses(f) {
+            return Some("fail");
+        }
+    }
+    if let Some(w) = warn_at {
+        if crosses(w) {
+            return Some("warn");
+        }
+    }
+    None
+}
+
+/// Format a metric value compactly: integers as integers, else one decimal.
+fn fmt_metric_num(v: f64) -> String {
+    if v.fract().abs() < f64::EPSILON {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+/// A signed delta (`+2`, `-11`, `+1.5`) for the deltas line.
+fn fmt_signed(v: f64) -> String {
+    let n = fmt_metric_num(v.abs());
+    if v < 0.0 {
+        format!("-{n}")
+    } else {
+        format!("+{n}")
+    }
+}
+
+/// `%` renders glued to the number (`71%`); other units get a leading space
+/// (`7 count`); an empty unit adds nothing.
+fn fmt_unit_suffix(unit: &str) -> String {
+    match unit {
+        "" => String::new(),
+        "%" => "%".to_string(),
+        u => format!(" {u}"),
+    }
+}
+
 fn coverage_target_nudge_message(pct: f64) -> String {
     format!(
         "Diff coverage on this effort's changed lines is {pct:.0}%, below the {target:.0}% \
@@ -1907,6 +2074,61 @@ fn analysis_source(collector: &Collector) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn threshold_state_respects_direction() {
+        // lower-better: worse is higher.
+        assert_eq!(
+            threshold_state("lower-better", 12.0, Some(5.0), Some(10.0)),
+            Some("fail")
+        );
+        assert_eq!(
+            threshold_state("lower-better", 7.0, Some(5.0), Some(10.0)),
+            Some("warn")
+        );
+        assert_eq!(
+            threshold_state("lower-better", 3.0, Some(5.0), Some(10.0)),
+            None
+        );
+        // higher-better: worse is lower (e.g. coverage %).
+        assert_eq!(
+            threshold_state("higher-better", 40.0, Some(80.0), Some(50.0)),
+            Some("fail")
+        );
+        assert_eq!(
+            threshold_state("higher-better", 70.0, Some(80.0), Some(50.0)),
+            Some("warn")
+        );
+        assert_eq!(
+            threshold_state("higher-better", 90.0, Some(80.0), Some(50.0)),
+            None
+        );
+        // neutral never crosses.
+        assert_eq!(
+            threshold_state("neutral", 999.0, Some(1.0), Some(1.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn fmt_helpers_format_compactly() {
+        assert_eq!(fmt_metric_num(7.0), "7");
+        assert_eq!(fmt_metric_num(70.5), "70.5");
+        assert_eq!(fmt_signed(9.0), "+9");
+        assert_eq!(fmt_signed(-11.0), "-11");
+        assert_eq!(fmt_unit_suffix("%"), "%");
+        assert_eq!(fmt_unit_suffix("count"), " count");
+        assert_eq!(fmt_unit_suffix(""), "");
+    }
+
+    #[test]
+    fn operational_keys_are_recognized() {
+        assert!(is_operational_metric_key("agent.tokens.total"));
+        assert!(is_operational_metric_key("effort.cycle_time_ms"));
+        assert!(is_operational_metric_key("task.efforts"));
+        assert!(!is_operational_metric_key("oxplow.rust.unsafe_blocks"));
+        assert!(!is_operational_metric_key("acme.custom"));
+    }
 
     #[test]
     fn report_nudge_names_configured_test_command() {
@@ -2564,6 +2786,117 @@ mod tests {
                 .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
                 .await
                 .is_empty());
+        }
+
+        /// Seed a gauge definition + two samples (baseline, current) in the open
+        /// effort's window. Returns the metric id.
+        async fn seed_gauge(
+            h: &Harness,
+            key: &str,
+            direction: &str,
+            warn_at: Option<f64>,
+            fail_at: Option<f64>,
+            baseline: f64,
+            current: f64,
+        ) -> i64 {
+            use oxplow_db::{NewMetricDefinition, NewMetricSample};
+            let mut def = NewMetricDefinition::new(key, "gauge", "unsafe blocks");
+            def.unit = Some("count".into());
+            def.direction = direction.into();
+            def.warn_at = warn_at;
+            def.fail_at = fail_at;
+            let metric_id = h.service.metrics.upsert_definition(def).await.unwrap();
+            for value in [baseline, current] {
+                h.service
+                    .metrics
+                    .record_sample(NewMetricSample {
+                        run_id: None,
+                        metric_id,
+                        value,
+                        numerator: None,
+                        denominator: None,
+                        captured_at: None,
+                        snapshot_id: None,
+                        closest_git_version: None,
+                        branch: None,
+                        git_version_exact: false,
+                        basis_ref: None,
+                        stream_id: 1,
+                        thread_id: None,
+                        subject_kind: None,
+                        subject_ref: None,
+                        path: None,
+                        line: None,
+                        dims_json: None,
+                        provenance: "observed".into(),
+                        source: "test".into(),
+                    })
+                    .await
+                    .unwrap();
+            }
+            metric_id
+        }
+
+        #[tokio::test]
+        async fn effort_metric_context_reports_deltas_and_one_shot_crossing() {
+            let h = build(None).await;
+            // unsafe blocks went 3 → 12 (lower-better), crossing fail_at=10.
+            seed_gauge(
+                &h,
+                "test.unsafe_blocks",
+                "lower-better",
+                Some(5.0),
+                Some(10.0),
+                3.0,
+                12.0,
+            )
+            .await;
+
+            let first = h.service.effort_metric_context(&h.thread).await.unwrap();
+            assert!(first.contains("Metric deltas (this effort)"), "{first}");
+            assert!(first.contains("unsafe blocks: 3 → 12"), "{first}");
+            assert!(first.contains("Δ +9"), "{first}");
+            assert!(
+                first.contains("crossed fail threshold (10)"),
+                "first turn surfaces the crossing: {first}"
+            );
+
+            // Second turn: the delta still shows, but the loud crossing is
+            // one-shot — it must not repeat.
+            let second = h.service.effort_metric_context(&h.thread).await.unwrap();
+            assert!(second.contains("unsafe blocks: 3 → 12"), "{second}");
+            assert!(
+                !second.contains("crossed"),
+                "crossing is one-shot per effort: {second}"
+            );
+        }
+
+        #[tokio::test]
+        async fn effort_metric_context_none_when_nothing_moved() {
+            let h = build(None).await;
+            // Two equal samples, neutral direction → no movement, no crossing.
+            seed_gauge(&h, "test.flat", "neutral", None, None, 7.0, 7.0).await;
+            assert!(h.service.effort_metric_context(&h.thread).await.is_none());
+        }
+
+        #[tokio::test]
+        async fn effort_metric_context_skips_operational_keys() {
+            let h = build(None).await;
+            // Tokens grow every turn but aren't a code-health signal — excluded.
+            seed_gauge(
+                &h,
+                "agent.tokens.total",
+                "neutral",
+                None,
+                None,
+                100.0,
+                5000.0,
+            )
+            .await;
+            assert!(
+                h.service.effort_metric_context(&h.thread).await.is_none(),
+                "operational `agent.*` metrics are filtered out"
+            );
         }
 
         #[tokio::test]
