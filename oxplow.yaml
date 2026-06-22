@@ -52,9 +52,12 @@ metrics:
 - use: oxplow.rust.panic_macros
 - use: oxplow.rust.todo_markers
 - use: oxplow.rust.fn_count
+- use: oxplow.rust.high_complexity_fns
+- use: oxplow.rust.long_functions
 # Frontend (apps/desktop) — the bundled TypeScript gauges.
 - use: oxplow.ts.any_usage
 - use: oxplow.ts.non_null_assertions
 - use: oxplow.ts.console_calls
 - use: oxplow.ts.ts_ignore
 - use: oxplow.ts.fn_count
+- use: oxplow.ts.high_complexity_fns

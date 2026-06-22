@@ -202,6 +202,41 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             .collect();
         Ok(heap.alloc(serde_json::Value::Array(arr)))
     }
+    /// Per-function code metrics for `text` in `language` — a flat list of
+    /// `{name, complexity, length, parameter_count, start_line, end_line,
+    /// visibility}`. Backed by `oxplow_code_metrics`' tree-sitter walker (the
+    /// cyclomatic-complexity / length / param computations that the in-process
+    /// code-quality producer used), exposed generically so a bundled or
+    /// user-authored metric can project them. Pure → `observed`.
+    fn code_metrics<'v>(
+        text: &str,
+        language: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let lang = oxplow_code_metrics::language_from_name(language)
+            .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
+        let fns = oxplow_code_metrics::analyze_with_language("", text, lang);
+        let arr: Vec<serde_json::Value> = fns
+            .into_iter()
+            .map(|m| {
+                let visibility = match m.visibility {
+                    oxplow_code_metrics::Visibility::Public => "public",
+                    oxplow_code_metrics::Visibility::Private => "private",
+                    oxplow_code_metrics::Visibility::Unknown => "unknown",
+                };
+                serde_json::json!({
+                    "name": m.name,
+                    "complexity": m.complexity,
+                    "length": m.length,
+                    "parameter_count": m.parameter_count,
+                    "start_line": m.start_line,
+                    "end_line": m.end_line,
+                    "visibility": visibility,
+                })
+            })
+            .collect();
+        Ok(heap.alloc(serde_json::Value::Array(arr)))
+    }
     /// Return the snapshot files matching `glob` as `[{path, text}]`, read from
     /// the per-run [`GaugeHost`] injected via `Evaluator::extra`. When no host is
     /// present (e.g. a report-derived run) or the host has no files, returns an

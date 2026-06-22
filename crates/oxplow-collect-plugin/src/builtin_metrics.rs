@@ -141,6 +141,38 @@ const RUST: &[BuiltinMetric] = &[
         input: "text",
         script: include_str!("plugins/metrics/rust/fn_count.star"),
     },
+    // Complexity / length signals (successors to the in-process code-quality
+    // producer, tsk229) via the code_metrics() host builtin.
+    BuiltinMetric {
+        key: "oxplow.rust.high_complexity_fns",
+        kind: "gauge",
+        title: "high-complexity functions",
+        unit: "count",
+        direction: "lower-better",
+        grain: "tree",
+        language: "rust",
+        dimensions: &["language", "git_version"],
+        target: None,
+        trigger: "on-snapshot",
+        runtime: "starlark",
+        input: "text",
+        script: include_str!("plugins/metrics/rust/high_complexity_fns.star"),
+    },
+    BuiltinMetric {
+        key: "oxplow.rust.long_functions",
+        kind: "gauge",
+        title: "long functions (>60 lines)",
+        unit: "count",
+        direction: "lower-better",
+        grain: "tree",
+        language: "rust",
+        dimensions: &["language", "git_version"],
+        target: None,
+        trigger: "on-snapshot",
+        runtime: "starlark",
+        input: "text",
+        script: include_str!("plugins/metrics/rust/long_functions.star"),
+    },
 ];
 
 /// A `gauge`/`tree`/`on-snapshot`/`starlark`/`text` metric (the common shape for
@@ -210,6 +242,14 @@ const TS: &[BuiltinMetric] = &[
         "typescript",
         None,
         include_str!("plugins/metrics/ts/fn_count.star"),
+    ),
+    ast_gauge(
+        "oxplow.ts.high_complexity_fns",
+        "high-complexity functions",
+        "lower-better",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/high_complexity_fns.star"),
     ),
 ];
 
@@ -405,6 +445,54 @@ const g = (a: any) => a!;
     fn clojure_todo_comments_golden() {
         // TODO (core.clj) + FIXME (util.cljs) = 2.
         assert_eq!(run_over("oxplow.clojure.todo_comments", clj_corpus()), 2.0);
+    }
+
+    fn metrics_corpus() -> HashMap<String, String> {
+        // `complex`: 11 `if` branches → cyclomatic complexity 12 (> 10).
+        let mut complex = String::from("fn complex(x: i32) -> i32 {\n");
+        for i in 0..11 {
+            complex.push_str(&format!("    if x == {i} {{ return {i}; }}\n"));
+        }
+        complex.push_str("    0\n}\n");
+        // `big`: 65-statement body → length > 60. Low complexity.
+        let mut big = String::from("fn big() {\n");
+        for i in 0..65 {
+            big.push_str(&format!("    let v{i} = {i};\n"));
+        }
+        big.push_str("}\n");
+        let mut m = HashMap::new();
+        m.insert("src/c.rs".to_string(), format!("{complex}{big}"));
+        m
+    }
+
+    #[test]
+    fn rust_high_complexity_fns_golden() {
+        // Only `complex` (cc 12) exceeds 10; `big` is cc 1.
+        assert_eq!(
+            run_over("oxplow.rust.high_complexity_fns", metrics_corpus()),
+            1.0
+        );
+    }
+
+    #[test]
+    fn rust_long_functions_golden() {
+        // Only `big` (>60 lines) is long; `complex` is ~13 lines.
+        assert_eq!(
+            run_over("oxplow.rust.long_functions", metrics_corpus()),
+            1.0
+        );
+    }
+
+    #[test]
+    fn ts_high_complexity_fns_golden() {
+        let mut body = String::from("function complex(x: number): number {\n");
+        for i in 0..11 {
+            body.push_str(&format!("    if (x === {i}) return {i};\n"));
+        }
+        body.push_str("    return 0;\n}\n");
+        let mut m = HashMap::new();
+        m.insert("src/c.ts".to_string(), body);
+        assert_eq!(run_over("oxplow.ts.high_complexity_fns", m), 1.0);
     }
 
     #[test]
