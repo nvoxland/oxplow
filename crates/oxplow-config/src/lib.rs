@@ -965,6 +965,8 @@ const METRIC_KINDS: &[&str] = &["gauge", "findings", "test", "coverage", "event"
 const METRIC_DIRECTIONS: &[&str] = &["higher-better", "lower-better", "neutral"];
 /// Metric aggregations.
 const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max"];
+/// Metric grains (the subject granularity a sample is recorded at).
+const METRIC_GRAINS: &[&str] = &["effort", "tree", "file", "entity"];
 /// Compute triggers.
 const METRIC_TRIGGERS: &[&str] = &[
     "on-report",
@@ -982,6 +984,11 @@ const METRIC_TRIGGERS: &[&str] = &[
 fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
+    // Each metric key may appear at most once in the project block. Two entries
+    // for the same key (a `key:` define plus a `use:`, or two defines) would
+    // each resolve to a `ResolvedMetric`, silently double-seeding and
+    // double-computing the metric. Reject the collision instead.
+    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (i, e) in raw.into_iter().flatten().enumerate() {
         let use_key = opt(e.use_key);
         let key = opt(e.key);
@@ -1009,6 +1016,12 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
         if is_define && the_key.starts_with("oxplow.") {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] key \"{the_key}\" uses the reserved \"oxplow.\" namespace"
+            )));
+        }
+        if !seen_keys.insert(the_key.clone()) {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] key \"{the_key}\" appears more than once in the \
+                 metrics block; declare it once (a single `use:` or `key:`)"
             )));
         }
 
@@ -1044,6 +1057,14 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
                 )));
             }
         }
+        let grain = opt(e.grain);
+        if let Some(g) = &grain {
+            if !METRIC_GRAINS.contains(&g.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] grain must be one of {METRIC_GRAINS:?} (got \"{g}\")"
+                )));
+            }
+        }
 
         // `use:` inherits compute from the catalog; `key:` must define it.
         let compute = match (is_define, e.compute) {
@@ -1074,7 +1095,7 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             unit: opt(e.unit),
             direction,
             default_agg,
-            grain: opt(e.grain),
+            grain,
             language: opt(e.language),
             dimensions: e
                 .dimensions
@@ -2078,6 +2099,26 @@ metrics:
         // entryFile escaping the project root.
         assert!(load_from_yaml(
             "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: ../x.jq }\n"
+        )
+        .is_err());
+        // unknown grain.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    grain: module\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // a valid grain is accepted.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    grain: tree\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_ok());
+        // the same key declared twice (a `key:` define + a `use:`).
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: x.jq }\n  - use: a.b\n    target: 5\n"
+        )
+        .is_err());
+        // the same key defined twice.
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: x.jq }\n  - key: a.b\n    compute: { runtime: jaq, entryFile: y.jq }\n"
         )
         .is_err());
     }
