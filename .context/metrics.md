@@ -175,9 +175,14 @@ metrics:
     a golden test over a fixture corpus. A project activates one with
     `metrics: - use: oxplow.<lang>.<name>`; the runner builds the collector from
     the embedded script (`BuiltinMetric::collector()`), never a project-disk
-    file. Rust set today: `oxplow.rust.{unsafe_blocks, unwrap_expect_calls,
-    panic_macros, todo_markers, fn_count}` (TS/Clojure/C# — tsk228). This repo
-    dogfoods them in its own `oxplow.yaml`.
+    file. Shipped: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
+    `panic_macros`, `todo_markers`, `fn_count`), **TypeScript** (`any_usage`,
+    `non_null_assertions`, `console_calls`, `ts_ignore`, `fn_count`), **Clojure**
+    (`defn_count`, `todo_comments`) — all `oxplow.<lang>.*`. This repo dogfoods
+    the Rust + TS sets in its own `oxplow.yaml`. **C#** is deferred: `ast_query`
+    only has the grammars bundled in `oxplow-code-metrics`, which omits
+    `tree-sitter-c-sharp` — a C# catalog needs that grammar + a `Language::CSharp`
+    variant first (see tsk228).
   - **user-global** — `global_config_dir()/metrics/*.yaml`, shared across
     projects, hot-reloaded by the config watcher.
   - **project** — `oxplow.yaml` + scripts under `oxplow/metrics/`.

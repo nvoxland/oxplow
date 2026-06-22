@@ -143,9 +143,102 @@ const RUST: &[BuiltinMetric] = &[
     },
 ];
 
+/// A `gauge`/`tree`/`on-snapshot`/`starlark`/`text` metric (the common shape for
+/// a tree-derived AST scan), so each per-language entry stays terse.
+const fn ast_gauge(
+    key: &'static str,
+    title: &'static str,
+    direction: &'static str,
+    language: &'static str,
+    target: Option<f64>,
+    script: &'static str,
+) -> BuiltinMetric {
+    BuiltinMetric {
+        key,
+        kind: "gauge",
+        title,
+        unit: "count",
+        direction,
+        grain: "tree",
+        language,
+        dimensions: &["language", "git_version"],
+        target,
+        trigger: "on-snapshot",
+        runtime: "starlark",
+        input: "text",
+        script,
+    }
+}
+
+const TS: &[BuiltinMetric] = &[
+    ast_gauge(
+        "oxplow.ts.any_usage",
+        "any usage",
+        "lower-better",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/any_usage.star"),
+    ),
+    ast_gauge(
+        "oxplow.ts.non_null_assertions",
+        "non-null assertions",
+        "lower-better",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/non_null_assertions.star"),
+    ),
+    ast_gauge(
+        "oxplow.ts.console_calls",
+        "console.* calls",
+        "lower-better",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/console_calls.star"),
+    ),
+    ast_gauge(
+        "oxplow.ts.ts_ignore",
+        "ts-ignore / ts-expect-error",
+        "lower-better",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/ts_ignore.star"),
+    ),
+    ast_gauge(
+        "oxplow.ts.fn_count",
+        "function count",
+        "neutral",
+        "typescript",
+        None,
+        include_str!("plugins/metrics/ts/fn_count.star"),
+    ),
+];
+
+const CLOJURE: &[BuiltinMetric] = &[
+    ast_gauge(
+        "oxplow.clojure.defn_count",
+        "defn count",
+        "neutral",
+        "clojure",
+        None,
+        include_str!("plugins/metrics/clojure/defn_count.star"),
+    ),
+    ast_gauge(
+        "oxplow.clojure.todo_comments",
+        "TODO / FIXME comments",
+        "lower-better",
+        "clojure",
+        None,
+        include_str!("plugins/metrics/clojure/todo_comments.star"),
+    ),
+];
+
 /// Every bundled built-in metric, across all languages.
-pub fn builtin_metrics() -> &'static [BuiltinMetric] {
-    RUST
+///
+/// (C# is intentionally absent: `ast_query` is backed by the grammars bundled in
+/// `oxplow-code-metrics`, which does not include `tree-sitter-c-sharp` — adding a
+/// C# catalog needs that grammar + a `Language::CSharp` variant first.)
+pub fn builtin_metrics() -> Vec<BuiltinMetric> {
+    [RUST, TS, CLOJURE].concat()
 }
 
 #[cfg(test)]
@@ -158,7 +251,7 @@ mod tests {
     /// single sample's value.
     fn run_over(key: &str, files: HashMap<String, String>) -> f64 {
         let metric = builtin_metrics()
-            .iter()
+            .into_iter()
             .find(|m| m.key == key)
             .unwrap_or_else(|| panic!("no builtin metric {key}"));
         let out = metric
@@ -228,6 +321,90 @@ fn b() {
     fn rust_fn_count_golden() {
         // a, b, c = 3 function_items.
         assert_eq!(run_over("oxplow.rust.fn_count", corpus()), 3.0);
+    }
+
+    fn ts_corpus() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(
+            "src/a.ts".to_string(),
+            r#"
+// @ts-ignore
+function f(x: any): any {
+    console.log(x);
+    const y = x!.foo;
+    return y;
+}
+const g = (a: any) => a!;
+"#
+            .to_string(),
+        );
+        m.insert(
+            "src/b.tsx".to_string(),
+            "// @ts-expect-error\nexport const C = () => { console.warn('x'); return null; };\n"
+                .to_string(),
+        );
+        // Non-TS file the globs must skip.
+        m.insert(
+            "notes.md".to_string(),
+            "any! console.log @ts-ignore".to_string(),
+        );
+        m
+    }
+
+    #[test]
+    fn ts_any_usage_golden() {
+        // a.ts: `x: any`, `: any` return, `a: any` = 3.
+        assert_eq!(run_over("oxplow.ts.any_usage", ts_corpus()), 3.0);
+    }
+
+    #[test]
+    fn ts_non_null_assertions_golden() {
+        // a.ts: `x!`, `a!`; = 2 (the tsx file has none).
+        assert_eq!(run_over("oxplow.ts.non_null_assertions", ts_corpus()), 2.0);
+    }
+
+    #[test]
+    fn ts_console_calls_golden() {
+        // console.log (a.ts) + console.warn (b.tsx) = 2.
+        assert_eq!(run_over("oxplow.ts.console_calls", ts_corpus()), 2.0);
+    }
+
+    #[test]
+    fn ts_ts_ignore_golden() {
+        // @ts-ignore (a.ts) + @ts-expect-error (b.tsx) = 2; the markdown is skipped.
+        assert_eq!(run_over("oxplow.ts.ts_ignore", ts_corpus()), 2.0);
+    }
+
+    #[test]
+    fn ts_fn_count_golden() {
+        // a.ts: function f + arrow g = 2; b.tsx: arrow C = 1; total 3.
+        assert_eq!(run_over("oxplow.ts.fn_count", ts_corpus()), 3.0);
+    }
+
+    fn clj_corpus() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(
+            "src/core.clj".to_string(),
+            ";; TODO: refactor\n(defn add [a b] (+ a b))\n(defn- helper [] :ok)\n(def x 1)\n"
+                .to_string(),
+        );
+        m.insert(
+            "src/util.cljs".to_string(),
+            "(defn greet [n] (str \"hi \" n)) ; FIXME i18n\n".to_string(),
+        );
+        m
+    }
+
+    #[test]
+    fn clojure_defn_count_golden() {
+        // add (defn) + helper (defn-) in core.clj + greet (defn) in util.cljs = 3.
+        assert_eq!(run_over("oxplow.clojure.defn_count", clj_corpus()), 3.0);
+    }
+
+    #[test]
+    fn clojure_todo_comments_golden() {
+        // TODO (core.clj) + FIXME (util.cljs) = 2.
+        assert_eq!(run_over("oxplow.clojure.todo_comments", clj_corpus()), 2.0);
     }
 
     #[test]
