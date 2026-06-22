@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use oxplow_collect_plugin::{Collector, CollectorInput, CollectorKind, GaugeHost};
+use oxplow_collect_plugin::{builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost};
 use oxplow_config::{
     global_config_dir, load_global_metric_entries, resolve_metrics, MetricComputeConfig,
-    OxplowConfig, ResolvedMetric,
+    MetricEntry, OxplowConfig, ResolvedMetric,
 };
 use oxplow_db::{
     NewMetricDefinition, NewMetricRun, NewMetricSample, SnapshotStorage, SqliteMetricStore,
@@ -87,8 +87,9 @@ impl MetricsService {
     }
 
     /// The active, resolved metrics for this project (built-in ∪ global ∪
-    /// project, precedence project > global > built-in). Built-ins are empty
-    /// until the bundled catalog lands (tsk218).
+    /// project, precedence project > global > built-in). Built-ins are the
+    /// bundled catalog (`oxplow_collect_plugin::builtin_metrics`, tsk218); a
+    /// project activates one with `metrics: - use: oxplow.<lang>.<name>`.
     fn resolved_metrics(&self) -> Vec<ResolvedMetric> {
         let project = self
             .config
@@ -98,7 +99,8 @@ impl MetricsService {
         let global = global_config_dir()
             .map(|d| load_global_metric_entries(&d))
             .unwrap_or_default();
-        resolve_metrics(&[], &global, &project)
+        let builtin = builtin_metric_entries();
+        resolve_metrics(&builtin, &global, &project)
     }
 
     fn max_file_bytes(&self) -> u64 {
@@ -333,11 +335,23 @@ impl MetricsService {
         ctx: &GaugeRunContext,
         files: HashMap<String, String>,
     ) -> usize {
-        let collector = match compute_to_collector(metric, &self.project_dir) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(key = %metric.key, error = %e, "gauge metric: bad compute");
-                return 0;
+        // Built-in metrics run from their embedded script (no project-disk
+        // file); global/project metrics build from their `compute.entryFile`.
+        let collector = if metric.scope == "built-in" {
+            match builtin_collector(&metric.key) {
+                Some(c) => c,
+                None => {
+                    tracing::warn!(key = %metric.key, "gauge metric: unknown built-in key");
+                    return 0;
+                }
+            }
+        } else {
+            match compute_to_collector(metric, &self.project_dir) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(key = %metric.key, error = %e, "gauge metric: bad compute");
+                    return 0;
+                }
             }
         };
         let source = gauge_source(metric, &collector);
@@ -430,6 +444,7 @@ fn metric_definition(m: &ResolvedMetric) -> NewMetricDefinition {
     def.direction = m.direction.clone();
     def.default_agg = m.default_agg.clone();
     def.grain = m.grain.clone();
+    def.language = m.language.clone();
     def.producer = Some(m.key.clone());
     def.category = Some("custom".into());
     def.scope = m.scope.clone();
@@ -439,6 +454,43 @@ fn metric_definition(m: &ResolvedMetric) -> NewMetricDefinition {
     def.warn_at = m.warn_at;
     def.fail_at = m.fail_at;
     def
+}
+
+/// The bundled built-in metric catalog as `MetricEntry` definitions, so the
+/// three-scope resolver knows them (a project `use:`s one to activate it). The
+/// `compute.entryFile` is a sentinel — built-in collectors run from their
+/// embedded script (see [`builtin_collector`]), never a project-disk file.
+fn builtin_metric_entries() -> Vec<MetricEntry> {
+    builtin_metrics()
+        .iter()
+        .map(|m| MetricEntry {
+            key: Some(m.key.to_string()),
+            title: Some(m.title.to_string()),
+            kind: Some(m.kind.to_string()),
+            unit: Some(m.unit.to_string()),
+            direction: Some(m.direction.to_string()),
+            grain: Some(m.grain.to_string()),
+            language: Some(m.language.to_string()),
+            dimensions: m.dimensions.iter().map(|d| d.to_string()).collect(),
+            target: m.target,
+            trigger: Some(m.trigger.to_string()),
+            compute: Some(MetricComputeConfig {
+                runtime: m.runtime.to_string(),
+                input: Some(m.input.to_string()),
+                entry_file: Some(m.key.to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// Build the embedded collector for a built-in metric key, if known.
+fn builtin_collector(key: &str) -> Option<Collector> {
+    builtin_metrics()
+        .iter()
+        .find(|m| m.key == key)
+        .map(|m| m.collector())
 }
 
 /// Build a gauge [`Collector`] from a metric's `compute:` block (mirrors
@@ -543,6 +595,7 @@ mod tests {
             direction: "lower-better".into(),
             default_agg: "last".into(),
             grain: Some("tree".into()),
+            language: Some("rust".into()),
             dimensions: vec!["language".into()],
             target: Some(0.0),
             warn_at: None,
@@ -636,6 +689,44 @@ def transform(input):
         assert_eq!(def.kind, "gauge");
         assert_eq!(def.scope, "project");
         assert_eq!(def.producer.as_deref(), Some("repo.loc"));
+    }
+
+    #[tokio::test]
+    async fn used_builtin_resolves_at_builtin_scope_and_runs_embedded() {
+        let (svc, dir) = fixture().await;
+        // A user enables a bundled built-in by `use:` — no project script.
+        std::fs::write(
+            dir.path().join("oxplow.yaml"),
+            "metrics:\n  - use: oxplow.rust.unsafe_blocks\n    target: 3\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+
+        // Seeding registers the definition at built-in scope, with the project's
+        // target override applied.
+        assert_eq!(svc.metrics.seed_definitions().await, 1);
+        let def = svc
+            .metric_store
+            .get_definition("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .expect("seeded");
+        assert_eq!(def.scope, "built-in");
+        assert_eq!(def.language.as_deref(), Some("rust"));
+        assert_eq!(def.target, Some(3.0), "project override merged");
+
+        // Running it executes the EMBEDDED script (no project-disk file). With
+        // no snapshot the file map is empty, so it cleanly yields a 0 sample.
+        let count = svc
+            .metrics
+            .run_metric_by_key("oxplow.rust.unsafe_blocks", None)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].value, 0.0);
+        assert_eq!(samples[0].source, "metric:oxplow.rust.unsafe_blocks");
     }
 
     #[test]

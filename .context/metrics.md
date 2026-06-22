@@ -166,11 +166,25 @@ metrics:
 - The **gauge** script returns `{ "samples": [ {value, subject?, dims?} ] }` and
   may call the `files(glob)` / `ast_query(text, language, sexpr)` host builtins
   (see [collection.md](./collection.md)).
-- **Three scopes**, precedence **project > global > built-in** by key: built-in
-  (bundled — tsk218), user-global (`global_config_dir()/metrics/*.yaml`, shared
-  across projects, hot-reloaded by the config watcher), and project
-  (`oxplow.yaml`). `use:` references a catalog key and layers overrides; `key:`
-  defines a new one. `oxplow.*` is reserved for built-ins.
+- **Three scopes**, precedence **project > global > built-in** by key:
+  - **built-in** — the bundled catalog
+    (`oxplow_collect_plugin::builtin_metrics()`; scripts under
+    `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/`, embedded via
+    `include_str!` in `builtin_metrics.rs`). Each authored through the **public**
+    surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
+    a golden test over a fixture corpus. A project activates one with
+    `metrics: - use: oxplow.<lang>.<name>`; the runner builds the collector from
+    the embedded script (`BuiltinMetric::collector()`), never a project-disk
+    file. Rust set today: `oxplow.rust.{unsafe_blocks, unwrap_expect_calls,
+    panic_macros, todo_markers, fn_count}` (TS/Clojure/C# — tsk228). This repo
+    dogfoods them in its own `oxplow.yaml`.
+  - **user-global** — `global_config_dir()/metrics/*.yaml`, shared across
+    projects, hot-reloaded by the config watcher.
+  - **project** — `oxplow.yaml` + scripts under `oxplow/metrics/`.
+
+  `use:` references a catalog key and layers overrides; `key:` defines a new one.
+  `oxplow.*` is reserved for built-ins (a project may `use:` one but not
+  `key:`-define under it).
 - Validation mirrors the plugin rules: namespaced keys, project-relative
   `entryFile` (no `..`), known runtime/kind/trigger/direction; a `use:` with an
   unknown key resolves to a warning (skipped), not an error.

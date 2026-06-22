@@ -41,3 +41,14 @@ collection:
   # `cargo clippy` / `eslint`); this repo emits clippy JSON explicitly.
   analysisRunPatterns:
   - clippy --message-format=json
+# Metric substrate (epic tsk213, P3). Enable bundled `oxplow.rust.*` gauges —
+# each is a tree-derived AST scan that runs on every snapshot and records a
+# durable, BI-reportable sample. `use:` enables a built-in (optionally with a
+# project override like `target:`); define new ones with `key:` + a `compute:`
+# script under `oxplow/metrics/`. Dogfoods the new authoring system.
+metrics:
+- use: oxplow.rust.unsafe_blocks
+- use: oxplow.rust.unwrap_expect_calls
+- use: oxplow.rust.panic_macros
+- use: oxplow.rust.todo_markers
+- use: oxplow.rust.fn_count

@@ -1822,6 +1822,8 @@ export type MetricEntry = {
 	defaultAgg?: string | null,
 	// `effort` | `tree` | `file` | `entity`.
 	grain?: string | null,
+	// Language this metric measures (e.g. `rust`), for the catalog filter.
+	language?: string | null,
 	// Declared conformed-dimension keys this metric carries.
 	dimensions?: string[],
 	target?: number | null,

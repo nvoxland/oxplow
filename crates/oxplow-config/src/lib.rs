@@ -152,6 +152,9 @@ pub struct MetricEntry {
     /// `effort` | `tree` | `file` | `entity`.
     #[serde(default)]
     pub grain: Option<String>,
+    /// Language this metric measures (e.g. `rust`), for the catalog filter.
+    #[serde(default)]
+    pub language: Option<String>,
     /// Declared conformed-dimension keys this metric carries.
     #[serde(default)]
     pub dimensions: Vec<String>,
@@ -184,6 +187,7 @@ pub struct ResolvedMetric {
     pub direction: String,
     pub default_agg: String,
     pub grain: Option<String>,
+    pub language: Option<String>,
     pub dimensions: Vec<String>,
     pub target: Option<f64>,
     pub warn_at: Option<f64>,
@@ -714,6 +718,7 @@ fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     put_str("direction", &e.direction);
     put_str("defaultAgg", &e.default_agg);
     put_str("grain", &e.grain);
+    put_str("language", &e.language);
     if !e.dimensions.is_empty() {
         m.insert(
             "dimensions".into(),
@@ -1054,6 +1059,7 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             direction,
             default_agg,
             grain: opt(e.grain),
+            language: opt(e.language),
             dimensions: e
                 .dimensions
                 .into_iter()
@@ -1195,6 +1201,7 @@ fn resolve_one(
         direction: pick_str(|e| &e.direction).unwrap_or_else(|| "neutral".into()),
         default_agg: pick_str(|e| &e.default_agg).unwrap_or_else(|| "last".into()),
         grain: pick_str(|e| &e.grain),
+        language: pick_str(|e| &e.language),
         dimensions,
         target: pick_f64(|e| e.target),
         warn_at: pick_f64(|e| e.warn_at),
