@@ -381,9 +381,18 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
-        // Dual-write into the unified metric substrate (best-effort).
+        // Dual-write into the unified metric substrate (best-effort) — counts as
+        // samples + the full payload (suite/case tree) as a `test-detail`
+        // finding so the effort panel can render off the substrate (tsk215).
         self.mirror_test_metrics(
-            thread, &stream_id, provenance, source, passed, failed, total,
+            thread,
+            &stream_id,
+            provenance,
+            source,
+            passed,
+            failed,
+            total,
+            Some(serde_json::Value::Object(payload.clone())),
         )
         .await;
         let id = self
@@ -561,6 +570,7 @@ impl CollectionService {
     /// covered/changed components (so module/branch roll-ups re-aggregate
     /// correctly) plus the capture branch + git version. A metric write error
     /// is logged and swallowed so it never fails the legacy observation path.
+    #[allow(clippy::too_many_arguments)]
     async fn mirror_coverage_metric(
         &self,
         thread: &ThreadId,
@@ -569,19 +579,29 @@ impl CollectionService {
         covered: usize,
         changed: usize,
         version: &file_ref_version::ResolvedFileVersion,
+        detail: Option<serde_json::Value>,
     ) {
         let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
         else {
             return;
         };
         if let Err(e) = self
-            .record_coverage_metric(thread, stream_val, summary_pct, covered, changed, version)
+            .record_coverage_metric(
+                thread,
+                stream_val,
+                summary_pct,
+                covered,
+                changed,
+                version,
+                detail,
+            )
             .await
         {
             tracing::warn!(error = %e, "failed to mirror coverage into metric substrate");
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn record_coverage_metric(
         &self,
         thread: &ThreadId,
@@ -590,6 +610,7 @@ impl CollectionService {
         covered: usize,
         changed: usize,
         version: &file_ref_version::ResolvedFileVersion,
+        detail: Option<serde_json::Value>,
     ) -> Result<(), DomainError> {
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
 
@@ -619,6 +640,9 @@ impl CollectionService {
         run.git_version_exact = version.git_version_exact;
         run.branch = branch.clone();
         let run_id = self.metrics.record_run(run).await?;
+        // Verbatim per-file uncovered-changed-lines detail (tsk215).
+        self.record_detail_finding(run_id, "coverage-detail", detail)
+            .await?;
 
         let mut sample =
             NewMetricSample::observed(metric_id, stream_val, summary_pct, "coverage-report");
@@ -638,10 +662,42 @@ impl CollectionService {
         Ok(())
     }
 
+    /// Record one run-scoped detail finding carrying a verbatim `payload_json`
+    /// (the rich per-effort detail — test tree / coverage files / analysis
+    /// findings — kept on the substrate so the effort panel renders off the
+    /// model, tsk215). No-op when `detail` is None.
+    async fn record_detail_finding(
+        &self,
+        run_id: i64,
+        kind: &str,
+        detail: Option<serde_json::Value>,
+    ) -> Result<(), DomainError> {
+        let Some(detail) = detail else { return Ok(()) };
+        self.metrics
+            .record_finding(oxplow_db::NewMetricFinding {
+                run_id,
+                metric_id: None,
+                subject_kind: None,
+                subject_ref: None,
+                path: None,
+                start_line: None,
+                end_line: None,
+                col: None,
+                kind: kind.to_string(),
+                severity: None,
+                rule: None,
+                message: None,
+                value: None,
+                extra_json: Some(serde_json::to_string(&detail).unwrap_or_default()),
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Mirror a test run into the metric substrate (best-effort): a `tests` run
-    /// with `oxplow.tests.{passed,failed,total}` gauge samples. Provenance flows
-    /// through (a hook-observed run is `observed`; an MCP `record_test_run` is
-    /// `asserted`).
+    /// with `oxplow.tests.{passed,failed,total}` gauge samples + a `test-detail`
+    /// finding (the suite/case tree). Provenance flows through (a hook-observed
+    /// run is `observed`; an MCP `record_test_run` is `asserted`).
     #[allow(clippy::too_many_arguments)]
     async fn mirror_test_metrics(
         &self,
@@ -652,6 +708,7 @@ impl CollectionService {
         passed: Option<i64>,
         failed: Option<i64>,
         total: Option<i64>,
+        detail: Option<serde_json::Value>,
     ) {
         if passed.is_none() && failed.is_none() && total.is_none() {
             return;
@@ -668,6 +725,12 @@ impl CollectionService {
             run.trigger = Some("on-report".into());
             run.branch = branch.clone();
             let run_id = self.metrics.record_run(run).await?;
+
+            // Rich detail (the suite/case tree + counts) verbatim, so the effort
+            // panel can render the full tree off the substrate (tsk215). One
+            // run-scoped `test-detail` finding carrying the payload.
+            self.record_detail_finding(run_id, "test-detail", detail)
+                .await?;
 
             let specs = [
                 (
@@ -719,6 +782,7 @@ impl CollectionService {
     /// an analyzer run + `oxplow.analysis.{errors,warnings}` gauge samples + one
     /// `metric_finding` per lint finding (located detail).
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     async fn mirror_analysis_metrics(
         &self,
         thread: &ThreadId,
@@ -729,6 +793,7 @@ impl CollectionService {
         snapshot_id: Option<i64>,
         git_version: Option<String>,
         git_version_exact: bool,
+        detail: Option<serde_json::Value>,
     ) {
         let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
         else {
@@ -758,6 +823,11 @@ impl CollectionService {
             run.git_version_exact = git_version_exact;
             run.branch = branch.clone();
             let run_id = self.metrics.record_run(run).await?;
+            // Verbatim analyzer payload (command/analyzer/counts/findings) so the
+            // effort panel renders off the substrate (tsk215). Located per-lint
+            // findings are also written below for the substrate's findings drill-in.
+            self.record_detail_finding(run_id, "analysis-detail", detail)
+                .await?;
 
             for (key, title, value) in [
                 ("oxplow.analysis.errors", "Analysis errors", errors),
@@ -885,6 +955,7 @@ impl CollectionService {
             total_covered,
             total_changed,
             &version,
+            Some(payload.clone()),
         )
         .await;
         let id = self
@@ -1510,6 +1581,7 @@ impl CollectionService {
                 local_snapshot_id,
                 closest_git_version.clone(),
                 git_version_exact,
+                Some(serde_json::Value::Object(payload.clone())),
             )
             .await;
         }
@@ -2360,6 +2432,82 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn record_test_run_writes_test_detail_finding_to_substrate() {
+            // tsk215: the suite/case tree is kept verbatim on the substrate as a
+            // `test-detail` finding so the effort panel renders off the model.
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let report = TestReport {
+                suites: vec![TestSuite {
+                    name: "oxplow-app".into(),
+                    cases: vec![
+                        TestCase {
+                            classname: "mod".into(),
+                            name: "t1".into(),
+                            status: TestStatus::Passed,
+                            time_ms: Some(3),
+                        },
+                        TestCase {
+                            classname: "mod".into(),
+                            name: "t2".into(),
+                            status: TestStatus::Failed,
+                            time_ms: None,
+                        },
+                    ],
+                }],
+            };
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    Some(&report),
+                )
+                .await
+                .unwrap();
+            let total = h.service.metric_samples_for_key("oxplow.tests.total").await;
+            let run_id = total[0].run_id.unwrap();
+            let findings = h.service.metric_findings_for_run(run_id).await;
+            let detail = findings
+                .iter()
+                .find(|f| f.kind == "test-detail")
+                .expect("test-detail finding written");
+            let payload: serde_json::Value =
+                serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["suites"][0]["name"], "oxplow-app");
+            assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
+        }
+
+        #[tokio::test]
+        async fn ingest_coverage_writes_coverage_detail_finding_to_substrate() {
+            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+            let cov = h
+                .service
+                .metric_samples_for_key("oxplow.coverage.diff_pct")
+                .await;
+            let run_id = cov[0].run_id.unwrap();
+            let findings = h.service.metric_findings_for_run(run_id).await;
+            let detail = findings
+                .iter()
+                .find(|f| f.kind == "coverage-detail")
+                .expect("coverage-detail finding written");
+            let payload: serde_json::Value =
+                serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
+            assert!(payload["files"].is_array(), "per-file uncovered lines kept");
+            assert!((payload["summaryPct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+        }
+
+        #[tokio::test]
         async fn record_test_run_embeds_junit_tree_and_derives_counts() {
             let h = build(None).await;
             // Run the bundled junit collector to build the suite/case tree
@@ -3050,14 +3198,19 @@ mod tests {
             assert_eq!(errors[0].value, 1.0);
             assert_eq!(warnings[0].value, 1.0);
 
-            // One finding per lint hit, recorded under the run.
+            // One `lint` finding per hit (located detail) + one verbatim
+            // `analysis-detail` payload (tsk215) under the run.
             let run_id = errors[0].run_id.expect("sample carries its run");
             let findings = h.service.metric_findings_for_run(run_id).await;
-            assert_eq!(findings.len(), 2);
-            assert!(findings.iter().all(|f| f.kind == "lint"));
-            assert!(findings.iter().any(|f| f.rule.as_deref() == Some("E0308")
+            let lints: Vec<_> = findings.iter().filter(|f| f.kind == "lint").collect();
+            assert_eq!(lints.len(), 2);
+            assert!(lints.iter().any(|f| f.rule.as_deref() == Some("E0308")
                 && f.severity.as_deref() == Some("error")
                 && f.path.as_deref() == Some("src/a.rs")));
+            assert!(
+                findings.iter().any(|f| f.kind == "analysis-detail"),
+                "verbatim analysis payload kept on the substrate"
+            );
         }
 
         #[tokio::test]
