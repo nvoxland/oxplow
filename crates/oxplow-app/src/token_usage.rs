@@ -476,8 +476,8 @@ impl TokenUsageService {
         let mut run = NewMetricRun::done(stream_val, "token-parse", "token-parse");
         run.thread_id = Some(thread.value());
         run.trigger = Some("continuous".into());
-        let run_id = self.metrics.record_run(run).await?;
 
+        let mut samples = Vec::new();
         for (model, agg) in by_model {
             let subject = format!("model:{model}");
             let total = agg.input + agg.output;
@@ -490,14 +490,17 @@ impl TokenUsageService {
             for (key, value) in rows {
                 let metric_id = ids[key];
                 let mut s = NewMetricSample::observed(metric_id, stream_val, value, "token-parse");
-                s.run_id = Some(run_id);
                 s.thread_id = Some(thread.value());
                 s.subject_kind = Some("model".into());
                 s.subject_ref = Some(subject.clone());
                 s.dims_json = Some(format!("{{\"model\":\"{model}\"}}"));
-                self.metrics.record_sample(s).await?;
+                samples.push(s);
             }
         }
+        // Atomic: the run and all its samples land together (or not at all).
+        self.metrics
+            .record_run_with_data(run, samples, Vec::new())
+            .await?;
         Ok(())
     }
 }

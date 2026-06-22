@@ -630,14 +630,9 @@ impl CollectionService {
         run.closest_git_version = version.closest_git_version.clone();
         run.git_version_exact = version.git_version_exact;
         run.branch = branch.clone();
-        let run_id = self.metrics.record_run(run).await?;
-        // Verbatim per-file uncovered-changed-lines detail (tsk215).
-        self.record_detail_finding(run_id, "coverage-detail", detail)
-            .await?;
 
         let mut sample =
             NewMetricSample::observed(metric_id, stream_val, summary_pct, "coverage-report");
-        sample.run_id = Some(run_id);
         sample.numerator = Some(covered as f64);
         sample.denominator = Some(changed as f64);
         sample.thread_id = Some(thread.value());
@@ -646,43 +641,45 @@ impl CollectionService {
         sample.git_version_exact = version.git_version_exact;
         sample.basis_ref = version.closest_git_version.clone();
         sample.branch = branch;
-        self.metrics.record_sample(sample).await?;
+
+        // Atomic: the run, its sample, and the verbatim per-file
+        // uncovered-changed-lines detail finding (tsk215) commit together.
+        let findings: Vec<NewMetricFinding> = Self::detail_finding("coverage-detail", detail)
+            .into_iter()
+            .collect();
+        self.metrics
+            .record_run_with_data(run, vec![sample], findings)
+            .await?;
         self.events.emit(OxplowEvent::MetricSamplesChanged {
             stream_id: oxplow_domain::StreamId::new(stream_val),
         });
         Ok(())
     }
 
-    /// Record one run-scoped detail finding carrying a verbatim `payload_json`
+    /// Build one run-scoped detail finding carrying a verbatim `payload_json`
     /// (the rich per-effort detail — test tree / coverage files / analysis
     /// findings — kept on the substrate so the effort panel renders off the
-    /// model, tsk215). No-op when `detail` is None.
-    async fn record_detail_finding(
-        &self,
-        run_id: i64,
-        kind: &str,
-        detail: Option<serde_json::Value>,
-    ) -> Result<(), DomainError> {
-        let Some(detail) = detail else { return Ok(()) };
-        self.metrics
-            .record_finding(oxplow_db::NewMetricFinding {
-                run_id,
-                metric_id: None,
-                subject_kind: None,
-                subject_ref: None,
-                path: None,
-                start_line: None,
-                end_line: None,
-                col: None,
-                kind: kind.to_string(),
-                severity: None,
-                rule: None,
-                message: None,
-                value: None,
-                extra_json: Some(serde_json::to_string(&detail).unwrap_or_default()),
-            })
-            .await?;
-        Ok(())
+    /// model, tsk215). `None` detail → no finding. The `run_id` is a placeholder
+    /// (`0`); `record_run_with_data` overwrites it with the real run id when the
+    /// run + its samples + findings commit together.
+    fn detail_finding(kind: &str, detail: Option<serde_json::Value>) -> Option<NewMetricFinding> {
+        let detail = detail?;
+        Some(NewMetricFinding {
+            run_id: 0,
+            metric_id: None,
+            subject_kind: None,
+            subject_ref: None,
+            path: None,
+            start_line: None,
+            end_line: None,
+            col: None,
+            kind: kind.to_string(),
+            severity: None,
+            rule: None,
+            message: None,
+            value: None,
+            extra_json: Some(serde_json::to_string(&detail).unwrap_or_default()),
+        })
     }
 
     /// Mirror a test run into the metric substrate (best-effort): a `tests` run
@@ -715,13 +712,6 @@ impl CollectionService {
             run.thread_id = Some(thread.value());
             run.trigger = Some("on-report".into());
             run.branch = branch.clone();
-            let run_id = self.metrics.record_run(run).await?;
-
-            // Rich detail (the suite/case tree + counts) verbatim, so the effort
-            // panel can render the full tree off the substrate (tsk215). One
-            // run-scoped `test-detail` finding carrying the payload.
-            self.record_detail_finding(run_id, "test-detail", detail)
-                .await?;
 
             let specs = [
                 (
@@ -738,6 +728,7 @@ impl CollectionService {
                 ),
                 ("oxplow.tests.total", "Tests total", "neutral", total),
             ];
+            let mut samples = Vec::new();
             for (key, title, direction, value) in specs {
                 let Some(v) = value else { continue };
                 let mut def = NewMetricDefinition::new(key, "gauge", title);
@@ -751,11 +742,18 @@ impl CollectionService {
                 let mut sample =
                     NewMetricSample::observed(metric_id, stream_val, v as f64, source.to_string());
                 sample.provenance = provenance.to_string();
-                sample.run_id = Some(run_id);
                 sample.thread_id = Some(thread.value());
                 sample.branch = branch.clone();
-                self.metrics.record_sample(sample).await?;
+                samples.push(sample);
             }
+            // Atomic: the run, its samples, and the verbatim suite/case-tree
+            // `test-detail` finding (tsk215) commit together.
+            let findings: Vec<NewMetricFinding> = Self::detail_finding("test-detail", detail)
+                .into_iter()
+                .collect();
+            self.metrics
+                .record_run_with_data(run, samples, findings)
+                .await?;
             Ok::<(), DomainError>(())
         }
         .await;
@@ -772,7 +770,6 @@ impl CollectionService {
     /// Mirror a static-analysis result into the metric substrate (best-effort):
     /// an analyzer run + `oxplow.analysis.{errors,warnings}` gauge samples + one
     /// `metric_finding` per lint finding (located detail).
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     async fn mirror_analysis_metrics(
         &self,
@@ -813,13 +810,8 @@ impl CollectionService {
             run.closest_git_version = git_version.clone();
             run.git_version_exact = git_version_exact;
             run.branch = branch.clone();
-            let run_id = self.metrics.record_run(run).await?;
-            // Verbatim analyzer payload (command/analyzer/counts/findings) so the
-            // effort panel renders off the substrate (tsk215). Located per-lint
-            // findings are also written below for the substrate's findings drill-in.
-            self.record_detail_finding(run_id, "analysis-detail", detail)
-                .await?;
 
+            let mut samples = Vec::new();
             for (key, title, value) in [
                 ("oxplow.analysis.errors", "Analysis errors", errors),
                 ("oxplow.analysis.warnings", "Analysis warnings", warnings),
@@ -838,15 +830,21 @@ impl CollectionService {
                     value as f64,
                     source.to_string(),
                 );
-                sample.run_id = Some(run_id);
                 sample.thread_id = Some(thread.value());
                 sample.snapshot_id = snapshot_id;
                 sample.closest_git_version = git_version.clone();
                 sample.git_version_exact = git_version_exact;
                 sample.branch = branch.clone();
-                self.metrics.record_sample(sample).await?;
+                samples.push(sample);
             }
 
+            // Verbatim analyzer payload (command/analyzer/counts/findings) so the
+            // effort panel renders off the substrate (tsk215), plus one located
+            // `metric_finding` per lint hit for the substrate's findings drill-in.
+            let mut findings: Vec<NewMetricFinding> =
+                Self::detail_finding("analysis-detail", detail)
+                    .into_iter()
+                    .collect();
             for f in &report.findings {
                 let severity = match f.severity {
                     Error => "error",
@@ -854,25 +852,27 @@ impl CollectionService {
                     Info => "info",
                     Note => "note",
                 };
-                self.metrics
-                    .record_finding(NewMetricFinding {
-                        run_id,
-                        metric_id: None,
-                        subject_kind: Some("file".into()),
-                        subject_ref: Some(format!("file:{}", f.path)),
-                        path: Some(f.path.clone()),
-                        start_line: f.line.map(|l| l as i64),
-                        end_line: f.line.map(|l| l as i64),
-                        col: f.column.map(|c| c as i64),
-                        kind: "lint".into(),
-                        severity: Some(severity.into()),
-                        rule: f.rule.clone(),
-                        message: Some(f.message.clone()),
-                        value: None,
-                        extra_json: None,
-                    })
-                    .await?;
+                findings.push(NewMetricFinding {
+                    run_id: 0,
+                    metric_id: None,
+                    subject_kind: Some("file".into()),
+                    subject_ref: Some(format!("file:{}", f.path)),
+                    path: Some(f.path.clone()),
+                    start_line: f.line.map(|l| l as i64),
+                    end_line: f.line.map(|l| l as i64),
+                    col: f.column.map(|c| c as i64),
+                    kind: "lint".into(),
+                    severity: Some(severity.into()),
+                    rule: f.rule.clone(),
+                    message: Some(f.message.clone()),
+                    value: None,
+                    extra_json: None,
+                });
             }
+            // Atomic: run + samples + all findings commit together.
+            self.metrics
+                .record_run_with_data(run, samples, findings)
+                .await?;
             Ok::<(), DomainError>(())
         }
         .await;

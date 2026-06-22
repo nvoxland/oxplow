@@ -496,7 +496,6 @@ impl TaskService {
             run.thread_id = Some(thread_id.value());
             run.trigger = Some("on-effort-complete".into());
             run.branch = branch.clone();
-            let run_id = metrics.record_run(run).await?;
 
             // (key, title, unit, direction, value)
             let specs = [
@@ -515,6 +514,7 @@ impl TaskService {
                     efforts_so_far as f64,
                 ),
             ];
+            let mut samples = Vec::new();
             for (key, title, unit, direction, value) in specs {
                 let mut def = NewMetricDefinition::new(key, "gauge", title);
                 def.unit = Some(unit.into());
@@ -527,13 +527,16 @@ impl TaskService {
                 let metric_id = metrics.upsert_definition(def).await?;
                 let mut sample =
                     NewMetricSample::observed(metric_id, stream_val, value, "effort-lifecycle");
-                sample.run_id = Some(run_id);
                 sample.thread_id = Some(thread_id.value());
                 sample.subject_kind = Some("effort".into());
                 sample.subject_ref = Some(effort_id.to_string());
                 sample.branch = branch.clone();
-                metrics.record_sample(sample).await?;
+                samples.push(sample);
             }
+            // Atomic: the run and both lifecycle samples commit together.
+            metrics
+                .record_run_with_data(run, samples, Vec::new())
+                .await?;
             Ok::<(), DomainError>(())
         }
         .await;

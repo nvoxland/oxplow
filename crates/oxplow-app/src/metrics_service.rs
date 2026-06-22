@@ -692,10 +692,15 @@ impl MetricsService {
             run.git_version_exact = ctx.git_version_exact;
             run.branch = ctx.branch.clone();
             run.basis_ref = ctx.closest_git_version.clone();
-            let run_id = self.metrics.record_run(run).await?;
 
-            let mut count = 0;
+            let mut rows = Vec::new();
             for sample in &samples {
+                // A non-finite value (NaN/±inf, e.g. an out-of-range literal in
+                // the gauge script) isn't a meaningful measurement — drop it
+                // rather than poison the series.
+                if !sample.value.is_finite() {
+                    continue;
+                }
                 let (subject_kind, subject_ref) = resolve_subject(&sample.subject, ctx);
                 let mut s = NewMetricSample::observed(
                     metric_id,
@@ -703,7 +708,6 @@ impl MetricsService {
                     sample.value,
                     source.clone(),
                 );
-                s.run_id = Some(run_id);
                 s.thread_id = ctx.thread_id;
                 s.snapshot_id = ctx.snapshot_id;
                 s.closest_git_version = ctx.closest_git_version.clone();
@@ -716,9 +720,13 @@ impl MetricsService {
                     .dims
                     .as_ref()
                     .and_then(|d| serde_json::to_string(d).ok());
-                self.metrics.record_sample(s).await?;
-                count += 1;
+                rows.push(s);
             }
+            // Atomic: the run and its samples commit together.
+            let count = rows.len();
+            self.metrics
+                .record_run_with_data(run, rows, Vec::new())
+                .await?;
             Ok::<usize, DomainError>(count)
         }
         .await;

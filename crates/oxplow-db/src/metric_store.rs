@@ -18,7 +18,7 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, Timestamp};
 
-use crate::database::Database;
+use crate::database::{map_sql_err, Database};
 
 fn ts_to_string(ts: Timestamp) -> String {
     serde_json::to_string(&ts)
@@ -333,11 +333,123 @@ impl NewMetricSample {
             source: source.into(),
         }
     }
+
+    /// A minimal `asserted` scalar sample — a value the agent/CI reported
+    /// rather than one oxplow computed itself (lower trust). `source` describes
+    /// who asserted it (e.g. `"agent-reported"`).
+    pub fn asserted(metric_id: i64, stream_id: i64, value: f64, source: impl Into<String>) -> Self {
+        Self {
+            provenance: "asserted".into(),
+            ..Self::observed(metric_id, stream_id, value, source)
+        }
+    }
 }
 
 const SAMPLE_COLS: &str = "id, run_id, metric_id, value, numerator, denominator, captured_at, \
      snapshot_id, closest_git_version, git_version_exact, basis_ref, stream_id, thread_id, \
      subject_kind, subject_ref, path, line, dims_json, provenance, source, branch";
+
+/// Insert one `metric_run` row (shared by `record_run` and the transactional
+/// `record_run_with_data`). `started_at` defaults to now.
+fn insert_run(conn: &rusqlite::Connection, run: NewMetricRun) -> rusqlite::Result<i64> {
+    let started = run
+        .started_at
+        .map(ts_to_string)
+        .unwrap_or_else(|| ts_to_string(Timestamp::now()));
+    let ended = run.ended_at.map(ts_to_string);
+    conn.execute(
+        "INSERT INTO metric_run
+           (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
+            provenance, source, snapshot_id, closest_git_version, git_version_exact,
+            started_at, ended_at, branch)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        params![
+            run.stream_id,
+            run.thread_id,
+            run.producer,
+            run.status,
+            run.error,
+            run.scope,
+            run.trigger,
+            run.basis_ref,
+            run.provenance,
+            run.source,
+            run.snapshot_id,
+            run.closest_git_version,
+            run.git_version_exact,
+            started,
+            ended,
+            run.branch,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Insert one `metric_sample` row. `captured_at` defaults to now.
+fn insert_sample(conn: &rusqlite::Connection, s: NewMetricSample) -> rusqlite::Result<i64> {
+    let captured = s
+        .captured_at
+        .map(ts_to_string)
+        .unwrap_or_else(|| ts_to_string(Timestamp::now()));
+    conn.execute(
+        "INSERT INTO metric_sample
+           (run_id, metric_id, value, numerator, denominator, captured_at, snapshot_id,
+            closest_git_version, git_version_exact, basis_ref, stream_id, thread_id,
+            subject_kind, subject_ref, path, line, dims_json, provenance, source, branch)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                 ?16, ?17, ?18, ?19, ?20)",
+        params![
+            s.run_id,
+            s.metric_id,
+            s.value,
+            s.numerator,
+            s.denominator,
+            captured,
+            s.snapshot_id,
+            s.closest_git_version,
+            s.git_version_exact,
+            s.basis_ref,
+            s.stream_id,
+            s.thread_id,
+            s.subject_kind,
+            s.subject_ref,
+            s.path,
+            s.line,
+            s.dims_json,
+            s.provenance,
+            s.source,
+            s.branch,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Insert one `metric_finding` row.
+fn insert_finding(conn: &rusqlite::Connection, f: NewMetricFinding) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO metric_finding
+           (run_id, metric_id, subject_kind, subject_ref, path, start_line, end_line,
+            col, kind, severity, rule, message, value, extra_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            f.run_id,
+            f.metric_id,
+            f.subject_kind,
+            f.subject_ref,
+            f.path,
+            f.start_line,
+            f.end_line,
+            f.col,
+            f.kind,
+            f.severity,
+            f.rule,
+            f.message,
+            f.value,
+            f.extra_json,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
 
 fn row_to_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSample> {
     let captured_at: String = row.get(6)?;
@@ -520,39 +632,34 @@ impl SqliteMetricStore {
 
     /// Insert a run; returns its row id. `started_at` defaults to now.
     pub async fn record_run(&self, run: NewMetricRun) -> Result<i64, DomainError> {
+        self.db.call(move |conn| insert_run(conn, run)).await
+    }
+
+    /// Atomically insert a run plus all of its dependent samples and findings in
+    /// one transaction. Each sample/finding's `run_id` is forced to the new
+    /// run's id, so a producer cannot leave a half-written graph behind on a
+    /// crash mid-write (a run with no samples, or samples missing the `*-detail`
+    /// finding the effort panel reconstructs from). Returns the run id.
+    pub async fn record_run_with_data(
+        &self,
+        run: NewMetricRun,
+        samples: Vec<NewMetricSample>,
+        findings: Vec<NewMetricFinding>,
+    ) -> Result<i64, DomainError> {
         self.db
-            .call(move |conn| {
-                let started = run
-                    .started_at
-                    .map(ts_to_string)
-                    .unwrap_or_else(|| ts_to_string(Timestamp::now()));
-                let ended = run.ended_at.map(ts_to_string);
-                conn.execute(
-                    "INSERT INTO metric_run
-                       (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
-                        provenance, source, snapshot_id, closest_git_version, git_version_exact,
-                        started_at, ended_at, branch)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
-                    params![
-                        run.stream_id,
-                        run.thread_id,
-                        run.producer,
-                        run.status,
-                        run.error,
-                        run.scope,
-                        run.trigger,
-                        run.basis_ref,
-                        run.provenance,
-                        run.source,
-                        run.snapshot_id,
-                        run.closest_git_version,
-                        run.git_version_exact,
-                        started,
-                        ended,
-                        run.branch,
-                    ],
-                )?;
-                Ok(conn.last_insert_rowid())
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let run_id = insert_run(&tx, run).map_err(map_sql_err)?;
+                for mut s in samples {
+                    s.run_id = Some(run_id);
+                    insert_sample(&tx, s).map_err(map_sql_err)?;
+                }
+                for mut f in findings {
+                    f.run_id = run_id;
+                    insert_finding(&tx, f).map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(run_id)
             })
             .await
     }
@@ -581,76 +688,12 @@ impl SqliteMetricStore {
 
     /// Insert a scalar sample; returns its row id. `captured_at` defaults to now.
     pub async fn record_sample(&self, s: NewMetricSample) -> Result<i64, DomainError> {
-        self.db
-            .call(move |conn| {
-                let captured = s
-                    .captured_at
-                    .map(ts_to_string)
-                    .unwrap_or_else(|| ts_to_string(Timestamp::now()));
-                conn.execute(
-                    "INSERT INTO metric_sample
-                       (run_id, metric_id, value, numerator, denominator, captured_at, snapshot_id,
-                        closest_git_version, git_version_exact, basis_ref, stream_id, thread_id,
-                        subject_kind, subject_ref, path, line, dims_json, provenance, source, branch)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17, ?18, ?19, ?20)",
-                    params![
-                        s.run_id,
-                        s.metric_id,
-                        s.value,
-                        s.numerator,
-                        s.denominator,
-                        captured,
-                        s.snapshot_id,
-                        s.closest_git_version,
-                        s.git_version_exact,
-                        s.basis_ref,
-                        s.stream_id,
-                        s.thread_id,
-                        s.subject_kind,
-                        s.subject_ref,
-                        s.path,
-                        s.line,
-                        s.dims_json,
-                        s.provenance,
-                        s.source,
-                        s.branch,
-                    ],
-                )?;
-                Ok(conn.last_insert_rowid())
-            })
-            .await
+        self.db.call(move |conn| insert_sample(conn, s)).await
     }
 
     /// Insert a finding; returns its row id.
     pub async fn record_finding(&self, f: NewMetricFinding) -> Result<i64, DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO metric_finding
-                       (run_id, metric_id, subject_kind, subject_ref, path, start_line, end_line,
-                        col, kind, severity, rule, message, value, extra_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                    params![
-                        f.run_id,
-                        f.metric_id,
-                        f.subject_kind,
-                        f.subject_ref,
-                        f.path,
-                        f.start_line,
-                        f.end_line,
-                        f.col,
-                        f.kind,
-                        f.severity,
-                        f.rule,
-                        f.message,
-                        f.value,
-                        f.extra_json,
-                    ],
-                )?;
-                Ok(conn.last_insert_rowid())
-            })
-            .await
+        self.db.call(move |conn| insert_finding(conn, f)).await
     }
 
     /// Fetch a run by id.
@@ -894,6 +937,43 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule.as_deref(), Some("unsafe-block"));
         assert_eq!(findings[0].path.as_deref(), Some("src/a.rs"));
+    }
+
+    #[tokio::test]
+    async fn record_run_with_data_writes_atomically_and_backfills_run_id() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "rust.unsafe_blocks").await;
+        // Samples/findings carry no run_id — the composite must backfill it.
+        let s1 = NewMetricSample::observed(metric, 1, 1.0, "builtin");
+        let s2 = NewMetricSample::observed(metric, 1, 2.0, "builtin");
+        let f = NewMetricFinding {
+            run_id: 0,
+            metric_id: Some(metric),
+            subject_kind: None,
+            subject_ref: None,
+            path: Some("src/a.rs".into()),
+            start_line: Some(1),
+            end_line: Some(1),
+            col: None,
+            kind: "lint".into(),
+            severity: Some("warning".into()),
+            rule: Some("r".into()),
+            message: None,
+            value: None,
+            extra_json: None,
+        };
+        let run = store
+            .record_run_with_data(NewMetricRun::done(1, "p", "builtin"), vec![s1, s2], vec![f])
+            .await
+            .unwrap();
+
+        let samples = store.list_samples(metric).await.unwrap();
+        assert_eq!(samples.len(), 2);
+        // Every sample is stitched to the run id the composite returned.
+        assert!(samples.iter().all(|s| s.run_id == Some(run)));
+        let findings = store.list_findings(run).await.unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].run_id, run);
     }
 
     #[tokio::test]

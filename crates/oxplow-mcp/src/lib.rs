@@ -1769,8 +1769,7 @@ impl OxplowMcp {
             .filter(|d| !d.is_empty())
             .and_then(|d| serde_json::to_string(d).ok());
         let mut sample =
-            oxplow_db::NewMetricSample::observed(def.id, stream.value(), p.value, "asserted");
-        sample.provenance = "asserted".into();
+            oxplow_db::NewMetricSample::asserted(def.id, stream.value(), p.value, "agent-reported");
         sample.subject_kind = subject_kind;
         sample.subject_ref = subject_ref;
         sample.dims_json = dims_json;
@@ -4943,6 +4942,7 @@ mod tests {
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].value, 0.12);
         assert_eq!(samples[0].provenance, "asserted");
+        assert_eq!(samples[0].source, "agent-reported");
         assert_eq!(samples[0].subject_kind.as_deref(), Some("suite"));
         assert_eq!(samples[0].subject_ref.as_deref(), Some("unit"));
     }
