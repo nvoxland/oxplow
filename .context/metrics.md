@@ -194,7 +194,10 @@ metrics:
   `entryFile` (no `..`), known runtime/kind/trigger/direction; a `use:` with an
   unknown key resolves to a warning (skipped), not an error.
 
-(The agent-facing skill that authors these on request is tsk221.)
+The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
++ the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
+materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
+a working `metrics:` entry + script + verification, no oxplow-team involvement.
 
 ## Gotchas
 

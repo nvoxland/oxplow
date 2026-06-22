@@ -183,9 +183,9 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
     })
 }
 
-/// The five oxplow skills every agent runtime ships, as
-/// `(dir_name, SKILL.md body)` pairs. The dir name must match the
-/// frontmatter `name:` — both Claude and opencode key discovery on it.
+/// The oxplow skills every agent runtime ships, as `(dir_name, SKILL.md body)`
+/// pairs. The dir name must match the frontmatter `name:` — both Claude and
+/// opencode key discovery on it.
 const OXPLOW_SKILLS: &[(&str, &str)] = &[
     (
         "oxplow-runtime",
@@ -207,6 +207,10 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
         "oxplow-collection",
         include_str!("../assets/oxplow-collection.SKILL.md"),
     ),
+    (
+        "oxplow-metrics",
+        include_str!("../assets/oxplow-metrics.SKILL.md"),
+    ),
 ];
 
 /// Slash-command definitions for opencode's inline `command` config
@@ -224,6 +228,7 @@ pub fn opencode_command_definitions() -> serde_json::Value {
             include_str!("../assets/review-comments.md"),
         ),
         ("oxplow-configure", include_str!("../assets/configure.md")),
+        ("oxplow-new-metric", include_str!("../assets/new-metric.md")),
     ];
     let mut map = serde_json::Map::new();
     for (name, asset) in COMMANDS {
@@ -280,6 +285,7 @@ pub fn write_plugin(
     fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
     fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
     fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-metrics"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     let manifest_body = json!({
@@ -331,6 +337,12 @@ pub fn write_plugin(
         &collection_skill,
         include_str!("../assets/oxplow-collection.SKILL.md"),
     )?;
+    // oxplow-metrics has no named PluginPaths field (the original five do, for
+    // tests); it's materialized for all three agents via OXPLOW_SKILLS + here.
+    fs::write(
+        skills_dir.join("oxplow-metrics").join("SKILL.md"),
+        include_str!("../assets/oxplow-metrics.SKILL.md"),
+    )?;
 
     let work_next_command = commands_dir.join("work-next.md");
     fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
@@ -343,6 +355,13 @@ pub fn write_plugin(
 
     let configure_command = commands_dir.join("configure.md");
     fs::write(&configure_command, include_str!("../assets/configure.md"))?;
+
+    // /oxplow:new-metric — no named PluginPaths field (covered by OXPLOW_SKILLS
+    // parity + the opencode command parity test).
+    fs::write(
+        commands_dir.join("new-metric.md"),
+        include_str!("../assets/new-metric.md"),
+    )?;
 
     Ok(PluginPaths {
         plugin_dir,
@@ -425,6 +444,7 @@ pub fn write_codex_runtime(
     fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
     fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
     fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
+    fs::create_dir_all(skills_dir.join("oxplow-metrics"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     write_json(
@@ -479,6 +499,12 @@ pub fn write_codex_runtime(
     fs::write(
         &collection_skill,
         include_str!("../assets/oxplow-collection.SKILL.md"),
+    )?;
+    // oxplow-metrics has no named PluginPaths field (the original five do, for
+    // tests); it's materialized for all three agents via OXPLOW_SKILLS + here.
+    fs::write(
+        skills_dir.join("oxplow-metrics").join("SKILL.md"),
+        include_str!("../assets/oxplow-metrics.SKILL.md"),
     )?;
 
     Ok(CodexRuntimePaths {
@@ -688,6 +714,7 @@ mod tests {
             "oxplow-wiki-capture",
             "oxplow-mermaid",
             "oxplow-collection",
+            "oxplow-metrics",
         ] {
             let skill = paths.skills_dir.join(name).join("SKILL.md");
             let body = fs::read_to_string(&skill).unwrap_or_else(|_| panic!("missing {name}"));
@@ -710,6 +737,7 @@ mod tests {
             "oxplow-work-next",
             "oxplow-review-comments",
             "oxplow-configure",
+            "oxplow-new-metric",
         ] {
             let def = &defs[name];
             let template = def["template"].as_str().unwrap_or_default();
