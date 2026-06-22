@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 
 import {
+  BUILTIN_PRESETS,
   type ExplorerPreset,
   type PresetStore,
+  allPresets,
   loadPresets,
   removePreset,
   savePreset,
@@ -64,4 +66,18 @@ test("malformed storage yields empty list", () => {
   const store = fakeStore();
   store.setItem("oxplow.metrics.explorerPresets", "{not an array}");
   expect(loadPresets(store)).toEqual([]);
+});
+
+test("allPresets merges built-ins with saved; saved shadows same-named built-in", () => {
+  const store = fakeStore();
+  // The Token Analytics replacement ships as a built-in.
+  expect(BUILTIN_PRESETS.some((p) => p.name === "Tokens by model")).toBe(true);
+  const fresh = allPresets(store);
+  expect(fresh.map((p) => p.name)).toEqual(BUILTIN_PRESETS.map((p) => p.name));
+
+  savePreset(preset({ name: "Coverage", selected: ["mine"] }), store);
+  const merged = allPresets(store);
+  // Still one "Coverage" entry, now the saved one (shadows the built-in).
+  expect(merged.filter((p) => p.name === "Coverage")).toHaveLength(1);
+  expect(merged.find((p) => p.name === "Coverage")!.selected).toEqual(["mine"]);
 });

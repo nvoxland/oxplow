@@ -60,3 +60,16 @@ pub async fn set_metric_enabled(
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::metrics::set_metric_enabled(&state, key, enabled).await
 }
+
+/// Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
+/// inline edit, tsk233).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_metric_override(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    target: Option<f64>,
+    trigger: Option<String>,
+) -> Result<(), IpcError> {
+    oxplow_rpc::commands::metrics::set_metric_override(&state, key, target, trigger).await
+}

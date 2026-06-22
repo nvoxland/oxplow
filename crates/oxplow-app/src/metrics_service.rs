@@ -151,21 +151,24 @@ impl MetricsService {
     /// built-in shows up even before it's `use:`d/seeded.
     pub fn catalog(&self) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_metrics();
-        let enabled: std::collections::HashSet<&str> =
-            resolved.iter().map(|m| m.key.as_str()).collect();
+        let by_key: std::collections::HashMap<&str, &_> =
+            resolved.iter().map(|m| (m.key.as_str(), m)).collect();
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
         for b in builtin_metrics() {
             seen.insert(b.key.to_string());
+            // When enabled, surface the *resolved* target/trigger (so a project
+            // override shows through, tsk233); otherwise the built-in defaults.
+            let r = by_key.get(b.key);
             out.push(MetricCatalogEntry {
                 key: b.key.to_string(),
                 title: b.title.to_string(),
                 kind: b.kind.to_string(),
                 language: Some(b.language.to_string()),
                 scope: "built-in".to_string(),
-                enabled: enabled.contains(b.key),
-                target: b.target,
-                trigger: b.trigger.to_string(),
+                enabled: r.is_some(),
+                target: r.map_or(b.target, |m| m.target),
+                trigger: r.map_or_else(|| b.trigger.to_string(), |m| m.trigger.clone()),
             });
         }
         // Project/global-defined metrics not already shown as a built-in.
@@ -208,6 +211,46 @@ impl MetricsService {
             } else if !enabled {
                 cfg.metrics
                     .retain(|e| e.use_key.as_deref() != Some(key) && e.key.as_deref() != Some(key));
+            }
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_definitions().await;
+        Ok(())
+    }
+
+    /// Set the `target` / `trigger` override for a metric in this project's
+    /// `oxplow.yaml`, then reseed (the Catalog inline edit, tsk233). Enabling
+    /// it if not already present (an override implies the metric is active);
+    /// `None` for a field clears that override (falls back to the definition's
+    /// default). Persists + emits `ConfigChanged`.
+    pub async fn set_metric_override(
+        &self,
+        key: &str,
+        target: Option<f64>,
+        trigger: Option<String>,
+    ) -> Result<(), String> {
+        {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            let entry = cfg
+                .metrics
+                .iter_mut()
+                .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
+            match entry {
+                Some(e) => {
+                    e.target = target;
+                    e.trigger = trigger;
+                }
+                None => cfg.metrics.push(MetricEntry {
+                    use_key: Some(key.to_string()),
+                    target,
+                    trigger,
+                    ..Default::default()
+                }),
             }
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
@@ -875,6 +918,51 @@ def transform(input):
                 .enabled,
             "disabled again"
         );
+    }
+
+    #[tokio::test]
+    async fn set_metric_override_writes_target_and_trigger() {
+        let (svc, dir) = fixture().await;
+
+        // Setting an override on a not-yet-enabled metric enables it and
+        // persists the target + trigger into oxplow.yaml.
+        svc.metrics
+            .set_metric_override(
+                "oxplow.rust.unsafe_blocks",
+                Some(0.0),
+                Some("manual".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let entry = svc
+            .metrics
+            .catalog()
+            .into_iter()
+            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .unwrap();
+        assert!(entry.enabled, "override implies enabled");
+        assert_eq!(entry.target, Some(0.0));
+        assert_eq!(entry.trigger, "manual");
+
+        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        assert!(yaml.contains("target"), "target persisted; got:\n{yaml}");
+        assert!(yaml.contains("manual"), "trigger persisted; got:\n{yaml}");
+
+        // Clearing the target override (None) drops it back to the default.
+        svc.metrics
+            .set_metric_override("oxplow.rust.unsafe_blocks", None, None)
+            .await
+            .unwrap();
+        let entry = svc
+            .metrics
+            .catalog()
+            .into_iter()
+            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .unwrap();
+        // unsafe_blocks ships with target 0 in the built-in catalog, so the
+        // resolved target falls back to that default, not the cleared override.
+        assert_eq!(entry.target, Some(0.0));
     }
 
     #[test]

@@ -601,6 +601,33 @@ impl SqliteTaskEffortStore {
             .await
     }
 
+    /// Every effort whose span overlaps the `[window_start, window_end]` time
+    /// range — the efforts-as-overlay read powering the Metrics Explorer's
+    /// effort bands (tsk233). An effort overlaps when it started before the
+    /// window ends AND is still open or ended after the window starts. Open
+    /// efforts (`ended_at IS NULL`) extend to "now", so they always overlap a
+    /// window that reaches the present.
+    pub async fn list_in_window(
+        &self,
+        window_start: Timestamp,
+        window_end: Timestamp,
+    ) -> Result<Vec<TaskEffort>, DomainError> {
+        let start = ts_to_string(window_start);
+        let end = ts_to_string(window_end);
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                      WHERE started_at <= ?2
+                        AND (ended_at IS NULL OR ended_at >= ?1)
+                      ORDER BY started_at ASC",
+                )?;
+                let rows = stmt.query_map(params![start, end], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// Backfill the start-snapshot pin on an effort opened by the
     /// transactional lifecycle transition. The snapshot is requested
     /// AFTER that transaction commits, so a snapshot failure degrades
@@ -1198,6 +1225,47 @@ mod tests {
             .unwrap();
         // Ordered by path; overlapping efforts only.
         assert_eq!(got, vec!["after.rs".to_string(), "inside.rs".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn list_in_window_returns_only_overlapping_efforts() {
+        let db = Database::in_memory();
+        let store = SqliteTaskEffortStore::new(db.clone());
+        let db2 = db.clone();
+        tokio::task::spawn_blocking(move || {
+            db2.with_conn(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                // (id, started_at, ended_at) — NULL ended_at = open.
+                for (id, start, end) in [
+                    (1, "2026-01-01T00:00:00Z", Some("2026-01-02T00:00:00Z")), // before
+                    (2, "2026-01-05T00:00:00Z", Some("2026-01-07T00:00:00Z")), // overlaps start
+                    (3, "2026-01-06T00:00:00Z", None),                         // open → overlaps
+                    (4, "2026-01-20T00:00:00Z", Some("2026-01-21T00:00:00Z")), // after
+                ] {
+                    conn.execute(
+                        "INSERT INTO task_effort
+                           (id, task_id, thread_id, started_at, ended_at)
+                         VALUES (?1, 1, 1, ?2, ?3)",
+                        params![id, start, end],
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        let ts = |s: &str| -> Timestamp { serde_json::from_str(&format!("\"{s}\"")).unwrap() };
+        let got = store
+            .list_in_window(ts("2026-01-06T00:00:00Z"), ts("2026-01-10T00:00:00Z"))
+            .await
+            .unwrap();
+        // e2 (01-05) and e3 (open) overlap; e1 (before) and e4 (after) don't.
+        assert_eq!(
+            got.iter().map(|e| e.id.value()).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
     }
 
     async fn fixture_with_db() -> (SqliteTaskEffortStore, Database, TaskId, ThreadId) {

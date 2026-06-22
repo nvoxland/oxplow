@@ -1723,6 +1723,27 @@ export async function setMetricEnabled(key: string, enabled: boolean): Promise<v
   unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
+/** Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
+ *  inline edit, tsk233). `null` clears that override. */
+export async function setMetricOverride(
+  key: string,
+  target: number | null,
+  trigger: string | null,
+): Promise<void> {
+  unwrap(await commands.setMetricOverride(key, target, trigger));
+}
+
+/** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
+ *  Metrics Explorer's effort-band overlay (tsk233). */
+export async function listEffortsInWindow(
+  windowStart: string,
+  windowEnd: string,
+): Promise<TaskEffort[]> {
+  return unwrap(
+    await commands.listEffortsInWindow(windowStart, windowEnd),
+  ) as unknown as TaskEffort[];
+}
+
 /** Persisted agent nudges (report-less-run / commit-hygiene) fired for an
  *  effort, newest-first. Drives the collapsed "Agent nudges" debug sub-view. */
 export async function listNudgesForEffort(

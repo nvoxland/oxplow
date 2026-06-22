@@ -4,8 +4,11 @@ import {
   type MetricCatalogEntry,
   listMetricCatalog,
   setMetricEnabled,
+  setMetricOverride,
   subscribeOxplowEvents,
 } from "../api.js";
+
+const TRIGGERS = ["on-snapshot", "on-effort-complete", "manual"] as const;
 
 /**
  * Metric Catalog (epic tsk213, P4): browse the available catalog
@@ -40,6 +43,23 @@ export function MetricsCatalog() {
     }
   };
 
+  // Write a target/trigger override into oxplow.yaml (tsk233). Preserves the
+  // sibling field at its current resolved value; an empty target clears it.
+  const override = async (
+    entry: MetricCatalogEntry,
+    next: { target?: number | null; trigger?: string },
+  ) => {
+    setBusy(entry.key);
+    try {
+      const target = next.target !== undefined ? next.target : entry.target;
+      const trigger = next.trigger !== undefined ? next.trigger : entry.trigger;
+      await setMetricOverride(entry.key, target, trigger);
+      refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (rows.length === 0) {
     return <div style={{ opacity: 0.6 }}>No metrics in the catalog.</div>;
   }
@@ -53,6 +73,7 @@ export function MetricsCatalog() {
           <th style={{ padding: "4px 8px" }}>Kind</th>
           <th style={{ padding: "4px 8px" }}>Language</th>
           <th style={{ padding: "4px 8px" }}>Scope</th>
+          <th style={{ padding: "4px 8px" }}>Trigger</th>
           <th style={{ padding: "4px 8px", textAlign: "right" }}>Target</th>
         </tr>
       </thead>
@@ -88,8 +109,49 @@ export function MetricsCatalog() {
                 {m.scope}
               </span>
             </td>
+            <td style={{ padding: "6px 8px" }}>
+              {m.enabled ? (
+                <select
+                  value={TRIGGERS.includes(m.trigger as (typeof TRIGGERS)[number]) ? m.trigger : ""}
+                  disabled={busy === m.key}
+                  onChange={(e) => void override(m, { trigger: e.target.value })}
+                  data-testid={`catalog-trigger-${m.key}`}
+                  style={{ fontSize: 12 }}
+                >
+                  {!TRIGGERS.includes(m.trigger as (typeof TRIGGERS)[number]) ? (
+                    <option value="">{m.trigger}</option>
+                  ) : null}
+                  {TRIGGERS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span style={{ opacity: 0.5 }}>{m.trigger}</span>
+              )}
+            </td>
             <td style={{ padding: "6px 8px", textAlign: "right" }}>
-              {m.target == null ? "—" : m.target}
+              {m.enabled ? (
+                <input
+                  type="number"
+                  defaultValue={m.target ?? ""}
+                  disabled={busy === m.key}
+                  onBlur={(e) => {
+                    const raw = e.target.value.trim();
+                    const next = raw === "" ? null : Number(raw);
+                    if (next !== m.target && !(next != null && Number.isNaN(next))) {
+                      void override(m, { target: next });
+                    }
+                  }}
+                  data-testid={`catalog-target-${m.key}`}
+                  style={{ width: 64, fontSize: 12, textAlign: "right" }}
+                />
+              ) : m.target == null ? (
+                "—"
+              ) : (
+                m.target
+              )}
             </td>
           </tr>
         ))}

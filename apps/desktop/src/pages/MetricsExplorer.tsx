@@ -3,10 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type MetricDefinition,
   type MetricSample,
+  type TaskEffort,
+  listEffortsInWindow,
   listMetricSamples,
 } from "../api.js";
 import {
+  BUILTIN_PRESETS,
   type ExplorerPreset,
+  allPresets,
   loadPresets,
   removePreset,
   savePreset,
@@ -120,10 +124,14 @@ function MultiLineChart({
   series,
   target,
   kind,
+  efforts = [],
+  onScopeToEffort,
 }: {
   series: Series[];
   target?: number | null;
   kind: "line" | "bar";
+  efforts?: TaskEffort[];
+  onScopeToEffort?: (startMs: number, endMs: number) => void;
 }) {
   const w = 760;
   const h = 260;
@@ -147,6 +155,31 @@ function MultiLineChart({
 
   return (
     <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} role="img" aria-label="metric chart">
+      {/* effort overlay bands (behind the series) — hover names the effort,
+          click scopes the chart to its window (tsk233) */}
+      {efforts.map((eff) => {
+        const t1 = Date.parse(String(eff.started_at));
+        const t2 = eff.ended_at ? Date.parse(String(eff.ended_at)) : tMax;
+        if (Number.isNaN(t1)) return null;
+        const x1 = Math.max(padL, x(t1));
+        const x2 = Math.min(w - padR, x(Number.isNaN(t2) ? tMax : t2));
+        const bw = Math.max(1.5, x2 - x1);
+        return (
+          <rect
+            key={eff.id}
+            x={x1}
+            y={padT}
+            width={bw}
+            height={h - padT - padB}
+            fill="var(--accent, #58a6ff)"
+            opacity={0.08}
+            style={{ cursor: onScopeToEffort ? "pointer" : "default" }}
+            onClick={() => onScopeToEffort?.(t1, Number.isNaN(t2) ? tMax : t2)}
+          >
+            <title>{`effort ${eff.id} (task ${eff.task_id})\n${eff.started_at} → ${eff.ended_at ?? "open"}`}</title>
+          </rect>
+        );
+      })}
       {/* axes */}
       <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="var(--border, #2a2a2a)" />
       <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="var(--border, #2a2a2a)" />
@@ -262,9 +295,14 @@ function ScatterChart({
 export function MetricsExplorer({
   defs,
   onOpenDetail,
+  initialPreset,
 }: {
   defs: MetricDefinition[];
   onOpenDetail?: (def: MetricDefinition) => void;
+  /** Name of a preset (built-in or saved) to apply on first paint — lets a
+   *  recognizable entry point (e.g. "Tokens by model") open the Explorer
+   *  pre-scoped (tsk233). */
+  initialPreset?: string;
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<string>("none");
@@ -272,11 +310,27 @@ export function MetricsExplorer({
   const [samplesByKey, setSamplesByKey] = useState<Record<string, MetricSample[]>>({});
   const [presets, setPresets] = useState<ExplorerPreset[]>(() => loadPresets());
   const [presetName, setPresetName] = useState<string>("");
+  const [presetApplied, setPresetApplied] = useState(false);
 
-  // Default to the first metric so the chart isn't empty on first paint.
+  // Apply an initial preset (built-in or saved) once, else default to the first
+  // metric so the chart isn't empty on first paint.
   useEffect(() => {
-    if (selected.length === 0 && defs.length > 0) setSelected([defs[0]!.key]);
-  }, [defs, selected.length]);
+    if (presetApplied) return;
+    if (initialPreset) {
+      const p = allPresets().find((x) => x.name === initialPreset);
+      if (p) {
+        setSelected(p.selected);
+        setGroupBy(p.groupBy);
+        setViz(p.viz === "bar" || p.viz === "scatter" ? p.viz : "line");
+        setPresetApplied(true);
+        return;
+      }
+    }
+    if (selected.length === 0 && defs.length > 0) {
+      setSelected([defs[0]!.key]);
+      setPresetApplied(true);
+    }
+  }, [defs, selected.length, initialPreset, presetApplied]);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,6 +369,39 @@ export function MetricsExplorer({
     [selected, samplesByKey, groupBy, defs],
   );
 
+  // Effort bands: fetch the efforts overlapping the charted window so they can
+  // be drawn behind the series (tsk233). `scope` narrows the visible window to
+  // a clicked effort.
+  const [efforts, setEfforts] = useState<TaskEffort[]>([]);
+  const [scope, setScope] = useState<{ start: number; end: number } | null>(null);
+  useEffect(() => {
+    const ts = Object.values(samplesByKey)
+      .flat()
+      .map((s) => Date.parse(String(s.captured_at)))
+      .filter((t) => !Number.isNaN(t));
+    if (ts.length === 0) {
+      setEfforts([]);
+      return;
+    }
+    let cancelled = false;
+    const start = new Date(Math.min(...ts)).toISOString();
+    const end = new Date(Math.max(...ts)).toISOString();
+    void listEffortsInWindow(start, end).then((rows) => {
+      if (!cancelled) setEfforts(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [samplesByKey]);
+
+  // Apply the click-to-scope window to what the chart shows.
+  const shownSeries = useMemo<Series[]>(() => {
+    if (!scope) return series;
+    return series
+      .map((s) => ({ ...s, points: s.points.filter((p) => p.t >= scope.start && p.t <= scope.end) }))
+      .filter((s) => s.points.length > 0);
+  }, [series, scope]);
+
   // A single target line only makes sense for one selected measure.
   const target = selected.length === 1 ? (defs.find((d) => d.key === selected[0])?.target ?? null) : null;
 
@@ -327,8 +414,13 @@ export function MetricsExplorer({
     setPresets(savePreset({ name, selected, groupBy, viz }));
     setPresetName("");
   };
+  // Built-ins ∪ saved (a saved preset shadows a built-in of the same name).
+  const pickerPresets = useMemo<ExplorerPreset[]>(() => {
+    const names = new Set(presets.map((p) => p.name));
+    return [...BUILTIN_PRESETS.filter((b) => !names.has(b.name)), ...presets];
+  }, [presets]);
   const onLoad = (name: string) => {
-    const p = presets.find((x) => x.name === name);
+    const p = pickerPresets.find((x) => x.name === name);
     if (!p) return;
     setSelected(p.selected);
     setGroupBy(p.groupBy);
@@ -403,7 +495,7 @@ export function MetricsExplorer({
               data-testid="explorer-preset-load"
             >
               <option value="">load…</option>
-              {presets.map((p) => (
+              {pickerPresets.map((p) => (
                 <option key={p.name} value={p.name}>
                   {p.name}
                 </option>
@@ -441,6 +533,17 @@ export function MetricsExplorer({
           </div>
         </div>
       </div>
+      {scope ? (
+        <div style={{ fontSize: 11, display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ opacity: 0.7 }}>
+            Scoped to an effort window ({new Date(scope.start).toLocaleString()} →{" "}
+            {new Date(scope.end).toLocaleString()})
+          </span>
+          <button onClick={() => setScope(null)} data-testid="explorer-scope-clear" style={{ fontSize: 11 }}>
+            Clear
+          </button>
+        </div>
+      ) : null}
       {viz === "scatter" ? (
         <ScatterChart
           points={scatter}
@@ -448,7 +551,13 @@ export function MetricsExplorer({
           yLabel={defs.find((d) => d.key === selected[1])?.title ?? selected[1] ?? "y"}
         />
       ) : (
-        <MultiLineChart series={series} target={target} kind={viz === "bar" ? "bar" : "line"} />
+        <MultiLineChart
+          series={shownSeries}
+          target={target}
+          kind={viz === "bar" ? "bar" : "line"}
+          efforts={efforts}
+          onScopeToEffort={(start, end) => setScope({ start, end })}
+        />
       )}
       {/* legend */}
       {viz !== "scatter" ? (

@@ -119,7 +119,6 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
 import { MetricsPage } from "./pages/MetricsPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
-import { TokenAnalyticsPage } from "./pages/TokenAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -2722,11 +2721,13 @@ export function App() {
           render: () => <PageAnalyticsPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "token-analytics") {
+        // Retired as a bespoke page (tsk233): Token Analytics is now a saved
+        // Explorer preset over the substrate's `agent.tokens.*`/`agent.cost_usd`.
         tabs.push({
           id: ref.id,
           label: "Token Analytics",
           closable: true,
-          render: () => <TokenAnalyticsPage />,
+          render: () => <MetricsPage initialPreset="Tokens by model" />,
         });
       } else if (
         ref.kind === "tasks"

@@ -462,6 +462,11 @@ export const commands = {
 	 */
 	listChangedPathsForEffort: (effortId: EffortId) => typedError<EffortChangedPaths, IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
 	/**
+	 *  Efforts whose span overlaps the given time window — the Metrics Explorer's
+	 *  effort-band overlay (tsk233).
+	 */
+	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
+	/**
 	 *  Collection observations (test-run / diff-coverage) for an effort,
 	 *  newest-first. Optional `kind` filter. Drives the effort-review
 	 *  coverage badge + tests-run list on `TaskPage`.
@@ -486,6 +491,11 @@ export const commands = {
 	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
 	// Enable/disable a metric in `oxplow.yaml` (the Catalog toggle).
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
+	/**
+	 *  Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
+	 *  inline edit, tsk233).
+	 */
+	setMetricOverride: (key: string, target: number | null, trigger: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target, trigger })),
 	/**
 	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
 	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on

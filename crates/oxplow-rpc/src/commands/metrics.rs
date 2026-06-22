@@ -71,3 +71,18 @@ pub async fn set_metric_enabled(
         .await
         .map_err(IpcError::internal)
 }
+
+/// Set a metric's `target` / `trigger` override in `oxplow.yaml` (enabling it if
+/// needed; `None` clears that override), then reseed. The Catalog inline edit
+/// (tsk233).
+pub async fn set_metric_override(
+    svc: &Services,
+    key: String,
+    target: Option<f64>,
+    trigger: Option<String>,
+) -> Result<(), IpcError> {
+    svc.metrics
+        .set_metric_override(&key, target, trigger)
+        .await
+        .map_err(IpcError::internal)
+}

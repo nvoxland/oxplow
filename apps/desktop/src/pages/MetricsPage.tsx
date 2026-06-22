@@ -76,7 +76,7 @@ function statusColor(def: MetricDefinition, value: number): string | undefined {
  * latest recorded value, capture branch, and sample count. Live-refreshes on
  * `metricSamplesChanged`. The seed of the full Explorer/Catalog (P4).
  */
-export function MetricsPage() {
+export function MetricsPage({ initialPreset }: { initialPreset?: string } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<MetricDefinition | null>(null);
@@ -125,7 +125,11 @@ export function MetricsPage() {
         ) : null}
         {!detail && !loading && rows.length > 0 ? (
           <Card testId="metrics-explorer-card" title="Explorer">
-            <MetricsExplorer defs={rows.map((r) => r.def)} onOpenDetail={setDetail} />
+            <MetricsExplorer
+              defs={rows.map((r) => r.def)}
+              onOpenDetail={setDetail}
+              initialPreset={initialPreset}
+            />
           </Card>
         ) : null}
         {!detail ? (

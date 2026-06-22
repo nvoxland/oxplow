@@ -145,8 +145,13 @@ UI code:
   in `buildExplorerSeries`, pure pairing in `buildScatterPoints` (two measures ×
   a shared group → one point per group value, e.g. coverage × complexity by
   module). **Saved views** (`metricsPresets.ts`, localStorage): name the current
-  measures/group-by/viz and reload it later. A measure's title links to its
-  per-kind **detail** (via `onOpenDetail`).
+  measures/group-by/viz and reload it later; the picker also offers **built-in
+  presets** (`BUILTIN_PRESETS`: "Tokens by model", "Coverage", "Tests pass/fail")
+  and the page accepts an `initialPreset` deep-link. **Effort bands** (tsk233):
+  the efforts overlapping the charted window (`list_efforts_in_window`) render as
+  faint bands behind the series — hover names the effort, click scopes the chart
+  to that window (Clear resets). A measure's title links to its per-kind
+  **detail** (via `onOpenDetail`).
 - **Metric detail** (`MetricDetail.tsx` + pure `metricDetailData.ts`, tsk232) —
   one renderer selected from `metric_definition.kind`, opened by clicking a
   Recorded-metrics row or an Explorer measure. Every kind shows the value trend
@@ -156,21 +161,24 @@ UI code:
   per-file uncovered changed lines (`coverage-detail`), **event** → top-N
   subjects, **gauge** → trend only.
 - **Catalog** (`MetricsCatalog.tsx`, P4) — browse the available catalog
-  (built-in ∪ global ∪ project) via `list_metric_catalog` and enable/disable in
-  this project with a toggle that calls `set_metric_enabled` → writes a `use:`
-  into `oxplow.yaml` + reseeds. (Inline target/trigger edit + new-metric scaffold
-  remain deferred.)
+  (built-in ∪ global ∪ project) via `list_metric_catalog`; enable/disable with a
+  toggle (`set_metric_enabled` → writes a `use:` into `oxplow.yaml`), and
+  **inline-edit target/trigger** (tsk233) via `set_metric_override` →
+  `MetricsService::set_metric_override` writes the override onto the `use:` entry
+  (`catalog()` now surfaces the *resolved* target/trigger so the edit reflects).
 - **Recorded metrics** — the seeded definitions with latest value, trend
   sparkline, capture branch, sample count; colored by `statusColor`
   (target/`fail_at`/direction); rows open the detail view. Live-refreshes on
   `metricSamplesChanged`.
 
-Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` (RPC core in
-`commands/metrics.rs`, Tauri adapters, `ui`-scoped in the surface-parity
-manifest), backed by `MetricsService::{catalog, set_metric_enabled}` and the
-`MetricCatalogEntry` type. Still-deferred P4 polish: effort/event overlay bands
-on the Explorer time axis, Catalog inline target/trigger edit + new-metric
-scaffold, and retiring the Token/Page/Usage/Coverage pages as saved presets.
+Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
+`set_metric_override` (RPC cores in `commands/metrics.rs`, Tauri adapters,
+`ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
+set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type.
+**Token Analytics is retired** as a bespoke page (tsk233) — its `token-analytics`
+tab now renders the Metrics page with the "Tokens by model" preset. (Page/Usage
+analytics stay bespoke: `page_visit`/`usage_event` are deliberately **not**
+projected into the substrate — see the producers note above.)
 
 ## Adding a metric (today)
 

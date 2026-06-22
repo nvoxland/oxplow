@@ -117,6 +117,8 @@ pub const MANIFEST: &[Capability] = &[
     both("add_thread_note"),
     both("list_thread_notes"),
     both("list_effort_observations"),
+    // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
+    ui("list_efforts_in_window"),
     // Unified metric substrate reads (tsk213) — exposed on both surfaces.
     both("list_metric_definitions"),
     both("list_metric_samples"),
@@ -127,6 +129,7 @@ pub const MANIFEST: &[Capability] = &[
     // the `metrics:` config / run_metric, not the catalog toggle).
     ui("list_metric_catalog"),
     ui("set_metric_enabled"),
+    ui("set_metric_override"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
     // compute via config + the runner, not ad-hoc IPC.
     agent("run_metric"),

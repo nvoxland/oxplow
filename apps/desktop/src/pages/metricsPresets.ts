@@ -13,6 +13,27 @@ export type ExplorerPreset = {
 
 const KEY = "oxplow.metrics.explorerPresets";
 
+/** Recognizable views shipped over the substrate — the successors to the
+ *  bespoke analytics pages (tsk233). Always available in the preset picker and
+ *  not user-deletable; a saved preset with the same name shadows one. */
+export const BUILTIN_PRESETS: readonly ExplorerPreset[] = [
+  // The substrate replacement for the Token Analytics page: per-model token
+  // totals + cost over time (subject = model).
+  {
+    name: "Tokens by model",
+    selected: ["agent.tokens.total", "agent.cost_usd"],
+    groupBy: "subject",
+    viz: "line",
+  },
+  { name: "Coverage", selected: ["oxplow.coverage.diff_pct"], groupBy: "none", viz: "line" },
+  {
+    name: "Tests pass/fail",
+    selected: ["oxplow.tests.passed", "oxplow.tests.failed"],
+    groupBy: "none",
+    viz: "line",
+  },
+];
+
 /** A minimal storage shim so the pure load/save logic is testable without a DOM
  *  (tests pass a fake; the app passes `localStorage`). */
 export type PresetStore = Pick<Storage, "getItem" | "setItem">;
@@ -57,6 +78,14 @@ export function savePreset(
   ].sort((a, b2) => a.name.localeCompare(b2.name));
   b?.setItem(KEY, JSON.stringify(next));
   return next;
+}
+
+/** Built-in presets ∪ saved presets, saved shadowing a built-in of the same
+ *  name. The full picker list (built-ins are not deletable). */
+export function allPresets(store?: PresetStore): ExplorerPreset[] {
+  const saved = loadPresets(store);
+  const savedNames = new Set(saved.map((p) => p.name));
+  return [...BUILTIN_PRESETS.filter((b) => !savedNames.has(b.name)), ...saved];
 }
 
 /** Remove the preset named `name` and persist. Returns the new list. */

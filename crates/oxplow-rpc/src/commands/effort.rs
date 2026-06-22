@@ -9,7 +9,7 @@ use oxplow_db::{
     EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TaskEffortStore as _,
     TokenUsageByDay, TokenUsageTotals,
 };
-use oxplow_domain::{EffortId, TaskId, ThreadId};
+use oxplow_domain::{EffortId, TaskId, ThreadId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::error::IpcError;
@@ -32,6 +32,19 @@ pub async fn list_task_efforts(
     item_id: TaskId,
 ) -> Result<Vec<TaskEffort>, IpcError> {
     Ok(svc.effort_store.list_for_item(item_id).await?)
+}
+
+/// Efforts whose span overlaps `[window_start, window_end]` — the time-range
+/// overlay the Metrics Explorer draws as effort bands (tsk233).
+pub async fn list_efforts_in_window(
+    svc: &Services,
+    window_start: Timestamp,
+    window_end: Timestamp,
+) -> Result<Vec<TaskEffort>, IpcError> {
+    Ok(svc
+        .effort_store
+        .list_in_window(window_start, window_end)
+        .await?)
 }
 
 pub async fn get_effort_files(

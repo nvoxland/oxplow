@@ -4,7 +4,7 @@ use oxplow_db::{
     AgentKindTokenUsage, AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths,
     EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TokenUsageByDay, TokenUsageTotals,
 };
-use oxplow_domain::{EffortId, TaskId, ThreadId};
+use oxplow_domain::{EffortId, TaskId, ThreadId, Timestamp};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -16,6 +16,18 @@ pub async fn list_task_efforts(
     item_id: TaskId,
 ) -> Result<Vec<TaskEffort>, IpcError> {
     oxplow_rpc::commands::effort::list_task_efforts(&state, item_id).await
+}
+
+/// Efforts whose span overlaps the given time window — the Metrics Explorer's
+/// effort-band overlay (tsk233).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_efforts_in_window(
+    state: tauri::State<'_, AppState>,
+    window_start: Timestamp,
+    window_end: Timestamp,
+) -> Result<Vec<TaskEffort>, IpcError> {
+    oxplow_rpc::commands::effort::list_efforts_in_window(&state, window_start, window_end).await
 }
 
 #[tauri::command]
