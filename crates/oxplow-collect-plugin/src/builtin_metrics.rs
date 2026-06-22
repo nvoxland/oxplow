@@ -348,7 +348,8 @@ fn a() {
 }
 fn b() {
     unsafe { bar(); }
-    todo!()
+    todo!();
+    std::panic!("path-qualified macro counts too");
 }
 "#
             .to_string(),
@@ -377,8 +378,9 @@ fn b() {
 
     #[test]
     fn rust_panic_macros_golden() {
-        // panic! + todo! = 2.
-        assert_eq!(run_over("oxplow.rust.panic_macros", corpus()), 2.0);
+        // panic! + todo! + path-qualified std::panic! = 3 (the scoped form is
+        // counted via the scoped_identifier pattern).
+        assert_eq!(run_over("oxplow.rust.panic_macros", corpus()), 3.0);
     }
 
     #[test]
@@ -402,6 +404,7 @@ fn b() {
 // @ts-ignore
 function f(x: any): any {
     console.log(x);
+    window.console.error(x);
     const y = x!.foo;
     return y;
 }
@@ -436,8 +439,9 @@ const g = (a: any) => a!;
 
     #[test]
     fn ts_console_calls_golden() {
-        // console.log (a.ts) + console.warn (b.tsx) = 2.
-        assert_eq!(run_over("oxplow.ts.console_calls", ts_corpus()), 2.0);
+        // console.log + namespaced window.console.error (a.ts) + console.warn
+        // (b.tsx) = 3.
+        assert_eq!(run_over("oxplow.ts.console_calls", ts_corpus()), 3.0);
     }
 
     #[test]
@@ -456,7 +460,10 @@ const g = (a: any) => a!;
         let mut m = HashMap::new();
         m.insert(
             "src/core.clj".to_string(),
-            ";; TODO: refactor\n(defn add [a b] (+ a b))\n(defn- helper [] :ok)\n(def x 1)\n"
+            // The last form binds a local literally named `defn` and references
+            // it — neither is a definition, so the head-anchored query must NOT
+            // count them (the old `(sym_lit)` query would have).
+            ";; TODO: refactor\n(defn add [a b] (+ a b))\n(defn- helper [] :ok)\n(def x 1)\n(let [defn 1] defn)\n"
                 .to_string(),
         );
         m.insert(
@@ -469,6 +476,8 @@ const g = (a: any) => a!;
     #[test]
     fn clojure_defn_count_golden() {
         // add (defn) + helper (defn-) in core.clj + greet (defn) in util.cljs = 3.
+        // The `(let [defn 1] defn)` form's two `defn` symbols are NOT defs (not in
+        // head position) and must not inflate the count.
         assert_eq!(run_over("oxplow.clojure.defn_count", clj_corpus()), 3.0);
     }
 
@@ -537,6 +546,7 @@ namespace Acme {
             try { Work(); } catch (System.Exception) { }
             var r = FetchAsync().Result;
             _task.Wait();
+            System.Action w = _task.Wait; // method-group ref, NOT a blocking call
         }
         async void Background() { await Task.Delay(1); }
     }
@@ -571,7 +581,8 @@ namespace Acme {
 
     #[test]
     fn csharp_blocking_async_calls_golden() {
-        // `.Result` + `.Wait()` in Service.cs = 2; the markdown is skipped.
+        // `.Result` + invoked `.Wait()` in Service.cs = 2; the non-invoked
+        // `.Wait` method-group reference and the markdown are NOT counted.
         assert_eq!(
             run_over("oxplow.csharp.blocking_async_calls", cs_corpus()),
             2.0
