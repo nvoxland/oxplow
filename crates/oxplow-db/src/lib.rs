@@ -41,9 +41,7 @@ pub use metric_store::{
     MetricDefinition, MetricFinding, MetricRun, MetricSample, NewMetricDefinition,
     NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
 };
-pub use observation_store::{
-    EffortObservation, NewEffortObservation, SqliteEffortObservationStore,
-};
+pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use stream_store::SqliteStreamStore;

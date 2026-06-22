@@ -25,15 +25,27 @@ oxplow parses coverage reports itself (→ `observed`); the agent never types
 coverage numbers. See [data-model.md](./data-model.md)'s `effort_observation`
 section for the column.
 
+> **Storage retired (tsk215).** The `effort_observation` table + its store were
+> **dropped** — the **metric substrate** ([metrics.md](./metrics.md)) is now the
+> sole store for coverage/test/analysis facts. The hook ride-along records into
+> `metric_sample` + `metric_finding` (the rich detail — test suite/case tree,
+> coverage per-file uncovered lines, analysis payload — lives in verbatim
+> `*-detail` findings); the effort-review panel reconstructs its observation rows
+> from there via `CollectionService::effort_observations_from_metrics` (the
+> `list_effort_observations` IPC/MCP). The `EffortObservation` type survives only
+> as the read/IPC shape. Everything below about the **collector plugins**, the
+> **hybrid ingestion** seam, and the **nudges** is unchanged — only the storage
+> moved. (One micro-change: a *report-less* run — analyzer/tests ran but produced
+> no parseable report — no longer leaves a "ran-record" row; the report-less
+> nudge is what surfaces it.)
+
 ## Pieces
 
-- **`effort_observation` store** (`crates/oxplow-db/src/observation_store.rs`,
-  migration `V26`). Generic effort-scoped fact: `kind` + `metric_value` +
-  `payload_json` + `provenance` + a `page_ref`-style freshness pin. Three
-  `kind`s today: `test-run`, `diff-coverage`, `static-analysis`. Effort-scoped and
-  CASCADE-deleted with its effort (an observation is meaningless outside its
-  effort's snapshot bracket). Full schema in
-  [data-model.md](./data-model.md).
+- **Effort-review rows** are reconstructed from the metric substrate
+  (`effort_observations_from_metrics`), not a dedicated table. The
+  `EffortObservation` wire type (`kind` ∈ `test-run`/`diff-coverage`/
+  `static-analysis`, `metric_value`, `payload_json`, freshness pin) is the
+  read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
 - **Pluggable parsers — `oxplow-collect-plugin`** (`crates/oxplow-collect-plugin/`).
   Report parsing is **not baked in**: a `CollectorRegistry` maps a `format`
   string → a *collector* that turns report text into a **typed output** for its

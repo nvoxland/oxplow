@@ -83,11 +83,11 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteCommentStore, SqliteEffortObservationStore, SqliteMetricStore, SqlitePageRefStore,
-    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteTaskEffortStore, SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore,
-    SqliteTaskStore, SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
-    SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqliteCommentStore, SqliteMetricStore, SqlitePageRefStore, SqlitePageVisitStore,
+    SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
+    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
+    SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -410,10 +410,8 @@ pub struct Services {
     /// for code that wants to bypass the trait surfaces.
     pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
     pub effort_store: Arc<SqliteTaskEffortStore>,
-    /// Effort-scoped collection observations (test runs + diff coverage).
-    pub observation_store: Arc<SqliteEffortObservationStore>,
     /// Unified metric substrate (durable typed metrics; epic tsk213). The
-    /// successor to `observation_store` + `code_quality_store`.
+    /// successor to the retired `effort_observation` + `code_quality_*`.
     pub metric_store: Arc<SqliteMetricStore>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
     /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
@@ -501,7 +499,6 @@ impl Services {
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
-        let observation_store = Arc::new(SqliteEffortObservationStore::new(db.clone()));
         let metric_store = Arc::new(SqliteMetricStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -622,7 +619,6 @@ impl Services {
             .with_metrics(metric_store.clone(), event_bus.clone())
             .with_gauge_runner(metrics.clone());
         let collection = collection::CollectionService::new(
-            observation_store.clone(),
             metric_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
@@ -670,7 +666,6 @@ impl Services {
             agent_turn_store,
             thread_runtime,
             effort_store,
-            observation_store,
             metric_store,
             metrics,
             nudge_store,

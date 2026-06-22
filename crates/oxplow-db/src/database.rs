@@ -409,7 +409,6 @@ mod tests {
             "page_ref",
             "comment",
             "comment_message",
-            "effort_observation",
             "metric_definition",
             "metric_dimension",
             "metric_subject",
@@ -417,7 +416,8 @@ mod tests {
             "metric_sample",
             "metric_finding",
         ];
-        let expected_absent = ["hook_event", "agent_status"];
+        // `effort_observation` was dropped in V39 (tsk215) — assert it's gone.
+        let expected_absent = ["hook_event", "agent_status", "effort_observation"];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             .unwrap();

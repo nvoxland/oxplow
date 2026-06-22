@@ -1320,7 +1320,7 @@ export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
 
-// One persisted observation row.
+// One effort-review observation row (reconstructed from the metric substrate).
 export type EffortObservation = {
 	id: number,
 	stream_id: string,

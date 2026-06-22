@@ -25,7 +25,6 @@ use oxplow_collect_plugin::{
 };
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::observation_store::{NewEffortObservation, SqliteEffortObservationStore};
 use oxplow_db::{
     NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
 };
@@ -221,11 +220,10 @@ pub enum AnalysisIngest {
 
 #[derive(Clone)]
 pub struct CollectionService {
-    observations: Arc<SqliteEffortObservationStore>,
-    /// Unified metric substrate (epic tsk213). Written alongside
-    /// `observations` so coverage/test/analysis facts accrue durably in the
-    /// new model while the legacy effort_observation UI still works; the
-    /// legacy path is dropped once the metric-backed UI lands (tsk215).
+    /// Unified metric substrate (epic tsk213) — the **sole** store for
+    /// coverage/test/analysis facts now (the legacy `effort_observation` table
+    /// was dropped in tsk215). The effort panel reconstructs its rows from here
+    /// via `effort_observations_from_metrics`.
     metrics: Arc<SqliteMetricStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteTaskEffortStore>,
@@ -236,8 +234,7 @@ pub struct CollectionService {
     project_dir: PathBuf,
     events: EventBus,
     /// Efforts already nudged about a report-less test run. In-memory:
-    /// ephemeral guidance that shouldn't pollute the effort_observation
-    /// table or survive a restart.
+    /// ephemeral guidance that shouldn't be persisted or survive a restart.
     nudged_efforts: Arc<std::sync::Mutex<std::collections::HashSet<EffortId>>>,
     /// Commit shas already nudged about out-of-effort files. Same ephemeral
     /// in-memory dedup as `nudged_efforts`, but keyed by commit sha so the
@@ -252,7 +249,6 @@ pub struct CollectionService {
 impl CollectionService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        observations: Arc<SqliteEffortObservationStore>,
         metrics: Arc<SqliteMetricStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
@@ -264,7 +260,6 @@ impl CollectionService {
         events: EventBus,
     ) -> Self {
         Self {
-            observations,
             metrics,
             nudges,
             efforts,
@@ -395,23 +390,12 @@ impl CollectionService {
             Some(serde_json::Value::Object(payload.clone())),
         )
         .await;
-        let id = self
-            .observations
-            .record(NewEffortObservation {
-                stream_id,
-                effort_id: effort.id.to_string(),
-                kind: "test-run".into(),
-                provenance: provenance.to_string(),
-                source: source.to_string(),
-                metric_value: None,
-                payload_json: Some(serde_json::Value::Object(payload).to_string()),
-                local_snapshot_id: None,
-                closest_git_version: None,
-                git_version_exact: false,
-            })
-            .await?;
+        // Substrate is the sole store now (tsk215) — `stream_id` is consumed by
+        // the mirror above; the suite/case tree is kept as a `test-detail`
+        // finding. Signal the panel to refetch; `Some` = recorded.
+        let _ = (stream_id, payload);
         self.emit(thread, &effort);
-        Ok(Some(id))
+        Ok(Some(0))
     }
 
     /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
@@ -448,7 +432,6 @@ impl CollectionService {
                 "format \"{format_str}\" is not a coverage format"
             )));
         }
-        let source = coverage_source(collector);
         let abs = self.project_dir.join(&report_path);
         let Ok(content) = std::fs::read_to_string(&abs) else {
             return Ok(CoverageIngest::ReportMissing(report_path));
@@ -467,7 +450,7 @@ impl CollectionService {
             }
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
-        self.store_diff_coverage(thread, &effort, &stream_id, &report, &source)
+        self.store_diff_coverage(thread, &effort, &stream_id, &report)
             .await
     }
 
@@ -901,7 +884,6 @@ impl CollectionService {
         effort: &TaskEffort,
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
-        source: &str,
     ) -> Result<CoverageIngest, DomainError> {
         let Some(start) = effort.start_snapshot_id else {
             return Ok(CoverageIngest::NoBaseline);
@@ -958,24 +940,11 @@ impl CollectionService {
             Some(payload.clone()),
         )
         .await;
-        let id = self
-            .observations
-            .record(NewEffortObservation {
-                stream_id: stream_id.to_string(),
-                effort_id: effort.id.to_string(),
-                kind: "diff-coverage".into(),
-                provenance: "observed".into(),
-                source: source.to_string(),
-                metric_value: Some(summary_pct),
-                payload_json: Some(payload.to_string()),
-                local_snapshot_id: Some(version.local_snapshot_id),
-                closest_git_version: version.closest_git_version,
-                git_version_exact: version.git_version_exact,
-            })
-            .await?;
+        // Substrate is the sole store now (tsk215) — the diff-coverage detail
+        // is mirrored above; just signal the panel to refetch.
         self.emit(thread, effort);
         Ok(CoverageIngest::Stored {
-            observation_id: id,
+            observation_id: 0,
             summary_pct,
             changed_lines: total_changed,
             covered_lines: total_covered,
@@ -1073,10 +1042,10 @@ impl CollectionService {
         // diff-coverage observation.
         let coverage = self.merge_fresh_coverage(&effort, &cfg, &registry);
         let mut coverage_pct: Option<f64> = None;
-        if let Some((merged, source)) = &coverage {
+        if let Some((merged, _source)) = &coverage {
             if let Some(stream_id) = self.stream_id_for(thread).await? {
                 if let CoverageIngest::Stored { summary_pct, .. } = self
-                    .store_diff_coverage(thread, &effort, &stream_id, merged, source)
+                    .store_diff_coverage(thread, &effort, &stream_id, merged)
                     .await?
                 {
                     coverage_pct = Some(summary_pct);
@@ -1585,32 +1554,30 @@ impl CollectionService {
             )
             .await;
         }
-        let id = self
-            .observations
-            .record(NewEffortObservation {
-                stream_id,
-                effort_id: effort.id.to_string(),
-                kind: "static-analysis".into(),
-                provenance: "observed".into(),
-                source: source.to_string(),
-                metric_value,
-                payload_json: Some(serde_json::Value::Object(payload).to_string()),
-                local_snapshot_id,
-                closest_git_version,
-                git_version_exact,
-            })
-            .await?;
+        // Substrate is the sole store now (tsk215) — the analyzer payload is
+        // kept as an `analysis-detail` finding + per-lint `metric_finding` rows
+        // via the mirror above. Signal the panel to refetch; `Some` = recorded.
+        let _ = (
+            stream_id,
+            metric_value,
+            payload,
+            local_snapshot_id,
+            closest_git_version,
+            git_version_exact,
+        );
         self.emit(thread, &effort);
-        Ok(Some(id))
+        Ok(Some(0))
     }
 
-    /// Observations for an effort, newest-first. Pass `kind` to filter.
+    /// Effort-review observations for an effort, newest-first. Pass `kind` to
+    /// filter. Backed by the metric substrate (tsk215) via
+    /// [`effort_observations_from_metrics`](Self::effort_observations_from_metrics).
     pub async fn list_for_effort(
         &self,
         effort_id: &str,
         kind: Option<&str>,
     ) -> Result<Vec<oxplow_db::EffortObservation>, DomainError> {
-        self.observations.list_for_effort(effort_id, kind).await
+        Ok(self.effort_observations_from_metrics(effort_id, kind).await)
     }
 
     /// Reconstruct the effort-review observations for `effort_id` from the
@@ -1665,6 +1632,21 @@ impl CollectionService {
                         .and_then(|f| f.extra_json),
                     None => None,
                 };
+                // Headline numeric per the panel's per-kind convention: coverage
+                // → %, static-analysis → error+warning count, test-run → none
+                // (the panel reads its counts from the payload).
+                let metric_value = match obs_kind {
+                    "test-run" => None,
+                    "static-analysis" => payload_json
+                        .as_deref()
+                        .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+                        .map(|v| {
+                            v["errorCount"].as_f64().unwrap_or(0.0)
+                                + v["warningCount"].as_f64().unwrap_or(0.0)
+                        })
+                        .or(Some(sample.value)),
+                    _ => Some(sample.value),
+                };
                 out.push(oxplow_db::EffortObservation {
                     id: sample.id,
                     stream_id: oxplow_domain::StreamId::new(sample.stream_id).to_string(),
@@ -1672,7 +1654,7 @@ impl CollectionService {
                     kind: obs_kind.to_string(),
                     provenance: sample.provenance,
                     source: sample.source,
-                    metric_value: Some(sample.value),
+                    metric_value,
                     payload_json,
                     local_snapshot_id: sample.snapshot_id,
                     closest_git_version: sample.closest_git_version,
@@ -1898,17 +1880,6 @@ fn first_coverage_report<'a>(
     })
 }
 
-/// Trust label for a coverage collector's output: in-process tiers are
-/// `observed` from a `coverage-report`; the external-exec escape hatch is
-/// flagged `plugin-exec:<name>` so the UI can mark it lower-trust.
-fn coverage_source(collector: &Collector) -> String {
-    if collector.runtime() == CollectorRuntime::Exec {
-        format!("plugin-exec:{}", collector.name())
-    } else {
-        "coverage-report".to_string()
-    }
-}
-
 /// First configured report whose format resolves to an analysis collector —
 /// the default target for an `ingest_analysis` call with no override.
 fn first_analysis_report<'a>(
@@ -2009,20 +1980,6 @@ mod tests {
             args: vec![],
         };
         assert!(plugin_to_collector(&p, dir.path()).is_err());
-    }
-
-    #[test]
-    fn coverage_source_flags_exec_lower_trust() {
-        let jaq = Collector::jaq(
-            "p",
-            CollectorKind::Coverage,
-            ["f"],
-            CollectorInput::Xml,
-            ".",
-        );
-        assert_eq!(coverage_source(&jaq), "coverage-report");
-        let exec = Collector::exec("clover-cli", CollectorKind::Coverage, ["f"], ["cat"]);
-        assert_eq!(coverage_source(&exec), "plugin-exec:clover-cli");
     }
 
     #[test]
@@ -2333,7 +2290,6 @@ mod tests {
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             let service = CollectionService::new(
-                Arc::new(SqliteEffortObservationStore::new(db.clone())),
                 Arc::new(SqliteMetricStore::new(db.clone())),
                 nudges.clone(),
                 efforts.clone(),
@@ -2924,17 +2880,16 @@ mod tests {
                 nudge.contains("bun run test:collect"),
                 "nudge should name the configured testCommand; got: {nudge}"
             );
-            // The effort still gets a test-run observation (the run was real).
+            // A report-LESS run produces no parseable counts, so the substrate
+            // records no test sample → the effort panel shows no test-run row
+            // for it (tsk215). The report-less *nudge* is what surfaces the run
+            // to the agent; the command-only "ran-record" marker is retired.
             let obs = h
                 .service
                 .list_for_effort(&h.effort_id, Some("test-run"))
                 .await
                 .unwrap();
-            assert_eq!(
-                obs.len(),
-                1,
-                "test-run observation should still be recorded"
-            );
+            assert!(obs.is_empty(), "no substrate row for a report-less run");
             // The fired nudge also projects an `agent.nudges.fired` event
             // sample, subject = the nudge kind (tsk216).
             let fired = h.service.metric_samples_for_key("agent.nudges.fired").await;
@@ -3340,25 +3295,27 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn record_static_analysis_command_only_when_no_report() {
-            // The ran-record: analyzer ran but produced no parseable report.
+        async fn record_static_analysis_command_only_produces_no_substrate_row() {
+            // tsk215: an analyzer that ran but produced no parseable report has
+            // no metric to record, so the substrate has no static-analysis row
+            // (the legacy "ran-record" marker is retired — a parseable report is
+            // what surfaces analysis on the effort panel now).
             let h = build(None).await;
-            h.service
+            let recorded = h
+                .service
                 .record_static_analysis(&h.thread, "cargo clippy", None, &[], "analysis-report")
                 .await
                 .unwrap();
+            assert!(recorded.is_some(), "the run is acknowledged");
             let rows = h
                 .service
                 .list_for_effort(&h.effort_id, Some("static-analysis"))
                 .await
                 .unwrap();
-            assert_eq!(rows.len(), 1);
-            // No findings → no metric, command recorded.
-            assert_eq!(rows[0].metric_value, None);
-            let payload: serde_json::Value =
-                serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
-            assert_eq!(payload["command"], "cargo clippy");
-            assert!(payload.get("findings").is_none());
+            assert!(
+                rows.is_empty(),
+                "no substrate row for a report-less analyzer run"
+            );
         }
 
         #[tokio::test]
@@ -3529,10 +3486,11 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn on_post_tool_use_records_static_analysis_on_analysis_command() {
-            // A clippy command with no fresh report → command-only
-            // static-analysis ran-record on the open effort (deterministic;
-            // no report-mtime dependence).
+        async fn on_post_tool_use_handles_a_report_less_analysis_command() {
+            // A clippy command with no fresh report: the hook runs cleanly and
+            // (no test patterns) returns no nudge. tsk215: a report-less analyzer
+            // run records no substrate row (a parseable report is what surfaces
+            // analysis on the effort panel now).
             let h = build(None).await;
             let result = h
                 .service
@@ -3544,18 +3502,12 @@ mod tests {
                 .unwrap();
             // No test patterns matched → no test nudge.
             assert!(result.is_none());
-            let rows = h
+            assert!(h
                 .service
                 .list_for_effort(&h.effort_id, Some("static-analysis"))
                 .await
-                .unwrap();
-            assert_eq!(rows.len(), 1);
-            assert!(rows[0]
-                .payload_json
-                .as_deref()
                 .unwrap()
-                .contains("cargo clippy"));
-            // A pure analysis command records no test-run.
+                .is_empty());
             assert!(h
                 .service
                 .list_for_effort(&h.effort_id, Some("test-run"))

@@ -932,58 +932,20 @@ complete / fail; `CodeQualityPanel` (`apps/desktop/src/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
-### `effort_observation` — `SqliteEffortObservationStore` (`crates/oxplow-db/src/observation_store.rs`, migration `V26__effort_observation.sql`)
+### `effort_observation` — **RETIRED** (dropped in migration `V39__drop_effort_observation.sql`, tsk215)
 
-Structured, agent-or-tool-reported facts attached to a `task_effort` — the
-foundation of the **collection** subsystem (see `.context/collection.md`).
-Modeled on `code_quality_finding` (kind + `metric_value` + payload) plus the
-`page_ref` freshness-pin columns. Three `kind`s today: `test-run`
-(which tests ran), `diff-coverage` (coverage over the effort's changed
-lines), and `static-analysis` (linter/analyzer findings). `kind` is an
-open-ended string, so adding one needs **no migration** — `static-analysis`
-was added without one.
-
-Columns: `id, stream_id (NOT NULL, FK streams ON DELETE CASCADE), effort_id
-(NOT NULL, FK task_effort ON DELETE CASCADE), kind, provenance, source,
-metric_value (REAL, nullable), payload_json (TEXT), local_snapshot_id,
-closest_git_version, git_version_exact, created_at`. Indexes on
-`(effort_id, kind, created_at DESC)` and `(stream_id)`.
-
-- **`provenance` is the spine** (`CHECK IN ('observed','asserted')`):
-  `observed` = oxplow saw it directly (the PostToolUse Bash hook, or oxplow
-  parsing a coverage report itself); `asserted` = the agent reported it via
-  MCP and we can't independently verify it. The UI marks asserted facts so a
-  reviewer never mistakes a typed number for a measured one. Within `observed`,
-  `source` carries the trust tier: deterministic in-process parses are
-  `coverage-report`/`post-tool-bash`; the external-exec plugin escape hatch is
-  `plugin-exec:<name>` (lower-trust — it can do I/O).
-- **`kind` is a *typed* collector kind, not a formless blob.** The shipped
-  kinds (`test-run`, `diff-coverage`, `static-analysis`) each have a fixed
-  `payload_json` schema produced by a registered collector
-  (`crates/oxplow-collect-plugin`); parsers are pluggable but every observation
-  is still a known, typed thing. A new kind is a new `CollectorKind` + plugins,
-  not an arbitrary payload.
-- **`effort_id` is NOT NULL + CASCADE** (a deliberate tightening of the
-  original plan's nullable column): an observation only has meaning inside
-  its effort's start/end snapshot bracket — `diff-coverage` intersects
-  against the effort's changed lines — so it dies with the effort. The
-  passive hook skips recording when there's no open effort rather than
-  inserting a dangling row.
-- **Freshness pin** (`local_snapshot_id` / `closest_git_version` /
-  `git_version_exact`) mirrors `task_effort_file` / `page_ref` (see V20);
-  filled at capture time by the same `oxplow_app::file_ref_version` resolver
-  so the UI can flag a coverage badge as stale once HEAD moves past the pin.
-- **`payload_json`** is kind-specific and parsed only in TS / by the agent
-  (opaque to Rust, so enriching it needs no migration): `test-run` carries
-  `{ command, exitCode?, passed?, failed?, total?, durationMs? }`;
-  `diff-coverage` carries `{ summaryPct, changedLines, coveredLines, files:
-  [{ path, uncoveredChangedLines }] }`; `static-analysis` carries
-  `{ command?, analyzer?, findings: [{ path, line?, column?, severity, rule?,
-  message }], errorCount, warningCount, infoCount, noteCount }` with
-  `metric_value` = error+warning count (lower is better).
-- **Retention** is store-driven like `CodeQualityStore`: each `record()`
-  prunes to keep-last-N (10) per `(effort_id, kind)` in the same
-  transaction.
+The `effort_observation` table + `SqliteEffortObservationStore` are **gone**.
+Coverage / test / static-analysis facts now live in the **metric substrate**
+(`metric_sample` + `metric_finding`, see `.context/metrics.md`); the rich detail
+that used to live in `payload_json` (test suite/case tree, coverage per-file
+uncovered lines, analysis payload) is written as verbatim `*-detail`
+`metric_finding` rows by the `mirror_*` helpers in `collection.rs`. The
+effort-review panel reconstructs its rows from there via
+`CollectionService::effort_observations_from_metrics` (the
+`list_effort_observations` IPC/MCP). The `EffortObservation` struct
+(`observation_store.rs`) survives **only** as that read/IPC shape — no table, no
+store. The `provenance`/`source` trust spine and the `observed`/`asserted`
+distinction carry onto every `metric_sample` (see `.context/metrics.md`).
 
 ### `agent_nudge` — `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`, migration `V33__agent_nudge.sql`)
 
@@ -1003,7 +965,7 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
 - **`thread_id` NOT NULL, `effort_id` nullable**: every nudge fires within a
   thread; today both kinds fire against the open effort, but the column is
   nullable so a future thread-scoped nudge (no open effort) has a home. The
-  effort FK cascades like `effort_observation` when present.
+  effort FK cascades with its `task_effort` when present.
 - **`kind`** is open-ended (`report-less-run` | `commit-hygiene` |
   `configure`, …) — adding a kind needs no migration.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.

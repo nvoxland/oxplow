@@ -7,15 +7,17 @@ tests, clippy findings, tokens, cost — all become *metric definitions* over th
 same tables, queryable by the agent (MCP) and the renderer (IPC), and surfaced
 on the Metrics page.
 
-Status: substrate + read surface are **live**; the legacy `effort_observation`
-path still runs **alongside** (dual-write) until the UI fully moves over and it's
-dropped. See `tsk215`/`tsk219` for the remaining work.
+Status: substrate + read surface are **live** and are now the **sole** store for
+coverage/test/analysis facts — the legacy `effort_observation` table was
+**dropped** (tsk215). The effort-review panel reconstructs its rows from the
+substrate (`CollectionService::effort_observations_from_metrics`); the
+`EffortObservation` type survives only as the read/IPC shape.
 
 ## Why it exists
 
 `effort_observation` (see [collection.md](./collection.md)) was the first cut,
-but it's **effort-scoped, CASCADE-deleted with its effort, and pruned to the
-last 10** — so it can't answer "how did coverage move over the last month" or
+but it was **effort-scoped, CASCADE-deleted with its effort, and pruned to the
+last 10** — so it couldn't answer "how did coverage move over the last month" or
 "compare this branch to main." A coverage % or token count is a *datum about the
 code/process at a point in time*, not a child of an effort. The substrate fixes
 that: **time-primary, durable, dimension-sliceable**.
@@ -80,13 +82,17 @@ code-fact producers; operational producers (tokens) leave it NULL.
 
 ## Producers (how samples get written)
 
-Producers are the only thing that writes samples. Today they're **dual-write
-side-bands** that also feed the legacy tables (best-effort: a metric write error
-is logged via `tracing::warn!`, never fails the host path):
+Producers are the only thing that writes samples. They're best-effort
+side-bands on the host path (a metric write error is logged via `tracing::warn!`,
+never fails the host path). For coverage/tests/analysis the substrate is now the
+**sole** store (the legacy `effort_observation` table was dropped, tsk215) — the
+mirror helpers also write a verbatim `*-detail` `metric_finding` (test
+suite/case tree, coverage per-file uncovered lines, analysis payload) so the
+panel can reconstruct full detail via `effort_observations_from_metrics`:
 
 | producer | where | emits |
 |---|---|---|
-| coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from the existing `store_diff_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.diff_pct`; `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit |
+| coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from the existing `store_diff_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.diff_pct`; `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`, derived `agent.cost_usd` (per-model price table) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
@@ -101,8 +107,9 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 > **The plan is for these to become bundled plugins** (jaq/Starlark/exec,
 > registered via `with_builtins()`) so producers are *content*, not hardcoded
-> Rust — and for the legacy `effort_observation` path to be dropped (tsk215,
-> tsk218). The hardcoded mirror helpers are the interim.
+> Rust (tsk218). The hardcoded mirror helpers are the interim. The legacy
+> `effort_observation` path has already been **dropped** (tsk215) — the substrate
+> is the sole store.
 
 ## Read surface
 
