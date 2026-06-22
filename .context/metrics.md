@@ -199,6 +199,24 @@ The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 a working `metrics:` entry + script + verification, no oxplow-team involvement.
 
+## Targets & feedback (advise-only, P5/tsk220)
+
+A definition's `target` / `warn_at` / `fail_at` (interpreted via `direction`) are
+the single source of red/green: the Metrics page colors from them
+(`MetricsPage.statusColor`, three tiers) — no hardcoded UI ramps (the coverage
+50/80 ramp is retired; the thresholds live on `oxplow.coverage.diff_pct` as
+`target: 80` / `fail_at: 50`, set in `collection.rs::record_coverage_metric`).
+See [theming.md](./theming.md).
+
+Feedback is **advisory — oxplow never blocks**. When an effort's diff coverage
+lands below target, the PostToolUse ride-along fires a **one-shot** nudge
+("coverage X% < 80% target — add tests…") via the same `persist_nudge` +
+`additionalContext` path as the report-less / commit-hygiene nudges, deduped
+per-effort by an in-memory `nudged_coverage` set. (A broader "metric deltas this
+effort" prompt line + gauge-threshold nudges are a tracked follow-up — gauge
+metrics run in the background on-snapshot, not in a hook, so surfacing their
+threshold crossings needs the Stop/prompt path, not the PostToolUse return.)
+
 ## Gotchas
 
 - **Provenance is the spine** (carried from collection.md): in-process/parsed →

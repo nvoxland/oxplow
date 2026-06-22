@@ -51,14 +51,20 @@ function Sparkline({ values, color }: { values: number[]; color?: string }) {
   );
 }
 
-/** Color a value against the metric's target + direction (the data-driven
- *  successor to the hardcoded coverage ramps). */
+/** Color a value against the metric's `target`/`fail_at` + `direction` — the
+ *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). Three
+ *  tiers: meets target → ok (green); past the fail floor → fail (red);
+ *  in-between (below target, above fail) → warn (amber). `neutral` metrics and
+ *  threshold-less metrics are uncolored. */
 function statusColor(def: MetricDefinition, value: number): string | undefined {
-  const threshold = def.fail_at ?? def.warn_at ?? def.target;
-  if (threshold == null || def.direction === "neutral") return undefined;
-  const ok =
-    def.direction === "higher-better" ? value >= threshold : value <= threshold;
-  return ok ? "var(--ok, #3fb950)" : "var(--warn, #e5a50a)";
+  if (def.direction === "neutral") return undefined;
+  const higher = def.direction === "higher-better";
+  const meets = (t: number) => (higher ? value >= t : value <= t);
+  const okThreshold = def.target ?? def.warn_at;
+  if (okThreshold != null && meets(okThreshold)) return "var(--ok, #3fb950)";
+  if (def.fail_at != null && !meets(def.fail_at)) return "var(--err, #f85149)";
+  if (okThreshold != null || def.fail_at != null) return "var(--warn, #e5a50a)";
+  return undefined;
 }
 
 /**

@@ -150,10 +150,19 @@ function severityGlyph(s: FindingSeverity): string {
   return s === "error" ? "✗" : s === "warning" ? "⚠" : s === "info" ? "ℹ" : "·";
 }
 
-/** Emerald ≥80%, amber ≥50%, rose below — reusing the freshness ramp. */
+// Coverage coloring thresholds. These MIRROR the `oxplow.coverage.diff_pct`
+// metric definition's `target` (80) and `fail_at` (50) — the canonical source
+// of the ramp now lives in DATA on the definition (tsk220), and the substrate
+// Metrics page colors straight from `def.target`/`def.fail_at`/`def.direction`
+// via `statusColor`. This legacy effort-observation panel reads the raw pct (not
+// the def), so it restates the same two numbers here until it's retired (tsk215).
+const COVERAGE_TARGET_PCT = 80;
+const COVERAGE_FAIL_PCT = 50;
+
+/** Emerald ≥ target, amber ≥ fail floor, rose below — reusing the freshness ramp. */
 function coverageColor(pct: number): string {
-  if (pct >= 80) return "var(--freshness-fresh)";
-  if (pct >= 50) return "var(--freshness-stale)";
+  if (pct >= COVERAGE_TARGET_PCT) return "var(--freshness-fresh)";
+  if (pct >= COVERAGE_FAIL_PCT) return "var(--freshness-stale)";
   return "var(--freshness-very-stale)";
 }
 

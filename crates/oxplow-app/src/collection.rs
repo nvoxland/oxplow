@@ -168,6 +168,12 @@ pub fn parse_bash_post_tool(payload_json: &str) -> Option<BashInvocation> {
     Some(BashInvocation { command, exit_code })
 }
 
+/// Diff-coverage thresholds (tsk220), stored as the `oxplow.coverage.diff_pct`
+/// definition's `target`/`fail_at` so the renderer colors from DATA rather than
+/// a hardcoded 50/80 ramp, and the advisory nudge fires below target.
+pub const COVERAGE_TARGET_PCT: f64 = 80.0;
+pub const COVERAGE_FAIL_PCT: f64 = 50.0;
+
 /// Outcome of a coverage ingest, so the MCP tool can report precisely
 /// why nothing landed.
 #[derive(Debug, Clone, PartialEq)]
@@ -237,6 +243,10 @@ pub struct CollectionService {
     /// in-memory dedup as `nudged_efforts`, but keyed by commit sha so the
     /// hygiene nudge fires at most once per commit.
     nudged_commits: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Efforts already nudged about coverage below target (tsk220). Separate
+    /// set from `nudged_efforts` so the report-less and coverage-target nudges
+    /// don't suppress each other; same ephemeral in-memory dedup.
+    nudged_coverage: Arc<std::sync::Mutex<std::collections::HashSet<EffortId>>>,
 }
 
 impl CollectionService {
@@ -266,6 +276,7 @@ impl CollectionService {
             events,
             nudged_efforts: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             nudged_commits: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            nudged_coverage: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -593,6 +604,11 @@ impl CollectionService {
         def.language = None;
         def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
         def.description = Some("Coverage % over the effort's changed lines.".into());
+        // Targets live in DATA, not a hardcoded UI ramp (tsk220): the renderer
+        // colors red/green from these (fail < 50%, warn < 80%, ok ≥ 80%).
+        def.target = Some(COVERAGE_TARGET_PCT);
+        def.warn_at = Some(COVERAGE_TARGET_PCT);
+        def.fail_at = Some(COVERAGE_FAIL_PCT);
         let metric_id = self.metrics.upsert_definition(def).await?;
 
         let mut run = NewMetricRun::done(stream_val, "coverage", "coverage-report");
@@ -985,11 +1001,33 @@ impl CollectionService {
         // Coverage ride-along: merge every fresh coverage report → one
         // diff-coverage observation.
         let coverage = self.merge_fresh_coverage(&effort, &cfg, &registry);
+        let mut coverage_pct: Option<f64> = None;
         if let Some((merged, source)) = &coverage {
             if let Some(stream_id) = self.stream_id_for(thread).await? {
-                let _ = self
+                if let CoverageIngest::Stored { summary_pct, .. } = self
                     .store_diff_coverage(thread, &effort, &stream_id, merged, source)
-                    .await?;
+                    .await?
+                {
+                    coverage_pct = Some(summary_pct);
+                }
+            }
+        }
+        // Coverage-target nudge (tsk220, advise only): the effort's diff
+        // coverage landed below target → steer the agent to add tests, at most
+        // once per effort. Never blocks. Mutually exclusive with the report-less
+        // nudge below (this only fires when a coverage report WAS produced).
+        if let Some(pct) = coverage_pct {
+            if pct < COVERAGE_TARGET_PCT && self.mark_coverage_nudged(&effort.id) {
+                let msg = coverage_target_nudge_message(pct);
+                self.persist_nudge(
+                    thread,
+                    Some(&effort),
+                    "coverage-target",
+                    &msg,
+                    &bash.command,
+                )
+                .await;
+                return Ok(Some(msg));
             }
         }
         // Nudge: the agent ran tests but this run regenerated no report
@@ -1109,6 +1147,15 @@ impl CollectionService {
     fn mark_commit_nudged(&self, sha: &str) -> bool {
         match self.nudged_commits.lock() {
             Ok(mut set) => set.insert(sha.to_string()),
+            Err(_) => false,
+        }
+    }
+
+    /// Record that `effort` has been nudged about coverage below target.
+    /// Returns `true` the first time (caller should nudge), `false` after.
+    fn mark_coverage_nudged(&self, effort: &EffortId) -> bool {
+        match self.nudged_coverage.lock() {
+            Ok(mut set) => set.insert(*effort),
             Err(_) => false,
         }
     }
@@ -1578,6 +1625,17 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
              report(s). See .context/collection.md."
         )
     }
+}
+
+/// The PostToolUse nudge shown when an effort's diff coverage lands below the
+/// `oxplow.coverage.diff_pct` target (tsk220). Advisory — oxplow never blocks.
+fn coverage_target_nudge_message(pct: f64) -> String {
+    format!(
+        "Diff coverage on this effort's changed lines is {pct:.0}%, below the {target:.0}% \
+         target. Add tests for the uncovered changed lines before closing (advisory — oxplow \
+         won't block you). See the effort's coverage panel for which lines are uncovered.",
+        target = COVERAGE_TARGET_PCT
+    )
 }
 
 /// The PostToolUse nudge shown when a `git commit` swept in files that fall
@@ -2610,6 +2668,51 @@ mod tests {
             assert_eq!(fired[0].value, 1.0);
             assert_eq!(fired[0].subject_kind.as_deref(), Some("nudge"));
             assert_eq!(fired[0].subject_ref.as_deref(), Some("report-less-run"));
+        }
+
+        #[tokio::test]
+        async fn coverage_def_carries_target_thresholds_from_data() {
+            // tsk220: the 50/80 ramp lives on the definition (data), so the
+            // renderer colors red/green from it and the nudge fires below target
+            // — no hardcoded UI constant.
+            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+            let def = h
+                .service
+                .metrics
+                .get_definition("oxplow.coverage.diff_pct")
+                .await
+                .unwrap()
+                .expect("coverage definition seeded");
+            assert_eq!(def.target, Some(80.0), "target in data");
+            assert_eq!(def.fail_at, Some(50.0), "fail floor in data");
+            assert_eq!(def.direction, "higher-better");
+        }
+
+        #[test]
+        fn coverage_target_nudge_message_names_pct_and_target() {
+            let msg = super::coverage_target_nudge_message(50.0);
+            assert!(msg.contains("50%"), "names the actual pct; got: {msg}");
+            assert!(msg.contains("80% target"), "names the target; got: {msg}");
+            assert!(
+                msg.to_lowercase().contains("advisory"),
+                "flagged advise-only; got: {msg}"
+            );
+        }
+
+        #[tokio::test]
+        async fn coverage_target_nudge_is_one_shot_per_effort() {
+            // The acceptance invariant: at most one coverage nudge per effort.
+            let h = build(None).await;
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            assert!(h.service.mark_coverage_nudged(&eid), "first time fires");
+            assert!(
+                !h.service.mark_coverage_nudged(&eid),
+                "second time is deduped"
+            );
         }
 
         #[tokio::test]

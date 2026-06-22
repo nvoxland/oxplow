@@ -94,6 +94,21 @@ text, lifts to a 4%-white wash on hover).
 `--freshness-fresh` (emerald), `--freshness-stale` (amber),
 `--freshness-very-stale` (rose).
 
+### Metric status (data-driven — NO hardcoded ramps)
+
+Metric red/green is computed **from the metric definition's data**, not from
+magic numbers in the renderer. `MetricsPage.statusColor(def, value)` reads
+`def.target` / `def.fail_at` / `def.direction` and returns three tiers — meets
+target → `--ok` (green), past the fail floor → `--err` (red), in-between →
+`--warn` (amber); `neutral` / threshold-less metrics are uncolored. The former
+hardcoded **coverage 50/80 ramp is retired** (tsk220): the thresholds now live on
+the `oxplow.coverage.diff_pct` definition (`target: 80`, `fail_at: 50`, set in
+`collection.rs::record_coverage_metric`). To re-tune a metric's coloring, change
+its `target`/`warn_at`/`fail_at` (config or producer) — never a UI constant. (The
+legacy `EffortObservations` coverage bar still restates `80`/`50` as named
+constants documented to mirror the def; it's removed with `effort_observation` in
+tsk215.)
+
 ### Comments
 
 `--comment-highlight` (amber) — the inline highlight + quote rule for
