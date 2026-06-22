@@ -468,7 +468,9 @@ impl MetricsService {
         if metrics.is_empty() {
             return;
         }
-        let files = self.build_file_map(snapshot_id).await;
+        // Build the snapshot file map once and share it across every gauge of
+        // this run via an Arc (no per-gauge clone of the whole map).
+        let files = Arc::new(self.build_file_map(snapshot_id).await);
         let ctx = self
             .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id, None)
             .await;
@@ -497,10 +499,10 @@ impl MetricsService {
             Ok(Some(e)) => e.end_snapshot_id,
             _ => None,
         };
-        let files = match snapshot_id {
+        let files = Arc::new(match snapshot_id {
             Some(sid) => self.build_file_map(sid).await,
             None => HashMap::new(),
-        };
+        });
         let subject = Some(("effort".to_string(), effort_id.to_string()));
         let ctx = self
             .snapshot_context(
@@ -539,10 +541,10 @@ impl MetricsService {
             .await
             .ok()
             .flatten();
-        let files = match snapshot_id {
+        let files = Arc::new(match snapshot_id {
             Some(sid) => self.build_file_map(sid).await,
             None => HashMap::new(),
-        };
+        });
         let ctx = self
             .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0), None)
             .await;
@@ -628,7 +630,7 @@ impl MetricsService {
         &self,
         metric: &ResolvedMetric,
         ctx: &GaugeRunContext,
-        files: HashMap<String, String>,
+        files: Arc<HashMap<String, String>>,
     ) -> usize {
         // Built-in metrics run from their embedded script (no project-disk
         // file); global/project metrics build from their `compute.entryFile`.
@@ -661,7 +663,7 @@ impl MetricsService {
             }
             None => String::new(),
         };
-        let host = GaugeHost::new(files);
+        let host = GaugeHost::from_shared(files);
         let report =
             match tokio::task::spawn_blocking(move || collector.run_gauge(&content, host)).await {
                 Ok(Ok(out)) => out,
@@ -975,7 +977,10 @@ def transform(input):
             branch: Some("metrics-substrate".into()),
             subject_default: None,
         };
-        let count = svc.metrics.run_one_gauge(&metric, &ctx, files).await;
+        let count = svc
+            .metrics
+            .run_one_gauge(&metric, &ctx, Arc::new(files))
+            .await;
         assert_eq!(count, 1);
 
         let def = svc
@@ -1305,7 +1310,7 @@ def transform(input):
             branch: None,
             subject_default: None,
         };
-        let count = m.run_one_gauge(&metric, &ctx, files).await;
+        let count = m.run_one_gauge(&metric, &ctx, Arc::new(files)).await;
         assert_eq!(count, 1, "global-scope script resolved + ran");
         let def = svc
             .metric_store

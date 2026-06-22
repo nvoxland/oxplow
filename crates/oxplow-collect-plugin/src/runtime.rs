@@ -270,18 +270,30 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
 }
 
 /// Per-run host state for a Starlark **gauge**, injected via `Evaluator::extra`
-/// and read by the `files(glob)` builtin. Owns its file map (path → content) so
-/// it carries no borrow lifetime across the Starlark boundary and is
-/// `Send + 'static` (it can move into the sandbox worker thread).
+/// and read by the `files(glob)` builtin. The file map (path → content) is held
+/// behind an `Arc` so the *same* captured snapshot can be shared across every
+/// gauge of a run without cloning the whole map per gauge (a real cost when many
+/// gauges run on one snapshot). It carries no borrow lifetime across the
+/// Starlark boundary and stays `Send + 'static` (it can move into the sandbox
+/// worker thread).
 #[derive(Debug, Default, starlark::any::ProvidesStaticType)]
 pub struct GaugeHost {
-    files: std::collections::HashMap<String, String>,
+    files: std::sync::Arc<std::collections::HashMap<String, String>>,
 }
 
 impl GaugeHost {
     /// A host exposing `files` (repo-relative path → UTF-8 content) to
-    /// `files(glob)`.
+    /// `files(glob)`, owning the map.
     pub fn new(files: std::collections::HashMap<String, String>) -> Self {
+        Self {
+            files: std::sync::Arc::new(files),
+        }
+    }
+
+    /// A host sharing an already-`Arc`'d file map — the per-gauge construction
+    /// path, so N gauges over one snapshot share one map (a cheap refcount bump
+    /// each) instead of N full clones.
+    pub fn from_shared(files: std::sync::Arc<std::collections::HashMap<String, String>>) -> Self {
         Self { files }
     }
 }
