@@ -218,6 +218,52 @@ pub enum AnalysisIngest {
     },
 }
 
+/// Cap on each in-memory nudge-dedup set. These are keyed by effort (or commit
+/// sha) and only ever grew before — a slow but unbounded leak in a long-lived
+/// daemon, since efforts are never explicitly forgotten (and the substrate may
+/// age-sweep them away entirely). Insertion-ordered eviction past the cap keeps
+/// memory bounded while preserving the one-shot guarantee for every recently
+/// active effort; only entries older than `NUDGE_DEDUP_CAP` distinct keys ago
+/// (long-closed efforts) can re-arm, which is harmless.
+const NUDGE_DEDUP_CAP: usize = 1024;
+
+/// A `HashSet` with a bounded size and oldest-first eviction. Used for the
+/// ephemeral in-memory nudge-dedup sets so they can't grow without limit.
+struct BoundedSet<T> {
+    set: std::collections::HashSet<T>,
+    order: std::collections::VecDeque<T>,
+    cap: usize,
+}
+
+impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
+    fn new(cap: usize) -> Self {
+        Self {
+            set: std::collections::HashSet::new(),
+            order: std::collections::VecDeque::new(),
+            cap,
+        }
+    }
+
+    /// Insert `v`; return `true` the first time it's seen, `false` if already
+    /// present. Evicts the oldest entry once over capacity.
+    fn insert(&mut self, v: T) -> bool {
+        if !self.set.insert(v.clone()) {
+            return false;
+        }
+        self.order.push_back(v);
+        while self.order.len() > self.cap {
+            if let Some(old) = self.order.pop_front() {
+                self.set.remove(&old);
+            }
+        }
+        true
+    }
+
+    fn contains(&self, v: &T) -> bool {
+        self.set.contains(v)
+    }
+}
+
 #[derive(Clone)]
 pub struct CollectionService {
     /// Unified metric substrate (epic tsk213) — the **sole** store for
@@ -235,22 +281,23 @@ pub struct CollectionService {
     events: EventBus,
     /// Efforts already nudged about a report-less test run. In-memory:
     /// ephemeral guidance that shouldn't be persisted or survive a restart.
-    nudged_efforts: Arc<std::sync::Mutex<std::collections::HashSet<EffortId>>>,
+    /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
+    nudged_efforts: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
     /// Commit shas already nudged about out-of-effort files. Same ephemeral
-    /// in-memory dedup as `nudged_efforts`, but keyed by commit sha so the
-    /// hygiene nudge fires at most once per commit.
-    nudged_commits: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// bounded in-memory dedup as `nudged_efforts`, but keyed by commit sha so
+    /// the hygiene nudge fires at most once per commit.
+    nudged_commits: Arc<std::sync::Mutex<BoundedSet<String>>>,
     /// Efforts already nudged about coverage below target (tsk220). Separate
     /// set from `nudged_efforts` so the report-less and coverage-target nudges
-    /// don't suppress each other; same ephemeral in-memory dedup.
-    nudged_coverage: Arc<std::sync::Mutex<std::collections::HashSet<EffortId>>>,
+    /// don't suppress each other; same ephemeral bounded in-memory dedup.
+    nudged_coverage: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
     /// `(effort, metric_id)` pairs already surfaced as a gauge warn/fail
     /// crossing in the effort-metric prompt context (tsk231). Gauge metrics run
     /// on-snapshot in the background, not in a hook, so their threshold crossing
     /// can't ride the PostToolUse `additionalContext`; instead the
     /// UserPromptSubmit context line surfaces it **once** per effort+metric.
-    /// Same ephemeral in-memory dedup.
-    nudged_gauge: Arc<std::sync::Mutex<std::collections::HashSet<(EffortId, i64)>>>,
+    /// Same ephemeral bounded in-memory dedup.
+    nudged_gauge: Arc<std::sync::Mutex<BoundedSet<(EffortId, i64)>>>,
 }
 
 impl CollectionService {
@@ -276,10 +323,10 @@ impl CollectionService {
             config,
             project_dir,
             events,
-            nudged_efforts: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            nudged_commits: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            nudged_coverage: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-            nudged_gauge: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
+            nudged_commits: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
+            nudged_coverage: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
+            nudged_gauge: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
         }
     }
 
@@ -1218,6 +1265,18 @@ impl CollectionService {
         }
     }
 
+    /// Has `(effort, metric)` already had its crossing surfaced? A read-only
+    /// peek: [`effort_metric_context`] decides which crossings are fresh during
+    /// its loop but defers the actual `mark_gauge_nudged` to its await-free tail
+    /// (so a hook timeout mid-loop can't consume a one-shot the agent never saw).
+    /// A poisoned lock reads as "already nudged" — suppress rather than nag.
+    fn gauge_already_nudged(&self, effort: &EffortId, metric_id: i64) -> bool {
+        match self.nudged_gauge.lock() {
+            Ok(set) => set.contains(&(*effort, metric_id)),
+            Err(_) => true,
+        }
+    }
+
     /// The advisory "metric deltas this effort" block for the open effort on
     /// `thread` (tsk231) — how each code metric's samples moved since the
     /// effort started, plus a **one-shot** loud marker the first turn a gauge
@@ -1229,6 +1288,10 @@ impl CollectionService {
         let effort = self.efforts.find_open_for_thread(thread).await.ok()??;
         let defs = self.metrics.list_definitions().await.ok()?;
         let mut lines: Vec<String> = Vec::new();
+        // Crossings surfaced this turn — marked consumed only in the await-free
+        // tail below, never inside the loop (a hook timeout could otherwise drop
+        // the response after a one-shot was already consumed mid-loop).
+        let mut fresh_crossings: Vec<i64> = Vec::new();
         for def in defs {
             // Operational/event metrics (tokens, cost, cycle-time, nudges,
             // navigation) grow every turn and aren't code-health signals — keep
@@ -1253,7 +1316,12 @@ impl CollectionService {
             let current = last.value;
             let moved = (current - baseline).abs() > f64::EPSILON;
             let crossing = threshold_state(&def.direction, current, def.warn_at, def.fail_at);
-            let fresh_crossing = crossing.is_some() && self.mark_gauge_nudged(&effort.id, def.id);
+            // Peek (don't consume) the one-shot here; consume after the loop.
+            let fresh_crossing =
+                crossing.is_some() && !self.gauge_already_nudged(&effort.id, def.id);
+            if fresh_crossing {
+                fresh_crossings.push(def.id);
+            }
             if !moved && !fresh_crossing {
                 continue;
             }
@@ -1288,6 +1356,13 @@ impl CollectionService {
         }
         if lines.is_empty() {
             return None;
+        }
+        // Await-free tail: consume the one-shots now that the context is fully
+        // built and about to be returned. The timeout that bounds the hook only
+        // fires at await points, so nothing between here and the response can
+        // drop a marker we've consumed.
+        for metric_id in fresh_crossings {
+            self.mark_gauge_nudged(&effort.id, metric_id);
         }
         Some(format!(
             "# Metric deltas (this effort)\n{}\n\n(Advisory — for awareness, not gating.)",
@@ -2074,6 +2149,21 @@ fn analysis_source(collector: &Collector) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_set_dedups_and_evicts_oldest() {
+        let mut s = BoundedSet::new(2);
+        assert!(s.insert(1)); // new
+        assert!(!s.insert(1)); // already present
+        assert!(s.insert(2));
+        assert!(s.contains(&1) && s.contains(&2));
+        // Inserting a third evicts the oldest (1).
+        assert!(s.insert(3));
+        assert!(!s.contains(&1), "oldest entry evicted past cap");
+        assert!(s.contains(&2) && s.contains(&3));
+        // 1 is forgotten, so it inserts fresh again (re-arms).
+        assert!(s.insert(1));
+    }
 
     #[test]
     fn threshold_state_respects_direction() {
