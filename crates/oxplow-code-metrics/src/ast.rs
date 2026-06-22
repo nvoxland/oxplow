@@ -149,6 +149,15 @@ fn c() { unsafe { foo(); } }
     }
 
     #[test]
+    fn ast_query_works_for_csharp() {
+        // C# method declarations resolve through the new `Language::CSharp`
+        // grammar (the catalog under oxplow-collect-plugin builds on this).
+        let src = "class C { public void M(int x) { if (x > 0) { Do(); } } }";
+        let methods = ast_query(src, "csharp", "(method_declaration) @m").expect("runs");
+        assert_eq!(methods.len(), 1);
+    }
+
+    #[test]
     fn ast_query_works_across_languages() {
         // TypeScript: count `any` type annotations (a `predefined_type` node).
         let ts = "function f(x: any): any { return x; }";

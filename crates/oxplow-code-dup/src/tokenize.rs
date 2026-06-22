@@ -125,6 +125,7 @@ pub fn is_skip_node(lang: Language, node: Node<'_>, src: &[u8]) -> bool {
             kind,
             "preproc_include" | "using_declaration" | "using_directive"
         ),
+        Language::CSharp => matches!(kind, "using_directive"),
         Language::Clojure => {
             if kind != "list_lit" {
                 return false;

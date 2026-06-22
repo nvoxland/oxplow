@@ -32,8 +32,11 @@ pub enum Language {
     /// decision-point detection use the head-symbol-text matchers
     /// (`function_form_heads`, `decision_form_heads`) on
     /// `LanguageSpec` rather than the static-`node.kind()` arrays
-    /// that suffice for the other nine languages.
+    /// that suffice for the other ten languages.
     Clojure,
+    /// C#. Standard `node.kind()`-driven detection like the other
+    /// non-Clojure languages.
+    CSharp,
 }
 
 pub struct LanguageSpec {
@@ -132,6 +135,7 @@ impl Language {
             Language::C => &C,
             Language::Cpp => &CPP,
             Language::Clojure => &CLOJURE,
+            Language::CSharp => &CSHARP,
         }
     }
 
@@ -155,6 +159,7 @@ impl Language {
             Language::C => 8,
             Language::Cpp => 9,
             Language::Clojure => 10,
+            Language::CSharp => 11,
         }
     }
 }
@@ -173,6 +178,7 @@ pub fn language_from_name(name: &str) -> Option<Language> {
         "c" => Language::C,
         "cpp" | "c++" | "cxx" | "cc" => Language::Cpp,
         "clojure" | "clj" | "cljs" | "cljc" => Language::Clojure,
+        "csharp" | "c#" | "cs" => Language::CSharp,
         _ => return None,
     })
 }
@@ -193,6 +199,7 @@ pub fn language_for_path(path: &str) -> Option<Language> {
         "c" | "h" => Language::C,
         "cc" | "cxx" | "cpp" | "hpp" | "hxx" => Language::Cpp,
         "clj" | "cljs" | "cljc" => Language::Clojure,
+        "cs" => Language::CSharp,
         _ => return None,
     })
 }
@@ -509,4 +516,51 @@ static CLOJURE: LanguageSpec = LanguageSpec {
         "try",
     ],
     grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
+};
+
+// ---- C# ----
+
+static CSHARP: LanguageSpec = LanguageSpec {
+    function_kinds: &[
+        "method_declaration",
+        "constructor_declaration",
+        "destructor_declaration",
+        "operator_declaration",
+        "local_function_statement",
+        "lambda_expression",
+    ],
+    name_fields: &["name"],
+    param_list_fields: &["parameters"],
+    parameter_kinds: &["parameter"],
+    decision_kinds: &[
+        "if_statement",
+        // `else` is not condition-bearing — excluded (cf. Rust/JS).
+        "for_statement",
+        "for_each_statement",
+        "while_statement",
+        "do_statement",
+        "case_switch_label",
+        "case_pattern_switch_label",
+        "switch_expression_arm",
+        "catch_clause",
+        "conditional_expression",
+        "when_clause",
+    ],
+    container_kinds: &[
+        "class_declaration",
+        "struct_declaration",
+        "interface_declaration",
+        "record_declaration",
+        "enum_declaration",
+        "namespace_declaration",
+        "file_scoped_namespace_declaration",
+    ],
+    container_name_fields: &["name"],
+    // C# encodes visibility via `modifier` child nodes; no clean
+    // single-signal strategy in the shared enum, so functions report
+    // Unknown (none of the bundled C# metrics filter on visibility).
+    visibility: VisibilityStrategy::Unknown,
+    function_form_heads: &[],
+    decision_form_heads: &[],
+    grammar: || tree_sitter_c_sharp::LANGUAGE.into(),
 };

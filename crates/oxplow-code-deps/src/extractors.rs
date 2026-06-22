@@ -27,6 +27,39 @@ pub(crate) fn walk(
         Language::C => walk_c_like(root, src, path, out, /*cpp=*/ false),
         Language::Cpp => walk_c_like(root, src, path, out, /*cpp=*/ true),
         Language::Clojure => walk_clojure(root, src, path, out),
+        Language::CSharp => walk_csharp(root, src, path, out),
+    }
+}
+
+// ---- C# ----
+
+fn walk_csharp(node: Node<'_>, src: &[u8], path: &str, out: &mut Vec<ImportEdge>) {
+    if node.kind() == "using_directive" {
+        // `using System.Text;` / `using static Foo.Bar;` / `using Alias = Foo;`
+        // — take the first qualified/identifier child as the namespace. The
+        // alias target (RHS of `=`) is also a name child; the first one is the
+        // namespace being referenced, which is what matters for the zone graph.
+        let mut c = node.walk();
+        for child in node.named_children(&mut c) {
+            if matches!(child.kind(), "qualified_name" | "identifier") {
+                if let Ok(text) = child.utf8_text(src) {
+                    let (start, end) = lines(node);
+                    out.push(ImportEdge {
+                        from_path: path.into(),
+                        raw: node_text(node, src),
+                        module: text.trim().to_string(),
+                        kind: ImportKind::Using,
+                        start_line: start,
+                        end_line: end,
+                    });
+                }
+                break;
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_csharp(child, src, path, out);
     }
 }
 

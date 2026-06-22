@@ -272,13 +272,44 @@ const CLOJURE: &[BuiltinMetric] = &[
     ),
 ];
 
+const CSHARP: &[BuiltinMetric] = &[
+    ast_gauge(
+        "oxplow.csharp.method_count",
+        "method count",
+        "neutral",
+        "csharp",
+        None,
+        include_str!("plugins/metrics/csharp/method_count.star"),
+    ),
+    ast_gauge(
+        "oxplow.csharp.empty_catch",
+        "empty catch blocks",
+        "lower-better",
+        "csharp",
+        None,
+        include_str!("plugins/metrics/csharp/empty_catch.star"),
+    ),
+    ast_gauge(
+        "oxplow.csharp.blocking_async_calls",
+        "blocking async calls (.Result / .Wait())",
+        "lower-better",
+        "csharp",
+        None,
+        include_str!("plugins/metrics/csharp/blocking_async_calls.star"),
+    ),
+    ast_gauge(
+        "oxplow.csharp.high_complexity_fns",
+        "high-complexity functions",
+        "lower-better",
+        "csharp",
+        None,
+        include_str!("plugins/metrics/csharp/high_complexity_fns.star"),
+    ),
+];
+
 /// Every bundled built-in metric, across all languages.
-///
-/// (C# is intentionally absent: `ast_query` is backed by the grammars bundled in
-/// `oxplow-code-metrics`, which does not include `tree-sitter-c-sharp` — adding a
-/// C# catalog needs that grammar + a `Language::CSharp` variant first.)
 pub fn builtin_metrics() -> Vec<BuiltinMetric> {
-    [RUST, TS, CLOJURE].concat()
+    [RUST, TS, CLOJURE, CSHARP].concat()
 }
 
 #[cfg(test)]
@@ -493,6 +524,70 @@ const g = (a: any) => a!;
         let mut m = HashMap::new();
         m.insert("src/c.ts".to_string(), body);
         assert_eq!(run_over("oxplow.ts.high_complexity_fns", m), 1.0);
+    }
+
+    fn cs_corpus() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert(
+            "src/Service.cs".to_string(),
+            r#"
+namespace Acme {
+    class Service {
+        public void Run(int x) {
+            try { Work(); } catch (System.Exception) { }
+            var r = FetchAsync().Result;
+            _task.Wait();
+        }
+        async void Background() { await Task.Delay(1); }
+    }
+}
+"#
+            .to_string(),
+        );
+        m.insert(
+            "src/Util.cs".to_string(),
+            "class Util {\n    static void Noop() { try { } catch { } }\n}\n".to_string(),
+        );
+        // A non-C# file the glob must skip.
+        m.insert(
+            "README.md".to_string(),
+            ".Result .Wait() catch { }".to_string(),
+        );
+        m
+    }
+
+    #[test]
+    fn csharp_method_count_golden() {
+        // Service: Run + Background = 2; Util: Noop = 1; total 3.
+        assert_eq!(run_over("oxplow.csharp.method_count", cs_corpus()), 3.0);
+    }
+
+    #[test]
+    fn csharp_empty_catch_golden() {
+        // Service.cs: `catch (System.Exception) { }` (1); Util.cs: `catch { }`
+        // (1) = 2. The non-empty catch (if any) and the markdown are excluded.
+        assert_eq!(run_over("oxplow.csharp.empty_catch", cs_corpus()), 2.0);
+    }
+
+    #[test]
+    fn csharp_blocking_async_calls_golden() {
+        // `.Result` + `.Wait()` in Service.cs = 2; the markdown is skipped.
+        assert_eq!(
+            run_over("oxplow.csharp.blocking_async_calls", cs_corpus()),
+            2.0
+        );
+    }
+
+    #[test]
+    fn csharp_high_complexity_fns_golden() {
+        let mut body = String::from("class C {\n    int Complex(int x) {\n");
+        for i in 0..11 {
+            body.push_str(&format!("        if (x == {i}) return {i};\n"));
+        }
+        body.push_str("        return 0;\n    }\n}\n");
+        let mut m = HashMap::new();
+        m.insert("src/C.cs".to_string(), body);
+        assert_eq!(run_over("oxplow.csharp.high_complexity_fns", m), 1.0);
     }
 
     #[test]

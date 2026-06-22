@@ -202,13 +202,15 @@ metrics:
     `metrics: - use: oxplow.<lang>.<name>`; the runner builds the collector from
     the embedded script (`BuiltinMetric::collector()`), never a project-disk
     file. Shipped: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
-    `panic_macros`, `todo_markers`, `fn_count`), **TypeScript** (`any_usage`,
-    `non_null_assertions`, `console_calls`, `ts_ignore`, `fn_count`), **Clojure**
-    (`defn_count`, `todo_comments`) — all `oxplow.<lang>.*`. This repo dogfoods
-    the Rust + TS sets in its own `oxplow.yaml`. **C#** is deferred: `ast_query`
-    only has the grammars bundled in `oxplow-code-metrics`, which omits
-    `tree-sitter-c-sharp` — a C# catalog needs that grammar + a `Language::CSharp`
-    variant first (see tsk228).
+    `panic_macros`, `todo_markers`, `fn_count`, `high_complexity_fns`,
+    `long_functions`), **TypeScript** (`any_usage`, `non_null_assertions`,
+    `console_calls`, `ts_ignore`, `fn_count`, `high_complexity_fns`), **Clojure**
+    (`defn_count`, `todo_comments`), **C#** (`method_count`, `empty_catch`,
+    `blocking_async_calls`, `high_complexity_fns`) — all `oxplow.<lang>.*`. This
+    repo dogfoods the Rust + TS sets in its own `oxplow.yaml`. The
+    complexity/`code_metrics()`-backed gauges and the C# grammar
+    (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
+    tsk229/tsk230.
   - **user-global** — `global_config_dir()/metrics/*.yaml`, shared across
     projects, hot-reloaded by the config watcher.
   - **project** — `oxplow.yaml` + scripts under `oxplow/metrics/`.
