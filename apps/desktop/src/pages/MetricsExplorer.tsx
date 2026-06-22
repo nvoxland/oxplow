@@ -96,10 +96,8 @@ export function buildScatterPoints(
   selected: string[],
   samplesByKey: Record<string, MetricSample[]>,
   groupBy: string,
-  defs: MetricDefinition[],
 ): ScatterPoint[] {
   if (selected.length !== 2 || groupBy === "none") return [];
-  void defs;
   // Latest value of `key` per group value (samples are newest-first).
   const latestByGroup = (key: string): Map<string, number> => {
     const m = new Map<string, number>();
@@ -159,10 +157,15 @@ function MultiLineChart({
           click scopes the chart to its window (tsk233) */}
       {efforts.map((eff) => {
         const t1 = Date.parse(String(eff.started_at));
-        const t2 = eff.ended_at ? Date.parse(String(eff.ended_at)) : tMax;
         if (Number.isNaN(t1)) return null;
+        const t2raw = eff.ended_at ? Date.parse(String(eff.ended_at)) : tMax;
+        const t2 = Number.isNaN(t2raw) ? tMax : t2raw;
+        // Skip efforts whose span doesn't intersect the (possibly click-scoped)
+        // visible window — otherwise a clamped 1.5px "ghost" band sticks to a
+        // chart edge for an effort that isn't actually in view.
+        if (t2 < tMin || t1 > tMax) return null;
         const x1 = Math.max(padL, x(t1));
-        const x2 = Math.min(w - padR, x(Number.isNaN(t2) ? tMax : t2));
+        const x2 = Math.min(w - padR, x(t2));
         const bw = Math.max(1.5, x2 - x1);
         return (
           <rect
@@ -174,7 +177,7 @@ function MultiLineChart({
             fill="var(--accent, #58a6ff)"
             opacity={0.08}
             style={{ cursor: onScopeToEffort ? "pointer" : "default" }}
-            onClick={() => onScopeToEffort?.(t1, Number.isNaN(t2) ? tMax : t2)}
+            onClick={() => onScopeToEffort?.(t1, t2)}
           >
             <title>{`effort ${eff.id} (task ${eff.task_id})\n${eff.started_at} → ${eff.ended_at ?? "open"}`}</title>
           </rect>
@@ -211,7 +214,11 @@ function MultiLineChart({
       {series.map((s, si) => {
         const pts = s.points.slice().sort((a, b) => a.t - b.t);
         if (kind === "bar") {
-          const bw = Math.max(2, (w - padL - padR) / (pts.length * series.length + 1));
+          // Bar width from a shared denominator (max points across all series,
+          // not this series' length) so overlaid measures of unequal length
+          // keep aligned, equal-width bars.
+          const maxPts = Math.max(1, ...series.map((ss) => ss.points.length));
+          const bw = Math.max(2, (w - padL - padR) / (maxPts * series.length + 1));
           return pts.map((p, i) => (
             <rect
               key={`${si}-${i}`}
@@ -261,10 +268,16 @@ function ScatterChart({
       </div>
     );
   }
-  const xMax = Math.max(...points.map((p) => p.x), 1);
-  const yMax = Math.max(...points.map((p) => p.y), 1);
-  const x = (v: number) => padL + (v / xMax) * (w - padL - padR);
-  const y = (v: number) => h - padB - (v / yMax) * (h - padT - padB);
+  // Axes span [min(0, data) … max(1, data)] on each measure so negative values
+  // (deltas/derived metrics) plot on-axis instead of falling off the bottom.
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const xMin = Math.min(0, ...xs);
+  const yMin = Math.min(0, ...ys);
+  const xRange = Math.max(1, ...xs) - xMin || 1;
+  const yRange = Math.max(1, ...ys) - yMin || 1;
+  const x = (v: number) => padL + ((v - xMin) / xRange) * (w - padL - padR);
+  const y = (v: number) => h - padB - ((v - yMin) / yRange) * (h - padT - padB);
   return (
     <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} role="img" aria-label="scatter chart">
       <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="var(--border, #2a2a2a)" />
@@ -365,7 +378,7 @@ export function MetricsExplorer({
     [selected, samplesByKey, groupBy, defs],
   );
   const scatter = useMemo<ScatterPoint[]>(
-    () => buildScatterPoints(selected, samplesByKey, groupBy, defs),
+    () => buildScatterPoints(selected, samplesByKey, groupBy),
     [selected, samplesByKey, groupBy, defs],
   );
 

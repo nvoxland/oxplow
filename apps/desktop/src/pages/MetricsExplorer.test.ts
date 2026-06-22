@@ -55,7 +55,6 @@ test("group-by none → one series per measure, points sorted-able by time", () 
 });
 
 test("buildScatterPoints pairs two measures by shared group, latest per group", () => {
-  const defs = [d({ key: "cov", title: "Coverage" }), d({ key: "cx", title: "Complexity" })];
   const samplesByKey = {
     // newest-first per measure
     cov: [
@@ -68,7 +67,7 @@ test("buildScatterPoints pairs two measures by shared group, latest per group", 
       s({ value: 9, subject_ref: "module:b", captured_at: "2026-06-02T00:00:00Z" }),
     ],
   };
-  const pts = buildScatterPoints(["cov", "cx"], samplesByKey, "subject", defs);
+  const pts = buildScatterPoints(["cov", "cx"], samplesByKey, "subject");
   expect(pts).toEqual([
     { label: "module:a", x: 80, y: 3 },
     { label: "module:b", x: 60, y: 9 },
@@ -76,9 +75,8 @@ test("buildScatterPoints pairs two measures by shared group, latest per group", 
 });
 
 test("buildScatterPoints is empty without exactly two measures + a group-by", () => {
-  const defs = [d({ key: "cov" })];
-  expect(buildScatterPoints(["cov"], {}, "subject", defs)).toEqual([]);
-  expect(buildScatterPoints(["cov", "cx"], {}, "none", defs)).toEqual([]);
+  expect(buildScatterPoints(["cov"], {}, "subject")).toEqual([]);
+  expect(buildScatterPoints(["cov", "cx"], {}, "none")).toEqual([]);
 });
 
 test("a sample missing the group dimension is dropped from grouped series", () => {
