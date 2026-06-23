@@ -9,9 +9,15 @@ import {
   groupFindingsByFile,
 } from "./EffortObservations.js";
 
-const testRun = (at: string, passed: number, failed: number): EffortObservation =>
+const testRun = (
+  at: string,
+  passed: number,
+  failed: number,
+  snapshot?: number,
+): EffortObservation =>
   ({
     created_at: at,
+    local_snapshot_id: snapshot ?? null,
     payload_json: JSON.stringify({ command: "x", passed, failed, total: passed + failed }),
   }) as unknown as EffortObservation;
 
@@ -24,6 +30,20 @@ describe("clusterTestRuns (TDD iteration timeline)", () => {
     ]);
     expect(iters).toHaveLength(1);
     expect(iters[0]).toEqual({ at: "2026-06-23T10:00:00Z", passed: 719, failed: 0 });
+  });
+
+  test("groups by snapshot when present — same code state is one iteration", () => {
+    // Two test commands against snapshot 5 (same code), then an edit → snapshot
+    // 7. Exact grouping: 2 iterations, not 3, regardless of timing.
+    const iters = clusterTestRuns([
+      testRun("2026-06-23T10:06:00Z", 720, 0, 7),
+      testRun("2026-06-23T10:01:30Z", 419, 0, 5), // > 90s after the first run…
+      testRun("2026-06-23T10:00:00Z", 300, 3, 5), // …but same snapshot → merged
+    ]);
+    expect(iters.map((i) => [i.passed, i.failed])).toEqual([
+      [719, 3], // snapshot 5: 300+419 passed, 3 failed
+      [720, 0], // snapshot 7
+    ]);
   });
 
   test("splits time-separated runs into iterations, oldest-first (red→green)", () => {

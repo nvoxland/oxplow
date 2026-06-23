@@ -753,12 +753,23 @@ impl CollectionService {
             return;
         };
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
+        // Stamp the run + samples with the stream's current snapshot — the code
+        // state the tests ran against — so the effort panel groups runs into
+        // exact TDD iterations by code state (NOT a time heuristic, and NOT an
+        // effort FK: the substrate stays time-primary; see metrics.md / V38).
+        let snapshot_id = self
+            .snapshots
+            .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
+            .await
+            .ok()
+            .flatten();
         let result = async {
             let mut run = NewMetricRun::done(stream_val, "tests", source.to_string());
             run.provenance = provenance.to_string();
             run.thread_id = Some(thread.value());
             run.trigger = Some("on-report".into());
             run.branch = branch.clone();
+            run.snapshot_id = snapshot_id;
 
             let specs = [
                 (
@@ -791,6 +802,7 @@ impl CollectionService {
                 sample.provenance = provenance.to_string();
                 sample.thread_id = Some(thread.value());
                 sample.branch = branch.clone();
+                sample.snapshot_id = snapshot_id;
                 samples.push(sample);
             }
             // Atomic: the run, its samples, and the verbatim suite/case-tree
@@ -3057,6 +3069,12 @@ mod tests {
             assert_eq!(passed[0].provenance, "observed");
             // All three share one run.
             assert_eq!(passed[0].run_id, total[0].run_id);
+            // Stamped with the stream's current snapshot (the code state) so the
+            // panel can group runs into exact iterations (tsk259).
+            assert!(
+                passed[0].snapshot_id.is_some(),
+                "test sample carries the stream's current snapshot"
+            );
         }
 
         #[tokio::test]

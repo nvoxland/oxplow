@@ -632,22 +632,49 @@ export interface TestIteration {
   failed: number;
 }
 
-/** Cluster the effort's test-run observations into iterations by TIME. Test
- *  samples carry no snapshot/git stamp, so runs within ~90s are treated as one
- *  logical pass (e.g. the Rust + frontend stacks of a single `test:collect`); a
- *  larger gap starts a new iteration. Oldest-first, so a TDD red→green
- *  progression reads left→right. */
+/** Cluster the effort's test-run observations into iterations, oldest-first so a
+ *  TDD red→green progression reads left→right. Prefers an EXACT grouping by
+ *  `local_snapshot_id` — the code state the tests ran against (tsk259) — so the
+ *  same code state is one iteration (even two separate test commands) and an
+ *  edit starts the next. Falls back to time-clustering (~90s) only when a run
+ *  carries no snapshot, e.g. an agent-asserted run. */
 export function clusterTestRuns(runs: EffortObservation[]): TestIteration[] {
-  const GAP_MS = 90_000;
   const sorted = [...runs].sort((a, b) =>
     a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
   );
+  const counts = (obs: EffortObservation) => {
+    const p = parsePayload<TestRunPayload>(obs.payload_json);
+    return { passed: p?.passed ?? 0, failed: p?.failed ?? 0 };
+  };
+
+  // Exact path: group by the snapshot (code state) when every run has one.
+  if (
+    sorted.length > 0 &&
+    sorted.every((o) => typeof o.local_snapshot_id === "number" && o.local_snapshot_id > 0)
+  ) {
+    const bySnap = new Map<number, TestIteration>();
+    const order: number[] = [];
+    for (const obs of sorted) {
+      const snap = obs.local_snapshot_id as number;
+      const { passed, failed } = counts(obs);
+      const cur = bySnap.get(snap);
+      if (cur) {
+        cur.passed += passed;
+        cur.failed += failed;
+      } else {
+        bySnap.set(snap, { at: obs.created_at, passed, failed });
+        order.push(snap);
+      }
+    }
+    return order.map((s) => bySnap.get(s)!);
+  }
+
+  // Fallback: cluster by time (runs within ~90s are one logical pass).
+  const GAP_MS = 90_000;
   const iters: TestIteration[] = [];
   let lastT = Number.NEGATIVE_INFINITY;
   for (const obs of sorted) {
-    const p = parsePayload<TestRunPayload>(obs.payload_json);
-    const passed = p?.passed ?? 0;
-    const failed = p?.failed ?? 0;
+    const { passed, failed } = counts(obs);
     const t = Date.parse(String(obs.created_at));
     if (iters.length === 0 || (Number.isFinite(t) && t - lastT > GAP_MS)) {
       iters.push({ at: obs.created_at, passed, failed });
