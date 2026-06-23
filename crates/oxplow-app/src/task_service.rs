@@ -678,7 +678,12 @@ impl TaskService {
         if path.is_empty() {
             return Ok(false);
         }
-        let Some(effort) = effort_store.find_open_for_thread(thread).await? else {
+        // Auto-claim only when the effort is unambiguous (exactly one open).
+        // With parallel sub-agents (two open efforts on one thread) we can't know
+        // which one edited the file, so we don't guess — the snapshot diff still
+        // observes the change, and the close reconcile surfaces it for the agent
+        // to claim (tsk263). Single open effort ⇒ same behavior as before.
+        let Some(effort) = effort_store.find_single_open_for_thread(thread).await? else {
             return Ok(false);
         };
         let version = self.resolve_effort_file_version(&effort).await;

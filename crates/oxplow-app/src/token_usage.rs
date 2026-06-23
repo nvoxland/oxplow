@@ -366,9 +366,12 @@ impl TokenUsageService {
             return Ok(None);
         }
 
+        // Attribute tokens to the effort only when unambiguous; under parallel
+        // sub-agents (two open efforts) the turn isn't a single effort's, so it
+        // stays unattributed rather than guessing (tsk263).
         let effort_id = self
             .efforts
-            .find_open_for_thread(thread)
+            .find_single_open_for_thread(thread)
             .await?
             .map(|e| e.id.to_string());
 

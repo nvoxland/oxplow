@@ -360,6 +360,16 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         thread: &ThreadId,
     ) -> Result<Option<TaskEffort>, DomainError>;
+    /// Open effort for `thread` ONLY when it's unambiguous — exactly one open
+    /// effort. Returns `None` when zero OR two-plus are open (parallel
+    /// sub-agents on one thread), so attribution never silently guesses the
+    /// wrong one; the ambiguous case defers to claim+reconcile (tsk263). The
+    /// concurrency-safe replacement for `find_open_for_thread` on the
+    /// attribution path.
+    async fn find_single_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Option<TaskEffort>, DomainError>;
     /// Most-recent effort for `task` regardless of state, or `None`
     /// when the task has never had one. Used by `record_effort` to
     /// reattach files to a just-closed lifecycle effort.
@@ -762,6 +772,31 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 )?;
                 let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
                 rows.next().transpose()
+            })
+            .await
+    }
+
+    async fn find_single_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Option<TaskEffort>, DomainError> {
+        let thread = *thread;
+        self.db
+            .call(move |conn| {
+                // LIMIT 2 distinguishes "exactly one" from "two-or-more" cheaply.
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                     WHERE thread_id = ?1 AND ended_at IS NULL
+                     ORDER BY started_at DESC LIMIT 2",
+                )?;
+                let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
+                let first = rows.next().transpose()?;
+                let second = rows.next().transpose()?;
+                // Some only when unambiguous; None for zero or two-plus open.
+                Ok(match (first, second) {
+                    (Some(e), None) => Some(e),
+                    _ => None,
+                })
             })
             .await
     }
@@ -1506,6 +1541,58 @@ mod tests {
         let open = store.find_open_for_task(tid).await.unwrap().unwrap();
         store.finish(&open.id, None, None).await.unwrap();
         store.start(tid, &t, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn find_single_open_for_thread_only_when_unambiguous() {
+        let (store, db, tid, thread) = fixture_with_db().await;
+        // Zero open → None.
+        assert!(store
+            .find_single_open_for_thread(&thread)
+            .await
+            .unwrap()
+            .is_none());
+        // Exactly one open → Some.
+        store.start(tid, &thread, None).await.unwrap();
+        assert!(store
+            .find_single_open_for_thread(&thread)
+            .await
+            .unwrap()
+            .is_some());
+        // A second task's effort open on the same thread (parallel sub-agents)
+        // → ambiguous → None: attribution must not guess.
+        let now = Timestamp::from_unix_ms(2);
+        let tid2 = SqliteTaskStore::new(db.clone())
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(thread),
+                parent_id: None,
+                title: "x2".into(),
+                description: String::new(),
+                status: TaskStatus::Ready,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        store.start(tid2, &thread, None).await.unwrap();
+        assert!(
+            store
+                .find_single_open_for_thread(&thread)
+                .await
+                .unwrap()
+                .is_none(),
+            "two open efforts on one thread → no single attribution"
+        );
+        // The legacy lookup still returns one (the silent guess we're replacing).
+        assert!(store.find_open_for_thread(&thread).await.unwrap().is_some());
     }
 
     #[tokio::test]

@@ -1297,7 +1297,13 @@ impl CollectionService {
     /// steady-state turns add nothing). Surfaced via the UserPromptSubmit
     /// `additionalContext`, since on-snapshot gauges run outside any hook.
     pub async fn effort_metric_context(&self, thread: &ThreadId) -> Option<String> {
-        let effort = self.efforts.find_open_for_thread(thread).await.ok()??;
+        // Advisory prompt — only when the open effort is unambiguous; under
+        // parallel sub-agents we can't say whose deltas these are (tsk263).
+        let effort = self
+            .efforts
+            .find_single_open_for_thread(thread)
+            .await
+            .ok()??;
         // Shared attribution core (tsk253): the same per-family roll-up the
         // task-page panel reads (`effort_metric_deltas`), so the prompt and the
         // UI report the SAME baseline→current — file-attributed for gauges, so
