@@ -12,6 +12,7 @@ pub mod agent_pane;
 pub mod agent_prompt;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
+pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
 pub mod boot;

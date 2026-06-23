@@ -758,7 +758,7 @@ pub struct EffortFileReview {
 /// surfaced to the agent. Above this volume something else is
 /// happening (overlapping efforts, formatter, codegen, user edits)
 /// and the agent can't be expected to triage a wall of paths.
-pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
+pub const MAX_UNCLAIMED_FOR_REVIEW: usize = crate::attribution::MAX_UNCLAIMED_FOR_REVIEW;
 
 /// Compare the agent's declared `touched_files` for a task's
 /// most-recent effort against the auto-diff between
@@ -853,65 +853,15 @@ pub async fn reconcile_unattributed_on_close(
     snapshot_store: &SqliteSnapshotStore,
     effort_id: &EffortId,
 ) -> Vec<String> {
-    let Ok(Some(effort)) = effort_store.get_effort(effort_id).await else {
-        return Vec::new();
-    };
-    let Some(changed) = effort_changed_paths(snapshot_store, &effort).await else {
-        return Vec::new();
-    };
-    let claimed: Vec<String> = effort_store
-        .list_files(effort_id)
-        .await
-        .map(|fs| fs.into_iter().map(|f| f.path).collect())
-        .unwrap_or_default();
-    let acknowledged = effort_store
-        .list_acknowledged_paths(effort_id)
-        .await
-        .unwrap_or_default();
-    let other_claimed = effort_store
-        .paths_claimed_by_intervening_efforts(effort_id)
-        .await
-        .unwrap_or_default();
-    let unattributed = unclaimed_changed_paths(&claimed, &changed, &acknowledged, &other_claimed);
-    if effort_store
-        .replace_unattributed_files(effort_id, &unattributed)
-        .await
-        .is_err()
-    {
-        return Vec::new();
-    }
-    unattributed
+    // Files are now one `AttributionKind`; the close-time residue runs through
+    // the shared engine (tsk261). Behavior-identical to the pre-refactor path.
+    let kind = crate::attribution::FileKind::new(effort_store, snapshot_store);
+    crate::attribution::reconcile_close(&kind, effort_id).await
 }
 
-/// The `changed_but_not_claimed` set: paths the snapshot diff saw change
-/// that no one claimed (and the agent didn't acknowledge, and no
-/// intervening effort already owns). Sorted, deduped, uncapped — the
-/// shared core of the close-time reconciliation and the review.
-fn unclaimed_changed_paths(
-    claimed: &[String],
-    changed: &[String],
-    acknowledged: &[String],
-    other_claimed: &[String],
-) -> Vec<String> {
-    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
-    let acknowledged_set: std::collections::HashSet<&str> =
-        acknowledged.iter().map(|s| s.as_str()).collect();
-    let other_claimed_set: std::collections::HashSet<&str> =
-        other_claimed.iter().map(|s| s.as_str()).collect();
-    let mut out: Vec<String> = changed
-        .iter()
-        .filter(|s| {
-            !claimed_set.contains(s.as_str())
-                && !acknowledged_set.contains(s.as_str())
-                && !other_claimed_set.contains(s.as_str())
-        })
-        .cloned()
-        .collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
+/// Build a file review from the claimed/changed/acknowledged/other-claimed sets
+/// via the kind-agnostic differ ([`crate::attribution::diff`]) — the file view
+/// onto the shared reconciliation core.
 fn review_from_lists(
     effort_id: &EffortId,
     task_id: TaskId,
@@ -920,41 +870,20 @@ fn review_from_lists(
     acknowledged: &[String],
     other_claimed: &[String],
 ) -> Option<EffortFileReview> {
-    let claimed_set: std::collections::HashSet<&str> = claimed.iter().map(|s| s.as_str()).collect();
-    let changed_set: std::collections::HashSet<&str> = changed.iter().map(|s| s.as_str()).collect();
-    let acknowledged_set: std::collections::HashSet<&str> =
-        acknowledged.iter().map(|s| s.as_str()).collect();
-    let other_claimed_set: std::collections::HashSet<&str> =
-        other_claimed.iter().map(|s| s.as_str()).collect();
-    let mut claimed_but_not_changed: Vec<String> = claimed_set
-        .difference(&changed_set)
-        .map(|s| (*s).to_string())
-        .collect();
-    // A changed path another effort already claimed (it finished inside
-    // this effort's window) isn't this agent's to claim — drop it.
-    let mut changed_but_not_claimed: Vec<String> = changed_set
-        .difference(&claimed_set)
-        .filter(|s| !acknowledged_set.contains(*s) && !other_claimed_set.contains(*s))
-        .map(|s| (*s).to_string())
-        .collect();
-    claimed_but_not_changed.sort();
-    changed_but_not_claimed.sort();
-    if claimed_but_not_changed.is_empty() && changed_but_not_claimed.is_empty() {
-        return None;
-    }
-    let overflow = if changed_but_not_claimed.len() > MAX_UNCLAIMED_FOR_REVIEW {
-        let total = changed_but_not_claimed.len();
-        changed_but_not_claimed.clear();
-        Some(total)
-    } else {
-        None
+    let sets = crate::attribution::AttrSets {
+        claimed: claimed.to_vec(),
+        observed: changed.to_vec(),
+        acknowledged: acknowledged.to_vec(),
+        other_claimed: other_claimed.to_vec(),
     };
+    let (claimed_but_not_changed, changed_but_not_claimed, unclaimed_overflow) =
+        crate::attribution::diff(&sets, MAX_UNCLAIMED_FOR_REVIEW)?;
     Some(EffortFileReview {
         effort_id: effort_id.to_string(),
         task_id: task_id.value(),
         claimed_but_not_changed,
         changed_but_not_claimed,
-        unclaimed_overflow: overflow,
+        unclaimed_overflow,
     })
 }
 
