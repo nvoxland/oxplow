@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import {
   type AgentNudge,
@@ -625,6 +625,42 @@ function sumCounts(tree: TreeNode[]): { passed: number; failed: number; skipped:
 }
 
 /** Compact summary: pass/fail totals + top-5 groups + Details link. */
+/** One logical test pass within an effort: summed pass/fail at a point in time. */
+export interface TestIteration {
+  at: string;
+  passed: number;
+  failed: number;
+}
+
+/** Cluster the effort's test-run observations into iterations by TIME. Test
+ *  samples carry no snapshot/git stamp, so runs within ~90s are treated as one
+ *  logical pass (e.g. the Rust + frontend stacks of a single `test:collect`); a
+ *  larger gap starts a new iteration. Oldest-first, so a TDD red→green
+ *  progression reads left→right. */
+export function clusterTestRuns(runs: EffortObservation[]): TestIteration[] {
+  const GAP_MS = 90_000;
+  const sorted = [...runs].sort((a, b) =>
+    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
+  );
+  const iters: TestIteration[] = [];
+  let lastT = Number.NEGATIVE_INFINITY;
+  for (const obs of sorted) {
+    const p = parsePayload<TestRunPayload>(obs.payload_json);
+    const passed = p?.passed ?? 0;
+    const failed = p?.failed ?? 0;
+    const t = Date.parse(String(obs.created_at));
+    if (iters.length === 0 || (Number.isFinite(t) && t - lastT > GAP_MS)) {
+      iters.push({ at: obs.created_at, passed, failed });
+    } else {
+      const cur = iters[iters.length - 1];
+      cur.passed += passed;
+      cur.failed += failed;
+    }
+    if (Number.isFinite(t)) lastT = t;
+  }
+  return iters;
+}
+
 function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservation[] }) {
   if (runs.length === 0) return null;
   const ctxNav = useOptionalPageNavigation();
@@ -632,6 +668,8 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
   const merged = mergeTestRuns(runs);
   const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
   const totals = tree ? sumCounts(tree) : null;
+  // Per-iteration timeline (TDD visibility) — only meaningful with ≥2 passes.
+  const iterations = clusterTestRuns(runs);
 
   // Fall back to raw counts from the last run when no suite data exists.
   const lastRunPayload = parsePayload<TestRunPayload>(runs[runs.length - 1].payload_json);
@@ -718,6 +756,45 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
           </button>
         ) : null}
       </div>
+      {/* Per-iteration timeline: each test pass over time, so a TDD red→green
+          progression is visible. Hidden for a single pass (redundant header). */}
+      {iterations.length >= 2 ? (
+        <div
+          data-testid="tests-iterations"
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            gap: 6,
+            flexWrap: "wrap",
+            fontSize: "var(--text-xs)",
+            paddingLeft: 4,
+          }}
+        >
+          <span
+            style={{
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {iterations.length} runs
+          </span>
+          {iterations.map((it, i) => (
+            <Fragment key={`${it.at}-${i}`}>
+              {i > 0 ? <span style={{ color: "var(--text-muted)" }}>→</span> : null}
+              <span
+                title={new Date(it.at).toLocaleString()}
+                style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}
+              >
+                <span style={{ color: "var(--freshness-fresh)" }}>{it.passed}✓</span>
+                {it.failed > 0 ? (
+                  <span style={{ color: "var(--freshness-very-stale)" }}>{it.failed}✗</span>
+                ) : null}
+              </span>
+            </Fragment>
+          ))}
+        </div>
+      ) : null}
       {/* Top 5 suites — each row navigates to the detail page */}
       {top5.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 4 }}>

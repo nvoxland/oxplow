@@ -12,6 +12,22 @@ import { subscribeOxplowEvents } from "../tauri-bridge/index.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { metricRef } from "../tabs/pageRefs.js";
 
+/** Whether a metric already has a richer, dedicated panel in
+ *  `EffortObservationsBlock` (Coverage, Tests run, Static analysis, Token usage,
+ *  Agent nudges) — hidden here so the generic Metrics list doesn't repeat it.
+ *  Leaves this block to its unique value: code-health gauges + operational
+ *  metrics with no panel (cycle time, efforts). Pure — unit-tested. */
+export function hasDedicatedPanel(d: EffortMetricDelta): boolean {
+  if (
+    d.category === "coverage" ||
+    d.category === "testing" ||
+    d.category === "static-quality"
+  ) {
+    return true;
+  }
+  return d.key.startsWith("agent.tokens.") || d.key.startsWith("agent.nudges.");
+}
+
 /** Group + label a metric delta for the effort panel. Producer categories map
  *  to friendly labels; the code-health gauges (no category) group by language.
  *  Pure — unit-tested. */
@@ -101,14 +117,17 @@ export function EffortMetricsBlock({
     };
   }, [effortId]);
 
-  if (deltas.length === 0) return null;
+  // Drop metrics that already have a dedicated panel above (tests, coverage,
+  // analysis, tokens, nudges) — don't repeat them in the generic list.
+  const shown = deltas.filter((d) => !hasDedicatedPanel(d));
+  if (shown.length === 0) return null;
 
   // Group, preserving the backend's within-group ordering.
   const groups = new Map<
     string,
     { order: number; label: string; items: EffortMetricDelta[] }
   >();
-  for (const d of deltas) {
+  for (const d of shown) {
     const g = metricGroup(d);
     const entry = groups.get(g.label) ?? { ...g, items: [] };
     entry.items.push(d);

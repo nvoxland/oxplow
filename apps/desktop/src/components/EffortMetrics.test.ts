@@ -5,10 +5,23 @@ import {
   deltaColor,
   deltaSummary,
   fmtSigned,
+  hasDedicatedPanel,
   metricGroup,
 } from "./EffortMetrics.js";
 
 const d = (o: Partial<EffortMetricDelta>) => o as unknown as EffortMetricDelta;
+
+test("hasDedicatedPanel hides metrics shown in a dedicated panel", () => {
+  // Covered by Coverage / Tests / Static analysis / Token / Nudge panels.
+  expect(hasDedicatedPanel(d({ category: "testing", key: "oxplow.tests.total" }))).toBe(true);
+  expect(hasDedicatedPanel(d({ category: "coverage", key: "oxplow.coverage.diff_pct" }))).toBe(true);
+  expect(hasDedicatedPanel(d({ category: "static-quality", key: "oxplow.analysis.errors" }))).toBe(true);
+  expect(hasDedicatedPanel(d({ category: "operational", key: "agent.tokens.total" }))).toBe(true);
+  expect(hasDedicatedPanel(d({ category: "operational", key: "agent.nudges.fired" }))).toBe(true);
+  // Code-health gauges + panel-less operational metrics stay in the block.
+  expect(hasDedicatedPanel(d({ category: null, key: "oxplow.rust.unsafe_blocks" }))).toBe(false);
+  expect(hasDedicatedPanel(d({ category: "operational", key: "effort.cycle_time_ms" }))).toBe(false);
+});
 
 test("metricGroup buckets code-health gauges by language, producers by category", () => {
   expect(metricGroup(d({ category: null, language: "rust" })).label).toBe(
