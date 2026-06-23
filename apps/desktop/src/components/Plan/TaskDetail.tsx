@@ -12,6 +12,7 @@ import { FileTree } from "../FileTree/FileTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
 import { EffortObservationsBlock } from "../EffortObservations.js";
+import { EffortMetricsBlock } from "../EffortMetrics.js";
 
 /**
  * One entry in the tasks Activity timeline. Each effort
@@ -637,6 +638,11 @@ function ActivityEffortSection({
         </div>
       ) : null}
         <EffortObservationsBlock effortId={detail.effort.id} onOpenFile={onOpenFile} />
+        <EffortMetricsBlock
+          effortId={detail.effort.id}
+          startedAt={detail.effort.started_at}
+          endedAt={detail.effort.ended_at}
+        />
       </div>
     </section>
   );

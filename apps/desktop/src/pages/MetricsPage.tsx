@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   type MetricDefinition,
@@ -80,11 +80,32 @@ function statusColor(def: MetricDefinition, value: number): string | undefined {
  */
 export function MetricsPage({
   initialPreset,
+  initialMetricKey,
+  initialEffort,
   onOpenPage,
-}: { initialPreset?: string; onOpenPage?: (ref: TabRef) => void } = {}) {
+}: {
+  initialPreset?: string;
+  /** Deep-link: open this metric's detail view on first paint. */
+  initialMetricKey?: string;
+  /** Deep-link: scope the opened detail to this effort window
+   *  (the task-page metrics-panel drill-in). */
+  initialEffort?: { effortId: string; start: string; end: string | null };
+  onOpenPage?: (ref: TabRef) => void;
+} = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<MetricDefinition | null>(null);
+  // Apply the `initialMetricKey` deep-link once, after the rows load (so we can
+  // resolve the key → its `MetricDefinition` for the detail view).
+  const initialApplied = useRef(false);
+  useEffect(() => {
+    if (initialApplied.current || !initialMetricKey || rows.length === 0) return;
+    const row = rows.find((r) => r.def.key === initialMetricKey);
+    if (row) {
+      setDetail(row.def);
+      initialApplied.current = true;
+    }
+  }, [rows, initialMetricKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +146,11 @@ export function MetricsPage({
       >
         {detail ? (
           <Card testId="metric-detail-card" title="Metric detail">
-            <MetricDetail def={detail} onBack={() => setDetail(null)} />
+            <MetricDetail
+              def={detail}
+              effort={initialEffort}
+              onBack={() => setDetail(null)}
+            />
           </Card>
         ) : null}
         {!detail && !loading && rows.length > 0 ? (
@@ -134,6 +159,18 @@ export function MetricsPage({
               defs={rows.map((r) => r.def)}
               onOpenDetail={setDetail}
               initialPreset={initialPreset}
+              initialScope={
+                initialEffort &&
+                !Number.isNaN(Date.parse(initialEffort.start))
+                  ? {
+                      start: Date.parse(initialEffort.start),
+                      // Open effort (no end) → scope through "now".
+                      end: initialEffort.end
+                        ? Date.parse(initialEffort.end)
+                        : Date.now(),
+                    }
+                  : undefined
+              }
             />
           </Card>
         ) : null}

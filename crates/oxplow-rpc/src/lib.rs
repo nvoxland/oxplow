@@ -207,6 +207,7 @@ rpc_dispatch! {
     "list_efforts_at_snapshots" => commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> },
     "list_changed_paths_for_effort" => commands::effort::list_changed_paths_for_effort { effort_id: oxplow_domain::EffortId },
     "list_effort_observations" => commands::effort::list_effort_observations { effort_id: oxplow_domain::EffortId, kind: Option<String> },
+    "list_effort_metric_deltas" => commands::effort::list_effort_metric_deltas { effort_id: oxplow_domain::EffortId },
     "list_nudges_for_effort" => commands::effort::list_nudges_for_effort { effort_id: oxplow_domain::EffortId },
     "list_token_usage_for_effort" => commands::effort::list_token_usage_for_effort { effort_id: oxplow_domain::EffortId },
     // metrics (unified substrate, tsk213)

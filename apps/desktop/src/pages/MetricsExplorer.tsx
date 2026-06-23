@@ -309,6 +309,7 @@ export function MetricsExplorer({
   defs,
   onOpenDetail,
   initialPreset,
+  initialScope,
 }: {
   defs: MetricDefinition[];
   onOpenDetail?: (def: MetricDefinition) => void;
@@ -316,6 +317,10 @@ export function MetricsExplorer({
    *  recognizable entry point (e.g. "Tokens by model") open the Explorer
    *  pre-scoped (tsk233). */
   initialPreset?: string;
+  /** Effort window (ms) to scope the chart to on first paint — the task-page
+   *  metrics-panel drill-in (tsk254). Same effect as clicking an effort band;
+   *  the "Scoped to an effort window … Clear" banner clears it. */
+  initialScope?: { start: number; end: number };
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<string>("none");
@@ -386,7 +391,9 @@ export function MetricsExplorer({
   // be drawn behind the series (tsk233). `scope` narrows the visible window to
   // a clicked effort.
   const [efforts, setEfforts] = useState<TaskEffort[]>([]);
-  const [scope, setScope] = useState<{ start: number; end: number } | null>(null);
+  const [scope, setScope] = useState<{ start: number; end: number } | null>(
+    initialScope ?? null,
+  );
   useEffect(() => {
     const ts = Object.values(samplesByKey)
       .flat()

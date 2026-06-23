@@ -117,6 +117,9 @@ pub const MANIFEST: &[Capability] = &[
     both("add_thread_note"),
     both("list_thread_notes"),
     both("list_effort_observations"),
+    // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
+    // agent gets the same numbers as prompt text via `effort_metric_context`.
+    ui("list_effort_metric_deltas"),
     // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
     ui("list_efforts_in_window"),
     // Unified metric substrate reads (tsk213) — exposed on both surfaces.

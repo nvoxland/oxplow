@@ -2707,11 +2707,24 @@ export function App() {
           render: () => <UsagePage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "metrics") {
+        // `metricRef(key, effort)` deep-links into one metric's detail view
+        // (the task-page metrics-panel drill-in); the bare index ref has no
+        // payload and lands on the catalog.
+        const p = (ref.payload ?? null) as {
+          metricKey?: string;
+          effort?: { effortId: string; start: string; end: string | null };
+        } | null;
         tabs.push({
           id: ref.id,
-          label: "Metrics",
+          label: p?.metricKey ? "Metric" : "Metrics",
           closable: true,
-          render: () => <MetricsPage onOpenPage={navOpen} />,
+          render: () => (
+            <MetricsPage
+              onOpenPage={navOpen}
+              initialMetricKey={p?.metricKey}
+              initialEffort={p?.effort}
+            />
+          ),
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({

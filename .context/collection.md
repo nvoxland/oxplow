@@ -311,7 +311,7 @@ capabilities — see [metrics.md](./metrics.md)):
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
-- gauge: `{ "samples": [ { "value", "subject"? ("kind:ref"), "dims"? } ] }` (→ `metric_sample`; see [metrics.md](./metrics.md))
+- gauge: `{ "samples": [ { "value", "subject"? ("kind:ref"), "dims"? } ] }` (→ `metric_sample`; see [metrics.md](./metrics.md)). A gauge may emit **many** samples with different subjects — the bundled code gauges return a `tree:.` repo total **plus** a sparse `file:<path>` sample per nonzero file, which is the per-file *attribution grain* the effort roll-up reads ([metrics.md](./metrics.md)).
 
 The two bundled analysis plugins are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps

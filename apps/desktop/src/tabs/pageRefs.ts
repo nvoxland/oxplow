@@ -98,6 +98,16 @@ export function effortCoverageRef(effortId: string): TabRef {
   return { id: `effort-coverage:${effortId}`, kind: "effort-coverage", payload: { effortId } };
 }
 
+/** Open the Metrics page focused on one metric's detail view, optionally
+ *  scoped to an effort's window — the task-page metrics-panel drill-in
+ *  ("In this effort" before→after + further exploration). */
+export function metricRef(
+  metricKey: string,
+  effort?: { effortId: string; start: string; end: string | null },
+): TabRef {
+  return { id: `metrics:${metricKey}`, kind: "metrics", payload: { metricKey, effort } };
+}
+
 export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "page-analytics" | "token-analytics"): TabRef {
   return { id: kind, kind, payload: null };
 }

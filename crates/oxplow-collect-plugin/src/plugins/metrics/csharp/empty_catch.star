@@ -1,10 +1,16 @@
 # oxplow.csharp.empty_catch — count empty `catch { }` blocks (swallowed
 # exceptions — a correctness smell). Queries each catch clause's body block and
-# keeps the ones whose text is just braces + whitespace.
+# keeps the ones whose text is just braces + whitespace. Emits the repo-total
+# ("tree:.") plus a per-file sample ("file:<path>", nonzero only).
 def transform(input):
-    n = 0
+    total = 0
+    per_file = []
     for f in files("**/*.cs"):
+        c = 0
         for b in ast_query(f["text"], "csharp", "(catch_clause (block) @b)"):
             if len(regex_find(r"^\{\s*\}$", b["text"])) > 0:
-                n += 1
-    return {"samples": [{"value": n, "dims": {"language": "csharp"}}]}
+                c += 1
+        total += c
+        if c > 0:
+            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"language": "csharp"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "csharp"}}] + per_file}

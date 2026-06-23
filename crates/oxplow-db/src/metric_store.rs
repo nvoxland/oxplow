@@ -348,6 +348,47 @@ impl NewMetricSample {
     }
 }
 
+/// One metric's roll-up over a single effort — the wire shape the task/effort
+/// page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
+/// row: derived per request from the substrate using the right attribution key
+/// per metric family (file-attributed for gauges, thread-scoped for operational,
+/// effort-diff for coverage/tests). See metrics.md.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct EffortMetricDelta {
+    pub key: String,
+    pub title: String,
+    pub unit: Option<String>,
+    /// `higher-better` | `lower-better` | `neutral`.
+    pub direction: String,
+    /// The definition `kind` (`gauge` | `coverage` | `test` | `event` | …).
+    pub kind: String,
+    pub category: Option<String>,
+    pub language: Option<String>,
+    /// How this delta was computed: `files` (Σ over the effort's claimed files),
+    /// `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
+    pub agg: String,
+    /// The value as the effort began (`None` for a `sum`/flow metric).
+    pub baseline: Option<f64>,
+    /// The value as of the effort's end (or latest, if open).
+    pub current: f64,
+    /// `current − baseline` for a level/file metric; the flow total for `sum`.
+    pub delta: Option<f64>,
+    /// Whether the value moved across the effort (false ⇒ show the value only).
+    pub changed: bool,
+    /// For `files`: how many of the effort's claimed files carry this metric.
+    pub attributed_files: Option<i64>,
+    /// Samples considered (in-window, or per-file for `files`).
+    pub sample_count: i64,
+    pub target: Option<f64>,
+    pub warn_at: Option<f64>,
+    pub fail_at: Option<f64>,
+    /// `warn` | `fail` when `current` (the repo-total headline for gauges) sits
+    /// in that zone, interpreted via `direction`; else `None`.
+    pub crossing: Option<String>,
+    /// The latest contributing run, for findings drill-in.
+    pub latest_run_id: Option<i64>,
+}
+
 const SAMPLE_COLS: &str = "id, run_id, metric_id, value, numerator, denominator, captured_at, \
      snapshot_id, closest_git_version, git_version_exact, basis_ref, stream_id, thread_id, \
      subject_kind, subject_ref, path, line, dims_json, provenance, source, branch";
@@ -731,12 +772,16 @@ impl SqliteMetricStore {
             .await
     }
 
-    /// All samples for a metric, newest-first.
+    /// All **headline** samples for a metric, newest-first. Per-file attribution
+    /// samples (`subject_kind = 'file'`) are excluded — they're the effort-
+    /// rollup's grain (`file_samples_for_paths`), not the headline time series
+    /// the Metrics page / trend / summary read. See metrics.md (grain split).
     pub async fn list_samples(&self, metric_id: i64) -> Result<Vec<MetricSample>, DomainError> {
         self.db
             .call(move |conn| {
                 let sql = format!(
                     "SELECT {SAMPLE_COLS} FROM metric_sample WHERE metric_id = ?1
+                        AND (subject_kind IS NULL OR subject_kind != 'file')
                       ORDER BY captured_at DESC, id DESC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -760,6 +805,7 @@ impl SqliteMetricStore {
                 let sql = format!(
                     "SELECT {SAMPLE_COLS} FROM metric_sample s
                       WHERE s.metric_id = ?1
+                        AND (s.subject_kind IS NULL OR s.subject_kind != 'file')
                         AND s.captured_at >= (SELECT started_at FROM task_effort WHERE id = ?2)
                         AND (
                           (SELECT ended_at FROM task_effort WHERE id = ?2) IS NULL
@@ -769,6 +815,45 @@ impl SqliteMetricStore {
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![metric_id, effort_id], row_to_sample)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Per-file attribution samples (`subject_kind = 'file'`) for a metric,
+    /// scoped to `stream_id` and matched against `paths` on `subject_ref`,
+    /// oldest-first. The effort rollup groups these by path and windows them in
+    /// Rust to compute each claimed file's before→after contribution — the
+    /// attribution grain that disentangles overlapping efforts. Empty when
+    /// `paths` is empty. `stream_id` is the hard scope (a file changed on two
+    /// worktrees has samples under two streams).
+    pub async fn file_samples_for_paths(
+        &self,
+        metric_id: i64,
+        stream_id: i64,
+        paths: Vec<String>,
+    ) -> Result<Vec<MetricSample>, DomainError> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.db
+            .call(move |conn| {
+                let placeholders = std::iter::repeat("?")
+                    .take(paths.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT {SAMPLE_COLS} FROM metric_sample
+                      WHERE metric_id = ? AND stream_id = ? AND subject_kind = 'file'
+                        AND subject_ref IN ({placeholders})
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&metric_id, &stream_id];
+                for p in &paths {
+                    binds.push(p);
+                }
+                let rows = stmt.query_map(rusqlite::params_from_iter(binds), row_to_sample)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -907,8 +992,8 @@ mod tests {
         store
             .record_sample(NewMetricSample {
                 run_id: Some(run),
-                subject_kind: Some("file".into()),
-                subject_ref: Some("file:src/a.rs".into()),
+                subject_kind: Some("tree".into()),
+                subject_ref: Some(".".into()),
                 ..NewMetricSample::observed(metric, 1, 3.0, "builtin")
             })
             .await
@@ -937,7 +1022,7 @@ mod tests {
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].value, 3.0);
         assert_eq!(samples[0].run_id, Some(run));
-        assert_eq!(samples[0].subject_ref.as_deref(), Some("file:src/a.rs"));
+        assert_eq!(samples[0].subject_ref.as_deref(), Some("."));
 
         let findings = store.list_findings(run).await.unwrap();
         assert_eq!(findings.len(), 1);
@@ -1033,6 +1118,105 @@ mod tests {
             vec![2.0, 3.0],
             "only in-window samples, time-ordered"
         );
+    }
+
+    #[tokio::test]
+    async fn file_subject_samples_excluded_from_headline_reads() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "oxplow.rust.unsafe_blocks").await;
+        // A headline `tree:.` total plus two per-file samples, all in the window.
+        for s in [
+            NewMetricSample {
+                captured_at: Some(at("2026-05-26T10:30:00Z")),
+                subject_kind: Some("tree".into()),
+                subject_ref: Some(".".into()),
+                ..NewMetricSample::observed(metric, 1, 5.0, "builtin")
+            },
+            NewMetricSample {
+                captured_at: Some(at("2026-05-26T10:30:00Z")),
+                subject_kind: Some("file".into()),
+                subject_ref: Some("src/a.rs".into()),
+                ..NewMetricSample::observed(metric, 1, 3.0, "builtin")
+            },
+            NewMetricSample {
+                captured_at: Some(at("2026-05-26T10:30:00Z")),
+                subject_kind: Some("file".into()),
+                subject_ref: Some("src/b.rs".into()),
+                ..NewMetricSample::observed(metric, 1, 2.0, "builtin")
+            },
+        ] {
+            store.record_sample(s).await.unwrap();
+        }
+        // Headline reads see ONLY the tree total — the file rows are the rollup
+        // grain, not the trend/summary series.
+        let headline = store.list_samples(metric).await.unwrap();
+        assert_eq!(headline.len(), 1);
+        assert_eq!(headline[0].value, 5.0);
+        let in_effort = store.samples_for_effort(metric, 1).await.unwrap();
+        assert_eq!(
+            in_effort.iter().map(|s| s.value).collect::<Vec<_>>(),
+            vec![5.0]
+        );
+    }
+
+    #[tokio::test]
+    async fn file_samples_for_paths_scopes_by_stream_and_paths() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "oxplow.rust.unsafe_blocks").await;
+        // A second stream so the stream scope is exercised (a file changed on two
+        // worktrees has samples under two streams — they must not cross-leak).
+        store
+            .db
+            .call(|conn| {
+                conn.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                     VALUES (2, 'worktree', 'w', 'feat', 'refs/heads/feat', 'feat', '/w', '2026-05-26T00:00:00Z', '2026-05-26T00:00:00Z')",
+                    [],
+                )
+            })
+            .await
+            .unwrap();
+        let rows = [
+            (1_i64, "src/a.rs", "2026-05-26T10:00:00Z", 2.0),
+            (1, "src/a.rs", "2026-05-26T10:40:00Z", 1.0),
+            (1, "src/b.rs", "2026-05-26T10:40:00Z", 4.0),
+            (1, "src/c.rs", "2026-05-26T10:40:00Z", 9.0), // path not requested
+            (2, "src/a.rs", "2026-05-26T10:40:00Z", 99.0), // other stream
+        ];
+        for (stream, path, ts, v) in rows {
+            store
+                .record_sample(NewMetricSample {
+                    captured_at: Some(at(ts)),
+                    subject_kind: Some("file".into()),
+                    subject_ref: Some(path.into()),
+                    ..NewMetricSample::observed(metric, stream, v, "builtin")
+                })
+                .await
+                .unwrap();
+        }
+        let got = store
+            .file_samples_for_paths(metric, 1, vec!["src/a.rs".into(), "src/b.rs".into()])
+            .await
+            .unwrap();
+        // Only stream-1 a.rs (both, oldest-first) + b.rs; c.rs and stream-2 out.
+        let pairs: Vec<(String, f64)> = got
+            .iter()
+            .map(|s| (s.subject_ref.clone().unwrap(), s.value))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("src/a.rs".to_string(), 2.0),
+                ("src/a.rs".to_string(), 1.0),
+                ("src/b.rs".to_string(), 4.0),
+            ]
+        );
+        // Empty paths short-circuits.
+        assert!(store
+            .file_samples_for_paths(metric, 1, vec![])
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

@@ -1668,6 +1668,18 @@ export async function listEffortObservations(
   ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
 }
 
+export type { EffortMetricDelta } from "./tauri-bridge/index.js";
+
+/** Per-metric roll-up over an effort — grouped before→after deltas for the
+ *  task/effort page's metrics panel (attributed per family; tsk250). */
+export async function listEffortMetricDeltas(
+  effortId: string,
+): Promise<import("./tauri-bridge/index.js").EffortMetricDelta[]> {
+  return unwrap(
+    await commands.listEffortMetricDeltas(effortId),
+  ) as unknown as import("./tauri-bridge/index.js").EffortMetricDelta[];
+}
+
 export type {
   MetricDefinition,
   MetricSample,

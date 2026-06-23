@@ -318,9 +318,10 @@ mod tests {
     use crate::GaugeHost;
     use std::collections::HashMap;
 
-    /// Run a built-in metric by key over a fixture file map and return the
-    /// single sample's value.
-    fn run_over(key: &str, files: HashMap<String, String>) -> f64 {
+    /// Run a built-in metric by key over a fixture file map and return its
+    /// gauge report (headline `tree:.` total + sparse `file:<path>` per-file
+    /// breakdown — the grain split from metrics.md).
+    fn report_over(key: &str, files: HashMap<String, String>) -> crate::MetricReport {
         let metric = builtin_metrics()
             .into_iter()
             .find(|m| m.key == key)
@@ -329,9 +330,63 @@ mod tests {
             .collector()
             .run_gauge("", GaugeHost::new(files))
             .expect("gauge runs");
-        let report = out.as_gauge().expect("gauge output");
-        assert_eq!(report.samples.len(), 1, "{key} projects one sample");
-        report.samples[0].value
+        out.as_gauge().expect("gauge output").clone()
+    }
+
+    /// Run a built-in metric and return the repo-total (the `tree:.` sample's
+    /// value), asserting the invariant that the per-file (`file:<path>`)
+    /// breakdown sums exactly to it and that no sample carries a stray subject.
+    fn run_over(key: &str, files: HashMap<String, String>) -> f64 {
+        let report = report_over(key, files);
+        let totals = report
+            .samples
+            .iter()
+            .filter(|s| s.subject.as_deref() == Some("tree:."))
+            .count();
+        assert_eq!(totals, 1, "{key} must project exactly one tree:. total");
+        let total = report
+            .samples
+            .iter()
+            .find(|s| s.subject.as_deref() == Some("tree:."))
+            .expect("tree:. total")
+            .value;
+        let per_file_sum: f64 = report
+            .samples
+            .iter()
+            .filter(|s| {
+                s.subject
+                    .as_deref()
+                    .is_some_and(|sub| sub.starts_with("file:"))
+            })
+            .map(|s| s.value)
+            .sum();
+        assert_eq!(
+            total, per_file_sum,
+            "{key}: tree:. total must equal the sum of per-file samples"
+        );
+        for s in &report.samples {
+            let sub = s.subject.as_deref().unwrap_or("");
+            assert!(
+                sub == "tree:." || sub.starts_with("file:"),
+                "{key}: unexpected sample subject {sub:?}"
+            );
+        }
+        total
+    }
+
+    /// The `(path, value)` of every per-file (`file:<path>`) sample, in emit
+    /// order — the attribution grain the effort rollup reads.
+    fn per_file_over(key: &str, files: HashMap<String, String>) -> Vec<(String, f64)> {
+        report_over(key, files)
+            .samples
+            .iter()
+            .filter_map(|s| {
+                s.subject
+                    .as_deref()
+                    .and_then(|sub| sub.strip_prefix("file:"))
+                    .map(|p| (p.to_string(), s.value))
+            })
+            .collect()
     }
 
     fn corpus() -> HashMap<String, String> {
@@ -369,6 +424,21 @@ fn b() {
     #[test]
     fn rust_unsafe_blocks_golden() {
         assert_eq!(run_over("oxplow.rust.unsafe_blocks", corpus()), 2.0);
+    }
+
+    #[test]
+    fn per_file_breakdown_attributes_to_paths() {
+        // unsafe_blocks: src/a.rs has 2 unsafe blocks, src/b.rs has 0 (omitted —
+        // sparse), README.md is skipped by the glob → one file:* sample.
+        assert_eq!(
+            per_file_over("oxplow.rust.unsafe_blocks", corpus()),
+            vec![("src/a.rs".to_string(), 2.0)]
+        );
+        // todo_markers: a TODO in a.rs and a FIXME in b.rs → both files attributed.
+        assert_eq!(
+            per_file_over("oxplow.rust.todo_markers", corpus()),
+            vec![("src/a.rs".to_string(), 1.0), ("src/b.rs".to_string(), 1.0)]
+        );
     }
 
     #[test]

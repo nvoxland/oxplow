@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 
 import {
+  type EffortMetricDelta,
   type MetricDefinition,
   type MetricFinding,
   type MetricSample,
+  listEffortMetricDeltas,
   listMetricFindings,
   listMetricSamples,
 } from "../api.js";
+import {
+  deltaColor,
+  deltaSummary,
+  fmtSigned,
+} from "../components/EffortMetrics.js";
 import {
   deltaVsFirst,
   findingRows,
@@ -196,9 +203,20 @@ function TopSubjects({ samples }: { samples: MetricSample[] }) {
   );
 }
 
-export function MetricDetail({ def, onBack }: { def: MetricDefinition; onBack: () => void }) {
+export function MetricDetail({
+  def,
+  onBack,
+  effort,
+}: {
+  def: MetricDefinition;
+  onBack: () => void;
+  /** When set, show an "In this effort" before→after callout scoped to this
+   *  effort window (the task-page metrics-panel drill-in). */
+  effort?: { effortId: string; start: string; end: string | null };
+}) {
   const [samples, setSamples] = useState<MetricSample[]>([]);
   const [findings, setFindings] = useState<MetricFinding[]>([]);
+  const [effortDelta, setEffortDelta] = useState<EffortMetricDelta | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +231,20 @@ export function MetricDetail({ def, onBack }: { def: MetricDefinition; onBack: (
       cancelled = true;
     };
   }, [def.key]);
+
+  useEffect(() => {
+    if (!effort) {
+      setEffortDelta(null);
+      return;
+    }
+    let cancelled = false;
+    void listEffortMetricDeltas(effort.effortId).then((rows) => {
+      if (!cancelled) setEffortDelta(rows.find((r) => r.key === def.key) ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [effort?.effortId, def.key, effort]);
 
   const latest = samples[0] ?? null;
   const delta = deltaVsFirst(samples);
@@ -253,6 +285,40 @@ export function MetricDetail({ def, onBack }: { def: MetricDefinition; onBack: (
           </div>
         ) : null}
       </div>
+      {effort && effortDelta ? (
+        <div
+          data-testid="metric-detail-effort"
+          style={{
+            border: "1px solid var(--border-subtle, #2a2a2a)",
+            borderRadius: 6,
+            padding: "8px 12px",
+            display: "flex",
+            gap: 12,
+            alignItems: "baseline",
+            flexWrap: "wrap",
+            fontSize: 13,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>In this effort</span>
+          <span style={{ fontFamily: "var(--font-mono)" }}>
+            {deltaSummary(effortDelta)}
+          </span>
+          {effortDelta.changed &&
+          effortDelta.delta != null &&
+          effortDelta.agg !== "sum" ? (
+            <span style={{ color: deltaColor(effortDelta) }}>
+              Δ {fmtSigned(effortDelta.delta)}
+            </span>
+          ) : null}
+          {effortDelta.attributed_files != null &&
+          effortDelta.attributed_files > 0 ? (
+            <span style={{ opacity: 0.6 }}>
+              across {effortDelta.attributed_files}{" "}
+              {effortDelta.attributed_files === 1 ? "file" : "files"}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <TrendChart samples={samples} target={def.target} />
       {def.kind === "findings" ? <FindingsTable findings={findings} /> : null}
       {def.kind === "test" ? <TestTree findings={findings} /> : null}

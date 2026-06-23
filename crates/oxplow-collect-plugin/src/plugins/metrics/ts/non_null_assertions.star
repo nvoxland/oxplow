@@ -1,15 +1,20 @@
 # oxplow.ts.non_null_assertions — count `expr!` non-null assertions (a
-# type-checker override that can hide real nullability bugs).
+# type-checker override that can hide real nullability bugs). Emits the
+# repo-total ("tree:.") plus a per-file sample ("file:<path>", nonzero only).
 def _ts_files():
     out = []
     for f in files("**/*.ts"):
-        out.append((f["text"], "typescript"))
+        out.append((f["path"], f["text"], "typescript"))
     for f in files("**/*.tsx"):
-        out.append((f["text"], "tsx"))
+        out.append((f["path"], f["text"], "tsx"))
     return out
 
 def transform(input):
-    n = 0
-    for pair in _ts_files():
-        n += len(ast_query(pair[0], pair[1], "(non_null_expression) @n"))
-    return {"samples": [{"value": n, "dims": {"language": "typescript"}}]}
+    total = 0
+    per_file = []
+    for tri in _ts_files():
+        c = len(ast_query(tri[1], tri[2], "(non_null_expression) @n"))
+        total += c
+        if c > 0:
+            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"language": "typescript"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "typescript"}}] + per_file}

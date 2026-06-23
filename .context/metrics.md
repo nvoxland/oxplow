@@ -67,6 +67,31 @@ overlays** read from `task_effort` (`started_at`/`ended_at`) — so:
 (`SqliteMetricStore::samples_for_effort`). No count-prune, no CASCADE; optional
 age sweep only.
 
+### Per-file attribution grain (concurrency-safe efforts, tsk250)
+
+Time-window bucketing alone mis-attributes under **overlapping efforts** (two
+threads/streams working at once). So the code gauges emit **two grains**:
+
+- the **headline** `tree:.` sample (one per run) — the repo total every existing
+  read uses (Metrics page, trend, `get_metric_summary`, `effort_metric_context`);
+- sparse **`file:<path>`** samples (nonzero files only) — the *attribution*
+  grain, read **only** by the effort roll-up.
+
+`list_samples` / `samples_for_effort` filter out `subject_kind='file'` so the
+headline series is unchanged; `file_samples_for_paths(metric_id, stream_id,
+paths)` reads the per-file grain. `CollectionService::effort_metric_deltas`
+attributes **per metric family** (each already has a sound key — using time alone
+was the bug):
+
+| family | attribution key |
+|---|---|
+| per-file gauges (`gauge`/`tree`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen) |
+| operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
+| coverage / tests | already computed against the effort's **own diff** — in-window headline |
+
+A gauge with no per-file samples (or an effort with no claims) falls back to the
+in-window headline before→after.
+
 ### Additivity
 
 Ratio metrics (coverage %, pass rate) store `numerator`+`denominator`. Roll-ups
@@ -96,7 +121,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_definition` per resolved `metrics:` entry; runs each `gauge` on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | whatever the project/global `metrics:` entry declares — a `metric_sample` per `MetricReport.sample`, version/branch/snapshot-stamped, subject/dims from the script |
+| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_definition` per resolved `metrics:` entry; runs each `gauge` on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | whatever the project/global `metrics:` entry declares — a `metric_sample` per `MetricReport.sample`, version/branch/snapshot-stamped, subject/dims from the script. The bundled code gauges emit both the headline `tree:.` total and sparse `file:<path>` per-file samples (the attribution grain — see the per-file section above) |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -126,7 +151,10 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   in `collect_commands!` + the remote `rpc_dispatch!`): `list_metric_definitions`
   / `list_metric_samples` / `list_metric_findings` (the per-run drill-in,
   `both`-scoped — tsk232) exposed to the renderer with generated TS bindings
-  (`MetricDefinition`/`MetricSample`/`MetricFinding`).
+  (`MetricDefinition`/`MetricSample`/`MetricFinding`). `list_effort_metric_deltas`
+  (tsk250, `ui`-scoped — `commands/effort.rs`) returns the family-attributed
+  per-effort roll-up (`EffortMetricDelta`) for the task-page panel; the agent
+  gets the same numbers as prompt text via `effort_metric_context`.
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
   renderer refetches).
 
@@ -182,6 +210,15 @@ UI code:
   sparkline, capture branch, sample count; colored by `statusColor`
   (target/`fail_at`/direction); rows open the detail view. Live-refreshes on
   `metricSamplesChanged`.
+
+Metrics are also surfaced **organically off the Metrics page** (tsk250): the
+task/effort page renders an `EffortMetricsBlock` (`components/EffortMetrics.tsx`)
+under each effort — the metrics whose facts the effort touched, as compact
+before→after rows **grouped by type** (`metricGroup`), self-hiding when empty and
+live on `metricSamplesChanged`. A row drills into the metric's detail via
+`metricRef(key, {effortId,start,end})` → `MetricsPage` (`initialMetricKey` /
+`initialEffort` props) opens `MetricDetail`, which renders an **"In this effort"**
+before→after callout (+ per-file count) above the full trend.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
 `set_metric_override` (RPC cores in `commands/metrics.rs`, Tauri adapters,
@@ -280,9 +317,11 @@ Feedback is **advisory — oxplow never blocks**. Two paths:
 - **Effort metric deltas** (UserPromptSubmit, tsk231). `CollectionService::
   effort_metric_context(thread)` builds a "# Metric deltas (this effort)" block —
   for every **code** metric (operational `agent.*`/`effort.*`/`task.*` and `event`
-  kinds are skipped) with samples in the open effort's window, it shows
-  `title: baseline → current (Δ ±N)` (first vs last `samples_for_effort`). The
-  first turn a **gauge crosses** its `warn_at`/`fail_at` (`threshold_state`,
+  kinds are skipped) it shows `title: baseline → current (Δ ±N)`. It consumes the
+  **shared `effort_metric_deltas` core** (tsk253), so the prompt and the task-page
+  panel report the **same** numbers — file-attributed for gauges, so under
+  overlapping efforts the agent sees only its own effort's effect, not the repo
+  total. The first turn a **gauge crosses** its `warn_at`/`fail_at` (`threshold_state`,
   interpreted via `direction`) the line gets a loud `⚠ crossed fail/warn
   threshold` marker, **one-shot** per `(effort, metric)` via an in-memory
   `nudged_gauge` set — on-snapshot gauges run outside any hook, so the crossing

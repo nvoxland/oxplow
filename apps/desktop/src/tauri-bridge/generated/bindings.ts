@@ -473,6 +473,11 @@ export const commands = {
 	 */
 	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
 	/**
+	 *  Per-metric roll-up over an effort — grouped before→after deltas for the
+	 *  task/effort page's metrics panel (attributed per family; see metrics.md).
+	 */
+	listEffortMetricDeltas: (effortId: EffortId) => typedError<EffortMetricDelta[], IpcError>(__TAURI_INVOKE("list_effort_metric_deltas", { effortId })),
+	/**
 	 *  The metric catalog — every known definition. Optional `language` / `scope`
 	 *  filter. Drives the Catalog / Explorer measure picker.
 	 */
@@ -1339,6 +1344,52 @@ export type EffortFile = {
 export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
+
+/**
+ *  One metric's roll-up over a single effort — the wire shape the task/effort
+ *  page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
+ *  row: derived per request from the substrate using the right attribution key
+ *  per metric family (file-attributed for gauges, thread-scoped for operational,
+ *  effort-diff for coverage/tests). See metrics.md.
+ */
+export type EffortMetricDelta = {
+	key: string,
+	title: string,
+	unit: string | null,
+	// `higher-better` | `lower-better` | `neutral`.
+	direction: string,
+	// The definition `kind` (`gauge` | `coverage` | `test` | `event` | …).
+	kind: string,
+	category: string | null,
+	language: string | null,
+	/**
+	 *  How this delta was computed: `files` (Σ over the effort's claimed files),
+	 *  `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
+	 */
+	agg: string,
+	// The value as the effort began (`None` for a `sum`/flow metric).
+	baseline: number | null,
+	// The value as of the effort's end (or latest, if open).
+	current: number,
+	// `current − baseline` for a level/file metric; the flow total for `sum`.
+	delta: number | null,
+	// Whether the value moved across the effort (false ⇒ show the value only).
+	changed: boolean,
+	// For `files`: how many of the effort's claimed files carry this metric.
+	attributed_files: number | null,
+	// Samples considered (in-window, or per-file for `files`).
+	sample_count: number,
+	target: number | null,
+	warn_at: number | null,
+	fail_at: number | null,
+	/**
+	 *  `warn` | `fail` when `current` (the repo-total headline for gauges) sits
+	 *  in that zone, interpreted via `direction`; else `None`.
+	 */
+	crossing: string | null,
+	// The latest contributing run, for findings drill-in.
+	latest_run_id: number | null,
+};
 
 // One effort-review observation row (reconstructed from the metric substrate).
 export type EffortObservation = {

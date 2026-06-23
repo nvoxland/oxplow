@@ -1286,62 +1286,67 @@ impl CollectionService {
     /// `additionalContext`, since on-snapshot gauges run outside any hook.
     pub async fn effort_metric_context(&self, thread: &ThreadId) -> Option<String> {
         let effort = self.efforts.find_open_for_thread(thread).await.ok()??;
-        let defs = self.metrics.list_definitions().await.ok()?;
+        // Shared attribution core (tsk253): the same per-family roll-up the
+        // task-page panel reads (`effort_metric_deltas`), so the prompt and the
+        // UI report the SAME baseline→current — file-attributed for gauges, so
+        // under overlapping efforts the agent sees only its own effort's effect.
+        // The one-shot warn/fail crossing nudge is layered on top here.
+        let deltas = self.effort_metric_deltas(&effort.id.to_string()).await;
+        if deltas.is_empty() {
+            return None;
+        }
+        // key → metric-definition id, for the one-shot crossing dedup (keyed by
+        // def id in `nudged_gauge`); the delta carries the key, not the id.
+        let id_by_key: std::collections::HashMap<String, i64> = self
+            .metrics
+            .list_definitions()
+            .await
+            .ok()?
+            .into_iter()
+            .map(|d| (d.key, d.id))
+            .collect();
         let mut lines: Vec<String> = Vec::new();
         // Crossings surfaced this turn — marked consumed only in the await-free
         // tail below, never inside the loop (a hook timeout could otherwise drop
         // the response after a one-shot was already consumed mid-loop).
         let mut fresh_crossings: Vec<i64> = Vec::new();
-        for def in defs {
+        for d in &deltas {
             // Operational/event metrics (tokens, cost, cycle-time, nudges,
             // navigation) grow every turn and aren't code-health signals — keep
             // the line focused on code metrics.
-            if def.kind == "event" || is_operational_metric_key(&def.key) {
+            if d.kind == "event" || is_operational_metric_key(&d.key) {
                 continue;
             }
-            let Ok(samples) = self
-                .metrics
-                .samples_for_effort(def.id, effort.id.value())
-                .await
-            else {
-                continue;
-            };
-            // samples_for_effort is time-ASC: first = effort-start baseline,
-            // last = current. (The code metrics relevant here project one
-            // headline sample per run, so first/last are the right anchors.)
-            let (Some(first), Some(last)) = (samples.first(), samples.last()) else {
-                continue;
-            };
-            let baseline = first.value;
-            let current = last.value;
-            let moved = (current - baseline).abs() > f64::EPSILON;
-            let crossing = threshold_state(&def.direction, current, def.warn_at, def.fail_at);
+            let metric_id = id_by_key.get(&d.key).copied();
             // Peek (don't consume) the one-shot here; consume after the loop.
-            let fresh_crossing =
-                crossing.is_some() && !self.gauge_already_nudged(&effort.id, def.id);
+            let fresh_crossing = d.crossing.is_some()
+                && metric_id.is_some_and(|id| !self.gauge_already_nudged(&effort.id, id));
             if fresh_crossing {
-                fresh_crossings.push(def.id);
+                if let Some(id) = metric_id {
+                    fresh_crossings.push(id);
+                }
             }
-            if !moved && !fresh_crossing {
+            if !d.changed && !fresh_crossing {
                 continue;
             }
             let mut line = format!(
                 "- {}: {} → {}{}",
-                def.title,
-                fmt_metric_num(baseline),
-                fmt_metric_num(current),
-                fmt_unit_suffix(def.unit.as_deref().unwrap_or("")),
+                d.title,
+                fmt_metric_num(d.baseline.unwrap_or(d.current)),
+                fmt_metric_num(d.current),
+                fmt_unit_suffix(d.unit.as_deref().unwrap_or("")),
             );
-            if moved {
-                let delta = current - baseline;
-                line.push_str(&format!(" (Δ {})", fmt_signed(delta)));
+            if d.changed {
+                if let Some(delta) = d.delta {
+                    line.push_str(&format!(" (Δ {})", fmt_signed(delta)));
+                }
             }
             if fresh_crossing {
-                if let Some(level) = crossing {
+                if let Some(level) = d.crossing.as_deref() {
                     let thresh = if level == "fail" {
-                        def.fail_at
+                        d.fail_at
                     } else {
-                        def.warn_at
+                        d.warn_at
                     };
                     line.push_str(&format!(
                         " ⚠ crossed {} threshold{}",
@@ -1836,6 +1841,223 @@ impl CollectionService {
         out
     }
 
+    /// Roll every metric up over a single effort for the task/effort page — the
+    /// structured sibling of [`effort_metric_context`](Self::effort_metric_context)
+    /// (which builds the agent-prompt text). Attribution is **per family** so
+    /// overlapping efforts stay disentangled (see metrics.md):
+    /// - **per-file gauges**: Σ over the effort's *claimed* files
+    ///   (`task_effort_file`) of `(current_file − baseline_file)` — the slice
+    ///   this effort actually moved, even on a branch shared with another effort.
+    /// - **operational** (`agent.*`/`effort.*`/`task.*`) + **coverage/tests**:
+    ///   in-window headline samples scoped to the effort's thread; `sum` flows
+    ///   (tokens) are summed, everything else is before→after.
+    ///
+    /// Returns only metrics the effort moved/touched, grouped code-health →
+    /// coverage → tests → operational, then by title.
+    pub async fn effort_metric_deltas(&self, effort_id: &str) -> Vec<oxplow_db::EffortMetricDelta> {
+        let Some(eid) = EffortId::try_from_str(effort_id) else {
+            return vec![];
+        };
+        let Ok(Some(effort)) = self.efforts.get_effort(&eid).await else {
+            return vec![];
+        };
+        let Ok(defs) = self.metrics.list_definitions().await else {
+            return vec![];
+        };
+        // The effort's hard scope (stream) + its thread, for family attribution.
+        let stream_val = match self.threads.get(&effort.thread_id).await {
+            Ok(Some(t)) => t.stream_id.value(),
+            _ => return vec![],
+        };
+        let thread_val = effort.thread_id.value();
+        let claimed: Vec<String> = self
+            .efforts
+            .list_files(&eid)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
+        for def in defs {
+            let row = if is_file_attributed(&def) {
+                self.file_attributed_delta(&def, &effort, stream_val, &claimed)
+                    .await
+            } else {
+                self.in_window_delta(&def, &effort, Some(thread_val)).await
+            };
+            if let Some(row) = row {
+                out.push(row);
+            }
+        }
+        out.sort_by(|a, b| {
+            effort_metric_group_order(a)
+                .cmp(&effort_metric_group_order(b))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+        out
+    }
+
+    /// Per-file attribution for a gauge: Σ over the effort's claimed files of the
+    /// file's `(current − baseline)`, treating a missing per-file sample as 0
+    /// (sparse emission). Falls back to the in-window headline before→after when
+    /// the effort claimed no files or the gauge emits no per-file samples.
+    async fn file_attributed_delta(
+        &self,
+        def: &oxplow_db::MetricDefinition,
+        effort: &TaskEffort,
+        stream_val: i64,
+        claimed: &[String],
+    ) -> Option<oxplow_db::EffortMetricDelta> {
+        if claimed.is_empty() {
+            return self.in_window_delta(def, effort, None).await;
+        }
+        // The headline (`tree:.`) samples are one-per-run — they give the run
+        // timeline (newest-first). A gauge run scans every file, so a claimed
+        // path with NO per-file sample in a given run is 0 *as of that run*
+        // (sparse emission omits zeros). That's how a drop-to-zero is detected.
+        let headline = self.metrics.list_samples(def.id).await.ok()?;
+        if headline.is_empty() {
+            return self.in_window_delta(def, effort, None).await;
+        }
+        // Baseline run = latest run before the effort started; current run =
+        // latest run at/before the effort end (or the newest run when open).
+        let baseline_run = headline
+            .iter()
+            .find(|s| s.captured_at < effort.started_at)
+            .and_then(|s| s.run_id);
+        let current_run = headline
+            .iter()
+            .find(|s| match effort.ended_at {
+                Some(end) => s.captured_at <= end,
+                None => true,
+            })
+            .and_then(|s| s.run_id);
+        let per_file = self
+            .metrics
+            .file_samples_for_paths(def.id, stream_val, claimed.to_vec())
+            .await
+            .ok()?;
+        if per_file.is_empty() && current_run == baseline_run {
+            // No per-file data and no run movement → fall back to headline.
+            return self.in_window_delta(def, effort, None).await;
+        }
+        // A claimed file's value in a run: its per-file sample if present, else 0.
+        let value_in = |run: Option<i64>, path: &str| -> f64 {
+            run.and_then(|r| {
+                per_file
+                    .iter()
+                    .find(|s| s.run_id == Some(r) && s.subject_ref.as_deref() == Some(path))
+                    .map(|s| s.value)
+            })
+            .unwrap_or(0.0)
+        };
+        let mut baseline = 0.0;
+        let mut current = 0.0;
+        let mut attributed = 0i64;
+        for p in claimed {
+            let b = value_in(baseline_run, p);
+            let c = value_in(current_run, p);
+            if b != 0.0 || c != 0.0 {
+                attributed += 1;
+            }
+            baseline += b;
+            current += c;
+        }
+        // The effort's files never carried this metric → nothing to show.
+        if baseline == 0.0 && current == 0.0 {
+            return None;
+        }
+        let changed = (current - baseline).abs() > f64::EPSILON;
+        let latest_run = current_run;
+        // The warn/fail badge reflects the REPO total (the headline), not the
+        // claimed-file slice — read the latest headline value if present.
+        let crossing = headline
+            .first()
+            .map(|s| s.value)
+            .and_then(|v| threshold_state(&def.direction, v, def.warn_at, def.fail_at))
+            .map(str::to_string);
+        Some(effort_delta_row(
+            def,
+            DeltaCalc {
+                agg: "files",
+                baseline: Some(baseline),
+                current,
+                delta: changed.then_some(current - baseline),
+                changed,
+                attributed_files: Some(attributed),
+                sample_count: per_file.len() as i64,
+                latest_run_id: latest_run,
+                crossing,
+            },
+        ))
+    }
+
+    /// In-window before→after (or `sum` flow) for a metric, optionally scoped to
+    /// one thread (operational/coverage/test facts carry the thread; the gauge
+    /// fallback passes `None`). Reads the effort-window headline samples (the
+    /// store already excludes the per-file grain).
+    async fn in_window_delta(
+        &self,
+        def: &oxplow_db::MetricDefinition,
+        effort: &TaskEffort,
+        thread_filter: Option<i64>,
+    ) -> Option<oxplow_db::EffortMetricDelta> {
+        let samples = self
+            .metrics
+            .samples_for_effort(def.id, effort.id.value())
+            .await
+            .ok()?;
+        let mine: Vec<&oxplow_db::MetricSample> = match thread_filter {
+            Some(t) => samples.iter().filter(|s| s.thread_id == Some(t)).collect(),
+            None => samples.iter().collect(),
+        };
+        let (first, last) = (mine.first()?, mine.last()?);
+        let latest_run = last.run_id;
+        if def.default_agg == "sum" {
+            let total: f64 = mine.iter().map(|s| s.value).sum();
+            if total == 0.0 {
+                return None;
+            }
+            let crossing = threshold_state(&def.direction, total, def.warn_at, def.fail_at)
+                .map(str::to_string);
+            return Some(effort_delta_row(
+                def,
+                DeltaCalc {
+                    agg: "sum",
+                    baseline: None,
+                    current: total,
+                    delta: Some(total),
+                    changed: true,
+                    attributed_files: None,
+                    sample_count: mine.len() as i64,
+                    latest_run_id: latest_run,
+                    crossing,
+                },
+            ));
+        }
+        let baseline = first.value;
+        let current = last.value;
+        let changed = (current - baseline).abs() > f64::EPSILON;
+        let crossing =
+            threshold_state(&def.direction, current, def.warn_at, def.fail_at).map(str::to_string);
+        Some(effort_delta_row(
+            def,
+            DeltaCalc {
+                agg: "level",
+                baseline: Some(baseline),
+                current,
+                delta: changed.then_some(current - baseline),
+                changed,
+                attributed_files: None,
+                sample_count: mine.len() as i64,
+                latest_run_id: latest_run,
+                crossing,
+            },
+        ))
+    }
+
     /// Test-only: read the metric samples mirrored under a definition `key`.
     #[cfg(test)]
     async fn metric_samples_for_key(&self, key: &str) -> Vec<oxplow_db::MetricSample> {
@@ -1965,6 +2187,69 @@ fn threshold_state(
         }
     }
     None
+}
+
+/// Whether a metric is attributed to an effort by its *claimed files* (the
+/// per-file gauges) rather than by time window. The bundled code-health gauges
+/// are `gauge`/`tree`; operational metrics are excluded (thread-scoped instead).
+fn is_file_attributed(def: &oxplow_db::MetricDefinition) -> bool {
+    def.kind == "gauge"
+        && def.grain.as_deref() == Some("tree")
+        && !is_operational_metric_key(&def.key)
+}
+
+/// Effort-panel group ordering: code-health gauges first, then coverage, tests,
+/// static-analysis, operational. Drives the grouped rendering on the task page.
+fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
+    match d.category.as_deref() {
+        Some("coverage") => 1,
+        Some("testing") => 2,
+        Some("static-quality") => 3,
+        Some("operational") => 4,
+        _ => 0,
+    }
+}
+
+/// The computed half of an [`oxplow_db::EffortMetricDelta`] — the per-family
+/// numbers, joined with the definition's metadata by [`effort_delta_row`].
+struct DeltaCalc {
+    agg: &'static str,
+    baseline: Option<f64>,
+    current: f64,
+    delta: Option<f64>,
+    changed: bool,
+    attributed_files: Option<i64>,
+    sample_count: i64,
+    latest_run_id: Option<i64>,
+    crossing: Option<String>,
+}
+
+/// Build an effort-metric row from a definition + the computed `DeltaCalc`.
+fn effort_delta_row(
+    def: &oxplow_db::MetricDefinition,
+    c: DeltaCalc,
+) -> oxplow_db::EffortMetricDelta {
+    oxplow_db::EffortMetricDelta {
+        key: def.key.clone(),
+        title: def.title.clone(),
+        unit: def.unit.clone(),
+        direction: def.direction.clone(),
+        kind: def.kind.clone(),
+        category: def.category.clone(),
+        language: def.language.clone(),
+        agg: c.agg.to_string(),
+        baseline: c.baseline,
+        current: c.current,
+        delta: c.delta,
+        changed: c.changed,
+        attributed_files: c.attributed_files,
+        sample_count: c.sample_count,
+        target: def.target,
+        warn_at: def.warn_at,
+        fail_at: def.fail_at,
+        crossing: c.crossing,
+        latest_run_id: c.latest_run_id,
+    }
 }
 
 /// Format a metric value compactly: integers as integers, else one decimal.
@@ -2433,6 +2718,9 @@ mod tests {
             efforts: Arc<SqliteTaskEffortStore>,
             nudges: Arc<SqliteAgentNudgeStore>,
             tmp: tempfile::TempDir,
+            /// Shared in-memory db handle — lets a test seed a second task/effort
+            /// (e.g. the overlapping-efforts disentangle case).
+            db: Database,
         }
 
         /// Build the fixture. `report_xml` Some → write it + configure the
@@ -2619,6 +2907,7 @@ mod tests {
                 efforts,
                 nudges,
                 tmp,
+                db,
             }
         }
 
@@ -2892,6 +3181,7 @@ mod tests {
             use oxplow_db::{NewMetricDefinition, NewMetricSample};
             let mut def = NewMetricDefinition::new(key, "gauge", "unsafe blocks");
             def.unit = Some("count".into());
+            def.grain = Some("tree".into());
             def.direction = direction.into();
             def.warn_at = warn_at;
             def.fail_at = fail_at;
@@ -2987,6 +3277,237 @@ mod tests {
                 h.service.effort_metric_context(&h.thread).await.is_none(),
                 "operational `agent.*` metrics are filtered out"
             );
+        }
+
+        // ---- effort_metric_deltas (tsk250) -------------------------------
+
+        /// A `gauge`/`tree` definition (the per-file-attributed family).
+        async fn gauge_tree_def(
+            h: &Harness,
+            key: &str,
+            direction: &str,
+            target: Option<f64>,
+        ) -> i64 {
+            let mut def = oxplow_db::NewMetricDefinition::new(key, "gauge", key);
+            def.grain = Some("tree".into());
+            def.unit = Some("count".into());
+            def.direction = direction.into();
+            def.target = target;
+            h.service.metrics.upsert_definition(def).await.unwrap()
+        }
+
+        /// Record one gauge run (a `tree:.` total + sparse `file:<path>` samples,
+        /// all at `at`), mimicking a snapshot scan. Returns the run id.
+        async fn seed_run(
+            h: &Harness,
+            metric_id: i64,
+            at: Timestamp,
+            total: f64,
+            per_file: &[(&str, f64)],
+        ) {
+            use oxplow_db::{NewMetricRun, NewMetricSample};
+            let mut samples = vec![NewMetricSample {
+                captured_at: Some(at),
+                subject_kind: Some("tree".into()),
+                subject_ref: Some(".".into()),
+                ..NewMetricSample::observed(metric_id, 1, total, "test")
+            }];
+            for (path, v) in per_file {
+                samples.push(NewMetricSample {
+                    captured_at: Some(at),
+                    subject_kind: Some("file".into()),
+                    subject_ref: Some((*path).into()),
+                    ..NewMetricSample::observed(metric_id, 1, *v, "test")
+                });
+            }
+            h.service
+                .metrics
+                .record_run_with_data(NewMetricRun::done(1, "test", "test"), samples, vec![])
+                .await
+                .unwrap();
+        }
+
+        async fn claim(h: &Harness, effort_id: &str, path: &str) {
+            let eid = oxplow_domain::EffortId::try_from_str(effort_id).unwrap();
+            h.efforts
+                .record_file(
+                    &eid,
+                    path,
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        async fn effort_start(h: &Harness, effort_id: &str) -> Timestamp {
+            let eid = oxplow_domain::EffortId::try_from_str(effort_id).unwrap();
+            h.efforts
+                .get_effort(&eid)
+                .await
+                .unwrap()
+                .unwrap()
+                .started_at
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_attributes_gauge_by_claimed_files() {
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let m =
+                gauge_tree_def(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            // The effort claims a.rs and b.rs. c.rs is changed elsewhere (NOT
+            // claimed) — it must not leak into this effort's delta.
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            claim(&h, &h.effort_id, "src/b.rs").await;
+            // Baseline run (before the effort): a.rs=2, c.rs=5; total 7.
+            seed_run(&h, m, before, 7.0, &[("src/a.rs", 2.0), ("src/c.rs", 5.0)]).await;
+            // Current run (during the effort): a.rs removed (absent ⇒ 0), b.rs=3
+            // added, c.rs still 5; total 8.
+            seed_run(&h, m, after, 8.0, &[("src/b.rs", 3.0), ("src/c.rs", 5.0)]).await;
+
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(deltas.len(), 1, "one metric touched the effort's files");
+            let d = &deltas[0];
+            assert_eq!(d.agg, "files");
+            // a.rs 2→0, b.rs 0→3 ⇒ baseline 2, current 3, Δ +1. c.rs excluded.
+            assert_eq!(d.baseline, Some(2.0));
+            assert_eq!(d.current, 3.0);
+            assert_eq!(d.delta, Some(1.0));
+            assert!(d.changed);
+            assert_eq!(d.attributed_files, Some(2));
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_disentangles_overlapping_efforts() {
+            // Two efforts overlap in time on the same stream; each claims a
+            // DIFFERENT file. The per-file attribution must keep their deltas
+            // disjoint — the core concurrency guarantee.
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2_id = eff2.id.to_string();
+
+            let m =
+                gauge_tree_def(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            claim(&h, &h.effort_id, "src/a.rs").await; // effort 1 → a.rs
+            claim(&h, &eff2_id, "src/b.rs").await; // effort 2 → b.rs
+
+            let s1 = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(s1.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(eff2.started_at.unix_ms() + 60_000);
+            seed_run(&h, m, before, 6.0, &[("src/a.rs", 2.0), ("src/b.rs", 4.0)]).await;
+            seed_run(&h, m, after, 14.0, &[("src/a.rs", 5.0), ("src/b.rs", 9.0)]).await;
+
+            let d1 = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(d1.len(), 1);
+            assert_eq!(d1[0].baseline, Some(2.0)); // a.rs only
+            assert_eq!(d1[0].current, 5.0);
+            assert_eq!(d1[0].delta, Some(3.0));
+            assert_eq!(d1[0].attributed_files, Some(1));
+
+            let d2 = h.service.effort_metric_deltas(&eff2_id).await;
+            assert_eq!(d2.len(), 1);
+            assert_eq!(d2[0].baseline, Some(4.0)); // b.rs only
+            assert_eq!(d2[0].current, 9.0);
+            assert_eq!(d2[0].delta, Some(5.0));
+            assert_eq!(d2[0].attributed_files, Some(1));
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_sums_operational_flow_per_thread() {
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            // An operational `sum` flow (tokens): summed in-window, scoped to the
+            // effort's thread (the filter that keeps concurrent threads apart).
+            let mut def =
+                oxplow_db::NewMetricDefinition::new("agent.tokens.total", "event", "Tokens");
+            def.default_agg = "sum".into();
+            def.category = Some("operational".into());
+            let m = h.service.metrics.upsert_definition(def).await.unwrap();
+            use oxplow_db::NewMetricSample;
+            for value in [1000.0, 2000.0] {
+                h.service
+                    .metrics
+                    .record_sample(NewMetricSample {
+                        captured_at: Some(after),
+                        thread_id: Some(1),
+                        ..NewMetricSample::observed(m, 1, value, "test")
+                    })
+                    .await
+                    .unwrap();
+            }
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(deltas.len(), 1);
+            let d = &deltas[0];
+            assert_eq!(d.agg, "sum");
+            assert_eq!(d.baseline, None);
+            assert_eq!(d.current, 3000.0); // 1000 + 2000
+            assert_eq!(d.delta, Some(3000.0));
+        }
+
+        #[tokio::test]
+        async fn effort_metric_context_uses_file_attribution_and_agrees_with_panel() {
+            // tsk253: the prompt now reports the effort's OWN contribution (the
+            // claimed-file slice), matching the task-page panel — not the repo
+            // total, which under overlap includes other efforts' changes.
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let m =
+                gauge_tree_def(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            // Repo total jumps 10 → 13, but THIS effort's file (a.rs) only 2 → 5;
+            // z.rs (8, unchanged, unclaimed) is another effort's churn.
+            seed_run(&h, m, before, 10.0, &[("src/a.rs", 2.0), ("src/z.rs", 8.0)]).await;
+            seed_run(&h, m, after, 13.0, &[("src/a.rs", 5.0), ("src/z.rs", 8.0)]).await;
+
+            let ctx = h.service.effort_metric_context(&h.thread).await.unwrap();
+            assert!(
+                ctx.contains("2 → 5"),
+                "file-attributed slice, not repo total: {ctx}"
+            );
+            assert!(
+                !ctx.contains("10 → 13"),
+                "must not report the repo total: {ctx}"
+            );
+
+            // The prompt agrees with the panel for the same effort.
+            let panel = h.service.effort_metric_deltas(&h.effort_id).await;
+            let d = panel
+                .iter()
+                .find(|d| d.key == "oxplow.rust.unsafe_blocks")
+                .unwrap();
+            assert_eq!(d.baseline, Some(2.0));
+            assert_eq!(d.current, 5.0);
         }
 
         #[tokio::test]

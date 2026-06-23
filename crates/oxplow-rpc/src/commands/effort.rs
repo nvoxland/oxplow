@@ -6,8 +6,8 @@ use std::path::Path;
 use oxplow_app::Services;
 use oxplow_db::{
     AgentKindTokenUsage, AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths,
-    EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TaskEffortStore as _,
-    TokenUsageByDay, TokenUsageTotals,
+    EffortFile, EffortMetricDelta, EffortObservation, ModelTokenUsage, TaskEffort,
+    TaskEffortStore as _, TokenUsageByDay, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -113,6 +113,20 @@ pub async fn list_effort_observations(
         .await)
 }
 
+/// Per-metric roll-up over an effort — grouped before→after deltas for the
+/// task/effort page's metrics panel. Attributed per family (see metrics.md):
+/// per-file gauges by the effort's claimed files, operational by thread,
+/// coverage/tests by the effort's own diff.
+pub async fn list_effort_metric_deltas(
+    svc: &Services,
+    effort_id: EffortId,
+) -> Result<Vec<EffortMetricDelta>, IpcError> {
+    Ok(svc
+        .collection
+        .effort_metric_deltas(&effort_id.to_string())
+        .await)
+}
+
 /// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
 /// newest-first. Drives the collapsed "Agent nudges" debug sub-view on the
 /// task page. See `.context/agent-model.md` (Nudge persistence).
@@ -204,6 +218,19 @@ mod tests {
         // `kind` omitted → None.
         let out = crate::dispatch(
             "list_effort_observations",
+            serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn list_effort_metric_deltas_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "list_effort_metric_deltas",
             serde_json::json!({"effortId": "eff999999"}),
             &svc,
         )

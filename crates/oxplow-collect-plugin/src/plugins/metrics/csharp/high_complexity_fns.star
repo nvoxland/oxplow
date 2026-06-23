@@ -1,10 +1,17 @@
 # oxplow.csharp.high_complexity_fns — number of C# functions whose cyclomatic
 # complexity exceeds 10. Uses the code_metrics() host builtin (per-function
 # complexity via tree-sitter), the same threshold the Rust/TS gauges flag.
+# Emits the repo-total ("tree:.") plus a per-file sample ("file:<path>", nonzero
+# only) for effort attribution.
 def transform(input):
-    n = 0
+    total = 0
+    per_file = []
     for f in files("**/*.cs"):
+        c = 0
         for m in code_metrics(f["text"], "csharp"):
             if m["complexity"] > 10:
-                n += 1
-    return {"samples": [{"value": n, "dims": {"language": "csharp"}}]}
+                c += 1
+        total += c
+        if c > 0:
+            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"language": "csharp"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "csharp"}}] + per_file}

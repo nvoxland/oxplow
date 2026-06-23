@@ -2,7 +2,8 @@
 
 use oxplow_db::{
     AgentKindTokenUsage, AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths,
-    EffortFile, EffortObservation, ModelTokenUsage, TaskEffort, TokenUsageByDay, TokenUsageTotals,
+    EffortFile, EffortMetricDelta, EffortObservation, ModelTokenUsage, TaskEffort, TokenUsageByDay,
+    TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId, Timestamp};
 
@@ -74,6 +75,17 @@ pub async fn list_effort_observations(
     kind: Option<String>,
 ) -> Result<Vec<EffortObservation>, IpcError> {
     oxplow_rpc::commands::effort::list_effort_observations(&state, effort_id, kind).await
+}
+
+/// Per-metric roll-up over an effort — grouped before→after deltas for the
+/// task/effort page's metrics panel (attributed per family; see metrics.md).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_effort_metric_deltas(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<Vec<EffortMetricDelta>, IpcError> {
+    oxplow_rpc::commands::effort::list_effort_metric_deltas(&state, effort_id).await
 }
 
 /// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
