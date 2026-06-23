@@ -772,6 +772,38 @@ impl SqliteMetricStore {
             .await
     }
 
+    /// Runs of `producer` on `thread_id` whose `started_at` falls in an effort's
+    /// time window `[start, end]` (open effort ⇒ `end = None`). The OBSERVE side
+    /// for the run attribution kinds (test/coverage/analysis) — `metric_run`
+    /// already carries thread + time, so a run is observed against an effort by
+    /// thread + window, then attributed by claim+reconcile (tsk262). A thread
+    /// belongs to one stream, so `thread_id` alone scopes it. Oldest-first.
+    pub async fn runs_in_window(
+        &self,
+        thread_id: i64,
+        producer: &str,
+        start: Timestamp,
+        end: Option<Timestamp>,
+    ) -> Result<Vec<MetricRun>, DomainError> {
+        let producer = producer.to_string();
+        let start = ts_to_string(start);
+        let end = end.map(ts_to_string);
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {RUN_COLS} FROM metric_run
+                      WHERE thread_id = ?1 AND producer = ?2
+                        AND started_at >= ?3
+                        AND (?4 IS NULL OR started_at <= ?4)
+                      ORDER BY started_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![thread_id, producer, start, end], row_to_run)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// All **headline** samples for a metric, newest-first. Per-file attribution
     /// samples (`subject_kind = 'file'`) are excluded — they're the effort-
     /// rollup's grain (`file_samples_for_paths`), not the headline time series

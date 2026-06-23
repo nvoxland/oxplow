@@ -17,7 +17,10 @@
 
 use async_trait::async_trait;
 
-use oxplow_db::{SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore as _};
+use oxplow_db::{
+    SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore,
+    TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
+};
 use oxplow_domain::EffortId;
 
 /// Cap on the observed-but-unclaimed list surfaced to the agent per kind. Above
@@ -202,6 +205,92 @@ impl AttributionKind for FileKind<'_> {
     async fn persist_unattributed(&self, effort_id: &EffortId, refs: &[String]) -> bool {
         self.efforts
             .replace_unattributed_files(effort_id, refs)
+            .await
+            .is_ok()
+    }
+}
+
+/// Run kinds (`test-run`, `coverage`, `analysis`): events oxplow OBSERVES as
+/// `metric_run` rows in the effort's thread+time window, attributed via the
+/// generic ledger (`effort_attribution`). Unlike files, a run isn't an object
+/// you diff — oxplow can see *that* tests ran and *what* they returned, but not
+/// which sub-agent/effort, so the boundary claim resolves it. `ref` = the
+/// `metric_run` id as `run:<id>`. One struct serves every run producer.
+pub struct RunKind<'a> {
+    pub efforts: &'a SqliteTaskEffortStore,
+    pub metrics: &'a SqliteMetricStore,
+    pub ledger: &'a SqliteAttributionStore,
+    /// Attribution kind name, e.g. `test-run`.
+    pub kind: &'static str,
+    /// The `metric_run.producer` to observe, e.g. `tests`.
+    pub producer: &'static str,
+}
+
+impl<'a> RunKind<'a> {
+    /// Test runs (`producer = "tests"`, kind `"test-run"`).
+    pub fn tests(
+        efforts: &'a SqliteTaskEffortStore,
+        metrics: &'a SqliteMetricStore,
+        ledger: &'a SqliteAttributionStore,
+    ) -> Self {
+        Self {
+            efforts,
+            metrics,
+            ledger,
+            kind: "test-run",
+            producer: "tests",
+        }
+    }
+}
+
+#[async_trait]
+impl AttributionKind for RunKind<'_> {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    async fn gather(&self, effort_id: &EffortId) -> Option<AttrSets> {
+        let effort = self.efforts.get_effort(effort_id).await.ok().flatten()?;
+        // OBSERVE = this producer's runs on the effort's thread in its time
+        // window. (A run a concurrent effort owns falls in BOTH windows; the
+        // cross-effort dedup below keeps it off this effort's residue.)
+        let runs = self
+            .metrics
+            .runs_in_window(
+                effort.thread_id.value(),
+                self.producer,
+                effort.started_at,
+                effort.ended_at,
+            )
+            .await
+            .ok()?;
+        let observed: Vec<String> = runs.iter().map(|r| format!("run:{}", r.id)).collect();
+        let claimed = self
+            .ledger
+            .list_refs(effort_id, self.kind, STATE_CLAIMED)
+            .await
+            .unwrap_or_default();
+        let acknowledged = self
+            .ledger
+            .list_refs(effort_id, self.kind, STATE_ACKNOWLEDGED)
+            .await
+            .unwrap_or_default();
+        let other_claimed = self
+            .ledger
+            .refs_claimed_by_other_efforts(effort_id, self.kind)
+            .await
+            .unwrap_or_default();
+        Some(AttrSets {
+            claimed,
+            observed,
+            acknowledged,
+            other_claimed,
+        })
+    }
+
+    async fn persist_unattributed(&self, effort_id: &EffortId, refs: &[String]) -> bool {
+        self.ledger
+            .replace_unattributed(effort_id, self.kind, refs)
             .await
             .is_ok()
     }

@@ -7,6 +7,7 @@
 pub mod agent_nudge_store;
 pub mod agent_stores;
 pub mod analytics_stores;
+pub mod attribution_store;
 pub mod comment_store;
 mod database;
 pub mod effort_store;
@@ -30,6 +31,9 @@ pub use analytics_stores::{
     PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotStats,
     SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
     SqliteUsageStore, UsageEvent, UsageRollup,
+};
+pub use attribution_store::{
+    SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,
 };
 pub use comment_store::SqliteCommentStore;
 pub use database::{Database, DbInitError};

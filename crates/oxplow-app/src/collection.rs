@@ -3529,6 +3529,82 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn run_attribution_disentangles_concurrent_efforts_and_flags_unclaimed() {
+            // tsk262: test RUNS ride the kind-agnostic claim→reconcile engine.
+            // Two efforts overlap on one thread; three test runs land in the
+            // shared window. Each effort claims its own run; the third is
+            // claimed by nobody. RunKind must keep each effort's residue to only
+            // the truly-unattributed run — the other effort's run is deduped out.
+            use crate::attribution::{reconcile_close, RunKind};
+            use oxplow_db::{NewMetricRun, SqliteAttributionStore, STATE_CLAIMED};
+
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+
+            // Three observed test runs on the thread (after both efforts opened,
+            // so all three fall in both open windows).
+            let seed_run = || async {
+                let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
+                run.thread_id = Some(h.thread.value());
+                h.service.metrics.record_run(run).await.unwrap()
+            };
+            let r1 = seed_run().await;
+            let r2 = seed_run().await;
+            let r3 = seed_run().await;
+
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            ledger
+                .set_state(&eid1, "test-run", &format!("run:{r1}"), STATE_CLAIMED, None)
+                .await
+                .unwrap();
+            ledger
+                .set_state(
+                    &eff2.id,
+                    "test-run",
+                    &format!("run:{r2}"),
+                    STATE_CLAIMED,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let kind1 = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            // eff1: observed {r1,r2,r3} − claimed {r1} − other-claimed {r2} = {r3}.
+            assert_eq!(
+                reconcile_close(&kind1, &eid1).await,
+                vec![format!("run:{r3}")]
+            );
+            let kind2 = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            // eff2: observed all − claimed {r2} − other-claimed {r1} = {r3}.
+            assert_eq!(
+                reconcile_close(&kind2, &eff2.id).await,
+                vec![format!("run:{r3}")]
+            );
+        }
+
+        #[tokio::test]
         async fn ingest_coverage_writes_coverage_detail_finding_to_substrate() {
             let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
             h.service
