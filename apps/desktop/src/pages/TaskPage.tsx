@@ -112,9 +112,10 @@ export function TaskPage({
     };
     if (!inThreadItems) refetch();
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: string }).itemId;
-      if (targetId !== itemId) return;
+      // Oxplow events are `kind`-tagged (`{ kind: "tasksChanged", threadId }`);
+      // there is no `type` field. Only the out-of-thread task needs this — the
+      // in-thread case is driven by the live `items` prop.
+      if (event.kind !== "tasksChanged") return;
       refetch();
     });
     return () => {
@@ -130,9 +131,12 @@ export function TaskPage({
       if (!cancelled) setEfforts(rows);
     });
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type !== "task.changed") return;
-      const targetId = (event as unknown as { itemId?: string }).itemId;
-      if (targetId !== item.id) return;
+      // `tasksChanged` is thread-scoped and fires when an effort opens/closes
+      // as part of a status transition — refetch this task's efforts so the
+      // Activity timeline reflects the close without a remount.
+      if (event.kind !== "tasksChanged") return;
+      const threadId = (event as { threadId?: string | null }).threadId ?? null;
+      if (item.thread_id != null && threadId !== item.thread_id) return;
       void listTaskEfforts(item.id).then((rows) => {
         if (!cancelled) setEfforts(rows);
       });
