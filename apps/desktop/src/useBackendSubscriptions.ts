@@ -174,7 +174,7 @@ export function useBackendSubscriptions(
   // every thread change.
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "followup.changed") return;
+      if (event.kind !== "followupsChanged") return;
       const threadId = event.threadId;
       let streamIdForThread: string | null = null;
       for (const [sid, state] of Object.entries(threadStatesRef.current ?? {})) {
@@ -200,7 +200,7 @@ export function useBackendSubscriptions(
 
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "thread.changed") return;
+      if (event.kind !== "threadsChanged") return;
       void getThreadState(event.streamId)
         .then((state) => {
           setThreadStates((prev) => ({ ...prev, [event.streamId]: state }));
@@ -208,7 +208,6 @@ export function useBackendSubscriptions(
         .catch((error) => {
           logUi("warn", "failed to refresh thread state after change event", {
             streamId: event.streamId,
-            threadId: event.threadId,
             kind: event.kind,
             error: String(error),
           });
@@ -217,27 +216,12 @@ export function useBackendSubscriptions(
     return unsubscribe;
   }, [setThreadStates]);
 
-  useEffect(() => {
-    const unsubscribe = subscribeOxplowEvents((event) => {
-      if (event.type !== "stream.changed" || event.kind !== "prompt-changed" || !event.streamId) return;
-      void listStreams()
-        .then((updated) => {
-          setStreams(updated);
-          const updatedStream = updated.find((s) => s.id === event.streamId);
-          if (updatedStream) setStream((prev) => (prev?.id === updatedStream.id ? updatedStream : prev));
-        })
-        .catch((error) => {
-          logUi("warn", "failed to refresh streams after prompt change", { error: String(error) });
-        });
-    });
-    return unsubscribe;
-  }, [setStreams, setStream]);
-
   // Refresh the stream list whenever the cross-store bus signals a
-  // streams.changed (creation, archive via Remove…, rename, reorder).
-  // If the currently-selected stream disappeared from the list (e.g. it
-  // was just archived), fall back to the primary so the rail doesn't
-  // render against a stale id.
+  // `streamsChanged` (creation, archive via Remove…, rename, reorder,
+  // prompt edit). Swap the currently-selected stream for its fresh copy so
+  // content changes (e.g. the custom prompt) reflect live; if it disappeared
+  // from the list (e.g. it was just archived), fall back to the primary so the
+  // rail doesn't render against a stale id.
   useEffect(() => {
     const unsubscribe = subscribeOxplowEvents((event) => {
       if (event.kind !== "streamsChanged") return;
@@ -246,7 +230,8 @@ export function useBackendSubscriptions(
           setStreams(updated);
           setStream((prev) => {
             if (!prev) return prev;
-            if (updated.some((s) => s.id === prev.id)) return prev;
+            const fresh = updated.find((s) => s.id === prev.id);
+            if (fresh) return fresh;
             const primary = updated.find((s) => s.kind === "primary");
             return primary ?? updated[0] ?? null;
           });
@@ -287,7 +272,7 @@ export function useBackendSubscriptions(
     };
     reload();
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type === "config.changed") reload();
+      if (event.kind === "configChanged") reload();
     });
     const unsubReconnect = onRemoteReconnect(() => reload());
     return () => {

@@ -91,9 +91,9 @@ afterEach(cleanup);
 
 test("subscribes to the oxplow event bus on mount", () => {
   render(<Harness threadStates={{}} />);
-  // followup.changed, thread.changed, stream prompt-changed,
-  // streamsChanged, streamOrphaned, config.changed = 6 subscriptions.
-  expect(oxplowHandlers.length).toBe(6);
+  // followupsChanged, threadsChanged, streamsChanged, streamOrphaned,
+  // configChanged = 5 subscriptions.
+  expect(oxplowHandlers.length).toBe(5);
 });
 
 test("does not re-subscribe across re-renders (no churn)", () => {
@@ -108,10 +108,10 @@ test("does not re-subscribe across re-renders (no churn)", () => {
 test("unsubscribes every subscription on unmount", () => {
   const { unmount } = render(<Harness threadStates={{}} />);
   unmount();
-  // 6 oxplow + workspace-context + backlog + task + agent-status +
-  // stall-alerts = 11, plus 3 reconnect handlers (backlog, config,
-  // agent-status) = 14.
-  expect(unsubCount).toBe(14);
+  // 5 oxplow + workspace-context + backlog + task + agent-status +
+  // stall-alerts = 10, plus 3 reconnect handlers (backlog, config,
+  // agent-status) = 13.
+  expect(unsubCount).toBe(13);
 });
 
 test("registers reconnect handlers for the core stores", () => {
@@ -138,13 +138,13 @@ test("re-hydrates core stores on a remote reconnect", async () => {
   expect(listAgentStatuses).toHaveBeenCalledTimes(2);
 });
 
-test("followup.changed reads the current threadStates ref to recover the stream id", async () => {
+test("followupsChanged reads the current threadStates ref to recover the stream id", async () => {
   const threadStates: ThreadStates = { "s-1": { threads: [{ id: "t-1" }] } };
   render(<Harness threadStates={threadStates} />);
 
   await act(async () => {
     for (const handler of oxplowHandlers) {
-      handler({ type: "followup.changed", threadId: "t-1" });
+      handler({ kind: "followupsChanged", threadId: "t-1" });
     }
     await Promise.resolve();
   });

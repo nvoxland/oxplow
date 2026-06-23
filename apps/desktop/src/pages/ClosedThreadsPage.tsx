@@ -54,14 +54,15 @@ export function ClosedThreadsPage({ stream, onAfterReopen }: ClosedThreadsPagePr
   useEffect(() => {
     void refresh();
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.type === "thread.changed") {
-        if (event.kind === "closed" || event.kind === "reopened") {
-          void refresh();
-        }
-      }
+      // `threadsChanged` is the coarse signal for a close/reopen (status flip)
+      // on this page's stream — re-list the closed threads.
+      if (event.kind !== "threadsChanged") return;
+      const streamId = (event as { streamId?: string }).streamId;
+      if (stream && streamId !== stream.id) return;
+      void refresh();
     });
     return unsub;
-  }, [refresh]);
+  }, [refresh, stream]);
 
   async function handleReopen(threadId: string) {
     if (!stream) return;
