@@ -48,6 +48,9 @@ export type PageKind =
   | "effort-coverage"
   | "usage"
   | "metrics"
+  | "metrics-recorded"
+  | "metric-detail"
+  | "metrics-catalog"
   | "page-analytics"
   | "token-analytics";
 

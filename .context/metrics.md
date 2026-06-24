@@ -191,13 +191,35 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 ## UI
 
-`apps/desktop/src/pages/MetricsPage.tsx` — the **Metrics** page, reachable from
-the RailHud (Activity → Metrics; registered like the `usage` index page in
-`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`,
-`pageKinds.tsx`). Three sections, all reading the one fact table — no per-metric
-UI code:
+The metric UI is **four separate pages**, each with one job, all reading the one
+fact table — no per-metric UI code. Each is registered like the `usage` index
+page (`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`,
+`pageKinds.tsx`) and cross-links to the others in its header. The split happened
+in two steps: the Catalog off first (tsk282), then Explorer/Recorded/Detail
+(tsk283). The three **observe** pages are read-only; the Catalog is the only one
+that **writes**.
 
-- **Explorer** (`MetricsExplorer.tsx`, P4) — multi-measure overlay on one time
+- **Metrics Explorer** (`MetricsExplorerPage.tsx` wrapping `MetricsExplorer.tsx`)
+  — the marquee page and the rail "Metrics" entry (`indexRef("metrics")` /
+  `metricsExplorerRef()`). Header links: "Recorded metrics →", "Configure
+  metrics →". A measure's title navigates to the metric's **detail page** (via
+  `onOpenDetail` → `metricRef`).
+- **Recorded Metrics** (`RecordedMetricsPage.tsx`, `PageKind`
+  `"metrics-recorded"` / `recordedMetricsRef()`) — the seeded definitions with
+  latest value, trend sparkline, capture branch, sample count; colored by
+  `statusColor` (target/`fail_at`/direction). Each `<tr>` adopts browser-style
+  click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
+  modifier/middle/right → new tab). Header links: "Explorer →", "Configure
+  metrics →". Live-refreshes on `metricSamplesChanged`.
+- **Metric Detail** (`MetricDetailPage.tsx` wrapping `MetricDetail.tsx`,
+  `PageKind` `"metric-detail"`, routed by `metricRef(key, effort)`) — its own
+  page (tsk283), navigated into from the Explorer, Recorded Metrics, and the
+  task-page EffortMetrics drill-in (so there's no inline overlay). Back goes
+  through `PageNavigationContext` (`goBack`, falling back to Recorded Metrics).
+  See the `MetricDetail` component bullet below for what each kind renders.
+
+`MetricsExplorer.tsx` itself (the chart component, P4) is a multi-measure
+overlay on one time
   axis + group-by a conformed dimension (`branch`/`subject`/declared dims like
   `model`/`language`) + **line / bar / scatter** viz + target band + legend.
   Inline SVG (no charting lib, like the codebase's other visuals); pure grouping
@@ -211,15 +233,22 @@ UI code:
   faint bands behind the series — hover names the effort, click scopes the chart
   to that window (Clear resets). A measure's title links to its per-kind
   **detail** (via `onOpenDetail`).
-- **Metric detail** (`MetricDetail.tsx` + pure `metricDetailData.ts`, tsk232) —
-  one renderer selected from `metric_definition.kind`, opened by clicking a
-  Recorded-metrics row or an Explorer measure. Every kind shows the value trend
-  (+ Δ-vs-first, branch, trust badge); each adds its drill-in from the latest
-  run's findings (`list_metric_findings`): **findings** → a findings table,
-  **test** → the suite/case tree (from the `test-detail` payload), **coverage** →
-  per-file uncovered changed lines (`coverage-detail`), **event** → top-N
-  subjects, **gauge** → trend only.
-- **Catalog** (`MetricsCatalog.tsx`, P4) — browse the available catalog
+
+`MetricDetail.tsx` (+ pure `metricDetailData.ts`, tsk232) is the renderer
+`MetricDetailPage` mounts: one view selected from `metric_definition.kind`.
+Every kind shows the value trend (+ Δ-vs-first, branch, trust badge); each adds
+its drill-in from the latest run's findings (`list_metric_findings`):
+**findings** → a findings table, **test** → the suite/case tree (from the
+`test-detail` payload), **coverage** → per-file uncovered changed lines
+(`coverage-detail`), **event** → top-N subjects, **gauge** → trend only.
+
+The **configure** page (tsk282):
+
+- **Metrics Catalog** (`MetricsCatalogPage.tsx` wrapping `MetricsCatalog.tsx`,
+  P4) — a dedicated top-level page (`PageKind` `"metrics-catalog"`,
+  `metricsCatalogRef()`, launcher Activity category), the only metrics surface
+  that **writes**.
+  Browse the available catalog
   (built-in ∪ global ∪ project) via `list_metric_catalog`; enable/disable with a
   toggle (`set_metric_enabled` → writes a `use:` into `oxplow.yaml`), and
   **inline-edit target/trigger** (tsk233) via `set_metric_override` →
@@ -237,18 +266,14 @@ UI code:
   (it's outside the worktree). The runner resolves each metric's `entryFile`
   against the right base dir (`MetricsService::script_base_dir`: `<global>/metrics`
   for a global-scope metric, else the project dir).
-- **Recorded metrics** — the seeded definitions with latest value, trend
-  sparkline, capture branch, sample count; colored by `statusColor`
-  (target/`fail_at`/direction); rows open the detail view. Live-refreshes on
-  `metricSamplesChanged`.
 
-Metrics are also surfaced **organically off the Metrics page** (tsk250): the
+Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 task/effort page renders an `EffortMetricsBlock` (`components/EffortMetrics.tsx`)
 under each effort — the metrics whose facts the effort touched, as compact
 before→after rows **grouped by type** (`metricGroup`), self-hiding when empty and
 live on `metricSamplesChanged`. A row drills into the metric's detail via
-`metricRef(key, {effortId,start,end})` → `MetricsPage` (`initialMetricKey` /
-`initialEffort` props) opens `MetricDetail`, which renders an **"In this effort"**
+`metricRef(key, {effortId,start,end})` → `MetricDetailPage` (`metricKey` /
+`effort` props) renders `MetricDetail` with an **"In this effort"**
 before→after callout (+ per-file count) above the full trend.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
@@ -256,7 +281,8 @@ Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
 `ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
 set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type.
 **Token Analytics is retired** as a bespoke page (tsk233) — its `token-analytics`
-tab now renders the Metrics page with the "Tokens by model" preset. (Page/Usage
+tab now renders the **Metrics Explorer** page with the "Tokens by model" preset.
+(Page/Usage
 analytics stay bespoke: `page_visit`/`usage_event` are deliberately **not**
 projected into the substrate — see the producers note above.)
 

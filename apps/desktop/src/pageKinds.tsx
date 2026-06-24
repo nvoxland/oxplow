@@ -131,6 +131,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Activity;
     case "metrics":
       return Activity;
+    case "metrics-recorded":
+      return BarChart3;
+    case "metric-detail":
+      return Gauge;
+    case "metrics-catalog":
+      return Library;
     case "page-analytics":
       return BarChart3;
     case "token-analytics":
@@ -227,6 +233,12 @@ export function pageKindLabel(kind: string): string {
       return "usage";
     case "metrics":
       return "metrics";
+    case "metrics-recorded":
+      return "recorded metrics";
+    case "metric-detail":
+      return "metric";
+    case "metrics-catalog":
+      return "metrics catalog";
     case "page-analytics":
       return "page analytics";
     case "token-analytics":
@@ -263,6 +275,8 @@ const INDEX_KINDS = new Set<string>([
   "uncommitted-changes",
   "usage",
   "metrics",
+  "metrics-recorded",
+  "metrics-catalog",
   "page-analytics",
   "token-analytics",
 ]);

@@ -98,18 +98,39 @@ export function effortCoverageRef(effortId: string): TabRef {
   return { id: `effort-coverage:${effortId}`, kind: "effort-coverage", payload: { effortId } };
 }
 
-/** Open the Metrics page focused on one metric's detail view, optionally
- *  scoped to an effort's window — the task-page metrics-panel drill-in
- *  ("In this effort" before→after + further exploration). */
+/** Open one metric's detail page, optionally scoped to an effort's window —
+ *  the task-page metrics-panel drill-in ("In this effort" before→after +
+ *  further exploration). Its own page kind (`metric-detail`); the Explorer and
+ *  Recorded Metrics pages both navigate into it. */
 export function metricRef(
   metricKey: string,
   effort?: { effortId: string; start: string; end: string | null },
 ): TabRef {
-  return { id: `metrics:${metricKey}`, kind: "metrics", payload: { metricKey, effort } };
+  return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "page-analytics" | "token-analytics"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "metrics-catalog" | "page-analytics" | "token-analytics"): TabRef {
   return { id: kind, kind, payload: null };
+}
+
+/** The Metrics Explorer page — multi-measure charts over time. The marquee
+ *  *observe* surface; `indexRef("metrics")` is the rail "Metrics" entry. */
+export function metricsExplorerRef(): TabRef {
+  return indexRef("metrics");
+}
+
+/** The Recorded Metrics page — the seeded definitions with latest value, trend
+ *  sparkline, capture branch, sample count. Split off from the Explorer so each
+ *  page has one job (tsk283). */
+export function recordedMetricsRef(): TabRef {
+  return indexRef("metrics-recorded");
+}
+
+/** The Metrics Catalog page — browse the available catalog (built-in ∪ global
+ *  ∪ project), enable/disable, edit target/trigger, and scaffold new metrics.
+ *  The *configure* surface, split off from the *observe* Metrics page. */
+export function metricsCatalogRef(): TabRef {
+  return indexRef("metrics-catalog");
 }
 
 /** The global Comments inbox: every comment in the current stream. */
@@ -322,6 +343,9 @@ export function refFromTabId(id: string): TabRef {
       return taskRef(rest);
     case "finding":
       return findingRef(rest);
+    case "metric-detail":
+      // Effort scope isn't encoded in the id; history reopens the full trend.
+      return metricRef(rest);
     case "directory":
       return directoryRef(rest);
     case "snapshot": {

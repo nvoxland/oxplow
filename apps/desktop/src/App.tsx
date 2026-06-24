@@ -117,7 +117,10 @@ import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
-import { MetricsPage } from "./pages/MetricsPage.js";
+import { MetricDetailPage } from "./pages/MetricDetailPage.js";
+import { MetricsCatalogPage } from "./pages/MetricsCatalogPage.js";
+import { MetricsExplorerPage } from "./pages/MetricsExplorerPage.js";
+import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
@@ -1873,6 +1876,9 @@ export function App() {
       case "effort-coverage":
       case "usage":
       case "metrics":
+      case "metrics-recorded":
+      case "metric-detail":
+      case "metrics-catalog":
       case "page-analytics":
       case "token-analytics":
       case "op-error": {
@@ -2707,24 +2713,40 @@ export function App() {
           render: () => <UsagePage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "metrics") {
-        // `metricRef(key, effort)` deep-links into one metric's detail view
-        // (the task-page metrics-panel drill-in); the bare index ref has no
-        // payload and lands on the catalog.
+        tabs.push({
+          id: ref.id,
+          label: "Metrics",
+          closable: true,
+          render: () => <MetricsExplorerPage onOpenPage={navOpen} />,
+        });
+      } else if (ref.kind === "metrics-recorded") {
+        tabs.push({
+          id: ref.id,
+          label: "Recorded Metrics",
+          closable: true,
+          render: () => <RecordedMetricsPage onOpenPage={navOpen} />,
+        });
+      } else if (ref.kind === "metric-detail") {
+        // `metricRef(key, effort)` deep-links into one metric's detail page
+        // (the task-page metrics-panel drill-in).
         const p = (ref.payload ?? null) as {
           metricKey?: string;
           effort?: { effortId: string; start: string; end: string | null };
         } | null;
         tabs.push({
           id: ref.id,
-          label: p?.metricKey ? "Metric" : "Metrics",
+          label: "Metric",
           closable: true,
           render: () => (
-            <MetricsPage
-              onOpenPage={navOpen}
-              initialMetricKey={p?.metricKey}
-              initialEffort={p?.effort}
-            />
+            <MetricDetailPage metricKey={p?.metricKey} effort={p?.effort} onOpenPage={navOpen} />
           ),
+        });
+      } else if (ref.kind === "metrics-catalog") {
+        tabs.push({
+          id: ref.id,
+          label: "Metrics Catalog",
+          closable: true,
+          render: () => <MetricsCatalogPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({
@@ -2740,7 +2762,7 @@ export function App() {
           id: ref.id,
           label: "Token Analytics",
           closable: true,
-          render: () => <MetricsPage initialPreset="Tokens by model" onOpenPage={navOpen} />,
+          render: () => <MetricsExplorerPage initialPreset="Tokens by model" onOpenPage={navOpen} />,
         });
       } else if (
         ref.kind === "tasks"
