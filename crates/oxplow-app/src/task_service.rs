@@ -454,8 +454,7 @@ impl TaskService {
             // residue for the EFFORT REVIEW. Single-effort runs were already
             // auto-attributed at record, so their residue is empty.
             if let (Some(attribution), Some(metrics)) = (&self.attribution, &self.metrics) {
-                let kind =
-                    crate::attribution::RunKind::tests(effort_store, metrics, attribution);
+                let kind = crate::attribution::RunKind::tests(effort_store, metrics, attribution);
                 let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }

@@ -1842,10 +1842,30 @@ impl CollectionService {
             let Ok(Some(def)) = self.metrics.get_definition(metric_key).await else {
                 continue;
             };
-            let Ok(samples) = self.metrics.samples_for_effort(def.id, eid.value()).await else {
-                continue;
+            // Tests are observe-always → attribute by the ledger CLAIM (exact
+            // under concurrency), not a time window (which would mix concurrent
+            // efforts' runs). Coverage/analysis are gated on a single open
+            // effort, so their time window is unambiguous (tsk263).
+            let samples = if obs_kind == "test-run" {
+                let run_ids: Vec<i64> = self
+                    .attribution
+                    .list_refs(&eid, "test-run", STATE_CLAIMED)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
+                    .collect();
+                self.metrics
+                    .samples_for_runs(def.id, run_ids)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                match self.metrics.samples_for_effort(def.id, eid.value()).await {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                }
             };
-            // samples_for_effort is time-ASC; newest-first for the panel.
+            // Samples are time-ASC; newest-first for the panel.
             for sample in samples.into_iter().rev() {
                 let payload_json = match sample.run_id {
                     Some(rid) => self

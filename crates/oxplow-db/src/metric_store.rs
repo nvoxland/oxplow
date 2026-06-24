@@ -891,6 +891,43 @@ impl SqliteMetricStore {
             .await
     }
 
+    /// Headline samples of `metric_id` belonging to the given `run_ids`,
+    /// oldest-first. The attribution-by-claim read (tsk263): a run-kind producer
+    /// (tests) records observe-always, then a run is attributed to an effort via
+    /// the ledger — so the effort's samples are those of its *claimed* runs, not
+    /// a time window (which would mix concurrent efforts' runs). File-grain
+    /// samples are excluded, matching the headline reads.
+    pub async fn samples_for_runs(
+        &self,
+        metric_id: i64,
+        run_ids: Vec<i64>,
+    ) -> Result<Vec<MetricSample>, DomainError> {
+        if run_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.db
+            .call(move |conn| {
+                let placeholders = std::iter::repeat("?")
+                    .take(run_ids.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT {SAMPLE_COLS} FROM metric_sample
+                      WHERE metric_id = ? AND run_id IN ({placeholders})
+                        AND (subject_kind IS NULL OR subject_kind != 'file')
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&metric_id];
+                for r in &run_ids {
+                    binds.push(r);
+                }
+                let rows = stmt.query_map(rusqlite::params_from_iter(binds), row_to_sample)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// Findings for a run.
     pub async fn list_findings(&self, run_id: i64) -> Result<Vec<MetricFinding>, DomainError> {
         self.db
