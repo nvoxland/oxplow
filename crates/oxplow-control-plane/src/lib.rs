@@ -1119,14 +1119,22 @@ async fn stop_directive(
                 &eid,
             )
             .await;
-            let unattributed_runs = ctx
+            let unattributed_refs = ctx
                 .services
                 .attribution_store
                 .list_refs(&eid, "test-run", oxplow_db::STATE_UNATTRIBUTED)
                 .await
                 .unwrap_or_default();
-            if file_review.is_none() && unattributed_runs.is_empty() {
+            if file_review.is_none() && unattributed_refs.is_empty() {
                 continue;
+            }
+            // Enrich each bare `run:<id>` ref into a human descriptor the agent
+            // can actually recognize ("run:47 — cargo test (419 passed, 0
+            // failed) @ 10:03") — the ref stays at the front so `claim_runs`
+            // still parses it (tsk266).
+            let mut unattributed_runs = Vec::with_capacity(unattributed_refs.len());
+            for r in &unattributed_refs {
+                unattributed_runs.push(describe_run(&ctx.services.metric_store, r).await);
             }
             // task_id/title come from the file review when present; otherwise
             // resolve from the effort (run-only residue, no file discrepancy).
@@ -1237,6 +1245,75 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
         items.len(),
         titles.join("\n")
     )
+}
+
+/// Compose the human descriptor for a run from its already-fetched parts. Pure
+/// so it's unit-testable; [`describe_run`] does the I/O and calls this (tsk266).
+/// The `run:<id>` ref leads so `claim_runs`/`disclaim_runs` can still parse it.
+fn format_run_descriptor(
+    run_ref: &str,
+    command: Option<&str>,
+    passed: Option<i64>,
+    failed: Option<i64>,
+    time_hm: Option<(u8, u8)>,
+) -> String {
+    let mut out = run_ref.to_string();
+    if let Some(cmd) = command.map(str::trim).filter(|c| !c.is_empty()) {
+        out.push_str(&format!(" — {cmd}"));
+    }
+    let mut counts = Vec::new();
+    if let Some(p) = passed {
+        counts.push(format!("{p} passed"));
+    }
+    if let Some(f) = failed {
+        counts.push(format!("{f} failed"));
+    }
+    if !counts.is_empty() {
+        out.push_str(&format!(" ({})", counts.join(", ")));
+    }
+    if let Some((h, m)) = time_hm {
+        out.push_str(&format!(" @ {h:02}:{m:02}"));
+    }
+    out
+}
+
+/// Turn a bare `run:<id>` ledger ref into a descriptor by joining the
+/// `metric_run` row (timestamp) + its `test-detail` finding (command + counts)
+/// from the substrate. Falls back to the bare ref when the run can't be looked
+/// up — never blocks the review (tsk266).
+async fn describe_run(metrics: &oxplow_db::SqliteMetricStore, run_ref: &str) -> String {
+    let Some(id) = run_ref
+        .strip_prefix("run:")
+        .and_then(|s| s.parse::<i64>().ok())
+    else {
+        return run_ref.to_string();
+    };
+    let detail = metrics
+        .list_findings(id)
+        .await
+        .ok()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|f| f.kind == "test-detail")
+        .and_then(|f| f.extra_json)
+        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
+    let command = detail
+        .as_ref()
+        .and_then(|d| d.get("command").and_then(|c| c.as_str()))
+        .map(str::to_string);
+    let passed = detail
+        .as_ref()
+        .and_then(|d| d.get("passed").and_then(serde_json::Value::as_i64));
+    let failed = detail
+        .as_ref()
+        .and_then(|d| d.get("failed").and_then(serde_json::Value::as_i64));
+    let time_hm = metrics
+        .get_run(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| (r.started_at.0.hour(), r.started_at.0.minute()));
+    format_run_descriptor(run_ref, command.as_deref(), passed, failed, time_hm)
 }
 
 fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
@@ -1443,6 +1520,30 @@ mod tests {
         AgentKind, Stream, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, ThreadStatus,
         Timestamp,
     };
+
+    #[test]
+    fn format_run_descriptor_renders_command_counts_and_time() {
+        // tsk266: the agent gets a recognizable line, not an opaque id.
+        assert_eq!(
+            format_run_descriptor(
+                "run:47",
+                Some("cargo test"),
+                Some(419),
+                Some(0),
+                Some((10, 3))
+            ),
+            "run:47 — cargo test (419 passed, 0 failed) @ 10:03"
+        );
+        // Every piece is optional; the ref always leads so claim_runs can parse it.
+        assert_eq!(
+            format_run_descriptor("run:9", None, None, None, None),
+            "run:9"
+        );
+        assert_eq!(
+            format_run_descriptor("run:9", Some("   "), Some(5), None, None),
+            "run:9 (5 passed)"
+        );
+    }
 
     /// Build an `AppCtx` over an in-memory DB for filing-claim tests.
     /// The session layer refuses non-git dirs, so init a repo first.
