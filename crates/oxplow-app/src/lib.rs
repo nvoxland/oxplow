@@ -501,6 +501,7 @@ impl Services {
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let metric_store = Arc::new(SqliteMetricStore::new(db.clone()));
+        let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
@@ -629,6 +630,7 @@ impl Services {
             config_arc.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
+            attribution_store.clone(),
         );
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(

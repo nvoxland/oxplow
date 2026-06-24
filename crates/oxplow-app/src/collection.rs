@@ -29,7 +29,8 @@ use oxplow_db::{
     NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
 };
 use oxplow_db::{
-    SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffort, TaskEffortStore,
+    SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
+    TaskEffort, TaskEffortStore, STATE_CLAIMED,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, ThreadId};
@@ -279,6 +280,11 @@ pub struct CollectionService {
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     events: EventBus,
+    /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
+    /// analysis) record their claim state here. A run is auto-attributed to the
+    /// open effort at record time only when unambiguous (`find_single_open_for_thread`);
+    /// the concurrent case is resolved by the close reconcile + the agent's claim.
+    attribution: Arc<SqliteAttributionStore>,
     /// Efforts already nudged about a report-less test run. In-memory:
     /// ephemeral guidance that shouldn't be persisted or survive a restart.
     /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
@@ -312,6 +318,7 @@ impl CollectionService {
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
         events: EventBus,
+        attribution: Arc<SqliteAttributionStore>,
     ) -> Self {
         Self {
             metrics,
@@ -323,6 +330,7 @@ impl CollectionService {
             config,
             project_dir,
             events,
+            attribution,
             nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_commits: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_coverage: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
@@ -382,9 +390,8 @@ impl CollectionService {
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
     ) -> Result<Option<i64>, DomainError> {
-        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
-            return Ok(None);
-        };
+        // OBSERVE: record the run regardless of effort; attribution is separate
+        // (tsk263). We only need the stream to record into the substrate.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
@@ -434,23 +441,46 @@ impl CollectionService {
         // Dual-write into the unified metric substrate (best-effort) — counts as
         // samples + the full payload (suite/case tree) as a `test-detail`
         // finding so the effort panel can render off the substrate (tsk215).
-        self.mirror_test_metrics(
-            thread,
-            &stream_id,
-            provenance,
-            source,
-            passed,
-            failed,
-            total,
-            Some(serde_json::Value::Object(payload.clone())),
-        )
-        .await;
-        // Substrate is the sole store now (tsk215) — `stream_id` is consumed by
-        // the mirror above; the suite/case tree is kept as a `test-detail`
-        // finding. Signal the panel to refetch; `Some` = recorded.
+        let run_id = self
+            .mirror_test_metrics(
+                thread,
+                &stream_id,
+                provenance,
+                source,
+                passed,
+                failed,
+                total,
+                Some(serde_json::Value::Object(payload.clone())),
+            )
+            .await;
         let _ = (stream_id, payload);
-        self.emit(thread, &effort);
-        Ok(Some(0))
+        // ATTRIBUTE the run to the effort ONLY when unambiguous (exactly one
+        // open). Concurrent efforts ⇒ unattributed — the close reconcile + the
+        // agent's claim resolve it (tsk263). Best-effort: a ledger write error
+        // never fails the host path.
+        let single = self
+            .efforts
+            .find_single_open_for_thread(thread)
+            .await
+            .ok()
+            .flatten();
+        if let (Some(rid), Some(effort)) = (run_id, single.as_ref()) {
+            let _ = self
+                .attribution
+                .set_state(
+                    &effort.id,
+                    "test-run",
+                    &format!("run:{rid}"),
+                    STATE_CLAIMED,
+                    None,
+                )
+                .await;
+        }
+        // Refresh the effort panel when there's a single effort to refresh.
+        if let Some(effort) = single.as_ref() {
+            self.emit(thread, effort);
+        }
+        Ok(run_id.map(|_| 0))
     }
 
     /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
@@ -462,7 +492,7 @@ impl CollectionService {
         format_override: Option<String>,
         skip_if_stale: bool,
     ) -> Result<CoverageIngest, DomainError> {
-        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
             return Ok(CoverageIngest::NoOpenEffort);
         };
         let Some(stream_id) = self.stream_id_for(thread).await? else {
@@ -522,7 +552,7 @@ impl CollectionService {
         format_override: Option<String>,
         skip_if_stale: bool,
     ) -> Result<AnalysisIngest, DomainError> {
-        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
             return Ok(AnalysisIngest::NoOpenEffort);
         };
         let cfg = self.collection_cfg();
@@ -744,14 +774,11 @@ impl CollectionService {
         failed: Option<i64>,
         total: Option<i64>,
         detail: Option<serde_json::Value>,
-    ) {
+    ) -> Option<i64> {
         if passed.is_none() && failed.is_none() && total.is_none() {
-            return;
+            return None;
         }
-        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
-        else {
-            return;
-        };
+        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
         // Stamp the run + samples with the stream's current snapshot — the code
         // state the tests ran against — so the effort panel groups runs into
@@ -810,18 +837,23 @@ impl CollectionService {
             let findings: Vec<NewMetricFinding> = Self::detail_finding("test-detail", detail)
                 .into_iter()
                 .collect();
-            self.metrics
+            let run_id = self
+                .metrics
                 .record_run_with_data(run, samples, findings)
                 .await?;
-            Ok::<(), DomainError>(())
+            Ok::<i64, DomainError>(run_id)
         }
         .await;
         match result {
-            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
-                stream_id: oxplow_domain::StreamId::new(stream_val),
-            }),
+            Ok(run_id) => {
+                self.events.emit(OxplowEvent::MetricSamplesChanged {
+                    stream_id: oxplow_domain::StreamId::new(stream_val),
+                });
+                Some(run_id)
+            }
             Err(e) => {
-                tracing::warn!(error = %e, "failed to mirror test run into metric substrate")
+                tracing::warn!(error = %e, "failed to mirror test run into metric substrate");
+                None
             }
         }
     }
@@ -1036,7 +1068,7 @@ impl CollectionService {
         if !is_test && !is_analysis && !is_commit {
             return Ok(None);
         }
-        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
             return Ok(None);
         };
 
@@ -1683,7 +1715,7 @@ impl CollectionService {
         analyzers: &[String],
         source: &str,
     ) -> Result<Option<i64>, DomainError> {
-        let Some(effort) = self.efforts.find_open_for_thread(thread).await? else {
+        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
             return Ok(None);
         };
         let Some(stream_id) = self.stream_id_for(thread).await? else {
@@ -2917,6 +2949,7 @@ mod tests {
                 Arc::new(RwLock::new(cfg)),
                 project_dir,
                 EventBus::new(),
+                Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone())),
             );
             Harness {
                 service,
@@ -3608,6 +3641,38 @@ mod tests {
                 reconcile_close(&kind2, &eff2.id).await,
                 vec![format!("run:{r3}")]
             );
+        }
+
+        #[tokio::test]
+        async fn record_test_run_auto_attributes_when_single_open_effort() {
+            // tsk263: a recorded test run is auto-attributed to the open effort
+            // when it's unambiguous (the Harness has exactly one). The agent is
+            // only asked in the concurrent case.
+            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
+            let h = build(None).await;
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    Some(5),
+                    Some(0),
+                    Some(5),
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                )
+                .await
+                .unwrap();
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let claimed = ledger
+                .list_refs(&eid, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap();
+            assert_eq!(claimed.len(), 1, "single open effort → run auto-attributed");
+            assert!(claimed[0].starts_with("run:"), "ref is run:<id>");
         }
 
         #[tokio::test]
