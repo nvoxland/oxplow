@@ -85,9 +85,16 @@ was the bug):
 
 | family | attribution key |
 |---|---|
-| per-file gauges (`gauge`/`tree`, category `custom`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen). NB: `is_file_attributed` must **exclude run-kind metrics** — analysis is *also* `gauge`/`tree` but is run-attributed, not per-file (it emits no `file:` samples); the guard `&& !is_run_attributed(def)` keeps it out of this branch (tsk272) |
+| per-file gauges (`gauge`/`tree`, category `custom`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen). NB: analysis is *also* `gauge`/`tree` but is run-attributed, not per-file (it emits no `file:` samples) — the classifier (below) tests the run-kind families **first**, so analysis never reaches this branch (tsk272) |
 | operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
-| tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`). Selected by `is_run_attributed` = category ∈ {`testing`, `static-quality`} |
+| tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`). Category ∈ {`testing`, `static-quality`} |
+
+The family is chosen by **one classifier** — `classify_effort_attribution(def) →
+EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`, beside the
+write-side `AttributionKind` each family maps to: File↔`FileKind`,
+Coverage/Run↔`RunKind`, Window↔no-claim). `effort_metric_deltas` `match`es on it;
+adding a new fact-kind is one variant + one match arm, not a scattered if/else
+chain (tsk274).
 | coverage | observe-always (tsk270): the **absolute** whole-report % is stored per run (`oxplow.coverage.abs_pct`) + per-file instrumented/covered line-sets in the `coverage-detail` finding; the effort-relative **diff-coverage** is DERIVED at read (`diff_coverage_for_effort`) against the claiming effort's start snapshot — `coverage_delta` reads the claimed runs, never a time window |
 
 A gauge with no per-file samples (or an effort with no claims) falls back to the

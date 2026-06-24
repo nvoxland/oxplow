@@ -1488,7 +1488,7 @@ impl CollectionService {
             // Operational/event metrics (tokens, cost, cycle-time, nudges,
             // navigation) grow every turn and aren't code-health signals — keep
             // the line focused on code metrics.
-            if d.kind == "event" || is_operational_metric_key(&d.key) {
+            if d.kind == "event" || crate::attribution::is_operational_metric_key(&d.key) {
                 continue;
             }
             let metric_id = id_by_key.get(&d.key).copied();
@@ -2112,22 +2112,31 @@ impl CollectionService {
             .map(|f| f.path)
             .collect();
 
+        use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
         let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
         for def in defs {
-            let row = if is_file_attributed(&def) {
-                self.file_attributed_delta(&def, &effort, stream_val, &claimed)
-                    .await
-            } else if def.category.as_deref() == Some("coverage") {
-                // Coverage: derive each claimed run's effort-relative diff at read,
-                // before→after — observe-always + effort-relative (tsk270).
-                self.coverage_delta(&def, &effort).await
-            } else if is_run_attributed(&def) {
-                // Run-kind metric (observe-always) → attribute by the ledger claim,
-                // never the time window, so a concurrent/unclaimed run can't
-                // pollute this effort's rollup (tsk269).
-                self.run_attributed_delta(&def, &effort).await
-            } else {
-                self.in_window_delta(&def, &effort, Some(thread_val)).await
+            // One classifier (in `attribution.rs`, beside the write-side
+            // `AttributionKind` each family maps to) decides the family; this match
+            // is the only place each family's read computation is named (tsk274).
+            let row = match classify_effort_attribution(&def) {
+                EffortAttributionFamily::File => {
+                    self.file_attributed_delta(&def, &effort, stream_val, &claimed)
+                        .await
+                }
+                EffortAttributionFamily::Coverage => {
+                    // Derive each claimed run's effort-relative diff at read,
+                    // before→after — observe-always + effort-relative (tsk270).
+                    self.coverage_delta(&def, &effort).await
+                }
+                EffortAttributionFamily::Run => {
+                    // Observe-always run metric → attribute by the ledger claim,
+                    // never the time window, so a concurrent/unclaimed run can't
+                    // pollute this effort's rollup (tsk269).
+                    self.run_attributed_delta(&def, &effort).await
+                }
+                EffortAttributionFamily::Window => {
+                    self.in_window_delta(&def, &effort, Some(thread_val)).await
+                }
             };
             if let Some(row) = row {
                 out.push(row);
@@ -2479,15 +2488,6 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
     }
 }
 
-/// The PostToolUse nudge shown when an effort's diff coverage lands below the
-/// `oxplow.coverage.diff_pct` target (tsk220). Advisory — oxplow never blocks.
-/// Operational metric namespaces (tokens, cost, cycle-time, redo-rate, nudges,
-/// navigation) — these grow every turn and aren't code-health signals, so the
-/// effort-metric prompt context (tsk231) skips them.
-fn is_operational_metric_key(key: &str) -> bool {
-    key.starts_with("agent.") || key.starts_with("effort.") || key.starts_with("task.")
-}
-
 /// Classify a value against a metric's thresholds, interpreted via `direction`.
 /// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
 /// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
@@ -2522,34 +2522,6 @@ fn threshold_state(
         }
     }
     None
-}
-
-/// Whether a metric is attributed to an effort by its *claimed files* (the
-/// per-file gauges) rather than by time window. The bundled code-health gauges
-/// are `gauge`/`tree` (category `custom`); operational metrics are excluded
-/// (thread-scoped instead), and so are **run-kind** metrics — analysis is also a
-/// `gauge`/`tree` def but is attributed by its claimed run (`is_run_attributed`),
-/// not by per-file samples it never emits. Without this guard analysis would land
-/// here and silently produce nothing (or fall back to a concurrency-unsafe
-/// in-window delta) — see `effort_metric_deltas` (tsk272).
-fn is_file_attributed(def: &oxplow_db::MetricDefinition) -> bool {
-    def.kind == "gauge"
-        && def.grain.as_deref() == Some("tree")
-        && !is_operational_metric_key(&def.key)
-        && !is_run_attributed(def)
-}
-
-/// A run-kind metric whose effort delta must be attributed by the unified `"run"`
-/// ledger claim, never a time window (tsk269/tsk272): the observe-always families
-/// recorded through the run ledger — `testing` (tests) and `static-quality`
-/// (analysis). Both share the plain claimed-run before→after (`run_attributed_delta`).
-/// `coverage` is also run-kind but is handled by its own earlier `coverage_delta`
-/// branch (it derives the effort-relative diff at read), so it isn't matched here.
-fn is_run_attributed(def: &oxplow_db::MetricDefinition) -> bool {
-    matches!(
-        def.category.as_deref(),
-        Some("testing") | Some("static-quality")
-    )
 }
 
 /// Effort-panel group ordering: code-health gauges first, then coverage, tests,
@@ -2903,15 +2875,6 @@ mod tests {
         assert_eq!(fmt_unit_suffix("%"), "%");
         assert_eq!(fmt_unit_suffix("count"), " count");
         assert_eq!(fmt_unit_suffix(""), "");
-    }
-
-    #[test]
-    fn operational_keys_are_recognized() {
-        assert!(is_operational_metric_key("agent.tokens.total"));
-        assert!(is_operational_metric_key("effort.cycle_time_ms"));
-        assert!(is_operational_metric_key("task.efforts"));
-        assert!(!is_operational_metric_key("oxplow.rust.unsafe_blocks"));
-        assert!(!is_operational_metric_key("acme.custom"));
     }
 
     #[test]
@@ -3986,7 +3949,7 @@ mod tests {
 
             // Analysis metric, mirroring production: gauge / grain=tree /
             // static-quality (the def shape that made it collide with the
-            // per-file `is_file_attributed` heuristic).
+            // per-file branch — `classify_effort_attribution` routes it to Run).
             let mut def = oxplow_db::NewMetricDefinition::new(
                 "oxplow.analysis.errors",
                 "gauge",

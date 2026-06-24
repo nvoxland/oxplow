@@ -1,7 +1,8 @@
 //! Kind-agnostic claim → verify → reconcile attribution (epic tsk260).
 //!
 //! Generalizes the file claim-first model (`.context/agent-model.md`) so any
-//! fact-kind — `file`, `test-run`, `coverage`, … — shares one engine. The agent
+//! fact-kind — `file`, the unified `run` (tests/analysis/coverage), … — shares
+//! one engine. The agent
 //! **claims** what it did, oxplow **observes** independently, and the
 //! turn/effort boundary **reconciles** the two, surfacing discrepancies for
 //! confirmation ("changed but not claimed → you, or someone else?"). This needs
@@ -18,8 +19,8 @@
 use async_trait::async_trait;
 
 use oxplow_db::{
-    SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore,
-    TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
+    MetricDefinition, SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore,
+    SqliteTaskEffortStore, TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
 };
 use oxplow_domain::EffortId;
 
@@ -27,6 +28,65 @@ use oxplow_domain::EffortId;
 /// this, something else is happening (overlapping efforts, formatter, codegen,
 /// user/other-actor edits) and the agent can't triage a wall of items.
 pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
+
+/// Which **read-side attribution family** a metric definition belongs to — the
+/// single source of truth for how an effort's delta for that metric is computed
+/// AND which claim-set (the write/reconcile path's [`AttributionKind`]) backs it.
+/// Adding a new fact-kind is a variant here + one match arm in
+/// `CollectionService::effort_metric_deltas` — not edits scattered across an
+/// if/else chain plus predicate fns that can silently drift (the analysis
+/// mis-routing bug, tsk272/tsk274).
+///
+/// Family ↔ the write-side [`AttributionKind`] it reads:
+/// - [`File`](Self::File) ↔ [`FileKind`] — the effort's `task_effort_file` claims
+/// - [`Coverage`](Self::Coverage) / [`Run`](Self::Run) ↔ [`RunKind`] — the
+///   effort's `effort_attribution` ledger `"run"` claims
+/// - [`Window`](Self::Window) ↔ no claim — operational thread+time facts
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffortAttributionFamily {
+    /// Per-file code gauges: Σ over the effort's CLAIMED FILES of each file's
+    /// `(current − baseline)`. Backed by [`FileKind`].
+    File,
+    /// Coverage: run-claimed AND effort-relative — the diff is DERIVED at read
+    /// against the effort's start snapshot (`coverage_delta`). Backed by [`RunKind`].
+    Coverage,
+    /// Other run-kind facts (tests, analysis): before→after over the effort's
+    /// CLAIMED RUNS' samples (`run_attributed_delta`). Backed by [`RunKind`].
+    Run,
+    /// Operational / everything else: the effort's thread + time window, no claim.
+    Window,
+}
+
+/// Classify a metric definition into its [`EffortAttributionFamily`]. Run-kind
+/// families (coverage, then tests/analysis) are tested BEFORE the per-file
+/// `gauge`/`tree` heuristic on purpose: analysis is a `gauge`/`tree` def but is
+/// run-claimed, so keying it on `gauge`/`tree` would wrongly route it to the
+/// per-file path it never populates (tsk272). Operational `agent.*`/`effort.*`/
+/// `task.*` keys are never per-file gauges even when `gauge`/`tree`.
+pub fn classify_effort_attribution(def: &MetricDefinition) -> EffortAttributionFamily {
+    if def.category.as_deref() == Some("coverage") {
+        EffortAttributionFamily::Coverage
+    } else if matches!(
+        def.category.as_deref(),
+        Some("testing") | Some("static-quality")
+    ) {
+        EffortAttributionFamily::Run
+    } else if def.kind == "gauge"
+        && def.grain.as_deref() == Some("tree")
+        && !is_operational_metric_key(&def.key)
+    {
+        EffortAttributionFamily::File
+    } else {
+        EffortAttributionFamily::Window
+    }
+}
+
+/// Operational metric namespaces (tokens, cost, cycle-time, redo-rate, nudges) —
+/// thread+window facts, never per-file gauges. Shared by the classifier above and
+/// the effort-metric prompt context (`effort_metric_context`), which skips them.
+pub fn is_operational_metric_key(key: &str) -> bool {
+    key.starts_with("agent.") || key.starts_with("effort.") || key.starts_with("task.")
+}
 
 /// The four input sets for one kind's reconciliation of an effort.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -333,6 +393,99 @@ impl AttributionKind for RunKind<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::Timestamp;
+
+    /// Minimal `MetricDefinition` carrying only the fields the classifier reads
+    /// (`kind`/`grain`/`category`/`key`); the rest are dummy.
+    fn def(kind: &str, grain: Option<&str>, category: Option<&str>, key: &str) -> MetricDefinition {
+        MetricDefinition {
+            id: 1,
+            key: key.into(),
+            kind: kind.into(),
+            title: "t".into(),
+            unit: None,
+            direction: "neutral".into(),
+            default_agg: "last".into(),
+            grain: grain.map(Into::into),
+            basis: "absolute".into(),
+            producer: None,
+            description: None,
+            category: category.map(Into::into),
+            language: None,
+            scope: "project".into(),
+            dimensions_json: None,
+            target: None,
+            warn_at: None,
+            fail_at: None,
+            created_at: Timestamp::now(),
+            updated_at: Timestamp::now(),
+        }
+    }
+
+    #[test]
+    fn classify_routes_each_family() {
+        use EffortAttributionFamily::*;
+        // Coverage by category (its own diff-at-read branch).
+        assert_eq!(
+            classify_effort_attribution(&def(
+                "coverage",
+                None,
+                Some("coverage"),
+                "oxplow.coverage.abs_pct"
+            )),
+            Coverage
+        );
+        // Tests + analysis are run-claimed.
+        assert_eq!(
+            classify_effort_attribution(&def(
+                "gauge",
+                Some("effort"),
+                Some("testing"),
+                "oxplow.tests.total"
+            )),
+            Run
+        );
+        // Analysis is gauge/tree but MUST be Run, not File (the tsk272 regression
+        // guard): run-kind families are classified before the per-file heuristic.
+        assert_eq!(
+            classify_effort_attribution(&def(
+                "gauge",
+                Some("tree"),
+                Some("static-quality"),
+                "oxplow.analysis.errors"
+            )),
+            Run
+        );
+        // A code-health gauge (category custom) is per-file attributed.
+        assert_eq!(
+            classify_effort_attribution(&def(
+                "gauge",
+                Some("tree"),
+                Some("custom"),
+                "oxplow.rust.unsafe_blocks"
+            )),
+            File
+        );
+        // Operational keys are window-attributed even when gauge/tree.
+        assert_eq!(
+            classify_effort_attribution(&def("gauge", Some("tree"), None, "effort.cycle_time_ms")),
+            Window
+        );
+        // An event metric falls through to Window.
+        assert_eq!(
+            classify_effort_attribution(&def("event", None, None, "agent.nudges.fired")),
+            Window
+        );
+    }
+
+    #[test]
+    fn operational_keys_are_recognized() {
+        assert!(is_operational_metric_key("agent.tokens.total"));
+        assert!(is_operational_metric_key("effort.cycle_time_ms"));
+        assert!(is_operational_metric_key("task.efforts"));
+        assert!(!is_operational_metric_key("oxplow.rust.unsafe_blocks"));
+        assert!(!is_operational_metric_key("acme.custom"));
+    }
 
     fn sets(claimed: &[&str], observed: &[&str], ack: &[&str], other: &[&str]) -> AttrSets {
         let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect();
