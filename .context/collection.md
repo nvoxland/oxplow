@@ -133,6 +133,24 @@ hook + MCP wiring):
   reports). `record_test_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give.
 
+**Sub-agent runs + cross-agent attribution (tsk265).** The passive PostToolUse
+path only sees the **parent agent's** tool calls — Claude/Codex sub-agent (Task
+tool) tool calls don't fire the parent's hook, so a dispatched sub-agent's
+`cargo test` is **invisible to passive collection**. oxplow deliberately does
+NOT try to recover it by reading sub-agent transcripts / `SubagentStop` /
+`agent_id` (all agent-specific and version-fragile). Instead, attribution rides
+the two cross-agent-stable surfaces oxplow owns: the filesystem snapshot (which
+runs don't touch) and the **MCP contract**. So a sub-agent records its runs
+through `record_test_run`, passing `task_id` so the run attributes EXACTLY to
+its effort even under concurrency (resolved via `find_open_for_task`); the
+`dispatch_task` brief instructs this. Without a named task, a run attributes
+automatically when one effort is open, else **coarsely to the thread's
+open-effort set** (the time-window observe puts it in every overlapping effort's
+residue) — never guessed onto one. `claim_runs`/`disclaim_runs` on
+`complete_task`/`update_task` let the agent fix attribution at the close
+boundary; `amend_effort` does it after the fact. See
+[agent-model.md](./agent-model.md) for the full claim→reconcile loop.
+
 Both paths resolve `format` → collector via the registry and **classify by the
 collector's kind** (coverage vs test vs analysis), not a format-name heuristic.
 An unknown format is `tracing::warn!`-logged and skipped (not silently dropped).

@@ -173,6 +173,12 @@ pub struct RecordTestRunParams {
     pub failed: Option<i64>,
     pub total: Option<i64>,
     pub duration_ms: Option<i64>,
+    /// The task this run belongs to (e.g. `tsk42`), for EXACT attribution. A
+    /// dispatched sub-agent should pass the task id from its brief: oxplow then
+    /// credits the run to that task's effort even when other efforts are open
+    /// on the thread — no guessing. Omit when you're the only effort in flight;
+    /// oxplow attributes it automatically (single open) or coarsely (concurrent).
+    pub task_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -359,6 +365,13 @@ pub struct UpdateTaskMcpParams {
     /// alongside this update. Required for Local History attribution
     /// when transitioning to `done`/`blocked` from `in_progress`.
     pub touched_files: Option<Vec<String>>,
+    /// Run refs (`run:<id>`) to CLAIM for the effort closing alongside this
+    /// transition — the run-kind counterpart of `touched_files`. Use when you
+    /// ran tests during this effort that weren't auto-attributed.
+    pub claim_runs: Option<Vec<String>>,
+    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
+    /// flagged in the EFFORT REVIEW.
+    pub disclaim_runs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -393,6 +406,13 @@ pub struct CompleteTaskParams {
     /// backlinks on the target page show this task as the cause
     /// without relying on summary-body parsing.
     pub impacts: Option<Vec<McpTaskImpact>>,
+    /// Run refs (`run:<id>`) to CLAIM for this effort — the run-kind
+    /// counterpart of `touched_files`. Use when you ran tests during this
+    /// effort that oxplow didn't auto-attribute (a sibling effort was open).
+    pub claim_runs: Option<Vec<String>>,
+    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
+    /// flagged in the EFFORT REVIEW.
+    pub disclaim_runs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1527,10 +1547,13 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Record a test run against the thread's open effort with pass/fail counts \
-            the Bash-hook exit code can't capture. Marked `asserted` (agent-reported). oxplow \
-            already records `observed` test runs automatically from the Bash hook — use this \
-            only when you want to attach structured pass/fail/total counts."
+        description = "Record a test run with pass/fail counts the Bash-hook exit code can't \
+            capture. Marked `asserted` (agent-reported). oxplow already records `observed` test \
+            runs automatically from the Bash hook for the MAIN agent — but a dispatched sub-agent's \
+            runs are invisible to that hook, so a sub-agent SHOULD call this for its test runs. \
+            Pass `task_id` (from your brief) so the run is attributed exactly to your task's \
+            effort even when sibling efforts are open; omit it when you're the only effort in \
+            flight and oxplow will attribute it automatically."
     )]
     async fn record_test_run(
         &self,
@@ -1543,6 +1566,10 @@ impl OxplowMcp {
             ID_THREAD,
         )?;
         let tid = parse_thread_id(&params.0.thread_id)?;
+        let task = match params.0.task_id.as_deref() {
+            Some(raw) => Some(parse_task_id("record_test_run", "task_id", raw)?),
+            None => None,
+        };
         let id = self
             .services
             .collection
@@ -1557,6 +1584,7 @@ impl OxplowMcp {
                 "asserted",
                 "agent",
                 None,
+                task,
             )
             .await
             .map_err(internal)?;
@@ -2360,8 +2388,9 @@ impl OxplowMcp {
 
     #[tool(
         description = "Update fields on an existing task (partial-patch). Pass `touched_files` \
-                       alongside a `status` transition to `done`/`blocked` to attribute the closing \
-                       effort. `parent_id` reparents (empty string detaches)."
+                       (and/or `claim_runs`/`disclaim_runs` for test runs) alongside a `status` \
+                       transition to `done`/`blocked` to attribute the closing effort. \
+                       `parent_id` reparents (empty string detaches)."
     )]
     async fn update_task(
         &self,
@@ -2408,7 +2437,10 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
 
         let touched = p.touched_files.unwrap_or_default();
-        if !touched.is_empty() && matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked) {
+        let claim_runs = p.claim_runs.unwrap_or_default();
+        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
+        let closing = matches!(updated.status, TaskStatus::Done | TaskStatus::Blocked);
+        if !touched.is_empty() && closing {
             if let Some(tid) = updated.thread_id {
                 let worktree = worktree_for_thread(&self.services, &tid).await;
                 if let Err(err) = self
@@ -2427,6 +2459,22 @@ impl OxplowMcp {
                 {
                     tracing::warn!(?err, "update_task: effort record failed");
                 }
+            }
+        }
+        // Run claims/disclaims at the close boundary (tsk268) — the run-kind
+        // counterpart of `touched_files`, keyed to the just-closed effort.
+        if closing && (!claim_runs.is_empty() || !disclaim_runs.is_empty()) {
+            use oxplow_db::TaskEffortStore as _;
+            if let Some(effort) = self
+                .services
+                .effort_store
+                .most_recent_for_task(updated.id)
+                .await
+                .ok()
+                .flatten()
+            {
+                self.apply_run_claims(&effort.id, &claim_runs, &disclaim_runs)
+                    .await?;
             }
         }
         self.emit_tasks_changed(updated.thread_id);
@@ -2465,6 +2513,8 @@ impl OxplowMcp {
             .map_err(|e| internal(e.to_string()))?;
 
         let touched = p.touched_files.unwrap_or_default();
+        let claim_runs = p.claim_runs.unwrap_or_default();
+        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
         let impacts: Vec<oxplow_domain::TaskImpact> = p
             .impacts
             .unwrap_or_default()
@@ -2547,6 +2597,10 @@ impl OxplowMcp {
                             .map(|e| e.id),
                     };
                     if let Some(eid) = effort_for_review {
+                        // Apply the agent's close-time run claims/disclaims FIRST
+                        // (tsk268), so a fully-reconciled effort doesn't then nag.
+                        self.apply_run_claims(&eid, &claim_runs, &disclaim_runs)
+                            .await?;
                         let has_run_residue = !self
                             .services
                             .attribution_store
@@ -2569,6 +2623,46 @@ impl OxplowMcp {
             file_review: review,
         };
         json_result(&payload)
+    }
+
+    /// Apply run claims/disclaims to the `effort_attribution` ledger for
+    /// `effort_id` — the run-kind counterpart of file add/remove, shared by
+    /// `complete_task`/`update_task` (claim at the close boundary, tsk268) and
+    /// `amend_effort` (claim after the fact). `claim_runs` → `claimed`,
+    /// `disclaim_runs` → `acknowledged`; empty refs are skipped.
+    async fn apply_run_claims(
+        &self,
+        effort_id: &oxplow_domain::EffortId,
+        claim_runs: &[String],
+        disclaim_runs: &[String],
+    ) -> Result<(), McpError> {
+        for ref_ in claim_runs {
+            if ref_.is_empty() {
+                continue;
+            }
+            self.services
+                .attribution_store
+                .set_state(effort_id, "test-run", ref_, oxplow_db::STATE_CLAIMED, None)
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
+        for ref_ in disclaim_runs {
+            if ref_.is_empty() {
+                continue;
+            }
+            self.services
+                .attribution_store
+                .set_state(
+                    effort_id,
+                    "test-run",
+                    ref_,
+                    oxplow_db::STATE_ACKNOWLEDGED,
+                    None,
+                )
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
+        Ok(())
     }
 
     #[tool(
@@ -2658,37 +2752,11 @@ impl OxplowMcp {
         }
         // Run claims/disclaims ride the generic attribution ledger
         // (`effort_attribution`), the same claim→reconcile rails as files but
-        // keyed by `(effort, "test-run", ref)`. A claim parks the run as the
-        // effort's own; a disclaim acknowledges it as someone else's so the
-        // EFFORT REVIEW stops flagging it. Both clear the unattributed residue.
+        // keyed by `(effort, "test-run", ref)`.
         let claim_runs = p.claim_runs.unwrap_or_default();
         let disclaim_runs = p.disclaim_runs.unwrap_or_default();
-        for ref_ in &claim_runs {
-            if ref_.is_empty() {
-                continue;
-            }
-            self.services
-                .attribution_store
-                .set_state(&effort_id, "test-run", ref_, oxplow_db::STATE_CLAIMED, None)
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
-        for ref_ in &disclaim_runs {
-            if ref_.is_empty() {
-                continue;
-            }
-            self.services
-                .attribution_store
-                .set_state(
-                    &effort_id,
-                    "test-run",
-                    ref_,
-                    oxplow_db::STATE_ACKNOWLEDGED,
-                    None,
-                )
-                .await
-                .map_err(|e| internal(e.to_string()))?;
-        }
+        self.apply_run_claims(&effort_id, &claim_runs, &disclaim_runs)
+            .await?;
         json_result(&serde_json::json!({
             "effort_id": effort_id.to_string(),
             "added": add,
@@ -3917,12 +3985,15 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
         out.push(String::new());
     }
     out.push("## Protocol".into());
-    out.push(
+    out.push(format!(
         "Follow the `oxplow-subagent-work-protocol` skill: mark in_progress on entry; \
-         done on exit. Return ONE line: `oxplow-result: {\"ok\":true,\"itemId\":\"<id>\",…}`. \
-         Pass `touched_files` to `complete_task` so Local History attributes the writes."
-            .into(),
-    );
+         done on exit. Return ONE line: `oxplow-result: {{\"ok\":true,\"itemId\":\"<id>\",…}}`. \
+         Pass `touched_files` to `complete_task` so Local History attributes the writes. \
+         If you run tests, call `record_test_run` with `task_id: \"{}\"` — your runs are \
+         invisible to oxplow's passive Bash-hook collection, and naming your task attributes \
+         them exactly even while sibling efforts are open.",
+        item.id.value()
+    ));
     out.join("\n")
 }
 
@@ -4425,6 +4496,74 @@ mod tests {
                 .await
                 .unwrap(),
             vec!["run:2".to_string()],
+        );
+    }
+
+    #[tokio::test]
+    async fn update_task_claims_runs_at_close_boundary() {
+        // tsk268: the agent claims its runs at the natural close point (no
+        // reactive second amend_effort). update_task(status=done, claim_runs=…)
+        // writes the ledger claim for the task's effort.
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::{STATE_CLAIMED, STATE_UNATTRIBUTED};
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let mut item = make_task(Some(thread.id), "run close test");
+        item.status = oxplow_domain::TaskStatus::InProgress;
+        let task_id = services.task_store.insert(&item).await.unwrap();
+        item.id = task_id;
+        let effort = services
+            .effort_store
+            .start(task_id, &thread.id, None)
+            .await
+            .unwrap();
+        services
+            .attribution_store
+            .set_state(&effort.id, "test-run", "run:7", STATE_UNATTRIBUTED, None)
+            .await
+            .unwrap();
+
+        server
+            .update_task(Parameters(UpdateTaskMcpParams {
+                id: task_id.to_string(),
+                title: None,
+                description: None,
+                parent_id: None,
+                status: Some("done".into()),
+                priority: None,
+                touched_files: None,
+                claim_runs: Some(vec!["run:7".into()]),
+                disclaim_runs: None,
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            services
+                .attribution_store
+                .list_refs(&effort.id, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap(),
+            vec!["run:7".to_string()],
+            "the closing update claims the run for its effort"
+        );
+        assert!(
+            services
+                .attribution_store
+                .list_refs(&effort.id, "test-run", STATE_UNATTRIBUTED)
+                .await
+                .unwrap()
+                .is_empty(),
+            "claiming clears the unattributed residue"
         );
     }
 

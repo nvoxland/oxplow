@@ -762,6 +762,25 @@ intermediate `ready` step.
   `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
   `(effort, kind, ref)` is in exactly one of {claimed, unattributed,
   acknowledged}; claiming/disclaiming clears the unattributed residue.
+- **Run attribution rides the MCP contract, never agent internals (tsk265).**
+  oxplow has exactly two cross-agent-stable signals: the **filesystem
+  snapshot** (agent-agnostic — but a test run leaves no worktree artifact, so
+  this signal doesn't exist for runs) and the **MCP tool contract** (universal
+  because oxplow defines it). So run attribution depends ONLY on MCP +
+  effort state — never on `SubagentStop`, per-agent transcripts, `agent_id`,
+  `session_id`, or `parentID` (all of which vary by agent and drift across
+  versions). Concretely: Claude/Codex **sub-agent tool calls don't fire the
+  parent's PostToolUse hook**, so a sub-agent's `cargo test` is invisible to
+  passive collection. The fix isn't to spy on sub-agents — it's that a
+  dispatched sub-agent **names its task** through MCP: `record_test_run` takes
+  an optional `task_id`, and `complete_task`/`update_task` take
+  `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
+  is named — resolved via `find_open_for_task`, correct even under concurrency,
+  with no "which sub-agent" visibility; (2) AUTO when exactly one effort is
+  open; (3) else COARSELY to the thread's open-effort *set* (the time-window
+  OBSERVE puts it in every overlapping effort's residue) — less exact, never
+  wrong-exact. The `dispatch_task` brief instructs sub-agents to call
+  `record_test_run` with their `task_id` for exactly this reason.
 - The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
   REVIEW** directive (priority: between stale-epic-children and
   in-progress audit), covering BOTH file and run discrepancies. MCP

@@ -33,7 +33,7 @@ use oxplow_db::{
     TaskEffort, TaskEffortStore, STATE_CLAIMED,
 };
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, EffortId, ThreadId};
+use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
@@ -389,6 +389,7 @@ impl CollectionService {
         provenance: &str,
         source: &str,
         report: Option<&oxplow_coverage::TestReport>,
+        task: Option<TaskId>,
     ) -> Result<Option<i64>, DomainError> {
         // OBSERVE: record the run regardless of effort; attribution is separate
         // (tsk263). We only need the stream to record into the substrate.
@@ -454,17 +455,30 @@ impl CollectionService {
             )
             .await;
         let _ = (stream_id, payload);
-        // ATTRIBUTE the run to the effort ONLY when unambiguous (exactly one
-        // open). Concurrent efforts ⇒ unattributed — the close reconcile + the
-        // agent's claim resolve it (tsk263). Best-effort: a ledger write error
-        // never fails the host path.
+        // ATTRIBUTE — the agent-agnostic rule (tsk265), riding only oxplow's MCP
+        // contract + effort state, never any agent internals:
+        //   1. EXACT when the caller named a `task` — resolve its open effort and
+        //      claim the run for it, even under concurrency. A dispatched
+        //      sub-agent knows its own task id; this is how it self-attributes
+        //      precisely without oxplow ever seeing "which sub-agent".
+        //   2. else AUTO when exactly one effort is open (unambiguous).
+        //   3. else COARSE — leave it unclaimed. The time-window OBSERVE at close
+        //      associates the run with the thread's open-effort set (it falls in
+        //      every overlapping window), so it's attributed to the SET, never
+        //      guessed onto one. Less exact, never wrong-exact.
+        // Best-effort throughout: a ledger write error never fails the host path.
+        let exact = match task {
+            Some(tid) => self.efforts.find_open_for_task(tid).await.ok().flatten(),
+            None => None,
+        };
         let single = self
             .efforts
             .find_single_open_for_thread(thread)
             .await
             .ok()
             .flatten();
-        if let (Some(rid), Some(effort)) = (run_id, single.as_ref()) {
+        let attribute_to = exact.or(single);
+        if let (Some(rid), Some(effort)) = (run_id, attribute_to.as_ref()) {
             let _ = self
                 .attribution
                 .set_state(
@@ -476,8 +490,8 @@ impl CollectionService {
                 )
                 .await;
         }
-        // Refresh the effort panel when there's a single effort to refresh.
-        if let Some(effort) = single.as_ref() {
+        // Refresh the effort panel for whichever effort we attributed to.
+        if let Some(effort) = attribute_to.as_ref() {
             self.emit(thread, effort);
         }
         Ok(run_id.map(|_| 0))
@@ -1135,6 +1149,9 @@ impl CollectionService {
             "observed",
             &source,
             report.as_ref(),
+            // Passive PostToolUse is the orchestrator-only enrichment path — no
+            // named task; the single/coarse rule attributes it (tsk265).
+            None,
         )
         .await?;
         // Coverage ride-along: merge every fresh coverage report → one
@@ -3076,6 +3093,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -3108,6 +3126,7 @@ mod tests {
                     Some(6),
                     "observed",
                     "post-tool-bash",
+                    None,
                     None,
                 )
                 .await
@@ -3173,6 +3192,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -3218,6 +3238,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -3682,6 +3703,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -3693,6 +3715,79 @@ mod tests {
                 .unwrap();
             assert_eq!(claimed.len(), 1, "single open effort → run auto-attributed");
             assert!(claimed[0].starts_with("run:"), "ref is run:<id>");
+        }
+
+        #[tokio::test]
+        async fn record_test_run_attributes_to_named_task_under_concurrent_efforts() {
+            // tsk265: the agent-agnostic EXACT path. When the caller NAMES its
+            // task (a dispatched sub-agent knows its own task id), the run is
+            // claimed for THAT task's open effort even though two efforts are
+            // open on the thread — `find_single` would punt (ambiguous), but the
+            // named task resolves it exactly via the MCP contract, with no
+            // visibility into which sub-agent ran it.
+            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+
+            // Two efforts open ⇒ ambiguous for find_single. Name task2.
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    Some(5),
+                    Some(0),
+                    Some(5),
+                    "asserted",
+                    "agent",
+                    None,
+                    Some(task2),
+                )
+                .await
+                .unwrap();
+
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            // Claimed for the NAMED effort, never the other open one.
+            assert_eq!(
+                ledger
+                    .list_refs(&eff2.id, "test-run", STATE_CLAIMED)
+                    .await
+                    .unwrap()
+                    .len(),
+                1,
+                "named task → run claimed for its effort"
+            );
+            assert!(
+                ledger
+                    .list_refs(&eid1, "test-run", STATE_CLAIMED)
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "the other open effort is not credited"
+            );
         }
 
         #[tokio::test]
@@ -3749,6 +3844,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&junit),
+                    None,
                 )
                 .await
                 .unwrap();
