@@ -437,6 +437,30 @@ unattributed instead of leaving it silently attributed. Best-effort: an
 effort with no start snapshot (or any capture failure) falls back to the
 legacy `finish(None, None)` close with no reconciliation.
 
+`effort_attribution` (V40) is the **kind-agnostic attribution ledger** —
+the generalization of the file tables above to any fact oxplow OBSERVES
+but can't auto-attribute under concurrency (today: test **runs**). Columns:
+`effort_id` (CASCADE), `kind` TEXT (`"test-run"`, …), `ref` TEXT (the
+item's identity, e.g. `run:<id>`), `state` TEXT CHECK
+(`claimed | unattributed | acknowledged`), `detail_json`, `recorded_at`;
+primary key `(effort_id, kind, ref)`; index on `(kind, state)`. Store:
+`SqliteAttributionStore` (`crates/oxplow-db/src/attribution_store.rs`),
+driven by the `AttributionKind` engine (`crates/oxplow-app/src/attribution.rs`,
+with `FileKind` re-expressing the file tables and `RunKind` over this
+ledger). **Invariant (mirrors the file one): a `(effort, kind, ref)` is in
+exactly one of {claimed, unattributed, acknowledged}** — `set_state` is
+`INSERT OR REPLACE` on the PK, so claiming/disclaiming a run moves it
+between states rather than duplicating. Runs auto-attribute to a `claimed`
+row at `record_test_run` time only when `find_single_open_for_thread`
+resolves exactly one open effort; the concurrent case stays observed-only
+until the close reconciliation writes an `unattributed` row, which the
+agent resolves via `amend_effort(claim_runs/disclaim_runs)`. Because the
+row CASCADEs on `task_effort` but `metric_run`/`metric_sample` do NOT carry
+an `effort_id`, effort attribution is **exact while the effort is alive and
+simply gone once the effort is GC'd** — the metric rows outlive it. See
+`.context/metrics.md` for how reads join through this ledger and
+`.context/agent-model.md` for the claim→reconcile→surface loop.
+
 ### `snapshot` + `file_snapshot` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
 Time-ordered snapshots in two tables (the actual schema; an earlier

@@ -736,24 +736,45 @@ intermediate `ready` step.
   entries (`unclaimed_overflow` carries the original count when
   truncated) so the agent isn't asked to triage a wall of paths
   from parallel efforts or formatters. `amend_effort(effort_id, add_files,
-  remove_files)` is the corrective tool — adds/removes
-  `task_effort_file` rows AND, for every path in `remove_files`,
-  records an acknowledgement row in `effort_acknowledged_path` so
-  the Stop hook's recompute treats the discrepancy as resolved.
-  Re-adding a previously-disclaimed path via `add_files` clears
-  its acknowledgement. Persisted authorship is always the agent's
-  declared list (after any amend), never the raw diff.
-- The Stop hook also surfaces unresolved file reviews as a
-  one-shot directive (priority: between stale-epic-children and
-  in-progress audit). MCP `complete_task` stashes the effort id in
-  `ThreadRuntimeRegistry::pending_effort_reviews`; the Stop hook
-  drains it via `take_pending_effort_reviews`, recomputes the diff
-  fresh against the current `task_effort_file` rows, subtracts the
-  paths the agent has acknowledged via `effort_acknowledged_path`,
-  and fires the directive only if a discrepancy still remains. So
-  a successful `amend_effort` reconciles in a single round-trip —
-  the Stop hook won't re-flag the same disclaimed path on the next
-  recompute. Drained = one-shot regardless.
+  remove_files, claim_runs, disclaim_runs)` is the corrective tool —
+  adds/removes `task_effort_file` rows AND, for every path in
+  `remove_files`, records an acknowledgement row in
+  `effort_acknowledged_path` so the Stop hook's recompute treats the
+  discrepancy as resolved. Re-adding a previously-disclaimed path via
+  `add_files` clears its acknowledgement. Persisted authorship is always
+  the agent's declared list (after any amend), never the raw diff.
+- **Files are one kind of a generic claim→reconcile mechanic.** The same
+  CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
+  RECONCILE (residue at close) / SURFACE (Stop directive) loop attributes
+  **test runs** too, keyed by `(effort, "test-run", "run:<id>")` rows in
+  the `effort_attribution` ledger (see `crates/oxplow-app/src/attribution.rs`,
+  `AttributionKind` trait with `FileKind` + `RunKind`; ledger table in
+  `.context/data-model.md`; metric reads in `.context/metrics.md`). This
+  matters because **`find_open_for_thread` is no longer the attribution
+  authority** — "newest open effort on the thread wins" mis-assigns work
+  when parallel sub-agents (Claude/Codex internals we don't see into) run
+  separate efforts in one thread. Producers OBSERVE at thread/time grain
+  with no effort guess; runs auto-attribute via
+  `find_single_open_for_thread` only when **exactly one** effort is open
+  (unambiguous); the concurrent case is left unattributed for the agent to
+  claim. `amend_effort`'s `claim_runs`/`disclaim_runs` are the run-kind
+  counterpart of `add_files`/`remove_files`: `claim_runs` writes a
+  `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
+  `(effort, kind, ref)` is in exactly one of {claimed, unattributed,
+  acknowledged}; claiming/disclaiming clears the unattributed residue.
+- The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
+  REVIEW** directive (priority: between stale-epic-children and
+  in-progress audit), covering BOTH file and run discrepancies. MCP
+  `complete_task` stashes the effort id in
+  `ThreadRuntimeRegistry::pending_effort_reviews` on either a file
+  discrepancy OR ledger run residue; the Stop hook drains it via
+  `take_pending_effort_reviews`, recomputes the file diff fresh against
+  the current `task_effort_file` rows (minus `effort_acknowledged_path`)
+  AND re-reads the ledger's `unattributed` test-runs, and fires the
+  directive only if something still remains. So a successful `amend_effort`
+  (files or runs) reconciles in a single round-trip — the Stop hook won't
+  re-flag the same disclaimed path/run on the next recompute. Drained =
+  one-shot regardless.
 - `dispatch_task({ threadId, itemId, extraContext?, autoStart? })` composes
   a subagent brief server-side (preamble + item fields + children + last notes
   + optional extra context) so the orchestrator doesn't have to Read the item
@@ -1012,8 +1033,10 @@ branch after ingest, best-effort).**
    transcript formats differ — opencode surfaces its own `$cost` — and are
    wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
    but `on_stop` records per-turn.)
-4. Attribute each turn to the thread's open effort (`find_open_for_thread`,
-   nullable — a Stop can land with no open effort) and persist one
+4. Attribute each turn to the thread's open effort
+   (`find_single_open_for_thread`, nullable — a Stop can land with no open
+   effort, or with two-plus open, in which case the turn is left
+   unattributed rather than mis-assigned) and persist one
    `agent_token_usage` row per turn (provenance `observed`, with the actual
    per-turn `model` and `prompt`). A chunk spanning several prompts (a brief
    plus follow-up nudges, or an interrupt-and-re-prompt) yields one row per
@@ -1437,11 +1460,14 @@ same PostToolUse path that attributes wiki edits
 `TaskService::claim_open_effort_file` in `crates/oxplow-app/src/task_service.rs`).
 The claim is best-effort (never fails the hook), idempotent (`record_file`
 is `INSERT OR REPLACE` keyed on `(effort_id, path)`), and resolves the
-open effort **per thread** via `find_open_for_thread` — so it's reliable
-under the single-open-effort-per-thread rule (migration V31), unlike the
-old global active-effort heuristic that was removed for over-reporting
-when ≥2 efforts were in_progress. `Bash` / codegen / formatter writes are
-intentionally NOT auto-claimed — they stay for snapshot reconciliation.
+open effort **per thread** via `find_single_open_for_thread` — which
+returns an effort ONLY when exactly one is open. `find_open_for_thread`
+("newest open effort wins") was removed as an attribution authority: it
+mis-assigns when parallel sub-agents run separate efforts in one thread.
+When two-plus efforts are open the auto-claim is skipped and the file
+falls to close-time reconciliation, surfacing in the EFFORT REVIEW for
+the agent to claim. `Bash` / codegen / formatter writes are intentionally
+NOT auto-claimed — they stay for snapshot reconciliation.
 
 **Agent-declared payload (now confirm/amend).** When calling
 `update_task` or `complete_task` to close an effort, the agent passes

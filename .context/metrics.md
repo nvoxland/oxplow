@@ -87,10 +87,29 @@ was the bug):
 |---|---|
 | per-file gauges (`gauge`/`tree`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen) |
 | operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
-| coverage / tests | already computed against the effort's **own diff** — in-window headline |
+| coverage / analysis | gated producers: recorded only when `find_single_open_for_thread` resolves one open effort, so they're never ambiguous — in-window headline against the effort's own diff |
+| tests (`test-run`) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window |
 
 A gauge with no per-file samples (or an effort with no claims) falls back to the
 in-window headline before→after.
+
+### Run attribution grain — the ledger, not the clock (tsk260)
+
+Test runs are **observe-always** (every `record_test_run` writes its
+`metric_run`/`metric_sample` regardless of effort) but attributed through the
+`effort_attribution` ledger, never by time window — because parallel sub-agents
+in one thread run different tests concurrently and the clock can't tell them
+apart. At record time, `find_single_open_for_thread` auto-writes a `claimed`
+ledger row for `run:<id>` **only when exactly one effort is open**; the
+concurrent case is left for the agent to claim at close (`amend_effort
+claim_runs`). The effort roll-up's test reads therefore join through the ledger:
+`effort_observations_from_metrics` lists the effort's `claimed` test-run refs,
+parses the run ids, and reads `samples_for_runs(metric_id, run_ids)` — so an
+effort shows exactly the runs it owns and none a sibling effort claimed.
+Coverage/analysis stay time-windowed because they're **gated** producers (only
+recorded when one effort is open, hence never ambiguous). The mechanic and the
+trait (`AttributionKind`/`RunKind`) live in `.context/agent-model.md` +
+`.context/data-model.md`.
 
 ### Additivity
 
