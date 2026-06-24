@@ -1,6 +1,6 @@
 //! The kind-agnostic attribution ledger store (`effort_attribution`, V40) —
 //! claim / acknowledge / unattributed state per `(effort, kind, ref)` for every
-//! non-file attribution kind (`test-run`, `coverage`, …). Files keep their own
+//! non-file attribution kind (`run`, `coverage`, …). Files keep their own
 //! tables; see `crates/oxplow-app/src/attribution.rs` for the engine. Raw
 //! integer ids at this layer (the service/IPC boundary maps prefixed ids).
 
@@ -213,31 +213,28 @@ mod tests {
     async fn state_is_single_valued_and_claiming_overrides() {
         let (store, e1, _e2) = fixture().await;
         store
-            .set_state(&e1, "test-run", "run:5", STATE_UNATTRIBUTED, None)
+            .set_state(&e1, "run", "run:5", STATE_UNATTRIBUTED, None)
             .await
             .unwrap();
         assert_eq!(
             store
-                .list_refs(&e1, "test-run", STATE_UNATTRIBUTED)
+                .list_refs(&e1, "run", STATE_UNATTRIBUTED)
                 .await
                 .unwrap(),
             vec!["run:5"]
         );
         // Claiming the same ref overrides — now claimed, no longer unattributed.
         store
-            .set_state(&e1, "test-run", "run:5", STATE_CLAIMED, None)
+            .set_state(&e1, "run", "run:5", STATE_CLAIMED, None)
             .await
             .unwrap();
         assert!(store
-            .list_refs(&e1, "test-run", STATE_UNATTRIBUTED)
+            .list_refs(&e1, "run", STATE_UNATTRIBUTED)
             .await
             .unwrap()
             .is_empty());
         assert_eq!(
-            store
-                .list_refs(&e1, "test-run", STATE_CLAIMED)
-                .await
-                .unwrap(),
+            store.list_refs(&e1, "run", STATE_CLAIMED).await.unwrap(),
             vec!["run:5"]
         );
     }
@@ -246,30 +243,27 @@ mod tests {
     async fn replace_unattributed_leaves_claimed_intact() {
         let (store, e1, _e2) = fixture().await;
         store
-            .set_state(&e1, "test-run", "run:1", STATE_CLAIMED, None)
+            .set_state(&e1, "run", "run:1", STATE_CLAIMED, None)
             .await
             .unwrap();
         store
-            .replace_unattributed(&e1, "test-run", &["run:2".into(), "run:3".into()])
+            .replace_unattributed(&e1, "run", &["run:2".into(), "run:3".into()])
             .await
             .unwrap();
         // Re-replace with a smaller set — old unattributed cleared, claimed kept.
         store
-            .replace_unattributed(&e1, "test-run", &["run:2".into()])
+            .replace_unattributed(&e1, "run", &["run:2".into()])
             .await
             .unwrap();
         assert_eq!(
             store
-                .list_refs(&e1, "test-run", STATE_UNATTRIBUTED)
+                .list_refs(&e1, "run", STATE_UNATTRIBUTED)
                 .await
                 .unwrap(),
             vec!["run:2"]
         );
         assert_eq!(
-            store
-                .list_refs(&e1, "test-run", STATE_CLAIMED)
-                .await
-                .unwrap(),
+            store.list_refs(&e1, "run", STATE_CLAIMED).await.unwrap(),
             vec!["run:1"]
         );
     }
@@ -278,25 +272,25 @@ mod tests {
     async fn other_efforts_claims_are_visible_for_dedup() {
         let (store, e1, e2) = fixture().await;
         store
-            .set_state(&e2, "test-run", "run:9", STATE_CLAIMED, None)
+            .set_state(&e2, "run", "run:9", STATE_CLAIMED, None)
             .await
             .unwrap();
         // From e1's view, run:9 is owned by another effort.
         assert_eq!(
             store
-                .refs_claimed_by_other_efforts(&e1, "test-run")
+                .refs_claimed_by_other_efforts(&e1, "run")
                 .await
                 .unwrap(),
             vec!["run:9"]
         );
         // e1's own claim is NOT "another effort's".
         store
-            .set_state(&e1, "test-run", "run:1", STATE_CLAIMED, None)
+            .set_state(&e1, "run", "run:1", STATE_CLAIMED, None)
             .await
             .unwrap();
         assert_eq!(
             store
-                .refs_claimed_by_other_efforts(&e1, "test-run")
+                .refs_claimed_by_other_efforts(&e1, "run")
                 .await
                 .unwrap(),
             vec!["run:9"]
@@ -310,38 +304,32 @@ mod tests {
         // the run can't be double-counted in two efforts' rollups.
         let (store, e1, e2) = fixture().await;
         store
-            .set_state(&e1, "test-run", "run:9", STATE_CLAIMED, None)
+            .set_state(&e1, "run", "run:9", STATE_CLAIMED, None)
             .await
             .unwrap();
         store
-            .set_state(&e2, "test-run", "run:9", STATE_CLAIMED, None)
+            .set_state(&e2, "run", "run:9", STATE_CLAIMED, None)
             .await
             .unwrap();
         assert!(
             store
-                .list_refs(&e1, "test-run", STATE_CLAIMED)
+                .list_refs(&e1, "run", STATE_CLAIMED)
                 .await
                 .unwrap()
                 .is_empty(),
             "e1's claim is displaced by e2's exclusive claim"
         );
         assert_eq!(
-            store
-                .list_refs(&e2, "test-run", STATE_CLAIMED)
-                .await
-                .unwrap(),
+            store.list_refs(&e2, "run", STATE_CLAIMED).await.unwrap(),
             vec!["run:9"]
         );
         // A disclaim (acknowledged) is per-effort and does NOT displace others.
         store
-            .set_state(&e1, "test-run", "run:9", STATE_ACKNOWLEDGED, None)
+            .set_state(&e1, "run", "run:9", STATE_ACKNOWLEDGED, None)
             .await
             .unwrap();
         assert_eq!(
-            store
-                .list_refs(&e2, "test-run", STATE_CLAIMED)
-                .await
-                .unwrap(),
+            store.list_refs(&e2, "run", STATE_CLAIMED).await.unwrap(),
             vec!["run:9"],
             "e2 keeps its claim when e1 merely acknowledges the ref"
         );

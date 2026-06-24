@@ -470,13 +470,21 @@ impl CollectionService {
 
     /// Attribute a just-recorded run (`run:<id>`) to an effort via the unified
     /// `"run"` ledger (tsk269), riding only oxplow's MCP contract + effort state,
-    /// never any agent internals. EXACT when the caller named a `task` (resolve
-    /// its open effort via `find_open_for_task` and claim the run for it, even
-    /// under concurrency — a dispatched sub-agent self-attributes by naming its
-    /// own task, with oxplow never seeing "which sub-agent"); else AUTO when
-    /// exactly one effort is open (`find_single_open_for_thread`); else leave it
-    /// unclaimed for the close reconcile + window-dominance + the agent's claim to
-    /// resolve the concurrent case (less exact, never wrong-exact, never dropped).
+    /// never any agent internals.
+    ///
+    /// Naming a `task` is **EXACT-or-nothing** (tsk271): resolve that task's open
+    /// effort via `find_open_for_task` and claim the run for it, even under
+    /// concurrency — a dispatched sub-agent self-attributes by naming its own
+    /// task, with oxplow never seeing "which sub-agent". When the named task has
+    /// NO open effort, the run is **left unclaimed** — it is NOT auto-attributed
+    /// to whatever single effort happens to be open, since that effort belongs to
+    /// a different task and claiming it would be a *wrong-exact* mis-attribution
+    /// (the design otherwise guarantees "less exact, never wrong-exact"). An
+    /// UNNAMED run uses the AUTO optimization — claim only when exactly one effort
+    /// is open (`find_single_open_for_thread`). Either way the unclaimed case
+    /// defers to the close reconcile + window-dominance + the agent's claim, and
+    /// the run is always recorded (observe-always), never dropped.
+    ///
     /// Returns the effort it attributed to (for a panel refresh). Best-effort: a
     /// ledger write error never fails the host path.
     async fn auto_attribute_run(
@@ -485,12 +493,10 @@ impl CollectionService {
         run_id: i64,
         task: Option<TaskId>,
     ) -> Option<TaskEffort> {
-        let exact = match task {
+        // A named task is exact-or-nothing — never fall back to the single-open
+        // thread guess, which could claim a DIFFERENT task's effort.
+        let attribute_to = match task {
             Some(tid) => self.efforts.find_open_for_task(tid).await.ok().flatten(),
-            None => None,
-        };
-        let attribute_to = match exact {
-            Some(e) => Some(e),
             None => self
                 .efforts
                 .find_single_open_for_thread(thread)
@@ -2520,19 +2526,30 @@ fn threshold_state(
 
 /// Whether a metric is attributed to an effort by its *claimed files* (the
 /// per-file gauges) rather than by time window. The bundled code-health gauges
-/// are `gauge`/`tree`; operational metrics are excluded (thread-scoped instead).
+/// are `gauge`/`tree` (category `custom`); operational metrics are excluded
+/// (thread-scoped instead), and so are **run-kind** metrics — analysis is also a
+/// `gauge`/`tree` def but is attributed by its claimed run (`is_run_attributed`),
+/// not by per-file samples it never emits. Without this guard analysis would land
+/// here and silently produce nothing (or fall back to a concurrency-unsafe
+/// in-window delta) — see `effort_metric_deltas` (tsk272).
 fn is_file_attributed(def: &oxplow_db::MetricDefinition) -> bool {
     def.kind == "gauge"
         && def.grain.as_deref() == Some("tree")
         && !is_operational_metric_key(&def.key)
+        && !is_run_attributed(def)
 }
 
 /// A run-kind metric whose effort delta must be attributed by the unified `"run"`
-/// ledger claim, never a time window (tsk269). Today: the `testing` family (tests
-/// are observe-always). `coverage` joins this in Phase 2 once coverage runs
-/// auto-claim; until then it stays effort-gated + in-window.
+/// ledger claim, never a time window (tsk269/tsk272): the observe-always families
+/// recorded through the run ledger — `testing` (tests) and `static-quality`
+/// (analysis). Both share the plain claimed-run before→after (`run_attributed_delta`).
+/// `coverage` is also run-kind but is handled by its own earlier `coverage_delta`
+/// branch (it derives the effort-relative diff at read), so it isn't matched here.
 fn is_run_attributed(def: &oxplow_db::MetricDefinition) -> bool {
-    def.category.as_deref() == Some("testing")
+    matches!(
+        def.category.as_deref(),
+        Some("testing") | Some("static-quality")
+    )
 }
 
 /// Effort-panel group ordering: code-health gauges first, then coverage, tests,
@@ -3931,6 +3948,95 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn effort_metric_deltas_attributes_analysis_by_claimed_run() {
+            // tsk272: analysis is a run-kind fact (observe-always, on-report)
+            // attributed by the unified "run" ledger claim, like tests — NOT by a
+            // time window, and NOT by claimed files (it's a gauge/tree def but
+            // emits no per-file samples). Under two overlapping efforts, an
+            // analysis run CLAIMED by e1 must show on e1 and must NOT pollute the
+            // concurrent e2's analysis delta.
+            use oxplow_db::{NewMetricRun, NewMetricSample, SqliteAttributionStore, STATE_CLAIMED};
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2_id = eff2.id.to_string();
+            // A capture time inside BOTH (open) windows — after the later start
+            // (eff2). Using `now` would land before eff2 started and dodge the bug.
+            let at = Timestamp::from_unix_ms(eff2.started_at.unix_ms() + 1000);
+
+            // Analysis metric, mirroring production: gauge / grain=tree /
+            // static-quality (the def shape that made it collide with the
+            // per-file `is_file_attributed` heuristic).
+            let mut def = oxplow_db::NewMetricDefinition::new(
+                "oxplow.analysis.errors",
+                "gauge",
+                "Analysis errors",
+            );
+            def.grain = Some("tree".into());
+            def.direction = "lower-better".into();
+            def.category = Some("static-quality".into());
+            let m = h.service.metrics.upsert_definition(def).await.unwrap();
+
+            // One analysis run with a headline sample on the thread, falling in
+            // BOTH efforts' (open) windows.
+            let mut run = NewMetricRun::done(1, "analysis", "analysis-report");
+            run.thread_id = Some(h.thread.value());
+            run.trigger = Some("on-report".into());
+            let mut sample = NewMetricSample::observed(m, 1, 3.0, "analysis-report");
+            sample.captured_at = Some(at);
+            sample.thread_id = Some(h.thread.value());
+            let run_id = h
+                .service
+                .metrics
+                .record_run_with_data(run, vec![sample], vec![])
+                .await
+                .unwrap();
+
+            // Claim the run for e1 only.
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            ledger
+                .set_state(&eid1, "run", &format!("run:{run_id}"), STATE_CLAIMED, None)
+                .await
+                .unwrap();
+
+            let d1 = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(
+                d1.iter()
+                    .filter(|d| d.category.as_deref() == Some("static-quality"))
+                    .count(),
+                1,
+                "the claiming effort shows its analysis run"
+            );
+            let d2 = h.service.effort_metric_deltas(&eff2_id).await;
+            assert!(
+                !d2.iter()
+                    .any(|d| d.category.as_deref() == Some("static-quality")),
+                "an unclaimed analysis run must not pollute a concurrent effort"
+            );
+        }
+
+        #[tokio::test]
         async fn effort_metric_deltas_sums_operational_flow_per_thread() {
             let h = build(None).await;
             let start = effort_start(&h, &h.effort_id).await;
@@ -4291,6 +4397,69 @@ mod tests {
                     .unwrap()
                     .is_empty(),
                 "the other open effort is not credited"
+            );
+        }
+
+        #[tokio::test]
+        async fn record_test_run_named_task_without_open_effort_stays_unclaimed() {
+            // tsk271: naming a task is EXACT-or-nothing. When the named task has
+            // NO open effort, the run must NOT fall back to the thread's single
+            // open effort (a DIFFERENT task) — that would be a wrong-exact claim
+            // the design otherwise avoids. The run is still recorded
+            // (observe-always); it's just left unclaimed for the agent to claim.
+            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
+            let h = build(None).await;
+            let now = Timestamp::now();
+            // task2 exists but never started an effort ⇒ find_open_for_task is
+            // None. The harness's task1 effort is the ONLY open effort.
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    Some(5),
+                    Some(0),
+                    Some(5),
+                    "asserted",
+                    "agent",
+                    None,
+                    Some(task2),
+                )
+                .await
+                .unwrap();
+
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            assert!(
+                ledger
+                    .list_refs(&eid1, "run", STATE_CLAIMED)
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "named task with no open effort must not fall back to the single \
+                 open effort of a different task"
             );
         }
 

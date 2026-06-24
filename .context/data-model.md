@@ -442,7 +442,8 @@ the generalization of the file tables above to any fact oxplow OBSERVES
 but can't auto-attribute under concurrency — the unified `"run"` kind covers
 **tests, analysis, and coverage** (tsk269/tsk270), observed by
 `trigger='on-report'`. Columns:
-`effort_id` (CASCADE), `kind` TEXT (`"test-run"`, …), `ref` TEXT (the
+`effort_id` (CASCADE), `kind` TEXT (`"run"` for tests/analysis/coverage; `"file"`
+is re-expressed over the legacy file tables), `ref` TEXT (the
 item's identity, e.g. `run:<id>`), `state` TEXT CHECK
 (`claimed | unattributed | acknowledged`), `detail_json`, `recorded_at`;
 primary key `(effort_id, kind, ref)`; index on `(kind, state)`. Store:

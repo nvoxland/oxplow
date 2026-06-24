@@ -746,7 +746,8 @@ intermediate `ready` step.
 - **Files are one kind of a generic claim→reconcile mechanic.** The same
   CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
   RECONCILE (residue at close) / SURFACE (Stop directive) loop attributes
-  **test runs** too, keyed by `(effort, "test-run", "run:<id>")` rows in
+  **agent-work runs** (tests, analysis, coverage) too, keyed by
+  `(effort, "run", "run:<id>")` rows in
   the `effort_attribution` ledger (see `crates/oxplow-app/src/attribution.rs`,
   `AttributionKind` trait with `FileKind` + `RunKind`; ledger table in
   `.context/data-model.md`; metric reads in `.context/metrics.md`). This
@@ -786,11 +787,16 @@ intermediate `ready` step.
   an optional `task_id`, and `complete_task`/`update_task` take
   `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
   is named — resolved via `find_open_for_task`, correct even under concurrency,
-  with no "which sub-agent" visibility; (2) AUTO when exactly one effort is
-  open; (3) else COARSELY to the thread's open-effort *set* (the time-window
-  OBSERVE puts it in every overlapping effort's residue) — less exact, never
-  wrong-exact. The `dispatch_task` brief instructs sub-agents to call
-  `record_test_run` with their `task_id` for exactly this reason.
+  with no "which sub-agent" visibility; naming a task is **exact-or-nothing**
+  (tsk271): when the named task has no open effort the run is left *unclaimed*,
+  never auto-attributed to whatever single effort happens to be open (that
+  effort is a different task's — claiming it would be wrong-exact); (2) AUTO
+  when **no task is named** and exactly one effort is open
+  (`find_single_open_for_thread`); (3) else COARSELY to the thread's
+  open-effort *set* (the time-window OBSERVE puts it in every overlapping
+  effort's residue) — less exact, never wrong-exact. The `dispatch_task` brief
+  instructs sub-agents to call `record_test_run` with their `task_id` for
+  exactly this reason.
 - The Stop hook also surfaces unresolved reviews as a one-shot **EFFORT
   REVIEW** directive (priority: between stale-epic-children and
   in-progress audit), covering BOTH file and run discrepancies. MCP
@@ -799,7 +805,7 @@ intermediate `ready` step.
   discrepancy OR ledger run residue; the Stop hook drains it via
   `take_pending_effort_reviews`, recomputes the file diff fresh against
   the current `task_effort_file` rows (minus `effort_acknowledged_path`)
-  AND re-reads the ledger's `unattributed` test-runs, and fires the
+  AND re-reads the ledger's `unattributed` runs, and fires the
   directive only if something still remains. So a successful `amend_effort`
   (files or runs) reconciles in a single round-trip — the Stop hook won't
   re-flag the same disclaimed path/run on the next recompute. Drained =

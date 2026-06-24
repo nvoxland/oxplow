@@ -85,9 +85,9 @@ was the bug):
 
 | family | attribution key |
 |---|---|
-| per-file gauges (`gauge`/`tree`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen) |
+| per-file gauges (`gauge`/`tree`, category `custom`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen). NB: `is_file_attributed` must **exclude run-kind metrics** — analysis is *also* `gauge`/`tree` but is run-attributed, not per-file (it emits no `file:` samples); the guard `&& !is_run_attributed(def)` keeps it out of this branch (tsk272) |
 | operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
-| tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`) |
+| tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`). Selected by `is_run_attributed` = category ∈ {`testing`, `static-quality`} |
 | coverage | observe-always (tsk270): the **absolute** whole-report % is stored per run (`oxplow.coverage.abs_pct`) + per-file instrumented/covered line-sets in the `coverage-detail` finding; the effort-relative **diff-coverage** is DERIVED at read (`diff_coverage_for_effort`) against the claiming effort's start snapshot — `coverage_delta` reads the claimed runs, never a time window |
 
 A gauge with no per-file samples (or an effort with no claims) falls back to the
