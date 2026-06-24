@@ -22,27 +22,30 @@ const testRun = (
   }) as unknown as EffortObservation;
 
 describe("clusterTestRuns (TDD iteration timeline)", () => {
-  test("merges same-time stacks of one test:collect into a single iteration", () => {
-    // Rust + frontend runs seconds apart → one logical pass.
+  test("one iteration per run — each observation is its own bar", () => {
+    // Two test commands seconds apart are two runs, not one. Snapshots are
+    // coarse (effort boundaries), so we don't fold runs together by code state.
     const iters = clusterTestRuns([
       testRun("2026-06-23T10:00:00Z", 300, 0),
       testRun("2026-06-23T10:00:08Z", 419, 0),
     ]);
-    expect(iters).toHaveLength(1);
-    expect(iters[0]).toEqual({ at: "2026-06-23T10:00:00Z", passed: 719, failed: 0 });
+    expect(iters.map((i) => [i.passed, i.failed])).toEqual([
+      [300, 0],
+      [419, 0],
+    ]);
   });
 
-  test("groups by snapshot when present — same code state is one iteration", () => {
-    // Two test commands against snapshot 5 (same code), then an edit → snapshot
-    // 7. Exact grouping: 2 iterations, not 3, regardless of timing.
+  test("does not group by snapshot — every run is a distinct iteration", () => {
+    // Three runs sharing two snapshots → still three iterations, oldest-first.
     const iters = clusterTestRuns([
       testRun("2026-06-23T10:06:00Z", 720, 0, 7),
-      testRun("2026-06-23T10:01:30Z", 419, 0, 5), // > 90s after the first run…
-      testRun("2026-06-23T10:00:00Z", 300, 3, 5), // …but same snapshot → merged
+      testRun("2026-06-23T10:01:30Z", 419, 0, 5),
+      testRun("2026-06-23T10:00:00Z", 300, 3, 5),
     ]);
     expect(iters.map((i) => [i.passed, i.failed])).toEqual([
-      [719, 3], // snapshot 5: 300+419 passed, 3 failed
-      [720, 0], // snapshot 7
+      [300, 3],
+      [419, 0],
+      [720, 0],
     ]);
   });
 

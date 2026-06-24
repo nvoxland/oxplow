@@ -632,60 +632,20 @@ export interface TestIteration {
   failed: number;
 }
 
-/** Cluster the effort's test-run observations into iterations, oldest-first so a
- *  TDD red→green progression reads left→right. Prefers an EXACT grouping by
- *  `local_snapshot_id` — the code state the tests ran against (tsk259) — so the
- *  same code state is one iteration (even two separate test commands) and an
- *  edit starts the next. Falls back to time-clustering (~90s) only when a run
- *  carries no snapshot, e.g. an agent-asserted run. */
+/** One iteration per test-run observation, oldest-first so a TDD red→green
+ *  progression reads left→right. Each `record_test_run` the effort owns is its
+ *  own iteration — snapshots are coarse (captured only at effort boundaries, not
+ *  per-edit), so grouping by `local_snapshot_id` collapses every run in an effort
+ *  into one bar and hides exactly the repeated-runs signal this view exists to
+ *  show. Attribution is now exact per-effort (the run ledger), so the raw run
+ *  sequence is the truthful timeline. */
 export function clusterTestRuns(runs: EffortObservation[]): TestIteration[] {
-  const sorted = [...runs].sort((a, b) =>
-    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
-  );
-  const counts = (obs: EffortObservation) => {
-    const p = parsePayload<TestRunPayload>(obs.payload_json);
-    return { passed: p?.passed ?? 0, failed: p?.failed ?? 0 };
-  };
-
-  // Exact path: group by the snapshot (code state) when every run has one.
-  if (
-    sorted.length > 0 &&
-    sorted.every((o) => typeof o.local_snapshot_id === "number" && o.local_snapshot_id > 0)
-  ) {
-    const bySnap = new Map<number, TestIteration>();
-    const order: number[] = [];
-    for (const obs of sorted) {
-      const snap = obs.local_snapshot_id as number;
-      const { passed, failed } = counts(obs);
-      const cur = bySnap.get(snap);
-      if (cur) {
-        cur.passed += passed;
-        cur.failed += failed;
-      } else {
-        bySnap.set(snap, { at: obs.created_at, passed, failed });
-        order.push(snap);
-      }
-    }
-    return order.map((s) => bySnap.get(s)!);
-  }
-
-  // Fallback: cluster by time (runs within ~90s are one logical pass).
-  const GAP_MS = 90_000;
-  const iters: TestIteration[] = [];
-  let lastT = Number.NEGATIVE_INFINITY;
-  for (const obs of sorted) {
-    const { passed, failed } = counts(obs);
-    const t = Date.parse(String(obs.created_at));
-    if (iters.length === 0 || (Number.isFinite(t) && t - lastT > GAP_MS)) {
-      iters.push({ at: obs.created_at, passed, failed });
-    } else {
-      const cur = iters[iters.length - 1];
-      cur.passed += passed;
-      cur.failed += failed;
-    }
-    if (Number.isFinite(t)) lastT = t;
-  }
-  return iters;
+  return [...runs]
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))
+    .map((obs) => {
+      const p = parsePayload<TestRunPayload>(obs.payload_json);
+      return { at: obs.created_at, passed: p?.passed ?? 0, failed: p?.failed ?? 0 };
+    });
 }
 
 function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservation[] }) {
