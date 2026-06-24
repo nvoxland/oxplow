@@ -3685,6 +3685,73 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn run_residue_excludes_runs_dominated_by_a_nested_effort() {
+            // tsk267 window-dominance: a run that falls inside a strictly-nested
+            // sibling effort's window is that narrower effort's to own, so the
+            // wider effort drops it from its residue; a run outside the nested
+            // window stays the wider effort's. Windows are built in real time by
+            // ordering start/finish so eff2 ⊂ eff1.
+            use crate::attribution::{reconcile_close, RunKind};
+            use oxplow_db::{NewMetricRun, SqliteAttributionStore};
+
+            let h = build(None).await; // eff1 (h.effort_id) opened first
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+
+            let mk_run = || async {
+                let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
+                run.thread_id = Some(h.thread.value());
+                h.service.metrics.record_run(run).await.unwrap()
+            };
+
+            // eff2 opens after eff1; r_inner runs while eff2 is open; eff2 closes;
+            // r_outer runs after; eff1 closes last ⇒ eff2 ⊂ eff1, r_inner ∈ eff2,
+            // r_outer ∈ eff1 only. Small sleeps keep the timeline strictly ordered
+            // past the microsecond truncation of canonical timestamps.
+            let gap = || tokio::time::sleep(std::time::Duration::from_millis(3));
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            gap().await;
+            let r_inner = mk_run().await;
+            gap().await;
+            h.efforts.finish(&eff2.id, None, None).await.unwrap();
+            gap().await;
+            let r_outer = mk_run().await;
+            gap().await;
+            h.efforts.finish(&eid1, None, None).await.unwrap();
+
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let kind = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            // eff1 observes both, but r_inner is dominated by nested eff2 → only
+            // r_outer is eff1's residue.
+            let residue = reconcile_close(&kind, &eid1).await;
+            assert_eq!(residue, vec![format!("run:{r_outer}")]);
+            assert!(
+                !residue.contains(&format!("run:{r_inner}")),
+                "the nested effort's run is dominated away from eff1"
+            );
+        }
+
+        #[tokio::test]
         async fn record_test_run_auto_attributes_when_single_open_effort() {
             // tsk263: a recorded test run is auto-attributed to the open effort
             // when it's unambiguous (the Harness has exactly one). The agent is

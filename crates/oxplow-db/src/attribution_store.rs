@@ -54,10 +54,23 @@ impl SqliteAttributionStore {
             ref_.to_string(),
             state.to_string(),
         );
+        // A CLAIM is globally exclusive per `(kind, ref)`: a run has at most one
+        // owning effort (tsk267). Claiming a ref for this effort removes any
+        // OTHER effort's row for it, so concurrent efforts can't both claim the
+        // same run and double-count it in rollups. (`unattributed`/`acknowledged`
+        // stay per-effort — only a claim takes exclusive ownership.)
+        let is_claim = state == STATE_CLAIMED;
         let detail = detail_json.map(str::to_string);
         let now = ts_to_string(Timestamp::now());
         self.db
             .call(move |conn| {
+                if is_claim {
+                    conn.execute(
+                        "DELETE FROM effort_attribution
+                         WHERE kind = ?1 AND ref = ?2 AND effort_id != ?3",
+                        params![kind, ref_, eid],
+                    )?;
+                }
                 conn.execute(
                     "INSERT OR REPLACE INTO effort_attribution
                        (effort_id, kind, ref, state, detail_json, recorded_at)
@@ -287,6 +300,50 @@ mod tests {
                 .await
                 .unwrap(),
             vec!["run:9"]
+        );
+    }
+
+    #[tokio::test]
+    async fn claiming_a_ref_is_exclusive_across_efforts() {
+        // tsk267: a run has at most one owning effort. When e2 claims a ref e1
+        // already claimed (or holds as unattributed), e1's row is removed — so
+        // the run can't be double-counted in two efforts' rollups.
+        let (store, e1, e2) = fixture().await;
+        store
+            .set_state(&e1, "test-run", "run:9", STATE_CLAIMED, None)
+            .await
+            .unwrap();
+        store
+            .set_state(&e2, "test-run", "run:9", STATE_CLAIMED, None)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .list_refs(&e1, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap()
+                .is_empty(),
+            "e1's claim is displaced by e2's exclusive claim"
+        );
+        assert_eq!(
+            store
+                .list_refs(&e2, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap(),
+            vec!["run:9"]
+        );
+        // A disclaim (acknowledged) is per-effort and does NOT displace others.
+        store
+            .set_state(&e1, "test-run", "run:9", STATE_ACKNOWLEDGED, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .list_refs(&e2, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap(),
+            vec!["run:9"],
+            "e2 keeps its claim when e1 merely acknowledges the ref"
         );
     }
 }

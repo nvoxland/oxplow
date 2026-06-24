@@ -450,11 +450,23 @@ with `FileKind` re-expressing the file tables and `RunKind` over this
 ledger). **Invariant (mirrors the file one): a `(effort, kind, ref)` is in
 exactly one of {claimed, unattributed, acknowledged}** — `set_state` is
 `INSERT OR REPLACE` on the PK, so claiming/disclaiming a run moves it
-between states rather than duplicating. Runs auto-attribute to a `claimed`
-row at `record_test_run` time only when `find_single_open_for_thread`
-resolves exactly one open effort; the concurrent case stays observed-only
-until the close reconciliation writes an `unattributed` row, which the
-agent resolves via `amend_effort(claim_runs/disclaim_runs)`. Because the
+between states rather than duplicating. **A `claimed` row is additionally
+globally exclusive per `(kind, ref)`** (tsk267): `set_state` for a claim
+first deletes any *other* effort's row for that ref, so a run has at most
+one owning effort and can't double-count across two efforts' rollups
+(`unattributed`/`acknowledged` stay per-effort). Runs auto-attribute to a
+`claimed` row at `record_test_run` time only when
+`find_single_open_for_thread` resolves exactly one open effort (or the
+caller named a `task_id` — exact even under concurrency); the unclaimed
+concurrent case stays observed-only until the close reconciliation writes
+an `unattributed` row, which the agent resolves via
+`amend_effort`/`complete_task`/`update_task` `claim_runs`/`disclaim_runs`.
+**Window-dominance** keeps that residue from over-surfacing: at reconcile a
+run that falls inside a strictly-nested sibling effort's time window
+(`SqliteTaskEffortStore::nested_efforts`) is the *narrower* effort's to
+own, so the wider effort drops it; truly-overlapping (non-nested) siblings
+have no dominant effort, so the run stays in both and the agent
+disambiguates by claiming. Because the
 row CASCADEs on `task_effort` but `metric_run`/`metric_sample` do NOT carry
 an `effort_id`, effort attribution is **exact while the effort is alive and
 simply gone once the effort is GC'd** — the metric rows outlive it. See

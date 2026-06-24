@@ -541,6 +541,36 @@ impl SqliteTaskEffortStore {
             .await
     }
 
+    /// Other efforts on the same thread whose time-window is **strictly nested**
+    /// inside this effort's window (`other ⊆ self`, not equal). Used by run
+    /// attribution's window-dominance (tsk267): a run that falls inside a nested
+    /// sibling's window is the *narrower* (more specific) effort's to own, so the
+    /// wider effort drops it from its residue. Only closed efforts can be nested
+    /// (an open effort's end is unbounded ⇒ never `<= self.ended_at`). Empty when
+    /// self has no bounded window. Timestamps are fixed-width RFC3339, so the
+    /// `<=`/`>=` string comparisons order them correctly.
+    pub async fn nested_efforts(&self, id: &EffortId) -> Result<Vec<TaskEffort>, DomainError> {
+        let id = *id;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT other.* FROM task_effort other
+                     JOIN task_effort self ON self.id = ?1
+                     WHERE other.id != self.id
+                       AND other.thread_id = self.thread_id
+                       AND self.ended_at IS NOT NULL
+                       AND other.ended_at IS NOT NULL
+                       AND other.started_at >= self.started_at
+                       AND other.ended_at <= self.ended_at
+                       AND (other.started_at > self.started_at
+                            OR other.ended_at < self.ended_at)",
+                )?;
+                let rows = stmt.query_map(params![id.value()], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// One attribution action — start-if-missing + files + impacts +
     /// finish/summary — committed as a single transaction (composing
     /// the `_tx` cores above), then ONE post-commit page_ref slice
@@ -1264,6 +1294,45 @@ mod tests {
             .unwrap();
         // Ordered by path; overlapping efforts only.
         assert_eq!(got, vec!["after.rs".to_string(), "inside.rs".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn nested_efforts_returns_only_strictly_contained_siblings() {
+        // tsk267 window-dominance: self = effort 1 [10:00, 11:00]. A sibling is
+        // "nested" only when its window is strictly inside self's.
+        let db = Database::in_memory();
+        let store = SqliteTaskEffortStore::new(db.clone());
+        let db2 = db.clone();
+        tokio::task::spawn_blocking(move || {
+            db2.with_conn(|conn| {
+                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+                for (id, start, end) in [
+                    (1, "2026-01-01T10:00:00Z", Some("2026-01-01T11:00:00Z")), // self
+                    (2, "2026-01-01T10:20:00Z", Some("2026-01-01T10:40:00Z")), // nested ✓
+                    (3, "2026-01-01T10:30:00Z", Some("2026-01-01T11:30:00Z")), // ends after — not nested
+                    (4, "2026-01-01T09:00:00Z", Some("2026-01-01T09:30:00Z")), // entirely before
+                    (5, "2026-01-01T10:00:00Z", Some("2026-01-01T11:00:00Z")), // equal — not STRICTLY nested
+                    (6, "2026-01-01T10:15:00Z", None::<&str>), // still open — not nested
+                ] {
+                    conn.execute(
+                        "INSERT INTO task_effort
+                           (id, task_id, thread_id, started_at, ended_at,
+                            start_snapshot_id, end_snapshot_id)
+                         VALUES (?1, 1, 1, ?2, ?3, NULL, NULL)",
+                        params![id, start, end],
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        let nested = store.nested_efforts(&EffortId::new(1)).await.unwrap();
+        let mut ids: Vec<i64> = nested.iter().map(|e| e.id.value()).collect();
+        ids.sort();
+        assert_eq!(ids, vec![2], "only the strictly-contained sibling");
     }
 
     #[tokio::test]

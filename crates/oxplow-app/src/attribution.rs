@@ -264,12 +264,42 @@ impl AttributionKind for RunKind<'_> {
             )
             .await
             .ok()?;
-        let observed: Vec<String> = runs.iter().map(|r| format!("run:{}", r.id)).collect();
         let claimed = self
             .ledger
             .list_refs(effort_id, self.kind, STATE_CLAIMED)
             .await
             .unwrap_or_default();
+        // Window-dominance (tsk267): a run that falls inside a strictly-nested
+        // sibling effort's window is that *narrower* effort's to own, so drop it
+        // from this (wider) effort's observed set — UNLESS this effort explicitly
+        // claimed it (an explicit claim always beats the geometric heuristic).
+        // Truly-overlapping (non-nested) siblings have no dominant effort, so the
+        // run stays observed by both and the agent disambiguates via its claim.
+        let nested = self
+            .efforts
+            .nested_efforts(effort_id)
+            .await
+            .unwrap_or_default();
+        let claimed_set: std::collections::HashSet<&str> =
+            claimed.iter().map(String::as_str).collect();
+        let observed: Vec<String> = runs
+            .iter()
+            .filter_map(|r| {
+                let ref_ = format!("run:{}", r.id);
+                let dominated = nested.iter().any(|f| match f.ended_at {
+                    Some(end) => {
+                        let t = r.started_at.unix_ms();
+                        t >= f.started_at.unix_ms() && t <= end.unix_ms()
+                    }
+                    None => false,
+                });
+                if dominated && !claimed_set.contains(ref_.as_str()) {
+                    None
+                } else {
+                    Some(ref_)
+                }
+            })
+            .collect();
         let acknowledged = self
             .ledger
             .list_refs(effort_id, self.kind, STATE_ACKNOWLEDGED)

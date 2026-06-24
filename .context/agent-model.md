@@ -761,7 +761,12 @@ intermediate `ready` step.
   counterpart of `add_files`/`remove_files`: `claim_runs` writes a
   `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
   `(effort, kind, ref)` is in exactly one of {claimed, unattributed,
-  acknowledged}; claiming/disclaiming clears the unattributed residue.
+  acknowledged}; claiming/disclaiming clears the unattributed residue. A
+  claim is **globally exclusive per `(kind, ref)`** (a run has one owning
+  effort — claiming displaces any other effort's claim, so rollups can't
+  double-count), and at reconcile **window-dominance** drops a run from an
+  effort's residue when a strictly-nested sibling effort's window owns it
+  (tsk267).
 - **Run attribution rides the MCP contract, never agent internals (tsk265).**
   oxplow has exactly two cross-agent-stable signals: the **filesystem
   snapshot** (agent-agnostic — but a test run leaves no worktree artifact, so
