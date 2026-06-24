@@ -35,9 +35,10 @@ covers all three call sites:
 ## Shaping the row
 
 - `title`: imperative, ≤60 chars (`Fix login redirect loop`).
-- `description`: what and why, terse. Put acceptance criteria inline
-  as a `## Acceptance criteria` subsection (one observable criterion
-  per line) — there is no separate field.
+- `description`: what and why, terse. Structure it however the task
+  warrants — there is no required template. Write it for a human
+  reader and wiki-format it (markdown headings/lists, `[[…]]`
+  wikilinks) for readability.
 - `priority`: `medium` unless the user signalled otherwise.
 - **One reviewable concern per row** — at top level AND among epic
   siblings. Two things a reviewer would accept/reject separately go in

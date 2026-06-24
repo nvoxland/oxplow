@@ -168,7 +168,7 @@ export function NewTaskPage({
             data-testid="tasks-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description (markdown — include a ## Acceptance criteria section if helpful)"
+            placeholder="Description (markdown)"
             style={textareaStyle}
             rows={6}
           />

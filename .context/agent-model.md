@@ -124,7 +124,7 @@ oxplow agent:
   any commit-related directives.
 - **task lifecycle.** Create → Stop-hook picks next ready item →
   agent marks `in_progress` → agent works → agent marks `done`
-  when acceptance criteria are met. The user can reopen by flipping
+  when the work is complete. The user can reopen by flipping
   back to `in_progress`. Polling "is everything done?" treats `done`
   as terminal.
 
@@ -447,7 +447,7 @@ The pipeline runs in priority order:
 1. **Writer thread with `in_progress` tasks.** Block with the audit
    directive built by `buildInProgressAuditStopReason` — lists every
    `in_progress` item on the thread (id + title) and instructs the agent
-   to reconcile each: still active → leave alone; acceptance criteria met
+   to reconcile each: still active → leave alone; work complete
    → `complete_task` (status `done`);
    stuck → `blocked`; paused → `ready`; obsolete → `canceled`. Tasks
    persist across turn boundaries; without this audit step stale
@@ -1030,9 +1030,9 @@ failing the hook. Persistence happens **after** the existing in-memory
 one-shot dedup gates (per-effort for the report nudge, per-commit sha for
 hygiene), so a deduped/non-fired nudge is never stored.
 
-These are surfaced UI-side only (the agent never reads them back): a
-collapsed "Agent nudges" debug sub-view on the task page (near the effort
-observations) lists them, live-updating on the `agentNudgesChanged` event.
+These are surfaced UI-side only (the agent never reads them back): an
+"Agent Nudges" H2 section on the task page (after each effort's Metrics)
+lists them, live-updating on the `agentNudgesChanged` event.
 The point is a reviewer/human-facing record of "what oxplow told the agent
 this effort" — previously the nudges were fully ephemeral. IPC + event wiring
 is in `.context/ipc-and-stores.md` (Agent nudges).
@@ -1621,8 +1621,8 @@ Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
   `in_progress`.
 - **Defer/batch** — create the new task as `ready` with a short note
   capturing the ask. Flip to `in_progress` when actually picked up.
-- **Merge** — update the current task's title / description /
-  acceptance criteria when new info refines it. No new row.
+- **Merge** — update the current task's title / description
+  when new info refines it. No new row.
 - **Q&A** — pure conversational asks need no task. Tasks are for
   independent, completable work.
 - **Persist across turns** — if a turn ends with work mid-flight

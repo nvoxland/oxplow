@@ -11,7 +11,7 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { FileTree } from "../FileTree/FileTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
-import { EffortObservationsBlock } from "../EffortObservations.js";
+import { AgentNudgesBlock, EffortObservationsBlock } from "../EffortObservations.js";
 import { EffortMetricsBlock } from "../EffortMetrics.js";
 
 /**
@@ -106,7 +106,7 @@ export function TaskDetail({
       <RichTextField
         key={`desc-${item.id}`}
         value={item.description}
-        placeholder="Add a description… include a ## Acceptance criteria section if helpful."
+        placeholder="Add a description…"
         style={{ paddingLeft: 0, paddingRight: 22 }}
         comments={comments}
         onCommit={(value) => {
@@ -552,15 +552,22 @@ function ActivityEffortSection({
           justifyContent: "space-between",
           gap: 12,
           padding: "8px 14px",
-          background: "var(--surface-rail, var(--surface-app))",
+          // Standard panel-header chrome: muted-accent tint (not grey) so
+          // the band reads as an intentional header, matching RailSection /
+          // Page DetailsBody.
+          background: "var(--panel-header-bg)",
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
         <h3 style={{
           margin: 0,
-          fontSize: "var(--text-sm)",
-          fontWeight: "var(--weight-semibold)",
-          color: active ? "var(--accent)" : "var(--text-primary)",
+          fontSize: 11,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+          // Active effort keeps the accent as an in-progress status cue;
+          // completed efforts use the neutral panel-header label color.
+          color: active ? "var(--accent)" : "var(--text-secondary)",
         }}>
           {subheader}
         </h3>
@@ -601,10 +608,11 @@ function ActivityEffortSection({
       ) : null}
       {detail.changed_paths.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <h4>Modified files</h4>
+          <h2 className="task-activity-heading">Modified Files</h2>
           <FileTree
             items={detail.changed_paths.map((path) => ({ path, data: path }))}
             testId={`tasks-effort-files-${detail.effort.id}`}
+            showSearch={false}
             renderItem={(item) => {
               const name = item.path.split("/").pop() ?? item.path;
               const canDiff = !!onOpenDiff;
@@ -643,6 +651,7 @@ function ActivityEffortSection({
           startedAt={detail.effort.started_at}
           endedAt={detail.effort.ended_at}
         />
+        <AgentNudgesBlock effortId={detail.effort.id} />
       </div>
     </section>
   );

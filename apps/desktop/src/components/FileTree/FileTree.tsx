@@ -10,7 +10,8 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
  * Toolbar: expand-all / collapse-all / substring search. Search
  * filters the visible set to paths containing the query (case-
  * insensitive) and auto-expands their ancestors. Empty query restores
- * the user-controlled collapse state.
+ * the user-controlled collapse state. Pass `showSearch={false}` to drop
+ * the search input and leave only the expand/collapse buttons.
  *
  * Intentional non-features (yet): drag-and-drop, multi-select,
  * keyboard navigation, virtualization. Add when a caller actually
@@ -34,6 +35,9 @@ export interface FileTreeProps<T> {
   testId?: string;
   /** Override placeholder shown when items is empty. */
   emptyMessage?: string;
+  /** Show the substring-search input in the toolbar. Default true; pass
+   *  false to leave only the expand-all / collapse-all buttons. */
+  showSearch?: boolean;
 }
 
 interface DirNode<T> {
@@ -61,6 +65,7 @@ export function FileTree<T>({
   toolbarExtras,
   testId,
   emptyMessage = "No files.",
+  showSearch = true,
 }: FileTreeProps<T>) {
   const tree = useMemo(() => buildTree(items), [items]);
   const allDirs = useMemo(() => collectDirPaths(tree), [tree]);
@@ -143,19 +148,23 @@ export function FileTree<T>({
           Collapse all
         </button>
         {toolbarExtras}
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search files…"
-          style={searchInputStyle}
-          aria-label="Filter files"
-          data-testid={testId ? `${testId}-search` : undefined}
-        />
-        {matchedCount !== null ? (
-          <span style={matchCountStyle}>
-            {matchedCount} match{matchedCount === 1 ? "" : "es"}
-          </span>
+        {showSearch ? (
+          <>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search files…"
+              style={searchInputStyle}
+              aria-label="Filter files"
+              data-testid={testId ? `${testId}-search` : undefined}
+            />
+            {matchedCount !== null ? (
+              <span style={matchCountStyle}>
+                {matchedCount} match{matchedCount === 1 ? "" : "es"}
+              </span>
+            ) : null}
+          </>
         ) : null}
       </div>
       {items.length === 0 ? (

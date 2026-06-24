@@ -254,12 +254,10 @@ archived (N)" toggle in the Done section header. The same header carries
 an "Archive all" action that bulk-archives every visible Done/Canceled
 row. The orchestrator's `read_task_options` blocker check treats
 archived the same as done/canceled. `parent_id` chains items under
-epics. There is no separate `acceptance_criteria` column — agents
-and users are nudged to include a `## Acceptance criteria` subsection
-inline in `description` (markdown) when it would be helpful. The
-column was dropped in migration V18; existing AC values were appended
-into description as a `## Acceptance criteria` section so nothing was
-lost. Task links express dependencies (`blocks`, `discovered_from`,
+epics. The `description` (markdown) is the single prose field, structured
+however the author sees fit — the model is not prompted toward any
+template, and is meant to be human-readable, wiki-formatted for
+readability. Task links express dependencies (`blocks`, `discovered_from`,
 `relates_to`, …) via the `task_link` join table.
 
 `thread_id` is nullable — items with `thread_id IS NULL` belong to the

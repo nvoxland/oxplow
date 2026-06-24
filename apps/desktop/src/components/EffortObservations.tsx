@@ -934,7 +934,7 @@ export function EffortObservationsBlock({
           data-testid={`effort-observations-${effortId}`}
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
         >
-          <h4>Coverage &amp; tests</h4>
+          <h2 className="task-activity-heading">Coverage and Tests</h2>
           {coverage ? (
             <CoverageSummary obs={coverage} onOpenFile={onOpenFile} />
           ) : (
@@ -949,7 +949,6 @@ export function EffortObservationsBlock({
         </div>
       ) : null}
       <EffortTokenUsageBlock effortId={effortId} />
-      <AgentNudgesBlock effortId={effortId} />
     </>
   );
 }
@@ -975,13 +974,13 @@ function nudgeRelative(iso: string): string {
 }
 
 /**
- * Collapsed debug sub-view of the agent nudges oxplow fired for this effort
- * — the human/reviewer-facing record of "what oxplow told the agent." Low-key
- * by design (a `<details>` collapsed by default, native disclosure keyboard
- * behaviour), and self-hiding when no nudge fired. Live-updates on
- * `agentNudgesChanged` for this effort. See `.context/agent-model.md`.
+ * The agent nudges oxplow fired for this effort — the human/reviewer-facing
+ * record of "what oxplow told the agent." Rendered as a full H3 section
+ * (matching the other effort sub-sections), self-hiding when no nudge fired.
+ * Live-updates on `agentNudgesChanged` for this effort. See
+ * `.context/agent-model.md`.
  */
-function AgentNudgesBlock({ effortId }: { effortId: string }) {
+export function AgentNudgesBlock({ effortId }: { effortId: string }) {
   const [nudges, setNudges] = useState<AgentNudge[]>([]);
 
   useEffect(() => {
@@ -1005,54 +1004,67 @@ function AgentNudgesBlock({ effortId }: { effortId: string }) {
 
   if (nudges.length === 0) return null;
 
-  const mutedStyle: React.CSSProperties = {
-    fontSize: "var(--text-xs)",
-    color: "var(--text-muted)",
-  };
-
   return (
-    <details
+    <div
       data-testid={`effort-nudges-${effortId}`}
-      style={{ marginTop: 4, fontSize: "var(--text-xs)" }}
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
-      <summary
-        style={{ cursor: "pointer", color: "var(--text-muted)", userSelect: "none" }}
-      >
-        Agent nudges ({nudges.length})
-      </summary>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+      <h2 className="task-activity-heading">Agent Nudges</h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {nudges.map((n) => (
           <div
             key={n.id}
             data-testid={`nudge-row-${n.id}`}
-            style={{ display: "flex", flexDirection: "column", gap: 2 }}
+            style={{ display: "flex", flexDirection: "column", gap: 6 }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: "var(--text-xxs, 10px)",
-                  padding: "0 4px",
-                  borderRadius: 3,
-                  background: "var(--bg-tier-2, rgba(127,127,127,0.15))",
-                  color: "var(--text-secondary, var(--text-muted))",
+                  fontSize: "var(--text-xs)",
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  background: "var(--surface-elevated)",
+                  color: "var(--text-secondary)",
                 }}
               >
                 {NUDGE_KIND_LABEL[n.kind] ?? n.kind}
               </span>
-              <span style={mutedStyle}>{nudgeRelative(n.created_at)}</span>
-            </div>
-            <span style={{ color: "var(--text-secondary, var(--text-primary))" }}>
-              {n.message}
-            </span>
-            {n.trigger ? (
-              <span style={{ ...mutedStyle, fontFamily: "var(--font-mono)" }}>
-                {n.trigger}
+              <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>
+                {nudgeRelative(n.created_at)}
               </span>
+            </div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: "var(--text-base)",
+                lineHeight: "var(--leading-prose)",
+                color: "var(--text-primary)",
+              }}
+            >
+              {n.message}
+            </p>
+            {n.trigger ? (
+              <pre
+                style={{
+                  margin: 0,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--text-sm)",
+                  color: "var(--text-secondary)",
+                  background: "var(--surface-app)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 4,
+                  padding: "6px 8px",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {n.trigger}
+              </pre>
             ) : null}
           </div>
         ))}
       </div>
-    </details>
+    </div>
   );
 }

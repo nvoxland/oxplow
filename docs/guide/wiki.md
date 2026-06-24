@@ -21,8 +21,7 @@ commit message.
 They are *not* the right place for:
 
 - Personal todos — that's the work queue.
-- Per-task acceptance criteria — those belong inline in the
-  task description as a `## Acceptance criteria` subsection.
+- Per-task detail — that belongs inline in the task description.
 
 ## Editing
 

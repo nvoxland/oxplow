@@ -331,10 +331,10 @@ pub struct CreateTaskMcpParams {
     pub backlog: bool,
     pub title: String,
     /// Markdown body — the task's prose. Required: write the full
-    /// detail here. If acceptance criteria would help reviewers (or
-    /// future-you) know when this task is done, write them inline as a
-    /// `## Acceptance criteria` subsection. There is no separate AC
-    /// field — the description is the single source of truth.
+    /// detail here. The description is the single source of truth;
+    /// structure it however the task warrants. Write it for a human
+    /// reader and wiki-format it (markdown, `[[…]]` wikilinks) for
+    /// readability.
     pub description: String,
     pub kind: Option<String>,
     pub priority: Option<String>,
@@ -393,7 +393,9 @@ pub struct McpTaskImpact {
 pub struct CompleteTaskParams {
     pub id: String,
     /// Summary note appended to the task before marking done
-    /// (developer audience — the canonical text).
+    /// (developer audience — the canonical text). Write it for a
+    /// human reader and wiki-format it (markdown, `[[…]]` wikilinks)
+    /// for readability.
     pub summary: String,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-

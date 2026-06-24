@@ -147,7 +147,7 @@ export function EffortMetricsBlock({
       data-testid={`effort-metrics-${effortId}`}
       style={{ display: "flex", flexDirection: "column", gap: 8 }}
     >
-      <h4>Metrics</h4>
+      <h2 className="task-activity-heading">Metrics</h2>
       {ordered.map((group) => (
         <div
           key={group.label}
