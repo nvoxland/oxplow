@@ -804,6 +804,37 @@ impl SqliteMetricStore {
             .await
     }
 
+    /// Like [`runs_in_window`] but filtered by `trigger` instead of `producer` —
+    /// the unified OBSERVE for run attribution (tsk269). All agent-work runs
+    /// (tests/coverage/analysis) stamp `trigger = "on-report"` regardless of their
+    /// (per-analyzer, varying) `producer`, so this captures all three under one
+    /// ledger kind. Oldest-first.
+    pub async fn runs_in_window_by_trigger(
+        &self,
+        thread_id: i64,
+        trigger: &str,
+        start: Timestamp,
+        end: Option<Timestamp>,
+    ) -> Result<Vec<MetricRun>, DomainError> {
+        let trigger = trigger.to_string();
+        let start = ts_to_string(start);
+        let end = end.map(ts_to_string);
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {RUN_COLS} FROM metric_run
+                      WHERE thread_id = ?1 AND trigger = ?2
+                        AND started_at >= ?3
+                        AND (?4 IS NULL OR started_at <= ?4)
+                      ORDER BY started_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![thread_id, trigger, start, end], row_to_run)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// All **headline** samples for a metric, newest-first. Per-file attribution
     /// samples (`subject_kind = 'file'`) are excluded — they're the effort-
     /// rollup's grain (`file_samples_for_paths`), not the headline time series

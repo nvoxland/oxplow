@@ -754,10 +754,14 @@ intermediate `ready` step.
   authority** — "newest open effort on the thread wins" mis-assigns work
   when parallel sub-agents (Claude/Codex internals we don't see into) run
   separate efforts in one thread. Producers OBSERVE at thread/time grain
-  with no effort guess; runs auto-attribute via
-  `find_single_open_for_thread` only when **exactly one** effort is open
-  (unambiguous); the concurrent case is left unattributed for the agent to
-  claim. `amend_effort`'s `claim_runs`/`disclaim_runs` are the run-kind
+  with no effort guess (**observe-always**, tsk269: tests + analysis are
+  recorded regardless of open-effort count; coverage joins in tsk270);
+  runs auto-attribute via `find_single_open_for_thread` only when
+  **exactly one** effort is open, or when the recorder names a `task_id`
+  (exact even under concurrency); the concurrent case is left unattributed
+  for the agent to claim. **`find_single_open_for_thread` is a Class-A
+  auto-attribute optimization, never a drop-gate** — a producer never bails
+  for lack of a single effort; it records and defers attribution. `amend_effort`'s `claim_runs`/`disclaim_runs` are the run-kind
   counterpart of `add_files`/`remove_files`: `claim_runs` writes a
   `claimed` ledger row, `disclaim_runs` an `acknowledged` one. A
   `(effort, kind, ref)` is in exactly one of {claimed, unattributed,

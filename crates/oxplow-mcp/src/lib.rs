@@ -2604,7 +2604,7 @@ impl OxplowMcp {
                         let has_run_residue = !self
                             .services
                             .attribution_store
-                            .list_refs(&eid, "test-run", oxplow_db::STATE_UNATTRIBUTED)
+                            .list_refs(&eid, "run", oxplow_db::STATE_UNATTRIBUTED)
                             .await
                             .unwrap_or_default()
                             .is_empty();
@@ -2642,7 +2642,7 @@ impl OxplowMcp {
             }
             self.services
                 .attribution_store
-                .set_state(effort_id, "test-run", ref_, oxplow_db::STATE_CLAIMED, None)
+                .set_state(effort_id, "run", ref_, oxplow_db::STATE_CLAIMED, None)
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
@@ -2652,13 +2652,7 @@ impl OxplowMcp {
             }
             self.services
                 .attribution_store
-                .set_state(
-                    effort_id,
-                    "test-run",
-                    ref_,
-                    oxplow_db::STATE_ACKNOWLEDGED,
-                    None,
-                )
+                .set_state(effort_id, "run", ref_, oxplow_db::STATE_ACKNOWLEDGED, None)
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
@@ -2752,7 +2746,7 @@ impl OxplowMcp {
         }
         // Run claims/disclaims ride the generic attribution ledger
         // (`effort_attribution`), the same claim→reconcile rails as files but
-        // keyed by `(effort, "test-run", ref)`.
+        // keyed by `(effort, "run", ref)`.
         let claim_runs = p.claim_runs.unwrap_or_default();
         let disclaim_runs = p.disclaim_runs.unwrap_or_default();
         self.apply_run_claims(&effort_id, &claim_runs, &disclaim_runs)
@@ -4454,7 +4448,7 @@ mod tests {
         for r in ["run:1", "run:2"] {
             services
                 .attribution_store
-                .set_state(&effort.id, "test-run", r, STATE_UNATTRIBUTED, None)
+                .set_state(&effort.id, "run", r, STATE_UNATTRIBUTED, None)
                 .await
                 .unwrap();
         }
@@ -4474,7 +4468,7 @@ mod tests {
         // Neither remains unattributed; each moved to its declared state.
         let unattributed = services
             .attribution_store
-            .list_refs(&effort.id, "test-run", STATE_UNATTRIBUTED)
+            .list_refs(&effort.id, "run", STATE_UNATTRIBUTED)
             .await
             .unwrap();
         assert!(
@@ -4484,7 +4478,7 @@ mod tests {
         assert_eq!(
             services
                 .attribution_store
-                .list_refs(&effort.id, "test-run", STATE_CLAIMED)
+                .list_refs(&effort.id, "run", STATE_CLAIMED)
                 .await
                 .unwrap(),
             vec!["run:1".to_string()],
@@ -4492,7 +4486,7 @@ mod tests {
         assert_eq!(
             services
                 .attribution_store
-                .list_refs(&effort.id, "test-run", STATE_ACKNOWLEDGED)
+                .list_refs(&effort.id, "run", STATE_ACKNOWLEDGED)
                 .await
                 .unwrap(),
             vec!["run:2".to_string()],
@@ -4528,7 +4522,7 @@ mod tests {
             .unwrap();
         services
             .attribution_store
-            .set_state(&effort.id, "test-run", "run:7", STATE_UNATTRIBUTED, None)
+            .set_state(&effort.id, "run", "run:7", STATE_UNATTRIBUTED, None)
             .await
             .unwrap();
 
@@ -4550,7 +4544,7 @@ mod tests {
         assert_eq!(
             services
                 .attribution_store
-                .list_refs(&effort.id, "test-run", STATE_CLAIMED)
+                .list_refs(&effort.id, "run", STATE_CLAIMED)
                 .await
                 .unwrap(),
             vec!["run:7".to_string()],
@@ -4559,7 +4553,7 @@ mod tests {
         assert!(
             services
                 .attribution_store
-                .list_refs(&effort.id, "test-run", STATE_UNATTRIBUTED)
+                .list_refs(&effort.id, "run", STATE_UNATTRIBUTED)
                 .await
                 .unwrap()
                 .is_empty(),

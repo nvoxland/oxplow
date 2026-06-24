@@ -455,46 +455,62 @@ impl CollectionService {
             )
             .await;
         let _ = (stream_id, payload);
-        // ATTRIBUTE — the agent-agnostic rule (tsk265), riding only oxplow's MCP
-        // contract + effort state, never any agent internals:
-        //   1. EXACT when the caller named a `task` — resolve its open effort and
-        //      claim the run for it, even under concurrency. A dispatched
-        //      sub-agent knows its own task id; this is how it self-attributes
-        //      precisely without oxplow ever seeing "which sub-agent".
-        //   2. else AUTO when exactly one effort is open (unambiguous).
-        //   3. else COARSE — leave it unclaimed. The time-window OBSERVE at close
-        //      associates the run with the thread's open-effort set (it falls in
-        //      every overlapping window), so it's attributed to the SET, never
-        //      guessed onto one. Less exact, never wrong-exact.
-        // Best-effort throughout: a ledger write error never fails the host path.
+        // ATTRIBUTE via the unified run ledger, then refresh the panel for the
+        // effort it landed on (if any). Observe-always: the run is already
+        // recorded above regardless of effort.
+        let attribute_to = match run_id {
+            Some(rid) => self.auto_attribute_run(thread, rid, task).await,
+            None => None,
+        };
+        if let Some(effort) = attribute_to.as_ref() {
+            self.emit(thread, effort);
+        }
+        Ok(run_id.map(|_| 0))
+    }
+
+    /// Attribute a just-recorded run (`run:<id>`) to an effort via the unified
+    /// `"run"` ledger (tsk269), riding only oxplow's MCP contract + effort state,
+    /// never any agent internals. EXACT when the caller named a `task` (resolve
+    /// its open effort via `find_open_for_task` and claim the run for it, even
+    /// under concurrency — a dispatched sub-agent self-attributes by naming its
+    /// own task, with oxplow never seeing "which sub-agent"); else AUTO when
+    /// exactly one effort is open (`find_single_open_for_thread`); else leave it
+    /// unclaimed for the close reconcile + window-dominance + the agent's claim to
+    /// resolve the concurrent case (less exact, never wrong-exact, never dropped).
+    /// Returns the effort it attributed to (for a panel refresh). Best-effort: a
+    /// ledger write error never fails the host path.
+    async fn auto_attribute_run(
+        &self,
+        thread: &ThreadId,
+        run_id: i64,
+        task: Option<TaskId>,
+    ) -> Option<TaskEffort> {
         let exact = match task {
             Some(tid) => self.efforts.find_open_for_task(tid).await.ok().flatten(),
             None => None,
         };
-        let single = self
-            .efforts
-            .find_single_open_for_thread(thread)
-            .await
-            .ok()
-            .flatten();
-        let attribute_to = exact.or(single);
-        if let (Some(rid), Some(effort)) = (run_id, attribute_to.as_ref()) {
+        let attribute_to = match exact {
+            Some(e) => Some(e),
+            None => self
+                .efforts
+                .find_single_open_for_thread(thread)
+                .await
+                .ok()
+                .flatten(),
+        };
+        if let Some(effort) = attribute_to.as_ref() {
             let _ = self
                 .attribution
                 .set_state(
                     &effort.id,
-                    "test-run",
-                    &format!("run:{rid}"),
+                    "run",
+                    &format!("run:{run_id}"),
                     STATE_CLAIMED,
                     None,
                 )
                 .await;
         }
-        // Refresh the effort panel for whichever effort we attributed to.
-        if let Some(effort) = attribute_to.as_ref() {
-            self.emit(thread, effort);
-        }
-        Ok(run_id.map(|_| 0))
+        attribute_to
     }
 
     /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
@@ -566,9 +582,9 @@ impl CollectionService {
         format_override: Option<String>,
         skip_if_stale: bool,
     ) -> Result<AnalysisIngest, DomainError> {
-        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
-            return Ok(AnalysisIngest::NoOpenEffort);
-        };
+        // OBSERVE-ALWAYS (tsk269): analysis findings are absolute, so we record
+        // regardless of open-effort count; `record_static_analysis` attributes via
+        // the ledger.
         let cfg = self.collection_cfg();
         let registry = self.registry(&cfg);
         let (report_path, format_str) = match (report_path_override, format_override) {
@@ -600,7 +616,7 @@ impl CollectionService {
         };
         // Stale guard for the ride-along (skip_if_stale); the explicit MCP
         // path passes false — the caller asked for it.
-        if skip_if_stale && report_is_stale(&abs, effort.started_at) {
+        if skip_if_stale && report_is_stale(&abs, report_fresh_floor()) {
             return Ok(AnalysisIngest::StaleReport(report_path));
         }
         // No baseline gate: findings are ABSOLUTE (current-file), not
@@ -887,11 +903,8 @@ impl CollectionService {
         git_version: Option<String>,
         git_version_exact: bool,
         detail: Option<serde_json::Value>,
-    ) {
-        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
-        else {
-            return;
-        };
+    ) -> Option<i64> {
+        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
         let analyzer = analyzers
             .first()
@@ -975,18 +988,23 @@ impl CollectionService {
                 });
             }
             // Atomic: run + samples + all findings commit together.
-            self.metrics
+            let run_id = self
+                .metrics
                 .record_run_with_data(run, samples, findings)
                 .await?;
-            Ok::<(), DomainError>(())
+            Ok::<i64, DomainError>(run_id)
         }
         .await;
         match result {
-            Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
-                stream_id: oxplow_domain::StreamId::new(stream_val),
-            }),
+            Ok(run_id) => {
+                self.events.emit(OxplowEvent::MetricSamplesChanged {
+                    stream_id: oxplow_domain::StreamId::new(stream_val),
+                });
+                Some(run_id)
+            }
             Err(e) => {
-                tracing::warn!(error = %e, "failed to mirror analysis into metric substrate")
+                tracing::warn!(error = %e, "failed to mirror analysis into metric substrate");
+                None
             }
         }
     }
@@ -1082,18 +1100,23 @@ impl CollectionService {
         if !is_test && !is_analysis && !is_commit {
             return Ok(None);
         }
-        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
-            return Ok(None);
-        };
+        // OBSERVE-ALWAYS (tsk269): tests + analysis are recorded regardless of how
+        // many efforts are open — attribution is deferred to the ledger, never a
+        // precondition for recording. The single open effort (if any) is resolved
+        // here only for the effort-RELATIVE advisories (commit-hygiene, coverage,
+        // nudges), which legitimately no-op when ambiguous.
+        let effort_opt = self.efforts.find_single_open_for_thread(thread).await?;
 
         // Commit-hygiene nudge: a successful `git commit` that swept in files
-        // outside the open effort's changed set. Informational, one-shot per
-        // commit. Independent of the test/analysis ride-alongs below.
+        // outside the open effort's changed set. Effort-relative advisory — only
+        // with a single open effort. Independent of the ride-alongs below.
         if is_commit {
-            if let Some(msg) = self.check_commit_hygiene(&effort, bash.exit_code).await? {
-                self.persist_nudge(thread, Some(&effort), "commit-hygiene", &msg, &bash.command)
-                    .await;
-                return Ok(Some(msg));
+            if let Some(effort) = &effort_opt {
+                if let Some(msg) = self.check_commit_hygiene(effort, bash.exit_code).await? {
+                    self.persist_nudge(thread, Some(effort), "commit-hygiene", &msg, &bash.command)
+                        .await;
+                    return Ok(Some(msg));
+                }
             }
             // A pure commit (not also a test/analysis run) is done.
             if !is_test && !is_analysis {
@@ -1101,14 +1124,15 @@ impl CollectionService {
             }
         }
         let registry = self.registry(&cfg);
+        let floor = report_fresh_floor();
 
-        // Static-analysis ride-along: when an analyzer ran, record a
-        // static-analysis observation — command-only (the ran-record) when no
-        // fresh analysis report exists, or carrying merged findings when one
-        // does. Classification is by collector kind, not a format heuristic.
+        // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
+        // record a static-analysis observation — command-only (the ran-record)
+        // when no fresh analysis report exists, or carrying merged findings when
+        // one does. Classification is by collector kind, not a format heuristic.
         if is_analysis {
             let (report, source, analyzers) =
-                match self.merge_fresh_analysis(&effort, &cfg, &registry) {
+                match self.merge_fresh_analysis(floor, &cfg, &registry) {
                     Some((r, source, analyzers)) => (Some(r), source, analyzers),
                     None => (None, "analysis-report".to_string(), Vec::new()),
                 };
@@ -1127,10 +1151,10 @@ impl CollectionService {
         if !is_test {
             return Ok(None);
         }
-        // Merge every test report fresher than the effort start into one
-        // per-test tree (each test stack regenerates its own report; the
-        // freshness guard excludes stale ones from prior efforts/runs).
-        let report = self.merge_fresh_test_reports(&effort, &cfg, &registry);
+        // Merge every fresh test report into one per-test tree (each test stack
+        // regenerates its own report; the freshness window excludes stale ones
+        // from prior runs/other stacks).
+        let report = self.merge_fresh_test_reports(floor, &cfg, &registry);
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
         // in-process collectors, "plugin-exec:<name>" when a lower-trust exec
         // plugin produced the suites (mirrors the coverage path).
@@ -1154,6 +1178,13 @@ impl CollectionService {
             None,
         )
         .await?;
+        // Coverage + nudges below are effort-RELATIVE (diff-coverage is computed
+        // against the effort's start snapshot; nudges key/dedup per effort), so
+        // they only run with a single open effort. The test run above is already
+        // recorded regardless. (Coverage observe-always is Phase 2 / tsk270.)
+        let Some(effort) = effort_opt else {
+            return Ok(None);
+        };
         // Coverage ride-along: merge every fresh coverage report → one
         // diff-coverage observation.
         let coverage = self.merge_fresh_coverage(&effort, &cfg, &registry);
@@ -1551,7 +1582,7 @@ impl CollectionService {
     /// when nothing fresh/non-empty.
     fn merge_fresh_test_reports(
         &self,
-        effort: &TaskEffort,
+        floor: oxplow_domain::Timestamp,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> Option<(oxplow_coverage::TestReport, String)> {
@@ -1566,7 +1597,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, effort.started_at) {
+            if report_is_stale(&abs, floor) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -1662,7 +1693,7 @@ impl CollectionService {
     /// for the UI's "which analyzer ran" label. `None` when none contributed.
     fn merge_fresh_analysis(
         &self,
-        effort: &TaskEffort,
+        floor: oxplow_domain::Timestamp,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> Option<(oxplow_coverage::AnalysisReport, String, Vec<String>)> {
@@ -1679,7 +1710,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, effort.started_at) {
+            if report_is_stale(&abs, floor) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -1718,12 +1749,14 @@ impl CollectionService {
         Some((merged, source, analyzers))
     }
 
-    /// Record a `static-analysis` observation against the thread's open
-    /// effort. This single kind is both the ran-record (when `report` is
-    /// `None` — analyzer ran but regenerated no parseable report, like a
-    /// command-only `test-run`) and the findings (when a report parsed). The
-    /// headline metric is the error+warning count (lower = better). Returns
-    /// `Ok(None)` when no effort is open.
+    /// Record a `static-analysis` observation. OBSERVE-ALWAYS (tsk269): analysis
+    /// findings are absolute (current-file, not effort-relative), so the run is
+    /// recorded regardless of how many efforts are open and attributed via the
+    /// unified `"run"` ledger. This single kind is both the ran-record (when
+    /// `report` is `None` — analyzer ran but regenerated no parseable report) and
+    /// the findings (when a report parsed). The headline metric is the
+    /// error+warning count (lower = better). Returns `Ok(None)` only when there's
+    /// no stream or nothing was recorded.
     async fn record_static_analysis(
         &self,
         thread: &ThreadId,
@@ -1732,12 +1765,12 @@ impl CollectionService {
         analyzers: &[String],
         source: &str,
     ) -> Result<Option<i64>, DomainError> {
-        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
-            return Ok(None);
-        };
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
+        // Optional single open effort — for the snapshot pin + panel refresh only;
+        // attribution rides the ledger (auto-claimed below when unambiguous).
+        let effort = self.efforts.find_single_open_for_thread(thread).await?;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -1765,9 +1798,21 @@ impl CollectionService {
             (errors + warnings) as f64
         });
 
-        // Freshness pin (mirrors diff-coverage): pin to the effort's end
-        // snapshot if present, else its start.
-        let pin = effort.end_snapshot_id.or(effort.start_snapshot_id);
+        // Snapshot pin: the effort's end-or-start snapshot when one is open, else
+        // the stream's current snapshot (the code state the analyzer ran against)
+        // — so observe-always still pins the run to a code state under 0/N efforts.
+        let pin = match &effort {
+            Some(e) => e.end_snapshot_id.or(e.start_snapshot_id),
+            None => match oxplow_domain::StreamId::try_from_str(&stream_id) {
+                Some(s) => self
+                    .snapshots
+                    .latest_snapshot_id_for_stream(s)
+                    .await
+                    .ok()
+                    .flatten(),
+                None => None,
+            },
+        };
         let (local_snapshot_id, closest_git_version, git_version_exact) = match pin {
             Some(p) => {
                 let v = file_ref_version::resolve(&self.snapshots, &self.project_dir, p).await?;
@@ -1781,8 +1826,8 @@ impl CollectionService {
         };
 
         // Dual-write into the unified metric substrate (best-effort), when a
-        // report was parsed (command-only analyzer runs have no counts).
-        if let Some(r) = report {
+        // report was parsed (command-only analyzer runs have no counts → no run).
+        let run_id = if let Some(r) = report {
             self.mirror_analysis_metrics(
                 thread,
                 &stream_id,
@@ -1794,11 +1839,10 @@ impl CollectionService {
                 git_version_exact,
                 Some(serde_json::Value::Object(payload.clone())),
             )
-            .await;
-        }
-        // Substrate is the sole store now (tsk215) — the analyzer payload is
-        // kept as an `analysis-detail` finding + per-lint `metric_finding` rows
-        // via the mirror above. Signal the panel to refetch; `Some` = recorded.
+            .await
+        } else {
+            None
+        };
         let _ = (
             stream_id,
             metric_value,
@@ -1807,7 +1851,16 @@ impl CollectionService {
             closest_git_version,
             git_version_exact,
         );
-        self.emit(thread, &effort);
+        // Attribute the run via the unified ledger, then refresh the panel for the
+        // effort it landed on (command-only runs have no run → refresh the single
+        // open effort if any).
+        let attribute_to = match run_id {
+            Some(rid) => self.auto_attribute_run(thread, rid, None).await,
+            None => effort,
+        };
+        if let Some(e) = attribute_to.as_ref() {
+            self.emit(thread, e);
+        }
         Ok(Some(0))
     }
 
@@ -1859,14 +1912,21 @@ impl CollectionService {
             let Ok(Some(def)) = self.metrics.get_definition(metric_key).await else {
                 continue;
             };
-            // Tests are observe-always → attribute by the ledger CLAIM (exact
-            // under concurrency), not a time window (which would mix concurrent
-            // efforts' runs). Coverage/analysis are gated on a single open
-            // effort, so their time window is unambiguous (tsk263).
-            let samples = if obs_kind == "test-run" {
+            // Tests + analysis are observe-always → attribute by the unified
+            // ledger CLAIM (exact under concurrency), not a time window (which
+            // would mix concurrent efforts' runs). `samples_for_runs` filters the
+            // effort's claimed runs to this metric, so passing the whole claimed
+            // set is correct. Coverage is still effort-gated (Phase 1 / tsk270),
+            // so its time window is unambiguous (tsk263/tsk269).
+            let samples = if obs_kind == "diff-coverage" {
+                match self.metrics.samples_for_effort(def.id, eid.value()).await {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                }
+            } else {
                 let run_ids: Vec<i64> = self
                     .attribution
-                    .list_refs(&eid, "test-run", STATE_CLAIMED)
+                    .list_refs(&eid, "run", STATE_CLAIMED)
                     .await
                     .unwrap_or_default()
                     .iter()
@@ -1876,11 +1936,6 @@ impl CollectionService {
                     .samples_for_runs(def.id, run_ids)
                     .await
                     .unwrap_or_default()
-            } else {
-                match self.metrics.samples_for_effort(def.id, eid.value()).await {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                }
             };
             // Samples are time-ASC; newest-first for the panel.
             for sample in samples.into_iter().rev() {
@@ -1971,6 +2026,11 @@ impl CollectionService {
             let row = if is_file_attributed(&def) {
                 self.file_attributed_delta(&def, &effort, stream_val, &claimed)
                     .await
+            } else if is_run_attributed(&def) {
+                // Run-kind metric (observe-always) → attribute by the ledger claim,
+                // never the time window, so a concurrent/unclaimed run can't
+                // pollute this effort's rollup (tsk269).
+                self.run_attributed_delta(&def, &effort).await
             } else {
                 self.in_window_delta(&def, &effort, Some(thread_val)).await
             };
@@ -2100,6 +2160,38 @@ impl CollectionService {
             Some(t) => samples.iter().filter(|s| s.thread_id == Some(t)).collect(),
             None => samples.iter().collect(),
         };
+        Self::delta_from_samples(def, &mine)
+    }
+
+    /// Per-run-claim delta for a run-kind metric (tsk269): the before→after (or
+    /// `sum` flow) over the samples of the runs THIS effort claimed in the ledger
+    /// (`run:<id>` → `samples_for_runs`), never a time window. So an unclaimed run
+    /// that merely overlaps the effort's window can't pollute the rollup.
+    async fn run_attributed_delta(
+        &self,
+        def: &oxplow_db::MetricDefinition,
+        effort: &TaskEffort,
+    ) -> Option<oxplow_db::EffortMetricDelta> {
+        let run_ids: Vec<i64> = self
+            .attribution
+            .list_refs(&effort.id, "run", STATE_CLAIMED)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
+            .collect();
+        let samples = self.metrics.samples_for_runs(def.id, run_ids).await.ok()?;
+        let mine: Vec<&oxplow_db::MetricSample> = samples.iter().collect();
+        Self::delta_from_samples(def, &mine)
+    }
+
+    /// The shared before→after / `sum`-flow computation over an ordered (time-ASC)
+    /// sample slice — the tail both [`in_window_delta`] and [`run_attributed_delta`]
+    /// share. `None` when there are no samples (or a `sum` total of 0).
+    fn delta_from_samples(
+        def: &oxplow_db::MetricDefinition,
+        mine: &[&oxplow_db::MetricSample],
+    ) -> Option<oxplow_db::EffortMetricDelta> {
         let (first, last) = (mine.first()?, mine.last()?);
         let latest_run = last.run_id;
         if def.default_agg == "sum" {
@@ -2285,6 +2377,14 @@ fn is_file_attributed(def: &oxplow_db::MetricDefinition) -> bool {
         && !is_operational_metric_key(&def.key)
 }
 
+/// A run-kind metric whose effort delta must be attributed by the unified `"run"`
+/// ledger claim, never a time window (tsk269). Today: the `testing` family (tests
+/// are observe-always). `coverage` joins this in Phase 2 once coverage runs
+/// auto-claim; until then it stays effort-gated + in-window.
+fn is_run_attributed(def: &oxplow_db::MetricDefinition) -> bool {
+    def.category.as_deref() == Some("testing")
+}
+
 /// Effort-panel group ordering: code-health gauges first, then coverage, tests,
 /// static-analysis, operational. Drives the grouped rendering on the task page.
 fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
@@ -2402,14 +2502,32 @@ fn commit_hygiene_message(short_sha: &str, out_of_effort: &[String]) -> String {
     msg
 }
 
-fn report_is_stale(path: &std::path::Path, effort_start: oxplow_domain::Timestamp) -> bool {
+/// How far back a report's mtime can be and still count as "fresh" for passive
+/// ingestion (tsk269). Replaces the effort-start floor so collection works at
+/// 0/N open efforts (observe-always). A report regenerated by the command that
+/// just ran is seconds old; stale reports from prior runs/other stacks fall
+/// outside the window and are skipped — same router/anti-replay intent as the
+/// old effort-start floor, minus the effort dependency. 10 minutes is generous
+/// for a slow suite that finishes writing well after its command started.
+const REPORT_FRESH_WINDOW_MS: i64 = 10 * 60 * 1000;
+
+/// The freshness floor: reports touched at/before this are stale. `now` minus
+/// the window. (Passed where the effort-start `Timestamp` used to be.)
+fn report_fresh_floor() -> oxplow_domain::Timestamp {
+    oxplow_domain::Timestamp::from_unix_ms(
+        oxplow_domain::Timestamp::now().unix_ms() - REPORT_FRESH_WINDOW_MS,
+    )
+}
+
+/// True when `path`'s mtime is at/before `floor` — i.e. NOT freshly regenerated.
+fn report_is_stale(path: &std::path::Path, floor: oxplow_domain::Timestamp) -> bool {
     let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else {
         return false;
     };
     let Ok(since) = mtime.duration_since(std::time::UNIX_EPOCH) else {
         return false;
     };
-    (since.as_millis() as i64) <= effort_start.unix_ms()
+    (since.as_millis() as i64) <= floor.unix_ms()
 }
 
 /// 1-based line numbers on the NEW side that were inserted or replaced.
@@ -3648,6 +3766,7 @@ mod tests {
             let seed_run = || async {
                 let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
                 run.thread_id = Some(h.thread.value());
+                run.trigger = Some("on-report".into());
                 h.service.metrics.record_run(run).await.unwrap()
             };
             let r1 = seed_run().await;
@@ -3656,31 +3775,77 @@ mod tests {
 
             let ledger = SqliteAttributionStore::new(h.db.clone());
             ledger
-                .set_state(&eid1, "test-run", &format!("run:{r1}"), STATE_CLAIMED, None)
+                .set_state(&eid1, "run", &format!("run:{r1}"), STATE_CLAIMED, None)
                 .await
                 .unwrap();
             ledger
-                .set_state(
-                    &eff2.id,
-                    "test-run",
-                    &format!("run:{r2}"),
-                    STATE_CLAIMED,
-                    None,
-                )
+                .set_state(&eff2.id, "run", &format!("run:{r2}"), STATE_CLAIMED, None)
                 .await
                 .unwrap();
 
-            let kind1 = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind1 = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
             // eff1: observed {r1,r2,r3} − claimed {r1} − other-claimed {r2} = {r3}.
             assert_eq!(
                 reconcile_close(&kind1, &eid1).await,
                 vec![format!("run:{r3}")]
             );
-            let kind2 = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind2 = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
             // eff2: observed all − claimed {r2} − other-claimed {r1} = {r3}.
             assert_eq!(
                 reconcile_close(&kind2, &eff2.id).await,
                 vec![format!("run:{r3}")]
+            );
+        }
+
+        #[tokio::test]
+        async fn record_test_run_observes_with_no_open_effort() {
+            // tsk269 observe-always: a run is recorded into the substrate even
+            // with NO open effort — just left unattributed (no ledger claim). The
+            // bug this fixes: collection used to drop it entirely.
+            use oxplow_db::SqliteAttributionStore;
+            let h = build(None).await;
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            h.efforts.finish(&eid1, None, None).await.unwrap(); // close the only effort
+
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    Some(5),
+                    Some(0),
+                    Some(5),
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            // The run IS in the substrate (observed)…
+            let runs = h
+                .service
+                .metrics
+                .runs_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(runs.len(), 1, "run recorded despite no open effort");
+            // …but nothing is claimed (no effort to attribute to).
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            assert!(
+                ledger
+                    .list_refs(&eid1, "run", STATE_CLAIMED)
+                    .await
+                    .unwrap()
+                    .is_empty(),
+                "no effort open ⇒ no claim, just an observed run"
             );
         }
 
@@ -3721,6 +3886,7 @@ mod tests {
             let mk_run = || async {
                 let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
                 run.thread_id = Some(h.thread.value());
+                run.trigger = Some("on-report".into());
                 h.service.metrics.record_run(run).await.unwrap()
             };
 
@@ -3740,7 +3906,7 @@ mod tests {
             h.efforts.finish(&eid1, None, None).await.unwrap();
 
             let ledger = SqliteAttributionStore::new(h.db.clone());
-            let kind = RunKind::tests(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
             // eff1 observes both, but r_inner is dominated by nested eff2 → only
             // r_outer is eff1's residue.
             let residue = reconcile_close(&kind, &eid1).await;
@@ -3776,10 +3942,7 @@ mod tests {
                 .unwrap();
             let ledger = SqliteAttributionStore::new(h.db.clone());
             let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let claimed = ledger
-                .list_refs(&eid, "test-run", STATE_CLAIMED)
-                .await
-                .unwrap();
+            let claimed = ledger.list_refs(&eid, "run", STATE_CLAIMED).await.unwrap();
             assert_eq!(claimed.len(), 1, "single open effort → run auto-attributed");
             assert!(claimed[0].starts_with("run:"), "ref is run:<id>");
         }
@@ -3840,7 +4003,7 @@ mod tests {
             // Claimed for the NAMED effort, never the other open one.
             assert_eq!(
                 ledger
-                    .list_refs(&eff2.id, "test-run", STATE_CLAIMED)
+                    .list_refs(&eff2.id, "run", STATE_CLAIMED)
                     .await
                     .unwrap()
                     .len(),
@@ -3849,7 +4012,7 @@ mod tests {
             );
             assert!(
                 ledger
-                    .list_refs(&eid1, "test-run", STATE_CLAIMED)
+                    .list_refs(&eid1, "run", STATE_CLAIMED)
                     .await
                     .unwrap()
                     .is_empty(),
@@ -4271,7 +4434,9 @@ mod tests {
                 summary: None,
             };
             let registry = h.service.registry(&cfg);
-            let report = h.service.merge_fresh_test_reports(&effort, &cfg, &registry);
+            let report = h
+                .service
+                .merge_fresh_test_reports(effort.started_at, &cfg, &registry);
             assert!(
                 report.is_some(),
                 "fresh JUnit report should be merged (effort start = epoch)"
@@ -4460,7 +4625,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, source) = h
                 .service
-                .merge_fresh_test_reports(&effort, &cfg, &registry)
+                .merge_fresh_test_reports(effort.started_at, &cfg, &registry)
                 .expect("both fresh reports merged");
             let names: Vec<&str> = merged.suites.iter().map(|s| s.name.as_str()).collect();
             assert!(
@@ -4635,7 +4800,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, source, analyzers) = h
                 .service
-                .merge_fresh_analysis(&effort, &cfg, &registry)
+                .merge_fresh_analysis(effort.started_at, &cfg, &registry)
                 .expect("fresh clippy report merged");
             assert_eq!(merged.findings.len(), 2);
             assert_eq!(source, "analysis-report");

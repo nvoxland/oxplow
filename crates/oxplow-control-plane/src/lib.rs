@@ -1122,7 +1122,7 @@ async fn stop_directive(
             let unattributed_refs = ctx
                 .services
                 .attribution_store
-                .list_refs(&eid, "test-run", oxplow_db::STATE_UNATTRIBUTED)
+                .list_refs(&eid, "run", oxplow_db::STATE_UNATTRIBUTED)
                 .await
                 .unwrap_or_default();
             if file_review.is_none() && unattributed_refs.is_empty() {
@@ -1252,24 +1252,12 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
 /// The `run:<id>` ref leads so `claim_runs`/`disclaim_runs` can still parse it.
 fn format_run_descriptor(
     run_ref: &str,
-    command: Option<&str>,
-    passed: Option<i64>,
-    failed: Option<i64>,
+    summary: Option<&str>,
     time_hm: Option<(u8, u8)>,
 ) -> String {
     let mut out = run_ref.to_string();
-    if let Some(cmd) = command.map(str::trim).filter(|c| !c.is_empty()) {
-        out.push_str(&format!(" — {cmd}"));
-    }
-    let mut counts = Vec::new();
-    if let Some(p) = passed {
-        counts.push(format!("{p} passed"));
-    }
-    if let Some(f) = failed {
-        counts.push(format!("{f} failed"));
-    }
-    if !counts.is_empty() {
-        out.push_str(&format!(" ({})", counts.join(", ")));
+    if let Some(s) = summary.map(str::trim).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(" — {s}"));
     }
     if let Some((h, m)) = time_hm {
         out.push_str(&format!(" @ {h:02}:{m:02}"));
@@ -1277,10 +1265,63 @@ fn format_run_descriptor(
     out
 }
 
+/// Render the kind-specific middle of a run descriptor from its `*-detail`
+/// finding payload — tests show command + pass/fail, coverage shows the diff %,
+/// analysis shows the analyzer + error/warning counts (tsk269). Pure for testing.
+fn run_summary_from_detail(detail_kind: &str, payload: &serde_json::Value) -> Option<String> {
+    let counts = |parts: &[(&str, &str)]| -> String {
+        let joined: Vec<String> = parts
+            .iter()
+            .filter_map(|(key, label)| {
+                payload
+                    .get(*key)
+                    .and_then(serde_json::Value::as_i64)
+                    .map(|n| format!("{n} {label}"))
+            })
+            .collect();
+        if joined.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", joined.join(", "))
+        }
+    };
+    let str_field = |key: &str| payload.get(key).and_then(|v| v.as_str());
+    match detail_kind {
+        "test-detail" => {
+            let cmd = str_field("command").unwrap_or("test run").trim();
+            Some(format!(
+                "{cmd}{}",
+                counts(&[("passed", "passed"), ("failed", "failed")])
+            ))
+        }
+        "coverage-detail" => Some(
+            match payload
+                .get("summaryPct")
+                .and_then(serde_json::Value::as_f64)
+            {
+                Some(pct) => format!("coverage ({pct:.0}% of changed lines)"),
+                None => "coverage report".to_string(),
+            },
+        ),
+        "analysis-detail" => {
+            let who = str_field("analyzer")
+                .or_else(|| str_field("command"))
+                .unwrap_or("analysis")
+                .trim();
+            Some(format!(
+                "{who}{}",
+                counts(&[("errorCount", "errors"), ("warningCount", "warnings")])
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Turn a bare `run:<id>` ledger ref into a descriptor by joining the
-/// `metric_run` row (timestamp) + its `test-detail` finding (command + counts)
-/// from the substrate. Falls back to the bare ref when the run can't be looked
-/// up — never blocks the review (tsk266).
+/// `metric_run` row (timestamp) + its `*-detail` finding (test/coverage/analysis)
+/// from the substrate. Dispatches on the finding kind so a coverage/analysis run
+/// renders as such, not a malformed test run (tsk266/tsk269). Falls back to the
+/// bare ref when the run can't be looked up — never blocks the review.
 async fn describe_run(metrics: &oxplow_db::SqliteMetricStore, run_ref: &str) -> String {
     let Some(id) = run_ref
         .strip_prefix("run:")
@@ -1288,39 +1329,31 @@ async fn describe_run(metrics: &oxplow_db::SqliteMetricStore, run_ref: &str) -> 
     else {
         return run_ref.to_string();
     };
-    let detail = metrics
+    let summary = metrics
         .list_findings(id)
         .await
         .ok()
         .unwrap_or_default()
         .into_iter()
-        .find(|f| f.kind == "test-detail")
-        .and_then(|f| f.extra_json)
-        .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
-    let command = detail
-        .as_ref()
-        .and_then(|d| d.get("command").and_then(|c| c.as_str()))
-        .map(str::to_string);
-    let passed = detail
-        .as_ref()
-        .and_then(|d| d.get("passed").and_then(serde_json::Value::as_i64));
-    let failed = detail
-        .as_ref()
-        .and_then(|d| d.get("failed").and_then(serde_json::Value::as_i64));
+        .find_map(|f| {
+            let payload =
+                serde_json::from_str::<serde_json::Value>(f.extra_json.as_deref()?).ok()?;
+            run_summary_from_detail(&f.kind, &payload)
+        });
     let time_hm = metrics
         .get_run(id)
         .await
         .ok()
         .flatten()
         .map(|r| (r.started_at.0.hour(), r.started_at.0.minute()));
-    format_run_descriptor(run_ref, command.as_deref(), passed, failed, time_hm)
+    format_run_descriptor(run_ref, summary.as_deref(), time_hm)
 }
 
 fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
     let mut out = String::from(
         "EFFORT REVIEW: one or more efforts you just closed have a discrepancy between \
          what you declared and what oxplow observed — in the files you touched and/or \
-         the test runs that happened during your effort. For each:\n\n",
+         the test/coverage/analysis runs that happened during your effort. For each:\n\n",
     );
     for r in reviews {
         out.push_str(&format!(
@@ -1350,8 +1383,9 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
         }
         if !r.unattributed_runs.is_empty() {
             out.push_str(
-                "      These test runs happened during your effort but weren't attributed \
-                 to you (a concurrent effort was open, so oxplow couldn't auto-assign them):\n",
+                "      These test/coverage/analysis runs happened during your effort but \
+                 weren't attributed to you (a concurrent effort was open, so oxplow couldn't \
+                 auto-assign them):\n",
             );
             for run in &r.unattributed_runs {
                 out.push_str(&format!("        - {run}\n"));
@@ -1522,27 +1556,41 @@ mod tests {
     };
 
     #[test]
-    fn format_run_descriptor_renders_command_counts_and_time() {
+    fn format_run_descriptor_renders_summary_and_time() {
         // tsk266: the agent gets a recognizable line, not an opaque id.
         assert_eq!(
             format_run_descriptor(
                 "run:47",
-                Some("cargo test"),
-                Some(419),
-                Some(0),
+                Some("cargo test (419 passed, 0 failed)"),
                 Some((10, 3))
             ),
             "run:47 — cargo test (419 passed, 0 failed) @ 10:03"
         );
         // Every piece is optional; the ref always leads so claim_runs can parse it.
+        assert_eq!(format_run_descriptor("run:9", None, None), "run:9");
+        assert_eq!(format_run_descriptor("run:9", Some("   "), None), "run:9");
+    }
+
+    #[test]
+    fn run_summary_dispatches_per_detail_kind() {
+        // tsk269: a coverage/analysis run renders as such, not a malformed test.
+        let test = serde_json::json!({"command": "cargo test", "passed": 419, "failed": 0});
         assert_eq!(
-            format_run_descriptor("run:9", None, None, None, None),
-            "run:9"
+            run_summary_from_detail("test-detail", &test).as_deref(),
+            Some("cargo test (419 passed, 0 failed)")
         );
+        let cov = serde_json::json!({"summaryPct": 83.4});
         assert_eq!(
-            format_run_descriptor("run:9", Some("   "), Some(5), None, None),
-            "run:9 (5 passed)"
+            run_summary_from_detail("coverage-detail", &cov).as_deref(),
+            Some("coverage (83% of changed lines)")
         );
+        let analysis =
+            serde_json::json!({"analyzer": "clippy", "errorCount": 0, "warningCount": 2});
+        assert_eq!(
+            run_summary_from_detail("analysis-detail", &analysis).as_deref(),
+            Some("clippy (0 errors, 2 warnings)")
+        );
+        assert_eq!(run_summary_from_detail("other", &test), None);
     }
 
     /// Build an `AppCtx` over an in-memory DB for filing-claim tests.

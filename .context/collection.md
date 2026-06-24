@@ -133,6 +133,19 @@ hook + MCP wiring):
   reports). `record_test_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give.
 
+**Observe-always (tsk269).** Tests + analysis are recorded **regardless of how
+many efforts are open** — attribution is deferred to the unified `"run"` ledger,
+never a precondition for recording. `on_post_tool_use` resolves a single open
+effort only for the effort-RELATIVE advisories (commit-hygiene, the report-less /
+coverage-target nudges) and for coverage, which legitimately no-op under 0/N
+efforts; the test/analysis OBSERVE calls run unconditionally. Report freshness is
+gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of the
+old effort-start floor, so it works with no open effort. **Coverage is still
+effort-gated here** (it's effort-relative — diff vs the effort's start snapshot);
+tsk270 decouples it (observe absolute, derive the diff at read). The earlier
+`find_single_open_for_thread` *drop-gates* on the producers are gone — the helper
+stays only as the Class-A auto-attribute optimization.
+
 **Sub-agent runs + cross-agent attribution (tsk265).** The passive PostToolUse
 path only sees the **parent agent's** tool calls — Claude/Codex sub-agent (Task
 tool) tool calls don't fire the parent's hook, so a dispatched sub-agent's
@@ -144,11 +157,10 @@ runs don't touch) and the **MCP contract**. So a sub-agent records its runs
 through `record_test_run`, passing `task_id` so the run attributes EXACTLY to
 its effort even under concurrency (resolved via `find_open_for_task`); the
 `dispatch_task` brief instructs this. Without a named task, a run attributes
-automatically when one effort is open, else **coarsely to the thread's
-open-effort set** (the time-window observe puts it in every overlapping effort's
-residue) — never guessed onto one. `claim_runs`/`disclaim_runs` on
-`complete_task`/`update_task` let the agent fix attribution at the close
-boundary; `amend_effort` does it after the fact. See
+automatically when one effort is open, else is left unclaimed for the close
+reconcile + window-dominance + the agent's claim — never guessed onto one.
+`claim_runs`/`disclaim_runs` on `complete_task`/`update_task` let the agent fix
+attribution at the close boundary; `amend_effort` does it after the fact. See
 [agent-model.md](./agent-model.md) for the full claim→reconcile loop.
 
 Both paths resolve `format` → collector via the registry and **classify by the

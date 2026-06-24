@@ -448,13 +448,14 @@ impl TaskService {
                     "effort close: recorded unattributed changes"
                 );
             }
-            // Reconcile the run kinds too (test-run; tsk263): the test runs in
-            // this effort's window that weren't attributed to it (the concurrent
-            // case — a parallel effort's, or another actor's) become the close
-            // residue for the EFFORT REVIEW. Single-effort runs were already
-            // auto-attributed at record, so their residue is empty.
+            // Reconcile the unified run kind (tsk263/tsk269): every agent-work run
+            // (tests/coverage/analysis) in this effort's window that wasn't
+            // attributed to it (the concurrent case — a parallel effort's, or
+            // another actor's) becomes the close residue for the EFFORT REVIEW.
+            // Single-effort runs were already auto-attributed at record, so their
+            // residue is empty.
             if let (Some(attribution), Some(metrics)) = (&self.attribution, &self.metrics) {
-                let kind = crate::attribution::RunKind::tests(effort_store, metrics, attribution);
+                let kind = crate::attribution::RunKind::runs(effort_store, metrics, attribution);
                 let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }

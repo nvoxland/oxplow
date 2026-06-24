@@ -210,25 +210,29 @@ impl AttributionKind for FileKind<'_> {
     }
 }
 
-/// Run kinds (`test-run`, `coverage`, `analysis`): events oxplow OBSERVES as
-/// `metric_run` rows in the effort's thread+time window, attributed via the
-/// generic ledger (`effort_attribution`). Unlike files, a run isn't an object
-/// you diff — oxplow can see *that* tests ran and *what* they returned, but not
-/// which sub-agent/effort, so the boundary claim resolves it. `ref` = the
-/// `metric_run` id as `run:<id>`. One struct serves every run producer.
+/// The unified run kind `"run"` — every agent-work `metric_run` (tests,
+/// coverage, analysis) oxplow OBSERVES in the effort's thread+time window
+/// (filtered by `trigger = "on-report"`), attributed via the generic ledger
+/// (`effort_attribution`). Unlike files, a run isn't an object you diff — oxplow
+/// can see *that* it ran and *what* it returned, but not which sub-agent/effort,
+/// so the boundary claim resolves it. `ref` = the `metric_run` id as `run:<id>`.
 pub struct RunKind<'a> {
     pub efforts: &'a SqliteTaskEffortStore,
     pub metrics: &'a SqliteMetricStore,
     pub ledger: &'a SqliteAttributionStore,
-    /// Attribution kind name, e.g. `test-run`.
+    /// Attribution kind name — `"run"` (the unified run kind, tsk269).
     pub kind: &'static str,
-    /// The `metric_run.producer` to observe, e.g. `tests`.
-    pub producer: &'static str,
+    /// The `metric_run.trigger` to observe — `"on-report"`, which every
+    /// agent-work run (tests/coverage/analysis) stamps regardless of its
+    /// (per-analyzer, varying) producer. One filter captures all three.
+    pub trigger: &'static str,
 }
 
 impl<'a> RunKind<'a> {
-    /// Test runs (`producer = "tests"`, kind `"test-run"`).
-    pub fn tests(
+    /// All agent-work runs — tests, coverage, analysis — under one kind `"run"`,
+    /// observed by `trigger = "on-report"`. Attribution is per-`metric_run`,
+    /// producer-agnostic; the producer only drives rendering.
+    pub fn runs(
         efforts: &'a SqliteTaskEffortStore,
         metrics: &'a SqliteMetricStore,
         ledger: &'a SqliteAttributionStore,
@@ -237,8 +241,8 @@ impl<'a> RunKind<'a> {
             efforts,
             metrics,
             ledger,
-            kind: "test-run",
-            producer: "tests",
+            kind: "run",
+            trigger: "on-report",
         }
     }
 }
@@ -256,9 +260,9 @@ impl AttributionKind for RunKind<'_> {
         // cross-effort dedup below keeps it off this effort's residue.)
         let runs = self
             .metrics
-            .runs_in_window(
+            .runs_in_window_by_trigger(
                 effort.thread_id.value(),
-                self.producer,
+                self.trigger,
                 effort.started_at,
                 effort.ended_at,
             )
