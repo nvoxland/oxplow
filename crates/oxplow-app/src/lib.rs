@@ -619,6 +619,7 @@ impl Services {
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone())
             .with_metrics(metric_store.clone(), event_bus.clone())
+            .with_attribution(attribution_store.clone())
             .with_gauge_runner(metrics.clone());
         let collection = collection::CollectionService::new(
             metric_store.clone(),

@@ -21,8 +21,8 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteMetricStore,
-    SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
+    EffortFileChange, NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteAttributionStore,
+    SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -126,6 +126,10 @@ pub struct TaskService {
     /// also runs any `on-effort-complete` gauges against the effort's end
     /// snapshot. Optional so bare TaskService tests skip it.
     gauge_runner: Option<crate::metrics_service::MetricsService>,
+    /// Kind-agnostic attribution ledger (tsk263). When set (with `metrics` +
+    /// `effort_store`), closing an effort reconciles the run kinds too — the
+    /// concurrent-effort runs left unattributed become the close residue.
+    attribution: Option<Arc<SqliteAttributionStore>>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
@@ -143,7 +147,15 @@ impl TaskService {
             metrics: None,
             events: None,
             gauge_runner: None,
+            attribution: None,
         }
+    }
+
+    /// Attach the attribution ledger so closing an effort reconciles the run
+    /// kinds (test/coverage/analysis) alongside files (tsk263).
+    pub fn with_attribution(mut self, store: Arc<SqliteAttributionStore>) -> Self {
+        self.attribution = Some(store);
+        self
     }
 
     /// Attach the config-declared gauge runner so closing an effort also runs
@@ -435,6 +447,16 @@ impl TaskService {
                     count = marked.len(),
                     "effort close: recorded unattributed changes"
                 );
+            }
+            // Reconcile the run kinds too (test-run; tsk263): the test runs in
+            // this effort's window that weren't attributed to it (the concurrent
+            // case — a parallel effort's, or another actor's) become the close
+            // residue for the EFFORT REVIEW. Single-effort runs were already
+            // auto-attributed at record, so their residue is empty.
+            if let (Some(attribution), Some(metrics)) = (&self.attribution, &self.metrics) {
+                let kind =
+                    crate::attribution::RunKind::tests(effort_store, metrics, attribution);
+                let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }
     }
