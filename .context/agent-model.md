@@ -755,7 +755,8 @@ intermediate `ready` step.
   when parallel sub-agents (Claude/Codex internals we don't see into) run
   separate efforts in one thread. Producers OBSERVE at thread/time grain
   with no effort guess (**observe-always**, tsk269: tests + analysis are
-  recorded regardless of open-effort count; coverage joins in tsk270);
+  recorded regardless of open-effort count — coverage stores absolute
+  and derives its effort diff at read, tsk270);
   runs auto-attribute via `find_single_open_for_thread` only when
   **exactly one** effort is open, or when the recorder names a `task_id`
   (exact even under concurrency); the concurrent case is left unattributed

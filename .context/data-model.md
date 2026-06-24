@@ -440,7 +440,7 @@ legacy `finish(None, None)` close with no reconciliation.
 `effort_attribution` (V40) is the **kind-agnostic attribution ledger** —
 the generalization of the file tables above to any fact oxplow OBSERVES
 but can't auto-attribute under concurrency — the unified `"run"` kind covers
-**tests + analysis** today (coverage joins in tsk270), observed by
+**tests, analysis, and coverage** (tsk269/tsk270), observed by
 `trigger='on-report'`. Columns:
 `effort_id` (CASCADE), `kind` TEXT (`"test-run"`, …), `ref` TEXT (the
 item's identity, e.g. `run:<id>`), `state` TEXT CHECK

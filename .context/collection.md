@@ -133,18 +133,22 @@ hook + MCP wiring):
   reports). `record_test_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give.
 
-**Observe-always (tsk269).** Tests + analysis are recorded **regardless of how
-many efforts are open** — attribution is deferred to the unified `"run"` ledger,
-never a precondition for recording. `on_post_tool_use` resolves a single open
-effort only for the effort-RELATIVE advisories (commit-hygiene, the report-less /
-coverage-target nudges) and for coverage, which legitimately no-op under 0/N
-efforts; the test/analysis OBSERVE calls run unconditionally. Report freshness is
-gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of the
-old effort-start floor, so it works with no open effort. **Coverage is still
-effort-gated here** (it's effort-relative — diff vs the effort's start snapshot);
-tsk270 decouples it (observe absolute, derive the diff at read). The earlier
-`find_single_open_for_thread` *drop-gates* on the producers are gone — the helper
-stays only as the Class-A auto-attribute optimization.
+**Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
+**regardless of how many efforts are open** — attribution is deferred to the
+unified `"run"` ledger, never a precondition for recording. `on_post_tool_use`
+resolves a single open effort only for the effort-RELATIVE *advisories*
+(commit-hygiene + the report-less / coverage-target nudges), which legitimately
+no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
+is gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of the
+old effort-start floor, so it works with no open effort. **Coverage** is
+effort-relative (diff vs the effort's start snapshot), so it can't store the diff
+at record: `observe_coverage` stores the **absolute** whole-report coverage
+(`oxplow.coverage.abs_pct` + per-file instrumented/covered line-sets in the
+`coverage-detail` finding), and the effort-relative diff is DERIVED at read
+(`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
+still produces a diff. The earlier `find_single_open_for_thread` *drop-gates* on
+the producers are gone — the helper stays only as the Class-A auto-attribute
+optimization.
 
 **Sub-agent runs + cross-agent attribution (tsk265).** The passive PostToolUse
 path only sees the **parent agent's** tool calls — Claude/Codex sub-agent (Task

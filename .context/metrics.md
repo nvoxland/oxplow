@@ -88,7 +88,7 @@ was the bug):
 | per-file gauges (`gauge`/`tree`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen) |
 | operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
 | tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`) |
-| coverage | still effort-gated (Phase 1 / tsk270): recorded only when `find_single_open_for_thread` resolves one open effort, so its in-window headline is unambiguous — moves to the ledger in Phase 2 |
+| coverage | observe-always (tsk270): the **absolute** whole-report % is stored per run (`oxplow.coverage.abs_pct`) + per-file instrumented/covered line-sets in the `coverage-detail` finding; the effort-relative **diff-coverage** is DERIVED at read (`diff_coverage_for_effort`) against the claiming effort's start snapshot — `coverage_delta` reads the claimed runs, never a time window |
 
 A gauge with no per-file samples (or an effort with no claims) falls back to the
 in-window headline before→after.
@@ -109,11 +109,12 @@ therefore join through the ledger: `effort_observations_from_metrics` and
 `run_attributed_delta` list the effort's `claimed` run refs, parse the ids, and
 read `samples_for_runs(metric_id, run_ids)` — `samples_for_runs` filters to the
 metric, so the test/analysis specs share one claimed set. An effort shows exactly
-the runs it owns; a concurrent/unclaimed run can't pollute its rollup. **Coverage
-is still effort-gated in Phase 1** (it's effort-relative — diff vs the effort's
-start snapshot — so it can't be naively observe-always; tsk270 decouples it). The
-mechanic + trait (`AttributionKind`/`RunKind`) live in `.context/agent-model.md`
-+ `.context/data-model.md`.
+the runs it owns; a concurrent/unclaimed run can't pollute its rollup. **Coverage**
+is effort-relative (diff vs the effort's start snapshot), so it observes the
+ABSOLUTE report always and DERIVES the effort diff at read
+(`diff_coverage_for_effort`, `coverage_delta`) — a run claimed after close still
+yields a diff (tsk270). The mechanic + trait (`AttributionKind`/`RunKind`) live in
+`.context/agent-model.md` + `.context/data-model.md`.
 
 ### Additivity
 
@@ -140,7 +141,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 
 | producer | where | emits |
 |---|---|---|
-| coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from the existing `store_diff_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.diff_pct`; `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
+| coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |

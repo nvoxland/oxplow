@@ -14,7 +14,7 @@ const d = (o: Partial<EffortMetricDelta>) => o as unknown as EffortMetricDelta;
 test("hasDedicatedPanel hides metrics shown in a dedicated panel", () => {
   // Covered by Coverage / Tests / Static analysis / Token / Nudge panels.
   expect(hasDedicatedPanel(d({ category: "testing", key: "oxplow.tests.total" }))).toBe(true);
-  expect(hasDedicatedPanel(d({ category: "coverage", key: "oxplow.coverage.diff_pct" }))).toBe(true);
+  expect(hasDedicatedPanel(d({ category: "coverage", key: "oxplow.coverage.abs_pct" }))).toBe(true);
   expect(hasDedicatedPanel(d({ category: "static-quality", key: "oxplow.analysis.errors" }))).toBe(true);
   expect(hasDedicatedPanel(d({ category: "operational", key: "agent.tokens.total" }))).toBe(true);
   expect(hasDedicatedPanel(d({ category: "operational", key: "agent.nudges.fired" }))).toBe(true);

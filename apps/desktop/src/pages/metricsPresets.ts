@@ -26,7 +26,7 @@ export const BUILTIN_PRESETS: readonly ExplorerPreset[] = [
     groupBy: "subject",
     viz: "line",
   },
-  { name: "Coverage", selected: ["oxplow.coverage.diff_pct"], groupBy: "none", viz: "line" },
+  { name: "Coverage", selected: ["oxplow.coverage.abs_pct"], groupBy: "none", viz: "line" },
   {
     name: "Tests pass/fail",
     selected: ["oxplow.tests.passed", "oxplow.tests.failed"],

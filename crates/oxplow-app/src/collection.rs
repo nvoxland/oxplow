@@ -522,9 +522,8 @@ impl CollectionService {
         format_override: Option<String>,
         skip_if_stale: bool,
     ) -> Result<CoverageIngest, DomainError> {
-        let Some(effort) = self.efforts.find_single_open_for_thread(thread).await? else {
-            return Ok(CoverageIngest::NoOpenEffort);
-        };
+        // OBSERVE-ALWAYS (tsk270): record absolute coverage regardless of effort;
+        // the effort-relative diff is derived at read.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(CoverageIngest::NoOpenEffort);
         };
@@ -553,7 +552,7 @@ impl CollectionService {
         };
         // Stale guard for the ride-along (skip_if_stale); the explicit
         // MCP path passes false — the caller asked for it.
-        if skip_if_stale && report_is_stale(&abs, effort.started_at) {
+        if skip_if_stale && report_is_stale(&abs, report_fresh_floor()) {
             return Ok(CoverageIngest::StaleReport(report_path));
         }
         let report = match collector.run(&content) {
@@ -565,8 +564,7 @@ impl CollectionService {
             }
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
-        self.store_diff_coverage(thread, &effort, &stream_id, &report)
-            .await
+        self.observe_coverage(thread, &stream_id, &report).await
     }
 
     /// Ingest a SINGLE analysis report (the explicit MCP path) — the on-demand
@@ -678,12 +676,9 @@ impl CollectionService {
         changed: usize,
         version: &file_ref_version::ResolvedFileVersion,
         detail: Option<serde_json::Value>,
-    ) {
-        let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
-        else {
-            return;
-        };
-        if let Err(e) = self
+    ) -> Option<i64> {
+        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
+        match self
             .record_coverage_metric(
                 thread,
                 stream_val,
@@ -695,7 +690,11 @@ impl CollectionService {
             )
             .await
         {
-            tracing::warn!(error = %e, "failed to mirror coverage into metric substrate");
+            Ok(run_id) => Some(run_id),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to mirror coverage into metric substrate");
+                None
+            }
         }
     }
 
@@ -709,20 +708,25 @@ impl CollectionService {
         changed: usize,
         version: &file_ref_version::ResolvedFileVersion,
         detail: Option<serde_json::Value>,
-    ) -> Result<(), DomainError> {
+    ) -> Result<i64, DomainError> {
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
 
-        let mut def =
-            NewMetricDefinition::new("oxplow.coverage.diff_pct", "coverage", "Diff coverage");
+        // ABSOLUTE whole-report coverage (tsk270): observe-always, no effort
+        // baseline. The effort-relative diff-coverage is derived at READ from the
+        // stored per-file line-sets (`diff_coverage_for_effort`).
+        let mut def = NewMetricDefinition::new("oxplow.coverage.abs_pct", "coverage", "Coverage");
         def.unit = Some("%".into());
         def.direction = "higher-better".into();
-        def.grain = Some("effort".into());
-        def.basis = "diff-vs-effort-start".into();
+        // No per-sample grain: this is the whole-report absolute %, one scalar per
+        // run (the effort-relative diff is derived at read, not stored). Grain CHECK
+        // allows only effort/tree/file/entity/NULL.
+        def.grain = None;
+        def.basis = "absolute".into();
         def.producer = Some("coverage".into());
         def.category = Some("coverage".into());
         def.language = None;
         def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
-        def.description = Some("Coverage % over the effort's changed lines.".into());
+        def.description = Some("Whole-report coverage %.".into());
         // Targets live in DATA, not a hardcoded UI ramp (tsk220): the renderer
         // colors red/green from these (fail < 50%, warn < 80%, ok ≥ 80%).
         def.target = Some(COVERAGE_TARGET_PCT);
@@ -749,18 +753,19 @@ impl CollectionService {
         sample.basis_ref = version.closest_git_version.clone();
         sample.branch = branch;
 
-        // Atomic: the run, its sample, and the verbatim per-file
-        // uncovered-changed-lines detail finding (tsk215) commit together.
+        // Atomic: the run, its sample, and the verbatim per-file absolute
+        // instrumented/covered detail finding (tsk215/tsk270) commit together.
         let findings: Vec<NewMetricFinding> = Self::detail_finding("coverage-detail", detail)
             .into_iter()
             .collect();
-        self.metrics
+        let run_id = self
+            .metrics
             .record_run_with_data(run, vec![sample], findings)
             .await?;
         self.events.emit(OxplowEvent::MetricSamplesChanged {
             stream_id: oxplow_domain::StreamId::new(stream_val),
         });
-        Ok(())
+        Ok(run_id)
     }
 
     /// Build one run-scoped detail finding carrying a verbatim `payload_json`
@@ -1009,77 +1014,136 @@ impl CollectionService {
         }
     }
 
-    async fn store_diff_coverage(
+    /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
+    /// coverage — per-file instrumented/covered line-sets, verbatim, in the
+    /// `coverage-detail` finding + an `oxplow.coverage.abs_pct` headline + the
+    /// run (pinned to the stream's current snapshot) — with NO effort baseline.
+    /// The effort-relative diff-coverage is derived later at READ from these
+    /// line-sets ([`diff_coverage_for_effort`]). Attribution rides the unified
+    /// `"run"` ledger (auto-claimed when unambiguous, else reconciled/claimed).
+    async fn observe_coverage(
         &self,
         thread: &ThreadId,
-        effort: &TaskEffort,
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
     ) -> Result<CoverageIngest, DomainError> {
-        let Some(start) = effort.start_snapshot_id else {
-            return Ok(CoverageIngest::NoBaseline);
+        let Some((abs_pct, total_cov, total_instr, payload)) = coverage_abs_payload(report) else {
+            return Ok(CoverageIngest::NoChangedCoverage);
         };
-        // Changed lines per file = end-side diff of the effort's start
-        // snapshot vs the current working tree (the effort is typically
-        // still open when tests run, so there's no end snapshot yet).
+
+        // Pin to the stream's current snapshot — the code state the report
+        // measured — independent of any effort (observe-always).
+        let pin = match oxplow_domain::StreamId::try_from_str(stream_id) {
+            Some(s) => self
+                .snapshots
+                .latest_snapshot_id_for_stream(s)
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
+        let version = match pin {
+            Some(p) => file_ref_version::resolve(&self.snapshots, &self.project_dir, p).await?,
+            None => file_ref_version::ResolvedFileVersion {
+                local_snapshot_id: 0,
+                closest_git_version: None,
+                git_version_exact: false,
+            },
+        };
+        let run_id = self
+            .mirror_coverage_metric(
+                thread,
+                stream_id,
+                abs_pct,
+                total_cov,
+                total_instr,
+                &version,
+                Some(payload),
+            )
+            .await;
+        let attribute_to = match run_id {
+            Some(rid) => self.auto_attribute_run(thread, rid, None).await,
+            None => None,
+        };
+        if let Some(e) = attribute_to.as_ref() {
+            self.emit(thread, e);
+        }
+        Ok(CoverageIngest::Stored {
+            observation_id: 0,
+            summary_pct: abs_pct,
+            changed_lines: total_instr,
+            covered_lines: total_cov,
+        })
+    }
+
+    /// Derive the effort-relative **diff-coverage** from a run's stored ABSOLUTE
+    /// per-file line-sets, against the effort's start snapshot (tsk270). The body
+    /// is the pre-tsk270 `store_diff_coverage` computation, moved to read time so
+    /// a coverage run claimed AFTER the effort closed still produces a diff and
+    /// nothing is frozen at reconcile. Returns `(summary_pct, diff_payload)` or
+    /// `None` when the effort has no start snapshot or no changed instrumented
+    /// lines overlap. `diff_payload` is the same shape the panel already renders.
+    async fn diff_coverage_for_effort(
+        &self,
+        effort: &TaskEffort,
+        abs_payload: &serde_json::Value,
+    ) -> Result<Option<(f64, serde_json::Value)>, DomainError> {
+        let Some(start) = effort.start_snapshot_id else {
+            return Ok(None);
+        };
         let start_tree = self.snapshots.tree_at(start).await?;
+        let to_set = |v: Option<&serde_json::Value>| -> BTreeSet<u32> {
+            v.and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_u64().map(|n| n as u32))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
         let mut total_changed = 0usize;
         let mut total_covered = 0usize;
         let mut files_payload = Vec::new();
-        for (path, fc) in &report.files {
+        for f in abs_payload
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let Some(path) = f.get("path").and_then(|p| p.as_str()) else {
+                continue;
+            };
             let changed = self.changed_lines_for(path, &start_tree);
             if changed.is_empty() {
                 continue;
             }
+            let instrumented = to_set(f.get("instrumented"));
+            let covered = to_set(f.get("covered"));
             let changed_instr: BTreeSet<u32> =
-                fc.instrumented.intersection(&changed).copied().collect();
+                instrumented.intersection(&changed).copied().collect();
             if changed_instr.is_empty() {
                 continue;
             }
             let changed_cov: BTreeSet<u32> =
-                fc.covered.intersection(&changed_instr).copied().collect();
+                covered.intersection(&changed_instr).copied().collect();
             let uncovered: Vec<u32> = changed_instr.difference(&changed_cov).copied().collect();
             total_changed += changed_instr.len();
             total_covered += changed_cov.len();
-            files_payload.push(json!({
-                "path": path,
-                "uncoveredChangedLines": uncovered,
-            }));
+            files_payload.push(json!({ "path": path, "uncoveredChangedLines": uncovered }));
         }
         if total_changed == 0 {
-            return Ok(CoverageIngest::NoChangedCoverage);
+            return Ok(None);
         }
         let summary_pct = (total_covered as f64 / total_changed as f64) * 100.0;
-        let payload = json!({
-            "summaryPct": summary_pct,
-            "changedLines": total_changed,
-            "coveredLines": total_covered,
-            "files": files_payload,
-        });
-
-        let pin = effort.end_snapshot_id.unwrap_or(start);
-        let version = file_ref_version::resolve(&self.snapshots, &self.project_dir, pin).await?;
-        // Dual-write into the unified metric substrate (best-effort) before the
-        // legacy observation consumes `version`.
-        self.mirror_coverage_metric(
-            thread,
-            stream_id,
+        Ok(Some((
             summary_pct,
-            total_covered,
-            total_changed,
-            &version,
-            Some(payload.clone()),
-        )
-        .await;
-        // Substrate is the sole store now (tsk215) — the diff-coverage detail
-        // is mirrored above; just signal the panel to refetch.
-        self.emit(thread, effort);
-        Ok(CoverageIngest::Stored {
-            observation_id: 0,
-            summary_pct,
-            changed_lines: total_changed,
-            covered_lines: total_covered,
-        })
+            json!({
+                "summaryPct": summary_pct,
+                "changedLines": total_changed,
+                "coveredLines": total_covered,
+                "files": files_payload,
+            }),
+        )))
     }
 
     /// PostToolUse entry point: detect a test and/or static-analysis run,
@@ -1178,27 +1242,33 @@ impl CollectionService {
             None,
         )
         .await?;
-        // Coverage + nudges below are effort-RELATIVE (diff-coverage is computed
-        // against the effort's start snapshot; nudges key/dedup per effort), so
-        // they only run with a single open effort. The test run above is already
-        // recorded regardless. (Coverage observe-always is Phase 2 / tsk270.)
+        // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
+        // report regardless of effort; the effort-relative diff is derived later
+        // at read. Keep the merged report so the coverage-target nudge can derive
+        // this effort's diff-coverage when a single effort is open.
+        let coverage = self.merge_fresh_coverage(floor, &cfg, &registry);
+        if let Some((merged, _source)) = &coverage {
+            if let Some(stream_id) = self.stream_id_for(thread).await? {
+                let _ = self.observe_coverage(thread, &stream_id, merged).await?;
+            }
+        }
+        // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
+        // run with a single open effort. The runs above are already recorded.
         let Some(effort) = effort_opt else {
             return Ok(None);
         };
-        // Coverage ride-along: merge every fresh coverage report → one
-        // diff-coverage observation.
-        let coverage = self.merge_fresh_coverage(&effort, &cfg, &registry);
-        let mut coverage_pct: Option<f64> = None;
-        if let Some((merged, _source)) = &coverage {
-            if let Some(stream_id) = self.stream_id_for(thread).await? {
-                if let CoverageIngest::Stored { summary_pct, .. } = self
-                    .store_diff_coverage(thread, &effort, &stream_id, merged)
+        // Derive THIS effort's diff-coverage from the absolute report (read-time)
+        // for the coverage-target nudge.
+        let coverage_pct = match &coverage {
+            Some((merged, _)) => match coverage_abs_payload(merged) {
+                Some((_, _, _, abs_payload)) => self
+                    .diff_coverage_for_effort(&effort, &abs_payload)
                     .await?
-                {
-                    coverage_pct = Some(summary_pct);
-                }
-            }
-        }
+                    .map(|(pct, _)| pct),
+                None => None,
+            },
+            None => None,
+        };
         // Coverage-target nudge (tsk220, advise only): the effort's diff
         // coverage landed below target → steer the agent to add tests, at most
         // once per effort. Never blocks. Mutually exclusive with the report-less
@@ -1634,7 +1704,7 @@ impl CollectionService {
     /// process). `None` when none contributed.
     fn merge_fresh_coverage(
         &self,
-        effort: &TaskEffort,
+        floor: oxplow_domain::Timestamp,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> Option<(oxplow_coverage::CoverageReport, String)> {
@@ -1650,7 +1720,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, effort.started_at) {
+            if report_is_stale(&abs, floor) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -1890,10 +1960,13 @@ impl CollectionService {
         let Some(eid) = EffortId::try_from_str(effort_id) else {
             return vec![];
         };
+        // Coverage derives its effort-relative diff against the effort's start
+        // snapshot, so load the effort once (tsk270).
+        let effort = self.efforts.get_effort(&eid).await.ok().flatten();
         // (headline metric key, detail finding kind, observation kind)
         let specs = [
             (
-                "oxplow.coverage.diff_pct",
+                "oxplow.coverage.abs_pct",
                 "coverage-detail",
                 "diff-coverage",
             ),
@@ -1912,34 +1985,26 @@ impl CollectionService {
             let Ok(Some(def)) = self.metrics.get_definition(metric_key).await else {
                 continue;
             };
-            // Tests + analysis are observe-always → attribute by the unified
-            // ledger CLAIM (exact under concurrency), not a time window (which
-            // would mix concurrent efforts' runs). `samples_for_runs` filters the
-            // effort's claimed runs to this metric, so passing the whole claimed
-            // set is correct. Coverage is still effort-gated (Phase 1 / tsk270),
-            // so its time window is unambiguous (tsk263/tsk269).
-            let samples = if obs_kind == "diff-coverage" {
-                match self.metrics.samples_for_effort(def.id, eid.value()).await {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                }
-            } else {
-                let run_ids: Vec<i64> = self
-                    .attribution
-                    .list_refs(&eid, "run", STATE_CLAIMED)
-                    .await
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
-                    .collect();
-                self.metrics
-                    .samples_for_runs(def.id, run_ids)
-                    .await
-                    .unwrap_or_default()
-            };
+            // Every run kind is observe-always → attribute by the unified ledger
+            // CLAIM (exact under concurrency), never a time window (which would mix
+            // concurrent efforts' runs). `samples_for_runs` filters the effort's
+            // claimed runs to this metric, so the whole claimed set is correct.
+            let run_ids: Vec<i64> = self
+                .attribution
+                .list_refs(&eid, "run", STATE_CLAIMED)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
+                .collect();
+            let samples = self
+                .metrics
+                .samples_for_runs(def.id, run_ids)
+                .await
+                .unwrap_or_default();
             // Samples are time-ASC; newest-first for the panel.
             for sample in samples.into_iter().rev() {
-                let payload_json = match sample.run_id {
+                let raw_detail = match sample.run_id {
                     Some(rid) => self
                         .metrics
                         .list_findings(rid)
@@ -1949,20 +2014,40 @@ impl CollectionService {
                         .and_then(|f| f.extra_json),
                     None => None,
                 };
-                // Headline numeric per the panel's per-kind convention: coverage
-                // → %, static-analysis → error+warning count, test-run → none
-                // (the panel reads its counts from the payload).
-                let metric_value = match obs_kind {
-                    "test-run" => None,
-                    "static-analysis" => payload_json
+                // Headline numeric + payload per the panel's per-kind convention:
+                // coverage → derive THIS effort's diff from the run's ABSOLUTE
+                // detail (skip when no overlap/baseline); static-analysis →
+                // error+warning count; test-run → none (panel reads the payload).
+                let (payload_json, metric_value) = if obs_kind == "diff-coverage" {
+                    let abs = raw_detail
                         .as_deref()
-                        .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
-                        .map(|v| {
-                            v["errorCount"].as_f64().unwrap_or(0.0)
-                                + v["warningCount"].as_f64().unwrap_or(0.0)
-                        })
-                        .or(Some(sample.value)),
-                    _ => Some(sample.value),
+                        .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok());
+                    let derived = match (effort.as_ref(), abs) {
+                        (Some(eff), Some(abs)) => self
+                            .diff_coverage_for_effort(eff, &abs)
+                            .await
+                            .ok()
+                            .flatten(),
+                        _ => None,
+                    };
+                    match derived {
+                        Some((pct, diff_payload)) => (Some(diff_payload.to_string()), Some(pct)),
+                        None => continue,
+                    }
+                } else {
+                    let metric_value = match obs_kind {
+                        "test-run" => None,
+                        "static-analysis" => raw_detail
+                            .as_deref()
+                            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+                            .map(|v| {
+                                v["errorCount"].as_f64().unwrap_or(0.0)
+                                    + v["warningCount"].as_f64().unwrap_or(0.0)
+                            })
+                            .or(Some(sample.value)),
+                        _ => Some(sample.value),
+                    };
+                    (raw_detail, metric_value)
                 };
                 out.push(oxplow_db::EffortObservation {
                     id: sample.id,
@@ -2026,6 +2111,10 @@ impl CollectionService {
             let row = if is_file_attributed(&def) {
                 self.file_attributed_delta(&def, &effort, stream_val, &claimed)
                     .await
+            } else if def.category.as_deref() == Some("coverage") {
+                // Coverage: derive each claimed run's effort-relative diff at read,
+                // before→after — observe-always + effort-relative (tsk270).
+                self.coverage_delta(&def, &effort).await
             } else if is_run_attributed(&def) {
                 // Run-kind metric (observe-always) → attribute by the ledger claim,
                 // never the time window, so a concurrent/unclaimed run can't
@@ -2183,6 +2272,67 @@ impl CollectionService {
         let samples = self.metrics.samples_for_runs(def.id, run_ids).await.ok()?;
         let mine: Vec<&oxplow_db::MetricSample> = samples.iter().collect();
         Self::delta_from_samples(def, &mine)
+    }
+
+    /// Coverage delta (tsk270): coverage is **observe-always** (absolute) AND
+    /// **effort-relative** (diff vs the effort's start snapshot), so neither the
+    /// time window nor the stored sample value is right. For each coverage run
+    /// THIS effort claimed (ledger), derive its diff-coverage from the run's
+    /// absolute detail at read, then before→after over the derived sequence.
+    async fn coverage_delta(
+        &self,
+        def: &oxplow_db::MetricDefinition,
+        effort: &TaskEffort,
+    ) -> Option<oxplow_db::EffortMetricDelta> {
+        let run_ids: Vec<i64> = self
+            .attribution
+            .list_refs(&effort.id, "run", STATE_CLAIMED)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
+            .collect();
+        // `samples_for_runs` on the abs-coverage def yields one sample per claimed
+        // COVERAGE run (other producers don't carry it), time-ASC.
+        let samples = self.metrics.samples_for_runs(def.id, run_ids).await.ok()?;
+        let mut derived: Vec<f64> = Vec::new();
+        let mut latest_run = None;
+        for s in &samples {
+            let Some(rid) = s.run_id else { continue };
+            let abs = self
+                .metrics
+                .list_findings(rid)
+                .await
+                .ok()
+                .and_then(|fs| fs.into_iter().find(|f| f.kind == "coverage-detail"))
+                .and_then(|f| f.extra_json)
+                .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
+            if let Some(abs) = abs {
+                if let Ok(Some((pct, _))) = self.diff_coverage_for_effort(effort, &abs).await {
+                    derived.push(pct);
+                    latest_run = Some(rid);
+                }
+            }
+        }
+        let (first, last) = (derived.first()?, derived.last()?);
+        let (baseline, current) = (*first, *last);
+        let changed = (current - baseline).abs() > f64::EPSILON;
+        let crossing =
+            threshold_state(&def.direction, current, def.warn_at, def.fail_at).map(str::to_string);
+        Some(effort_delta_row(
+            def,
+            DeltaCalc {
+                agg: "level",
+                baseline: Some(baseline),
+                current,
+                delta: changed.then_some(current - baseline),
+                changed,
+                attributed_files: None,
+                sample_count: derived.len() as i64,
+                latest_run_id: latest_run,
+                crossing,
+            },
+        ))
     }
 
     /// The shared before→after / `sum`-flow computation over an ordered (time-ASC)
@@ -2510,6 +2660,43 @@ fn commit_hygiene_message(short_sha: &str, out_of_effort: &[String]) -> String {
 /// old effort-start floor, minus the effort dependency. 10 minutes is generous
 /// for a slow suite that finishes writing well after its command started.
 const REPORT_FRESH_WINDOW_MS: i64 = 10 * 60 * 1000;
+
+/// Build the ABSOLUTE coverage payload from a report (tsk270): whole-report %
+/// plus per-file instrumented/covered line-sets, stored verbatim so the
+/// effort-relative diff can be derived later at read. Returns
+/// `(abs_pct, covered, instrumented, payload)`; `None` when nothing is
+/// instrumented.
+fn coverage_abs_payload(
+    report: &oxplow_coverage::CoverageReport,
+) -> Option<(f64, usize, usize, serde_json::Value)> {
+    let mut total_instr = 0usize;
+    let mut total_cov = 0usize;
+    let mut files_payload = Vec::new();
+    for (path, fc) in &report.files {
+        if fc.instrumented.is_empty() {
+            continue;
+        }
+        let covered_instr: BTreeSet<u32> =
+            fc.covered.intersection(&fc.instrumented).copied().collect();
+        total_instr += fc.instrumented.len();
+        total_cov += covered_instr.len();
+        files_payload.push(json!({
+            "path": path,
+            "instrumented": fc.instrumented.iter().copied().collect::<Vec<u32>>(),
+            "covered": covered_instr.iter().copied().collect::<Vec<u32>>(),
+        }));
+    }
+    if total_instr == 0 {
+        return None;
+    }
+    let abs_pct = (total_cov as f64 / total_instr as f64) * 100.0;
+    Some((
+        abs_pct,
+        total_cov,
+        total_instr,
+        json!({ "absPct": abs_pct, "files": files_payload }),
+    ))
+}
 
 /// The freshness floor: reports touched at/before this are stale. `now` minus
 /// the window. (Passed where the effort-start `Timestamp` used to be.)
@@ -3128,6 +3315,9 @@ mod tests {
             // is covered by `report_is_stale_compares_mtime_to_effort_start`
             // (a just-written report's mtime vs. the effort start is
             // wall-clock/fs-granularity sensitive and would flake here).
+            // tsk270: ingest records ABSOLUTE coverage (instruments {1,2,4},
+            // covers {1,2} → 2/3 ≈ 66.7%); the effort-relative DIFF (changed∩instr
+            // = {2,4}, covered {2} → 50%, line 4 uncovered) is derived at READ.
             let outcome = h
                 .service
                 .ingest_coverage(&h.thread, None, None, false)
@@ -3140,12 +3330,13 @@ mod tests {
                     covered_lines,
                     ..
                 } => {
-                    assert_eq!(changed_lines, 2);
-                    assert_eq!(covered_lines, 1);
-                    assert!((summary_pct - 50.0).abs() < 1e-6, "got {summary_pct}");
+                    assert_eq!(changed_lines, 3, "absolute instrumented");
+                    assert_eq!(covered_lines, 2, "absolute covered");
+                    assert!((summary_pct - 66.666).abs() < 0.01, "abs got {summary_pct}");
                 }
                 other => panic!("expected Stored, got {other:?}"),
             }
+            // The DIFF is derived at read against the effort's changed lines.
             let rows = h
                 .service
                 .list_for_effort(&h.effort_id, Some("diff-coverage"))
@@ -3153,10 +3344,92 @@ mod tests {
                 .unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
+            assert!(
+                (rows[0].metric_value.unwrap() - 50.0).abs() < 1e-6,
+                "derived diff %"
+            );
             let payload = rows[0].payload_json.as_deref().unwrap();
             let cov: DiffCovPayload = serde_json::from_str(payload).expect("payload parses");
             let foo = cov.files.iter().find(|f| f.path == "src/foo.rs").unwrap();
             assert_eq!(foo.uncovered, vec![4]);
+        }
+
+        #[tokio::test]
+        async fn coverage_diff_is_unattributed_under_concurrency_then_claimable() {
+            // tsk270: with two open efforts, a coverage run is observed but NOT
+            // auto-attributed (no pollution) — neither effort's panel shows it
+            // until the agent claims it. After a claim, the diff is DERIVED at
+            // read for the claiming effort (late-claim works even post-close).
+            use oxplow_db::SqliteAttributionStore;
+            let h = build(Some(COBERTURA_50PCT)).await;
+            let now = Timestamp::now();
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            // Open a second effort so the thread is ambiguous.
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "t2".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let _eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+
+            // Observe coverage — two efforts open ⇒ unclaimed.
+            assert!(matches!(
+                h.service
+                    .ingest_coverage(&h.thread, None, None, false)
+                    .await
+                    .unwrap(),
+                CoverageIngest::Stored { .. }
+            ));
+            // No pollution: neither effort shows a diff-coverage observation yet.
+            assert!(h
+                .service
+                .list_for_effort(&h.effort_id, Some("diff-coverage"))
+                .await
+                .unwrap()
+                .is_empty());
+
+            // The agent claims the run for eff1 (late-claim is the same path).
+            let ledger = SqliteAttributionStore::new(h.db.clone());
+            let runs = h
+                .service
+                .metrics
+                .runs_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            let run_ref = format!("run:{}", runs[0].id);
+            ledger
+                .set_state(&eid1, "run", &run_ref, STATE_CLAIMED, None)
+                .await
+                .unwrap();
+
+            // Now eff1's diff-coverage is derived at read (50%, line 4 uncovered).
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("diff-coverage"))
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1, "claimed run now surfaces a derived diff");
+            assert!((rows[0].metric_value.unwrap() - 50.0).abs() < 1e-6);
         }
 
         #[tokio::test]
@@ -3170,14 +3443,15 @@ mod tests {
 
             let samples = h
                 .service
-                .metric_samples_for_key("oxplow.coverage.diff_pct")
+                .metric_samples_for_key("oxplow.coverage.abs_pct")
                 .await;
             assert_eq!(samples.len(), 1, "one mirrored coverage sample");
             let s = &samples[0];
-            assert!((s.value - 50.0).abs() < 1e-6, "value {}", s.value);
+            // Absolute: covered {1,2}=2 of instrumented {1,2,4}=3 → 66.7%.
+            assert!((s.value - 66.666).abs() < 0.01, "value {}", s.value);
             // Components stored so module/branch roll-ups re-aggregate correctly.
-            assert_eq!(s.numerator, Some(1.0));
-            assert_eq!(s.denominator, Some(2.0));
+            assert_eq!(s.numerator, Some(2.0));
+            assert_eq!(s.denominator, Some(3.0));
             assert_eq!(s.provenance, "observed");
             assert_eq!(s.source, "coverage-report");
             // Branch captured from the git_init'd repo (main/master).
@@ -4029,7 +4303,7 @@ mod tests {
                 .unwrap();
             let cov = h
                 .service
-                .metric_samples_for_key("oxplow.coverage.diff_pct")
+                .metric_samples_for_key("oxplow.coverage.abs_pct")
                 .await;
             let run_id = cov[0].run_id.unwrap();
             let findings = h.service.metric_findings_for_run(run_id).await;
@@ -4037,10 +4311,20 @@ mod tests {
                 .iter()
                 .find(|f| f.kind == "coverage-detail")
                 .expect("coverage-detail finding written");
+            // tsk270: the stored detail is ABSOLUTE (per-file instrumented/covered
+            // line-sets + whole-report absPct), not the effort-relative diff.
             let payload: serde_json::Value =
                 serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
-            assert!(payload["files"].is_array(), "per-file uncovered lines kept");
-            assert!((payload["summaryPct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+            assert!(payload["files"].is_array(), "per-file line-sets kept");
+            let foo = payload["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["path"] == "src/foo.rs")
+                .unwrap();
+            assert_eq!(foo["instrumented"], serde_json::json!([1, 2, 4]));
+            assert_eq!(foo["covered"], serde_json::json!([1, 2]));
+            assert!((payload["absPct"].as_f64().unwrap() - 66.666).abs() < 0.01);
         }
 
         #[tokio::test]
@@ -4096,19 +4380,21 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn ingest_coverage_no_open_effort_after_finish() {
+        async fn ingest_coverage_observes_with_no_open_effort() {
+            // tsk270 observe-always: coverage is recorded even with no open effort
+            // (absolute), just left unattributed — no longer dropped.
             let h = build(Some(COBERTURA_50PCT)).await;
             h.efforts
                 .finish(&EffortId::try_from_str(&h.effort_id).unwrap(), None, None)
                 .await
                 .unwrap();
-            assert_eq!(
+            assert!(matches!(
                 h.service
                     .ingest_coverage(&h.thread, None, None, true)
                     .await
                     .unwrap(),
-                CoverageIngest::NoOpenEffort
-            );
+                CoverageIngest::Stored { .. }
+            ));
         }
 
         #[tokio::test]
@@ -4132,14 +4418,24 @@ mod tests {
   <class name="Foo" filename="src/foo.rs"><lines><line number="1" hits="3"/></lines></class>
 </classes></package></packages></coverage>"#;
             let h = build(Some(only_line_1)).await;
-            // false: see the Stored test — this checks the intersection
-            // branch, not the (separately unit-tested) mtime guard.
-            assert_eq!(
+            // tsk270: observe records absolute coverage regardless (Stored)…
+            assert!(matches!(
                 h.service
                     .ingest_coverage(&h.thread, None, None, false)
                     .await
                     .unwrap(),
-                CoverageIngest::NoChangedCoverage
+                CoverageIngest::Stored { .. }
+            ));
+            // …but the effort's DERIVED diff is empty (line 1 is unchanged), so no
+            // diff-coverage observation surfaces for it.
+            let rows = h
+                .service
+                .list_for_effort(&h.effort_id, Some("diff-coverage"))
+                .await
+                .unwrap();
+            assert!(
+                rows.is_empty(),
+                "no changed instrumented lines → no diff observation"
             );
         }
 
@@ -4367,7 +4663,7 @@ mod tests {
             let def = h
                 .service
                 .metrics
-                .get_definition("oxplow.coverage.diff_pct")
+                .get_definition("oxplow.coverage.abs_pct")
                 .await
                 .unwrap()
                 .expect("coverage definition seeded");
