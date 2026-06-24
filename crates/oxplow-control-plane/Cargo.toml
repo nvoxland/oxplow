@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 oxplow-app = { workspace = true }
+oxplow-db = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-mcp = { workspace = true }
 oxplow-runtime = { workspace = true }

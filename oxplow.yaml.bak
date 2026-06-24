@@ -1,0 +1,43 @@
+agents:
+- claude
+- codex
+- opencode
+# What oxplow watches / snapshots / indexes is now driven by `.gitignore`
+# (+ `.git/info/exclude`) plus the always-on `.git`/`.oxplow` ignores, so
+# the old `generated:` list (target, node_modules, .idea, site, *.iml,
+# test-report.xml) is redundant — all of it is already gitignored.
+# Re-add only for the two override cases:
+#   generated:
+#     exclude:            # ignore something .gitignore does NOT
+#       - some/tracked/generated.json
+#     include:            # force-track something .gitignore DOES ignore
+#       - dist/keep-this.json
+collection:
+  # `bun run test:collect` runs both stacks and emits all three reports:
+  # `cargo cov` (= llvm-cov nextest) writes the Rust lcov + JUnit, then the
+  # frontend `test:junit` script writes the bun JUnit.
+  testCommand: bun run test:collect
+  agentHint: "Run tests with `bun run test:collect` — not bare `cargo test`, `bun test`, or `bun run test`. Only `test:collect` emits the lcov + JUnit reports that oxplow parses into the effort's coverage panel. Run it before closing any task that changes logic."
+  reports:
+  # Rust (cargo cov)
+  - { path: target/coverage/lcov.info, format: lcov }
+  - { path: target/nextest/default/junit.xml, format: junit }
+  # Frontend (bun run --cwd apps/desktop test:junit)
+  - { path: apps/desktop/test-report.xml, format: junit }
+  # Rust static analysis (clippy). Dogfoods the analysis collector: run
+  # `cargo clippy --workspace --all-targets --message-format=json > target/clippy.json`
+  # and oxplow ingests it into a `static-analysis` observation on the effort.
+  - { path: target/clippy.json, format: clippy-json }
+  # Distinctive substrings so the hook recognizes a test run regardless of
+  # which stack/command was invoked (built-ins already cover `bun test`).
+  testRunPatterns:
+  - cargo cov
+  - llvm-cov
+  - nextest
+  - bun test
+  - test:collect
+  - test:junit
+  # Substrings that mark a static-analysis run (built-ins already cover
+  # `cargo clippy` / `eslint`); this repo emits clippy JSON explicitly.
+  analysisRunPatterns:
+  - clippy --message-format=json

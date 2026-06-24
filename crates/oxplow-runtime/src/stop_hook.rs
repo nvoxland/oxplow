@@ -53,6 +53,10 @@ pub struct PendingEffortReview {
     pub claimed_but_not_changed: Vec<String>,
     pub changed_but_not_claimed: Vec<String>,
     pub unclaimed_overflow: Option<usize>,
+    /// Run refs (`run:<id>`) observed during the effort that the agent
+    /// neither auto-claimed (concurrent-effort case) nor disclaimed —
+    /// the run-kind counterpart to `changed_but_not_claimed`.
+    pub unattributed_runs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -365,6 +369,7 @@ mod tests {
             claimed_but_not_changed: vec!["src/typo.rs".into()],
             changed_but_not_claimed: vec!["src/extra.rs".into()],
             unclaimed_overflow: None,
+            unattributed_runs: vec![],
         }];
         let snap = ThreadSnapshot {
             thread: Some(&t),

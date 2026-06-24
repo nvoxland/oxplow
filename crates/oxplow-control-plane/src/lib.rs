@@ -1060,6 +1060,7 @@ async fn stop_directive(
     thread_id: Option<&ThreadId>,
     turn_signals: Option<&TurnSignals>,
 ) -> Option<serde_json::Value> {
+    use oxplow_db::TaskEffortStore as _;
     let thread_id = thread_id?;
     let thread = ctx
         .services
@@ -1108,26 +1109,60 @@ async fn stop_directive(
             .map(|t| (t.id.value(), t.title.clone()))
             .collect();
         for eid in pending_ids {
-            let Some(review) = oxplow_app::task_service::recompute_effort_file_review(
+            // Two reconcilable kinds share this surface: files (recomputed
+            // against live `task_effort_file` rows) and test runs (the
+            // `effort_attribution` ledger's unattributed residue). An effort
+            // is worth surfacing if EITHER still carries something to triage.
+            let file_review = oxplow_app::task_service::recompute_effort_file_review(
                 &ctx.services.effort_store,
                 &ctx.services.snapshot_store,
                 &eid,
             )
-            .await
-            else {
+            .await;
+            let unattributed_runs = ctx
+                .services
+                .attribution_store
+                .list_refs(&eid, "test-run", oxplow_db::STATE_UNATTRIBUTED)
+                .await
+                .unwrap_or_default();
+            if file_review.is_none() && unattributed_runs.is_empty() {
                 continue;
+            }
+            // task_id/title come from the file review when present; otherwise
+            // resolve from the effort (run-only residue, no file discrepancy).
+            let task_id = match file_review.as_ref() {
+                Some(r) => r.task_id,
+                None => ctx
+                    .services
+                    .effort_store
+                    .get_effort(&eid)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|e| e.task_id.value())
+                    .unwrap_or(0),
             };
             let title = titles_by_id
-                .get(&review.task_id)
+                .get(&task_id)
                 .cloned()
-                .unwrap_or_else(|| format!("task {}", review.task_id));
+                .unwrap_or_else(|| format!("task {task_id}"));
             pending_reviews.push(PendingEffortReview {
-                effort_id: review.effort_id,
-                task_id: review.task_id,
+                effort_id: file_review
+                    .as_ref()
+                    .map(|r| r.effort_id.clone())
+                    .unwrap_or_else(|| eid.value().to_string()),
+                task_id,
                 task_title: title,
-                claimed_but_not_changed: review.claimed_but_not_changed,
-                changed_but_not_claimed: review.changed_but_not_claimed,
-                unclaimed_overflow: review.unclaimed_overflow,
+                claimed_but_not_changed: file_review
+                    .as_ref()
+                    .map(|r| r.claimed_but_not_changed.clone())
+                    .unwrap_or_default(),
+                changed_but_not_claimed: file_review
+                    .as_ref()
+                    .map(|r| r.changed_but_not_claimed.clone())
+                    .unwrap_or_default(),
+                unclaimed_overflow: file_review.as_ref().and_then(|r| r.unclaimed_overflow),
+                unattributed_runs,
             });
         }
     }
@@ -1206,8 +1241,9 @@ fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
 
 fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
     let mut out = String::from(
-        "EFFORT FILE REVIEW: one or more efforts you just closed have a discrepancy \
-         between your declared `touched_files` and the snapshot diff. For each:\n\n",
+        "EFFORT REVIEW: one or more efforts you just closed have a discrepancy between \
+         what you declared and what oxplow observed — in the files you touched and/or \
+         the test runs that happened during your effort. For each:\n\n",
     );
     for r in reviews {
         out.push_str(&format!(
@@ -1235,12 +1271,23 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
                  or external activity.)\n"
             ));
         }
+        if !r.unattributed_runs.is_empty() {
+            out.push_str(
+                "      These test runs happened during your effort but weren't attributed \
+                 to you (a concurrent effort was open, so oxplow couldn't auto-assign them):\n",
+            );
+            for run in &r.unattributed_runs {
+                out.push_str(&format!("        - {run}\n"));
+            }
+        }
     }
     out.push_str(
         "\nIf any are wrong, call `mcp__oxplow__amend_effort(effort_id, add_files, \
-         remove_files)` to correct. If you genuinely meant your original list \
-         (e.g. you edited then reverted, or another actor changed those files), no \
-         amend is needed — silent agreement is fine and the prompt won't repeat.",
+         remove_files, claim_runs, disclaim_runs)` to correct — `claim_runs` for runs \
+         that were yours, `disclaim_runs` for ones that weren't. If your original \
+         declaration was right (you reverted an edit, or another actor/effort produced \
+         those changes/runs), no amend is needed — silent agreement is fine and the \
+         prompt won't repeat.",
     );
     out
 }

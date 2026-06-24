@@ -414,6 +414,9 @@ pub struct Services {
     /// Unified metric substrate (durable typed metrics; epic tsk213). The
     /// successor to the retired `effort_observation` + `code_quality_*`.
     pub metric_store: Arc<SqliteMetricStore>,
+    /// Kind-agnostic attribution ledger (tsk262/263) — run claim/acknowledge
+    /// state; the agent claims/disclaims runs via `amend_effort`.
+    pub attribution_store: Arc<oxplow_db::SqliteAttributionStore>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
     /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
     pub metrics: metrics_service::MetricsService,
@@ -671,6 +674,7 @@ impl Services {
             thread_runtime,
             effort_store,
             metric_store,
+            attribution_store,
             metrics,
             nudge_store,
             collection,

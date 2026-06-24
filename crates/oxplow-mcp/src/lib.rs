@@ -409,6 +409,13 @@ pub struct AmendEffortParams {
     /// yours but actually came from another actor (formatter, parallel
     /// effort, the user, etc.).
     pub remove_files: Option<Vec<String>>,
+    /// Run refs (`run:<id>`, as shown in the EFFORT REVIEW) to CLAIM for this
+    /// effort — use when an observed test run that wasn't auto-attributed (the
+    /// concurrent-effort case) was in fact yours.
+    pub claim_runs: Option<Vec<String>>,
+    /// Run refs to DISCLAIM (acknowledge as not yours) so they stop being
+    /// flagged — another effort's, the user's, or CI's.
+    pub disclaim_runs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2440,6 +2447,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<CompleteTaskParams>,
     ) -> Result<CallToolResult, McpError> {
+        use oxplow_db::TaskEffortStore as _;
         let p = params.0;
         let id = parse_task_id("complete_task", "id", &p.id)?;
         let _ = p.author; // legacy field — kept on the wire, no longer attributed
@@ -2521,10 +2529,37 @@ impl OxplowMcp {
                 // (or silently agree). Recomputed at stop time so a
                 // subsequent amend_effort that already reconciled
                 // the discrepancy doesn't trigger a stale prompt.
-                if let (Some(r), Some(tid)) = (review.as_ref(), item.thread_id) {
-                    self.services
-                        .thread_runtime
-                        .record_pending_effort_review(&tid, parse_effort_id(&r.effort_id)?);
+                //
+                // Stash on EITHER a file discrepancy OR run-ledger residue:
+                // `record_effort` already ran the run reconciliation, so any
+                // unattributed test runs (the concurrent-effort case) are in
+                // the ledger now and want the agent's claim/disclaim too.
+                if let Some(tid) = item.thread_id {
+                    let effort_for_review = match review.as_ref() {
+                        Some(r) => Some(parse_effort_id(&r.effort_id)?),
+                        None => self
+                            .services
+                            .effort_store
+                            .most_recent_for_task(item.id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|e| e.id),
+                    };
+                    if let Some(eid) = effort_for_review {
+                        let has_run_residue = !self
+                            .services
+                            .attribution_store
+                            .list_refs(&eid, "test-run", oxplow_db::STATE_UNATTRIBUTED)
+                            .await
+                            .unwrap_or_default()
+                            .is_empty();
+                        if review.is_some() || has_run_residue {
+                            self.services
+                                .thread_runtime
+                                .record_pending_effort_review(&tid, eid);
+                        }
+                    }
                 }
             }
         }
@@ -2537,10 +2572,11 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Adjust an effort's `task_effort_file` rows after the fact — reconcile the \
-                       file-attribution list when the auto-diff disagreed with your \
-                       `touched_files` on `complete_task`. See param docs for \
-                       `add_files`/`remove_files`; passing both empty is a no-op."
+        description = "Reconcile an effort's attribution after the fact — fix the file list \
+                       (`add_files`/`remove_files`) when the auto-diff disagreed with your \
+                       `touched_files`, and/or claim or disclaim observed test runs \
+                       (`claim_runs`/`disclaim_runs`, using the `run:<id>` refs shown in the \
+                       EFFORT REVIEW). Passing all empty is a no-op."
     )]
     async fn amend_effort(
         &self,
@@ -2620,10 +2656,45 @@ impl OxplowMcp {
                 .await
                 .map_err(|e| internal(e.to_string()))?;
         }
+        // Run claims/disclaims ride the generic attribution ledger
+        // (`effort_attribution`), the same claim→reconcile rails as files but
+        // keyed by `(effort, "test-run", ref)`. A claim parks the run as the
+        // effort's own; a disclaim acknowledges it as someone else's so the
+        // EFFORT REVIEW stops flagging it. Both clear the unattributed residue.
+        let claim_runs = p.claim_runs.unwrap_or_default();
+        let disclaim_runs = p.disclaim_runs.unwrap_or_default();
+        for ref_ in &claim_runs {
+            if ref_.is_empty() {
+                continue;
+            }
+            self.services
+                .attribution_store
+                .set_state(&effort_id, "test-run", ref_, oxplow_db::STATE_CLAIMED, None)
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
+        for ref_ in &disclaim_runs {
+            if ref_.is_empty() {
+                continue;
+            }
+            self.services
+                .attribution_store
+                .set_state(
+                    &effort_id,
+                    "test-run",
+                    ref_,
+                    oxplow_db::STATE_ACKNOWLEDGED,
+                    None,
+                )
+                .await
+                .map_err(|e| internal(e.to_string()))?;
+        }
         json_result(&serde_json::json!({
             "effort_id": effort_id.to_string(),
             "added": add,
             "removed": remove,
+            "claimed_runs": claim_runs,
+            "disclaimed_runs": disclaim_runs,
         }))
     }
 
@@ -4240,6 +4311,8 @@ mod tests {
                 effort_id: effort.id.to_string(),
                 add_files: Some(vec!["src/added.rs".into()]),
                 remove_files: Some(vec!["src/disclaim.rs".into()]),
+                claim_runs: None,
+                disclaim_runs: None,
             }))
             .await
             .unwrap();
@@ -4267,6 +4340,8 @@ mod tests {
                 effort_id: effort.id.to_string(),
                 add_files: Some(vec!["src/disclaim.rs".into()]),
                 remove_files: None,
+                claim_runs: None,
+                disclaim_runs: None,
             }))
             .await
             .unwrap();
@@ -4278,6 +4353,78 @@ mod tests {
         assert!(
             acks_after.is_empty(),
             "re-claiming the path should clear its acknowledgement, got {acks_after:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn amend_effort_claims_and_disclaims_runs() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::{STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED};
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let mut item = make_task(Some(thread.id), "run amend test");
+        let task_id = services.task_store.insert(&item).await.unwrap();
+        item.id = task_id;
+        let effort = services
+            .effort_store
+            .start(task_id, &thread.id, None)
+            .await
+            .unwrap();
+        // Seed two unattributed runs in the ledger, as the reconcile would.
+        for r in ["run:1", "run:2"] {
+            services
+                .attribution_store
+                .set_state(&effort.id, "test-run", r, STATE_UNATTRIBUTED, None)
+                .await
+                .unwrap();
+        }
+
+        // Claim run:1 as mine, disclaim run:2 as someone else's.
+        server
+            .amend_effort(Parameters(AmendEffortParams {
+                effort_id: effort.id.to_string(),
+                add_files: None,
+                remove_files: None,
+                claim_runs: Some(vec!["run:1".into()]),
+                disclaim_runs: Some(vec!["run:2".into()]),
+            }))
+            .await
+            .unwrap();
+
+        // Neither remains unattributed; each moved to its declared state.
+        let unattributed = services
+            .attribution_store
+            .list_refs(&effort.id, "test-run", STATE_UNATTRIBUTED)
+            .await
+            .unwrap();
+        assert!(
+            unattributed.is_empty(),
+            "claim/disclaim should clear the residue, got {unattributed:?}",
+        );
+        assert_eq!(
+            services
+                .attribution_store
+                .list_refs(&effort.id, "test-run", STATE_CLAIMED)
+                .await
+                .unwrap(),
+            vec!["run:1".to_string()],
+        );
+        assert_eq!(
+            services
+                .attribution_store
+                .list_refs(&effort.id, "test-run", STATE_ACKNOWLEDGED)
+                .await
+                .unwrap(),
+            vec!["run:2".to_string()],
         );
     }
 

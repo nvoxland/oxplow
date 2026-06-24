@@ -3743,6 +3743,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "oxplow-app",
+ "oxplow-db",
  "oxplow-domain",
  "oxplow-mcp",
  "oxplow-runtime",
