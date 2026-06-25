@@ -141,6 +141,11 @@ export function MetricDetailPage({
     const hasDrillIn = DRILL_IN_KINDS.has(def.kind);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }} data-testid="metric-detail">
+        {def.description ? (
+          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, opacity: 0.8 }} data-testid="metric-description">
+            {def.description}
+          </p>
+        ) : null}
         <TrendChart
           points={points}
           target={mode === "value" ? def.target : null}

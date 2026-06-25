@@ -80,7 +80,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "token-parse",
             dimensions: TOKEN_DIMS,
-            description: None,
+            description: Some("Input tokens consumed by the agent."),
         },
         ProducerMetric {
             key: "agent.tokens.output",
@@ -93,7 +93,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "token-parse",
             dimensions: TOKEN_DIMS,
-            description: None,
+            description: Some("Output tokens produced by the agent."),
         },
         ProducerMetric {
             key: "agent.tokens.total",
@@ -106,7 +106,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "token-parse",
             dimensions: TOKEN_DIMS,
-            description: None,
+            description: Some("Total tokens (input + output) used by the agent."),
         },
         ProducerMetric {
             key: "agent.turns",
@@ -119,7 +119,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "token-parse",
             dimensions: TOKEN_DIMS,
-            description: None,
+            description: Some("Number of agent turns."),
         },
         // effort-lifecycle (task_service.rs)
         ProducerMetric {
@@ -133,7 +133,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "effort-lifecycle",
             dimensions: EFFORT_DIMS,
-            description: None,
+            description: Some("How long an effort stayed open (close minus start)."),
         },
         ProducerMetric {
             key: "task.efforts",
@@ -146,7 +146,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "effort-lifecycle",
             dimensions: EFFORT_DIMS,
-            description: None,
+            description: Some("Number of efforts spent on a task (the redo-rate signal)."),
         },
         // nudges (collection.rs)
         ProducerMetric {
@@ -160,7 +160,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "operational",
             producer: "nudges",
             dimensions: NUDGE_DIMS,
-            description: None,
+            description: Some("Count of nudges fired to the agent."),
         },
         // tests (collection.rs)
         ProducerMetric {
@@ -174,7 +174,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: None,
+            description: Some("Tests that passed in the latest run."),
         },
         ProducerMetric {
             key: "oxplow.tests.failed",
@@ -187,7 +187,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: None,
+            description: Some("Tests that failed in the latest run."),
         },
         ProducerMetric {
             key: "oxplow.tests.total",
@@ -200,7 +200,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: None,
+            description: Some("Total tests in the latest run."),
         },
         // coverage (collection.rs) — whole-report absolute %, no per-sample grain.
         ProducerMetric {
@@ -228,7 +228,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "static-quality",
             producer: "analysis",
             dimensions: TREE_DIMS,
-            description: None,
+            description: Some("Static-analysis errors in the latest run."),
         },
         ProducerMetric {
             key: "oxplow.analysis.warnings",
@@ -241,7 +241,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "static-quality",
             producer: "analysis",
             dimensions: TREE_DIMS,
-            description: None,
+            description: Some("Static-analysis warnings in the latest run."),
         },
     ]
 }

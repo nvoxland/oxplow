@@ -155,6 +155,10 @@ pub struct MetricEntry {
     /// Language this metric measures (e.g. `rust`), for the catalog filter.
     #[serde(default)]
     pub language: Option<String>,
+    /// One-line human description of what the metric measures (shown atop the
+    /// Metric Detail page). Inherent to the definition — a `use:` can't override.
+    #[serde(default)]
+    pub description: Option<String>,
     /// Declared conformed-dimension keys this metric carries.
     #[serde(default)]
     pub dimensions: Vec<String>,
@@ -188,6 +192,7 @@ pub struct ResolvedMetric {
     pub default_agg: String,
     pub grain: Option<String>,
     pub language: Option<String>,
+    pub description: Option<String>,
     pub dimensions: Vec<String>,
     pub target: Option<f64>,
     pub warn_at: Option<f64>,
@@ -1097,6 +1102,7 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             default_agg,
             grain,
             language: opt(e.language),
+            description: opt(e.description),
             dimensions: e
                 .dimensions
                 .into_iter()
@@ -1239,6 +1245,9 @@ fn resolve_one(
         default_agg: pick_str(|e| &e.default_agg).unwrap_or_else(|| "last".into()),
         grain: pick_str(|e| &e.grain),
         language: pick_str(|e| &e.language),
+        // Description is inherent to the definition (like trigger) — a `use:`
+        // override doesn't change what the metric *is*.
+        description: def.description.clone(),
         dimensions,
         target: pick_f64(|e| e.target),
         warn_at: pick_f64(|e| e.warn_at),
@@ -2168,6 +2177,26 @@ metrics:
         assert_eq!(resolved[0].scope, "project");
         assert_eq!(resolved[0].kind, "gauge");
         assert_eq!(resolved[0].trigger, "manual");
+    }
+
+    #[test]
+    fn resolve_carries_description_from_definition_not_override() {
+        // A built-in/global definition declares the description; a `use:` entry's
+        // own description is ignored (description is inherent, like trigger).
+        let mut def = define("acme.loc", None);
+        def.description = Some("Lines of code in the repo.".into());
+        let global = vec![def];
+        let project = vec![MetricEntry {
+            use_key: Some("acme.loc".into()),
+            description: Some("a project override that should be ignored".into()),
+            ..Default::default()
+        }];
+        let resolved = resolve_metrics(&[], &global, &project);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].description.as_deref(),
+            Some("Lines of code in the repo.")
+        );
     }
 
     #[test]

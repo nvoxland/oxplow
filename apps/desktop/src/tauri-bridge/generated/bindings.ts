@@ -1929,6 +1929,11 @@ export type MetricEntry = {
 	grain?: string | null,
 	// Language this metric measures (e.g. `rust`), for the catalog filter.
 	language?: string | null,
+	/**
+	 *  One-line human description of what the metric measures (shown atop the
+	 *  Metric Detail page). Inherent to the definition — a `use:` can't override.
+	 */
+	description?: string | null,
 	// Declared conformed-dimension keys this metric carries.
 	dimensions?: string[],
 	target?: number | null,

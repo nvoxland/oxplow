@@ -17,6 +17,9 @@ pub struct BuiltinMetric {
     pub key: &'static str,
     pub kind: &'static str,
     pub title: &'static str,
+    /// One-line description of what the metric measures (shown atop the Metric
+    /// Detail page).
+    pub description: &'static str,
     pub unit: &'static str,
     pub direction: &'static str,
     pub grain: &'static str,
@@ -70,6 +73,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.unsafe_blocks",
         kind: "gauge",
         title: "unsafe blocks",
+        description: "Count of `unsafe` blocks in the codebase.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -85,6 +89,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.unwrap_expect_calls",
         kind: "gauge",
         title: "unwrap / expect calls",
+        description: "Calls to `.unwrap()` / `.expect()` that can panic at runtime.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -100,6 +105,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.panic_macros",
         kind: "gauge",
         title: "panic-family macros",
+        description: "Uses of `panic!` / `unreachable!` / `todo!` and similar panic macros.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -115,6 +121,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.todo_markers",
         kind: "gauge",
         title: "TODO / FIXME markers",
+        description: "`TODO` / `FIXME` markers left in the code.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -130,6 +137,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.fn_count",
         kind: "gauge",
         title: "function count",
+        description: "Total number of functions defined.",
         unit: "count",
         direction: "neutral",
         grain: "tree",
@@ -147,6 +155,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.high_complexity_fns",
         kind: "gauge",
         title: "high-complexity functions",
+        description: "Functions whose cyclomatic complexity exceeds the threshold.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -162,6 +171,7 @@ const RUST: &[BuiltinMetric] = &[
         key: "oxplow.rust.long_functions",
         kind: "gauge",
         title: "long functions (>60 lines)",
+        description: "Functions longer than 60 lines.",
         unit: "count",
         direction: "lower-better",
         grain: "tree",
@@ -180,6 +190,7 @@ const RUST: &[BuiltinMetric] = &[
 const fn ast_gauge(
     key: &'static str,
     title: &'static str,
+    description: &'static str,
     direction: &'static str,
     language: &'static str,
     target: Option<f64>,
@@ -189,6 +200,7 @@ const fn ast_gauge(
         key,
         kind: "gauge",
         title,
+        description,
         unit: "count",
         direction,
         grain: "tree",
@@ -206,6 +218,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.any_usage",
         "any usage",
+        "Uses of the `any` type.",
         "lower-better",
         "typescript",
         None,
@@ -214,6 +227,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.non_null_assertions",
         "non-null assertions",
+        "Non-null assertions (`!`).",
         "lower-better",
         "typescript",
         None,
@@ -222,6 +236,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.console_calls",
         "console.* calls",
+        "Calls to `console.*`.",
         "lower-better",
         "typescript",
         None,
@@ -230,6 +245,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.ts_ignore",
         "ts-ignore / ts-expect-error",
+        "`@ts-ignore` / `@ts-expect-error` suppressions.",
         "lower-better",
         "typescript",
         None,
@@ -238,6 +254,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.fn_count",
         "function count",
+        "Total number of functions defined.",
         "neutral",
         "typescript",
         None,
@@ -246,6 +263,7 @@ const TS: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.ts.high_complexity_fns",
         "high-complexity functions",
+        "Functions whose cyclomatic complexity exceeds the threshold.",
         "lower-better",
         "typescript",
         None,
@@ -257,6 +275,7 @@ const CLOJURE: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.clojure.defn_count",
         "defn count",
+        "Number of `defn` definitions.",
         "neutral",
         "clojure",
         None,
@@ -265,6 +284,7 @@ const CLOJURE: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.clojure.todo_comments",
         "TODO / FIXME comments",
+        "`TODO` / `FIXME` comments left in the code.",
         "lower-better",
         "clojure",
         None,
@@ -276,6 +296,7 @@ const CSHARP: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.csharp.method_count",
         "method count",
+        "Total number of methods defined.",
         "neutral",
         "csharp",
         None,
@@ -284,6 +305,7 @@ const CSHARP: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.csharp.empty_catch",
         "empty catch blocks",
+        "Empty `catch` blocks that swallow exceptions.",
         "lower-better",
         "csharp",
         None,
@@ -292,6 +314,7 @@ const CSHARP: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.csharp.blocking_async_calls",
         "blocking async calls (.Result / .Wait())",
+        "Blocking calls on async code (`.Result` / `.Wait()`).",
         "lower-better",
         "csharp",
         None,
@@ -300,6 +323,7 @@ const CSHARP: &[BuiltinMetric] = &[
     ast_gauge(
         "oxplow.csharp.high_complexity_fns",
         "high-complexity functions",
+        "Methods whose cyclomatic complexity exceeds the threshold.",
         "lower-better",
         "csharp",
         None,

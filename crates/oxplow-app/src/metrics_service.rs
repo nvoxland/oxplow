@@ -819,6 +819,7 @@ fn metric_definition(m: &ResolvedMetric) -> NewMetricDefinition {
     def.default_agg = m.default_agg.clone();
     def.grain = m.grain.clone();
     def.language = m.language.clone();
+    def.description = m.description.clone();
     def.producer = Some(m.key.clone());
     def.category = Some("custom".into());
     def.scope = m.scope.clone();
@@ -845,6 +846,7 @@ fn builtin_metric_entries() -> Vec<MetricEntry> {
             direction: Some(m.direction.to_string()),
             grain: Some(m.grain.to_string()),
             language: Some(m.language.to_string()),
+            description: Some(m.description.to_string()),
             dimensions: m.dimensions.iter().map(|d| d.to_string()).collect(),
             target: m.target,
             trigger: Some(m.trigger.to_string()),
@@ -991,6 +993,7 @@ mod tests {
             default_agg: "last".into(),
             grain: Some("tree".into()),
             language: Some("rust".into()),
+            description: Some("test gauge".into()),
             dimensions: vec!["language".into()],
             target: Some(0.0),
             warn_at: None,

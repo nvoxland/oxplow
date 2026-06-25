@@ -227,7 +227,19 @@ that **writes**.
   page (tsk283), navigated into from the Explorer, Recorded Metrics, and the
   task-page EffortMetrics drill-in (so there's no inline overlay). Back goes
   through `PageNavigationContext` (`goBack`, falling back to Recorded Metrics).
-  See the `MetricDetail` component bullet below for what each kind renders.
+  The metric name is the H1; the definition's **`description`** renders as intro
+  text under it (tsk309). Layout is the details layout: a right rail holds the
+  range/chart-mode/branch controls + the agg-aware in-range stat, the main column
+  the trend chart → paginated recordings table → kind drill-in. See the
+  `MetricDetail` component bullet below for what each kind renders.
+
+> **Definition descriptions (tsk309).** Every metric carries a one-line
+> `description` (on `metric_definition`). It's inherent to the definition — set
+> once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
+> like trigger). Sources: the built-in code gauges (`BuiltinMetric.description`),
+> the always-on producers (`ProducerMetric.description` in `producer_metrics.rs`),
+> and config `key:` entries (`MetricEntry.description` → `ResolvedMetric` →
+> `metric_definition()`).
 
 `MetricsExplorer.tsx` itself (the chart component, P4) is a multi-measure
 overlay on one time
