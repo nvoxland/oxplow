@@ -56,7 +56,7 @@ pub async fn list_metric_findings(
 /// The available catalog (built-in ∪ global ∪ project) with each entry's
 /// enabled-in-this-project flag — drives the Catalog page (tsk219).
 pub async fn list_metric_catalog(svc: &Services) -> Result<Vec<MetricCatalogEntry>, IpcError> {
-    Ok(svc.metrics.catalog())
+    Ok(svc.metrics.catalog().await)
 }
 
 /// Enable (add a `use:`) or disable (remove) a metric in `oxplow.yaml`, then
@@ -72,17 +72,16 @@ pub async fn set_metric_enabled(
         .map_err(IpcError::internal)
 }
 
-/// Set a metric's `target` / `trigger` override in `oxplow.yaml` (enabling it if
-/// needed; `None` clears that override), then reseed. The Catalog inline edit
-/// (tsk233).
+/// Set a metric's `target` override in `oxplow.yaml` (enabling it if needed;
+/// `None` clears that override), then reseed. The Catalog inline edit (tsk233).
+/// `trigger` is inherent to the definition and is not overridable (tsk290).
 pub async fn set_metric_override(
     svc: &Services,
     key: String,
     target: Option<f64>,
-    trigger: Option<String>,
 ) -> Result<(), IpcError> {
     svc.metrics
-        .set_metric_override(&key, target, trigger)
+        .set_metric_override(&key, target)
         .await
         .map_err(IpcError::internal)
 }

@@ -25,9 +25,7 @@ use oxplow_collect_plugin::{
 };
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{
-    NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
-};
+use oxplow_db::{NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore};
 use oxplow_db::{
     SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
     TaskEffort, TaskEffortStore, STATE_CLAIMED,
@@ -38,6 +36,7 @@ use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
 use crate::file_ref_version;
+use crate::producer_metrics::producer_metric;
 
 /// Built-in command substrings that count as a test run. The collection
 /// profile's `testRunPatterns` extends (never replaces) this list.
@@ -719,20 +718,10 @@ impl CollectionService {
 
         // ABSOLUTE whole-report coverage (tsk270): observe-always, no effort
         // baseline. The effort-relative diff-coverage is derived at READ from the
-        // stored per-file line-sets (`diff_coverage_for_effort`).
-        let mut def = NewMetricDefinition::new("oxplow.coverage.abs_pct", "coverage", "Coverage");
-        def.unit = Some("%".into());
-        def.direction = "higher-better".into();
-        // No per-sample grain: this is the whole-report absolute %, one scalar per
-        // run (the effort-relative diff is derived at read, not stored). Grain CHECK
-        // allows only effort/tree/file/entity/NULL.
-        def.grain = None;
-        def.basis = "absolute".into();
-        def.producer = Some("coverage".into());
-        def.category = Some("coverage".into());
-        def.language = None;
-        def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
-        def.description = Some("Whole-report coverage %.".into());
+        // stored per-file line-sets (`diff_coverage_for_effort`). The descriptor
+        // (kind/unit/grain/dims/…) is the shared registry's (tsk287); the
+        // coverage-specific thresholds are policy applied here.
+        let mut def = producer_metric("oxplow.coverage.abs_pct").definition();
         // Targets live in DATA, not a hardcoded UI ramp (tsk220): the renderer
         // colors red/green from these (fail < 50%, warn < 80%, ok ≥ 80%).
         def.target = Some(COVERAGE_TARGET_PCT);
@@ -839,31 +828,16 @@ impl CollectionService {
             run.branch = branch.clone();
             run.snapshot_id = snapshot_id;
 
+            // (key, value); definitions come from the shared producer registry (tsk287).
             let specs = [
-                (
-                    "oxplow.tests.passed",
-                    "Tests passed",
-                    "higher-better",
-                    passed,
-                ),
-                (
-                    "oxplow.tests.failed",
-                    "Tests failed",
-                    "lower-better",
-                    failed,
-                ),
-                ("oxplow.tests.total", "Tests total", "neutral", total),
+                ("oxplow.tests.passed", passed),
+                ("oxplow.tests.failed", failed),
+                ("oxplow.tests.total", total),
             ];
             let mut samples = Vec::new();
-            for (key, title, direction, value) in specs {
+            for (key, value) in specs {
                 let Some(v) = value else { continue };
-                let mut def = NewMetricDefinition::new(key, "gauge", title);
-                def.unit = Some("count".into());
-                def.direction = direction.into();
-                def.grain = Some("effort".into());
-                def.producer = Some("tests".into());
-                def.category = Some("testing".into());
-                def.dimensions_json = Some("[\"branch\"]".into());
+                let def = producer_metric(key).definition();
                 let metric_id = self.metrics.upsert_definition(def).await?;
                 let mut sample =
                     NewMetricSample::observed(metric_id, stream_val, v as f64, source.to_string());
@@ -941,17 +915,12 @@ impl CollectionService {
             run.branch = branch.clone();
 
             let mut samples = Vec::new();
-            for (key, title, value) in [
-                ("oxplow.analysis.errors", "Analysis errors", errors),
-                ("oxplow.analysis.warnings", "Analysis warnings", warnings),
+            // Definitions come from the shared producer registry (tsk287).
+            for (key, value) in [
+                ("oxplow.analysis.errors", errors),
+                ("oxplow.analysis.warnings", warnings),
             ] {
-                let mut def = NewMetricDefinition::new(key, "gauge", title);
-                def.unit = Some("count".into());
-                def.direction = "lower-better".into();
-                def.grain = Some("tree".into());
-                def.producer = Some("analysis".into());
-                def.category = Some("static-quality".into());
-                def.dimensions_json = Some("[\"branch\",\"git_version\"]".into());
+                let def = producer_metric(key).definition();
                 let metric_id = self.metrics.upsert_definition(def).await?;
                 let mut sample = NewMetricSample::observed(
                     metric_id,
@@ -1363,14 +1332,8 @@ impl CollectionService {
         };
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
         let result = async {
-            let mut def = NewMetricDefinition::new("agent.nudges.fired", "event", "Nudges fired");
-            def.unit = Some("count".into());
-            def.direction = "lower-better".into();
-            def.default_agg = "sum".into();
-            def.grain = Some("effort".into());
-            def.producer = Some("nudges".into());
-            def.category = Some("operational".into());
-            def.dimensions_json = Some("[\"subject\",\"branch\",\"thread\"]".into());
+            // Definition comes from the shared producer registry (tsk287).
+            let def = producer_metric("agent.nudges.fired").definition();
             let metric_id = self.metrics.upsert_definition(def).await?;
             // Event kind: no compute run (run_id stays NULL).
             let mut sample = NewMetricSample::observed(metric_id, stream_val, 1.0, "nudges");

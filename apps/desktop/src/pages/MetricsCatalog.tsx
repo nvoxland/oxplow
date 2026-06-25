@@ -10,7 +10,50 @@ import {
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 
-const TRIGGERS = ["on-snapshot", "on-effort-complete", "manual"] as const;
+
+/** Display order + labels for the catalog's category grouping. Code gauges
+ *  (the toggleable opt-in compute) lead; the always-on producer families
+ *  follow. Unknown categories fall to the end under their raw key. */
+const CATEGORY_ORDER = [
+  "custom",
+  "testing",
+  "coverage",
+  "static-quality",
+  "operational",
+] as const;
+const CATEGORY_LABEL: Record<string, string> = {
+  custom: "Code gauges",
+  testing: "Tests",
+  coverage: "Coverage",
+  "static-quality": "Static analysis",
+  operational: "Operational",
+};
+
+function categoryLabel(cat: string | null): string {
+  if (!cat) return "Other";
+  return CATEGORY_LABEL[cat] ?? cat;
+}
+
+/** Group catalog entries by category in display order. Pure — entries keep
+ *  their incoming (key-sorted) order within each group. */
+export function groupCatalog(
+  rows: MetricCatalogEntry[],
+): Array<{ category: string | null; entries: MetricCatalogEntry[] }> {
+  const byCat = new Map<string | null, MetricCatalogEntry[]>();
+  for (const r of rows) {
+    const cat = r.category ?? null;
+    const list = byCat.get(cat);
+    if (list) list.push(r);
+    else byCat.set(cat, [r]);
+  }
+  const order = (cat: string | null) => {
+    const i = CATEGORY_ORDER.indexOf((cat ?? "") as (typeof CATEGORY_ORDER)[number]);
+    return i === -1 ? CATEGORY_ORDER.length : i;
+  };
+  return [...byCat.entries()]
+    .map(([category, entries]) => ({ category, entries }))
+    .sort((a, b) => order(a.category) - order(b.category));
+}
 
 /**
  * Metric Catalog (epic tsk213, P4): browse the available catalog
@@ -66,17 +109,12 @@ export function MetricsCatalog({
     }
   };
 
-  // Write a target/trigger override into oxplow.yaml (tsk233). Preserves the
-  // sibling field at its current resolved value; an empty target clears it.
-  const override = async (
-    entry: MetricCatalogEntry,
-    next: { target?: number | null; trigger?: string },
-  ) => {
+  // Write a target override into oxplow.yaml (tsk233). An empty target clears
+  // it. `trigger` is inherent to the definition — not overridable (tsk290).
+  const override = async (entry: MetricCatalogEntry, next: { target: number | null }) => {
     setBusy(entry.key);
     try {
-      const target = next.target !== undefined ? next.target : entry.target;
-      const trigger = next.trigger !== undefined ? next.trigger : entry.trigger;
-      await setMetricOverride(entry.key, target, trigger);
+      await setMetricOverride(entry.key, next.target);
       refresh();
     } catch (e) {
       recordOpError({
@@ -122,7 +160,7 @@ export function MetricsCatalog({
   };
 
   const newMetricBar = (
-    <div style={{ marginBottom: 10 }}>
+    <div style={{ marginTop: 12 }}>
       {!creating ? (
         <button
           type="button"
@@ -211,15 +249,14 @@ export function MetricsCatalog({
   if (rows.length === 0) {
     return (
       <div>
-        {newMetricBar}
         <div style={{ opacity: 0.6 }}>No metrics in the catalog.</div>
+        {newMetricBar}
       </div>
     );
   }
 
   return (
     <div>
-    {newMetricBar}
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
       <thead>
         <tr style={{ textAlign: "left", opacity: 0.6 }}>
@@ -232,91 +269,117 @@ export function MetricsCatalog({
           <th style={{ padding: "4px 8px", textAlign: "right" }}>Target</th>
         </tr>
       </thead>
-      <tbody>
-        {rows.map((m) => (
-          <tr key={m.key} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-            <td style={{ padding: "6px 8px" }}>
-              <input
-                type="checkbox"
-                checked={m.enabled}
-                disabled={busy === m.key}
-                onChange={() => void toggle(m)}
-                aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.key}`}
-                data-testid={`catalog-toggle-${m.key}`}
-              />
-            </td>
-            <td style={{ padding: "6px 8px" }}>
-              <div style={{ fontWeight: 600 }}>{m.title}</div>
-              <div style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 11 }}>{m.key}</div>
-            </td>
-            <td style={{ padding: "6px 8px" }}>{m.kind}</td>
-            <td style={{ padding: "6px 8px" }}>{m.language ?? "—"}</td>
-            <td style={{ padding: "6px 8px" }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  padding: "1px 6px",
-                  borderRadius: 4,
-                  background: "var(--surface-2, #1c1c1c)",
-                  opacity: 0.8,
-                }}
-              >
-                {m.scope}
-              </span>
-            </td>
-            <td style={{ padding: "6px 8px" }}>
-              {m.enabled ? (
-                <select
-                  value={TRIGGERS.includes(m.trigger as (typeof TRIGGERS)[number]) ? m.trigger : ""}
-                  disabled={busy === m.key}
-                  onChange={(e) => void override(m, { trigger: e.target.value })}
-                  data-testid={`catalog-trigger-${m.key}`}
-                  style={{ fontSize: 12 }}
-                >
-                  {!TRIGGERS.includes(m.trigger as (typeof TRIGGERS)[number]) ? (
-                    <option value="">{m.trigger}</option>
-                  ) : null}
-                  {TRIGGERS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span style={{ opacity: 0.5 }}>{m.trigger}</span>
-              )}
-            </td>
-            <td style={{ padding: "6px 8px", textAlign: "right" }}>
-              {m.enabled ? (
-                <input
-                  // Uncontrolled (so typing isn't clobbered mid-edit), but keyed
-                  // on the resolved target so an external oxplow.yaml edit
-                  // arriving via `configChanged` remounts it with the new value
-                  // instead of showing a stale one.
-                  key={`target-${m.key}-${m.target ?? "none"}`}
-                  type="number"
-                  defaultValue={m.target ?? ""}
-                  disabled={busy === m.key}
-                  onBlur={(e) => {
-                    const raw = e.target.value.trim();
-                    const next = raw === "" ? null : Number(raw);
-                    if (next !== m.target && !(next != null && Number.isNaN(next))) {
-                      void override(m, { target: next });
-                    }
-                  }}
-                  data-testid={`catalog-target-${m.key}`}
-                  style={{ width: 64, fontSize: 12, textAlign: "right" }}
-                />
-              ) : m.target == null ? (
-                "—"
-              ) : (
-                m.target
-              )}
+      {groupCatalog(rows).map((group) => (
+        <tbody key={group.category ?? "other"}>
+          <tr>
+            <td
+              colSpan={7}
+              style={{
+                padding: "10px 8px 4px",
+                fontSize: 11,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.04em",
+                opacity: 0.6,
+              }}
+              data-testid={`catalog-group-${group.category ?? "other"}`}
+            >
+              {categoryLabel(group.category)}
             </td>
           </tr>
-        ))}
-      </tbody>
+          {group.entries.map((m) => {
+            // Only toggleable metrics expose enable/disable + target/trigger
+            // overrides; always-on producers/plugins are read-only.
+            const editable = m.toggleable && m.enabled;
+            return (
+              <tr key={m.key} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
+                <td style={{ padding: "6px 8px" }}>
+                  {m.toggleable ? (
+                    <input
+                      type="checkbox"
+                      checked={m.enabled}
+                      disabled={busy === m.key}
+                      onChange={() => void toggle(m)}
+                      aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.key}`}
+                      data-testid={`catalog-toggle-${m.key}`}
+                    />
+                  ) : (
+                    <span
+                      title="Always on — recorded automatically by a producer; nothing to enable."
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                        background: "var(--surface-2, #1c1c1c)",
+                        opacity: 0.7,
+                        whiteSpace: "nowrap",
+                      }}
+                      data-testid={`catalog-alwayson-${m.key}`}
+                    >
+                      Always on
+                    </span>
+                  )}
+                </td>
+                <td style={{ padding: "6px 8px" }}>
+                  <div style={{ fontWeight: 600 }}>{m.title}</div>
+                  <div style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 11 }}>{m.key}</div>
+                </td>
+                <td style={{ padding: "6px 8px" }}>{m.kind}</td>
+                <td style={{ padding: "6px 8px" }}>{m.language ?? "—"}</td>
+                <td style={{ padding: "6px 8px" }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                      background: "var(--surface-2, #1c1c1c)",
+                      opacity: 0.8,
+                    }}
+                  >
+                    {m.scope}
+                  </span>
+                </td>
+                <td style={{ padding: "6px 8px" }}>
+                  {/* Trigger is inherent to the definition — read-only, never
+                      user-picked (tsk290). */}
+                  <span style={{ opacity: 0.5 }} data-testid={`catalog-trigger-${m.key}`}>
+                    {m.trigger}
+                  </span>
+                </td>
+                <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                  {editable ? (
+                    <input
+                      // Uncontrolled (so typing isn't clobbered mid-edit), but keyed
+                      // on the resolved target so an external oxplow.yaml edit
+                      // arriving via `configChanged` remounts it with the new value
+                      // instead of showing a stale one.
+                      key={`target-${m.key}-${m.target ?? "none"}`}
+                      type="number"
+                      defaultValue={m.target ?? ""}
+                      disabled={busy === m.key}
+                      onBlur={(e) => {
+                        const raw = e.target.value.trim();
+                        const next = raw === "" ? null : Number(raw);
+                        if (next !== m.target && !(next != null && Number.isNaN(next))) {
+                          void override(m, { target: next });
+                        }
+                      }}
+                      data-testid={`catalog-target-${m.key}`}
+                      style={{ width: 64, fontSize: 12, textAlign: "right" }}
+                    />
+                  ) : m.target == null ? (
+                    "—"
+                  ) : (
+                    m.target
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      ))}
     </table>
+    {newMetricBar}
     </div>
   );
 }

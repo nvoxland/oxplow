@@ -1,7 +1,5 @@
-import { Card, cardLinkButton } from "../components/Card.js";
-import { fileRef, indexRef } from "../tabs/pageRefs.js";
+import { fileRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
-import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { MetricsCatalog } from "./MetricsCatalog.js";
 
@@ -20,20 +18,7 @@ export function MetricsCatalogPage({
   onOpenPage?: (ref: TabRef) => void;
 } = {}) {
   return (
-    <Page
-      testId="page-metrics-catalog"
-      title="Metrics Catalog"
-      actions={
-        <RouteLink
-          ref={indexRef("metrics")}
-          onNavigate={onOpenPage}
-          style={cardLinkButton}
-          testId="metrics-catalog-view-metrics"
-        >
-          ← View metrics
-        </RouteLink>
-      }
-    >
+    <Page testId="page-metrics-catalog" title="Metrics Catalog">
       <div
         style={{
           padding: "16px 20px",
@@ -43,11 +28,9 @@ export function MetricsCatalogPage({
           maxWidth: 1000,
         }}
       >
-        <Card testId="metrics-catalog-browse-card" title="Catalog — browse + enable">
-          <MetricsCatalog
-            onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
-          />
-        </Card>
+        <MetricsCatalog
+          onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
+        />
       </div>
     </Page>
   );

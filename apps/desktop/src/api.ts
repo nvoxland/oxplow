@@ -1735,14 +1735,14 @@ export async function setMetricEnabled(key: string, enabled: boolean): Promise<v
   unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
-/** Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
- *  inline edit, tsk233). `null` clears that override. */
+/** Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+ *  tsk233). `null` clears that override. `trigger` is inherent to the
+ *  definition and not overridable (tsk290). */
 export async function setMetricOverride(
   key: string,
   target: number | null,
-  trigger: string | null,
 ): Promise<void> {
-  unwrap(await commands.setMetricOverride(key, target, trigger));
+  unwrap(await commands.setMetricOverride(key, target));
 }
 
 /** Scaffold a new project gauge metric — writes a starter script + a `metrics:`

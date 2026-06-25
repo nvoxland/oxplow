@@ -21,8 +21,8 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteAttributionStore,
-    SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
+    EffortFileChange, NewMetricRun, NewMetricSample, SqliteAttributionStore, SqliteMetricStore,
+    SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -33,6 +33,7 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
+use crate::producer_metrics::producer_metric;
 
 #[derive(Debug, Error)]
 pub enum TaskServiceError {
@@ -519,33 +520,15 @@ impl TaskService {
             run.trigger = Some("on-effort-complete".into());
             run.branch = branch.clone();
 
-            // (key, title, unit, direction, value)
+            // (key, value) — definitions come from the shared producer registry
+            // (tsk287) so the Catalog can't drift from what's emitted here.
             let specs = [
-                (
-                    "effort.cycle_time_ms",
-                    "Effort cycle time",
-                    "ms",
-                    "lower-better",
-                    cycle_ms as f64,
-                ),
-                (
-                    "task.efforts",
-                    "Efforts per task",
-                    "count",
-                    "lower-better",
-                    efforts_so_far as f64,
-                ),
+                ("effort.cycle_time_ms", cycle_ms as f64),
+                ("task.efforts", efforts_so_far as f64),
             ];
             let mut samples = Vec::new();
-            for (key, title, unit, direction, value) in specs {
-                let mut def = NewMetricDefinition::new(key, "gauge", title);
-                def.unit = Some(unit.into());
-                def.direction = direction.into();
-                def.default_agg = "avg".into();
-                def.grain = Some("effort".into());
-                def.producer = Some("effort-lifecycle".into());
-                def.category = Some("operational".into());
-                def.dimensions_json = Some("[\"branch\",\"effort\"]".into());
+            for (key, value) in specs {
+                let def = producer_metric(key).definition();
                 let metric_id = metrics.upsert_definition(def).await?;
                 let mut sample =
                     NewMetricSample::observed(metric_id, stream_val, value, "effort-lifecycle");

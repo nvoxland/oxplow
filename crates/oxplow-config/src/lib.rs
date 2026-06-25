@@ -1244,7 +1244,10 @@ fn resolve_one(
         warn_at: pick_f64(|e| e.warn_at),
         fail_at: pick_f64(|e| e.fail_at),
         scope: scope.to_string(),
-        trigger: pick_str(|e| &e.trigger).unwrap_or_else(|| "manual".into()),
+        // trigger is inherent to the definition — when a metric is collected is a
+        // property of what it measures, not a per-project knob. Like `compute`,
+        // a `use:` entry can't override it (tsk290).
+        trigger: def.trigger.clone().unwrap_or_else(|| "manual".into()),
         // compute always comes from the definition (use: entries can't set it).
         compute: def.compute.clone().unwrap_or_default(),
     }

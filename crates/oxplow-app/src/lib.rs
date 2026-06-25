@@ -33,6 +33,7 @@ pub mod lsp_sessions;
 pub mod metrics_service;
 pub mod output_activity;
 pub mod page_ref_backfill;
+pub mod producer_metrics;
 pub mod recovery;
 pub mod ref_resolver;
 pub mod resume_check;

@@ -167,6 +167,17 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 > `effort_observation` path has already been **dropped** (tsk215) — the substrate
 > is the sole store.
 
+> **Producer-metric registry (tsk286/tsk287).** Because these producers only
+> `upsert` their definition at *record* time, the Catalog (a registry of
+> *available* metrics) can't discover them before first data. So the canonical
+> always-on producer metrics live in **`producer_metrics.rs`**
+> (`builtin_producer_metrics()` + `ProducerMetric::definition()`) as the **single
+> source of truth**: the producers build their `NewMetricDefinition` via
+> `producer_metric(key).definition()` (no inline descriptors), and `catalog()`
+> unions the same list. Add/rename a producer metric in **one** place. Coverage's
+> red/green thresholds (`target`/`warn_at`/`fail_at`) are policy applied by the
+> coverage producer on top of the registry descriptor, not part of the registry.
+
 ## Read surface
 
 - **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
@@ -248,12 +259,29 @@ The **configure** page (tsk282):
   P4) — a dedicated top-level page (`PageKind` `"metrics-catalog"`,
   `metricsCatalogRef()`, launcher Activity category), the only metrics surface
   that **writes**.
-  Browse the available catalog
-  (built-in ∪ global ∪ project) via `list_metric_catalog`; enable/disable with a
-  toggle (`set_metric_enabled` → writes a `use:` into `oxplow.yaml`), and
-  **inline-edit target/trigger** (tsk233) via `set_metric_override` →
-  `MetricsService::set_metric_override` writes the override onto the `use:` entry
-  (`catalog()` now surfaces the *resolved* target/trigger so the edit reflects).
+  It's a **registry of everything available**, NOT a list of metrics with
+  recorded data — every metric the system can produce is listed via
+  `list_metric_catalog`, **grouped by category** (Code gauges / Tests / Coverage
+  / Static analysis / Operational), even before any sample exists. `catalog()`
+  unions **four** sources, deduped by key: (1) the bundled code gauges
+  (`builtin_metrics()`, toggleable); (2) project/global `metrics:` entries
+  (toggleable); (3) the built-in always-on producers
+  (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
+  lifecycle, nudges — listed regardless of recorded data so the user sees they
+  exist, tsk286); (4) every other seeded `metric_definition` — installed plugin
+  metrics and legacy rows. Each entry carries `toggleable` + `category`: **only toggleable
+  metrics** (the code gauges + config entries) show the enable/disable checkbox
+  and the target editor; always-on producers/plugins render an "Always
+  on" badge and read-only fields (they're free side-bands, not opt-in compute —
+  the old "built-in vs hardcoded" split was an artifact; both are `scope:
+  built-in` in the DB). Enable/disable via `set_metric_enabled` (→ writes a
+  `use:` into `oxplow.yaml`); **inline-edit the target** (tsk233) via
+  `set_metric_override` → `MetricsService::set_metric_override` writes the
+  target override onto the `use:` entry. **Trigger is inherent to the
+  definition** — *when* a metric is collected is a property of what it measures,
+  not a per-project knob — so it's shown **read-only** and never user-pickable;
+  `resolve_one` reads it from the definition (like `compute`), a `use:` entry
+  can't override it, and `set_metric_override` no longer accepts it (tsk290).
   **"New metric"** (tsk234/tsk235) scaffolds a gauge at **project** or **global**
   scope: `scaffold_metric` → `MetricsService::scaffold_metric` writes a starter
   Starlark stub + a `key:` `metrics:` entry. *Project* writes under

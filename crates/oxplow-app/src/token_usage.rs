@@ -26,13 +26,14 @@ use std::sync::Arc;
 
 use oxplow_db::TaskEffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewMetricDefinition, NewMetricRun, NewMetricSample, SqliteMetricStore,
-    SqliteTaskEffortStore, SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewMetricRun, NewMetricSample, SqliteMetricStore, SqliteTaskEffortStore,
+    SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
 
 use crate::events::{EventBus, OxplowEvent};
+use crate::producer_metrics::producer_metric;
 
 /// Summed usage across a chunk of transcript (one Stop's delta).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -456,23 +457,16 @@ impl TokenUsageService {
         stream_val: i64,
         by_model: &std::collections::HashMap<String, TokenAgg>,
     ) -> Result<(), DomainError> {
-        // (key, title, unit)
-        let specs = [
-            ("agent.tokens.input", "Input tokens", "tokens"),
-            ("agent.tokens.output", "Output tokens", "tokens"),
-            ("agent.tokens.total", "Total tokens", "tokens"),
-            ("agent.turns", "Agent turns", "count"),
-        ];
+        // Definitions come from the shared producer registry (tsk287) so the
+        // Catalog can't drift from what's emitted here.
         let mut ids = std::collections::HashMap::new();
-        for (key, title, unit) in specs {
-            let mut def = NewMetricDefinition::new(key, "gauge", title);
-            def.unit = Some(unit.into());
-            def.direction = "neutral".into();
-            def.default_agg = "sum".into();
-            def.grain = Some("entity".into());
-            def.producer = Some("token-parse".into());
-            def.category = Some("operational".into());
-            def.dimensions_json = Some("[\"model\",\"agent\"]".into());
+        for key in [
+            "agent.tokens.input",
+            "agent.tokens.output",
+            "agent.tokens.total",
+            "agent.turns",
+        ] {
+            let def = producer_metric(key).definition();
             ids.insert(key, self.metrics.upsert_definition(def).await?);
         }
 

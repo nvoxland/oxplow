@@ -33,6 +33,7 @@ use specta::Type;
 
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
+use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::read_snapshot_content;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -67,10 +68,21 @@ pub struct MetricCatalogEntry {
     pub language: Option<String>,
     /// `built-in` | `global` | `project`.
     pub scope: String,
-    /// Active in this project's `oxplow.yaml` `metrics:` block.
+    /// Active in this project's `oxplow.yaml` `metrics:` block. Always `true`
+    /// for non-toggleable (always-on) producer/plugin metrics.
     pub enabled: bool,
     pub target: Option<f64>,
     pub trigger: String,
+    /// Whether this metric can be enabled/disabled + overridden from config.
+    /// `true` for the bundled code gauges (`use:`-able) and project/global
+    /// `metrics:` entries; `false` for always-on producers (tokens, tests,
+    /// coverage, analysis, lifecycle, nudges) and plugin-seeded definitions —
+    /// those are free side-bands, not opt-in compute. The real axis is
+    /// always-on vs toggleable; "built-in vs hardcoded" was an artifact (tsk284).
+    pub toggleable: bool,
+    /// `operational` | `testing` | `static-quality` | `custom` — drives the
+    /// Catalog page's grouping.
+    pub category: Option<String>,
 }
 
 /// The per-trigger context every gauge run is stamped with.
@@ -179,7 +191,18 @@ impl MetricsService {
     /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
     /// enabled-in-this-project flag — the Catalog page's read (tsk219). A
     /// built-in shows up even before it's `use:`d/seeded.
-    pub fn catalog(&self) -> Vec<MetricCatalogEntry> {
+    /// The full metric registry for this project — **everything available**,
+    /// not just metrics with recorded data. Four sources, deduped by key:
+    /// 1. bundled code gauges (`builtin_metrics()`) — toggleable, shown even
+    ///    before they're enabled;
+    /// 2. project/global `metrics:` entries — toggleable;
+    /// 3. built-in always-on producers (`builtin_producer_metrics()`) — tokens,
+    ///    tests, coverage, analysis, lifecycle, nudges — `toggleable: false`,
+    ///    listed even with zero recorded data so the user can see they exist
+    ///    (tsk286);
+    /// 4. every other seeded `metric_definition` — installed plugin metrics (and
+    ///    legacy rows) not covered above. Also `toggleable: false`.
+    pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_metrics();
         let by_key: std::collections::HashMap<&str, &_> =
             resolved.iter().map(|m| (m.key.as_str(), m)).collect();
@@ -199,6 +222,8 @@ impl MetricsService {
                 enabled: r.is_some(),
                 target: r.map_or(b.target, |m| m.target),
                 trigger: r.map_or_else(|| b.trigger.to_string(), |m| m.trigger.clone()),
+                toggleable: true,
+                category: Some("custom".to_string()),
             });
         }
         // Project/global-defined metrics not already shown as a built-in.
@@ -213,7 +238,50 @@ impl MetricsService {
                     enabled: true,
                     target: m.target,
                     trigger: m.trigger.clone(),
+                    toggleable: true,
+                    category: Some("custom".to_string()),
                 });
+            }
+        }
+        // Built-in always-on producer metrics — listed even with zero recorded
+        // data, so the registry is complete the moment a project opens (tsk286).
+        for p in builtin_producer_metrics() {
+            if seen.insert(p.key.to_string()) {
+                out.push(MetricCatalogEntry {
+                    key: p.key.to_string(),
+                    title: p.title.to_string(),
+                    kind: p.kind.to_string(),
+                    language: None,
+                    scope: "built-in".to_string(),
+                    enabled: true,
+                    target: None,
+                    trigger: "auto".to_string(),
+                    toggleable: false,
+                    category: Some(p.category.to_string()),
+                });
+            }
+        }
+        // Every other seeded definition — installed plugin metrics (and legacy
+        // rows) not covered above. Best-effort: a store read error just yields
+        // the set assembled so far.
+        if let Ok(defs) = self.metrics.list_definitions().await {
+            for d in defs {
+                if seen.insert(d.key.clone()) {
+                    out.push(MetricCatalogEntry {
+                        key: d.key.clone(),
+                        title: d.title.clone(),
+                        kind: d.kind.clone(),
+                        language: d.language.clone(),
+                        scope: d.scope.clone(),
+                        enabled: true,
+                        target: d.target,
+                        // No config trigger for a producer-seeded metric; it runs
+                        // on its producer's own cadence.
+                        trigger: "auto".to_string(),
+                        toggleable: false,
+                        category: d.category.clone(),
+                    });
+                }
             }
         }
         out.sort_by(|a, b| a.key.cmp(&b.key));
@@ -255,12 +323,7 @@ impl MetricsService {
     /// it if not already present (an override implies the metric is active);
     /// `None` for a field clears that override (falls back to the definition's
     /// default). Persists + emits `ConfigChanged`.
-    pub async fn set_metric_override(
-        &self,
-        key: &str,
-        target: Option<f64>,
-        trigger: Option<String>,
-    ) -> Result<(), String> {
+    pub async fn set_metric_override(&self, key: &str, target: Option<f64>) -> Result<(), String> {
         {
             let mut cfg = self
                 .config
@@ -271,14 +334,14 @@ impl MetricsService {
                 .iter_mut()
                 .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
             match entry {
+                // Only `target` is project-overridable; `trigger` is inherent to
+                // the definition and never set here (tsk290).
                 Some(e) => {
                     e.target = target;
-                    e.trigger = trigger;
                 }
                 None => cfg.metrics.push(MetricEntry {
                     use_key: Some(key.to_string()),
                     target,
-                    trigger,
                     ..Default::default()
                 }),
             }
@@ -1069,7 +1132,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
 
         // Built-ins appear in the catalog, not enabled until `use:`d.
-        let cat = svc.metrics.catalog();
+        let cat = svc.metrics.catalog().await;
         assert!(!cat.is_empty(), "built-in catalog is non-empty");
         let entry = cat
             .iter()
@@ -1077,6 +1140,8 @@ def transform(input):
             .expect("built-in present");
         assert_eq!(entry.scope, "built-in");
         assert!(!entry.enabled, "not enabled before use:");
+        assert!(entry.toggleable, "code gauges are toggleable");
+        assert_eq!(entry.category.as_deref(), Some("custom"));
 
         // Enable end-to-end: writes a `use:` into oxplow.yaml + seeds the def.
         svc.metrics
@@ -1086,6 +1151,7 @@ def transform(input):
         assert!(
             svc.metrics
                 .catalog()
+                .await
                 .iter()
                 .find(|e| e.key == "oxplow.rust.unsafe_blocks")
                 .unwrap()
@@ -1113,6 +1179,7 @@ def transform(input):
         assert!(
             !svc.metrics
                 .catalog()
+                .await
                 .iter()
                 .find(|e| e.key == "oxplow.rust.unsafe_blocks")
                 .unwrap()
@@ -1122,42 +1189,110 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn set_metric_override_writes_target_and_trigger() {
+    async fn catalog_lists_all_producer_metrics_before_any_data() {
+        // The Catalog is a registry: every always-on producer metric must be
+        // visible even on a brand-new project with zero recorded samples (tsk286).
+        let (svc, _dir) = fixture().await;
+        let cat = svc.metrics.catalog().await;
+        let by_key: std::collections::HashMap<&str, &MetricCatalogEntry> =
+            cat.iter().map(|e| (e.key.as_str(), e)).collect();
+
+        for (key, kind, category) in [
+            ("oxplow.coverage.abs_pct", "coverage", "coverage"),
+            ("oxplow.tests.passed", "gauge", "testing"),
+            ("oxplow.analysis.errors", "gauge", "static-quality"),
+            ("agent.tokens.total", "gauge", "operational"),
+            ("agent.nudges.fired", "event", "operational"),
+            ("effort.cycle_time_ms", "gauge", "operational"),
+        ] {
+            let e = by_key
+                .get(key)
+                .unwrap_or_else(|| panic!("{key} listed in catalog with no data"));
+            assert_eq!(e.kind, kind, "{key} kind");
+            assert_eq!(e.category.as_deref(), Some(category), "{key} category");
+            assert!(!e.toggleable, "{key} is always-on, not toggleable");
+        }
+        // Toggleable code gauges still coexist.
+        assert!(
+            by_key
+                .get("oxplow.rust.unsafe_blocks")
+                .is_some_and(|e| e.toggleable),
+            "code gauges present + toggleable"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_unions_always_on_producer_definitions() {
+        let (svc, _dir) = fixture().await;
+
+        // Simulate a producer (or external plugin) seeding a definition directly,
+        // the way token-parse / tests / coverage do at runtime.
+        let mut def = NewMetricDefinition::new(
+            "agent.tokens.total".to_string(),
+            "gauge".to_string(),
+            "Total tokens".to_string(),
+        );
+        def.category = Some("operational".to_string());
+        def.producer = Some("token-parse".to_string());
+        svc.metric_store.upsert_definition(def).await.unwrap();
+
+        let cat = svc.metrics.catalog().await;
+        let entry = cat
+            .iter()
+            .find(|e| e.key == "agent.tokens.total")
+            .expect("producer-seeded metric is in the catalog");
+        assert!(!entry.toggleable, "always-on producers are not toggleable");
+        assert!(entry.enabled, "always-on producers read as enabled");
+        assert_eq!(entry.category.as_deref(), Some("operational"));
+
+        // A toggleable code gauge still coexists in the same listing.
+        assert!(
+            cat.iter()
+                .any(|e| e.key == "oxplow.rust.unsafe_blocks" && e.toggleable),
+            "code gauges still present and toggleable"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_metric_override_writes_target_trigger_stays_inherent() {
         let (svc, dir) = fixture().await;
 
-        // Setting an override on a not-yet-enabled metric enables it and
-        // persists the target + trigger into oxplow.yaml.
+        // Setting a target override on a not-yet-enabled metric enables it and
+        // persists the target into oxplow.yaml.
         svc.metrics
-            .set_metric_override(
-                "oxplow.rust.unsafe_blocks",
-                Some(0.0),
-                Some("manual".to_string()),
-            )
+            .set_metric_override("oxplow.rust.unsafe_blocks", Some(0.0))
             .await
             .unwrap();
 
         let entry = svc
             .metrics
             .catalog()
+            .await
             .into_iter()
             .find(|e| e.key == "oxplow.rust.unsafe_blocks")
             .unwrap();
         assert!(entry.enabled, "override implies enabled");
         assert_eq!(entry.target, Some(0.0));
-        assert_eq!(entry.trigger, "manual");
+        // Trigger is inherent to the definition (on-snapshot for code gauges),
+        // never overridable (tsk290).
+        assert_eq!(entry.trigger, "on-snapshot");
 
         let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
         assert!(yaml.contains("target"), "target persisted; got:\n{yaml}");
-        assert!(yaml.contains("manual"), "trigger persisted; got:\n{yaml}");
+        assert!(
+            !yaml.contains("trigger"),
+            "trigger is never written to config; got:\n{yaml}"
+        );
 
         // Clearing the target override (None) drops it back to the default.
         svc.metrics
-            .set_metric_override("oxplow.rust.unsafe_blocks", None, None)
+            .set_metric_override("oxplow.rust.unsafe_blocks", None)
             .await
             .unwrap();
         let entry = svc
             .metrics
             .catalog()
+            .await
             .into_iter()
             .find(|e| e.key == "oxplow.rust.unsafe_blocks")
             .unwrap();
@@ -1258,6 +1393,7 @@ def transform(input):
         // Seeded at scope `global` (the resolver read it from the global dir).
         let entry = m
             .catalog()
+            .await
             .into_iter()
             .find(|e| e.key == "myglobal.todo")
             .expect("global metric in catalog");

@@ -497,10 +497,10 @@ export const commands = {
 	// Enable/disable a metric in `oxplow.yaml` (the Catalog toggle).
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
 	/**
-	 *  Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
-	 *  inline edit, tsk233).
+	 *  Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+	 *  tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 	 */
-	setMetricOverride: (key: string, target: number | null, trigger: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target, trigger })),
+	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
 	/**
 	 *  Scaffold a new project gauge metric (script + `metrics:` entry); returns the
 	 *  project-relative script path. The Catalog "New metric" action (tsk234).
@@ -1824,10 +1824,27 @@ export type MetricCatalogEntry = {
 	language: string | null,
 	// `built-in` | `global` | `project`.
 	scope: string,
-	// Active in this project's `oxplow.yaml` `metrics:` block.
+	/**
+	 *  Active in this project's `oxplow.yaml` `metrics:` block. Always `true`
+	 *  for non-toggleable (always-on) producer/plugin metrics.
+	 */
 	enabled: boolean,
 	target: number | null,
 	trigger: string,
+	/**
+	 *  Whether this metric can be enabled/disabled + overridden from config.
+	 *  `true` for the bundled code gauges (`use:`-able) and project/global
+	 *  `metrics:` entries; `false` for always-on producers (tokens, tests,
+	 *  coverage, analysis, lifecycle, nudges) and plugin-seeded definitions —
+	 *  those are free side-bands, not opt-in compute. The real axis is
+	 *  always-on vs toggleable; "built-in vs hardcoded" was an artifact (tsk284).
+	 */
+	toggleable: boolean,
+	/**
+	 *  `operational` | `testing` | `static-quality` | `custom` — drives the
+	 *  Catalog page's grouping.
+	 */
+	category: string | null,
 };
 
 /**

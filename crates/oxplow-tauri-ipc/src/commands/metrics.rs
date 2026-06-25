@@ -61,17 +61,16 @@ pub async fn set_metric_enabled(
     oxplow_rpc::commands::metrics::set_metric_enabled(&state, key, enabled).await
 }
 
-/// Set a metric's `target` / `trigger` override in `oxplow.yaml` (the Catalog
-/// inline edit, tsk233).
+/// Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+/// tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_metric_override(
     state: tauri::State<'_, AppState>,
     key: String,
     target: Option<f64>,
-    trigger: Option<String>,
 ) -> Result<(), IpcError> {
-    oxplow_rpc::commands::metrics::set_metric_override(&state, key, target, trigger).await
+    oxplow_rpc::commands::metrics::set_metric_override(&state, key, target).await
 }
 
 /// Scaffold a new project gauge metric (script + `metrics:` entry); returns the
