@@ -1,13 +1,10 @@
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
-import {
-  type EffortMetricDelta,
-  type MetricDefinition,
-  type MetricFinding,
-  type MetricSample,
-  listEffortMetricDeltas,
-  listMetricFindings,
-  listMetricSamples,
+import type {
+  EffortMetricDelta,
+  MetricDefinition,
+  MetricFinding,
+  MetricSample,
 } from "../api.js";
 import {
   deltaColor,
@@ -15,47 +12,165 @@ import {
   fmtSigned,
 } from "../components/EffortMetrics.js";
 import {
-  deltaVsFirst,
+  CHART_MODES,
+  type ChartMode,
+  RANGE_PRESETS,
+  type SeriesPoint,
+  type TimeRange,
   findingRows,
+  fromLocalInput,
+  inRangeStat,
+  matchPresetKey,
   parseDetailPayload,
-  seriesPoints,
+  rangeFromPreset,
+  toLocalInput,
   topSubjects,
 } from "./metricDetailData.js";
 
-// Per-kind Metric detail view (tsk213, P4 / tsk232): one renderer selected from
-// `metric_definition.kind`. Every kind shares a value trend (read off the same
-// `metric_sample` facts); each adds its kind-specific drill-in from the latest
-// run's findings — so a new metric of a known kind gets this for free.
-
-const SAMPLE_LIMIT = 200;
+// Composable pieces of the Metric detail page (tsk213, P4 / tsk232 / tsk291).
+// The page (`MetricDetailPage`) lays these out: the right rail carries the
+// stats, the main column carries the trend chart, the recordings table, and the
+// kind-specific drill-in selected from `metric_definition.kind`.
 
 function fmt(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
 
-/** Compact single-series trend line — the shared header chart for every kind. */
-function TrendChart({ samples, target }: { samples: MetricSample[]; target?: number | null }) {
-  const pts = seriesPoints(samples);
+function fmtValue(v: number, unit?: string | null): string {
+  return `${fmt(v)}${unit ? ` ${unit}` : ""}`;
+}
+
+/** Short date+time label for an epoch-ms tick on the trend's time axis. */
+function fmtTick(t: number): string {
+  return new Date(t).toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Single-series trend line over already-transformed points, with a labeled
+ *  time (x) axis and value (y) axis. Dragging horizontally calls
+ *  `onSelectRange` with the [from,to] epoch-ms span dragged across. */
+export function TrendChart({
+  points: pts,
+  target,
+  onSelectRange,
+  domain,
+  unit,
+}: {
+  points: SeriesPoint[];
+  target?: number | null;
+  onSelectRange?: (from: number, to: number) => void;
+  /** Time-axis span. When set, the x axis covers this whole window (e.g. the
+   *  selected range) rather than just the first→last sample. */
+  domain?: { from: number; to: number };
+  /** Unit appended to the hover tooltip's value. */
+  unit?: string | null;
+}) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  // Drag selection in SVG-x coordinates (null = not dragging).
+  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
+  // Index of the point under the pointer (hover-to-inspect), or null.
+  const [hoverI, setHoverI] = useState<number | null>(null);
+
+  const w = 760;
+  const h = 220;
+  const padL = 44;
+  const padR = 12;
+  const padT = 10;
+  const padB = 36;
+
   if (pts.length < 2) {
     return <div style={{ opacity: 0.6, padding: 16 }}>Not enough samples to chart yet.</div>;
   }
-  const w = 760;
-  const h = 200;
-  const padL = 40;
-  const padR = 12;
-  const padT = 10;
-  const padB = 22;
-  const tMin = Math.min(...pts.map((p) => p.t));
-  const tMax = Math.max(...pts.map((p) => p.t));
+  // Time axis spans the full window when a `domain` is given (so a series that
+  // stops short of "now" still plots against the whole range); otherwise the
+  // data extent.
+  const tMin = domain ? domain.from : Math.min(...pts.map((p) => p.t));
+  const tMax = domain ? domain.to : Math.max(...pts.map((p) => p.t));
   const vMin = Math.min(0, ...pts.map((p) => p.v));
   const vMax = Math.max(...pts.map((p) => p.v), target ?? -Infinity);
   const tRange = tMax - tMin || 1;
   const vRange = vMax - vMin || 1;
   const x = (t: number) => padL + ((t - tMin) / tRange) * (w - padL - padR);
   const y = (v: number) => h - padB - ((v - vMin) / vRange) * (h - padT - padB);
+  // Inverse of `x`: SVG-x pixel → time, clamped to the plot area.
+  const timeAt = (svgX: number) => {
+    const clamped = Math.max(padL, Math.min(w - padR, svgX));
+    return tMin + ((clamped - padL) / (w - padL - padR)) * tRange;
+  };
+  // Pointer clientX → SVG-x (the svg renders scaled via maxWidth:100%).
+  const toSvgX = (clientX: number) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return padL;
+    return (clientX - rect.left) * (w / rect.width);
+  };
   const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const ticks = [0, 1, 2, 3].map((i) => tMin + (i / 3) * tRange);
+
+  // Nearest point (by x) to a given SVG-x — drives the hover tooltip.
+  const nearestIndex = (svgX: number) => {
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = Math.abs(x(pts[i]!.t) - svgX);
+      if (dx < bestD) {
+        bestD = dx;
+        best = i;
+      }
+    }
+    return best;
+  };
+
+  const endDrag = () => {
+    if (drag && onSelectRange && Math.abs(drag.x1 - drag.x0) > 4) {
+      const a = timeAt(drag.x0);
+      const b = timeAt(drag.x1);
+      onSelectRange(Math.min(a, b), Math.max(a, b));
+    }
+    setDrag(null);
+  };
+
   return (
-    <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} role="img" aria-label="metric trend">
+    <svg
+      ref={svgRef}
+      // A viewBox (not fixed width/height alone) so the chart SCALES to the
+      // container width instead of clipping its right edge — and the hover
+      // tooltip near the edge scales with it (tsk300).
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ display: "block", width: "100%", height: "auto", maxWidth: w, cursor: "crosshair", userSelect: "none" }}
+      role="img"
+      aria-label="metric trend"
+      onPointerDown={
+        onSelectRange
+          ? (e) => {
+              (e.target as Element).setPointerCapture?.(e.pointerId);
+              const sx = toSvgX(e.clientX);
+              setDrag({ x0: sx, x1: sx });
+            }
+          : undefined
+      }
+      onPointerMove={(e) => {
+        const sx = toSvgX(e.clientX);
+        // Dragging takes precedence — extend the selection and hide the tooltip;
+        // otherwise track the nearest point for hover inspection.
+        if (drag) {
+          setDrag((d0) => (d0 ? { ...d0, x1: sx } : null));
+          setHoverI(null);
+        } else {
+          setHoverI(nearestIndex(sx));
+        }
+      }}
+      onPointerUp={onSelectRange ? endDrag : undefined}
+      onPointerLeave={() => setHoverI(null)}
+      onPointerCancel={() => {
+        setDrag(null);
+        setHoverI(null);
+      }}
+    >
       <line x1={padL} y1={padT} x2={padL} y2={h - padB} stroke="var(--border, #2a2a2a)" />
       <line x1={padL} y1={h - padB} x2={w - padR} y2={h - padB} stroke="var(--border, #2a2a2a)" />
       {[0, 0.5, 1].map((fr) => {
@@ -69,6 +184,23 @@ function TrendChart({ samples, target }: { samples: MetricSample[]; target?: num
           </g>
         );
       })}
+      {ticks.map((t, i) => {
+        const anchor = i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle";
+        return (
+          <g key={i}>
+            <line x1={x(t)} y1={h - padB} x2={x(t)} y2={h - padB + 4} stroke="var(--border, #2a2a2a)" />
+            <text
+              x={x(t)}
+              y={h - padB + 15}
+              textAnchor={anchor}
+              fontSize={9}
+              fill="var(--text-muted, #888)"
+            >
+              {fmtTick(t)}
+            </text>
+          </g>
+        );
+      })}
       {target != null ? (
         <line x1={padL} y1={y(target)} x2={w - padR} y2={y(target)} stroke="var(--ok, #3fb950)" strokeDasharray="4 3" opacity={0.7} />
       ) : null}
@@ -76,7 +208,316 @@ function TrendChart({ samples, target }: { samples: MetricSample[]; target?: num
       {pts.map((p, i) => (
         <circle key={i} cx={x(p.t)} cy={y(p.v)} r={1.8} fill="var(--accent, #58a6ff)" />
       ))}
+      {drag && Math.abs(drag.x1 - drag.x0) > 1 ? (
+        <rect
+          x={Math.min(drag.x0, drag.x1)}
+          y={padT}
+          width={Math.abs(drag.x1 - drag.x0)}
+          height={h - padT - padB}
+          fill="var(--accent, #58a6ff)"
+          opacity={0.15}
+        />
+      ) : null}
+      {hoverI != null && !drag && pts[hoverI]
+        ? (() => {
+            const p = pts[hoverI]!;
+            const px = x(p.t);
+            const py = y(p.v);
+            const valLbl = `${fmt(p.v)}${unit ? ` ${unit}` : ""}`;
+            const timeLbl = fmtTick(p.t);
+            const boxW = Math.max(valLbl.length, timeLbl.length) * 6.2 + 12;
+            const boxH = 32;
+            // Prefer the right of the point; flip left near the edge; clamp.
+            let bx = px + 10;
+            if (bx + boxW > w - padR) bx = px - 10 - boxW;
+            bx = Math.max(padL, Math.min(bx, w - padR - boxW));
+            return (
+              <g pointerEvents="none">
+                <line x1={px} y1={padT} x2={px} y2={h - padB} stroke="var(--text-muted, #888)" opacity={0.4} strokeDasharray="3 3" />
+                <circle cx={px} cy={py} r={3.5} fill="var(--accent, #58a6ff)" stroke="var(--surface-card, #111)" strokeWidth={1.5} />
+                <rect x={bx} y={padT} width={boxW} height={boxH} rx={4} fill="var(--surface-card, #1c1c1c)" stroke="var(--border, #2a2a2a)" />
+                <text x={bx + 6} y={padT + 14} fontSize={11} fontWeight={600} fill="var(--text, #ddd)">
+                  {valLbl}
+                </text>
+                <text x={bx + 6} y={padT + 26} fontSize={9} fill="var(--text-muted, #888)">
+                  {timeLbl}
+                </text>
+              </g>
+            );
+          })()
+        : null}
     </svg>
+  );
+}
+
+/** Time-range + chart-mode + branch controls for the metric detail page. */
+export function MetricControls({
+  range,
+  onRange,
+  mode,
+  onMode,
+  branch,
+  branches,
+  onBranch,
+}: {
+  range: TimeRange;
+  onRange: (r: TimeRange) => void;
+  mode: ChartMode;
+  onMode: (m: ChartMode) => void;
+  branch: string | null;
+  branches: string[];
+  onBranch: (b: string | null) => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const presetKey = matchPresetKey(range, Date.now());
+  // Custom inputs show when the user picks "Custom range…" or whenever the
+  // active window doesn't match a preset (e.g. after a chart drag).
+  const isCustom = customOpen || presetKey === "custom";
+  // Stacked vertically — these live in the narrow (320px) Details rail.
+  const selStyle = { fontSize: 12, width: "100%" } as const;
+  const rowStyle = { display: "flex", flexDirection: "column", gap: 3 } as const;
+  const labelStyle = { opacity: 0.6, fontSize: 12 } as const;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }} data-testid="metric-controls">
+      <div style={rowStyle}>
+        <span style={labelStyle}>Range</span>
+        <select
+          value={isCustom ? "custom" : presetKey}
+          onChange={(e) => {
+            if (e.target.value === "custom") {
+              setCustomOpen(true);
+            } else {
+              setCustomOpen(false);
+              onRange(rangeFromPreset(e.target.value, Date.now()));
+            }
+          }}
+          data-testid="range-preset"
+          style={selStyle}
+        >
+          {RANGE_PRESETS.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+          <option value="custom">Custom range…</option>
+        </select>
+        {isCustom ? (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              border: "1px solid var(--border, #2a2a2a)",
+              borderRadius: 4,
+              padding: 6,
+            }}
+          >
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11 }}>
+              <span style={{ opacity: 0.6 }}>From</span>
+              <input
+                type="datetime-local"
+                value={toLocalInput(range.from)}
+                onChange={(e) => {
+                  const from = fromLocalInput(e.target.value);
+                  if (from != null) onRange({ from, to: range.to });
+                }}
+                data-testid="range-from"
+                style={selStyle}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11 }}>
+              <span style={{ opacity: 0.6 }}>To</span>
+              <input
+                type="datetime-local"
+                value={toLocalInput(range.to)}
+                onChange={(e) => {
+                  const to = fromLocalInput(e.target.value);
+                  if (to != null) onRange({ from: range.from, to });
+                }}
+                data-testid="range-to"
+                style={selStyle}
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Chart</span>
+        <select value={mode} onChange={(e) => onMode(e.target.value as ChartMode)} data-testid="chart-mode" style={selStyle}>
+          {CHART_MODES.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Branch</span>
+        <select
+          value={branch ?? ""}
+          onChange={(e) => onBranch(e.target.value || null)}
+          data-testid="branch-filter"
+          style={selStyle}
+        >
+          <option value="">All branches</option>
+          {branches.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+const PAGE_SIZE = 25;
+
+/** The actual recordings — every sample, newest first, paginated. */
+export function RecordingsTable({
+  samples,
+  unit,
+}: {
+  samples: MetricSample[];
+  unit?: string | null;
+}) {
+  const [page, setPage] = useState(0);
+  // Reset to the first page whenever the (filtered) input set changes.
+  useEffect(() => setPage(0), [samples]);
+
+  if (samples.length === 0) return <div style={{ opacity: 0.6 }}>No recordings in range.</div>;
+  const pageCount = Math.max(1, Math.ceil(samples.length / PAGE_SIZE));
+  const cur = Math.min(page, pageCount - 1);
+  const start = cur * PAGE_SIZE;
+  const rows = samples.slice(start, start + PAGE_SIZE);
+  const btn = {
+    fontSize: 12,
+    padding: "2px 8px",
+    cursor: "pointer",
+  } as const;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }} data-testid="metric-recordings">
+        <thead>
+          <tr style={{ textAlign: "left", opacity: 0.6 }}>
+            <th style={{ padding: "4px 8px" }}>Time</th>
+            <th style={{ padding: "4px 8px", textAlign: "right" }}>Value</th>
+            <th style={{ padding: "4px 8px" }}>Branch</th>
+            <th style={{ padding: "4px 8px" }}>Version</th>
+            <th style={{ padding: "4px 8px" }}>Trust</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((s) => (
+            <tr key={s.id} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
+              <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>
+                {new Date(String(s.captured_at)).toLocaleString()}
+              </td>
+              <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>
+                {fmtValue(s.value, unit)}
+              </td>
+              <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
+              <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
+                {s.closest_git_version ? s.closest_git_version.slice(0, 8) : "—"}
+              </td>
+              <td style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }} title={s.source}>
+                {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance}`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {samples.length > PAGE_SIZE ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12 }} data-testid="recordings-pager">
+          <button type="button" style={btn} disabled={cur === 0} onClick={() => setPage(cur - 1)}>
+            ‹ Prev
+          </button>
+          <span style={{ opacity: 0.6 }}>
+            {start + 1}–{Math.min(start + PAGE_SIZE, samples.length)} of {samples.length}
+          </span>
+          <button type="button" style={btn} disabled={cur >= pageCount - 1} onClick={() => setPage(cur + 1)}>
+            Next ›
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Stat({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, padding: "3px 0" }}>
+      <span style={{ opacity: 0.6 }}>{label}</span>
+      <span style={{ textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{children}</span>
+    </div>
+  );
+}
+
+/** Right-rail stats for the metric detail page: latest, change, type, id, … */
+export function MetricStatsRail({
+  def,
+  samples,
+  effort,
+  effortDelta,
+}: {
+  def: MetricDefinition;
+  samples: MetricSample[];
+  effort?: { effortId: string; start: string; end: string | null };
+  effortDelta?: EffortMetricDelta | null;
+}) {
+  const latest = samples[0] ?? null;
+  // The "in range" headline follows how the metric rolls up (Σ for sum metrics
+  // like tokens, mean for avg, signed last−first for level gauges) — see
+  // `inRangeStat` (tsk301).
+  const rangeStat = inRangeStat(samples, def.default_agg);
+  const rangeText = rangeStat
+    ? rangeStat.signed
+      ? `${rangeStat.value > 0 ? "+" : ""}${fmtValue(rangeStat.value, def.unit)}`
+      : fmtValue(rangeStat.value, def.unit)
+    : null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }} data-testid="metric-detail-stats">
+      {rangeStat ? (
+        <Stat label={rangeStat.label}>
+          <strong>{rangeText}</strong>
+        </Stat>
+      ) : null}
+      {def.unit ? <Stat label="Unit">{def.unit}</Stat> : null}
+      <Stat label="Direction">{def.direction}</Stat>
+      {def.target != null ? <Stat label="Target">{fmt(def.target)}</Stat> : null}
+      {latest?.branch ? (
+        <Stat label="Branch">
+          <code style={{ fontSize: 11 }}>{latest.branch}</code>
+        </Stat>
+      ) : null}
+      {effort && effortDelta ? (
+        <div
+          data-testid="metric-detail-effort"
+          style={{
+            marginTop: 8,
+            border: "1px solid var(--border-subtle, #2a2a2a)",
+            borderRadius: 6,
+            padding: "8px 10px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            fontSize: 13,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>In this effort</span>
+          <span style={{ fontFamily: "var(--font-mono)" }}>{deltaSummary(effortDelta)}</span>
+          {effortDelta.changed && effortDelta.delta != null && effortDelta.agg !== "sum" ? (
+            <span style={{ color: deltaColor(effortDelta) }}>Δ {fmtSigned(effortDelta.delta)}</span>
+          ) : null}
+          {effortDelta.attributed_files != null && effortDelta.attributed_files > 0 ? (
+            <span style={{ opacity: 0.6 }}>
+              across {effortDelta.attributed_files}{" "}
+              {effortDelta.attributed_files === 1 ? "file" : "files"}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -203,127 +644,26 @@ function TopSubjects({ samples }: { samples: MetricSample[] }) {
   );
 }
 
-export function MetricDetail({
+/** Kind-specific drill-in for the latest run, or null for plain gauges. */
+export function KindDrillIn({
   def,
-  onBack,
-  effort,
+  findings,
+  samples,
 }: {
   def: MetricDefinition;
-  onBack: () => void;
-  /** When set, show an "In this effort" before→after callout scoped to this
-   *  effort window (the task-page metrics-panel drill-in). */
-  effort?: { effortId: string; start: string; end: string | null };
-}) {
-  const [samples, setSamples] = useState<MetricSample[]>([]);
-  const [findings, setFindings] = useState<MetricFinding[]>([]);
-  const [effortDelta, setEffortDelta] = useState<EffortMetricDelta | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void listMetricSamples(def.key, SAMPLE_LIMIT).then(async (rows) => {
-      if (cancelled) return;
-      setSamples(rows);
-      const runId = rows[0]?.run_id ?? null;
-      const fs = runId != null ? await listMetricFindings(runId) : [];
-      if (!cancelled) setFindings(fs);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [def.key]);
-
-  useEffect(() => {
-    if (!effort) {
-      setEffortDelta(null);
-      return;
-    }
-    let cancelled = false;
-    void listEffortMetricDeltas(effort.effortId).then((rows) => {
-      if (!cancelled) setEffortDelta(rows.find((r) => r.key === def.key) ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [effort?.effortId, def.key, effort]);
-
-  const latest = samples[0] ?? null;
-  const delta = deltaVsFirst(samples);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }} data-testid="metric-detail">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-        <button onClick={onBack} style={{ fontSize: 12, cursor: "pointer" }}>
-          ← Back
-        </button>
-        <div style={{ fontWeight: 600 }}>{def.title}</div>
-        <code style={{ opacity: 0.5, fontSize: 11 }}>{def.key}</code>
-        <span style={{ opacity: 0.5, fontSize: 11 }}>{def.kind}</span>
-      </div>
-      <div style={{ display: "flex", gap: 20, fontSize: 13, flexWrap: "wrap" }}>
-        <div>
-          <span style={{ opacity: 0.6 }}>Latest </span>
-          <strong>
-            {latest ? `${fmt(latest.value)}${def.unit ? ` ${def.unit}` : ""}` : "—"}
-          </strong>
-        </div>
-        {delta != null ? (
-          <div>
-            <span style={{ opacity: 0.6 }}>Δ this window </span>
-            <strong>{delta > 0 ? `+${fmt(delta)}` : fmt(delta)}</strong>
-          </div>
-        ) : null}
-        {latest?.branch ? (
-          <div>
-            <span style={{ opacity: 0.6 }}>Branch </span>
-            <code style={{ fontSize: 11 }}>{latest.branch}</code>
-          </div>
-        ) : null}
-        {latest ? (
-          <div style={{ opacity: latest.provenance === "observed" ? 0.6 : 1 }}>
-            <span style={{ opacity: 0.6 }}>Trust </span>
-            <span title={latest.source}>{latest.provenance === "observed" ? "observed" : `⚠ ${latest.provenance}`}</span>
-          </div>
-        ) : null}
-      </div>
-      {effort && effortDelta ? (
-        <div
-          data-testid="metric-detail-effort"
-          style={{
-            border: "1px solid var(--border-subtle, #2a2a2a)",
-            borderRadius: 6,
-            padding: "8px 12px",
-            display: "flex",
-            gap: 12,
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            fontSize: 13,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>In this effort</span>
-          <span style={{ fontFamily: "var(--font-mono)" }}>
-            {deltaSummary(effortDelta)}
-          </span>
-          {effortDelta.changed &&
-          effortDelta.delta != null &&
-          effortDelta.agg !== "sum" ? (
-            <span style={{ color: deltaColor(effortDelta) }}>
-              Δ {fmtSigned(effortDelta.delta)}
-            </span>
-          ) : null}
-          {effortDelta.attributed_files != null &&
-          effortDelta.attributed_files > 0 ? (
-            <span style={{ opacity: 0.6 }}>
-              across {effortDelta.attributed_files}{" "}
-              {effortDelta.attributed_files === 1 ? "file" : "files"}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      <TrendChart samples={samples} target={def.target} />
-      {def.kind === "findings" ? <FindingsTable findings={findings} /> : null}
-      {def.kind === "test" ? <TestTree findings={findings} /> : null}
-      {def.kind === "coverage" ? <CoverageHeat findings={findings} /> : null}
-      {def.kind === "event" ? <TopSubjects samples={samples} /> : null}
-    </div>
-  );
+  findings: MetricFinding[];
+  samples: MetricSample[];
+}): ReactNode {
+  switch (def.kind) {
+    case "findings":
+      return <FindingsTable findings={findings} />;
+    case "test":
+      return <TestTree findings={findings} />;
+    case "coverage":
+      return <CoverageHeat findings={findings} />;
+    case "event":
+      return <TopSubjects samples={samples} />;
+    default:
+      return null;
+  }
 }
