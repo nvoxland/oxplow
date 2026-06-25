@@ -56,6 +56,7 @@ function SectionLabel({ children }: { children: string }) {
 export function MetricDetailPage({
   metricKey,
   effort,
+  onOpenPage,
 }: {
   metricKey?: string;
   effort?: { effortId: string; start: string; end: string | null };
@@ -155,7 +156,7 @@ export function MetricDetailPage({
         />
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <SectionLabel>Recordings</SectionLabel>
-          <RecordingsTable samples={filtered} unit={def.unit} />
+          <RecordingsTable samples={filtered} unit={def.unit} metricKey={def.key} onOpenPage={onOpenPage} />
         </div>
         {hasDrillIn ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

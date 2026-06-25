@@ -739,8 +739,8 @@ impl MetricsService {
                     return 0;
                 }
             };
-        let samples = match report {
-            oxplow_collect_plugin::CollectorOutput::Gauge(r) => r.samples,
+        let (samples, gauge_findings) = match report {
+            oxplow_collect_plugin::CollectorOutput::Gauge(r) => (r.samples, r.findings),
             _ => return 0,
         };
 
@@ -787,10 +787,42 @@ impl MetricsService {
                     .and_then(|d| serde_json::to_string(d).ok());
                 rows.push(s);
             }
-            // Atomic: the run and its samples commit together.
+            // Located items the gauge counted (e.g. each high-complexity
+            // function) → `metric_finding` on this run, so a recording drills in.
+            let findings: Vec<oxplow_db::NewMetricFinding> = gauge_findings
+                .iter()
+                .map(|gf| {
+                    // Split a `"kind:ref"` subject inline — unlike samples, a
+                    // finding never inherits the run's default subject.
+                    let (subject_kind, subject_ref) = match &gf.subject {
+                        Some(s) => match s.split_once(':') {
+                            Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
+                            None => (None, Some(s.clone())),
+                        },
+                        None => (None, None),
+                    };
+                    oxplow_db::NewMetricFinding {
+                        run_id: 0, // backfilled by record_run_with_data
+                        metric_id: Some(metric_id),
+                        subject_kind,
+                        subject_ref,
+                        path: gf.path.clone(),
+                        start_line: gf.line,
+                        end_line: gf.end_line,
+                        col: None,
+                        kind: "gauge-item".to_string(),
+                        severity: gf.severity.clone(),
+                        rule: gf.rule.clone(),
+                        message: gf.message.clone(),
+                        value: gf.value,
+                        extra_json: None,
+                    }
+                })
+                .collect();
+            // Atomic: the run, its samples, and its findings commit together.
             let count = rows.len();
             self.metrics
-                .record_run_with_data(run, rows, Vec::new())
+                .record_run_with_data(run, rows, findings)
                 .await?;
             Ok::<usize, DomainError>(count)
         }
@@ -1068,6 +1100,68 @@ def transform(input):
             samples[0].dims_json.as_deref(),
             Some("{\"language\":\"rust\"}")
         );
+    }
+
+    #[tokio::test]
+    async fn run_one_gauge_records_findings_on_the_run() {
+        let (svc, dir) = fixture().await;
+        // A gauge that counts long functions AND emits a located finding for each.
+        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/metrics/longfns.star"),
+            r#"
+def transform(input):
+    total = 0
+    findings = []
+    for f in files("**/*.rs"):
+        for m in code_metrics(f["text"], "rust"):
+            if m["length"] > 1:
+                total += 1
+                findings.append({
+                    "path": f["path"],
+                    "line": m["start_line"],
+                    "message": m["name"],
+                    "value": m["length"],
+                })
+    return {"samples": [{"value": total, "subject": "tree:."}], "findings": findings}
+"#,
+        )
+        .unwrap();
+        let metric = starlark_gauge("repo.long_fns", "oxplow/metrics/longfns.star");
+
+        let mut files = HashMap::new();
+        files.insert(
+            "src/a.rs".to_string(),
+            "fn big() {\n    let x = 1;\n    let y = 2;\n}\n".to_string(),
+        );
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            subject_default: None,
+        };
+        svc.metrics
+            .run_one_gauge(&metric, &ctx, Arc::new(files))
+            .await;
+
+        let def = svc
+            .metric_store
+            .get_definition("repo.long_fns")
+            .await
+            .unwrap()
+            .expect("seeded");
+        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
+        let run_id = samples[0].run_id.expect("sample has a run");
+        let findings = svc.metric_store.list_findings(run_id).await.unwrap();
+        assert_eq!(findings.len(), 1, "one long function → one finding");
+        assert_eq!(findings[0].path.as_deref(), Some("src/a.rs"));
+        assert_eq!(findings[0].message.as_deref(), Some("big"));
+        assert_eq!(findings[0].kind, "gauge-item");
+        assert!(findings[0].value.unwrap() >= 3.0);
     }
 
     #[tokio::test]

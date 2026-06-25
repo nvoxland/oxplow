@@ -81,12 +81,40 @@ pub struct GaugeSample {
 }
 
 /// The typed output of a `gauge` collector: ≥1 scalar sample to project into
-/// `metric_sample`. Mirrors the JSON a gauge script returns —
-/// `{ "samples": [ { "value", "subject"?, "dims"? } ] }`.
+/// `metric_sample`, plus optional located `findings` — the underlying items the
+/// metric counted (e.g. each high-complexity function), persisted on the run so
+/// a recording can be drilled into. Mirrors the JSON a gauge script returns —
+/// `{ "samples": [ … ], "findings"?: [ { "path"?, "line"?, "message"?, … } ] }`.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MetricReport {
     #[serde(default)]
     pub samples: Vec<GaugeSample>,
+    #[serde(default)]
+    pub findings: Vec<GaugeFinding>,
+}
+
+/// One located item a gauge counted — projected onto `metric_finding` on the
+/// run. All fields optional so a script emits only what's meaningful (a
+/// complexity finding: `path` + `line` + `message`=name + `value`=complexity).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GaugeFinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    /// Optional `"kind:ref"` subject (split like `GaugeSample.subject`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
 }
 
 /// The typed result of running a collector. The variant is determined by the

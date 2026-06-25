@@ -118,6 +118,7 @@ import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
+import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
 import { MetricsCatalogPage } from "./pages/MetricsCatalogPage.js";
 import { MetricsExplorerPage } from "./pages/MetricsExplorerPage.js";
 import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
@@ -1878,6 +1879,7 @@ export function App() {
       case "metrics":
       case "metrics-recorded":
       case "metric-detail":
+      case "metric-recording":
       case "metrics-catalog":
       case "page-analytics":
       case "token-analytics":
@@ -2739,6 +2741,27 @@ export function App() {
           closable: true,
           render: () => (
             <MetricDetailPage metricKey={p?.metricKey} effort={p?.effort} onOpenPage={navOpen} />
+          ),
+        });
+      } else if (ref.kind === "metric-recording") {
+        const p = (ref.payload ?? null) as {
+          runId?: number;
+          metricKey?: string;
+          capturedAt?: string;
+          value?: number;
+        } | null;
+        tabs.push({
+          id: ref.id,
+          label: "Recording",
+          closable: true,
+          render: () => (
+            <MetricRecordingPage
+              runId={p?.runId}
+              metricKey={p?.metricKey}
+              capturedAt={p?.capturedAt}
+              value={p?.value}
+              onOpenPage={navOpen}
+            />
           ),
         });
       } else if (ref.kind === "metrics-catalog") {

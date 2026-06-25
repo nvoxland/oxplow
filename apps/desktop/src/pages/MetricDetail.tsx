@@ -11,6 +11,9 @@ import {
   deltaSummary,
   fmtSigned,
 } from "../components/EffortMetrics.js";
+import { metricRecordingRef } from "../tabs/pageRefs.js";
+import { useRouteDispatch } from "../tabs/RouteLink.js";
+import type { TabRef } from "../tabs/tabState.js";
 import {
   CHART_MODES,
   type ChartMode,
@@ -373,13 +376,62 @@ export function MetricControls({
 
 const PAGE_SIZE = 25;
 
-/** The actual recordings — every sample, newest first, paginated. */
+/** One recordings-table row. When the sample has a `run_id` it's clickable
+ *  (browser-style via `useRouteDispatch`) → the recording's item-level findings
+ *  page; otherwise it's a plain row. */
+function RecordingRow({
+  s,
+  unit,
+  metricKey,
+  onOpenPage,
+}: {
+  s: MetricSample;
+  unit?: string | null;
+  metricKey?: string;
+  onOpenPage?: (ref: TabRef) => void;
+}) {
+  const hasRun = s.run_id != null;
+  const { handlers } = useRouteDispatch(
+    metricRecordingRef(s.run_id ?? -1, {
+      metricKey,
+      capturedAt: String(s.captured_at),
+      value: s.value,
+    }),
+    { onNavigate: onOpenPage },
+  );
+  const nav = hasRun
+    ? { onClick: handlers.onClick, onAuxClick: handlers.onAuxClick, onContextMenu: handlers.onContextMenu }
+    : {};
+  return (
+    <tr
+      {...nav}
+      style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: hasRun ? "pointer" : undefined }}
+    >
+      <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{new Date(String(s.captured_at)).toLocaleString()}</td>
+      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmtValue(s.value, unit)}</td>
+      <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
+      <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
+        {s.closest_git_version ? s.closest_git_version.slice(0, 8) : "—"}
+      </td>
+      <td style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }} title={s.source}>
+        {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance}`}
+      </td>
+    </tr>
+  );
+}
+
+/** The actual recordings — every sample, newest first, paginated. Rows with a
+ *  run drill into that recording's item-level findings. */
 export function RecordingsTable({
   samples,
   unit,
+  metricKey,
+  onOpenPage,
 }: {
   samples: MetricSample[];
   unit?: string | null;
+  metricKey?: string;
+  onOpenPage?: (ref: TabRef) => void;
 }) {
   const [page, setPage] = useState(0);
   // Reset to the first page whenever the (filtered) input set changes.
@@ -409,21 +461,7 @@ export function RecordingsTable({
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr key={s.id} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-              <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>
-                {new Date(String(s.captured_at)).toLocaleString()}
-              </td>
-              <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>
-                {fmtValue(s.value, unit)}
-              </td>
-              <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
-              <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
-                {s.closest_git_version ? s.closest_git_version.slice(0, 8) : "—"}
-              </td>
-              <td style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }} title={s.source}>
-                {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance}`}
-              </td>
-            </tr>
+            <RecordingRow key={s.id} s={s} unit={unit} metricKey={metricKey} onOpenPage={onOpenPage} />
           ))}
         </tbody>
       </table>

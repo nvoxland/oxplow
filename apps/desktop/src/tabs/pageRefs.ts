@@ -113,6 +113,20 @@ export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | 
   return { id: kind, kind, payload: null };
 }
 
+/** Drill-in to a single **recording** of a metric — the located items
+ *  (`metric_finding`s) the gauge counted at that run. Opened by clicking a row
+ *  in the Metric Detail recordings table (tsk313). */
+export function metricRecordingRef(
+  runId: number,
+  payload?: { metricKey?: string; capturedAt?: string; value?: number },
+): TabRef {
+  return {
+    id: `metric-recording:${runId}`,
+    kind: "metric-recording",
+    payload: { runId, ...payload },
+  };
+}
+
 /** The Metrics Explorer page — multi-measure charts over time. The marquee
  *  *observe* surface; `indexRef("metrics")` is the rail "Metrics" entry. */
 export function metricsExplorerRef(): TabRef {
@@ -346,6 +360,13 @@ export function refFromTabId(id: string): TabRef {
     case "metric-detail":
       // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
+    case "metric-recording": {
+      // Only the run id is in the id; metric context is best-effort payload.
+      const n = Number(rest);
+      return Number.isFinite(n)
+        ? metricRecordingRef(n)
+        : { id, kind: "metric-recording", payload: null };
+    }
     case "directory":
       return directoryRef(rest);
     case "snapshot": {

@@ -135,6 +135,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return BarChart3;
     case "metric-detail":
       return Gauge;
+    case "metric-recording":
+      return AlertTriangle;
     case "metrics-catalog":
       return Library;
     case "page-analytics":
@@ -237,6 +239,8 @@ export function pageKindLabel(kind: string): string {
       return "recorded metrics";
     case "metric-detail":
       return "metric";
+    case "metric-recording":
+      return "recording";
     case "metrics-catalog":
       return "metrics catalog";
     case "page-analytics":

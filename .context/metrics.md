@@ -257,6 +257,16 @@ overlay on one time
   to that window (Clear resets). A measure's title links to its per-kind
   **detail** (via `onOpenDetail`).
 
+- **Metric Recording** (`MetricRecordingPage.tsx`, `PageKind` `"metric-recording"`,
+  `metricRecordingRef(runId, {metricKey,capturedAt,value})`, tsk313) — drill-in
+  from a **single recording**. The Recordings-table rows on the Metric Detail
+  page are clickable when the sample has a `run_id`; clicking opens this page,
+  which lists the run's **`metric_finding`s** (`list_metric_findings(runId)`) —
+  the located items the gauge counted (file:line · name · value). This is how a
+  "count of X" gauge (high-complexity functions, long functions) becomes
+  drillable: the gauge **emits findings** alongside its samples (see the gauge
+  findings channel below). Degrades to an empty state when a run has no findings.
+
 `MetricDetail.tsx` (+ pure `metricDetailData.ts`, tsk232) is the renderer
 `MetricDetailPage` mounts: one view selected from `metric_definition.kind`.
 Every kind shows the value trend (+ Δ-vs-first, branch, trust badge); each adds
@@ -359,7 +369,14 @@ metrics:
 
 - The **gauge** script returns `{ "samples": [ {value, subject?, dims?} ] }` and
   may call the `files(glob)` / `ast_query(text, language, sexpr)` host builtins
-  (see [collection.md](./collection.md)).
+  (see [collection.md](./collection.md)). It may **also** return
+  `"findings": [ {path?, line?, message?, value?, subject?, rule?, severity?} ]`
+  (`GaugeFinding`, tsk311) — the *located items the metric counted* (e.g. each
+  high-complexity function). The runner records them as `metric_finding`s on the
+  run (kind `gauge-item`); a recording then drills into them via the Metric
+  Recording page. The bundled complexity/length gauges emit one finding per
+  offending function (`{path, line, message=name, value=complexity|length}`,
+  tsk312).
 - **Three scopes**, precedence **project > global > built-in** by key:
   - **built-in** — the bundled catalog
     (`oxplow_collect_plugin::builtin_metrics()`; scripts under
