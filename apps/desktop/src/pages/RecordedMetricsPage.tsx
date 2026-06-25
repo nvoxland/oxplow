@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   type MetricDefinition,
@@ -7,21 +7,27 @@ import {
   listMetricSamples,
   subscribeOxplowEvents,
 } from "../api.js";
-import { cardLinkButton } from "../components/Card.js";
-import { metricRef, metricsCatalogRef, metricsExplorerRef } from "../tabs/pageRefs.js";
+import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
-import { RouteLink } from "../tabs/RouteLink.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { categoryLabel, groupByCategory } from "./metricCategories.js";
+import {
+  DEFAULT_RANGE_KEY,
+  RANGE_PRESETS,
+  branchOptions,
+  filterByBranch,
+  filterByRange,
+  rangeFromPreset,
+} from "./metricDetailData.js";
 
 type Row = {
   def: MetricDefinition;
   latest: MetricSample | null;
-  count: number;
   samples: MetricSample[];
 };
 
-const SAMPLE_LIMIT = 50;
+const SAMPLE_LIMIT = 200;
 
 function formatValue(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
@@ -51,10 +57,7 @@ function Sparkline({ values, color }: { values: number[]; color?: string }) {
 }
 
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
- *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). Three
- *  tiers: meets target → ok (green); past the fail floor → fail (red);
- *  in-between (below target, above fail) → warn (amber). `neutral` metrics and
- *  threshold-less metrics are uncolored. */
+ *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). */
 function statusColor(def: MetricDefinition, value: number): string | undefined {
   if (def.direction === "neutral") return undefined;
   const higher = def.direction === "higher-better";
@@ -66,15 +69,13 @@ function statusColor(def: MetricDefinition, value: number): string | undefined {
   return undefined;
 }
 
-/** One table row. A `<tr>` keeps its markup but adopts browser-style click
- *  semantics via `useRouteDispatch` so plain-click navigates in-tab to the
- *  metric's detail page and modifier/middle/right-click open a new tab. */
+/** One metric row: title · latest value · trend sparkline. A `<tr>` that adopts
+ *  browser-style click via `useRouteDispatch` (plain → detail in-tab,
+ *  modifier/middle/right → new tab). */
 function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef) => void }) {
-  const { def, latest, count, samples } = row;
+  const { def, latest, samples } = row;
   const color = latest ? statusColor(def, latest.value) : undefined;
-  const { handlers } = useRouteDispatch(metricRef(def.key), {
-    onNavigate: onOpenPage,
-  });
+  const { handlers } = useRouteDispatch(metricRef(def.key), { onNavigate: onOpenPage });
   return (
     <tr
       onClick={handlers.onClick}
@@ -82,11 +83,7 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
       onContextMenu={handlers.onContextMenu}
       style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
     >
-      <td style={{ padding: "6px 8px" }}>
-        <div style={{ fontWeight: 600 }}>{def.title}</div>
-        <div style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 11 }}>{def.key}</div>
-      </td>
-      <td style={{ padding: "6px 8px" }}>{def.kind}</td>
+      <td style={{ padding: "6px 8px", fontWeight: 600 }}>{def.title}</td>
       <td style={{ padding: "6px 8px", fontWeight: 600, color }}>
         {latest ? `${formatValue(latest.value)}${def.unit ? ` ${def.unit}` : ""}` : "—"}
       </td>
@@ -99,24 +96,26 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
           color={color}
         />
       </td>
-      <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{latest?.branch ?? "—"}</td>
-      <td style={{ padding: "6px 8px", textAlign: "right" }}>{count}</td>
     </tr>
   );
 }
 
+const sel = { fontSize: 12, width: "100%" } as const;
+
 /**
- * Recorded Metrics — the seeded definitions with latest value, trend sparkline,
- * capture branch, and sample count; colored by `statusColor`
- * (target/`fail_at`/direction). Rows open the per-metric detail page
- * (`metricRef`). Live-refreshes on `metricSamplesChanged`.
- *
- * Split off from the Explorer (tsk283) so each surface has one job. The header
- * cross-links back to the Explorer and to the Catalog.
+ * Recorded Metrics — the seeded definitions with latest value + trend
+ * sparkline, organized as **one table per category** (Code gauges / Tests /
+ * Coverage / Static analysis / Operational, via the shared `groupByCategory`)
+ * under section headings, like the Catalog. A right-side panel scopes the
+ * latest/trend by a preset time range (default 7 days) and branch. Rows open
+ * the per-metric detail page (`metricRef`). Live on `metricSamplesChanged`.
  */
 export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rangeKey, setRangeKey] = useState<string>(DEFAULT_RANGE_KEY);
+  const [branch, setBranch] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +124,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
         const built = await Promise.all(
           defs.map(async (def) => {
             const samples = await listMetricSamples(def.key, SAMPLE_LIMIT);
-            return { def, latest: samples[0] ?? null, count: samples.length, samples };
+            return { def, latest: samples[0] ?? null, samples };
           }),
         );
         if (!cancelled) {
@@ -144,32 +143,82 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
     };
   }, []);
 
+  const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
+  // Scope each metric's latest + trend to the selected range + branch. All
+  // metrics stay listed; an out-of-scope metric just shows "—".
+  const viewRows = useMemo(() => {
+    const range = rangeFromPreset(rangeKey, Date.now());
+    const q = query.trim().toLowerCase();
+    return rows
+      .filter((r) => !q || r.def.title.toLowerCase().includes(q) || r.def.key.toLowerCase().includes(q))
+      .map((r) => {
+        const samples = filterByBranch(filterByRange(r.samples, range), branch);
+        return { def: r.def, latest: samples[0] ?? null, samples };
+      });
+  }, [rows, rangeKey, branch, query]);
+
+  const headingStyle = {
+    margin: "0 0 8px",
+    fontSize: 17,
+    fontWeight: 700,
+    paddingBottom: 6,
+    borderBottom: "1px solid var(--border, #2a2a2a)",
+  } as const;
+
   return (
     <Page
       testId="page-metrics-recorded"
       title="Recorded Metrics"
-      actions={
-        <div style={{ display: "flex", gap: 12 }}>
-          <RouteLink
-            ref={metricsExplorerRef()}
-            onNavigate={onOpenPage}
-            style={cardLinkButton}
-            testId="metrics-explorer-link"
-          >
-            Explorer →
-          </RouteLink>
-          <RouteLink
-            ref={metricsCatalogRef()}
-            onNavigate={onOpenPage}
-            style={cardLinkButton}
-            testId="metrics-configure-link"
-          >
-            Configure metrics →
-          </RouteLink>
+      layout="details"
+      rightRailTitle="Filters"
+      rightRail={
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Search</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by name…"
+              data-testid="recorded-search"
+              style={sel}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Range</span>
+            <select
+              value={rangeKey}
+              onChange={(e) => setRangeKey(e.target.value)}
+              data-testid="recorded-range"
+              style={sel}
+            >
+              {RANGE_PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Branch</span>
+            <select
+              value={branch ?? ""}
+              onChange={(e) => setBranch(e.target.value || null)}
+              data-testid="recorded-branch-filter"
+              style={sel}
+            >
+              <option value="">All branches</option>
+              {branches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       }
     >
-      <div style={{ padding: "16px 20px", maxWidth: 1000 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         {loading ? (
           <div style={{ opacity: 0.6 }}>Loading…</div>
         ) : rows.length === 0 ? (
@@ -179,23 +228,23 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
             can be declared in <code>oxplow.yaml</code>.
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ textAlign: "left", opacity: 0.6 }}>
-                <th style={{ padding: "4px 8px" }}>Metric</th>
-                <th style={{ padding: "4px 8px" }}>Kind</th>
-                <th style={{ padding: "4px 8px" }}>Latest</th>
-                <th style={{ padding: "4px 8px" }}>Trend</th>
-                <th style={{ padding: "4px 8px" }}>Branch</th>
-                <th style={{ padding: "4px 8px", textAlign: "right" }}>Samples</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <RecordedRow key={row.def.key} row={row} onOpenPage={onOpenPage} />
-              ))}
-            </tbody>
-          </table>
+          groupByCategory(viewRows, (r) => r.def.category).map((group) => (
+            <section key={group.category ?? "other"} data-testid={`recorded-group-${group.category ?? "other"}`}>
+              <h2 style={headingStyle}>{categoryLabel(group.category)}</h2>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+                <colgroup>
+                  <col />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 120 }} />
+                </colgroup>
+                <tbody>
+                  {group.entries.map((row) => (
+                    <RecordedRow key={row.def.key} row={row} onOpenPage={onOpenPage} />
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ))
         )}
       </div>
     </Page>

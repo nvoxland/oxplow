@@ -9,50 +9,15 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
+import { categoryLabel, groupByCategory } from "./metricCategories.js";
 
 
-/** Display order + labels for the catalog's category grouping. Code gauges
- *  (the toggleable opt-in compute) lead; the always-on producer families
- *  follow. Unknown categories fall to the end under their raw key. */
-const CATEGORY_ORDER = [
-  "custom",
-  "testing",
-  "coverage",
-  "static-quality",
-  "operational",
-] as const;
-const CATEGORY_LABEL: Record<string, string> = {
-  custom: "Code gauges",
-  testing: "Tests",
-  coverage: "Coverage",
-  "static-quality": "Static analysis",
-  operational: "Operational",
-};
-
-function categoryLabel(cat: string | null): string {
-  if (!cat) return "Other";
-  return CATEGORY_LABEL[cat] ?? cat;
-}
-
-/** Group catalog entries by category in display order. Pure — entries keep
- *  their incoming (key-sorted) order within each group. */
+/** Group catalog entries by category in display order. Thin wrapper over the
+ *  shared `groupByCategory` (used by the Recorded Metrics page too). */
 export function groupCatalog(
   rows: MetricCatalogEntry[],
 ): Array<{ category: string | null; entries: MetricCatalogEntry[] }> {
-  const byCat = new Map<string | null, MetricCatalogEntry[]>();
-  for (const r of rows) {
-    const cat = r.category ?? null;
-    const list = byCat.get(cat);
-    if (list) list.push(r);
-    else byCat.set(cat, [r]);
-  }
-  const order = (cat: string | null) => {
-    const i = CATEGORY_ORDER.indexOf((cat ?? "") as (typeof CATEGORY_ORDER)[number]);
-    return i === -1 ? CATEGORY_ORDER.length : i;
-  };
-  return [...byCat.entries()]
-    .map(([category, entries]) => ({ category, entries }))
-    .sort((a, b) => order(a.category) - order(b.category));
+  return groupByCategory(rows, (r) => r.category);
 }
 
 /**
@@ -272,19 +237,18 @@ export function MetricsCatalog({
       {groupCatalog(rows).map((group) => (
         <tbody key={group.category ?? "other"}>
           <tr>
-            <td
-              colSpan={7}
-              style={{
-                padding: "10px 8px 4px",
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-                opacity: 0.6,
-              }}
-              data-testid={`catalog-group-${group.category ?? "other"}`}
-            >
-              {categoryLabel(group.category)}
+            <td colSpan={7} style={{ padding: "22px 8px 6px" }} data-testid={`catalog-group-${group.category ?? "other"}`}>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: 17,
+                  fontWeight: 700,
+                  paddingBottom: 6,
+                  borderBottom: "1px solid var(--border, #2a2a2a)",
+                }}
+              >
+                {categoryLabel(group.category)}
+              </h2>
             </td>
           </tr>
           {group.entries.map((m) => {
