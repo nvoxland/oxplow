@@ -586,6 +586,13 @@ pub struct LspWorkspaceSymbolParams {
     pub query: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListCodeUnitsParams {
+    pub stream_id: String,
+    /// Repo-relative path of the file to list units for.
+    pub path: String,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -3280,6 +3287,41 @@ impl OxplowMcp {
         Ok(CallToolResult::success(vec![Content::text(
             resp.to_string(),
         )]))
+    }
+
+    #[tool(
+        description = "List the code units in a file — functions, classes, modules, and (for \
+                       languages that have them, e.g. Go/Java) the package — via oxplow's \
+                       built-in tree-sitter analysis. Deterministic and offline; works for the \
+                       bundled languages (Rust, TS/TSX, JS, Python, Go, Java, C, C++, Clojure, \
+                       C#). Complements lsp_document_symbols (which covers any LSP language). \
+                       Each unit: kind, name, containerPath, startLine, endLine. Empty for \
+                       unsupported / unparseable files."
+    )]
+    async fn list_code_units(
+        &self,
+        params: Parameters<ListCodeUnitsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let file = self
+            .services
+            .git
+            .read_workspace_file(Some(p.stream_id.as_str()), p.path.clone())
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        let units: Vec<serde_json::Value> = oxplow_code_metrics::list_units(&p.path, &file.content)
+            .iter()
+            .map(|u| {
+                serde_json::json!({
+                    "kind": u.kind.as_str(),
+                    "name": u.name,
+                    "containerPath": u.container_path,
+                    "startLine": u.start_line,
+                    "endLine": u.end_line,
+                })
+            })
+            .collect();
+        json_result(&units)
     }
 
     #[tool(description = "LSP textDocument/diagnostic — pulls the latest diagnostics for a file.")]

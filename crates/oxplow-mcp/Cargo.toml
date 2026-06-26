@@ -11,6 +11,8 @@ oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-app = { workspace = true }
 oxplow-git = { workspace = true }
+# list_code_units — generic per-language unit listing (tsk325).
+oxplow-code-metrics = { workspace = true }
 rmcp = { workspace = true }
 schemars = "1"
 tokio = { workspace = true }

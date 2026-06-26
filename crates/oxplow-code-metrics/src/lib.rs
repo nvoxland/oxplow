@@ -72,6 +72,27 @@ pub struct FunctionMetrics {
     pub visibility: Visibility,
 }
 
+/// A code "unit" — the generic, language-agnostic structural element the
+/// language-plugin epic (tsk320) builds navigation / roll-ups on. One per
+/// function, class-like container, module/namespace, or package the file
+/// participates in. The set of kinds a language exposes is declared on its
+/// [`plugin::LanguagePlugin::unit_kinds`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodeUnit {
+    /// What kind of unit this is.
+    pub kind: UnitKind,
+    /// The unit's name (e.g. function/class name, package directory).
+    pub name: String,
+    /// Outer-to-inner names of the named-declaration ancestors this unit
+    /// lives inside. Empty for top-level units.
+    pub container_path: Vec<String>,
+    /// 1-based start line; `0` for synthetic units (e.g. the package, which
+    /// is path-derived rather than a single AST node).
+    pub start_line: u32,
+    /// 1-based end line; `0` for synthetic units.
+    pub end_line: u32,
+}
+
 /// Analyze a single file. Returns an empty Vec for unsupported
 /// languages (or files that fail to parse).
 pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
@@ -79,6 +100,104 @@ pub fn analyze_file(path: &str, source: &str) -> Vec<FunctionMetrics> {
         return Vec::new();
     };
     analyze_with_language(path, source, lang)
+}
+
+/// List the code units in a file — functions, class-like containers,
+/// modules/namespaces, and (when the language declares it) the package the
+/// file belongs to. The generic "list the things that make sense for this
+/// language" surface, deterministic and offline (tree-sitter), complementing
+/// the LSP `documentSymbol` path. Returns an empty Vec for unsupported /
+/// unparseable input.
+///
+/// Units are returned in a stable order: package (if any) → containers and
+/// functions in source order.
+pub fn list_units(path: &str, source: &str) -> Vec<CodeUnit> {
+    let Some(lang) = language_for_path(path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+
+    // Package: path-derived, only when the language declares it as a unit
+    // (Go, Java). Named by the file's parent directory.
+    if plugin::for_language(lang)
+        .unit_kinds
+        .contains(&UnitKind::Package)
+    {
+        if let Some(pkg) = package_for_path(path) {
+            out.push(CodeUnit {
+                kind: UnitKind::Package,
+                name: pkg,
+                container_path: Vec::new(),
+                start_line: 0,
+                end_line: 0,
+            });
+        }
+    }
+
+    let Some(tree) = parse(source, lang) else {
+        return out;
+    };
+    let spec = lang.spec();
+    let src = source.as_bytes();
+    let mut nodes: Vec<CodeUnit> = Vec::new();
+    walk_units(tree.root_node(), src, spec, &mut nodes);
+    // Source order (start line, then end line) for a stable, readable list.
+    nodes.sort_by_key(|u| (u.start_line, u.end_line));
+    out.extend(nodes);
+    out
+}
+
+/// The package name for a path — its parent directory (repo-relative).
+/// `None` for a top-level file (no parent component).
+fn package_for_path(path: &str) -> Option<String> {
+    let parent = std::path::Path::new(path).parent()?;
+    let s = parent.to_str()?;
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
+/// Map a container node kind to its [`UnitKind`]. Module-like containers
+/// (`mod`, `module`, `namespace`) become [`UnitKind::Module`]; everything
+/// else in `container_kinds` (class / struct / interface / impl / trait /
+/// enum / record) is a [`UnitKind::Class`].
+fn container_unit_kind(node_kind: &str) -> UnitKind {
+    if node_kind.contains("mod") || node_kind.contains("namespace") {
+        UnitKind::Module
+    } else {
+        UnitKind::Class
+    }
+}
+
+/// Recursive unit-finder: emits a [`CodeUnit`] for every function-like and
+/// container node, descending so nested units are captured.
+fn walk_units(node: Node<'_>, src: &[u8], spec: &LanguageSpec, out: &mut Vec<CodeUnit>) {
+    if is_function_node(node, src, spec) {
+        let name = function_name(node, src, spec).unwrap_or_else(|| "(anonymous)".into());
+        out.push(CodeUnit {
+            kind: UnitKind::Function,
+            name,
+            container_path: container_path(node, src, spec),
+            start_line: node.start_position().row as u32 + 1,
+            end_line: node.end_position().row as u32 + 1,
+        });
+    } else if spec.container_kinds.contains(&node.kind()) {
+        if let Some(name) = container_name(node, src, spec) {
+            out.push(CodeUnit {
+                kind: container_unit_kind(node.kind()),
+                name,
+                container_path: container_path(node, src, spec),
+                start_line: node.start_position().row as u32 + 1,
+                end_line: node.end_position().row as u32 + 1,
+            });
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_units(child, src, spec, out);
+    }
 }
 
 /// Like `analyze_file` but with the language explicitly chosen

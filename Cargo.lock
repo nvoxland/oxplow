@@ -3929,6 +3929,7 @@ dependencies = [
  "async-trait",
  "git2",
  "oxplow-app",
+ "oxplow-code-metrics",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",

@@ -541,3 +541,55 @@ fn markers_clojure_semicolon_and_csharp() {
     assert_eq!(csm.len(), 1);
     assert_eq!(csm[0].kind, "FIXME");
 }
+
+#[test]
+fn list_units_rust_functions_and_containers() {
+    let src = r#"
+mod inner {
+    struct S;
+    impl S {
+        fn method(&self) {}
+    }
+}
+
+fn top() {}
+"#;
+    let units = list_units("src/x.rs", src);
+    let kinds: Vec<(&str, &str)> = units
+        .iter()
+        .map(|u| (u.kind.as_str(), u.name.as_str()))
+        .collect();
+    // mod → Module; impl → Class (named for its type); functions captured;
+    // no Package unit (Rust doesn't declare one).
+    assert!(kinds.contains(&("module", "inner")), "kinds: {kinds:?}");
+    assert!(kinds.contains(&("class", "S")), "kinds: {kinds:?}");
+    assert!(kinds.contains(&("function", "method")), "kinds: {kinds:?}");
+    assert!(kinds.contains(&("function", "top")), "kinds: {kinds:?}");
+    assert!(
+        !units.iter().any(|u| u.kind == UnitKind::Package),
+        "rust should not emit a package unit"
+    );
+    // The nested method records its containers.
+    let method = units.iter().find(|u| u.name == "method").unwrap();
+    assert_eq!(method.container_path, vec!["inner", "S"]);
+}
+
+#[test]
+fn list_units_go_emits_package_from_directory() {
+    let src = "package foo\n\nfunc Bar() {}\n";
+    let units = list_units("pkg/foo/bar.go", src);
+    // Go declares Package as a unit kind → the file's parent dir.
+    let pkg = units
+        .iter()
+        .find(|u| u.kind == UnitKind::Package)
+        .expect("go file should emit a package unit");
+    assert_eq!(pkg.name, "pkg/foo");
+    assert!(units
+        .iter()
+        .any(|u| u.kind == UnitKind::Function && u.name == "Bar"));
+}
+
+#[test]
+fn list_units_empty_for_unsupported() {
+    assert!(list_units("notes.txt", "TODO not code").is_empty());
+}

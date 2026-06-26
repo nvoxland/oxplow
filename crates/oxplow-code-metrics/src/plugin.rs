@@ -40,6 +40,18 @@ pub enum UnitKind {
     Package,
 }
 
+impl UnitKind {
+    /// Stable lowercase tag for serialization / display.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UnitKind::Function => "function",
+            UnitKind::Class => "class",
+            UnitKind::Module => "module",
+            UnitKind::Package => "package",
+        }
+    }
+}
+
 /// Everything oxplow knows about one language, in one place.
 #[derive(Debug, Clone, Copy)]
 pub struct LanguagePlugin {

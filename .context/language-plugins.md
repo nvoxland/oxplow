@@ -70,6 +70,26 @@ new languages:
 Adding a brand-new language **with static analysis** (complexity, containers,
 markers, merge) requires a recompile — that's the deliberate trade.
 
+## Listing units (the generic structure surface)
+
+"List the functions / classes / modules / packages that make sense for a
+language" is served two ways, both keyed off the registry's `unit_kinds`:
+
+- **Tree-sitter (deterministic, offline)** — `oxplow_code_metrics::list_units(path, source)`
+  returns `Vec<CodeUnit>` (`kind` ∈ function/class/module/package, `name`,
+  `container_path`, line span). Functions + class-like containers + modules
+  come from the AST (`LanguageSpec`); the **package** is path-derived and only
+  emitted when the language declares `UnitKind::Package` (Go, Java). Exposed to
+  the agent as the **`list_code_units`** MCP tool. Works for the 11 bundled
+  languages.
+- **LSP (any server-backed language)** — the `lsp_document_symbols` /
+  `lsp_workspace_symbols` MCP tools (tsk324) return the server's symbol tree
+  for *any* configured LSP language, not just the tree-sitter set. See
+  `.context/lsp.md`.
+
+These are the substrate a future Metrics roll-up (group complexity/coverage by
+package/module via the dormant `metric_subject` hierarchy) builds on.
+
 ## Adding a language (the checklist)
 
 1. **Grammar dep** — add `tree-sitter-<lang>` to the workspace `Cargo.toml`
@@ -93,7 +113,9 @@ markers, merge) requires a recompile — that's the deliberate trade.
 ## Status
 
 Part of the unified language-plugin epic (tsk320). Live: the single
-`Language` enum (tsk321) and the registry bundle (tsk322). Not yet wired:
-surfacing LSP `documentSymbol`/`workspaceSymbol` as a generic unit source
-(tsk324) and exercising `unit_kinds` against the `metric_subject` roll-up
-hierarchy (tsk325).
+`Language` enum (tsk321), the registry bundle (tsk322), the LSP symbol surface
+(tsk324), and generic unit listing — `list_units` + the `list_code_units` MCP
+tool (tsk325). **Still open:** exercising `unit_kinds` against the
+`metric_subject` roll-up hierarchy so metrics can be grouped by package/module
+in the Metrics Explorer (filed as a follow-up), and LSP `callHierarchy`
+(tsk326).
