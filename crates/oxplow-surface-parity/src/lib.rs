@@ -201,6 +201,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("lsp_definition"),
     agent("lsp_hover"),
     agent("lsp_references"),
+    agent("lsp_document_symbols"),
+    agent("lsp_workspace_symbols"),
     agent("lsp_diagnostics"),
     agent("lsp_list_servers"),
     agent("lsp_install_server"),

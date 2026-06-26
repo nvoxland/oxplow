@@ -772,6 +772,9 @@ fn client_capabilities() -> Value {
             "workspaceEdit": { "documentChanges": true },
             "configuration": true,
             "workspaceFolders": true,
+            // workspace/symbol — project-wide symbol search, surfaced via
+            // the lsp_workspace_symbols MCP tool (tsk324).
+            "symbol": { "dynamicRegistration": false },
         },
         "window": { "workDoneProgress": true },
     })

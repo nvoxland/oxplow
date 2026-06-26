@@ -575,6 +575,17 @@ pub struct LspInstallParams {
     pub package_name: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LspWorkspaceSymbolParams {
+    pub stream_id: String,
+    /// Language server to query (picks the per-language session, e.g.
+    /// "rust", "typescript", "go").
+    pub language: String,
+    /// Symbol name query (fuzzy, server-defined). Empty lists all the
+    /// server is willing to return.
+    pub query: String,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -3214,6 +3225,56 @@ impl OxplowMcp {
                     "context": { "includeDeclaration": true },
                 }),
             )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
+    #[tool(
+        description = "LSP textDocument/documentSymbol — list the symbols (functions, classes, \
+                       methods, modules, …) declared in a file, language-agnostically via its \
+                       language server. Returns the server's DocumentSymbol[] / \
+                       SymbolInformation[] tree. Works for any configured LSP language (not just \
+                       the tree-sitter-analysed ones); run lsp_list_servers first to confirm \
+                       coverage."
+    )]
+    async fn lsp_document_symbols(
+        &self,
+        params: Parameters<LspDiagnosticsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request(
+                "textDocument/documentSymbol",
+                serde_json::json!({ "textDocument": { "uri": p.uri } }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            resp.to_string(),
+        )]))
+    }
+
+    #[tool(
+        description = "LSP workspace/symbol — search symbols across the whole project by name \
+                       (fuzzy, server-defined), language-agnostically via the language server. \
+                       Returns SymbolInformation[] / WorkspaceSymbol[]. An empty query lists all \
+                       the server is willing to return. Use to find a definition by name without \
+                       a file/position."
+    )]
+    async fn lsp_workspace_symbols(
+        &self,
+        params: Parameters<LspWorkspaceSymbolParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let resp = proxy
+            .request("workspace/symbol", serde_json::json!({ "query": p.query }))
             .await
             .map_err(|e| internal(e.to_string()))?;
         Ok(CallToolResult::success(vec![Content::text(

@@ -93,8 +93,18 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `applied:false`). Editor wiring details:
   `.context/editor-and-monaco.md`.
 - **MCP**: `lsp_hover` / `lsp_definition` / `lsp_references` /
-  `lsp_diagnostics` in `crates/oxplow-mcp/src/lib.rs`, riding the same
-  sessions.
+  `lsp_diagnostics` / `lsp_document_symbols` / `lsp_workspace_symbols` in
+  `crates/oxplow-mcp/src/lib.rs`, riding the same sessions. The two **symbol**
+  tools (tsk324) expose the LSP-native, language-agnostic "list the
+  functions/classes/modules in this file" (`textDocument/documentSymbol`) and
+  "find a symbol by name across the project" (`workspace/symbol`) — they work
+  for **any** configured LSP language, not just the tree-sitter-analysed set,
+  so they're the generic structure source the language-plugin epic (tsk320)
+  builds the unit surface on. Each new MCP tool must also be registered in the
+  surface-parity manifest (`crates/oxplow-surface-parity/src/lib.rs`) or its
+  parity test fails. `workspace/symbol` is declared in `client_capabilities()`
+  (`workspace.symbol`); keep the declared set + the pump's auto-answers in
+  lockstep.
 
 ## Testing
 
