@@ -26,8 +26,6 @@ interface JUnitCase {
   name: string;
   status: TestStatus;
   timeMs?: number;
-  /** Set by mergeTestRuns when this case had status "failed" in any earlier run. */
-  everFailed?: boolean;
 }
 interface JUnitSuite {
   name: string;
@@ -411,65 +409,137 @@ function StaticAnalysisSummary({
   );
 }
 
-interface TreeNode {
+/** A node enriched with PER-RUN data: `counts[i]` is the aggregate for run i
+ *  (oldest-first) and each leaf carries its status in every run. Lets both the
+ *  overview and the detail tree show pass/fail for each run, not just a merge. */
+export interface MultiRunLeaf {
+  name: string;
+  /** Status in each run, oldest-first; `null` for a run the case didn't run in. */
+  statuses: (TestStatus | null)[];
+  /** Most recent non-null status — the leaf's current state. */
+  finalStatus: TestStatus;
+  everFailed: boolean;
+  timeMs?: number;
+}
+export interface MultiRunNode {
   label: string;
   path: string;
-  children: TreeNode[];
-  leaves: { name: string; status: TestStatus; timeMs?: number; everFailed?: boolean }[];
-  counts: { passed: number; failed: number; skipped: number };
+  children: MultiRunNode[];
+  leaves: MultiRunLeaf[];
+  /** Aggregate pass/fail/skip per run, oldest-first (one entry per run). */
+  counts: { passed: number; failed: number; skipped: number }[];
 }
 
-/** Build a tree per suite by splitting each case's `classname` on `::`/`.`
- *  — the Rust module path / pytest file·class / jest describe path. */
-function buildTestTree(suites: JUnitSuite[]): TreeNode[] {
+/** The grouping path for one case. The path differs by tech: nextest puts the
+ *  module path in `name` (classname = crate); pytest/jest put it in `classname`.
+ *  Use both, split on `::`/`.`, drop a leading segment that just repeats the
+ *  suite, collapse consecutive dupes — the last segment is the test, the rest
+ *  is the natural module / describe tree. */
+function caseSegments(suiteName: string, c: JUnitCase): { segs: string[]; leafName: string } {
+  let segs = [...c.classname.split(/::|\./), ...c.name.split(/::|\./)]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((s, i, a) => i === 0 || s !== a[i - 1]);
+  if (segs.length > 1 && segs[0] === suiteName) segs = segs.slice(1);
+  const leafName = segs.pop() ?? c.name;
+  return { segs, leafName };
+}
+
+/** Build a per-suite tree across ALL runs (union of nodes/leaves), recording
+ *  each leaf's status in every run and each node's aggregate counts per run.
+ *  Runs are ordered oldest-first so a red→green progression reads left→right. */
+export function buildMultiRunTree(runs: EffortObservation[]): MultiRunNode[] {
+  const ordered = [...runs].sort((a, b) =>
+    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
+  );
+  const n = ordered.length;
+
+  interface MutLeaf {
+    name: string;
+    statuses: (TestStatus | null)[];
+    timeMs?: number;
+  }
   interface Mut {
     label: string;
     path: string;
     childMap: Map<string, Mut>;
-    leaves: { name: string; status: TestStatus; timeMs?: number; everFailed?: boolean }[];
+    leafMap: Map<string, MutLeaf>;
   }
-  const mut = (label: string, path: string): Mut => ({ label, path, childMap: new Map(), leaves: [] });
-  const finalize = (m: Mut): TreeNode => {
-    const children = [...m.childMap.values()].map(finalize);
-    const counts = { passed: 0, failed: 0, skipped: 0 };
-    for (const leaf of m.leaves) counts[leaf.status]++;
-    for (const c of children) {
-      counts.passed += c.counts.passed;
-      counts.failed += c.counts.failed;
-      counts.skipped += c.counts.skipped;
-    }
-    return { label: m.label, path: m.path, children, leaves: m.leaves, counts };
-  };
-  return suites.map((suite) => {
-    const suiteName = suite.name || "(tests)";
-    const root = mut(suiteName, suiteName);
-    for (const c of suite.cases) {
-      // The grouping path differs by tech: nextest puts the module path in
-      // `name` (classname = crate); pytest/jest put it in `classname`. Use
-      // both, split on `::`/`.`, drop a leading segment that just repeats
-      // the suite, and collapse consecutive dupes — the last segment is the
-      // test, the rest is the natural module / describe tree.
-      let segs = [...c.classname.split(/::|\./), ...c.name.split(/::|\./)]
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .filter((s, i, a) => i === 0 || s !== a[i - 1]);
-      if (segs.length > 1 && segs[0] === suiteName) segs = segs.slice(1);
-      const leafName = segs.pop() ?? c.name;
-      let node = root;
-      let path = root.path;
-      for (const seg of segs) {
-        path += `/${seg}`;
-        let child = node.childMap.get(seg);
-        if (!child) {
-          child = mut(seg, path);
-          node.childMap.set(seg, child);
-        }
-        node = child;
-      }
-      node.leaves.push({ name: leafName, status: c.status, timeMs: c.timeMs, everFailed: c.everFailed });
-    }
-    return finalize(root);
+  const mut = (label: string, path: string): Mut => ({
+    label,
+    path,
+    childMap: new Map(),
+    leafMap: new Map(),
   });
+
+  const suiteRoots = new Map<string, Mut>();
+  const suiteOrder: string[] = [];
+
+  ordered.forEach((obs, runIdx) => {
+    const payload = parsePayload<TestRunPayload>(obs.payload_json);
+    for (const suite of payload?.suites ?? []) {
+      const suiteName = suite.name || "(tests)";
+      let root = suiteRoots.get(suiteName);
+      if (!root) {
+        root = mut(suiteName, suiteName);
+        suiteRoots.set(suiteName, root);
+        suiteOrder.push(suiteName);
+      }
+      for (const c of suite.cases) {
+        const { segs, leafName } = caseSegments(suiteName, c);
+        let node = root;
+        let path = root.path;
+        for (const seg of segs) {
+          path += `/${seg}`;
+          let child = node.childMap.get(seg);
+          if (!child) {
+            child = mut(seg, path);
+            node.childMap.set(seg, child);
+          }
+          node = child;
+        }
+        let leaf = node.leafMap.get(leafName);
+        if (!leaf) {
+          leaf = { name: leafName, statuses: new Array<TestStatus | null>(n).fill(null) };
+          node.leafMap.set(leafName, leaf);
+        }
+        leaf.statuses[runIdx] = c.status;
+        if (c.timeMs !== undefined) leaf.timeMs = c.timeMs; // last run wins
+      }
+    }
+  });
+
+  const finalize = (m: Mut): MultiRunNode => {
+    const children = [...m.childMap.values()].map(finalize);
+    const leaves: MultiRunLeaf[] = [...m.leafMap.values()].map((l) => {
+      const everFailed = l.statuses.some((s) => s === "failed");
+      let finalStatus: TestStatus = "skipped";
+      for (let i = l.statuses.length - 1; i >= 0; i--) {
+        const s = l.statuses[i];
+        if (s) {
+          finalStatus = s;
+          break;
+        }
+      }
+      return { name: l.name, statuses: l.statuses, finalStatus, everFailed, timeMs: l.timeMs };
+    });
+    const counts = Array.from({ length: n }, (_, i) => {
+      const c = { passed: 0, failed: 0, skipped: 0 };
+      for (const leaf of leaves) {
+        const s = leaf.statuses[i];
+        if (s) c[s]++;
+      }
+      for (const child of children) {
+        c.passed += child.counts[i].passed;
+        c.failed += child.counts[i].failed;
+        c.skipped += child.counts[i].skipped;
+      }
+      return c;
+    });
+    return { label: m.label, path: m.path, children, leaves, counts };
+  };
+
+  return suiteOrder.map((s) => finalize(suiteRoots.get(s)!));
 }
 
 function statusColor(status: TestStatus): string {
@@ -483,31 +553,86 @@ function statusGlyph(status: TestStatus): string {
   return status === "passed" ? "✓" : status === "failed" ? "✗" : "⊘";
 }
 
-/** Compact "12✓ 1✗ 2⊘" rollup, omitting zeros. */
-function CountsSummary({ counts }: { counts: TreeNode["counts"] }) {
+/** One run's "12✓ 1✗ 2⊘" rollup, omitting zeros. `–` when the node ran nothing
+ *  that round (so a suite that skipped a run reads distinctly from one at 0). */
+function RunCounts({ counts }: { counts: MultiRunNode["counts"][number] }) {
   const parts: Array<[number, TestStatus]> = [
     [counts.passed, "passed"],
     [counts.failed, "failed"],
     [counts.skipped, "skipped"],
   ];
+  const shown = parts.filter(([nn]) => nn > 0);
+  if (shown.length === 0) return <span style={{ color: "var(--text-muted)" }}>–</span>;
   return (
-    <span style={{ display: "inline-flex", gap: 6, fontSize: "var(--text-xs)" }}>
-      {parts
-        .filter(([n]) => n > 0)
-        .map(([n, s]) => (
-          <span key={s} style={{ color: statusColor(s) }}>
-            {n}
-            {statusGlyph(s)}
-          </span>
-        ))}
+    <span style={{ display: "inline-flex", gap: 4 }}>
+      {shown.map(([nn, s]) => (
+        <span key={s} style={{ color: statusColor(s) }}>
+          {nn}
+          {statusGlyph(s)}
+        </span>
+      ))}
     </span>
   );
 }
 
-function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
-  // Auto-expand branches that contain a failure so failures are visible;
-  // all-passing branches start collapsed.
-  const [open, setOpen] = useState(node.counts.failed > 0);
+/** Per-run pass/fail strip for a node: `300✓ → 305✓` reads oldest→newest, so a
+ *  TDD red→green progression is visible on every row, not just one merged count. */
+function RunCountsStrip({ counts }: { counts: MultiRunNode["counts"] }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "baseline", fontSize: "var(--text-xs)" }}>
+      {counts.map((c, i) => (
+        <Fragment key={i}>
+          {i > 0 ? <span style={{ color: "var(--text-muted)" }}>→</span> : null}
+          <RunCounts counts={c} />
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/** Per-run status glyphs for a leaf case: `✗ ✓ ✓`; `·` for a run it didn't run in. */
+function LeafStatusStrip({ statuses }: { statuses: (TestStatus | null)[] }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4, fontSize: "var(--text-xs)" }}>
+      {statuses.map((s, i) => (
+        <span
+          key={i}
+          title={s ? `Run ${i + 1}: ${s}` : `Run ${i + 1}: not run`}
+          style={{ color: s ? statusColor(s) : "var(--text-muted)" }}
+        >
+          {s ? statusGlyph(s) : "·"}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Header strip of per-run totals — `714✓ 6✗ → 720✓` — the single source for
+ *  "number of runs and the pass/fail in each". `iterations` is oldest-first and
+ *  already windowed by the caller (overview: last few; detail: all). */
+function RunTimeline({ iterations }: { iterations: TestIteration[] }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", fontSize: "var(--text-sm)" }}>
+      {iterations.map((it, i) => (
+        <Fragment key={`${it.at}-${i}`}>
+          {i > 0 ? <span style={{ color: "var(--text-muted)" }}>→</span> : null}
+          <span title={new Date(it.at).toLocaleString()} style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}>
+            <span style={{ color: "var(--freshness-fresh)", fontWeight: "var(--weight-medium)" }}>{it.passed}✓</span>
+            {it.failed > 0 ? (
+              <span style={{ color: "var(--freshness-very-stale)", fontWeight: "var(--weight-medium)" }}>{it.failed}✗</span>
+            ) : null}
+          </span>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+function MultiRunTreeNode({ node, depth }: { node: MultiRunNode; depth: number }) {
+  // Auto-expand branches that failed in any run so failures are visible;
+  // always-passing branches start collapsed.
+  const everFailed = node.counts.some((c) => c.failed > 0);
+  const [open, setOpen] = useState(everFailed);
   return (
     <div>
       <button
@@ -531,15 +656,15 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
       >
         <span style={{ width: 16, fontSize: 16, lineHeight: 1, color: "var(--text-muted)" }}>{open ? "▾" : "▸"}</span>
         <span style={{ fontFamily: "var(--font-mono)", flex: "0 1 auto" }}>{node.label}</span>
-        <CountsSummary counts={node.counts} />
+        <RunCountsStrip counts={node.counts} />
       </button>
       {open ? (
         <div>
           {node.children.map((c) => (
-            <TestTreeNode key={c.path} node={c} depth={depth + 1} />
+            <MultiRunTreeNode key={c.path} node={c} depth={depth + 1} />
           ))}
           {node.leaves.map((leaf) => {
-            const onceFailed = leaf.everFailed && leaf.status !== "failed";
+            const onceFailed = leaf.everFailed && leaf.finalStatus !== "failed";
             return (
               <div
                 key={leaf.name}
@@ -553,7 +678,7 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
                   fontSize: "var(--text-xs)",
                 }}
               >
-                <span style={{ color: statusColor(leaf.status) }}>{statusGlyph(leaf.status)}</span>
+                <LeafStatusStrip statuses={leaf.statuses} />
                 <span style={{ fontFamily: "var(--font-mono)", color: onceFailed ? "var(--freshness-stale)" : "var(--text-primary)" }}>
                   {leaf.name}
                 </span>
@@ -574,57 +699,6 @@ function TestTreeNode({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-/** Merge all test-run observations into one suite list, last-write-wins per
- *  test case (keyed by `classname::name`). Observations are processed in
- *  storage order (oldest first), so later runs update the status of a case
- *  that ran earlier. Suites that never appeared together are unioned.
- *  Cases that had status "failed" in any run carry everFailed=true even if
- *  the final status is passing. */
-function mergeTestRuns(runs: EffortObservation[]): JUnitSuite[] {
-  const suiteOrder: string[] = [];
-  const suiteMap = new Map<string, Map<string, JUnitCase>>();
-  const everFailedKeys = new Set<string>();
-
-  for (const obs of runs) {
-    const run = parsePayload<TestRunPayload>(obs.payload_json);
-    if (!run?.suites) continue;
-    for (const suite of run.suites) {
-      const sname = suite.name || "(tests)";
-      if (!suiteMap.has(sname)) {
-        suiteMap.set(sname, new Map());
-        suiteOrder.push(sname);
-      }
-      const cases = suiteMap.get(sname)!;
-      for (const c of suite.cases) {
-        const key = `${sname}::${c.classname}::${c.name}`;
-        if (c.status === "failed") everFailedKeys.add(key);
-        cases.set(`${c.classname}::${c.name}`, c);
-      }
-    }
-  }
-
-  return suiteOrder.map((sname) => ({
-    name: sname,
-    cases: [...suiteMap.get(sname)!.values()].map((c) => ({
-      ...c,
-      everFailed: everFailedKeys.has(`${sname}::${c.classname}::${c.name}`),
-    })),
-  }));
-}
-
-/** Aggregate totals across a merged tree. */
-function sumCounts(tree: TreeNode[]): { passed: number; failed: number; skipped: number } {
-  return tree.reduce(
-    (acc, n) => ({
-      passed: acc.passed + n.counts.passed,
-      failed: acc.failed + n.counts.failed,
-      skipped: acc.skipped + n.counts.skipped,
-    }),
-    { passed: 0, failed: 0, skipped: 0 },
-  );
-}
-
-/** Compact summary: pass/fail totals + top-5 groups + Details link. */
 /** One logical test pass within an effort: summed pass/fail at a point in time. */
 export interface TestIteration {
   at: string;
@@ -648,29 +722,47 @@ export function clusterTestRuns(runs: EffortObservation[]): TestIteration[] {
     });
 }
 
+/** Run-count label for the Tests-run header. Calls out the zero case explicitly
+ *  so an effort with observations but no test run reads clearly, rather than the
+ *  section silently omitting tests. */
+export function runsLabel(count: number): string {
+  if (count === 0) return "no runs";
+  return `${count} ${count === 1 ? "run" : "runs"}`;
+}
+
+/** The overview windows the per-run breakdown to the most recent few runs; the
+ *  full history lives on the Details page. */
+const OVERVIEW_RUN_LIMIT = 3;
+
+const kickerStyle: React.CSSProperties = {
+  fontSize: "var(--text-xs)",
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+};
+
+/** Largest case count this suite reached in any shown run — the sort key for
+ *  "top suites" so a suite that ran big in some round still ranks. */
+function suiteTotal(node: MultiRunNode): number {
+  return Math.max(0, ...node.counts.map((c) => c.passed + c.failed + c.skipped));
+}
+
 function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservation[] }) {
-  if (runs.length === 0) return null;
   const ctxNav = useOptionalPageNavigation();
 
-  const merged = mergeTestRuns(runs);
-  const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
-  const totals = tree ? sumCounts(tree) : null;
-  // Per-iteration timeline (TDD visibility) — only meaningful with ≥2 passes.
+  // One source of truth for the header: per-run totals, oldest-first. The
+  // overview shows only the last few; the full count is still spelled out.
   const iterations = clusterTestRuns(runs);
+  const shown = iterations.slice(-OVERVIEW_RUN_LIMIT);
+  const truncated = iterations.length - shown.length;
 
-  // Fall back to raw counts from the last run when no suite data exists.
-  const lastRunPayload = parsePayload<TestRunPayload>(runs[runs.length - 1].payload_json);
-  const fallbackPassed = !totals && lastRunPayload?.total !== undefined ? (lastRunPayload.passed ?? 0) : null;
-  const fallbackFailed = !totals && lastRunPayload?.failed !== undefined ? lastRunPayload.failed : null;
-
-  // Top 5 suites by total case count, descending.
-  const sorted = tree
-    ? [...tree].sort((a, b) => {
-        const ta = a.counts.passed + a.counts.failed + a.counts.skipped;
-        const tb = b.counts.passed + b.counts.failed + b.counts.skipped;
-        return tb - ta;
-      })
-    : [];
+  // Suite breakdown over the same last-N window, so each row's per-run strip
+  // lines up with the header timeline.
+  const windowRuns = [...runs]
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))
+    .slice(-OVERVIEW_RUN_LIMIT);
+  const tree = buildMultiRunTree(windowRuns);
+  const sorted = [...tree].sort((a, b) => suiteTotal(b) - suiteTotal(a));
   const top5 = sorted.slice(0, 5);
   const overflow = sorted.length - top5.length;
 
@@ -690,41 +782,12 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
 
   return (
     <div data-testid="tests-run" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {/* Header row: label + pass/fail + details link */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontSize: "var(--text-xs)",
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          Tests run
-        </span>
-        {totals ? (
-          <>
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
-              {totals.passed} passed
-            </span>
-            {totals.failed > 0 ? (
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
-                {totals.failed} failed
-              </span>
-            ) : null}
-          </>
-        ) : fallbackPassed !== null ? (
-          <>
-            <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
-              {fallbackPassed} passed
-            </span>
-            {fallbackFailed ? (
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
-                {fallbackFailed} failed
-              </span>
-            ) : null}
-          </>
-        ) : null}
+      {/* Single header: run count + each run's pass/fail (zero called out). */}
+      <div data-testid="tests-runs-header" style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <span style={kickerStyle}>Tests run</span>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{runsLabel(iterations.length)}</span>
+        {truncated > 0 ? <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}>…→</span> : null}
+        {shown.length > 0 ? <RunTimeline iterations={shown} /> : null}
         {navToDetail ? (
           <button
             type="button"
@@ -743,46 +806,7 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
           </button>
         ) : null}
       </div>
-      {/* Per-iteration timeline: each test pass over time, so a TDD red→green
-          progression is visible. Hidden for a single pass (redundant header). */}
-      {iterations.length >= 2 ? (
-        <div
-          data-testid="tests-iterations"
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: 6,
-            flexWrap: "wrap",
-            fontSize: "var(--text-xs)",
-            paddingLeft: 4,
-          }}
-        >
-          <span
-            style={{
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-            }}
-          >
-            {iterations.length} runs
-          </span>
-          {iterations.map((it, i) => (
-            <Fragment key={`${it.at}-${i}`}>
-              {i > 0 ? <span style={{ color: "var(--text-muted)" }}>→</span> : null}
-              <span
-                title={new Date(it.at).toLocaleString()}
-                style={{ display: "inline-flex", gap: 4, alignItems: "baseline" }}
-              >
-                <span style={{ color: "var(--freshness-fresh)" }}>{it.passed}✓</span>
-                {it.failed > 0 ? (
-                  <span style={{ color: "var(--freshness-very-stale)" }}>{it.failed}✗</span>
-                ) : null}
-              </span>
-            </Fragment>
-          ))}
-        </div>
-      ) : null}
-      {/* Top 5 suites — each row navigates to the detail page */}
+      {/* Top 5 suites — each row shows its per-run pass/fail and navigates to detail */}
       {top5.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 2, paddingLeft: 4 }}>
           {top5.map((n) => (
@@ -790,7 +814,7 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
               <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-secondary)", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {n.label}
               </span>
-              <CountsSummary counts={n.counts} />
+              <RunCountsStrip counts={n.counts} />
             </button>
           ))}
           {overflow > 0 ? (
@@ -821,9 +845,9 @@ export function FullCoverageView({
   const runs = obs.filter((o) => o.kind === "test-run");
   const analysis = obs.find((o) => o.kind === "static-analysis");
 
-  const merged = mergeTestRuns(runs);
-  const tree = merged.some((s) => s.cases.length > 0) ? buildTestTree(merged) : null;
-  const totals = tree ? sumCounts(tree) : null;
+  // Detail view shows ALL runs: the header timeline and every per-node strip.
+  const runIterations = clusterTestRuns(runs);
+  const tree = buildMultiRunTree(runs);
   const mutedStyle: React.CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-muted)" };
 
   return (
@@ -840,25 +864,16 @@ export function FullCoverageView({
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* All runs listed at the top — run count + each run's pass/fail. */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <h4 style={{ margin: 0 }}>Tests</h4>
-          {totals ? (
-            <>
-              <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-fresh)" }}>
-                {totals.passed} passed
-              </span>
-              {totals.failed > 0 ? (
-                <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-medium)", color: "var(--freshness-very-stale)" }}>
-                  {totals.failed} failed
-                </span>
-              ) : null}
-            </>
-          ) : null}
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)" }}>{runsLabel(runIterations.length)}</span>
+          {runIterations.length > 0 ? <RunTimeline iterations={runIterations} /> : null}
         </div>
-        {tree ? (
+        {tree.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column" }}>
             {tree.map((n) => (
-              <TestTreeNode key={n.path} node={n} depth={0} />
+              <MultiRunTreeNode key={n.path} node={n} depth={0} />
             ))}
           </div>
         ) : runs.length > 0 ? (
@@ -942,7 +957,8 @@ export function EffortObservationsBlock({
               No coverage recorded for this effort — run the configured coverage command.
             </span>
           )}
-          {runs.length > 0 ? <TestsRun effortId={effortId} runs={runs} /> : <span style={mutedStyle}>No tests run.</span>}
+          {/* Always rendered — TestsRun calls out the zero-runs case itself. */}
+          <TestsRun effortId={effortId} runs={runs} />
           {/* Static analysis renders only when an analyzer ran for this effort,
               keeping untracked efforts uncluttered. */}
           {analysis ? <StaticAnalysisSummary obs={analysis} onOpenFile={onOpenFile} maxFiles={8} /> : null}
