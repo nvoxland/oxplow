@@ -145,6 +145,25 @@ impl Language {
         self.spec().tree_sitter_language()
     }
 
+    /// Canonical lowercase name — the inverse of [`language_from_name`]
+    /// (round-trips), and the value `source_files()` tags each file with so
+    /// scripts can pass it straight back to `code_metrics`/`markers`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Language::Rust => "rust",
+            Language::TypeScript => "typescript",
+            Language::Tsx => "tsx",
+            Language::JavaScript => "javascript",
+            Language::Python => "python",
+            Language::Go => "go",
+            Language::Java => "java",
+            Language::C => "c",
+            Language::Cpp => "cpp",
+            Language::Clojure => "clojure",
+            Language::CSharp => "csharp",
+        }
+    }
+
     /// Stable u8 tag used as a hash salt so cross-language token
     /// streams can never collide.
     pub fn tag(&self) -> u8 {

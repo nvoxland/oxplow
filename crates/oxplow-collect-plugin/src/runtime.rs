@@ -267,6 +267,56 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             };
         Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
     }
+
+    /// The language-agnostic **reader**: every *recognized* source file from the
+    /// host, each tagged with its detected language —
+    /// `[{path, text, language}]`. Files whose extension isn't a supported
+    /// language are skipped. A metric script sweeps this and calls a capability
+    /// (`code_metrics` / `markers`) per file, never naming a language itself.
+    fn source_files<'v>(
+        eval: &mut starlark::eval::Evaluator<'v, '_, '_>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let arr: Vec<serde_json::Value> = match eval
+            .extra
+            .and_then(|e| e.downcast_ref::<GaugeHost>())
+        {
+            Some(host) => {
+                let mut entries: Vec<(&String, &String)> = host
+                    .files
+                    .iter()
+                    .filter(|(path, _)| oxplow_code_metrics::is_supported_path(path.as_str()))
+                    .collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                entries
+                        .into_iter()
+                        .filter_map(|(path, text)| {
+                            oxplow_code_metrics::language_for_path(path).map(|lang| {
+                                serde_json::json!({ "path": path, "text": text, "language": lang.name() })
+                            })
+                        })
+                        .collect()
+            }
+            None => Vec::new(),
+        };
+        Ok(eval.heap().alloc(serde_json::Value::Array(arr)))
+    }
+
+    /// The comment-marker capability: `[{line, kind, text}]` for the
+    /// TODO/FIXME/HACK/XXX/BUG markers in `text`, comment-aware via the
+    /// language grammar. Dispatches into `oxplow_code_metrics::markers`.
+    fn markers<'v>(
+        text: &str,
+        language: &str,
+        heap: starlark::values::Heap<'v>,
+    ) -> anyhow::Result<starlark::values::Value<'v>> {
+        let lang = oxplow_code_metrics::language_from_name(language)
+            .ok_or_else(|| anyhow::anyhow!("unknown language \"{language}\""))?;
+        let arr: Vec<serde_json::Value> = oxplow_code_metrics::markers(text, lang)
+            .into_iter()
+            .map(|m| serde_json::json!({ "line": m.line, "kind": m.kind, "text": m.text }))
+            .collect();
+        Ok(heap.alloc(serde_json::Value::Array(arr)))
+    }
 }
 
 /// Per-run host state for a Starlark **gauge**, injected via `Evaluator::extra`

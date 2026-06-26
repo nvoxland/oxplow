@@ -811,6 +811,75 @@ def transform(input):
     }
 
     #[test]
+    fn source_files_and_markers_builtins_are_language_agnostic() {
+        // A single script sweeps source_files() (each tagged with language) and
+        // counts TODO/FIXME markers per file via the markers() capability — no
+        // language named in the script. Verifies cross-language collection.
+        let script = r#"
+def transform(input):
+    total = 0
+    by_lang = {}
+    for f in source_files():
+        lang = f["language"]
+        c = len(markers(f["text"], lang))
+        total += c
+        if c > 0:
+            by_lang[lang] = by_lang.get(lang, 0) + c
+    samples = [{"value": total, "subject": "tree:."}]
+    for lang in sorted(by_lang):
+        samples.append({"value": by_lang[lang], "subject": "language:" + lang, "dims": {"language": lang}})
+    return {"samples": samples}
+"#;
+        let c = Collector::starlark(
+            "oxplow.todos",
+            CollectorKind::Gauge,
+            ["todos"],
+            CollectorInput::Text,
+            script,
+        );
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "src/a.rs".to_string(),
+            "// TODO one\nfn a() {}\n".to_string(),
+        );
+        map.insert(
+            "src/b.ts".to_string(),
+            "// FIXME two\n// TODO three\nexport const x = 1;\n".to_string(),
+        );
+        map.insert(
+            "core.clj".to_string(),
+            "; TODO four\n(defn f [])\n".to_string(),
+        );
+        // Non-source file (skipped by source_files) — its "TODO" must not count.
+        map.insert("README.md".to_string(), "TODO not code\n".to_string());
+
+        let out = c.run_gauge("", GaugeHost::new(map)).expect("runs");
+        let report = out.as_gauge().expect("gauge");
+        let tree = report
+            .samples
+            .iter()
+            .find(|s| s.subject.as_deref() == Some("tree:."))
+            .expect("headline");
+        assert_eq!(
+            tree.value, 4.0,
+            "4 markers across rust/ts/clojure, README skipped"
+        );
+        // Per-language breakdown rides as language: samples with a language dim.
+        let rust = report
+            .samples
+            .iter()
+            .find(|s| s.subject.as_deref() == Some("language:rust"))
+            .expect("rust breakdown");
+        assert_eq!(rust.value, 1.0);
+        let ts = report
+            .samples
+            .iter()
+            .find(|s| s.subject.as_deref() == Some("language:typescript"))
+            .expect("ts breakdown");
+        assert_eq!(ts.value, 2.0);
+    }
+
+    #[test]
     fn files_builtin_is_empty_without_a_host() {
         // run() (no host) → files() sees no snapshot map and yields nothing.
         let script = r#"

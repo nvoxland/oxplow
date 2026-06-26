@@ -386,13 +386,22 @@ metrics:
     a golden test over a fixture corpus. A project activates one with
     `metrics: - use: oxplow.<lang>.<name>`; the runner builds the collector from
     the embedded script (`BuiltinMetric::collector()`), never a project-disk
-    file. Shipped: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
-    `panic_macros`, `todo_markers`, `fn_count`, `high_complexity_fns`,
-    `long_functions`), **TypeScript** (`any_usage`, `non_null_assertions`,
-    `console_calls`, `ts_ignore`, `fn_count`, `high_complexity_fns`), **Clojure**
-    (`defn_count`, `todo_comments`), **C#** (`method_count`, `empty_catch`,
-    `blocking_async_calls`, `high_complexity_fns`) — all `oxplow.<lang>.*`. This
-    repo dogfoods the Rust + TS sets in its own `oxplow.yaml`. The
+    file. Two families:
+    - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
+      `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
+      `oxplow.long_functions`. Built via the `code_gauge` helper with
+      `language: ""`; the scripts (under `plugins/metrics/code/`) sweep the
+      `source_files()` reader and call a capability (`code_metrics()` /
+      `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
+      not the metric. See "Language-agnostic capability layer" below.
+    - **Language-idiom metrics** (`oxplow.<lang>.*`) — concepts specific to one
+      language: **Rust** (`unsafe_blocks`, `unwrap_expect_calls`,
+      `panic_macros`), **TypeScript** (`any_usage`, `non_null_assertions`,
+      `console_calls`, `ts_ignore`), **Clojure** (`defn_count`), **C#**
+      (`empty_catch`, `blocking_async_calls`).
+
+    This repo dogfoods the language-idiom Rust/TS sets + all four unified code
+    metrics in its own `oxplow.yaml`. The
     complexity/`code_metrics()`-backed gauges and the C# grammar
     (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
     tsk229/tsk230.

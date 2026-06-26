@@ -6,8 +6,9 @@
 //!
 //! (The former per-function metrics scan — complexity / length / parameter
 //! count — was retired in tsk229: those signals now live in the metric
-//! substrate as bundled `oxplow.<lang>.{high_complexity_fns, long_functions}`
-//! gauges, computed via the `code_metrics()` host builtin. Duplication has no
+//! substrate as bundled, language-agnostic `oxplow.{high_complexity_fns,
+//! long_functions, fn_count}` gauges, computed via the `code_metrics()` host
+//! builtin across all languages (tsk314). Duplication has no
 //! plugin equivalent — cross-file token matching can't run in Starlark — so it
 //! stays an inherent in-process feature.)
 

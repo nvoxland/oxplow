@@ -84,6 +84,104 @@ pub fn analyze_with_language(path: &str, source: &str, language: Language) -> Ve
     out
 }
 
+/// A code marker (TODO / FIXME / …) found inside a comment — the
+/// language-agnostic counterpart of [`FunctionMetrics`] for the
+/// `oxplow.todos` metric. The language layer owns "what is a comment"
+/// (every tree-sitter grammar tags comment nodes with a kind containing
+/// "comment"), so the metric never special-cases a language.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marker {
+    /// 1-based line the marker sits on.
+    pub line: u32,
+    /// The marker keyword that matched (`TODO`, `FIXME`, …).
+    pub kind: String,
+    /// The marker's comment line, cleaned of leading comment delimiters.
+    pub text: String,
+}
+
+/// The marker keywords scanned for, in priority order.
+const MARKER_KEYWORDS: &[&str] = &["TODO", "FIXME", "HACK", "XXX", "BUG"];
+
+/// Scan a source file for comment markers (TODO / FIXME / HACK / XXX /
+/// BUG). Comment-aware: only text inside actual comment nodes is
+/// considered (so a `"TODO"` string literal doesn't count), using the
+/// language's own grammar. Returns an empty Vec for unsupported /
+/// unparseable input.
+pub fn markers(source: &str, language: Language) -> Vec<Marker> {
+    let Some(tree) = parse(source, language) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    collect_markers(tree.root_node(), source.as_bytes(), &mut out);
+    out.sort_by_key(|m| m.line);
+    out
+}
+
+fn collect_markers(node: Node<'_>, src: &[u8], out: &mut Vec<Marker>) {
+    // Every grammar tags comments with a kind containing "comment"
+    // (`line_comment` / `block_comment` / `comment`); match generically.
+    if node.kind().contains("comment") {
+        let text = node.utf8_text(src).unwrap_or("");
+        let base = node.start_position().row as u32;
+        for (i, line) in text.lines().enumerate() {
+            if let Some(kw) = first_marker(line) {
+                out.push(Marker {
+                    line: base + i as u32 + 1,
+                    kind: kw.to_string(),
+                    text: clean_comment_line(line),
+                });
+            }
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_markers(child, src, out);
+    }
+}
+
+/// The first marker keyword appearing as a standalone token in `line`.
+fn first_marker(line: &str) -> Option<&'static str> {
+    let mut best: Option<(usize, &'static str)> = None;
+    for kw in MARKER_KEYWORDS {
+        if let Some(pos) = find_token(line, kw) {
+            if best.map(|(p, _)| pos < p).unwrap_or(true) {
+                best = Some((pos, kw));
+            }
+        }
+    }
+    best.map(|(_, kw)| kw)
+}
+
+/// Byte index of `needle` in `hay` bounded by non-word chars on both
+/// sides (so `TODONE` / `mastodon` don't match `TODO`).
+fn find_token(hay: &str, needle: &str) -> Option<usize> {
+    let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let hb = hay.as_bytes();
+    let nb = needle.as_bytes();
+    let mut i = 0;
+    while i + nb.len() <= hb.len() {
+        if &hb[i..i + nb.len()] == nb {
+            let before_ok = i == 0 || !is_word(hb[i - 1]);
+            let after_ok = i + nb.len() == hb.len() || !is_word(hb[i + nb.len()]);
+            if before_ok && after_ok {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Trim a comment line of its leading comment delimiters / whitespace
+/// (`//`, `/*`, `*`, `;`, `#`) for display.
+fn clean_comment_line(line: &str) -> String {
+    line.trim()
+        .trim_start_matches(['/', '*', ';', '#', ' ', '\t'])
+        .trim()
+        .to_string()
+}
+
 /// Recursive function-finder. When we hit a node whose kind matches
 /// one of `spec.function_kinds` (or, for grammars with form-head
 /// matchers, a `list_lit` whose head sym is in

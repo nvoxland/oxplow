@@ -117,73 +117,70 @@ const RUST: &[BuiltinMetric] = &[
         input: "text",
         script: include_str!("plugins/metrics/rust/panic_macros.star"),
     },
-    BuiltinMetric {
-        key: "oxplow.rust.todo_markers",
-        kind: "gauge",
-        title: "TODO / FIXME markers",
-        description: "`TODO` / `FIXME` markers left in the code.",
-        unit: "count",
-        direction: "lower-better",
-        grain: "tree",
-        language: "rust",
-        dimensions: &["language", "git_version"],
-        target: None,
-        trigger: "on-snapshot",
-        runtime: "starlark",
-        input: "text",
-        script: include_str!("plugins/metrics/rust/todo_markers.star"),
-    },
-    BuiltinMetric {
-        key: "oxplow.rust.fn_count",
-        kind: "gauge",
-        title: "function count",
-        description: "Total number of functions defined.",
-        unit: "count",
-        direction: "neutral",
-        grain: "tree",
-        language: "rust",
-        dimensions: &["language", "git_version"],
-        target: None,
-        trigger: "on-snapshot",
-        runtime: "starlark",
-        input: "text",
-        script: include_str!("plugins/metrics/rust/fn_count.star"),
-    },
-    // Complexity / length signals (successors to the in-process code-quality
-    // producer, tsk229) via the code_metrics() host builtin.
-    BuiltinMetric {
-        key: "oxplow.rust.high_complexity_fns",
-        kind: "gauge",
-        title: "high-complexity functions",
-        description: "Functions whose cyclomatic complexity exceeds the threshold.",
-        unit: "count",
-        direction: "lower-better",
-        grain: "tree",
-        language: "rust",
-        dimensions: &["language", "git_version"],
-        target: None,
-        trigger: "on-snapshot",
-        runtime: "starlark",
-        input: "text",
-        script: include_str!("plugins/metrics/rust/high_complexity_fns.star"),
-    },
-    BuiltinMetric {
-        key: "oxplow.rust.long_functions",
-        kind: "gauge",
-        title: "long functions (>60 lines)",
-        description: "Functions longer than 60 lines.",
-        unit: "count",
-        direction: "lower-better",
-        grain: "tree",
-        language: "rust",
-        dimensions: &["language", "git_version"],
-        target: None,
-        trigger: "on-snapshot",
-        runtime: "starlark",
-        input: "text",
-        script: include_str!("plugins/metrics/rust/long_functions.star"),
-    },
 ];
+
+/// Language-agnostic code metrics (tsk314): one metric per concept, driven by
+/// the per-language capability layer (`source_files()` + `code_metrics()` /
+/// `markers()`). `language: ""` → no single language (the seeded definition's
+/// language is NULL; samples carry the per-file `language` dim). These replace
+/// the old per-language todo/complexity/fn-count/long-function gauges.
+const CODE: &[BuiltinMetric] = &[
+    code_gauge(
+        "oxplow.todos",
+        "TODO / FIXME markers",
+        "TODO/FIXME/HACK/XXX/BUG markers in comments, across all languages.",
+        "lower-better",
+        include_str!("plugins/metrics/code/todos.star"),
+    ),
+    code_gauge(
+        "oxplow.fn_count",
+        "function count",
+        "Total functions / methods defined, across all languages.",
+        "neutral",
+        include_str!("plugins/metrics/code/fn_count.star"),
+    ),
+    code_gauge(
+        "oxplow.high_complexity_fns",
+        "high-complexity functions",
+        "Functions whose cyclomatic complexity exceeds the threshold, across all languages.",
+        "lower-better",
+        include_str!("plugins/metrics/code/high_complexity_fns.star"),
+    ),
+    code_gauge(
+        "oxplow.long_functions",
+        "long functions (>60 lines)",
+        "Functions longer than 60 lines, across all languages.",
+        "lower-better",
+        include_str!("plugins/metrics/code/long_functions.star"),
+    ),
+];
+
+/// A language-agnostic tree gauge (the unified code metrics). Like `ast_gauge`
+/// but `language: ""` (no single language — it sweeps `source_files()` itself).
+const fn code_gauge(
+    key: &'static str,
+    title: &'static str,
+    description: &'static str,
+    direction: &'static str,
+    script: &'static str,
+) -> BuiltinMetric {
+    BuiltinMetric {
+        key,
+        kind: "gauge",
+        title,
+        description,
+        unit: "count",
+        direction,
+        grain: "tree",
+        language: "",
+        dimensions: &["language", "git_version"],
+        target: None,
+        trigger: "on-snapshot",
+        runtime: "starlark",
+        input: "text",
+        script,
+    }
+}
 
 /// A `gauge`/`tree`/`on-snapshot`/`starlark`/`text` metric (the common shape for
 /// a tree-derived AST scan), so each per-language entry stays terse.
@@ -251,57 +248,19 @@ const TS: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/ts/ts_ignore.star"),
     ),
-    ast_gauge(
-        "oxplow.ts.fn_count",
-        "function count",
-        "Total number of functions defined.",
-        "neutral",
-        "typescript",
-        None,
-        include_str!("plugins/metrics/ts/fn_count.star"),
-    ),
-    ast_gauge(
-        "oxplow.ts.high_complexity_fns",
-        "high-complexity functions",
-        "Functions whose cyclomatic complexity exceeds the threshold.",
-        "lower-better",
-        "typescript",
-        None,
-        include_str!("plugins/metrics/ts/high_complexity_fns.star"),
-    ),
 ];
 
-const CLOJURE: &[BuiltinMetric] = &[
-    ast_gauge(
-        "oxplow.clojure.defn_count",
-        "defn count",
-        "Number of `defn` definitions.",
-        "neutral",
-        "clojure",
-        None,
-        include_str!("plugins/metrics/clojure/defn_count.star"),
-    ),
-    ast_gauge(
-        "oxplow.clojure.todo_comments",
-        "TODO / FIXME comments",
-        "`TODO` / `FIXME` comments left in the code.",
-        "lower-better",
-        "clojure",
-        None,
-        include_str!("plugins/metrics/clojure/todo_comments.star"),
-    ),
-];
+const CLOJURE: &[BuiltinMetric] = &[ast_gauge(
+    "oxplow.clojure.defn_count",
+    "defn count",
+    "Number of `defn` definitions.",
+    "neutral",
+    "clojure",
+    None,
+    include_str!("plugins/metrics/clojure/defn_count.star"),
+)];
 
 const CSHARP: &[BuiltinMetric] = &[
-    ast_gauge(
-        "oxplow.csharp.method_count",
-        "method count",
-        "Total number of methods defined.",
-        "neutral",
-        "csharp",
-        None,
-        include_str!("plugins/metrics/csharp/method_count.star"),
-    ),
     ast_gauge(
         "oxplow.csharp.empty_catch",
         "empty catch blocks",
@@ -320,20 +279,12 @@ const CSHARP: &[BuiltinMetric] = &[
         None,
         include_str!("plugins/metrics/csharp/blocking_async_calls.star"),
     ),
-    ast_gauge(
-        "oxplow.csharp.high_complexity_fns",
-        "high-complexity functions",
-        "Methods whose cyclomatic complexity exceeds the threshold.",
-        "lower-better",
-        "csharp",
-        None,
-        include_str!("plugins/metrics/csharp/high_complexity_fns.star"),
-    ),
 ];
 
-/// Every bundled built-in metric, across all languages.
+/// Every bundled built-in metric: language-idiom metrics per language, plus the
+/// language-agnostic code metrics (`CODE`).
 pub fn builtin_metrics() -> Vec<BuiltinMetric> {
-    [RUST, TS, CLOJURE, CSHARP].concat()
+    [RUST, TS, CLOJURE, CSHARP, CODE].concat()
 }
 
 #[cfg(test)]
@@ -458,11 +409,6 @@ fn b() {
             per_file_over("oxplow.rust.unsafe_blocks", corpus()),
             vec![("src/a.rs".to_string(), 2.0)]
         );
-        // todo_markers: a TODO in a.rs and a FIXME in b.rs → both files attributed.
-        assert_eq!(
-            per_file_over("oxplow.rust.todo_markers", corpus()),
-            vec![("src/a.rs".to_string(), 1.0), ("src/b.rs".to_string(), 1.0)]
-        );
     }
 
     #[test]
@@ -475,19 +421,6 @@ fn b() {
         // panic! + todo! + path-qualified std::panic! = 3 (the scoped form is
         // counted via the scoped_identifier pattern).
         assert_eq!(run_over("oxplow.rust.panic_macros", corpus()), 3.0);
-    }
-
-    #[test]
-    fn rust_todo_markers_golden() {
-        // TODO in a.rs comment + FIXME in b.rs comment = 2; the TODO inside the
-        // string literal is NOT counted (comment-scoped).
-        assert_eq!(run_over("oxplow.rust.todo_markers", corpus()), 2.0);
-    }
-
-    #[test]
-    fn rust_fn_count_golden() {
-        // a, b, c = 3 function_items.
-        assert_eq!(run_over("oxplow.rust.fn_count", corpus()), 3.0);
     }
 
     fn ts_corpus() -> HashMap<String, String> {
@@ -544,12 +477,6 @@ const g = (a: any) => a!;
         assert_eq!(run_over("oxplow.ts.ts_ignore", ts_corpus()), 2.0);
     }
 
-    #[test]
-    fn ts_fn_count_golden() {
-        // a.ts: function f + arrow g = 2; b.tsx: arrow C = 1; total 3.
-        assert_eq!(run_over("oxplow.ts.fn_count", ts_corpus()), 3.0);
-    }
-
     fn clj_corpus() -> HashMap<String, String> {
         let mut m = HashMap::new();
         m.insert(
@@ -575,12 +502,6 @@ const g = (a: any) => a!;
         assert_eq!(run_over("oxplow.clojure.defn_count", clj_corpus()), 3.0);
     }
 
-    #[test]
-    fn clojure_todo_comments_golden() {
-        // TODO (core.clj) + FIXME (util.cljs) = 2.
-        assert_eq!(run_over("oxplow.clojure.todo_comments", clj_corpus()), 2.0);
-    }
-
     fn metrics_corpus() -> HashMap<String, String> {
         // `complex`: 11 `if` branches → cyclomatic complexity 12 (> 10).
         let mut complex = String::from("fn complex(x: i32) -> i32 {\n");
@@ -599,34 +520,46 @@ const g = (a: any) => a!;
         m
     }
 
-    #[test]
-    fn rust_high_complexity_fns_golden() {
-        // Only `complex` (cc 12) exceeds 10; `big` is cc 1.
-        assert_eq!(
-            run_over("oxplow.rust.high_complexity_fns", metrics_corpus()),
-            1.0
+    /// A mixed-language corpus exercising the language-agnostic code metrics:
+    /// a high-complexity + long Rust fn, a TS function with a TODO, and a
+    /// Clojure def with a FIXME. A non-source file is skipped by `source_files`.
+    fn mixed_corpus() -> HashMap<String, String> {
+        let mut m = metrics_corpus(); // src/c.rs: `complex` (cc 12) + `big` (long)
+        m.insert(
+            "src/a.ts".to_string(),
+            "// TODO wire this up\nfunction f(x: number) { return x; }\n".to_string(),
         );
+        m.insert(
+            "src/core.clj".to_string(),
+            "; FIXME naming\n(defn g [] :ok)\n".to_string(),
+        );
+        m.insert("README.md".to_string(), "TODO not code\n".to_string());
+        m
     }
 
     #[test]
-    fn rust_long_functions_golden() {
-        // Only `big` (>60 lines) is long; `complex` is ~13 lines.
-        assert_eq!(
-            run_over("oxplow.rust.long_functions", metrics_corpus()),
-            1.0
-        );
+    fn unified_high_complexity_fns_across_languages() {
+        // Only the Rust `complex` (cc 12) exceeds 10 across the whole corpus.
+        assert_eq!(run_over("oxplow.high_complexity_fns", mixed_corpus()), 1.0);
     }
 
     #[test]
-    fn ts_high_complexity_fns_golden() {
-        let mut body = String::from("function complex(x: number): number {\n");
-        for i in 0..11 {
-            body.push_str(&format!("    if (x === {i}) return {i};\n"));
-        }
-        body.push_str("    return 0;\n}\n");
-        let mut m = HashMap::new();
-        m.insert("src/c.ts".to_string(), body);
-        assert_eq!(run_over("oxplow.ts.high_complexity_fns", m), 1.0);
+    fn unified_long_functions_across_languages() {
+        // Only the Rust `big` (>60 lines) is long.
+        assert_eq!(run_over("oxplow.long_functions", mixed_corpus()), 1.0);
+    }
+
+    #[test]
+    fn unified_fn_count_across_languages() {
+        // rust complex + big (2) + ts f (1) + clojure g (1) = 4. README skipped.
+        assert_eq!(run_over("oxplow.fn_count", mixed_corpus()), 4.0);
+    }
+
+    #[test]
+    fn unified_todos_across_languages() {
+        // TS TODO + Clojure FIXME = 2 (comment-scoped); README's "TODO" is not a
+        // source file → skipped by source_files().
+        assert_eq!(run_over("oxplow.todos", mixed_corpus()), 2.0);
     }
 
     fn cs_corpus() -> HashMap<String, String> {
@@ -661,12 +594,6 @@ namespace Acme {
     }
 
     #[test]
-    fn csharp_method_count_golden() {
-        // Service: Run + Background = 2; Util: Noop = 1; total 3.
-        assert_eq!(run_over("oxplow.csharp.method_count", cs_corpus()), 3.0);
-    }
-
-    #[test]
     fn csharp_empty_catch_golden() {
         // Service.cs: `catch (System.Exception) { }` (1); Util.cs: `catch { }`
         // (1) = 2. The non-empty catch (if any) and the markdown are excluded.
@@ -681,18 +608,6 @@ namespace Acme {
             run_over("oxplow.csharp.blocking_async_calls", cs_corpus()),
             2.0
         );
-    }
-
-    #[test]
-    fn csharp_high_complexity_fns_golden() {
-        let mut body = String::from("class C {\n    int Complex(int x) {\n");
-        for i in 0..11 {
-            body.push_str(&format!("        if (x == {i}) return {i};\n"));
-        }
-        body.push_str("        return 0;\n    }\n}\n");
-        let mut m = HashMap::new();
-        m.insert("src/C.cs".to_string(), body);
-        assert_eq!(run_over("oxplow.csharp.high_complexity_fns", m), 1.0);
     }
 
     #[test]

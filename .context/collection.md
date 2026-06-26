@@ -340,6 +340,20 @@ capabilities — see [metrics.md](./metrics.md)):
   file matches. The snapshot is content-addressed/immutable → determinism +
   `observed` trust hold. Run a gauge collector with a host via
   `Collector::run_gauge(content, GaugeHost::new(map))`.
+- `code_metrics(text, language)` → per-function `[{name, complexity, length,
+  parameter_count, start_line, end_line, visibility}]` via `oxplow-code-metrics`.
+- **The language-agnostic capability layer** (tsk314) — for metrics that are the
+  *same concept across languages* (TODOs, complexity, …), a metric shouldn't
+  name a language. Two globals make that possible:
+  - `source_files()` → `[{path, text, language}]` — every **recognized** source
+    file from the host (filtered by `oxplow-code-metrics::is_supported_path`),
+    each tagged with its detected `language`. This is the reader: a script sweeps
+    it and never writes a glob or names a language.
+  - `markers(text, language)` → `[{line, kind, text}]` — TODO/FIXME/HACK/XXX/BUG
+    comment markers, comment-aware via the grammar.
+  Per-language knowledge (grammars, extensions, comment scanning) lives in
+  `oxplow-code-metrics`; metrics are defined once on these capabilities (the
+  `plugins/metrics/code/*.star` set). Adding a language → no metric changes.
 
 **Output schemas** the transform must produce:
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`

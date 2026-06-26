@@ -877,7 +877,9 @@ fn builtin_metric_entries() -> Vec<MetricEntry> {
             unit: Some(m.unit.to_string()),
             direction: Some(m.direction.to_string()),
             grain: Some(m.grain.to_string()),
-            language: Some(m.language.to_string()),
+            // Empty language = a language-agnostic metric (the unified code
+            // metrics) — no single language (NULL on the definition).
+            language: (!m.language.is_empty()).then(|| m.language.to_string()),
             description: Some(m.description.to_string()),
             dimensions: m.dimensions.iter().map(|d| d.to_string()).collect(),
             target: m.target,

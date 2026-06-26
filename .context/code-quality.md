@@ -9,8 +9,9 @@ for the user to install.
 > `"metrics"` → `complexity` / `function-length` / `parameter-count` findings),
 > the standalone **Code-quality page**, and the `run_code_quality_scan` /
 > `list_code_quality_scans` IPC+MCP commands are **gone**. Those signals now live
-> in the **metric substrate** as bundled `oxplow.<lang>.{high_complexity_fns,
-> long_functions, …}` gauges (computed via the `code_metrics()` host builtin —
+> in the **metric substrate** as bundled, **language-agnostic** gauges
+> (`oxplow.high_complexity_fns`, `oxplow.long_functions`, `oxplow.fn_count` —
+> computed via the `code_metrics()` host builtin across all languages, tsk314 —
 > see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
 > (`"duplication"` tool — no plugin equivalent, so it stays inherent) and the
 > live **Change-Analysis** pipeline (`analyze_functions_at_refs`, import deltas,

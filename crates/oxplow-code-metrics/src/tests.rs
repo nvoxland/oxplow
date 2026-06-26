@@ -498,3 +498,46 @@ fn clojure_ignores_non_function_top_level_lists() {
     let m = analyze_file("src/demo.clj", src);
     assert!(m.is_empty(), "expected no functions, got {m:#?}");
 }
+
+#[test]
+fn markers_rust_line_and_block_comments() {
+    let src = "// TODO: fix this\nfn a() {}\n/* FIXME: later\n   HACK: nested */\nfn b() {} // XXX cleanup\n";
+    let m = markers(src, Language::Rust);
+    let kinds: Vec<&str> = m.iter().map(|x| x.kind.as_str()).collect();
+    assert_eq!(kinds, vec!["TODO", "FIXME", "HACK", "XXX"]);
+    assert_eq!(m[0].line, 1);
+    assert_eq!(m[0].text, "TODO: fix this");
+    // Block-comment marker lines are offset within the comment.
+    assert_eq!(m[1].line, 3);
+    assert_eq!(m[2].line, 4);
+    assert_eq!(m[3].line, 5);
+}
+
+#[test]
+fn markers_only_inside_comments_not_string_literals() {
+    // "TODO" in a string is not a marker; the comment one is.
+    let src = "fn a() {\n    let s = \"TODO not a marker\";\n    // TODO real one\n}\n";
+    let m = markers(src, Language::Rust);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].line, 3);
+}
+
+#[test]
+fn markers_word_boundary() {
+    // TODONE / mastodon must not match TODO.
+    let src = "// TODONE done, not a marker\n// see mastodon\n";
+    assert!(markers(src, Language::Rust).is_empty());
+}
+
+#[test]
+fn markers_clojure_semicolon_and_csharp() {
+    let clj = "; TODO clojure marker\n(defn f [])\n";
+    let cm = markers(clj, Language::Clojure);
+    assert_eq!(cm.len(), 1);
+    assert_eq!(cm[0].kind, "TODO");
+
+    let cs = "// FIXME csharp\nclass C { }\n";
+    let csm = markers(cs, Language::CSharp);
+    assert_eq!(csm.len(), 1);
+    assert_eq!(csm[0].kind, "FIXME");
+}
