@@ -60,47 +60,22 @@ use std::ops::Range;
 
 use tree_sitter::{Language as TsLanguage, Node, Parser};
 
-/// A supported source language for the AST merge front half. Mirrors
-/// `oxplow-code-metrics`'s language set: the six first-slice languages
-/// from `.context/smart-merge.md` (rust, typescript, tsx, javascript,
-/// python, go) plus the second-slice languages (java, c, cpp, clojure —
-/// tsk137). Others are intentionally absent — the merge tier simply won't
-/// engage for them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Language {
-    Rust,
-    TypeScript,
-    Tsx,
-    JavaScript,
-    Python,
-    Go,
-    Java,
-    C,
-    Cpp,
-    Clojure,
-}
+/// The canonical, workspace-wide language identity (tsk321). The AST merge
+/// front half no longer declares its own enum — it reuses
+/// `oxplow_code_metrics::Language` and keys its `MergeSpec` table off it via
+/// [`merge_spec`], which returns `None` for the canonical variants the merge
+/// tier doesn't support (e.g. `CSharp`). Re-exported so existing call sites
+/// (`crate::ast_merge::Language`, `oxplow_git::MergeLanguage`) keep working.
+pub use oxplow_code_metrics::Language;
 
 /// Map a repo-relative (or any) path to its merge language by extension.
-/// Mirrors `oxplow_code_metrics::spec::language_for_path` but restricted
-/// to the languages the merge front half supports. `None` ⇒ unsupported,
-/// so the AST tier is skipped and git's markers stand.
+/// Resolves through the canonical `oxplow_code_metrics::language_for_path`,
+/// then drops any language the merge front half doesn't support (no
+/// [`MergeSpec`]), so e.g. `.cs` ⇒ `None`. `None` ⇒ unsupported, so the AST
+/// tier is skipped and git's markers stand.
 pub fn language_for_path(path: &str) -> Option<Language> {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())?;
-    Some(match ext.to_ascii_lowercase().as_str() {
-        "rs" => Language::Rust,
-        "ts" => Language::TypeScript,
-        "tsx" => Language::Tsx,
-        "js" | "mjs" | "cjs" | "jsx" => Language::JavaScript,
-        "py" => Language::Python,
-        "go" => Language::Go,
-        "java" => Language::Java,
-        "c" | "h" => Language::C,
-        "cc" | "cxx" | "cpp" | "hpp" | "hxx" => Language::Cpp,
-        "clj" | "cljs" | "cljc" => Language::Clojure,
-        _ => return None,
-    })
+    let lang = oxplow_code_metrics::language_for_path(path)?;
+    merge_spec(lang).map(|_| lang)
 }
 
 /// Per-language table of the tree-sitter node names that drive identity.
@@ -155,21 +130,24 @@ impl MergeSpec {
     }
 }
 
-impl Language {
-    pub fn spec(&self) -> &'static MergeSpec {
-        match self {
-            Language::Rust => &RUST,
-            Language::TypeScript => &TYPESCRIPT,
-            Language::Tsx => &TSX,
-            Language::JavaScript => &JAVASCRIPT,
-            Language::Python => &PYTHON,
-            Language::Go => &GO,
-            Language::Java => &JAVA,
-            Language::C => &C,
-            Language::Cpp => &CPP,
-            Language::Clojure => &CLOJURE,
-        }
-    }
+/// The [`MergeSpec`] for `lang`, or `None` for canonical languages the AST
+/// merge front half does not support. Their variant exists in the shared
+/// `Language` enum (so identity stays unified) but carries no merge spec —
+/// `C#` is analysed for metrics but never structurally merged here.
+pub fn merge_spec(lang: Language) -> Option<&'static MergeSpec> {
+    Some(match lang {
+        Language::Rust => &RUST,
+        Language::TypeScript => &TYPESCRIPT,
+        Language::Tsx => &TSX,
+        Language::JavaScript => &JAVASCRIPT,
+        Language::Python => &PYTHON,
+        Language::Go => &GO,
+        Language::Java => &JAVA,
+        Language::C => &C,
+        Language::Cpp => &CPP,
+        Language::Clojure => &CLOJURE,
+        Language::CSharp => return None,
+    })
 }
 
 /// A top-level declaration, reduced to what the structural merge needs.
@@ -188,7 +166,7 @@ pub struct Item {
 /// `None` if the parse failed (any error/missing node) — never operate
 /// on an untrusted tree.
 pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
-    let spec = lang.spec();
+    let spec = merge_spec(lang)?;
     let mut parser = Parser::new();
     parser.set_language(&spec.tree_sitter_language()).ok()?;
     let tree = parser.parse(src, None)?;
@@ -823,6 +801,18 @@ mod tests {
         // Genuinely unsupported.
         assert_eq!(language_for_path("x.txt"), None);
         assert_eq!(language_for_path("noext"), None);
+    }
+
+    #[test]
+    fn csharp_is_canonical_but_unsupported_for_merge() {
+        // C# lives in the unified `Language` enum (tsk321) — it's analysed
+        // for metrics — but the AST merge front half doesn't support it, so
+        // it has no `MergeSpec`, `parse_top_level_items` bails gracefully,
+        // and a `.cs` path is never picked up by the merge resolver.
+        assert!(merge_spec(Language::CSharp).is_none());
+        assert!(merge_spec(Language::Rust).is_some());
+        assert!(parse_top_level_items("class C { void M() {} }", Language::CSharp).is_none());
+        assert_eq!(language_for_path("x.cs"), None);
     }
 
     #[test]

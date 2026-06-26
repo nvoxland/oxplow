@@ -21,7 +21,10 @@ mod ast;
 mod spec;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
-pub use spec::{language_for_path, language_from_name, Language, LanguageSpec, VisibilityStrategy};
+pub use spec::{
+    language_for_path, language_from_lsp_id, language_from_name, Language, LanguageSpec,
+    VisibilityStrategy,
+};
 pub use tree_sitter::Tree;
 
 /// Coarse public/private classification. Heuristic per language —

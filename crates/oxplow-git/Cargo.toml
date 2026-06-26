@@ -10,6 +10,10 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-fs-watch = { workspace = true }
+# Canonical `Language` identity (the single source of truth shared across
+# crates; tsk321). The AST-merge front half keys its own `MergeSpec` table
+# off this enum instead of declaring a duplicate. See .context/smart-merge.md.
+oxplow-code-metrics = { workspace = true }
 git2 = { workspace = true }
 similar = "2"
 tokio = { workspace = true }

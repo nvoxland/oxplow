@@ -3866,6 +3866,7 @@ name = "oxplow-git"
 version = "0.6.0"
 dependencies = [
  "git2",
+ "oxplow-code-metrics",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-fs-watch",

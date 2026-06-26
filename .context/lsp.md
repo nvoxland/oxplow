@@ -50,6 +50,16 @@ manager owns:
   `apps/desktop/src/lspSuggestions.ts`; keep the two in sync) and both
   fix paths (`lsp_install_server` / yaml entry).
 
+> **LSP id ↔ analysis `Language` bridge (tsk321).** The session `language`
+> here is a free string (`languageId`), a separate namespace from the
+> static-analysis `oxplow_code_metrics::Language` enum. The one documented
+> bridge between them is `oxplow_code_metrics::language_from_lsp_id(id)` →
+> `Option<Language>` (handles `typescriptreact`/`javascriptreact`, delegates
+> the rest to `language_from_name`; an LSP language with no analysis grammar
+> resolves to `None`). Use it whenever an LSP buffer needs tree-sitter
+> analysis — don't re-derive the mapping. Part of the unified language-plugin
+> epic (tsk320).
+
 ## Installer (`crates/oxplow-app/src/lsp_installer.rs`)
 
 Wraps `crates/oxplow-lsp-installer/` (mason-org/mason-registry;

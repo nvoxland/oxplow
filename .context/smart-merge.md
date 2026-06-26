@@ -35,7 +35,21 @@ path as a Tier-1.5 fallback (tsk136 — see "Wiring" below). Two layers:
   `language_for_path` + the per-language `MergeSpec` kind tables.
   tree-sitter and **ten grammars** are real `oxplow-git` deps now: the 6
   first-slice (rust, typescript, tsx, javascript, python, go) plus the 4
-  second-slice (java, c, cpp, clojure — tsk137). Each `Item` carries `{
+  second-slice (java, c, cpp, clojure — tsk137).
+
+  > **One `Language` enum (tsk321).** `ast_merge` no longer declares its own
+  > `Language` — it `pub use`s the canonical `oxplow_code_metrics::Language`
+  > (the single source of truth) and keys its `MergeSpec` table off it via
+  > the free fn `merge_spec(lang) -> Option<&MergeSpec>`. Canonical variants
+  > the merge tier doesn't support (today only `CSharp`, which *is* analysed
+  > for metrics) return `None` there — identity stays unified, support is a
+  > per-spec property, not a separate enum. `ast_merge::language_for_path`
+  > resolves through `oxplow_code_metrics::language_for_path` then drops
+  > languages with no `MergeSpec` (so `.cs` ⇒ `None`, unchanged behavior).
+  > The LSP↔analysis namespace bridge is `language_from_lsp_id` in the same
+  > crate (maps `typescriptreact`→`Tsx`, etc.).
+
+  Each `Item` carries `{
   key, text, byte_span }`. Identity key depends on the language's
   `KeyStrategy`:
   - **Generic** (rust/ts/tsx/js/python/go/java): import normalized text,

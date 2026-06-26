@@ -15,7 +15,7 @@
 
 use tree_sitter::Language as TsLanguage;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
     Rust,
     TypeScript,
@@ -221,6 +221,25 @@ pub fn language_for_path(path: &str) -> Option<Language> {
         "cs" => Language::CSharp,
         _ => return None,
     })
+}
+
+/// Resolve an LSP `languageId` (the string a language server / editor
+/// uses to label a buffer, e.g. `"typescriptreact"`) to the canonical
+/// analysis [`Language`].
+///
+/// This is the **single bridge** between the LSP namespace — free strings
+/// keyed per session in `oxplow-app/src/lsp_sessions.rs` — and the
+/// static-analysis enum. LSP carries a few ids that [`language_from_name`]
+/// doesn't (`typescriptreact`/`javascriptreact`); everything else delegates
+/// to it. An LSP language with no analysis grammar (e.g. `lua`, `json`,
+/// `yaml`) resolves to `None`, which callers read as "no tree-sitter
+/// analysis for this buffer" — LSP features still work independently.
+pub fn language_from_lsp_id(language_id: &str) -> Option<Language> {
+    match language_id.trim().to_ascii_lowercase().as_str() {
+        "typescriptreact" => Some(Language::Tsx),
+        "javascriptreact" => Some(Language::JavaScript),
+        other => language_from_name(other),
+    }
 }
 
 // ---- Rust ----
@@ -583,3 +602,62 @@ static CSHARP: LanguageSpec = LanguageSpec {
     decision_form_heads: &[],
     grammar: || tree_sitter_c_sharp::LANGUAGE.into(),
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lsp_id_bridge_maps_react_variants_and_core_ids() {
+        // LSP-only ids that language_from_name doesn't carry.
+        assert!(matches!(
+            language_from_lsp_id("typescriptreact"),
+            Some(Language::Tsx)
+        ));
+        assert!(matches!(
+            language_from_lsp_id("javascriptreact"),
+            Some(Language::JavaScript)
+        ));
+        // Mixed case / whitespace tolerated.
+        assert!(matches!(
+            language_from_lsp_id("  TypeScriptReact "),
+            Some(Language::Tsx)
+        ));
+        // Core ids delegate to language_from_name.
+        assert!(matches!(language_from_lsp_id("rust"), Some(Language::Rust)));
+        assert!(matches!(
+            language_from_lsp_id("python"),
+            Some(Language::Python)
+        ));
+        // An LSP language with no analysis grammar resolves to None.
+        assert_eq!(language_from_lsp_id("lua"), None);
+        assert_eq!(language_from_lsp_id("yaml"), None);
+        assert_eq!(language_from_lsp_id("unknown-lang"), None);
+    }
+
+    #[test]
+    fn lsp_id_bridge_round_trips_canonical_names() {
+        // Every canonical language's own name() must resolve back through
+        // the LSP bridge, so the LSP and analysis namespaces agree on the
+        // core set.
+        for lang in [
+            Language::Rust,
+            Language::TypeScript,
+            Language::Tsx,
+            Language::JavaScript,
+            Language::Python,
+            Language::Go,
+            Language::Java,
+            Language::C,
+            Language::Cpp,
+            Language::Clojure,
+            Language::CSharp,
+        ] {
+            assert!(
+                language_from_lsp_id(lang.name()).is_some(),
+                "lsp bridge dropped canonical name {}",
+                lang.name()
+            );
+        }
+    }
+}
