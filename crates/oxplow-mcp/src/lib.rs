@@ -593,6 +593,19 @@ pub struct ListCodeUnitsParams {
     pub path: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LspCallHierarchyParams {
+    pub stream_id: String,
+    pub language: String,
+    pub uri: String,
+    pub line: u32,
+    pub character: u32,
+    /// "incoming" (callers of the symbol at this position) or "outgoing"
+    /// (the symbols it calls). Anything other than "incoming" is treated
+    /// as outgoing.
+    pub direction: String,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -3322,6 +3335,50 @@ impl OxplowMcp {
             })
             .collect();
         json_result(&units)
+    }
+
+    #[tool(
+        description = "LSP call hierarchy — for the symbol at a position, list its callers \
+                       (direction=\"incoming\") or callees (direction=\"outgoing\"), \
+                       language-agnostically via the language server. Runs \
+                       prepareCallHierarchy then incoming/outgoingCalls on the first resolved \
+                       item. Returns CallHierarchyIncomingCall[] / CallHierarchyOutgoingCall[], \
+                       or [] when the position has no call-hierarchy item."
+    )]
+    async fn lsp_call_hierarchy(
+        &self,
+        params: Parameters<LspCallHierarchyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let proxy: std::sync::Arc<oxplow_app::LspProxy> =
+            resolve_lsp_proxy(&self.services, &p.stream_id, &p.language).await?;
+        let prepared = proxy
+            .request(
+                "textDocument/prepareCallHierarchy",
+                serde_json::json!({
+                    "textDocument": { "uri": p.uri },
+                    "position": { "line": p.line, "character": p.character },
+                }),
+            )
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        let Some(item) = prepared.as_array().and_then(|a| a.first()).cloned() else {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "[]".to_string(),
+            )]));
+        };
+        let method = if p.direction.eq_ignore_ascii_case("incoming") {
+            "callHierarchy/incomingCalls"
+        } else {
+            "callHierarchy/outgoingCalls"
+        };
+        let calls = proxy
+            .request(method, serde_json::json!({ "item": item }))
+            .await
+            .map_err(|e| internal(e.to_string()))?;
+        Ok(CallToolResult::success(vec![Content::text(
+            calls.to_string(),
+        )]))
     }
 
     #[tool(description = "LSP textDocument/diagnostic — pulls the latest diagnostics for a file.")]

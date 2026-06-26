@@ -766,6 +766,9 @@ fn client_capabilities() -> Value {
                 }
             },
             "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
+            // callHierarchy — who-calls-this / what-this-calls, surfaced via
+            // the lsp_call_hierarchy MCP tool (tsk326).
+            "callHierarchy": { "dynamicRegistration": false },
         },
         "workspace": {
             "applyEdit": true,
