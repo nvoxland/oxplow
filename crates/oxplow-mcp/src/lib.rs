@@ -606,6 +606,13 @@ pub struct LspCallHierarchyParams {
     pub direction: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MetricByPackageParams {
+    pub metric_key: String,
+    /// Stream to roll up (e.g. "str1"). Per-file samples are stream-scoped.
+    pub stream: String,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -1773,6 +1780,41 @@ impl OxplowMcp {
         let limit = params.0.limit.unwrap_or(50).max(0) as usize;
         rows.truncate(limit);
         json_result(&rows)
+    }
+
+    #[tool(
+        description = "Roll up a code metric by PACKAGE (directory). For a metric that emits \
+            per-file samples — the bundled code gauges (oxplow.todos, oxplow.fn_count, \
+            oxplow.high_complexity_fns, oxplow.long_functions) and the oxplow.<lang>.* idiom \
+            metrics — returns its latest value summed per package (each file's parent \
+            directory), largest first, with the contributing file count. Answers 'which package \
+            holds the most complexity / TODOs / unsafe blocks'. Empty if the metric has no \
+            per-file samples for the stream. `stream` is required (e.g. \"str1\")."
+    )]
+    async fn metric_by_package(
+        &self,
+        params: Parameters<MetricByPackageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(def) = self
+            .services
+            .metric_store
+            .get_definition(&params.0.metric_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown metric_key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let stream_id = parse_stream_id(&params.0.stream)?;
+        let rollup = self
+            .services
+            .metric_store
+            .package_rollup_for_metric(def.id, stream_id.value())
+            .await
+            .map_err(internal)?;
+        json_result(&rollup)
     }
 
     #[tool(

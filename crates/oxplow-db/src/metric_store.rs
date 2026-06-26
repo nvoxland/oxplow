@@ -389,6 +389,29 @@ pub struct EffortMetricDelta {
     pub latest_run_id: Option<i64>,
 }
 
+/// A metric rolled up to a **package** (a file's parent directory): the sum
+/// of the latest per-file values under that directory. The `metric_subject`
+/// package grain made concrete (tsk327) — answers "which package holds the
+/// most of metric X". Files at the repo root roll up under ".".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MetricPackageRollup {
+    /// Repo-relative directory the files live in (the package).
+    pub package: String,
+    /// Sum of the latest value of each file in the package.
+    pub value: f64,
+    /// How many files contributed.
+    pub file_count: i64,
+}
+
+/// The package (parent directory, repo-relative) of a file path. Root-level
+/// files report `"."`.
+fn package_of(path: &str) -> String {
+    match path.rsplit_once('/') {
+        Some((dir, _)) if !dir.is_empty() => dir.to_string(),
+        _ => ".".to_string(),
+    }
+}
+
 const SAMPLE_COLS: &str = "id, run_id, metric_id, value, numerator, denominator, captured_at, \
      snapshot_id, closest_git_version, git_version_exact, basis_ref, stream_id, thread_id, \
      subject_kind, subject_ref, path, line, dims_json, provenance, source, branch";
@@ -854,6 +877,64 @@ impl SqliteMetricStore {
             .await
     }
 
+    /// Roll up a metric's **latest per-file** samples by package (the file's
+    /// parent directory, repo-relative), summing the latest value of each
+    /// file. This makes the dormant `metric_subject` package grain concrete
+    /// (tsk327): for the bundled code gauges — which emit a `subject_kind =
+    /// 'file'` sample per nonzero file — it answers "how much of metric X
+    /// lives in each package", largest first. `stream_id` is the hard scope.
+    /// Empty when the metric has no per-file samples for the stream.
+    pub async fn package_rollup_for_metric(
+        &self,
+        metric_id: i64,
+        stream_id: i64,
+    ) -> Result<Vec<MetricPackageRollup>, DomainError> {
+        let samples = self
+            .db
+            .call(move |conn| {
+                // The latest sample per file (max id per subject_ref).
+                let sql = format!(
+                    "SELECT {SAMPLE_COLS} FROM metric_sample s
+                      WHERE s.metric_id = ?1 AND s.stream_id = ?2 AND s.subject_kind = 'file'
+                        AND s.id = (
+                          SELECT MAX(s2.id) FROM metric_sample s2
+                           WHERE s2.metric_id = s.metric_id AND s2.stream_id = s.stream_id
+                             AND s2.subject_kind = 'file' AND s2.subject_ref = s.subject_ref
+                        )"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![metric_id, stream_id], row_to_sample)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await?;
+
+        // Group the latest-per-file samples by package (parent dir) in Rust.
+        let mut by_pkg: std::collections::BTreeMap<String, (f64, i64)> =
+            std::collections::BTreeMap::new();
+        for s in &samples {
+            let path = s.subject_ref.as_deref().or(s.path.as_deref()).unwrap_or("");
+            let entry = by_pkg.entry(package_of(path)).or_insert((0.0, 0));
+            entry.0 += s.value;
+            entry.1 += 1;
+        }
+        let mut out: Vec<MetricPackageRollup> = by_pkg
+            .into_iter()
+            .map(|(package, (value, file_count))| MetricPackageRollup {
+                package,
+                value,
+                file_count,
+            })
+            .collect();
+        // Largest first; tie-break on package name for determinism.
+        out.sort_by(|a, b| {
+            b.value
+                .partial_cmp(&a.value)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.package.cmp(&b.package))
+        });
+        Ok(out)
+    }
+
     /// Samples of `metric_id` that fall within the time window of `effort_id`
     /// (the effort-as-overlay model: efforts are NOT a stored sample dimension;
     /// membership is `captured_at` ∈ [started_at, ended_at]). An open effort
@@ -1317,6 +1398,59 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn package_rollup_sums_latest_per_file_by_directory() {
+        let store = fixture().await;
+        let metric = gauge_def(&store, "oxplow.rust.unsafe_blocks").await;
+        // Two packages; a.rs has two samples (only the latest, 1.0, counts).
+        // A root-level file rolls up under ".". A second stream must not leak.
+        store
+            .db
+            .call(|conn| {
+                conn.execute(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                     VALUES (2, 'worktree', 'w', 'feat', 'refs/heads/feat', 'feat', '/w', '2026-05-26T00:00:00Z', '2026-05-26T00:00:00Z')",
+                    [],
+                )
+            })
+            .await
+            .unwrap();
+        let rows = [
+            (1_i64, "src/app/a.rs", "2026-05-26T10:00:00Z", 5.0), // superseded
+            (1, "src/app/a.rs", "2026-05-26T10:40:00Z", 1.0),     // latest for a.rs
+            (1, "src/app/b.rs", "2026-05-26T10:40:00Z", 4.0),
+            (1, "src/util/c.rs", "2026-05-26T10:40:00Z", 9.0),
+            (1, "top.rs", "2026-05-26T10:40:00Z", 2.0), // repo root → "."
+            (2, "src/app/a.rs", "2026-05-26T10:40:00Z", 99.0), // other stream, excluded
+        ];
+        for (stream, path, ts, v) in rows {
+            store
+                .record_sample(NewMetricSample {
+                    captured_at: Some(at(ts)),
+                    subject_kind: Some("file".into()),
+                    subject_ref: Some(path.into()),
+                    ..NewMetricSample::observed(metric, stream, v, "builtin")
+                })
+                .await
+                .unwrap();
+        }
+        let rollup = store.package_rollup_for_metric(metric, 1).await.unwrap();
+        let got: Vec<(String, f64, i64)> = rollup
+            .iter()
+            .map(|r| (r.package.clone(), r.value, r.file_count))
+            .collect();
+        // src/util (9) > src/app (1+4=5) > "." (2); stream-2 a.rs excluded;
+        // a.rs's superseded 5.0 not counted (latest 1.0 only).
+        assert_eq!(
+            got,
+            vec![
+                ("src/util".to_string(), 9.0, 1),
+                ("src/app".to_string(), 5.0, 2),
+                (".".to_string(), 2.0, 1),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -87,8 +87,11 @@ language" is served two ways, both keyed off the registry's `unit_kinds`:
   for *any* configured LSP language, not just the tree-sitter set. See
   `.context/lsp.md`.
 
-These are the substrate a future Metrics roll-up (group complexity/coverage by
-package/module via the dormant `metric_subject` hierarchy) builds on.
+These are the substrate the Metrics package roll-up builds on: the
+`metric_by_package` MCP tool (tsk327, `SqliteMetricStore::package_rollup_for_metric`)
+sums a per-file metric's latest values by package (directory) — the
+`metric_subject` package grain made concrete. The Metrics **Explorer** UI
+group-by-package (a charting-semantics change) is the remaining follow-up.
 
 ## Adding a language (the checklist)
 
