@@ -301,4 +301,59 @@ mod tests {
         assert_eq!(mason_suggestion("csharp"), None);
         assert_eq!(mason_suggestion("unknown-lang"), None);
     }
+
+    /// Drift guard: the renderer mirror `apps/desktop/src/lspSuggestions.ts`
+    /// is kept in sync with [`mason_suggestion`] (the single source of truth)
+    /// by hand. Parse its `SUGGESTIONS` map and assert every entry reproduces
+    /// what `mason_suggestion` returns, so a stale TS value fails the build
+    /// instead of silently shipping a wrong "Install language server" hint.
+    #[test]
+    fn lsp_suggestions_ts_mirror_matches_mason_suggestion() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/desktop/src/lspSuggestions.ts"
+        );
+        let src = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+
+        // Walk the lines inside the `SUGGESTIONS` object literal, parsing the
+        // `key: "value",` entries.
+        let mut in_map = false;
+        let mut parsed = 0usize;
+        for line in src.lines() {
+            let t = line.trim();
+            if t.starts_with("export const SUGGESTIONS") {
+                in_map = true;
+                continue;
+            }
+            if !in_map {
+                continue;
+            }
+            if t.starts_with("};") {
+                break;
+            }
+            // `key: "value",` — key is a bare or quoted ident.
+            let Some((raw_key, rest)) = t.split_once(':') else {
+                continue;
+            };
+            let key = raw_key.trim().trim_matches('"');
+            let Some(open) = rest.find('"') else { continue };
+            let after = &rest[open + 1..];
+            let Some(close) = after.find('"') else {
+                continue;
+            };
+            let value = &after[..close];
+            assert_eq!(
+                mason_suggestion(key),
+                Some(value),
+                "lspSuggestions.ts drift: {key:?} → {value:?} but mason_suggestion gives {:?}",
+                mason_suggestion(key),
+            );
+            parsed += 1;
+        }
+        // Guard against a broken parser passing vacuously.
+        assert!(
+            parsed >= 15,
+            "parsed only {parsed} mirror entries — parser likely broken",
+        );
+    }
 }
