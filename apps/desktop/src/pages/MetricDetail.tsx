@@ -782,11 +782,11 @@ export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
           >
             {r.key}
           </span>
-          <div style={{ flex: 1, background: "var(--bg-tier-2, #222)", borderRadius: 3, height: 12 }}>
+          <div style={{ flex: 1, background: "var(--border, #2a2a2a)", borderRadius: 3, height: 12 }}>
             <div
               style={{
                 width: `${(r.value / max) * 100}%`,
-                background: "#58a6ff",
+                background: "var(--accent, #58a6ff)",
                 height: 12,
                 borderRadius: 3,
               }}
@@ -798,6 +798,11 @@ export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
           </span>
         </div>
       ))}
+      {rows.length > 20 ? (
+        <div style={{ fontSize: 11, opacity: 0.5, paddingTop: 2 }}>
+          +{rows.length - 20} more {dim === "package" ? "packages" : `${dim} values`}
+        </div>
+      ) : null}
     </div>
   );
 }
