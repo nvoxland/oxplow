@@ -389,15 +389,18 @@ pub struct EffortMetricDelta {
     pub latest_run_id: Option<i64>,
 }
 
-/// A metric rolled up to a **package** (a file's parent directory): the sum
-/// of the latest per-file values under that directory. The `metric_subject`
-/// package grain made concrete (tsk327) — answers "which package holds the
-/// most of metric X". Files at the repo root roll up under ".".
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct MetricPackageRollup {
-    /// Repo-relative directory the files live in (the package).
-    pub package: String,
-    /// Sum of the latest value of each file in the package.
+/// A metric's per-file values rolled up by one **dimension** — the package
+/// (a file's parent directory) or any `dims_json` key the file samples carry
+/// (e.g. `language`). Sums the latest value of each contributing file. The
+/// `metric_subject` package grain (and the per-file dim breakdown) made
+/// concrete (tsk327/tsk328/tsk319) — answers "which package / language holds
+/// the most of metric X". Files at the repo root roll up under ".".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct MetricDimensionRollup {
+    /// The dimension value the files were grouped by — a directory (for
+    /// `package`) or a `dims_json` value (e.g. a language name).
+    pub key: String,
+    /// Sum of the latest value of each file under this key.
     pub value: f64,
     /// How many files contributed.
     pub file_count: i64,
@@ -409,6 +412,18 @@ fn package_of(path: &str) -> String {
     match path.rsplit_once('/') {
         Some((dir, _)) if !dir.is_empty() => dir.to_string(),
         _ => ".".to_string(),
+    }
+}
+
+/// Read a sample's `dims_json` value for `key` (e.g. `"language"`) as a
+/// string, if present. Used by the dimension roll-up to group per-file
+/// samples by a conformed dimension they carry.
+fn dim_value(sample: &MetricSample, key: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(sample.dims_json.as_deref()?).ok()?;
+    match parsed.get(key)? {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
     }
 }
 
@@ -877,29 +892,37 @@ impl SqliteMetricStore {
             .await
     }
 
-    /// Roll up a metric's **latest per-file** samples by package (the file's
-    /// parent directory, repo-relative), summing the latest value of each
-    /// file. This makes the dormant `metric_subject` package grain concrete
-    /// (tsk327): for the bundled code gauges — which emit a `subject_kind =
-    /// 'file'` sample per nonzero file — it answers "how much of metric X
-    /// lives in each package", largest first. `stream_id` is the hard scope.
-    /// Empty when the metric has no per-file samples for the stream.
-    pub async fn package_rollup_for_metric(
+    /// Roll up a metric's **latest per-file** samples by a dimension, summing
+    /// the latest value of each file. `dimension = "package"` groups by the
+    /// file's parent directory (repo-relative); any other value groups by that
+    /// `dims_json` key the file samples carry (e.g. `"language"`). Files
+    /// missing the dimension are skipped. `stream_id = None` rolls up across
+    /// all streams (the project-level breakdown); `Some(id)` scopes to one
+    /// stream. Largest first. Makes the dormant `metric_subject` package grain
+    /// (and the per-file dim breakdown) concrete (tsk327/328/319): for the
+    /// bundled code gauges — which emit a `subject_kind = 'file'` sample per
+    /// nonzero file — it answers "which package / language holds the most of
+    /// metric X". Empty when the metric has no matching per-file samples.
+    pub async fn dimension_rollup_for_metric(
         &self,
         metric_id: i64,
-        stream_id: i64,
-    ) -> Result<Vec<MetricPackageRollup>, DomainError> {
+        stream_id: Option<i64>,
+        dimension: String,
+    ) -> Result<Vec<MetricDimensionRollup>, DomainError> {
         let samples = self
             .db
             .call(move |conn| {
-                // The latest sample per file (max id per subject_ref).
+                // The latest sample per file (max id per subject_ref), optionally
+                // scoped to one stream (NULL ⇒ all streams).
                 let sql = format!(
                     "SELECT {SAMPLE_COLS} FROM metric_sample s
-                      WHERE s.metric_id = ?1 AND s.stream_id = ?2 AND s.subject_kind = 'file'
+                      WHERE s.metric_id = ?1 AND s.subject_kind = 'file'
+                        AND (?2 IS NULL OR s.stream_id = ?2)
                         AND s.id = (
                           SELECT MAX(s2.id) FROM metric_sample s2
-                           WHERE s2.metric_id = s.metric_id AND s2.stream_id = s.stream_id
-                             AND s2.subject_kind = 'file' AND s2.subject_ref = s.subject_ref
+                           WHERE s2.metric_id = s.metric_id AND s2.subject_kind = 'file'
+                             AND s2.subject_ref = s.subject_ref
+                             AND (?2 IS NULL OR s2.stream_id = ?2)
                         )"
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -908,29 +931,37 @@ impl SqliteMetricStore {
             })
             .await?;
 
-        // Group the latest-per-file samples by package (parent dir) in Rust.
-        let mut by_pkg: std::collections::BTreeMap<String, (f64, i64)> =
+        // Group the latest-per-file samples by the requested dimension in Rust.
+        let mut by_key: std::collections::BTreeMap<String, (f64, i64)> =
             std::collections::BTreeMap::new();
         for s in &samples {
-            let path = s.subject_ref.as_deref().or(s.path.as_deref()).unwrap_or("");
-            let entry = by_pkg.entry(package_of(path)).or_insert((0.0, 0));
+            let key = if dimension == "package" {
+                let path = s.subject_ref.as_deref().or(s.path.as_deref()).unwrap_or("");
+                package_of(path)
+            } else {
+                match dim_value(s, &dimension) {
+                    Some(v) => v,
+                    None => continue, // file without this dim — skip.
+                }
+            };
+            let entry = by_key.entry(key).or_insert((0.0, 0));
             entry.0 += s.value;
             entry.1 += 1;
         }
-        let mut out: Vec<MetricPackageRollup> = by_pkg
+        let mut out: Vec<MetricDimensionRollup> = by_key
             .into_iter()
-            .map(|(package, (value, file_count))| MetricPackageRollup {
-                package,
+            .map(|(key, (value, file_count))| MetricDimensionRollup {
+                key,
                 value,
                 file_count,
             })
             .collect();
-        // Largest first; tie-break on package name for determinism.
+        // Largest first; tie-break on key for determinism.
         out.sort_by(|a, b| {
             b.value
                 .partial_cmp(&a.value)
                 .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.package.cmp(&b.package))
+                .then_with(|| a.key.cmp(&b.key))
         });
         Ok(out)
     }
@@ -1401,11 +1432,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn package_rollup_sums_latest_per_file_by_directory() {
+    async fn dimension_rollup_sums_latest_per_file_by_package_and_language() {
         let store = fixture().await;
         let metric = gauge_def(&store, "oxplow.rust.unsafe_blocks").await;
-        // Two packages; a.rs has two samples (only the latest, 1.0, counts).
-        // A root-level file rolls up under ".". A second stream must not leak.
+        // a.rs has two samples (only the latest, 1.0, counts). A second stream
+        // must not leak when scoped. Files carry a `language` dim.
         store
             .db
             .call(|conn| {
@@ -1418,37 +1449,61 @@ mod tests {
             .await
             .unwrap();
         let rows = [
-            (1_i64, "src/app/a.rs", "2026-05-26T10:00:00Z", 5.0), // superseded
-            (1, "src/app/a.rs", "2026-05-26T10:40:00Z", 1.0),     // latest for a.rs
-            (1, "src/app/b.rs", "2026-05-26T10:40:00Z", 4.0),
-            (1, "src/util/c.rs", "2026-05-26T10:40:00Z", 9.0),
-            (1, "top.rs", "2026-05-26T10:40:00Z", 2.0), // repo root → "."
-            (2, "src/app/a.rs", "2026-05-26T10:40:00Z", 99.0), // other stream, excluded
+            (1_i64, "src/app/a.rs", "rust", "2026-05-26T10:00:00Z", 5.0), // superseded
+            (1, "src/app/a.rs", "rust", "2026-05-26T10:40:00Z", 1.0),     // latest for a.rs
+            (1, "src/app/b.rs", "rust", "2026-05-26T10:40:00Z", 4.0),
+            (1, "src/util/c.rs", "rust", "2026-05-26T10:40:00Z", 9.0),
+            (1, "web/util.ts", "typescript", "2026-05-26T10:40:00Z", 3.0),
+            (2, "src/app/a.rs", "rust", "2026-05-26T10:40:00Z", 99.0), // other stream
         ];
-        for (stream, path, ts, v) in rows {
+        for (stream, path, lang, ts, v) in rows {
             store
                 .record_sample(NewMetricSample {
                     captured_at: Some(at(ts)),
                     subject_kind: Some("file".into()),
                     subject_ref: Some(path.into()),
+                    dims_json: Some(format!("{{\"language\":\"{lang}\"}}")),
                     ..NewMetricSample::observed(metric, stream, v, "builtin")
                 })
                 .await
                 .unwrap();
         }
-        let rollup = store.package_rollup_for_metric(metric, 1).await.unwrap();
-        let got: Vec<(String, f64, i64)> = rollup
+
+        // By package, scoped to stream 1.
+        let by_pkg = store
+            .dimension_rollup_for_metric(metric, Some(1), "package".into())
+            .await
+            .unwrap();
+        let pkg: Vec<(String, f64, i64)> = by_pkg
             .iter()
-            .map(|r| (r.package.clone(), r.value, r.file_count))
+            .map(|r| (r.key.clone(), r.value, r.file_count))
             .collect();
-        // src/util (9) > src/app (1+4=5) > "." (2); stream-2 a.rs excluded;
+        // src/util (9) > src/app (1+4=5) > web (3); stream-2 a.rs excluded;
         // a.rs's superseded 5.0 not counted (latest 1.0 only).
         assert_eq!(
-            got,
+            pkg,
             vec![
                 ("src/util".to_string(), 9.0, 1),
                 ("src/app".to_string(), 5.0, 2),
-                (".".to_string(), 2.0, 1),
+                ("web".to_string(), 3.0, 1),
+            ]
+        );
+
+        // By language (a `dims_json` key), scoped to stream 1.
+        let by_lang = store
+            .dimension_rollup_for_metric(metric, Some(1), "language".into())
+            .await
+            .unwrap();
+        let lang: Vec<(String, f64, i64)> = by_lang
+            .iter()
+            .map(|r| (r.key.clone(), r.value, r.file_count))
+            .collect();
+        // rust 1+4+9 = 14 across 3 files; typescript 3 across 1.
+        assert_eq!(
+            lang,
+            vec![
+                ("rust".to_string(), 14.0, 3),
+                ("typescript".to_string(), 3.0, 1),
             ]
         );
     }

@@ -125,6 +125,7 @@ pub const MANIFEST: &[Capability] = &[
     // Unified metric substrate reads (tsk213) — exposed on both surfaces.
     both("list_metric_definitions"),
     both("list_metric_samples"),
+    ui("metric_dimension_rollup"),
     // Per-run finding detail (tsk213/tsk232) — both: the agent drills in via MCP,
     // the renderer's per-kind Metric detail view reads it over IPC.
     both("list_metric_findings"),

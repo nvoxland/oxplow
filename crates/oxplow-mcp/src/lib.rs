@@ -1811,7 +1811,7 @@ impl OxplowMcp {
         let rollup = self
             .services
             .metric_store
-            .package_rollup_for_metric(def.id, stream_id.value())
+            .dimension_rollup_for_metric(def.id, Some(stream_id.value()), "package".to_string())
             .await
             .map_err(internal)?;
         json_result(&rollup)

@@ -1685,6 +1685,7 @@ export type {
   MetricSample,
   MetricFinding,
   MetricCatalogEntry,
+  MetricDimensionRollup,
 } from "./tauri-bridge/index.js";
 
 /** The metric catalog — every known definition (built-in / global / project).
@@ -1707,6 +1708,19 @@ export async function listMetricSamples(
   return unwrap(
     await commands.listMetricSamples(metricKey, limit ?? null),
   ) as unknown as import("./tauri-bridge/index.js").MetricSample[];
+}
+
+/** Roll up a metric's per-file samples by a dimension — `"package"` (the
+ *  file's parent directory) or a per-file `dims_json` key like `"language"` —
+ *  summed across streams, largest first. The Metric Detail Breakdown card
+ *  (tsk328 package / tsk319 language). */
+export async function metricDimensionRollup(
+  metricKey: string,
+  dimension: string,
+): Promise<import("./tauri-bridge/index.js").MetricDimensionRollup[]> {
+  return unwrap(
+    await commands.metricDimensionRollup(metricKey, dimension),
+  ) as unknown as import("./tauri-bridge/index.js").MetricDimensionRollup[];
 }
 
 /** Per-finding detail rows for one metric run (`run_id` from a sample) — the

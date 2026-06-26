@@ -213,6 +213,7 @@ rpc_dispatch! {
     // metrics (unified substrate, tsk213)
     "list_metric_definitions" => commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> },
     "list_metric_samples" => commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64> },
+    "metric_dimension_rollup" => commands::metrics::metric_dimension_rollup { metric_key: String, dimension: String },
     "list_metric_findings" => commands::metrics::list_metric_findings { run_id: i64 },
     "list_metric_catalog" => commands::metrics::list_metric_catalog {},
     "set_metric_enabled" => commands::metrics::set_metric_enabled { key: String, enabled: bool },

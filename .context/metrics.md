@@ -185,10 +185,12 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `list_metric_findings` (by run id — findings-kind drill-in),
   `get_metric_summary` (latest value + delta-vs-target), and `metric_by_package`
   (tsk327 — rolls a per-file metric up by package/directory via
-  `SqliteMetricStore::package_rollup_for_metric`: the latest `subject_kind='file'`
-  sample per file, summed by parent dir, largest first — the dormant
-  `metric_subject` package grain made concrete; "which package holds the most
-  complexity/TODOs"). Authoring/trigger:
+  `SqliteMetricStore::dimension_rollup_for_metric(.., "package")`: the latest
+  `subject_kind='file'` sample per file, summed by parent dir, largest first —
+  the dormant `metric_subject` package grain made concrete; "which package
+  holds the most complexity/TODOs"). The same store method rolls up by any
+  per-file `dims_json` key (e.g. `language`, tsk319) and backs the IPC
+  `metric_dimension_rollup` + the Metric Detail **Breakdown** card (tsk328/319). Authoring/trigger:
   `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`)
   and `record_metric` (an **asserted**, run-less sample for CI/agent-reported
   numbers). These four are **agent-only** (classified in the surface-parity

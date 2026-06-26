@@ -485,6 +485,12 @@ export const commands = {
 	// Durable samples for one metric (by definition `key`), newest-first.
 	listMetricSamples: (metricKey: string, limit: number | null) => typedError<MetricSample[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit })),
 	/**
+	 *  Roll up a metric's per-file samples by a dimension (`"package"` or a
+	 *  `dims_json` key like `"language"`), largest first — the Metric Detail
+	 *  Breakdown card (tsk328/tsk319).
+	 */
+	metricDimensionRollup: (metricKey: string, dimension: string) => typedError<MetricDimensionRollup[], IpcError>(__TAURI_INVOKE("metric_dimension_rollup", { metricKey, dimension })),
+	/**
 	 *  Per-finding detail rows for one metric run — the per-kind Metric detail
 	 *  drill-in (findings table / test tree / coverage heat).
 	 */
@@ -1900,6 +1906,26 @@ export type MetricDefinition = {
 	fail_at: number | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
+};
+
+/**
+ *  A metric's per-file values rolled up by one **dimension** — the package
+ *  (a file's parent directory) or any `dims_json` key the file samples carry
+ *  (e.g. `language`). Sums the latest value of each contributing file. The
+ *  `metric_subject` package grain (and the per-file dim breakdown) made
+ *  concrete (tsk327/tsk328/tsk319) — answers "which package / language holds
+ *  the most of metric X". Files at the repo root roll up under ".".
+ */
+export type MetricDimensionRollup = {
+	/**
+	 *  The dimension value the files were grouped by — a directory (for
+	 *  `package`) or a `dims_json` value (e.g. a language name).
+	 */
+	key: string,
+	// Sum of the latest value of each file under this key.
+	value: number,
+	// How many files contributed.
+	file_count: number,
 };
 
 /**

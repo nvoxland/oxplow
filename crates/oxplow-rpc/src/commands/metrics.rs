@@ -6,7 +6,7 @@
 
 use oxplow_app::metrics_service::MetricCatalogEntry;
 use oxplow_app::Services;
-use oxplow_db::{MetricDefinition, MetricFinding, MetricSample};
+use oxplow_db::{MetricDefinition, MetricDimensionRollup, MetricFinding, MetricSample};
 
 use crate::error::IpcError;
 
@@ -51,6 +51,25 @@ pub async fn list_metric_findings(
     run_id: i64,
 ) -> Result<Vec<MetricFinding>, IpcError> {
     Ok(svc.metric_store.list_findings(run_id).await?)
+}
+
+/// Roll up a metric's latest per-file samples by a dimension — `"package"`
+/// (the file's parent directory) or any per-file `dims_json` key like
+/// `"language"` — summed across all streams, largest first. Unknown key →
+/// empty (UI-friendly). Backs the Metric Detail **Breakdown** card
+/// (tsk328 package / tsk319 language).
+pub async fn metric_dimension_rollup(
+    svc: &Services,
+    metric_key: String,
+    dimension: String,
+) -> Result<Vec<MetricDimensionRollup>, IpcError> {
+    let Some(def) = svc.metric_store.get_definition(&metric_key).await? else {
+        return Ok(vec![]);
+    };
+    Ok(svc
+        .metric_store
+        .dimension_rollup_for_metric(def.id, None, dimension)
+        .await?)
 }
 
 /// The available catalog (built-in ∪ global ∪ project) with each entry's

@@ -42,8 +42,9 @@ pub use effort_store::{
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use metric_store::{
-    EffortMetricDelta, MetricDefinition, MetricFinding, MetricRun, MetricSample,
-    NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore,
+    EffortMetricDelta, MetricDefinition, MetricDimensionRollup, MetricFinding, MetricRun,
+    MetricSample, NewMetricDefinition, NewMetricFinding, NewMetricRun, NewMetricSample,
+    SqliteMetricStore,
 };
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};

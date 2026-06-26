@@ -16,6 +16,7 @@ import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
   KindDrillIn,
+  MetricBreakdownCard,
   MetricControls,
   MetricStatsRail,
   RecordingsTable,
@@ -158,6 +159,7 @@ export function MetricDetailPage({
           <SectionLabel>Recordings</SectionLabel>
           <RecordingsTable samples={filtered} unit={def.unit} metricKey={def.key} onOpenPage={onOpenPage} />
         </div>
+        <MetricBreakdownCard def={def} />
         {hasDrillIn ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <SectionLabel>Latest run</SectionLabel>

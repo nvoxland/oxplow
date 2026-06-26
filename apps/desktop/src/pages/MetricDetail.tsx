@@ -1,11 +1,13 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   EffortMetricDelta,
   MetricDefinition,
+  MetricDimensionRollup,
   MetricFinding,
   MetricSample,
 } from "../api.js";
+import { metricDimensionRollup } from "../api.js";
 import {
   deltaColor,
   deltaSummary,
@@ -704,4 +706,98 @@ export function KindDrillIn({
     default:
       return null;
   }
+}
+
+/** The dimensions a per-file metric can be broken down by: always `package`
+ *  (the file's directory), plus any per-file `dims_json` key the metric
+ *  declares (e.g. `language`). Run/time dims that aren't a per-file grain
+ *  (`git_version`, `branch`) are excluded. */
+function breakdownDimensions(def: MetricDefinition): string[] {
+  const out = ["package"];
+  if (def.dimensions_json) {
+    try {
+      for (const d of JSON.parse(def.dimensions_json) as string[]) {
+        if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+/** Breakdown card: roll the metric's latest per-file values up by a chosen
+ *  dimension (package / language / …) and render a horizontal bar list,
+ *  largest first. Exercises the `metric_subject` package grain + the per-file
+ *  dim breakdown (tsk328 package / tsk319 language). Self-hides when the
+ *  metric has no per-file samples (e.g. coverage, operational metrics). */
+export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
+  const dims = useMemo(() => breakdownDimensions(def), [def]);
+  const [dim, setDim] = useState<string>(dims[0] ?? "package");
+  const [rows, setRows] = useState<MetricDimensionRollup[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void metricDimensionRollup(def.key, dim).then((r) => {
+      if (!cancelled) setRows(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [def.key, dim]);
+
+  if (rows.length === 0) return null;
+  const max = Math.max(...rows.map((r) => r.value), 1);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="metric-breakdown">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            opacity: 0.6,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}
+        >
+          Breakdown by
+        </div>
+        <select
+          value={dim}
+          onChange={(e) => setDim(e.target.value)}
+          aria-label="Breakdown dimension"
+          style={{ fontSize: 12 }}
+        >
+          {dims.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
+        </select>
+      </div>
+      {rows.slice(0, 20).map((r) => (
+        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+          <span
+            style={{ width: "32%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            title={`${r.key} · ${r.file_count} file${r.file_count === 1 ? "" : "s"}`}
+          >
+            {r.key}
+          </span>
+          <div style={{ flex: 1, background: "var(--bg-tier-2, #222)", borderRadius: 3, height: 12 }}>
+            <div
+              style={{
+                width: `${(r.value / max) * 100}%`,
+                background: "#58a6ff",
+                height: 12,
+                borderRadius: 3,
+              }}
+            />
+          </div>
+          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+            {fmt(r.value)}
+            <span style={{ opacity: 0.5 }}> · {r.file_count}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }

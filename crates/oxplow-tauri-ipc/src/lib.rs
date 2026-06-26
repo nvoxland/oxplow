@@ -188,6 +188,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::effort::list_effort_metric_deltas,
             commands::metrics::list_metric_definitions,
             commands::metrics::list_metric_samples,
+            commands::metrics::metric_dimension_rollup,
             commands::metrics::list_metric_findings,
             commands::metrics::list_metric_catalog,
             commands::metrics::set_metric_enabled,

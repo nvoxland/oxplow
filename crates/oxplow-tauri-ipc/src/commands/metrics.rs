@@ -1,7 +1,7 @@
 //! Unified metric substrate read commands (epic tsk213).
 
 use oxplow_app::metrics_service::MetricCatalogEntry;
-use oxplow_db::{MetricDefinition, MetricFinding, MetricSample};
+use oxplow_db::{MetricDefinition, MetricDimensionRollup, MetricFinding, MetricSample};
 
 use crate::error::IpcError;
 use crate::state::AppState;
@@ -27,6 +27,19 @@ pub async fn list_metric_samples(
     limit: Option<i64>,
 ) -> Result<Vec<MetricSample>, IpcError> {
     oxplow_rpc::commands::metrics::list_metric_samples(&state, metric_key, limit).await
+}
+
+/// Roll up a metric's per-file samples by a dimension (`"package"` or a
+/// `dims_json` key like `"language"`), largest first — the Metric Detail
+/// Breakdown card (tsk328/tsk319).
+#[tauri::command]
+#[specta::specta]
+pub async fn metric_dimension_rollup(
+    state: tauri::State<'_, AppState>,
+    metric_key: String,
+    dimension: String,
+) -> Result<Vec<MetricDimensionRollup>, IpcError> {
+    oxplow_rpc::commands::metrics::metric_dimension_rollup(&state, metric_key, dimension).await
 }
 
 /// Per-finding detail rows for one metric run — the per-kind Metric detail
