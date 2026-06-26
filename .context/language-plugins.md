@@ -91,9 +91,9 @@ These are the substrate the Metrics package/dimension roll-up builds on:
 `SqliteMetricStore::dimension_rollup_for_metric` sums a per-file metric's
 latest values by **package** (directory) or any per-file `dims_json` key
 (e.g. **language**) — the `metric_subject` package grain made concrete. It
-backs the `metric_by_package` MCP tool (tsk327), the `metric_dimension_rollup`
-IPC, and the Metric Detail **Breakdown** card (tsk328 package / tsk319
-language). A per-package/-language *time series* in the Metrics Explorer
+backs the `metric_breakdown` MCP tool (tsk327/330 — `dimension` defaults to
+`package`, optional `stream`), the `metric_dimension_rollup` IPC, and the
+Metric Detail **Breakdown** card (tsk328 package / tsk319 language). A per-package/-language *time series* in the Metrics Explorer
 (a charting-semantics change) remains a future refinement.
 
 ## Adding a language (the checklist)

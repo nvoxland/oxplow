@@ -183,13 +183,15 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 - **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
   (optional language/scope filter), `list_metric_samples` (by key, newest-first),
   `list_metric_findings` (by run id — findings-kind drill-in),
-  `get_metric_summary` (latest value + delta-vs-target), and `metric_by_package`
-  (tsk327 — rolls a per-file metric up by package/directory via
-  `SqliteMetricStore::dimension_rollup_for_metric(.., "package")`: the latest
-  `subject_kind='file'` sample per file, summed by parent dir, largest first —
-  the dormant `metric_subject` package grain made concrete; "which package
-  holds the most complexity/TODOs"). The same store method rolls up by any
-  per-file `dims_json` key (e.g. `language`, tsk319) and backs the IPC
+  `get_metric_summary` (latest value + delta-vs-target), and `metric_breakdown`
+  (tsk327/330 — rolls a per-file metric up by a **dimension** via
+  `SqliteMetricStore::dimension_rollup_for_metric`: the latest
+  `subject_kind='file'` sample per file, summed by `dimension` key, largest
+  first — the dormant `metric_subject` package grain made concrete; "which
+  package / language holds the most complexity/TODOs"). `dimension` is
+  `"package"` (default — parent dir) or any per-file `dims_json` key (e.g.
+  `language`, tsk319); `stream` is optional (omit ⇒ all streams), matching the
+  UI. The same store method backs the IPC
   `metric_dimension_rollup` + the Metric Detail **Breakdown** card (tsk328/319). Authoring/trigger:
   `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`)
   and `record_metric` (an **asserted**, run-less sample for CI/agent-reported

@@ -140,7 +140,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("run_metric"),
     agent("record_metric"),
     agent("get_metric_summary"),
-    agent("metric_by_package"),
+    agent("metric_breakdown"),
     ui("list_nudges_for_effort"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),

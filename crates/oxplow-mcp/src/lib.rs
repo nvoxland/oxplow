@@ -607,10 +607,17 @@ pub struct LspCallHierarchyParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct MetricByPackageParams {
+pub struct MetricBreakdownParams {
     pub metric_key: String,
-    /// Stream to roll up (e.g. "str1"). Per-file samples are stream-scoped.
-    pub stream: String,
+    /// Dimension to group by: "package" (default — each file's parent
+    /// directory) or any per-file `dims_json` key the metric carries, e.g.
+    /// "language". Omit for "package".
+    #[serde(default)]
+    pub dimension: Option<String>,
+    /// Stream to scope to (e.g. "str1"). Omit to roll up across all streams
+    /// (the project-wide view, matching the UI breakdown).
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 /// Optional stream selector shared by the stream-scoped git read tools.
@@ -1783,17 +1790,19 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Roll up a code metric by PACKAGE (directory). For a metric that emits \
-            per-file samples — the bundled code gauges (oxplow.todos, oxplow.fn_count, \
+        description = "Roll up a code metric by a DIMENSION. For a metric that emits per-file \
+            samples — the bundled code gauges (oxplow.todos, oxplow.fn_count, \
             oxplow.high_complexity_fns, oxplow.long_functions) and the oxplow.<lang>.* idiom \
-            metrics — returns its latest value summed per package (each file's parent \
-            directory), largest first, with the contributing file count. Answers 'which package \
-            holds the most complexity / TODOs / unsafe blocks'. Empty if the metric has no \
-            per-file samples for the stream. `stream` is required (e.g. \"str1\")."
+            metrics — returns its latest value summed per dimension key, largest first, with the \
+            contributing file count. `dimension` is \"package\" (default — each file's parent \
+            directory) or any per-file dims_json key the metric carries, e.g. \"language\". \
+            Answers 'which package / language holds the most complexity / TODOs / unsafe blocks'. \
+            `stream` scopes to one stream (e.g. \"str1\"); omit it to roll up across all streams \
+            (the project-wide view). Empty if the metric has no matching per-file samples."
     )]
-    async fn metric_by_package(
+    async fn metric_breakdown(
         &self,
-        params: Parameters<MetricByPackageParams>,
+        params: Parameters<MetricBreakdownParams>,
     ) -> Result<CallToolResult, McpError> {
         let Some(def) = self
             .services
@@ -1807,11 +1816,15 @@ impl OxplowMcp {
                 None,
             ));
         };
-        let stream_id = parse_stream_id(&params.0.stream)?;
+        let dimension = params.0.dimension.unwrap_or_else(|| "package".to_string());
+        let stream_id = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?.value()),
+            None => None,
+        };
         let rollup = self
             .services
             .metric_store
-            .dimension_rollup_for_metric(def.id, Some(stream_id.value()), "package".to_string())
+            .dimension_rollup_for_metric(def.id, stream_id, dimension)
             .await
             .map_err(internal)?;
         json_result(&rollup)
