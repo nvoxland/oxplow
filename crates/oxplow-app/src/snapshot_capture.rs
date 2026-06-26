@@ -1402,12 +1402,27 @@ mod tests {
         cfg.set_str("user.name", "t").unwrap();
         cfg.set_str("user.email", "t@e.com").unwrap();
         let mut idx = repo.index().unwrap();
+        // Backdate each file to a fixed whole-second time in the past *before*
+        // `add_path`, so the index entry caches that mtime while the `.git/index`
+        // we write below lands at "now". Without this, `GitCleanBaseline`'s
+        // racy-clean rule (file mtime >= index mtime ⇒ untrusted) trips when the
+        // write+commit collapse into one filesystem tick — which the capture
+        // sweep then resolves to oxplow storage instead of git, making the
+        // git-backing assertion pass on macOS but flake on Linux CI. A whole
+        // second (zero nanos) also dodges any sub-second mtime truncation.
+        let past = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
         for (p, c) in files {
             let full = dir.join(p);
             if let Some(parent) = full.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }
             std::fs::write(&full, c).unwrap();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&full)
+                .unwrap()
+                .set_modified(past)
+                .unwrap();
             idx.add_path(std::path::Path::new(p)).unwrap();
         }
         idx.write().unwrap();
