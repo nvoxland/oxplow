@@ -47,28 +47,14 @@ pub enum LspSessionError {
     NotInitialized(String),
 }
 
-/// Hand-curated language-id → Mason package suggestions, mirrored by
-/// `apps/desktop/src/lspSuggestions.ts` (keep the two in sync). Used
-/// to make `NoConfig` errors actionable for both agents and the UI.
+/// Curated language-id → Mason package suggestion. The source of truth is
+/// now the per-language registry in `oxplow-code-metrics`
+/// (`plugin::mason_suggestion` — analysis languages carry their hint on the
+/// `LanguagePlugin` bundle, LSP-only languages fall back to a small table
+/// there). Still mirrored by `apps/desktop/src/lspSuggestions.ts` (keep the
+/// two in sync). Used to make `NoConfig` errors actionable for agents + UI.
 pub fn mason_suggestion(language: &str) -> Option<&'static str> {
-    match language {
-        "rust" => Some("rust-analyzer"),
-        "go" => Some("gopls"),
-        "typescript" | "javascript" | "typescriptreact" | "javascriptreact" => {
-            Some("typescript-language-server")
-        }
-        "python" => Some("pyright"),
-        "lua" => Some("lua-language-server"),
-        "c" | "cpp" => Some("clangd"),
-        "json" => Some("json-lsp"),
-        "yaml" => Some("yaml-language-server"),
-        "html" => Some("html-lsp"),
-        "css" => Some("css-lsp"),
-        "bash" | "shell" => Some("bash-language-server"),
-        "ruby" => Some("ruby-lsp"),
-        "zig" => Some("zls"),
-        _ => None,
-    }
+    oxplow_code_metrics::mason_suggestion(language)
 }
 
 fn no_config_message(language: &str) -> String {

@@ -7,8 +7,11 @@
 //! - **parameter-count** — number of declared parameters.
 //!
 //! Languages bundled: Rust, TypeScript, TSX, JavaScript, Python, Go,
-//! Java, C, C++. Adding a new language is one entry in `Language`
-//! plus a `LanguageSpec` with the relevant tree-sitter node names.
+//! Java, C, C++, Clojure, C#. Each language is declared as one cohesive
+//! [`plugin::LanguagePlugin`] in the registry (identity, extensions, LSP
+//! suggestion, unit kinds) plus its `LanguageSpec` node tables in
+//! [`spec`]. Adding a language is a single, well-isolated change — see
+//! `.context/language-plugins.md`.
 //!
 //! Files in unsupported languages are silently skipped (the caller
 //! sees no findings for them).
@@ -18,12 +21,16 @@ use std::path::Path;
 use tree_sitter::Node;
 
 mod ast;
+pub mod plugin;
 mod spec;
 
 pub use ast::{ast_query, parse, query, AstQueryError, QueryMatch};
+pub use plugin::{
+    for_language as language_plugin, language_for_path, mason_suggestion, registry, LanguagePlugin,
+    UnitKind,
+};
 pub use spec::{
-    language_for_path, language_from_lsp_id, language_from_name, Language, LanguageSpec,
-    VisibilityStrategy,
+    language_from_lsp_id, language_from_name, Language, LanguageSpec, VisibilityStrategy,
 };
 pub use tree_sitter::Tree;
 

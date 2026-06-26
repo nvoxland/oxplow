@@ -62,6 +62,7 @@ or exact mechanics.
 
 | If you're touching… | Read first |
 |---|---|
+| Language support — the `Language` enum, `LanguagePlugin` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-plugins.md` |
 | Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |

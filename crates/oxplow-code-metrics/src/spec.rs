@@ -202,26 +202,9 @@ pub fn language_from_name(name: &str) -> Option<Language> {
     })
 }
 
-/// Cheap path-extension check.
-pub fn language_for_path(path: &str) -> Option<Language> {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())?;
-    Some(match ext.to_ascii_lowercase().as_str() {
-        "rs" => Language::Rust,
-        "ts" => Language::TypeScript,
-        "tsx" => Language::Tsx,
-        "js" | "mjs" | "cjs" | "jsx" => Language::JavaScript,
-        "py" => Language::Python,
-        "go" => Language::Go,
-        "java" => Language::Java,
-        "c" | "h" => Language::C,
-        "cc" | "cxx" | "cpp" | "hpp" | "hxx" => Language::Cpp,
-        "clj" | "cljs" | "cljc" => Language::Clojure,
-        "cs" => Language::CSharp,
-        _ => return None,
-    })
-}
+// Path-extension → language resolution lives in [`crate::plugin`] now: the
+// per-language `LanguagePlugin::extensions` is the single source of truth
+// (`plugin::language_for_path`). See `.context/language-plugins.md`.
 
 /// Resolve an LSP `languageId` (the string a language server / editor
 /// uses to label a buffer, e.g. `"typescriptreact"`) to the canonical
