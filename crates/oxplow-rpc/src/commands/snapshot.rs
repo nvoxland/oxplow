@@ -1,11 +1,14 @@
 //! Cores for the `snapshot` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use similar::{ChangeTag, TextDiff};
 use specta::Type;
 
+use oxplow_app::blob_store::BlobStore;
 use oxplow_app::Services;
 use oxplow_db::{FileSnapshot, Snapshot, SnapshotChangeEntry, SnapshotStats};
 use oxplow_domain::StreamId;
@@ -228,9 +231,9 @@ pub enum DiffEndpoint {
 
 /// One changed path between two [`DiffEndpoint`]s. `status` is
 /// `"added" | "modified" | "deleted"`, matching the renderer's
-/// `BranchChangeEntry`. Line counts are 0 until the per-file content
-/// pass lands (tracked separately) — the SummaryCard renders 0s, the
-/// same as the previous snapshot-mode behavior.
+/// `BranchChangeEntry`. `additions`/`deletions` are per-file line
+/// counts (via `similar`), `0` only for binary, oversize, or otherwise
+/// unreadable content.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffEntry {
@@ -249,76 +252,290 @@ fn change_status_str(s: oxplow_domain::ChangeStatus) -> &'static str {
 }
 
 /// Diff two endpoints. `start = None` diffs `end` against the empty
-/// tree (everything added). Homogeneous pairs use the native fast
-/// paths — snapshot↔snapshot via `SqliteSnapshotStore::diff_snapshots`,
-/// commit↔commit via [`oxplow_git::tree_at_commit`] + the shared
-/// [`oxplow_domain::diff_trees`]. Mixed snapshot/commit and
-/// working-tree endpoints are not yet supported: their content-identity
-/// spaces differ (snapshot xxh3 vs git blob oid), so a faithful diff
-/// needs a normalization pass (tracked separately).
+/// tree (everything added).
+///
+/// The unified resolver builds a `path -> content cell` tree for each
+/// endpoint, then compares. Same-identity-space pairs (snapshot↔snapshot,
+/// commit↔commit, commit↔working, …) compare raw — no byte reads.
+/// Cross-space pairs (snapshot↔commit, snapshot↔working) **normalize**
+/// the snapshot side into git-oid space (read each oxplow-stored blob's
+/// bytes, recompute its git blob oid) so it compares like-for-like
+/// against the git tree. Oversize / pruned content keeps a best-effort
+/// opaque identity. `additions`/`deletions` are per-file line counts via
+/// `similar`, computed for the changed set only.
 pub async fn diff_endpoints(
     svc: &Services,
     start: Option<DiffEndpoint>,
     end: DiffEndpoint,
 ) -> Result<Vec<DiffEntry>, IpcError> {
-    let changes = endpoint_changes(svc, start.as_ref(), &end).await?;
-    Ok(changes
-        .into_iter()
-        .map(|c| DiffEntry {
-            path: c.path,
-            status: change_status_str(c.status).to_string(),
-            additions: 0,
-            deletions: 0,
-        })
-        .collect())
-}
-
-async fn endpoint_changes(
-    svc: &Services,
-    start: Option<&DiffEndpoint>,
-    end: &DiffEndpoint,
-) -> Result<Vec<oxplow_domain::FileChange>, IpcError> {
-    use DiffEndpoint::{Commit, Snapshot};
-    match (start, end) {
-        (None, Snapshot { snapshot_id }) => Ok(svc
-            .snapshot_store
-            .diff_snapshots(None, *snapshot_id)
-            .await?),
-        (Some(Snapshot { snapshot_id: from }), Snapshot { snapshot_id: to }) => Ok(svc
-            .snapshot_store
-            .diff_snapshots(Some(*from), *to)
-            .await?),
-        (None, Commit { sha }) => commit_changes(svc, None, sha).await,
-        (Some(Commit { sha: from }), Commit { sha: to }) => {
-            commit_changes(svc, Some(from), to).await
+    // Snapshot trees come off the DB (async); prefetch them, then do the
+    // git / fs / hashing / diff work on the blocking pool.
+    let start_snap = match &start {
+        Some(DiffEndpoint::Snapshot { snapshot_id }) => {
+            Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
         }
-        _ => Err(IpcError::invalid(
-            "diff_endpoints: mixed snapshot/commit and working-tree endpoints are not yet supported",
-        )),
-    }
-}
-
-/// commit↔commit (or empty↔commit) via libgit2 trees, off the async
-/// runtime. `from = None` ⇒ everything in `to` is added.
-async fn commit_changes(
-    svc: &Services,
-    from: Option<&str>,
-    to: &str,
-) -> Result<Vec<oxplow_domain::FileChange>, IpcError> {
-    let dir = svc.layout.project_dir.clone();
-    let from = from.map(str::to_string);
-    let to = to.to_string();
-    tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let after = oxplow_git::tree_at_commit(&dir, &to).map_err(|e| e.to_string())?;
-        let before = match from {
-            Some(f) => oxplow_git::tree_at_commit(&dir, &f).map_err(|e| e.to_string())?,
-            None => std::collections::BTreeMap::new(),
-        };
-        Ok(oxplow_domain::diff_trees(&before, &after))
+        _ => None,
+    };
+    let end_snap = match &end {
+        DiffEndpoint::Snapshot { snapshot_id } => {
+            Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
+        }
+        _ => None,
+    };
+    let project_dir = svc.layout.project_dir.clone();
+    let blobs = svc.blobs.clone();
+    let filter = current_filter(svc);
+    tokio::task::spawn_blocking(move || {
+        compute_diff(
+            start,
+            end,
+            start_snap,
+            end_snap,
+            &project_dir,
+            &blobs,
+            &filter,
+        )
     })
     .await
     .map_err(|e| IpcError::internal(e.to_string()))?
     .map_err(IpcError::internal)
+}
+
+/// The identity space a tree's `Cell`s compare in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Space {
+    /// xxh3 / git-oid / oversize-sentinel as stored by the snapshot store.
+    Snapshot,
+    /// git blob oids (commit trees, and the working tree we build in this
+    /// space).
+    Git,
+}
+
+/// How to fetch a path's raw bytes for line counting.
+#[derive(Clone)]
+enum ContentSource {
+    /// `id` is an xxh3 hash → oxplow blob store.
+    Oxplow,
+    /// `id` is a git blob oid → git odb.
+    Git,
+    /// live file on disk.
+    Working(PathBuf),
+    /// oversize / pruned — no readable bytes; identity is opaque.
+    Unreadable,
+}
+
+/// A path's content within one endpoint's tree.
+#[derive(Clone)]
+struct Cell {
+    /// Diff-comparison identity, in the cell's native [`Space`].
+    id: String,
+    source: ContentSource,
+}
+
+fn compute_diff(
+    start: Option<DiffEndpoint>,
+    end: DiffEndpoint,
+    start_snap: Option<BTreeMap<String, String>>,
+    end_snap: Option<BTreeMap<String, String>>,
+    project_dir: &Path,
+    blobs: &BlobStore,
+    filter: &WorkspaceFilter,
+) -> Result<Vec<DiffEntry>, String> {
+    let (after_cells, after_space) = cells_for_endpoint(&end, end_snap, project_dir, filter)?;
+    let (before_cells, before_space) = match &start {
+        Some(ep) => {
+            let (cells, space) = cells_for_endpoint(ep, start_snap, project_dir, filter)?;
+            (cells, Some(space))
+        }
+        None => (BTreeMap::new(), None),
+    };
+
+    // Cross-space pairs normalize into git-oid space; same-space pairs
+    // (incl. None start) compare raw identities with no byte reads.
+    let normalize = before_space.is_some_and(|bs| bs != after_space);
+    let before_ids: BTreeMap<String, String> = before_cells
+        .iter()
+        .map(|(p, c)| (p.clone(), compare_id(c, normalize, blobs)))
+        .collect();
+    let after_ids: BTreeMap<String, String> = after_cells
+        .iter()
+        .map(|(p, c)| (p.clone(), compare_id(c, normalize, blobs)))
+        .collect();
+    let changes = oxplow_domain::diff_trees(&before_ids, &after_ids);
+
+    Ok(changes
+        .into_iter()
+        .map(|c| {
+            let base = before_cells
+                .get(&c.path)
+                .and_then(|cell| read_cell(cell, blobs, project_dir));
+            let head = after_cells
+                .get(&c.path)
+                .and_then(|cell| read_cell(cell, blobs, project_dir));
+            let (additions, deletions) = count_lines(base.as_deref(), head.as_deref());
+            DiffEntry {
+                path: c.path,
+                status: change_status_str(c.status).to_string(),
+                additions,
+                deletions,
+            }
+        })
+        .collect())
+}
+
+/// Build one endpoint's `path -> Cell` tree + its identity space.
+fn cells_for_endpoint(
+    ep: &DiffEndpoint,
+    snap_tree: Option<BTreeMap<String, String>>,
+    project_dir: &Path,
+    filter: &WorkspaceFilter,
+) -> Result<(BTreeMap<String, Cell>, Space), String> {
+    match ep {
+        DiffEndpoint::Snapshot { .. } => {
+            let cells = snap_tree
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(path, id)| (path, classify_snapshot_cell(id)))
+                .collect();
+            Ok((cells, Space::Snapshot))
+        }
+        DiffEndpoint::Commit { sha } => {
+            let tree = oxplow_git::tree_at_commit(project_dir, sha).map_err(|e| e.to_string())?;
+            let cells = tree
+                .into_iter()
+                .map(|(path, oid)| {
+                    (
+                        path,
+                        Cell {
+                            id: oid,
+                            source: ContentSource::Git,
+                        },
+                    )
+                })
+                .collect();
+            Ok((cells, Space::Git))
+        }
+        DiffEndpoint::Working => Ok((working_cells(project_dir, filter), Space::Git)),
+    }
+}
+
+/// Infer a snapshot row's content source from its `tree_at` identity:
+/// 40-hex git oid, `oversize:…` sentinel, else a 32-hex xxh3 hash.
+fn classify_snapshot_cell(id: String) -> Cell {
+    let source = if id.starts_with("oversize:") {
+        ContentSource::Unreadable
+    } else if id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        ContentSource::Git
+    } else {
+        ContentSource::Oxplow
+    };
+    Cell { id, source }
+}
+
+/// Build the live working tree in git-oid space, honouring the
+/// generated-file filter (the same walk the capture sweep uses). Clean
+/// tracked files reuse their HEAD blob oid (no read); dirty / untracked
+/// files are hashed from disk.
+fn working_cells(project_dir: &Path, filter: &WorkspaceFilter) -> BTreeMap<String, Cell> {
+    let clean = oxplow_git::clean_head_blob_oids(project_dir);
+    let mut out = BTreeMap::new();
+    for entry in walkdir::WalkDir::new(project_dir)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
+            !filter.ignore(rel, e.file_type().is_dir())
+        })
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(project_dir) else {
+            continue;
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let abs = entry.path().to_path_buf();
+        let id = match clean.get(&rel_str) {
+            Some(oid) => oid.clone(),
+            None => match std::fs::read(&abs)
+                .ok()
+                .as_deref()
+                .and_then(oxplow_git::git_blob_oid)
+            {
+                Some(oid) => oid,
+                None => continue,
+            },
+        };
+        out.insert(
+            rel_str,
+            Cell {
+                id,
+                source: ContentSource::Working(abs),
+            },
+        );
+    }
+    out
+}
+
+/// The comparison identity for a cell. Raw when same-space; normalized
+/// into git-oid space when crossing spaces (only an oxplow xxh3 cell
+/// needs a byte read + rehash — git/working ids are already oids, an
+/// oversize sentinel stays opaque). A failed read falls back to the raw
+/// id (best-effort: it simply won't match, so the file reads as changed).
+fn compare_id(cell: &Cell, normalize_to_git: bool, blobs: &BlobStore) -> String {
+    if !normalize_to_git {
+        return cell.id.clone();
+    }
+    match &cell.source {
+        ContentSource::Oxplow => blobs
+            .read(&cell.id)
+            .ok()
+            .as_deref()
+            .and_then(oxplow_git::git_blob_oid)
+            .unwrap_or_else(|| cell.id.clone()),
+        _ => cell.id.clone(),
+    }
+}
+
+/// Raw bytes for a cell, for line counting. `None` for oversize / pruned
+/// content or a failed read.
+fn read_cell(cell: &Cell, blobs: &BlobStore, project_dir: &Path) -> Option<Vec<u8>> {
+    match &cell.source {
+        ContentSource::Oxplow => blobs.read(&cell.id).ok(),
+        ContentSource::Git => oxplow_git::read_blob(project_dir, &cell.id),
+        ContentSource::Working(path) => std::fs::read(path).ok(),
+        ContentSource::Unreadable => None,
+    }
+}
+
+/// Added / deleted line counts between two blobs via `similar`. A
+/// missing side is the empty file (added → all of head; deleted → all
+/// of base). Binary content (NUL byte) yields `(0, 0)`.
+fn count_lines(base: Option<&[u8]>, head: Option<&[u8]>) -> (u32, u32) {
+    let is_binary = |b: &&[u8]| b.contains(&0);
+    if base.filter(is_binary).is_some() || head.filter(is_binary).is_some() {
+        return (0, 0);
+    }
+    let base_s = base
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .unwrap_or_default();
+    let head_s = head
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .unwrap_or_default();
+    let diff = TextDiff::from_lines(base_s.as_str(), head_s.as_str());
+    let mut additions = 0u32;
+    let mut deletions = 0u32;
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Insert => additions += 1,
+            ChangeTag::Delete => deletions += 1,
+            ChangeTag::Equal => {}
+        }
+    }
+    (additions, deletions)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -598,18 +815,145 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn diff_endpoints_rejects_mixed_endpoints() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = super::diff_endpoints(
+    async fn diff_endpoints_mixed_snapshot_vs_commit_normalizes_oxplow_blob() {
+        let (svc, dir) = crate::test_support::services();
+        let p = dir.path();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .status()
+                .unwrap()
+                .success());
+        };
+        let rev = || {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(p)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+
+        // Commit a file, then capture an oxplow-storage snapshot of the
+        // SAME bytes (blob in the oxplow store, keyed by xxh3). The two
+        // identities differ raw (xxh3 vs git oid) but must compare equal
+        // after the snapshot side is normalized into git-oid space.
+        let content = "line one\nline two\n";
+        std::fs::write(p.join("a.txt"), content).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let c1 = rev();
+
+        let hash = svc.blobs.write(content.as_bytes()).unwrap();
+        let p1 = svc.snapshot_store.create_snapshot(stream).await.unwrap();
+        svc.snapshot_store
+            .capture(oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: stream,
+                path: "a.txt".into(),
+                blob_hash: Some(hash),
+                size_bytes: content.len() as i64,
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: oxplow_db::SnapshotStorage::Oxplow,
+                snapshot_id: Some(p1),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+
+        let same = super::diff_endpoints(
             &svc,
-            Some(super::DiffEndpoint::Snapshot { snapshot_id: 1 }),
-            super::DiffEndpoint::Commit { sha: "HEAD".into() },
+            Some(super::DiffEndpoint::Snapshot { snapshot_id: p1 }),
+            super::DiffEndpoint::Commit { sha: c1 },
         )
-        .await;
+        .await
+        .unwrap();
         assert!(
-            out.is_err(),
-            "mixed snapshot/commit endpoints not yet supported"
+            !same.iter().any(|e| e.path == "a.txt"),
+            "identical content across stores must not be a change: {same:?}"
         );
+
+        // Now change the committed bytes → a.txt is modified.
+        std::fs::write(p.join("a.txt"), "line one\nCHANGED\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c2"]);
+        let c2 = rev();
+        let changed = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Snapshot { snapshot_id: p1 }),
+            super::DiffEndpoint::Commit { sha: c2 },
+        )
+        .await
+        .unwrap();
+        assert!(
+            changed
+                .iter()
+                .any(|e| e.path == "a.txt" && e.status == "modified"),
+            "differing content must be modified: {changed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_working_tree_endpoint_detects_new_file() {
+        let (svc, dir) = crate::test_support::services();
+        std::fs::write(dir.path().join("w.txt"), "alpha\nbeta\ngamma\n").unwrap();
+        let entries = super::diff_endpoints(&svc, None, super::DiffEndpoint::Working)
+            .await
+            .unwrap();
+        let w = entries
+            .iter()
+            .find(|e| e.path == "w.txt")
+            .expect("new working-tree file should appear as added");
+        assert_eq!(w.status, "added");
+        assert_eq!(w.additions, 3, "three added lines: {w:?}");
+        assert_eq!(w.deletions, 0);
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_populates_line_counts_for_commits() {
+        let (svc, dir) = crate::test_support::services();
+        let p = dir.path();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .status()
+                .unwrap()
+                .success());
+        };
+        let rev = || {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(p)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        std::fs::write(p.join("m.txt"), "a\nb\nc\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let c1 = rev();
+        // line 2 b→B (1 del + 1 add), line 4 d appended (1 add).
+        std::fs::write(p.join("m.txt"), "a\nB\nc\nd\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c2"]);
+        let c2 = rev();
+
+        let entries = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Commit { sha: c1 }),
+            super::DiffEndpoint::Commit { sha: c2 },
+        )
+        .await
+        .unwrap();
+        let m = entries
+            .iter()
+            .find(|e| e.path == "m.txt")
+            .expect("m.txt changed");
+        assert_eq!(m.status, "modified");
+        assert_eq!((m.additions, m.deletions), (2, 1), "line counts: {m:?}");
     }
 
     #[tokio::test]

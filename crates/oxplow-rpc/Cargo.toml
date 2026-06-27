@@ -37,6 +37,9 @@ tracing = { workspace = true }
 tempfile = { workspace = true }
 # Line-diff for per-function churn attribution (used by code_quality).
 similar = "2"
+# Worktree walk for the diff-view working-tree endpoint (honours the
+# generated-file filter, same as the snapshot capture sweep).
+walkdir = "2"
 
 [dev-dependencies]
 tokio = { workspace = true }

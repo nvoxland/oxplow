@@ -38,6 +38,18 @@ pub fn tree_at_commit(
     Ok(out)
 }
 
+/// The git blob oid a byte slice would hash to, *without* writing it to
+/// the odb. Lets snapshot-store content (xxh3-keyed) and live
+/// working-tree bytes be normalized into the same git-oid identity
+/// space a commit tree uses, so a mixed snapshot↔commit (or
+/// working-tree) diff compares like-for-like. `None` only if libgit2
+/// rejects the hash (it shouldn't for a blob).
+pub fn git_blob_oid(bytes: &[u8]) -> Option<String> {
+    git2::Oid::hash_object(git2::ObjectType::Blob, bytes)
+        .ok()
+        .map(|oid| oid.to_string())
+}
+
 /// Content diff between two commits via the shared comparison.
 pub fn diff_commits(
     repo_path: impl AsRef<Path>,
@@ -118,6 +130,18 @@ mod tests {
         );
         // keep.txt unchanged → omitted.
         assert!(!changes.iter().any(|c| c.path == "keep.txt"));
+    }
+
+    #[test]
+    fn git_blob_oid_matches_libgit2_blob_write() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let bytes = b"hello world\n";
+        // Writing the blob to the odb yields the same oid hash_object
+        // computes — so git_blob_oid must equal it.
+        let written = repo.blob(bytes).unwrap().to_string();
+        assert_eq!(git_blob_oid(bytes), Some(written));
     }
 
     #[test]

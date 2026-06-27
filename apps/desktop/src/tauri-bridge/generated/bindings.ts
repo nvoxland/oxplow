@@ -1336,9 +1336,9 @@ export type DiffEndpoint = { kind: "snapshot"; snapshot_id: number } | { kind: "
 /**
  *  One changed path between two [`DiffEndpoint`]s. `status` is
  *  `"added" | "modified" | "deleted"`, matching the renderer's
- *  `BranchChangeEntry`. Line counts are 0 until the per-file content
- *  pass lands (tracked separately) — the SummaryCard renders 0s, the
- *  same as the previous snapshot-mode behavior.
+ *  `BranchChangeEntry`. `additions`/`deletions` are per-file line
+ *  counts (via `similar`), `0` only for binary, oversize, or otherwise
+ *  unreadable content.
  */
 export type DiffEntry = {
 	path: string,

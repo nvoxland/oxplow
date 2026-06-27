@@ -185,18 +185,16 @@ function ResolvedEndpointDiff({
     return m;
   }, [snapshotsById]);
 
-  // Endpoint-diff analysis: only when we can actually diff (the
-  // working-tree endpoint isn't supported by the substrate yet — tsk339
-  // — so an in-progress effort skips the IPC and shows a notice).
+  // Endpoint-diff analysis. An in-progress effort diffs its start
+  // snapshot against the live working tree (the `working` endpoint,
+  // supported by the substrate as of tsk339); a small header note flags
+  // that the end side is moving.
   const endpoints = useMemo(
-    () => (inProgress ? undefined : { start, end }),
-    [inProgress, JSON.stringify(start), JSON.stringify(end)],
+    () => ({ start, end }),
+    [JSON.stringify(start), JSON.stringify(end)],
   );
   const analysis = useChangeAnalysis({
-    // In-progress (working-tree end) can't be diffed yet — short-circuit
-    // the hook with a null stream so it does no work and we render the
-    // notice instead.
-    streamId: inProgress ? null : stream?.id ?? null,
+    streamId: stream?.id ?? null,
     target: tabKey,
     endpoints,
   });
@@ -315,13 +313,15 @@ function ResolvedEndpointDiff({
 
       {inProgress ? (
         <div
-          style={{ ...card, color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}
+          style={{ ...card, color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}
           data-testid="diff-view-in-progress"
         >
-          Effort is in progress — diffing against the live working tree isn't
-          supported yet, so there's nothing to compare until it closes.
+          Effort is in progress — diffing the start snapshot against the live
+          working tree, which keeps changing until it closes.
         </div>
-      ) : (
+      ) : null}
+
+      {(
         <>
           {analysis.error ? (
             <div style={{ ...card, color: "var(--severity-critical, #f87171)", fontSize: "var(--text-sm)" }}>

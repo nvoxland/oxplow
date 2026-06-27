@@ -62,7 +62,7 @@ pub use sync::{
     add_path, cherry_pick, commit_all, fetch, merge, pull, pull_remote_into_current, push,
     push_current_to, rebase, revert, search_workspace_text, GitOpResult, TextSearchHit,
 };
-pub use tree::{diff_commits, tree_at_commit};
+pub use tree::{diff_commits, git_blob_oid, tree_at_commit};
 pub use workspace::{
     create_workspace_directory, create_workspace_file, delete_workspace_path,
     list_workspace_entries, list_workspace_files, read_workspace_file, rename_workspace_path,
