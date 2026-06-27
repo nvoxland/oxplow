@@ -1,10 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
   getEffort,
   getTaskSummaries,
   listEffortFiles,
-  listEffortsAtSnapshots,
   listEffortsOverlappingRange,
   listSnapshots,
 } from "../api.js";
@@ -12,7 +11,9 @@ import { groupChangesByEffort, type GroupedChanges } from "../snapshot-effort-gr
 import {
   endpointLabel,
   isPureCommitRange,
+  previousSnapshotId,
   resolveEffortEndpoints,
+  resolveSnapshotEndpoints,
   snapshotRange,
 } from "../diffViewModel.js";
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
@@ -478,9 +479,7 @@ function SnapshotDiffBody({
   onOpenFile,
 }: DiffViewPageProps & { snapshotId: number }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [loadingSnapshot, setLoadingSnapshot] = useState(false);
-  const [completedEfforts, setCompletedEfforts] = useState<EffortRow[]>([]);
-  const [inFlightEfforts, setInFlightEfforts] = useState<EffortRow[]>([]);
+  const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
   const refForGraph = snapshotRef(snapshotId);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -495,207 +494,57 @@ function SnapshotDiffBody({
           body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
         }
       : undefined;
-  const target = `snapshot:${snapshotId}`;
-  const analysis = useChangeAnalysis({ streamId: stream?.id ?? null, target });
-
-  // Measure the SummaryCard so the SnapshotMeta on its left collapses
-  // to the same height — same pattern GitCommitPage uses.
-  const summaryRef = useRef<HTMLDivElement>(null);
-  const [summaryHeight, setSummaryHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = summaryRef.current;
-    if (!el) {
-      setSummaryHeight(null);
-      return;
-    }
-    const measure = () => setSummaryHeight(el.getBoundingClientRect().height);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [analysis.files.length, snapshotId, stream?.id]);
-
+  // A single captured snapshot is framed as the diff [prev → N]: the
+  // previous capture in the stream is the start, this snapshot the end.
+  // One diff path now (tsk341) — this body resolves the bracket and
+  // keeps the snapshot's backlinks, then renders ResolvedEndpointDiff.
   useEffect(() => {
     if (!stream) {
       setSnapshot(null);
+      setResolved(null);
       return;
     }
     let cancelled = false;
-    setLoadingSnapshot(true);
-    // No "get one snapshot" IPC; pull the recent window and pick our id.
-    // Cheap (~500 rows) — acceptable for a page-load fetch.
+    // No "get one snapshot" IPC; pull the recent window, pick our row,
+    // and find the previous capture. Cheap (~500 rows) for a page load.
     void listSnapshots(stream.id, 500)
       .then((rows) => {
         if (cancelled) return;
         setSnapshot(rows.find((r) => r.id === snapshotId) ?? null);
-        setLoadingSnapshot(false);
+        const prev = previousSnapshotId(
+          snapshotId,
+          rows.map((r) => r.id),
+        );
+        setResolved({ ...resolveSnapshotEndpoints(snapshotId, prev), taskId: null });
       })
       .catch((err) => {
         if (cancelled) return;
         logUi("warn", "snapshot fetch failed", { error: String(err) });
-        setLoadingSnapshot(false);
       });
     return () => {
       cancelled = true;
     };
   }, [stream?.id, snapshotId]);
 
-  // Efforts active at this snapshot, partitioned into "completed
-  // here" (end_snapshot_id == this snapshot — the "this is what
-  // shipped" view) and "in flight" (start_snapshot_id <= this AND
-  // end is later or NULL). Each row carries the canonical
-  // task_effort_file list — the LLM-declared authorship (after
-  // any amend_effort), not the raw snapshot diff. The auto-diff
-  // is only fetched for completed efforts (it requires both start
-  // and end snapshot ids).
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const all = await listEffortsAtSnapshots([snapshotId]);
-        if (all.length === 0) {
-          if (!cancelled) {
-            setCompletedEfforts([]);
-            setInFlightEfforts([]);
-          }
-          return;
-        }
-        const completed = all.filter((e) => e.completedHere);
-        const inFlight = all.filter((e) => !e.completedHere);
-        const titles = await getTaskSummaries(
-          Array.from(new Set(all.map((e) => e.tasksId))),
-        ).catch(() => [] as Array<{ id: string; title: string }>);
-        const titleByTask = new Map<string, string>(
-          titles.map((t) => [t.id, t.title] as [string, string]),
-        );
-        type EffortFileRow = { path: string; change: "created" | "updated" | "deleted" };
-        const filesByEffort: Array<[string, EffortFileRow[]]> = await Promise.all(
-          all.map(async (e) => {
-            try {
-              const files = await listEffortFiles(e.effortId);
-              return [e.effortId, files] as [string, EffortFileRow[]];
-            } catch (err) {
-              logUi("warn", "effort files fetch failed", {
-                error: String(err),
-                effortId: e.effortId,
-              });
-              return [e.effortId, [] as EffortFileRow[]] as [string, EffortFileRow[]];
-            }
-          }),
-        );
-        const filesById = new Map<string, EffortFileRow[]>(filesByEffort);
-        if (cancelled) return;
-        const toRow = (effort: EffortAtSnapshot): EffortRow => ({
-          effort,
-          taskTitle: titleByTask.get(effort.tasksId) ?? `task ${effort.tasksId}`,
-          files: filesById.get(effort.effortId) ?? [],
-        });
-        setCompletedEfforts(completed.map(toRow));
-        setInFlightEfforts(inFlight.map(toRow));
-      } catch (err) {
-        logUi("warn", "efforts at snapshot fetch failed", { error: String(err) });
-        if (!cancelled) {
-          setCompletedEfforts([]);
-          setInFlightEfforts([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [snapshotId]);
-
-  const headerTitle = useMemo(() => {
-    if (!snapshot) return `Snapshot ${snapshotId}`;
-    return `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`;
-  }, [snapshot, snapshotId]);
-
-  // The page's core: this snapshot's actual changed files, grouped by
-  // the effort(s) that claim them. All efforts active here (completed +
-  // in-flight) are candidate claimers; the helper buckets the rest into
-  // "unclaimed" and reports efforts that claimed nothing changed here.
-  const allEffortRows = useMemo(
-    () => [...completedEfforts, ...inFlightEfforts],
-    [completedEfforts, inFlightEfforts],
-  );
-  const effortById = useMemo(
-    () => new Map(allEffortRows.map((r) => [r.effort.effortId, r])),
-    [allEffortRows],
-  );
-  const grouped = useMemo<GroupedChanges>(
-    () =>
-      groupChangesByEffort(
-        analysis.files.map((f) => ({ path: f.path, status: f.status })),
-        allEffortRows.map((r) => ({
-          effortId: r.effort.effortId,
-          title: r.taskTitle,
-          files: r.files,
-        })),
-      ),
-    [analysis.files, allEffortRows],
-  );
+  const headerTitle = snapshot
+    ? `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`
+    : `Snapshot ${snapshotId}`;
 
   return (
     <Page testId="page-snapshot-detail" title={headerTitle} kind="snapshot" backlinks={backlinks} outbound={outbound}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            {loadingSnapshot && !snapshot ? (
-              <div style={muted}>Loading…</div>
-            ) : !snapshot ? (
-              <div style={muted}>Snapshot not found.</div>
-            ) : (
-              <SnapshotMeta
-                snapshot={snapshot}
-                collapsedMaxHeight={summaryHeight}
-                onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
-              />
-            )}
-          </div>
-          <div style={{ minWidth: 0 }} ref={summaryRef}>
-            {snapshot && stream && analysis.files.length > 0 ? (
-              <SummaryCard
-                fileCount={analysis.files.length}
-                additions={analysis.totals.additions}
-                deletions={analysis.totals.deletions}
-                byStatus={analysis.pivots.byStatus}
-                tests={analysis.tests}
-                testFunctions={summarizeTestFunctions(analysis.functions)}
-                testLineRatio={summarizeTestLineRatio(analysis.functionChurn)}
-              />
-            ) : null}
-          </div>
-        </div>
-
-        {snapshot && stream ? (
-          <ChangesByEffortSection
-            grouped={grouped}
-            effortById={effortById}
-            onOpenTask={(taskId) => onOpenPage(taskRef(taskId))}
-            onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
-            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
-          />
-        ) : null}
-
-        {snapshot && stream && onOpenFile ? (
-          <ChangeAnalysisPanel
-            analysis={analysis}
-            target={target}
-            showHeader={false}
-            onOpenPage={onOpenPage}
-            onOpenFile={onOpenFile}
-            onOpenDiff={onOpenDiff}
-            onOpenDiffInTab={onOpenDiffInTab}
-          />
-        ) : null}
-      </div>
+      {!resolved ? (
+        <div style={{ ...muted, padding: "12px 16px" }}>Loading…</div>
+      ) : (
+        <ResolvedEndpointDiff
+          stream={stream}
+          resolved={resolved}
+          tabKey={`snapshot:${snapshotId}`}
+          onOpenPage={onOpenPage}
+          onOpenFile={onOpenFile}
+          onOpenDiff={onOpenDiff}
+          onOpenDiffInTab={onOpenDiffInTab}
+        />
+      )}
     </Page>
   );
 }
@@ -873,64 +722,6 @@ const listStyle: React.CSSProperties = {
   gap: 2,
 };
 
-interface SnapshotMetaProps {
-  snapshot: Snapshot;
-  /** Pixel height the SummaryCard alongside this panel renders at —
-   *  the panel collapses to roughly that height. `null` lets it grow. */
-  collapsedMaxHeight: number | null;
-  onOpenCommit(sha: string): void;
-}
-
-function SnapshotMeta({ snapshot, collapsedMaxHeight, onOpenCommit }: SnapshotMetaProps) {
-  const captured = formatFullDateTime(snapshot.createdAt);
-  return (
-    <section
-      style={{
-        ...card,
-        maxHeight: collapsedMaxHeight ?? undefined,
-        overflow: collapsedMaxHeight ? "hidden" : undefined,
-      }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "var(--text-xs)" }}>
-        <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-          Captured {captured}
-        </div>
-        <div>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            Snapshot {snapshot.id}
-          </div>
-          <div style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-            {snapshot.fileCount} files captured in this snapshot.
-          </div>
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "auto 1fr",
-            gap: "2px 10px",
-            color: "var(--text-secondary)",
-            fontSize: 11,
-          }}
-        >
-          <span>Git commit</span>
-          <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>
-            {snapshot.gitCommit ? (
-              <button
-                type="button"
-                onClick={() => onOpenCommit(snapshot.gitCommit!)}
-                style={linkButton}
-              >
-                {snapshot.gitCommit.slice(0, 7)}
-              </button>
-            ) : (
-              <span style={{ color: "var(--text-secondary)" }}>—</span>
-            )}
-          </span>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const card: React.CSSProperties = {

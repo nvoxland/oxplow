@@ -33,6 +33,37 @@ export function resolveEffortEndpoints(effort: EffortLike): ResolvedEndpoints {
   return { start, end: { kind: "working" }, inProgress: true };
 }
 
+/** The snapshot immediately before `snapshotId` in a stream — the
+ *  largest captured id strictly less than it, or null when it's the
+ *  first. A single-snapshot diff uses this as its `start`. */
+export function previousSnapshotId(
+  snapshotId: number,
+  snapshotIds: number[],
+): number | null {
+  let prev: number | null = null;
+  for (const id of snapshotIds) {
+    if (id < snapshotId && (prev === null || id > prev)) prev = id;
+  }
+  return prev;
+}
+
+/** A single captured snapshot, framed as a diff: it's the `end`, and
+ *  the previous snapshot in the stream is the `start` (null when it's
+ *  the first capture → diff against the empty tree). */
+export function resolveSnapshotEndpoints(
+  snapshotId: number,
+  prevSnapshotId: number | null,
+): ResolvedEndpoints {
+  return {
+    start:
+      prevSnapshotId != null
+        ? { kind: "snapshot", snapshot_id: prevSnapshotId }
+        : null,
+    end: { kind: "snapshot", snapshot_id: snapshotId },
+    inProgress: false,
+  };
+}
+
 export interface EndpointLabel {
   text: string;
   /** When set, the label is a clickable git commit (short sha shown). */
