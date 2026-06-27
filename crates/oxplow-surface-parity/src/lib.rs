@@ -249,6 +249,9 @@ pub const MANIFEST: &[Capability] = &[
     both("restore_file_from_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
     ui("diff_endpoints"),
+    // Per-file content at an endpoint, feeding the diff view's function
+    // analysis (base + head). UI-only.
+    ui("read_endpoint_files_content"),
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
     todo("list_snapshots"),
     todo("get_snapshot_pair_diff"),

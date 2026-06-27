@@ -353,6 +353,12 @@ export const commands = {
 	 */
 	diffEndpoints: (start: { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" } | null, end: DiffEndpoint) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff_endpoints", { start, end })),
 	/**
+	 *  Read each `path`'s UTF-8 content as of `endpoint` (base + head for
+	 *  the diff view's function-level analysis). `None` per path that's
+	 *  absent / binary / oversize at that endpoint.
+	 */
+	readEndpointFilesContent: (endpoint: DiffEndpoint, paths: string[]) => typedError<(string | null)[], IpcError>(__TAURI_INVOKE("read_endpoint_files_content", { endpoint, paths })),
+	/**
 	 *  Build a per-snapshot summary: the FileSnapshot row, the id of the
 	 *  prior capture of the same path (if any), and a one-row diff
 	 *  describing how the captured file relates to its predecessor

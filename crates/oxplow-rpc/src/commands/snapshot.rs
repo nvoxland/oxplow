@@ -301,6 +301,44 @@ pub async fn diff_endpoints(
     .map_err(IpcError::internal)
 }
 
+/// Read the UTF-8 (lossy) content of each `path` as of `endpoint`.
+/// Returns a vec aligned to `paths`: `None` for a path absent at the
+/// endpoint, or binary / oversize / pruned content. Builds the
+/// endpoint's content tree once, then reads each requested path — the
+/// diff view's function-level analysis calls this twice (base + head)
+/// with the changed-file set, mirroring the snapshot/commit branches'
+/// per-file content reads.
+pub async fn read_endpoint_files_content(
+    svc: &Services,
+    endpoint: DiffEndpoint,
+    paths: Vec<String>,
+) -> Result<Vec<Option<String>>, IpcError> {
+    let snap = match &endpoint {
+        DiffEndpoint::Snapshot { snapshot_id } => {
+            Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
+        }
+        _ => None,
+    };
+    let project_dir = svc.layout.project_dir.clone();
+    let blobs = svc.blobs.clone();
+    let filter = current_filter(svc);
+    tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, String> {
+        let (cells, _space) = cells_for_endpoint(&endpoint, snap, &project_dir, &filter)?;
+        Ok(paths
+            .into_iter()
+            .map(|p| {
+                cells
+                    .get(&p)
+                    .and_then(|cell| read_cell(cell, &blobs, &project_dir))
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| IpcError::internal(e.to_string()))?
+    .map_err(IpcError::internal)
+}
+
 /// The identity space a tree's `Cell`s compare in.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Space {
@@ -967,5 +1005,55 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array(), "expected a JSON array, got {out}");
+    }
+
+    #[tokio::test]
+    async fn read_endpoint_files_content_reads_commit_blobs() {
+        let (svc, dir) = crate::test_support::services();
+        let p = dir.path().to_path_buf();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&p)
+                .status()
+                .unwrap()
+                .success());
+        };
+        std::fs::write(p.join("a.txt"), "hello\nworld\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let sha = {
+            let o = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&p)
+                .output()
+                .unwrap();
+            String::from_utf8(o.stdout).unwrap().trim().to_string()
+        };
+
+        let out = super::read_endpoint_files_content(
+            &svc,
+            super::DiffEndpoint::Commit { sha },
+            vec!["a.txt".into(), "missing.txt".into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].as_deref(), Some("hello\nworld\n"));
+        assert_eq!(out[1], None, "path absent at the endpoint reads as None");
+    }
+
+    #[tokio::test]
+    async fn read_endpoint_files_content_reads_working_tree() {
+        let (svc, dir) = crate::test_support::services();
+        std::fs::write(dir.path().join("w.txt"), "live").unwrap();
+        let out = super::read_endpoint_files_content(
+            &svc,
+            super::DiffEndpoint::Working,
+            vec!["w.txt".into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(out[0].as_deref(), Some("live"));
     }
 }

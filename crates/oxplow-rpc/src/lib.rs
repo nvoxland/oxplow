@@ -355,6 +355,7 @@ rpc_dispatch! {
     "get_snapshot" => commands::snapshot::get_snapshot { id: i64 },
     "get_snapshot_pair_diff" => commands::snapshot::get_snapshot_pair_diff { before_id: Option<i64>, after_id: Option<i64> },
     "diff_endpoints" => commands::snapshot::diff_endpoints { start: Option<commands::snapshot::DiffEndpoint>, end: commands::snapshot::DiffEndpoint },
+    "read_endpoint_files_content" => commands::snapshot::read_endpoint_files_content { endpoint: commands::snapshot::DiffEndpoint, paths: Vec<String> },
     "get_snapshot_summary" => commands::snapshot::get_snapshot_summary { snapshot_id: i64 },
     "restore_file_from_snapshot" => commands::snapshot::restore_file_from_snapshot { snapshot_id: i64 },
     // background

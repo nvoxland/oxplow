@@ -148,6 +148,19 @@ pub async fn diff_endpoints(
     oxplow_rpc::commands::snapshot::diff_endpoints(&state, start, end).await
 }
 
+/// Read each `path`'s UTF-8 content as of `endpoint` (base + head for
+/// the diff view's function-level analysis). `None` per path that's
+/// absent / binary / oversize at that endpoint.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_endpoint_files_content(
+    state: tauri::State<'_, AppState>,
+    endpoint: DiffEndpoint,
+    paths: Vec<String>,
+) -> Result<Vec<Option<String>>, IpcError> {
+    oxplow_rpc::commands::snapshot::read_endpoint_files_content(&state, endpoint, paths).await
+}
+
 /// Build a per-snapshot summary: the FileSnapshot row, the id of the
 /// prior capture of the same path (if any), and a one-row diff
 /// describing how the captured file relates to its predecessor
