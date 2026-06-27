@@ -24,8 +24,6 @@ import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
-import { ZoneBarCard } from "../components/ChangeAnalysis/ZoneBarCard.js";
-import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCard.js";
 import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import {
@@ -83,6 +81,8 @@ function EndpointDiffBody({
   spec,
   onOpenPage,
   onOpenFile,
+  onOpenDiff,
+  onOpenDiffInTab,
 }: DiffViewPageProps & { spec: Extract<DiffViewSpec, { mode: "effort" | "endpoints" }> }) {
   const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
@@ -137,6 +137,8 @@ function EndpointDiffBody({
           tabKey={specKey(spec)}
           onOpenPage={onOpenPage}
           onOpenFile={onOpenFile}
+          onOpenDiff={onOpenDiff}
+          onOpenDiffInTab={onOpenDiffInTab}
         />
       )}
     </Page>
@@ -155,12 +157,16 @@ function ResolvedEndpointDiff({
   tabKey,
   onOpenPage,
   onOpenFile,
+  onOpenDiff,
+  onOpenDiffInTab,
 }: {
   stream: Stream | null;
   resolved: ResolvedDiff;
   tabKey: string;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
+  onOpenDiff?(spec: DiffSpec): void;
+  onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }) {
   const { start, end, inProgress, taskId } = resolved;
 
@@ -362,20 +368,21 @@ function ResolvedEndpointDiff({
             />
           ) : null}
 
-          {/* Architectural zones + change treemap derive purely from the
-              file list (+ line counts), so they work over the endpoint
-              diff. The function / churn / duplication drilldown needs
-              per-file content handles the substrate doesn't expose yet
-              (tsk340 Tier 2), so it's omitted here rather than rendered
-              empty. */}
-          {analysis.files.length > 0 ? (
-            <>
-              <ZoneBarCard files={analysis.files} importDeltas={analysis.importDeltas} />
-              <ChangeTreemapCard
-                files={analysis.files}
-                onOpenFile={(path) => onOpenFile?.(path)}
-              />
-            </>
+          {/* Full change analysis: zones bar, treemap, and the function /
+              churn / duplication drilldown. The endpoint branch now runs
+              the same analyzer the snapshot/commit targets do (tsk341),
+              so this is the identical panel the legacy snapshot page
+              rendered. */}
+          {analysis.files.length > 0 && onOpenFile ? (
+            <ChangeAnalysisPanel
+              analysis={analysis}
+              target={tabKey}
+              showHeader={false}
+              onOpenPage={onOpenPage}
+              onOpenFile={onOpenFile}
+              onOpenDiff={onOpenDiff}
+              onOpenDiffInTab={onOpenDiffInTab}
+            />
           ) : null}
         </>
       )}

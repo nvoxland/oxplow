@@ -282,29 +282,98 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     setLoading(true);
     setError(null);
 
-    // Endpoint-diff mode: the file list + status come from the unified
-    // diff substrate. Function / duplication / co-change passes are
-    // skipped (no per-file content ids from this source yet — tsk339).
+    // Shared function-level analysis: hand it base+head content per
+    // file and it runs analyze_functions_at_refs → function buckets,
+    // churn, import deltas. Both the endpoint-diff branch and the
+    // git/snapshot branch build `specs` their own way, then hand off
+    // here so the two paths produce identical drilldown data.
+    const runFunctionAnalysis = async (
+      specs: Array<{ path: string; base_content: string | null; head_content: string | null }>,
+    ): Promise<void> => {
+      const analysis = await commands.analyzeFunctionsAtRefs(specs);
+      if (reqId !== reqIdRef.current) return;
+      if (analysis.status === "error") {
+        setError(typeof analysis.error === "string" ? analysis.error : "Function analysis failed.");
+        setFunctions(EMPTY_BUCKETS);
+        return;
+      }
+      const result = analysis.data;
+      const sides = result.sides.map((s) => ({
+        path: s.path,
+        side: s.side,
+        functions: s.functions.map((fn) => ({
+          name: fn.name,
+          paramCount: fn.parameter_count,
+          complexity: fn.complexity,
+          length: fn.length,
+          startLine: fn.start_line,
+          containerPath: fn.container_path,
+          visibility: (fn.visibility === "public" || fn.visibility === "private")
+            ? (fn.visibility as "public" | "private")
+            : ("unknown" as const),
+        })),
+      }));
+      const buckets = diffFunctions(indexSides(sides));
+      const churnRows: FunctionChurnRow[] = (result.churn ?? []).flatMap((file) =>
+        file.functions.map((fn) => ({
+          path: file.path,
+          name: fn.name,
+          containerPath: fn.container_path,
+          startLineHead: fn.start_line_head,
+          addedLines: fn.added_lines,
+          deletedLines: fn.deleted_lines,
+          modifiedLines: fn.modified_lines,
+        })),
+      );
+      attachChurn(buckets, churnRows);
+      setFunctions(buckets);
+      setFunctionChurn(churnRows);
+      setImportDeltas(result.import_deltas ?? []);
+    };
+
+    // Endpoint-diff mode: file list + status from the unified diff
+    // substrate; base/head content per file via read_endpoint_files_content
+    // feeds the same function analysis the git/snapshot branches run.
+    // Duplication + co-change stay off — snapshot/commit endpoints have
+    // no git-ref tree to scan and aren't commit history (matches the
+    // snapshot-target path's behavior).
     const eps = endpointsRef.current;
     if (eps) {
       try {
         const entries = await diffEndpoints(eps.start, eps.end);
         if (reqId !== reqIdRef.current) return;
-        setFiles(
-          entries.map((e) => ({
-            path: e.path,
-            status: e.status as BranchChangeEntry["status"],
-            // 0 today; tsk339 populates real line counts.
-            additions: e.additions,
-            deletions: e.deletions,
-          })),
-        );
-        setFunctions(EMPTY_BUCKETS);
-        setFunctionChurn([]);
-        setImportDeltas([]);
+        const fileList: BranchChangeEntry[] = entries.map((e) => ({
+          path: e.path,
+          status: e.status as BranchChangeEntry["status"],
+          additions: e.additions,
+          deletions: e.deletions,
+        }));
+        setFiles(fileList);
+
+        const analyzable = fileList.slice(0, 200);
+        const paths = analyzable.map((e) => e.path);
+        const baseRes = eps.start
+          ? await commands.readEndpointFilesContent(eps.start, paths)
+          : null;
+        const headRes = await commands.readEndpointFilesContent(eps.end, paths);
+        if (reqId !== reqIdRef.current) return;
+        const baseContents =
+          baseRes && baseRes.status === "ok" ? baseRes.data : paths.map(() => null);
+        const headContents = headRes.status === "ok" ? headRes.data : paths.map(() => null);
+        const specs = analyzable.map((e, i) => ({
+          path: e.path,
+          base_content: e.status === "added" ? null : (baseContents[i] ?? null),
+          head_content: e.status === "deleted" ? null : (headContents[i] ?? null),
+        }));
+        await runFunctionAnalysis(specs);
+        if (reqId !== reqIdRef.current) return;
+
         setCoChangeSurprise([]);
         setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
-        setResolvedRefs(null);
+        // Sentinel refs: snapshot/commit endpoints have no single git-ref
+        // pair, but a non-null `refs` lets the drilldown render its
+        // file-diff affordances (same posture as the snapshot target).
+        setResolvedRefs({ baseRef: "endpoint-base", headRef: "endpoint-head" });
       } catch (err) {
         if (reqId !== reqIdRef.current) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -388,45 +457,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
           };
         }),
       );
-      const analysis = await commands.analyzeFunctionsAtRefs(specs);
+      await runFunctionAnalysis(specs);
       if (reqId !== reqIdRef.current) return;
-      if (analysis.status === "error") {
-        setError(typeof analysis.error === "string" ? analysis.error : "Function analysis failed.");
-        setFunctions(EMPTY_BUCKETS);
-      } else {
-        const result = analysis.data;
-        const sides = result.sides.map((s) => ({
-          path: s.path,
-          side: s.side,
-          functions: s.functions.map((fn) => ({
-            name: fn.name,
-            paramCount: fn.parameter_count,
-            complexity: fn.complexity,
-            length: fn.length,
-            startLine: fn.start_line,
-            containerPath: fn.container_path,
-            visibility: (fn.visibility === "public" || fn.visibility === "private")
-              ? (fn.visibility as "public" | "private")
-              : "unknown" as const,
-          })),
-        }));
-        const buckets = diffFunctions(indexSides(sides));
-        const churnRows: FunctionChurnRow[] = (result.churn ?? []).flatMap((file) =>
-          file.functions.map((fn) => ({
-            path: file.path,
-            name: fn.name,
-            containerPath: fn.container_path,
-            startLineHead: fn.start_line_head,
-            addedLines: fn.added_lines,
-            deletedLines: fn.deleted_lines,
-            modifiedLines: fn.modified_lines,
-          })),
-        );
-        attachChurn(buckets, churnRows);
-        setFunctions(buckets);
-        setFunctionChurn(churnRows);
-        setImportDeltas(result.import_deltas ?? []);
-      }
 
       // Duplication: snapshot-mode skips this entirely. The scan
       // store is keyed on git refs / DISK; snapshot pairs have no
