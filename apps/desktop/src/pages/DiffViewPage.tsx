@@ -24,6 +24,8 @@ import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
+import { ZoneBarCard } from "../components/ChangeAnalysis/ZoneBarCard.js";
+import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCard.js";
 import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import {
@@ -358,6 +360,22 @@ function ResolvedEndpointDiff({
               files={analysis.files.map((f) => ({ path: f.path, status: f.status }))}
               onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
             />
+          ) : null}
+
+          {/* Architectural zones + change treemap derive purely from the
+              file list (+ line counts), so they work over the endpoint
+              diff. The function / churn / duplication drilldown needs
+              per-file content handles the substrate doesn't expose yet
+              (tsk340 Tier 2), so it's omitted here rather than rendered
+              empty. */}
+          {analysis.files.length > 0 ? (
+            <>
+              <ZoneBarCard files={analysis.files} importDeltas={analysis.importDeltas} />
+              <ChangeTreemapCard
+                files={analysis.files}
+                onOpenFile={(path) => onOpenFile?.(path)}
+              />
+            </>
           ) : null}
         </>
       )}
