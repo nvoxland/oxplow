@@ -339,10 +339,13 @@ Auto-managed by the runtime on `task.changed` status transitions:
 - `→ in_progress` opens a new effort; a `task-start` snapshot is flushed
   and linked to `start_snapshot_id`.
 - `in_progress → {done, blocked, canceled}` closes the effort; a
-  `task-end` snapshot is flushed and linked to `end_snapshot_id`,
-  subject to a 5-minute minimum gap between snapshots — if the latest
-  snapshot is fresher than that gap, the close path skips flushing a
-  new row (the effort's `end_snapshot_id` is left null in that case).
+  `task-end` snapshot is flushed and linked to `end_snapshot_id`.
+  Capture de-dupes by content hash — an unchanged tree reuses the
+  latest existing snapshot id rather than writing a near-identical row
+  — so `end_snapshot_id` is set whenever the stream holds any snapshot
+  (on a no-op close it falls back to the effort's `start_snapshot_id`).
+  It is null only while the effort is open: `end_snapshot_id` null ⇔
+  effort in progress. There is no time-based minimum gap.
 
 `summary` is the effort's single canonical prose body, written once on
 completion via `complete_task`. (A `summary_variants` column existed
@@ -525,10 +528,13 @@ linger until process exit.
 `effort_id` or `source` column on `snapshot` / `file_snapshot`
 themselves — the bracket is recorded by `task_effort.start_snapshot_id`
 and `task_effort.end_snapshot_id`, each pointing at a `snapshot.id`.
-The 5-minute minimum gap rule in the status-transition path may leave
-the effort's `end_snapshot_id` null — when the most recent snapshot is
-fresher than `END_SNAPSHOT_MIN_GAP_MS`, the close path skips flushing a
-new row to avoid spamming history with near-identical states.
+A closed effort's `end_snapshot_id` is non-null whenever the effort has
+a baseline — capture de-dupes an unchanged tree to the latest existing
+snapshot id rather than writing a near-identical row, and on a no-op
+close `backfill_effort_snapshot` falls back to the effort's
+`start_snapshot_id`. `end_snapshot_id` is null only while the effort is
+open (`end_snapshot_id` null ⇔ effort in progress); there is no
+time-based gap.
 
 **Change detection.** The startup sweep short-circuits on
 `(size_bytes, mtime_ms)`: a file whose stat matches its latest row is

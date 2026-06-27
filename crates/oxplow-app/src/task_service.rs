@@ -417,12 +417,35 @@ impl TaskService {
         if entering {
             snapshot.await_initial_ready().await;
         }
-        let snap_id = match snapshot.request_snapshot(source).await {
-            Ok(Some(id)) => id,
-            Ok(None) => return,
+        let captured = match snapshot.request_snapshot(source).await {
+            Ok(opt) => opt,
             Err(e) => {
                 tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot failed");
-                return;
+                None
+            }
+        };
+        let snap_id = if entering {
+            // A start pin needs a real captured baseline — there's
+            // nothing to diff an effort against without one.
+            match captured {
+                Some(id) => id,
+                None => return,
+            }
+        } else {
+            // Close: keep the invariant `end_snapshot_id` null ⇔ effort
+            // in progress. When capture yielded nothing (no-op close or
+            // a capture failure), fall back to the effort's own start
+            // snapshot so a closed effort with any baseline is never
+            // end-null (it degrades to an empty-diff effort).
+            let effort_start = effort_store
+                .get_effort(&effort_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|e| e.start_snapshot_id);
+            match close_end_snapshot(captured, effort_start) {
+                Some(id) => id,
+                None => return,
             }
         };
         let stamp = if entering {
@@ -999,6 +1022,18 @@ fn classify_change(worktree_root: Option<&Path>, path: &str) -> EffortFileChange
     }
 }
 
+/// The snapshot id to pin as an effort's `end_snapshot_id` on close.
+/// Prefer the freshly-captured snapshot; when capture yields nothing
+/// (a no-op close — nothing changed and the stream has no prior
+/// snapshot — or a capture failure) fall back to the effort's own
+/// `start_snapshot_id`. This keeps the invariant `end_snapshot_id`
+/// null ⇔ effort in progress: a closed effort with any baseline is
+/// never end-null (it degrades to an empty-diff effort). Returns
+/// `None` only for a degenerate effort that has no baseline at all.
+fn close_end_snapshot(captured: Option<i64>, effort_start: Option<i64>) -> Option<i64> {
+    captured.or(effort_start)
+}
+
 /// The bucketed view the Backlog page renders.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct BacklogState {
@@ -1037,6 +1072,17 @@ mod tests {
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadStatus};
+
+    #[test]
+    fn close_end_snapshot_prefers_capture_then_start() {
+        // Fresh capture wins.
+        assert_eq!(close_end_snapshot(Some(7), Some(3)), Some(7));
+        // No-op close (nothing captured) falls back to the start pin,
+        // so a closed effort with a baseline is never end-null.
+        assert_eq!(close_end_snapshot(None, Some(3)), Some(3));
+        // Truly empty effort (no baseline either) stays null.
+        assert_eq!(close_end_snapshot(None, None), None);
+    }
 
     #[test]
     fn classify_change_defaults_to_updated_without_worktree() {

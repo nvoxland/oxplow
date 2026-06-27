@@ -1439,14 +1439,15 @@ snapshot id. Mechanics:
   records its id on `task_effort.start_snapshot_id`. Any move
   *out* of `in_progress` (done / blocked / ready / canceled /
   archived) flushes a `task-end` snapshot recorded on
-  `task_effort.end_snapshot_id`, subject to the 5-minute gap
-  rule: when the stream's most recent snapshot is younger than
-  `END_SNAPSHOT_MIN_GAP_MS`, the flush is skipped and
-  `end_snapshot_id` is left null. Both task-start and task-end are
-  linked back to the effort via `file_snapshot.effort_id`. The flush
-  is automatic inside `applyStatusTransition` (which the MCP work-
-  item tools all delegate to) — agents never need to flush
-  explicitly.
+  `task_effort.end_snapshot_id`. The close **always** requests a
+  snapshot; content-hash dedup reuses the latest existing snapshot id
+  when nothing changed (rather than writing a near-identical row), so
+  `end_snapshot_id` is set whenever the stream holds any snapshot — it
+  is null only while the effort is open (`end_snapshot_id` null ⇔
+  effort in progress). There is **no** time-based gap. The flush
+  is automatic inside the status-transition path
+  (`backfill_effort_snapshot`, which the MCP work-item tools all
+  delegate to) — agents never need to flush explicitly.
 - On project open, `takeStartupSnapshot` runs once per stream — a full
   worktree walk that emits `source: "startup"`. If nothing changed
   while the app was down, `version_hash` dedup returns the existing
@@ -1462,11 +1463,14 @@ snapshot id. Mechanics:
   per-cycle record, not a single lifetime span. A DB-level UNIQUE
   partial index on `task_effort(task_id) WHERE ended_at IS
   NULL` enforces "at most one open effort per item."
-- Effort close enforces a **5-minute minimum gap**: if the latest
-  snapshot is fresher than `END_SNAPSHOT_MIN_GAP_MS`, the close path
-  skips flushing a new row to avoid spamming history with
-  near-identical states. The effort's `end_snapshot_id` may be left
-  null in that case.
+- Effort close de-dupes by **content hash**, not time. The close
+  always requests a `task-end` snapshot, but an unchanged tree reuses
+  the latest existing snapshot id instead of writing a near-identical
+  row. So a closed effort's `end_snapshot_id` is non-null whenever the
+  effort has a baseline: `backfill_effort_snapshot` pins it to the
+  freshly-captured snapshot, or — when capture yields nothing — falls
+  back to the effort's own `start_snapshot_id` (an empty-diff effort).
+  There is no `END_SNAPSHOT_MIN_GAP_MS` / minute-scale gap.
 - Effort-level diffs come from
   `getSnapshotPairDiff(task_effort.start_snapshot_id,
   task_effort.end_snapshot_id, path)` and the analogous
