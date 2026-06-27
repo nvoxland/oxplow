@@ -21,7 +21,13 @@ import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { gitCommitRef, snapshotRef, taskRef } from "../tabs/pageRefs.js";
+import {
+  effortDiffRef,
+  endpointDiffRef,
+  gitCommitRef,
+  snapshotRef,
+  taskRef,
+} from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
@@ -60,10 +66,7 @@ export interface DiffViewPageProps {
 }
 
 export function DiffViewPage(props: DiffViewPageProps) {
-  if (props.spec.mode === "snapshot") {
-    return <SnapshotDiffBody {...props} snapshotId={props.spec.snapshotId} />;
-  }
-  return <EndpointDiffBody {...props} spec={props.spec} />;
+  return <DiffBody {...props} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,24 +80,58 @@ interface ResolvedDiff {
   taskId: string | null;
 }
 
-function EndpointDiffBody({
+/**
+ * The one diff body. Resolves any of the three specs to concrete
+ * endpoints and renders the shared `ResolvedEndpointDiff`:
+ * - **endpoints** — already concrete.
+ * - **effort** — fetches the effort's start/end bracket (survives a
+ *   cold reopen with only the effort id).
+ * - **snapshot** — a single capture framed as `[prev → N]`; resolves the
+ *   previous capture from the stream's snapshot list.
+ */
+function DiffBody({
   stream,
   spec,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
   onOpenDiffInTab,
-}: DiffViewPageProps & { spec: Extract<DiffViewSpec, { mode: "effort" | "endpoints" }> }) {
+}: DiffViewPageProps) {
   const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  // Only snapshot mode needs the row (for the "Snapshot N · <time>"
+  // title); effort/endpoint diffs title as "Diff".
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const key = specKey(spec);
 
-  // Resolve the spec into concrete endpoints. Endpoints mode is already
-  // concrete; effort mode fetches the effort's snapshot bracket (so a
-  // cold history reopen with only the effort id still works).
+  // Backlinks/outbound keyed on the ref that opened this page. A
+  // snapshot is a linkable entity; effort/endpoint diffs rarely are,
+  // but a stable identity keeps the page chrome uniform.
+  const graphRef = useMemo<TabRef>(() => {
+    if (spec.mode === "snapshot") return snapshotRef(spec.snapshotId);
+    if (spec.mode === "effort") return effortDiffRef(spec.effortId);
+    return endpointDiffRef(spec.start, spec.end);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const backlinkEntries = useBacklinks(graphRef);
+  const outboundEntries = usePageOutbound(graphRef);
+  const backlinks = {
+    count: backlinkEntries.length,
+    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
+  };
+  const outbound =
+    outboundEntries.length > 0
+      ? {
+          count: outboundEntries.length,
+          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
+        }
+      : undefined;
+
   useEffect(() => {
     let cancelled = false;
+    setResolveError(null);
     if (spec.mode === "endpoints") {
-      setResolveError(null);
+      setSnapshot(null);
       setResolved({
         start: spec.start,
         end: spec.end,
@@ -104,29 +141,62 @@ function EndpointDiffBody({
       return;
     }
     setResolved(null);
-    setResolveError(null);
-    void getEffort(spec.effortId)
-      .then((effort) => {
+    if (spec.mode === "effort") {
+      setSnapshot(null);
+      void getEffort(spec.effortId)
+        .then((effort) => {
+          if (cancelled) return;
+          if (!effort) {
+            setResolveError("Effort not found.");
+            return;
+          }
+          setResolved({ ...resolveEffortEndpoints(effort), taskId: effort.taskId });
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          logUi("warn", "effort resolve failed", { error: String(err) });
+          setResolveError(err instanceof Error ? err.message : String(err));
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    // Snapshot mode: resolve [prev → N] from the stream's capture list.
+    if (!stream) {
+      setSnapshot(null);
+      setResolved(null);
+      return;
+    }
+    const snapshotId = spec.snapshotId;
+    void listSnapshots(stream.id, 500)
+      .then((rows) => {
         if (cancelled) return;
-        if (!effort) {
-          setResolveError("Effort not found.");
-          return;
-        }
-        const eps = resolveEffortEndpoints(effort);
-        setResolved({ ...eps, taskId: effort.taskId });
+        setSnapshot(rows.find((r) => r.id === snapshotId) ?? null);
+        const prev = previousSnapshotId(
+          snapshotId,
+          rows.map((r) => r.id),
+        );
+        setResolved({ ...resolveSnapshotEndpoints(snapshotId, prev), taskId: null });
       })
       .catch((err) => {
         if (cancelled) return;
-        logUi("warn", "effort resolve failed", { error: String(err) });
-        setResolveError(err instanceof Error ? err.message : String(err));
+        logUi("warn", "snapshot fetch failed", { error: String(err) });
       });
     return () => {
       cancelled = true;
     };
-  }, [spec.mode, spec.mode === "effort" ? spec.effortId : "", spec.mode === "endpoints" ? spec.start : null, spec.mode === "endpoints" ? spec.end : null]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream?.id, key]);
+
+  const title =
+    spec.mode === "snapshot"
+      ? snapshot
+        ? `Snapshot ${spec.snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`
+        : `Snapshot ${spec.snapshotId}`
+      : "Diff";
 
   return (
-    <Page testId="page-diff-view" title="Diff" kind="diff-view">
+    <Page testId="page-diff-view" title={title} kind="diff-view" backlinks={backlinks} outbound={outbound}>
       {resolveError ? (
         <div style={{ ...muted, padding: "12px 16px" }}>{resolveError}</div>
       ) : !resolved ? (
@@ -135,7 +205,7 @@ function EndpointDiffBody({
         <ResolvedEndpointDiff
           stream={stream}
           resolved={resolved}
-          tabKey={specKey(spec)}
+          tabKey={key}
           onOpenPage={onOpenPage}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}
@@ -146,10 +216,15 @@ function EndpointDiffBody({
   );
 }
 
-function specKey(spec: Extract<DiffViewSpec, { mode: "effort" | "endpoints" }>): string {
-  return spec.mode === "effort"
-    ? `effort:${spec.effortId}`
-    : `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
+function specKey(spec: DiffViewSpec): string {
+  switch (spec.mode) {
+    case "snapshot":
+      return `snapshot:${spec.snapshotId}`;
+    case "effort":
+      return `effort:${spec.effortId}`;
+    case "endpoints":
+      return `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
+  }
 }
 
 function ResolvedEndpointDiff({
@@ -459,94 +534,11 @@ function PlainChangedFiles({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Snapshot diff (legacy prev→N drill-in). Behavior unchanged from the
-// former SnapshotDetailPage.
-// ---------------------------------------------------------------------------
-
+/** One row in the overlapping-efforts roster. */
 interface EffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
   files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
-}
-
-function SnapshotDiffBody({
-  stream,
-  snapshotId,
-  onOpenDiff,
-  onOpenDiffInTab,
-  onOpenPage,
-  onOpenFile,
-}: DiffViewPageProps & { snapshotId: number }) {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
-  const refForGraph = snapshotRef(snapshotId);
-  const backlinkEntries = useBacklinks(refForGraph);
-  const outboundEntries = usePageOutbound(refForGraph);
-  const backlinks = {
-    count: backlinkEntries.length,
-    body: <BacklinksList entries={backlinkEntries} onOpenPage={onOpenPage} />,
-  };
-  const outbound =
-    outboundEntries.length > 0
-      ? {
-          count: outboundEntries.length,
-          body: <BacklinksList entries={outboundEntries} onOpenPage={onOpenPage} />,
-        }
-      : undefined;
-  // A single captured snapshot is framed as the diff [prev → N]: the
-  // previous capture in the stream is the start, this snapshot the end.
-  // One diff path now (tsk341) — this body resolves the bracket and
-  // keeps the snapshot's backlinks, then renders ResolvedEndpointDiff.
-  useEffect(() => {
-    if (!stream) {
-      setSnapshot(null);
-      setResolved(null);
-      return;
-    }
-    let cancelled = false;
-    // No "get one snapshot" IPC; pull the recent window, pick our row,
-    // and find the previous capture. Cheap (~500 rows) for a page load.
-    void listSnapshots(stream.id, 500)
-      .then((rows) => {
-        if (cancelled) return;
-        setSnapshot(rows.find((r) => r.id === snapshotId) ?? null);
-        const prev = previousSnapshotId(
-          snapshotId,
-          rows.map((r) => r.id),
-        );
-        setResolved({ ...resolveSnapshotEndpoints(snapshotId, prev), taskId: null });
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        logUi("warn", "snapshot fetch failed", { error: String(err) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stream?.id, snapshotId]);
-
-  const headerTitle = snapshot
-    ? `Snapshot ${snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`
-    : `Snapshot ${snapshotId}`;
-
-  return (
-    <Page testId="page-snapshot-detail" title={headerTitle} kind="snapshot" backlinks={backlinks} outbound={outbound}>
-      {!resolved ? (
-        <div style={{ ...muted, padding: "12px 16px" }}>Loading…</div>
-      ) : (
-        <ResolvedEndpointDiff
-          stream={stream}
-          resolved={resolved}
-          tabKey={`snapshot:${snapshotId}`}
-          onOpenPage={onOpenPage}
-          onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
-          onOpenDiffInTab={onOpenDiffInTab}
-        />
-      )}
-    </Page>
-  );
 }
 
 /// The page's core: a snapshot's changed files, grouped by the

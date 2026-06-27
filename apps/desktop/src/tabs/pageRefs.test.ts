@@ -140,7 +140,8 @@ describe("refFromTabId", () => {
   test("rebuilds payload-bearing kinds from their id", () => {
     expect(refFromTabId("wiki:some-slug")).toEqual(wikiPageRef("some-slug"));
     expect(refFromTabId("task:42")).toEqual(taskRef("42"));
-    expect(refFromTabId("snapshot:112")).toEqual(snapshotRef(112));
+    // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
+    expect(refFromTabId(snapshotRef(112).id)).toEqual(snapshotRef(112));
     expect(refFromTabId("external-url:https://x.test/p")).toEqual(externalUrlRef("https://x.test/p"));
   });
 

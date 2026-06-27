@@ -192,13 +192,15 @@ export function gitDashboardRef(): TabRef {
   return { id: "git-dashboard", kind: "git-dashboard", payload: null };
 }
 
-/** Detail page for a single snapshot (drill-in from the Local
- *  History dashboard's Recent Snapshots card). */
+/** Diff view of a single captured snapshot — framed as `[prev → N]`
+ *  (the previous capture in the stream is the start; the page resolves
+ *  it on load). Drill-in from the Local History dashboard, file version
+ *  history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
   return {
-    id: `snapshot:${snapshotId}`,
-    kind: "snapshot",
-    payload: { snapshotId },
+    id: `diff-view:snapshot:${snapshotId}`,
+    kind: "diff-view",
+    payload: { mode: "snapshot", snapshotId },
   };
 }
 
@@ -214,11 +216,11 @@ export function snapshotRef(snapshotId: number): TabRef {
  * - **endpoints** (`diff-view:endpoints:<start>..<end>`) — an explicit
  *   pair of snapshot/commit/working endpoints. `start = null` diffs
  *   `end` against the empty tree (everything added).
- *
- * `snapshotRef(N)` (the legacy `snapshot` kind) still renders
- * DiffViewPage, in its own prev→N mode — see the App.tsx render branch.
+ * - **snapshot** (`diff-view:snapshot:<N>`) — a single capture, framed
+ *   as `[prev → N]`; the page resolves the previous snapshot on load.
  */
 export type DiffViewPayload =
+  | { mode: "snapshot"; snapshotId: number }
   | { mode: "effort"; effortId: string }
   | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
 
@@ -434,15 +436,15 @@ export function refFromTabId(id: string): TabRef {
     }
     case "directory":
       return directoryRef(rest);
-    case "snapshot": {
-      const n = Number(rest);
-      return Number.isFinite(n) ? snapshotRef(n) : { id, kind: "snapshot", payload: null };
-    }
     case "diff-view": {
-      // `rest` is `effort:<id>` or `endpoints:<start>..<end>`.
+      // `rest` is `snapshot:<N>` | `effort:<id>` | `endpoints:<start>..<end>`.
       const sub = rest.indexOf(":");
       const subScheme = sub === -1 ? rest : rest.slice(0, sub);
       const subRest = sub === -1 ? "" : rest.slice(sub + 1);
+      if (subScheme === "snapshot") {
+        const n = Number(subRest);
+        if (Number.isFinite(n)) return snapshotRef(n);
+      }
       if (subScheme === "effort") return effortDiffRef(subRest);
       if (subScheme === "endpoints") {
         const [startTok, endTok] = subRest.split("..");

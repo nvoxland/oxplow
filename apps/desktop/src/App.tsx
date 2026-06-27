@@ -1857,7 +1857,6 @@ export function App() {
       case "git-history":
       case "git-dashboard":
       case "git-commit":
-      case "snapshot":
       case "diff-view":
       case "uncommitted-changes":
       case "hook-events":
@@ -2540,30 +2539,14 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "snapshot") {
-        const payload = (ref.payload as { snapshotId?: number } | null) ?? null;
-        const snapshotId = payload?.snapshotId ?? 0;
-        tabs.push({
-          id: ref.id,
-          label: `Snapshot ${snapshotId}`,
-          closable: true,
-          render: () => (
-            <DiffViewPage
-              stream={stream}
-              spec={{ mode: "snapshot", snapshotId }}
-              onOpenDiff={navOpenDiff}
-              onOpenDiffInTab={navOpenDiff}
-              onOpenPage={navOpen}
-              onOpenFile={navOpenFile}
-            />
-          ),
-        });
       } else if (ref.kind === "diff-view") {
         const payload = ref.payload as DiffViewPayload | null;
         if (payload) {
+          const label =
+            payload.mode === "snapshot" ? `Snapshot ${payload.snapshotId}` : "Diff";
           tabs.push({
             id: ref.id,
-            label: "Diff",
+            label,
             closable: true,
             render: () => (
               <DiffViewPage

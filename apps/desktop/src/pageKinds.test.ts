@@ -65,7 +65,7 @@ describe("pageKindIconComponent", () => {
       "new-stream",
       "new-task",
       "closed-threads",
-      "snapshot",
+      "diff-view",
     ];
     for (const k of supported) {
       expect(pageKindIconComponent(k)).not.toBeNull();

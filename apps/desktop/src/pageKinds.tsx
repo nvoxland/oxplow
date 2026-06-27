@@ -34,7 +34,6 @@ import {
   GitMerge,
   History,
   Inbox,
-  Layers,
   LayoutDashboard,
   Library,
   type LucideIcon,
@@ -91,12 +90,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
 
     case "effort-coverage":
       return Activity;
-
-    // Snapshot detail page — Local History dashboard drill-in.
-    // (Same `Layers` icon previously used only for backlink rows.)
-    case "snapshot":
-      return Layers;
-
 
     // Literal-id index pages (kind === id).
     case "agent":
@@ -196,8 +189,6 @@ export function pageKindLabel(kind: string): string {
       return "wiki page";
     case "git-commit":
       return "commit";
-    case "snapshot":
-      return "snapshot";
     case "diff-view":
       return "diff";
     case "new-task":
