@@ -397,6 +397,22 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         snapshot_ids: Vec<i64>,
     ) -> Result<Vec<EffortAtSnapshot>, DomainError>;
+    /// Every effort whose snapshot window OVERLAPS the half-open range
+    /// `(range_start, range_end]` — including efforts that merely
+    /// started or ended inside the range, fully contain it, or are
+    /// still open (NULL end). Overlap of half-open intervals
+    /// `(a.start, a.end]` and `(range_start, range_end]` is
+    /// `a.start < range_end AND a.end > range_start`; an open effort
+    /// (NULL end) overlaps if it started before `range_end`. Efforts
+    /// with a NULL `start_snapshot_id` are skipped (can't be placed on
+    /// the snapshot timeline). Drives the diff view's roster of other
+    /// efforts that overlapped the diffed range. Ordered by
+    /// `started_at` ASC.
+    async fn list_efforts_overlapping_range(
+        &self,
+        range_start: i64,
+        range_end: i64,
+    ) -> Result<Vec<TaskEffort>, DomainError>;
     /// All distinct file paths whose `file_snapshot` rows fall inside
     /// this effort's snapshot bracket — i.e. the auto-diff for the
     /// effort. Returns empty when either `start_snapshot_id` or
@@ -1216,6 +1232,29 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             })
             .await
     }
+
+    async fn list_efforts_overlapping_range(
+        &self,
+        range_start: i64,
+        range_end: i64,
+    ) -> Result<Vec<TaskEffort>, DomainError> {
+        self.db
+            .call(move |conn| {
+                // Half-open overlap (range_start, range_end]:
+                //   start < range_end AND (end IS NULL OR end > range_start).
+                // NULL start ⇒ unplaced ⇒ excluded (NULL < x is NULL).
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                     WHERE start_snapshot_id IS NOT NULL
+                       AND start_snapshot_id < ?2
+                       AND (end_snapshot_id IS NULL OR end_snapshot_id > ?1)
+                     ORDER BY started_at ASC, id ASC",
+                )?;
+                let rows = stmt.query_map(params![range_start, range_end], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -1995,5 +2034,104 @@ mod tests {
         let at_snap2 = bucket(snap2);
         assert!(at_snap2.contains(&&a.id) && at_snap2.contains(&&b.id));
         assert_eq!(bucket(snap3), vec![&b.id]);
+    }
+
+    #[tokio::test]
+    async fn list_efforts_overlapping_range_includes_straddle_contain_and_open() {
+        let db = Database::in_memory();
+        let now = Timestamp::from_unix_ms(1);
+        let s = Stream {
+            id: StreamId::new(1),
+            kind: StreamKind::Primary,
+            title: "p".into(),
+            branch: "main".into(),
+            branch_ref: "refs/heads/main".into(),
+            branch_source: "main".into(),
+            worktree_path: "/p".into(),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        };
+        SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
+        let t = Thread {
+            id: ThreadId::new(1),
+            stream_id: s.id,
+            title: "x".into(),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            agent: oxplow_domain::AgentKind::Claude,
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        };
+        SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
+        let tid = SqliteTaskStore::new(db.clone())
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(t.id),
+                parent_id: None,
+                title: "x".into(),
+                description: String::new(),
+                status: TaskStatus::Ready,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        let snap_store = crate::SqliteSnapshotStore::new(db.clone());
+        let s1 = snap_store.create_snapshot(s.id).await.unwrap();
+        let s2 = snap_store.create_snapshot(s.id).await.unwrap();
+        let _s3 = snap_store.create_snapshot(s.id).await.unwrap();
+        let s4 = snap_store.create_snapshot(s.id).await.unwrap();
+        let s5 = snap_store.create_snapshot(s.id).await.unwrap();
+        let store = SqliteTaskEffortStore::new(db);
+
+        // Range under test: (s2, s4].
+        // A [s1,s2] — ends exactly at range start → excluded.
+        let a = store.start(tid, &t.id, Some(s1)).await.unwrap();
+        store.finish(&a.id, Some(s2), None).await.unwrap();
+        // B [s2,s4] — straddles the range end → included.
+        let b = store.start(tid, &t.id, Some(s2)).await.unwrap();
+        store.finish(&b.id, Some(s4), None).await.unwrap();
+        // C [s4,s5] — starts exactly at range end → excluded.
+        let c = store.start(tid, &t.id, Some(s4)).await.unwrap();
+        store.finish(&c.id, Some(s5), None).await.unwrap();
+        // D [s1,s5] — fully contains the range → included.
+        let d = store.start(tid, &t.id, Some(s1)).await.unwrap();
+        store.finish(&d.id, Some(s5), None).await.unwrap();
+        // E [s2,open] — still in progress → included.
+        let e = store.start(tid, &t.id, Some(s2)).await.unwrap();
+
+        let rows = store.list_efforts_overlapping_range(s2, s4).await.unwrap();
+        let ids: std::collections::HashSet<i64> = rows.iter().map(|r| r.id.value()).collect();
+        assert!(ids.contains(&b.id.value()), "straddling effort included");
+        assert!(ids.contains(&d.id.value()), "containing effort included");
+        assert!(ids.contains(&e.id.value()), "open effort included");
+        assert!(
+            !ids.contains(&a.id.value()),
+            "effort ending at range start excluded"
+        );
+        assert!(
+            !ids.contains(&c.id.value()),
+            "effort starting at range end excluded"
+        );
     }
 }

@@ -11,6 +11,8 @@ import type {
   CommentMessage,
   CommentStatus,
   CommentThread,
+  DiffEndpoint,
+  DiffEntry,
   LaunchInfo,
   RecentProjectView,
   SearchHit,
@@ -2020,6 +2022,24 @@ export async function getSnapshotPairDiff(
   ) as unknown as SnapshotDiffResult;
 }
 
+/** Diff two endpoints, each a snapshot id or a git commit. `start =
+ *  null` diffs `end` against the empty tree (everything added). Powers
+ *  the effort / local-history diff view. Mixed snapshot/commit and
+ *  working-tree endpoints are not yet supported by the backend. */
+export async function diffEndpoints(
+  start: DiffEndpoint | null,
+  end: DiffEndpoint,
+): Promise<DiffEntry[]> {
+  return unwrap(await commands.diffEndpoints(start, end));
+}
+
+/** Endpoint constructors so call sites read as intent. */
+export const snapshotEndpoint = (snapshotId: number): DiffEndpoint => ({
+  kind: "snapshot",
+  snapshot_id: snapshotId,
+});
+export const commitEndpoint = (sha: string): DiffEndpoint => ({ kind: "commit", sha });
+
 export async function getEffortFiles(effortId: string): Promise<SnapshotSummary | null> {
   return unwrap(
     await commands.getEffortFiles(effortId),
@@ -2105,6 +2125,49 @@ export async function listEffortsAtSnapshots(
     startSnapshotId: r.effort.start_snapshot_id,
     endSnapshotId: r.effort.end_snapshot_id,
     completedHere: r.effort.end_snapshot_id === r.snapshot_id,
+  }));
+}
+
+export interface OverlappingEffort {
+  effortId: string;
+  taskId: string;
+  threadId: string;
+  startedAt: string;
+  endedAt: string | null;
+  startSnapshotId: number | null;
+  endSnapshotId: number | null;
+  summary: string | null;
+}
+
+/** Efforts whose snapshot window overlaps the half-open range
+ *  `(rangeStart, rangeEnd]` — including ones that merely started or
+ *  ended inside it, contain it, or are still open. Drives the diff
+ *  view's roster of other efforts that overlapped the diffed range. */
+export async function listEffortsOverlappingRange(
+  rangeStart: number,
+  rangeEnd: number,
+): Promise<OverlappingEffort[]> {
+  const rows = unwrap(
+    await commands.listEffortsOverlappingRange(rangeStart, rangeEnd),
+  ) as unknown as Array<{
+    id: string;
+    task_id: string;
+    thread_id: string;
+    started_at: string;
+    ended_at: string | null;
+    start_snapshot_id: number | null;
+    end_snapshot_id: number | null;
+    summary: string | null;
+  }>;
+  return rows.map((r) => ({
+    effortId: r.id,
+    taskId: r.task_id,
+    threadId: r.thread_id,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    startSnapshotId: r.start_snapshot_id,
+    endSnapshotId: r.end_snapshot_id,
+    summary: r.summary,
   }));
 }
 

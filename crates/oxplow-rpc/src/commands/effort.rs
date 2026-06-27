@@ -69,6 +69,21 @@ pub async fn list_efforts_at_snapshots(
         .await?)
 }
 
+/// Every effort whose snapshot window overlaps the half-open range
+/// `(range_start, range_end]` — incl. efforts that merely started or
+/// ended inside it, contain it, or are still open. Drives the diff
+/// view's "other efforts that overlapped this range" roster.
+pub async fn list_efforts_overlapping_range(
+    svc: &Services,
+    range_start: i64,
+    range_end: i64,
+) -> Result<Vec<TaskEffort>, IpcError> {
+    Ok(svc
+        .effort_store
+        .list_efforts_overlapping_range(range_start, range_end)
+        .await?)
+}
+
 /// All distinct file paths whose `file_snapshot` rows fall inside
 /// this effort's snapshot bracket — the "all changes during this
 /// effort" reference list. Returns empty when the effort has no

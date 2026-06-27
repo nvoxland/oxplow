@@ -5,7 +5,8 @@ use crate::error::IpcError;
 use crate::state::AppState;
 
 pub use oxplow_rpc::commands::snapshot::{
-    SnapshotEntry, SnapshotFileRow, SnapshotPairDiff, SnapshotSummary, SnapshotSummaryCounts,
+    DiffEndpoint, DiffEntry, SnapshotEntry, SnapshotFileRow, SnapshotPairDiff, SnapshotSummary,
+    SnapshotSummaryCounts,
 };
 
 #[tauri::command]
@@ -131,6 +132,20 @@ pub async fn get_snapshot_pair_diff(
     after_id: Option<i64>,
 ) -> Result<SnapshotPairDiff, IpcError> {
     oxplow_rpc::commands::snapshot::get_snapshot_pair_diff(&state, before_id, after_id).await
+}
+
+/// Diff two endpoints, each a snapshot id or a git commit (the live
+/// working tree is reserved for an in-progress effort's open end).
+/// `start = null` diffs `end` against the empty tree. Powers the
+/// effort / local-history diff view.
+#[tauri::command]
+#[specta::specta]
+pub async fn diff_endpoints(
+    state: tauri::State<'_, AppState>,
+    start: Option<DiffEndpoint>,
+    end: DiffEndpoint,
+) -> Result<Vec<DiffEntry>, IpcError> {
+    oxplow_rpc::commands::snapshot::diff_endpoints(&state, start, end).await
 }
 
 /// Build a per-snapshot summary: the FileSnapshot row, the id of the

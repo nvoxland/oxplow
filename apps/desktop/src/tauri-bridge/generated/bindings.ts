@@ -346,6 +346,13 @@ export const commands = {
 	 */
 	getSnapshotPairDiff: (beforeId: number | null, afterId: number | null) => typedError<SnapshotPairDiff, IpcError>(__TAURI_INVOKE("get_snapshot_pair_diff", { beforeId, afterId })),
 	/**
+	 *  Diff two endpoints, each a snapshot id or a git commit (the live
+	 *  working tree is reserved for an in-progress effort's open end).
+	 *  `start = null` diffs `end` against the empty tree. Powers the
+	 *  effort / local-history diff view.
+	 */
+	diffEndpoints: (start: { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" } | null, end: DiffEndpoint) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff_endpoints", { start, end })),
+	/**
 	 *  Build a per-snapshot summary: the FileSnapshot row, the id of the
 	 *  prior capture of the same path (if any), and a one-row diff
 	 *  describing how the captured file relates to its predecessor
@@ -452,6 +459,12 @@ export const commands = {
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
 	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
+	/**
+	 *  Every effort whose snapshot window overlaps the half-open range
+	 *  `(range_start, range_end]`. Drives the diff view's roster of other
+	 *  efforts that overlapped the diffed range.
+	 */
+	listEffortsOverlappingRange: (rangeStart: number, rangeEnd: number) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
 	 *  All distinct file paths whose `file_snapshot` rows fall inside
 	 *  this effort's snapshot bracket — the "all changes during this
@@ -1296,6 +1309,27 @@ export type CreateWorktreeRequest = {
 	title: string,
 	branch: string,
 	branchSource: string,
+};
+
+/**
+ *  One endpoint of a diff: a captured local-history snapshot, a git
+ *  commit (any revspec libgit2 resolves), or the live working tree
+ *  (reserved for an in-progress effort's open end).
+ */
+export type DiffEndpoint = { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" };
+
+/**
+ *  One changed path between two [`DiffEndpoint`]s. `status` is
+ *  `"added" | "modified" | "deleted"`, matching the renderer's
+ *  `BranchChangeEntry`. Line counts are 0 until the per-file content
+ *  pass lands (tracked separately) — the SummaryCard renders 0s, the
+ *  same as the previous snapshot-mode behavior.
+ */
+export type DiffEntry = {
+	path: string,
+	status: string,
+	additions: number,
+	deletions: number,
 };
 
 /**

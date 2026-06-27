@@ -215,6 +215,112 @@ pub async fn get_snapshot_pair_diff(
     })
 }
 
+/// One endpoint of a diff: a captured local-history snapshot, a git
+/// commit (any revspec libgit2 resolves), or the live working tree
+/// (reserved for an in-progress effort's open end).
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum DiffEndpoint {
+    Snapshot { snapshot_id: i64 },
+    Commit { sha: String },
+    Working,
+}
+
+/// One changed path between two [`DiffEndpoint`]s. `status` is
+/// `"added" | "modified" | "deleted"`, matching the renderer's
+/// `BranchChangeEntry`. Line counts are 0 until the per-file content
+/// pass lands (tracked separately) — the SummaryCard renders 0s, the
+/// same as the previous snapshot-mode behavior.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffEntry {
+    pub path: String,
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+fn change_status_str(s: oxplow_domain::ChangeStatus) -> &'static str {
+    match s {
+        oxplow_domain::ChangeStatus::Added => "added",
+        oxplow_domain::ChangeStatus::Modified => "modified",
+        oxplow_domain::ChangeStatus::Deleted => "deleted",
+    }
+}
+
+/// Diff two endpoints. `start = None` diffs `end` against the empty
+/// tree (everything added). Homogeneous pairs use the native fast
+/// paths — snapshot↔snapshot via `SqliteSnapshotStore::diff_snapshots`,
+/// commit↔commit via [`oxplow_git::tree_at_commit`] + the shared
+/// [`oxplow_domain::diff_trees`]. Mixed snapshot/commit and
+/// working-tree endpoints are not yet supported: their content-identity
+/// spaces differ (snapshot xxh3 vs git blob oid), so a faithful diff
+/// needs a normalization pass (tracked separately).
+pub async fn diff_endpoints(
+    svc: &Services,
+    start: Option<DiffEndpoint>,
+    end: DiffEndpoint,
+) -> Result<Vec<DiffEntry>, IpcError> {
+    let changes = endpoint_changes(svc, start.as_ref(), &end).await?;
+    Ok(changes
+        .into_iter()
+        .map(|c| DiffEntry {
+            path: c.path,
+            status: change_status_str(c.status).to_string(),
+            additions: 0,
+            deletions: 0,
+        })
+        .collect())
+}
+
+async fn endpoint_changes(
+    svc: &Services,
+    start: Option<&DiffEndpoint>,
+    end: &DiffEndpoint,
+) -> Result<Vec<oxplow_domain::FileChange>, IpcError> {
+    use DiffEndpoint::{Commit, Snapshot};
+    match (start, end) {
+        (None, Snapshot { snapshot_id }) => Ok(svc
+            .snapshot_store
+            .diff_snapshots(None, *snapshot_id)
+            .await?),
+        (Some(Snapshot { snapshot_id: from }), Snapshot { snapshot_id: to }) => Ok(svc
+            .snapshot_store
+            .diff_snapshots(Some(*from), *to)
+            .await?),
+        (None, Commit { sha }) => commit_changes(svc, None, sha).await,
+        (Some(Commit { sha: from }), Commit { sha: to }) => {
+            commit_changes(svc, Some(from), to).await
+        }
+        _ => Err(IpcError::invalid(
+            "diff_endpoints: mixed snapshot/commit and working-tree endpoints are not yet supported",
+        )),
+    }
+}
+
+/// commit↔commit (or empty↔commit) via libgit2 trees, off the async
+/// runtime. `from = None` ⇒ everything in `to` is added.
+async fn commit_changes(
+    svc: &Services,
+    from: Option<&str>,
+    to: &str,
+) -> Result<Vec<oxplow_domain::FileChange>, IpcError> {
+    let dir = svc.layout.project_dir.clone();
+    let from = from.map(str::to_string);
+    let to = to.to_string();
+    tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let after = oxplow_git::tree_at_commit(&dir, &to).map_err(|e| e.to_string())?;
+        let before = match from {
+            Some(f) => oxplow_git::tree_at_commit(&dir, &f).map_err(|e| e.to_string())?,
+            None => std::collections::BTreeMap::new(),
+        };
+        Ok(oxplow_domain::diff_trees(&before, &after))
+    })
+    .await
+    .map_err(|e| IpcError::internal(e.to_string()))?
+    .map_err(IpcError::internal)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotEntry {
@@ -371,5 +477,151 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out["changed"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_snapshot_vs_snapshot_classifies_changes() {
+        let (svc, _dir) = crate::test_support::services();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let store = &svc.snapshot_store;
+        let mk = |path: &str, hash: Option<&str>, snap: i64| oxplow_db::FileSnapshot {
+            id: 0,
+            stream_id: stream,
+            path: path.into(),
+            blob_hash: hash.map(|h| h.into()),
+            size_bytes: 1,
+            captured_at: oxplow_domain::Timestamp::now(),
+            storage: oxplow_db::SnapshotStorage::Oxplow,
+            snapshot_id: Some(snap),
+            mtime_ms: None,
+        };
+        // p1: a + b baselined.
+        let p1 = store.create_snapshot(stream).await.unwrap();
+        store.capture(mk("a.txt", Some("h-a-1"), p1)).await.unwrap();
+        store.capture(mk("b.txt", Some("h-b-1"), p1)).await.unwrap();
+        // p2: a modified, c added, b deleted.
+        let p2 = store.create_snapshot(stream).await.unwrap();
+        store.capture(mk("a.txt", Some("h-a-2"), p2)).await.unwrap();
+        store.capture(mk("c.txt", Some("h-c-1"), p2)).await.unwrap();
+        store.capture(mk("b.txt", None, p2)).await.unwrap();
+
+        let entries = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Snapshot { snapshot_id: p1 }),
+            super::DiffEndpoint::Snapshot { snapshot_id: p2 },
+        )
+        .await
+        .unwrap();
+        let by: std::collections::HashMap<_, _> = entries
+            .iter()
+            .map(|e| (e.path.as_str(), e.status.as_str()))
+            .collect();
+        assert_eq!(by.get("a.txt"), Some(&"modified"));
+        assert_eq!(by.get("c.txt"), Some(&"added"));
+        assert_eq!(by.get("b.txt"), Some(&"deleted"));
+        // unchanged paths are omitted.
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_none_start_is_all_added() {
+        let (svc, _dir) = crate::test_support::services();
+        let stream = svc.streams.list_streams().await.unwrap()[0].id;
+        let store = &svc.snapshot_store;
+        let p1 = store.create_snapshot(stream).await.unwrap();
+        store
+            .capture(oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: stream,
+                path: "only.txt".into(),
+                blob_hash: Some("h".into()),
+                size_bytes: 1,
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: oxplow_db::SnapshotStorage::Oxplow,
+                snapshot_id: Some(p1),
+                mtime_ms: None,
+            })
+            .await
+            .unwrap();
+        let entries = super::diff_endpoints(
+            &svc,
+            None,
+            super::DiffEndpoint::Snapshot { snapshot_id: p1 },
+        )
+        .await
+        .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].status, "added");
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_commit_vs_commit_classifies_changes() {
+        let (svc, dir) = crate::test_support::services();
+        let p = dir.path().to_path_buf();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&p)
+                .status()
+                .unwrap()
+                .success());
+        };
+        let rev = || {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&p)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        std::fs::write(p.join("keep.txt"), "k").unwrap();
+        std::fs::write(p.join("mod.txt"), "v1").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let c1 = rev();
+        std::fs::write(p.join("mod.txt"), "v2").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c2"]);
+        let c2 = rev();
+
+        let entries = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Commit { sha: c1 }),
+            super::DiffEndpoint::Commit { sha: c2 },
+        )
+        .await
+        .unwrap();
+        assert!(entries
+            .iter()
+            .any(|e| e.path == "mod.txt" && e.status == "modified"));
+        assert!(!entries.iter().any(|e| e.path == "keep.txt"));
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_rejects_mixed_endpoints() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Snapshot { snapshot_id: 1 }),
+            super::DiffEndpoint::Commit { sha: "HEAD".into() },
+        )
+        .await;
+        assert!(
+            out.is_err(),
+            "mixed snapshot/commit endpoints not yet supported"
+        );
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "diff_endpoints",
+            serde_json::json!({ "start": null, "end": { "kind": "commit", "sha": "HEAD" } }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_array(), "expected a JSON array, got {out}");
     }
 }

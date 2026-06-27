@@ -247,6 +247,8 @@ pub const MANIFEST: &[Capability] = &[
     both("list_snapshot_change_entries"),
     both("read_snapshot_file_content"),
     both("restore_file_from_snapshot"),
+    // Endpoint diff for the diff view page (effort / local-history) — UI-only.
+    ui("diff_endpoints"),
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
     todo("list_snapshots"),
     todo("get_snapshot_pair_diff"),
@@ -351,6 +353,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_task_efforts"),
     ui("get_effort_files"),
     ui("list_efforts_at_snapshots"),
+    ui("list_efforts_overlapping_range"),
     ui("list_changed_paths_for_effort"),
     // ---- ui-only: git log (presentation) ----
     ui("get_workspace_status_summary"),

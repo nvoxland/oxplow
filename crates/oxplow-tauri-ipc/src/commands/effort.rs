@@ -49,6 +49,20 @@ pub async fn list_efforts_at_snapshots(
     oxplow_rpc::commands::effort::list_efforts_at_snapshots(&state, snapshot_ids).await
 }
 
+/// Every effort whose snapshot window overlaps the half-open range
+/// `(range_start, range_end]`. Drives the diff view's roster of other
+/// efforts that overlapped the diffed range.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_efforts_overlapping_range(
+    state: tauri::State<'_, AppState>,
+    range_start: i64,
+    range_end: i64,
+) -> Result<Vec<TaskEffort>, IpcError> {
+    oxplow_rpc::commands::effort::list_efforts_overlapping_range(&state, range_start, range_end)
+        .await
+}
+
 /// All distinct file paths whose `file_snapshot` rows fall inside
 /// this effort's snapshot bracket — the "all changes during this
 /// effort" reference list. Returns empty when the effort has no

@@ -205,6 +205,7 @@ rpc_dispatch! {
     "list_efforts_in_window" => commands::effort::list_efforts_in_window { window_start: oxplow_domain::Timestamp, window_end: oxplow_domain::Timestamp },
     "get_effort_files" => commands::effort::get_effort_files { effort_id: oxplow_domain::EffortId },
     "list_efforts_at_snapshots" => commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> },
+    "list_efforts_overlapping_range" => commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 },
     "list_changed_paths_for_effort" => commands::effort::list_changed_paths_for_effort { effort_id: oxplow_domain::EffortId },
     "list_effort_observations" => commands::effort::list_effort_observations { effort_id: oxplow_domain::EffortId, kind: Option<String> },
     "list_effort_metric_deltas" => commands::effort::list_effort_metric_deltas { effort_id: oxplow_domain::EffortId },
@@ -352,6 +353,7 @@ rpc_dispatch! {
     "list_files_for_snapshot" => commands::snapshot::list_files_for_snapshot { snapshot_id: i64 },
     "get_snapshot" => commands::snapshot::get_snapshot { id: i64 },
     "get_snapshot_pair_diff" => commands::snapshot::get_snapshot_pair_diff { before_id: Option<i64>, after_id: Option<i64> },
+    "diff_endpoints" => commands::snapshot::diff_endpoints { start: Option<commands::snapshot::DiffEndpoint>, end: commands::snapshot::DiffEndpoint },
     "get_snapshot_summary" => commands::snapshot::get_snapshot_summary { snapshot_id: i64 },
     "restore_file_from_snapshot" => commands::snapshot::restore_file_from_snapshot { snapshot_id: i64 },
     // background
