@@ -40,6 +40,17 @@ pub async fn get_effort_files(
     oxplow_rpc::commands::effort::get_effort_files(&state, effort_id).await
 }
 
+/// One effort by id — its snapshot bracket + task id. Lets the diff
+/// view resolve `effortDiffRef(effortId)` into (start, end) endpoints.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_effort(
+    state: tauri::State<'_, AppState>,
+    effort_id: EffortId,
+) -> Result<Option<TaskEffort>, IpcError> {
+    oxplow_rpc::commands::effort::get_effort(&state, effort_id).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_efforts_at_snapshots(

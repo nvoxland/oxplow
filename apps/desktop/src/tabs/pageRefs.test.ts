@@ -3,6 +3,8 @@ import {
   agentRef,
   dashboardRef,
   diffRef,
+  effortDiffRef,
+  endpointDiffRef,
   externalUrlRef,
   fileRef,
   findingRef,
@@ -71,6 +73,54 @@ describe("pageRefs", () => {
   test("newTaskRef has stable create id", () => {
     expect(newTaskRef().id).toBe("new-task");
     expect(newTaskRef({ parentId: 1 }).id).toBe("new-task");
+  });
+
+  test("effortDiffRef encodes the effort id under the diff-view kind", () => {
+    const ref = effortDiffRef("eff42");
+    expect(ref.id).toBe("diff-view:effort:eff42");
+    expect(ref.kind).toBe("diff-view");
+    expect(ref.payload).toEqual({ mode: "effort", effortId: "eff42" });
+  });
+
+  test("endpointDiffRef encodes both endpoints; ids are stable + distinct", () => {
+    const a = endpointDiffRef(
+      { kind: "snapshot", snapshot_id: 1 },
+      { kind: "snapshot", snapshot_id: 9 },
+    );
+    const b = endpointDiffRef(
+      { kind: "snapshot", snapshot_id: 1 },
+      { kind: "snapshot", snapshot_id: 9 },
+    );
+    expect(a.id).toBe("diff-view:endpoints:s1..s9");
+    expect(a.id).toBe(b.id);
+    expect(a.kind).toBe("diff-view");
+    const c = endpointDiffRef(null, { kind: "commit", sha: "abc123" });
+    expect(c.id).toBe("diff-view:endpoints:none..cabc123");
+    expect(c.id).not.toBe(a.id);
+  });
+});
+
+describe("refFromTabId — diff-view", () => {
+  test("round-trips an effort diff", () => {
+    expect(refFromTabId("diff-view:effort:eff42")).toEqual(effortDiffRef("eff42"));
+  });
+
+  test("round-trips snapshot↔snapshot endpoints", () => {
+    const ref = endpointDiffRef(
+      { kind: "snapshot", snapshot_id: 1 },
+      { kind: "snapshot", snapshot_id: 9 },
+    );
+    expect(refFromTabId(ref.id)).toEqual(ref);
+  });
+
+  test("round-trips a null-start commit endpoint and a working endpoint", () => {
+    const commitRef = endpointDiffRef(null, { kind: "commit", sha: "abc123" });
+    expect(refFromTabId(commitRef.id)).toEqual(commitRef);
+    const workingRef = endpointDiffRef(
+      { kind: "snapshot", snapshot_id: 5 },
+      { kind: "working" },
+    );
+    expect(refFromTabId(workingRef.id)).toEqual(workingRef);
   });
 });
 

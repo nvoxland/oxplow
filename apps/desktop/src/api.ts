@@ -2046,6 +2046,33 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
   ) as unknown as SnapshotSummary | null;
 }
 
+/** One effort by id — its snapshot bracket + task id, so the diff view
+ *  can resolve `effortDiffRef(effortId)` into (start, end) endpoints.
+ *  `null` when the id is unknown. */
+export async function getEffort(effortId: string): Promise<OverlappingEffort | null> {
+  const row = unwrap(await commands.getEffort(effortId)) as unknown as {
+    id: string;
+    task_id: string;
+    thread_id: string;
+    started_at: string;
+    ended_at: string | null;
+    start_snapshot_id: number | null;
+    end_snapshot_id: number | null;
+    summary: string | null;
+  } | null;
+  if (!row) return null;
+  return {
+    effortId: row.id,
+    taskId: row.task_id,
+    threadId: row.thread_id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    startSnapshotId: row.start_snapshot_id,
+    endSnapshotId: row.end_snapshot_id,
+    summary: row.summary,
+  };
+}
+
 /** Per-effort touched_files list — the canonical authorship list
  *  (LLM-declared via `complete_task` + any subsequent `amend_effort`
  *  corrections). Distinct from getEffortFiles, which had a misleading

@@ -5,6 +5,7 @@
 
 import type { TabRef } from "./tabState.js";
 import { DISK, type FileVersion, versionIdFragment } from "../file-version.js";
+import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
 
 export function agentRef(): TabRef {
   return { id: "agent", kind: "agent", payload: null };
@@ -202,6 +203,70 @@ export function snapshotRef(snapshotId: number): TabRef {
 }
 
 /**
+ * The diff view (`diff-view` kind) reframes the old snapshot detail
+ * page as an explicit start→end diff. Two entry shapes, both rendered
+ * by `DiffViewPage`:
+ *
+ * - **effort** (`diff-view:effort:<effortId>`) — resolves the effort's
+ *   own start/end snapshot bracket on load (survives a cold history
+ *   reopen where only the id is in the tab id), carrying the task title
+ *   + "in progress" state.
+ * - **endpoints** (`diff-view:endpoints:<start>..<end>`) — an explicit
+ *   pair of snapshot/commit/working endpoints. `start = null` diffs
+ *   `end` against the empty tree (everything added).
+ *
+ * `snapshotRef(N)` (the legacy `snapshot` kind) still renders
+ * DiffViewPage, in its own prev→N mode — see the App.tsx render branch.
+ */
+export type DiffViewPayload =
+  | { mode: "effort"; effortId: string }
+  | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
+
+/** Stable single-token encoding of one endpoint for the tab id. */
+function encodeEndpoint(ep: DiffEndpoint | null): string {
+  if (ep === null) return "none";
+  switch (ep.kind) {
+    case "snapshot":
+      return `s${ep.snapshot_id}`;
+    case "commit":
+      return `c${ep.sha}`;
+    case "working":
+      return "w";
+  }
+}
+
+/** Inverse of `encodeEndpoint` — used by `refFromTabId` to rebuild an
+ *  endpoint diff from its tab id alone (history reopen). */
+function decodeEndpoint(token: string): DiffEndpoint | null {
+  if (token === "none") return null;
+  if (token === "w") return { kind: "working" };
+  if (token.startsWith("s")) return { kind: "snapshot", snapshot_id: Number(token.slice(1)) };
+  if (token.startsWith("c")) return { kind: "commit", sha: token.slice(1) };
+  return null;
+}
+
+/** Diff view scoped to one effort — resolves the effort's start/end
+ *  snapshot bracket on load. The 'View diff' button on a completed
+ *  effort points here. */
+export function effortDiffRef(effortId: string): TabRef {
+  return {
+    id: `diff-view:effort:${effortId}`,
+    kind: "diff-view",
+    payload: { mode: "effort", effortId },
+  };
+}
+
+/** Diff view between two explicit endpoints (snapshot / commit /
+ *  working). `start = null` diffs `end` against the empty tree. */
+export function endpointDiffRef(start: DiffEndpoint | null, end: DiffEndpoint): TabRef {
+  return {
+    id: `diff-view:endpoints:${encodeEndpoint(start)}..${encodeEndpoint(end)}`,
+    kind: "diff-view",
+    payload: { mode: "endpoints", start, end },
+  };
+}
+
+/**
  * Drilldown scope. `undefined` is "no scope" — show every changed
  * file. The host pages (commit, uncommitted) own the scope on their
  * own ref so a pivot click stays in-page rather than spawning a
@@ -372,6 +437,19 @@ export function refFromTabId(id: string): TabRef {
     case "snapshot": {
       const n = Number(rest);
       return Number.isFinite(n) ? snapshotRef(n) : { id, kind: "snapshot", payload: null };
+    }
+    case "diff-view": {
+      // `rest` is `effort:<id>` or `endpoints:<start>..<end>`.
+      const sub = rest.indexOf(":");
+      const subScheme = sub === -1 ? rest : rest.slice(0, sub);
+      const subRest = sub === -1 ? "" : rest.slice(sub + 1);
+      if (subScheme === "effort") return effortDiffRef(subRest);
+      if (subScheme === "endpoints") {
+        const [startTok, endTok] = subRest.split("..");
+        const end = decodeEndpoint(endTok ?? "");
+        if (end) return endpointDiffRef(decodeEndpoint(startTok ?? "none"), end);
+      }
+      return { id, kind: "diff-view", payload: null };
     }
     case "git-commit":
       // Id may carry a `:scope:value` suffix; the bare sha reopens the

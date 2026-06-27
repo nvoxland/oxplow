@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  diffEndpoints,
   getBranchChanges,
   getCommitDetail,
   listCodeQualityFindings,
@@ -10,6 +11,7 @@ import {
   subscribeSnapshotEvents,
   subscribeWorkspaceEvents,
 } from "../../api.js";
+import type { DiffEndpoint } from "../../tauri-bridge/generated/bindings.js";
 import type {
   BranchChangeEntry,
   CodeQualityFindingRow,
@@ -39,12 +41,21 @@ import type { ChangeAnalysisScope } from "../../tabs/pageRefs.js";
 
 export interface UseChangeAnalysisInput {
   streamId: string | null;
-  /** "working" or a commit SHA. */
+  /** "working" or a commit SHA. Ignored for routing when `endpoints`
+   *  is set, but still used as a stable cache key — pass a stable
+   *  string (e.g. the tab id). */
   target: string;
   /** Optional drilldown filter applied before pivots / functions /
    *  duplication / tests are computed. When omitted the hook returns
    *  unfiltered dashboard-mode data. */
   scope?: ChangeAnalysisScope;
+  /** When set, routes the file list + status through `diff_endpoints`
+   *  (the unified snapshot/commit diff substrate) instead of git refs
+   *  or the single-snapshot source. The function / duplication /
+   *  co-change passes are skipped: the endpoint substrate doesn't yet
+   *  expose per-file content ids or line counts (tracked in tsk339), so
+   *  the diff view renders the file list + status breakdown only. */
+  endpoints?: { start: DiffEndpoint | null; end: DiffEndpoint };
 }
 
 /** Predicate that matches a file against a drilldown scope. Pure;
@@ -226,7 +237,12 @@ async function fetchFiles(
 }
 
 export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysisState {
-  const { streamId, target, scope } = input;
+  const { streamId, target, scope, endpoints } = input;
+  // Stable key for the endpoints object so refresh's deps don't churn
+  // on every render (the caller may pass a fresh object literal).
+  const endpointsKey = endpoints ? JSON.stringify(endpoints) : "";
+  const endpointsRef = useRef(endpoints);
+  endpointsRef.current = endpoints;
   const [files, setFiles] = useState<BranchChangeEntry[]>(EMPTY_FILES);
   const [functions, setFunctions] = useState<FunctionsBuckets>(EMPTY_BUCKETS);
   const [functionChurn, setFunctionChurn] = useState<FunctionChurnRow[]>([]);
@@ -265,6 +281,41 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     const reqId = ++reqIdRef.current;
     setLoading(true);
     setError(null);
+
+    // Endpoint-diff mode: the file list + status come from the unified
+    // diff substrate. Function / duplication / co-change passes are
+    // skipped (no per-file content ids from this source yet — tsk339).
+    const eps = endpointsRef.current;
+    if (eps) {
+      try {
+        const entries = await diffEndpoints(eps.start, eps.end);
+        if (reqId !== reqIdRef.current) return;
+        setFiles(
+          entries.map((e) => ({
+            path: e.path,
+            status: e.status as BranchChangeEntry["status"],
+            // 0 today; tsk339 populates real line counts.
+            additions: e.additions,
+            deletions: e.deletions,
+          })),
+        );
+        setFunctions(EMPTY_BUCKETS);
+        setFunctionChurn([]);
+        setImportDeltas([]);
+        setCoChangeSurprise([]);
+        setDuplication({ findings: [], scanAgeMs: null, hasScan: false });
+        setResolvedRefs(null);
+      } catch (err) {
+        if (reqId !== reqIdRef.current) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setFiles(EMPTY_FILES);
+        setFunctions(EMPTY_BUCKETS);
+      } finally {
+        if (reqId === reqIdRef.current) setLoading(false);
+      }
+      return;
+    }
+
     try {
       const refs = await resolveRefs(streamId, target);
       if ("error" in refs) {
@@ -430,7 +481,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
-  }, [streamId, target, treeVersion]);
+  }, [streamId, target, treeVersion, endpointsKey]);
 
   useEffect(() => {
     void refresh();

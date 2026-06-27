@@ -352,6 +352,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: efforts ----
     ui("list_task_efforts"),
     ui("get_effort_files"),
+    ui("get_effort"),
     ui("list_efforts_at_snapshots"),
     ui("list_efforts_overlapping_range"),
     ui("list_changed_paths_for_effort"),

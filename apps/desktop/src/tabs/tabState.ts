@@ -14,6 +14,7 @@ export type PageKind =
   | "file"
   | "directory"
   | "diff"
+  | "diff-view"
   | "duplicate-block"
   | "wiki"
   | "wiki-freshness"

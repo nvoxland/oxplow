@@ -101,7 +101,7 @@ import { useBookmarksStore } from "./tabs/useBookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { LocalHistoryDashboardPage } from "./pages/LocalHistoryDashboardPage.js";
-import { SnapshotDetailPage } from "./pages/SnapshotDetailPage.js";
+import { DiffViewPage } from "./pages/DiffViewPage.js";
 import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
@@ -139,7 +139,7 @@ import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { closedThreadsRef, commentsRef, directoryRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, snapshotRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef } from "./tabs/pageRefs.js";
+import { closedThreadsRef, commentsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -1858,6 +1858,7 @@ export function App() {
       case "git-dashboard":
       case "git-commit":
       case "snapshot":
+      case "diff-view":
       case "uncommitted-changes":
       case "hook-events":
       case "terminal":
@@ -2547,9 +2548,9 @@ export function App() {
           label: `Snapshot ${snapshotId}`,
           closable: true,
           render: () => (
-            <SnapshotDetailPage
+            <DiffViewPage
               stream={stream}
-              snapshotId={snapshotId}
+              spec={{ mode: "snapshot", snapshotId }}
               onOpenDiff={navOpenDiff}
               onOpenDiffInTab={navOpenDiff}
               onOpenPage={navOpen}
@@ -2557,6 +2558,25 @@ export function App() {
             />
           ),
         });
+      } else if (ref.kind === "diff-view") {
+        const payload = ref.payload as DiffViewPayload | null;
+        if (payload) {
+          tabs.push({
+            id: ref.id,
+            label: "Diff",
+            closable: true,
+            render: () => (
+              <DiffViewPage
+                stream={stream}
+                spec={payload}
+                onOpenDiff={navOpenDiff}
+                onOpenDiffInTab={navOpenDiff}
+                onOpenPage={navOpen}
+                onOpenFile={navOpenFile}
+              />
+            ),
+          });
+        }
       } else if (ref.kind === "git-history") {
         tabs.push({
           id: ref.id,
@@ -2953,10 +2973,7 @@ export function App() {
               onDelete={(id) => { void handleDeleteTask(id); }}
               onOpenPage={navOpen}
               onOpenFile={(p) => navOpenFile(p)}
-              onShowInHistory={(snapshotId) => {
-                const id = Number(snapshotId);
-                if (Number.isFinite(id)) navOpen(snapshotRef(id));
-              }}
+              onShowEffortDiff={(effortId) => navOpen(effortDiffRef(effortId))}
               onOpenDiff={navOpenDiff}
             />
           ),

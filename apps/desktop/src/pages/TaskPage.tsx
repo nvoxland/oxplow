@@ -30,7 +30,8 @@ export interface TaskPageProps {
   onDelete?(itemId: string): void;
   onOpenPage(ref: TabRef): void;
   onOpenFile?(path: string): void;
-  onShowInHistory?(snapshotId: string): void;
+  /** Open the diff view for a completed effort (start→end snapshots). */
+  onShowEffortDiff?(effortId: string): void;
   onOpenDiff?(spec: import("../components/Diff/DiffPane.js").DiffSpec): void;
 }
 
@@ -49,7 +50,7 @@ export function TaskPage({
   onDelete,
   onOpenPage,
   onOpenFile,
-  onShowInHistory,
+  onShowEffortDiff,
   onOpenDiff,
 }: TaskPageProps) {
   const [fetchedItem, setFetchedItem] = useState<Task | null>(null);
@@ -235,7 +236,7 @@ export function TaskPage({
             efforts={efforts}
             formatTimestamp={(iso) => new Date(iso).toLocaleString()}
             onOpenFile={onOpenFile}
-            onShowInHistory={onShowInHistory}
+            onShowEffortDiff={onShowEffortDiff}
             onOpenDiff={onOpenDiff}
           />
         </section>

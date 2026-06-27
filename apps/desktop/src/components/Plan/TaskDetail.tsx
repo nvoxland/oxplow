@@ -440,13 +440,14 @@ export function ActivityTimeline({
   efforts,
   formatTimestamp,
   onOpenFile,
-  onShowInHistory,
+  onShowEffortDiff,
   onOpenDiff,
 }: {
   efforts: EffortDetail[];
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
+  /** Open the effort's diff view (start→end snapshot bracket). */
+  onShowEffortDiff?(effortId: string): void;
   /** Open a diff tab. Modified-file rows use this to show the file's
    *  diff across the effort's snapshot bracket. */
   onOpenDiff?(spec: DiffSpec): void;
@@ -478,7 +479,7 @@ export function ActivityTimeline({
           active={row.active}
           formatTimestamp={formatTimestamp}
           onOpenFile={onOpenFile}
-          onShowInHistory={onShowInHistory}
+          onShowEffortDiff={onShowEffortDiff}
           onOpenDiff={onOpenDiff}
         />
       ))}
@@ -500,14 +501,14 @@ function ActivityEffortSection({
   active,
   formatTimestamp,
   onOpenFile,
-  onShowInHistory,
+  onShowEffortDiff,
   onOpenDiff,
 }: {
   detail: EffortDetail;
   active: boolean;
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
-  onShowInHistory?(snapshotId: string): void;
+  onShowEffortDiff?(effortId: string): void;
   onOpenDiff?(spec: DiffSpec): void;
 }) {
   const ctxNav = useOptionalPageNavigation();
@@ -529,7 +530,6 @@ function ActivityEffortSection({
       baseLabel: "effort changes",
     });
   };
-  const endSnapshotId = detail.effort.end_snapshot_id;
   const subheader = active
     ? `In progress · started ${formatTimestamp(detail.effort.started_at)}`
     : `${formatTimestamp(detail.effort.started_at)} → ${formatEffortEnd(detail.effort.started_at, detail.effort.ended_at!, formatTimestamp)}`;
@@ -571,11 +571,11 @@ function ActivityEffortSection({
         }}>
           {subheader}
         </h3>
-        {!active && onShowInHistory && endSnapshotId ? (
+        {!active && onShowEffortDiff ? (
           <button
             type="button"
             data-testid={`tasks-show-in-history-${detail.effort.id}`}
-            onClick={() => onShowInHistory(endSnapshotId)}
+            onClick={() => onShowEffortDiff(detail.effort.id)}
             style={{
               flexShrink: 0,
               background: "transparent",
@@ -587,9 +587,9 @@ function ActivityEffortSection({
               fontSize: "var(--text-xs)",
               textDecoration: "underline",
             }}
-            title="Open Local History at this effort's end snapshot"
+            title="Open the diff view for this effort (start → end)"
           >
-            View snapshot
+            View diff
           </button>
         ) : null}
       </header>

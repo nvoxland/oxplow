@@ -59,6 +59,18 @@ pub async fn get_effort_files(
         .collect())
 }
 
+/// One effort by id — its snapshot bracket (`start_snapshot_id` /
+/// `end_snapshot_id`), task id, and lifecycle stamps. Lets the diff
+/// view resolve an `effortDiffRef(effortId)` into the (start, end)
+/// snapshot endpoints it diffs, including after a cold history reopen
+/// where only the effort id survives. `null` when the id is unknown.
+pub async fn get_effort(
+    svc: &Services,
+    effort_id: EffortId,
+) -> Result<Option<TaskEffort>, IpcError> {
+    Ok(svc.effort_store.get_effort(&effort_id).await?)
+}
+
 pub async fn list_efforts_at_snapshots(
     svc: &Services,
     snapshot_ids: Vec<i64>,
@@ -225,6 +237,19 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array());
+    }
+
+    #[tokio::test]
+    async fn get_effort_dispatches_and_returns_null_for_missing() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch(
+            "get_effort",
+            serde_json::json!({"effortId": "eff999999"}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert!(out.is_null(), "missing effort → null, got {out}");
     }
 
     #[tokio::test]

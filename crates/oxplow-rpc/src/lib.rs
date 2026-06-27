@@ -204,6 +204,7 @@ rpc_dispatch! {
     "list_task_efforts" => commands::effort::list_task_efforts { item_id: oxplow_domain::TaskId },
     "list_efforts_in_window" => commands::effort::list_efforts_in_window { window_start: oxplow_domain::Timestamp, window_end: oxplow_domain::Timestamp },
     "get_effort_files" => commands::effort::get_effort_files { effort_id: oxplow_domain::EffortId },
+    "get_effort" => commands::effort::get_effort { effort_id: oxplow_domain::EffortId },
     "list_efforts_at_snapshots" => commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> },
     "list_efforts_overlapping_range" => commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 },
     "list_changed_paths_for_effort" => commands::effort::list_changed_paths_for_effort { effort_id: oxplow_domain::EffortId },

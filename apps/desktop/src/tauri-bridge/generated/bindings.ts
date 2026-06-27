@@ -458,6 +458,21 @@ export const commands = {
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
+	/**
+	 *  One effort by id — its snapshot bracket + task id. Lets the diff
+	 *  view resolve `effortDiffRef(effortId)` into (start, end) endpoints.
+	 */
+	getEffort: (effortId: EffortId) => typedError<{
+	id: EffortId,
+	task_id: TaskId,
+	thread_id: ThreadId,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	start_snapshot_id: number | null,
+	end_snapshot_id: number | null,
+	// The effort's summary prose — the canonical text.
+	summary: string | null,
+} | null, IpcError>(__TAURI_INVOKE("get_effort", { effortId })),
 	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
 	/**
 	 *  Every effort whose snapshot window overlaps the half-open range

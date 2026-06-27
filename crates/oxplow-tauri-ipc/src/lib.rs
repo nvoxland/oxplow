@@ -182,6 +182,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // efforts
             commands::effort::list_task_efforts,
             commands::effort::get_effort_files,
+            commands::effort::get_effort,
             commands::effort::list_efforts_at_snapshots,
             commands::effort::list_efforts_overlapping_range,
             commands::effort::list_changed_paths_for_effort,

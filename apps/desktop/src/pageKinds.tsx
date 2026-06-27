@@ -62,6 +62,7 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "directory":
       return Folder;
     case "diff":
+    case "diff-view":
       return GitCompare;
     case "duplicate-block":
       return Copy;
@@ -197,6 +198,8 @@ export function pageKindLabel(kind: string): string {
       return "commit";
     case "snapshot":
       return "snapshot";
+    case "diff-view":
+      return "diff";
     case "new-task":
       return "new task";
     case "new-stream":
