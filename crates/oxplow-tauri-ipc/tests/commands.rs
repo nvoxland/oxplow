@@ -845,3 +845,147 @@ async fn lsp_list_reads_for_fresh_project() {
         .is_empty());
     let _ = commands::lsp::list_lsp_servers(app.state()).await;
 }
+
+// ---------------------------------------------------------------------------
+// analyze_functions_at_refs — the one richly-assertable code-quality adapter.
+// It takes no `Services` (pure tree-sitter), so it runs without the harness.
+// These lock the real parse + churn-attribution behavior the Change Analysis
+// dashboard depends on, not just "doesn't panic".
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn analyze_functions_detects_functions_and_churn_for_a_modified_file() {
+    use commands::code_quality::AnalyzeFileSpec;
+    // head changes alpha's body AND adds beta.
+    let base = "fn alpha() -> i32 {\n    1\n}\n";
+    let head = "fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n";
+    let result = commands::code_quality::analyze_functions_at_refs(vec![AnalyzeFileSpec {
+        path: "src/x.rs".into(),
+        base_content: Some(base.into()),
+        head_content: Some(head.into()),
+    }])
+    .await
+    .unwrap();
+
+    let base_side = result
+        .sides
+        .iter()
+        .find(|s| s.side == "base")
+        .expect("base side present");
+    let head_side = result
+        .sides
+        .iter()
+        .find(|s| s.side == "head")
+        .expect("head side present");
+    assert!(base_side.functions.iter().any(|f| f.name == "alpha"));
+    assert!(head_side.functions.iter().any(|f| f.name == "alpha"));
+    assert!(
+        head_side.functions.iter().any(|f| f.name == "beta"),
+        "the newly added fn must appear on the head side"
+    );
+
+    assert_eq!(result.churn.len(), 1, "one modified file → one churn entry");
+    let churn = &result.churn[0];
+    assert_eq!(churn.path, "src/x.rs");
+    assert!(
+        churn.file_added > 0,
+        "adding fn beta should register added lines, got {churn:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn analyze_functions_added_file_has_only_head_side_and_no_churn() {
+    use commands::code_quality::AnalyzeFileSpec;
+    let result = commands::code_quality::analyze_functions_at_refs(vec![AnalyzeFileSpec {
+        path: "src/new.rs".into(),
+        base_content: None,
+        head_content: Some("fn brand_new() {}\n".into()),
+    }])
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.sides.len(),
+        1,
+        "an added file has only the head side"
+    );
+    assert_eq!(result.sides[0].side, "head");
+    assert!(result.sides[0]
+        .functions
+        .iter()
+        .any(|f| f.name == "brand_new"));
+    assert!(
+        result.churn.is_empty(),
+        "a file with no base content has no before→after churn"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn analyze_functions_empty_input_returns_empty() {
+    let result = commands::code_quality::analyze_functions_at_refs(vec![])
+        .await
+        .unwrap();
+    assert!(result.sides.is_empty());
+    assert!(result.churn.is_empty());
+    assert!(result.import_deltas.is_empty());
+}
+
+// ---- launcher: recent-projects exists-flag mapping ----
+
+/// `list_recent_projects` layers an `exists` flag onto each stored row.
+/// This is the only crate-local logic in `launch.rs` (the rest spawns
+/// processes), and the launcher's "missing" badge depends on it. Build a
+/// mock app managing a `RecentProjectsState` and assert the flag tracks
+/// whether the directory is still on disk.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn list_recent_projects_flags_missing_directories() {
+    use oxplow_config::RecentProjects;
+    use oxplow_tauri_ipc::RecentProjectsState;
+    use std::sync::Arc;
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    use tauri::Manager;
+
+    let state_dir = tempfile::TempDir::new().unwrap();
+    let recent: RecentProjectsState =
+        Arc::new(RecentProjects::new(state_dir.path().join("recent.json")));
+
+    // A live project dir, plus one we delete after recording so its row
+    // points at a now-missing directory.
+    let live = tempfile::TempDir::new().unwrap();
+    let live_canon = std::fs::canonicalize(live.path())
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    recent.record(live.path());
+
+    let gone = tempfile::TempDir::new().unwrap();
+    recent.record(gone.path());
+    drop(gone); // directory removed; the recorded row remains
+
+    let app = mock_builder()
+        .manage(recent.clone())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+
+    let views = commands::launch::list_recent_projects(app.state::<RecentProjectsState>())
+        .await
+        .unwrap();
+
+    assert_eq!(views.len(), 2);
+    let live_view = views
+        .iter()
+        .find(|v| v.path == live_canon)
+        .expect("live project row present");
+    assert!(
+        live_view.exists,
+        "an existing directory must be flagged exists=true"
+    );
+    let gone_view = views
+        .iter()
+        .find(|v| v.path != live_canon)
+        .expect("missing project row present");
+    assert!(
+        !gone_view.exists,
+        "a deleted directory must be flagged exists=false"
+    );
+}

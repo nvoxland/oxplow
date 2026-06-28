@@ -48,13 +48,18 @@ FLOORS = {
     # link_type, expect_id_kind, compose_*_brief) lifted this from
     # 25% → 40%. 35 leaves cushion for the next batch.
     "oxplow-mcp": 35.0,
-    # oxplow-tauri-ipc: a broad read-command batch (git/branch/stream/
-    # config/thread/comment/note/snapshot/effort/workspace/lsp adapters,
-    # driven through the mock-runtime harness) lifted this from 27% →
-    # ~48%. Pinned at 42 (≈5pt cushion) to lock the gain; raise as the
-    # remaining process-bound adapters (launch/menu/terminal/webview)
-    # get covered.
-    "oxplow-tauri-ipc": 42.0,
+    # oxplow-tauri-ipc: a pass-through adapter crate — most commands are
+    # one-line delegates to oxplow-rpc cores, and typed delegates are
+    # compiler-guarded, so line coverage here mostly measures padding
+    # (see the "pass-through crates" note in working-in-this-repo.md).
+    # We deliberately DON'T chase a high number: this floor is a
+    # catastrophe-catcher (trips if the adapters regress toward 0% / the
+    # mock-runtime harness breaks), set well below the ~46% measured so
+    # trimming padding tests or leaving trivial delegates uncovered
+    # doesn't fail CI. The genuine logic (menu/launch/webview/state +
+    # computing adapters) is unit-tested; the real surface guard is the
+    # export_ts_bindings + oxplow-surface-parity tests, not line %.
+    "oxplow-tauri-ipc": 30.0,
 }
 
 CRATE_RE = re.compile(r"/crates/([^/]+)/")

@@ -75,3 +75,57 @@ impl LaunchInfo {
 pub use oxplow_rpc::PluginRuntime;
 
 pub type PluginRuntimeState = Arc<PluginRuntime>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launch_info_constructors_set_mode_and_dir() {
+        let launcher = LaunchInfo::launcher();
+        assert_eq!(launcher.mode, "launcher");
+        assert_eq!(launcher.project_dir, None);
+
+        let project = LaunchInfo::project("/home/me/proj");
+        assert_eq!(project.mode, "project");
+        assert_eq!(project.project_dir.as_deref(), Some("/home/me/proj"));
+
+        let setup = LaunchInfo::setup("/home/me/proj");
+        assert_eq!(setup.mode, "setup");
+        assert_eq!(setup.project_dir.as_deref(), Some("/home/me/proj"));
+    }
+
+    /// The renderer's `<Root>` switches on these exact wire values to
+    /// pick the launcher screen vs. the app shell vs. the setup prompt.
+    /// A field rename (`projectDir` → `project_dir`) or a mode-string
+    /// drift would silently break boot, so pin the serialized shape.
+    #[test]
+    fn launch_info_serializes_with_camelcase_and_stable_mode_strings() {
+        let project = serde_json::to_value(LaunchInfo::project("/x")).unwrap();
+        assert_eq!(
+            project,
+            serde_json::json!({ "mode": "project", "projectDir": "/x" })
+        );
+
+        let launcher = serde_json::to_value(LaunchInfo::launcher()).unwrap();
+        assert_eq!(
+            launcher,
+            serde_json::json!({ "mode": "launcher", "projectDir": null })
+        );
+
+        let setup = serde_json::to_value(LaunchInfo::setup("/y")).unwrap();
+        assert_eq!(
+            setup,
+            serde_json::json!({ "mode": "setup", "projectDir": "/y" })
+        );
+    }
+
+    #[test]
+    fn launch_info_round_trips_through_json() {
+        let original = LaunchInfo::project("/some/dir");
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: LaunchInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.mode, original.mode);
+        assert_eq!(parsed.project_dir, original.project_dir);
+    }
+}
