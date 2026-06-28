@@ -35,6 +35,12 @@ export interface ChangeAnalysisDrilldownProps {
   /** When false, the inline Files/Functions panel is omitted — the host
    *  (the diff view) renders its own. Default true. */
   showFilesPanel?: boolean;
+  /** When false, the Change Treemap is omitted (the diff view hoists it
+   *  to the top). Default true. */
+  showTreemap?: boolean;
+  /** When false, the "Look here first" card is omitted (the diff view
+   *  hoists it to the top). Default true. */
+  showLookHere?: boolean;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings): void;
@@ -45,6 +51,8 @@ export function ChangeAnalysisDrilldown({
   target,
   analysis,
   showFilesPanel = true,
+  showTreemap = true,
+  showLookHere = true,
   onOpenFile,
   onOpenDiff,
   onOpenDiffInTab,
@@ -180,7 +188,7 @@ export function ChangeAnalysisDrilldown({
 
   return (
     <>
-      <ChangeTreemapCard files={filesAfterStatus} onOpenFile={onOpenFile} />
+      {showTreemap ? <ChangeTreemapCard files={filesAfterStatus} onOpenFile={onOpenFile} /> : null}
       <CoChangeSurpriseCard
         surprise={analysis.coChangeSurprise.filter((s) => filteredPathSet.has(s.path))}
         onOpenFile={onOpenFile}
@@ -199,12 +207,14 @@ export function ChangeAnalysisDrilldown({
           onOpenFileDiff={(path) => openDiffAt(path, 1)}
         />
       ) : null}
-      <LookHereFirstCard
-        files={filesAfterStatus}
-        fileScores={analysis.fileScores}
-        onOpenFile={onOpenFile}
-        onOpenFileDiff={(path) => openDiffAt(path, 1)}
-      />
+      {showLookHere ? (
+        <LookHereFirstCard
+          files={filesAfterStatus}
+          fileScores={analysis.fileScores}
+          onOpenFile={onOpenFile}
+          onOpenFileDiff={(path) => openDiffAt(path, 1)}
+        />
+      ) : null}
       <ChurnCard
         files={filesAfterStatus}
         functionChurn={churnAfterStatus}

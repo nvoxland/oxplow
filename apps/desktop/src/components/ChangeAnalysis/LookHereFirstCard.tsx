@@ -10,6 +10,10 @@ interface LookHereFirstCardProps {
   /** Plain click target: open the file's diff in-tab. Cmd/ctrl-
    *  click escapes to a new-tab file open via onOpenFile. */
   onOpenFileDiff?: (path: string, line?: number) => void;
+  /** Drop the bordered card and render the title as a section `<h2>`,
+   *  matching the diff view's other boxless sections. Default false
+   *  (keeps the card on the commit/uncommitted analysis panels). */
+  boxless?: boolean;
 }
 
 const COLLAPSED_CAP = 8;
@@ -35,7 +39,7 @@ interface Row {
  * state — no point cluttering the dashboard with low-signal
  * panels.
  */
-export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDiff }: LookHereFirstCardProps) {
+export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDiff, boxless = false }: LookHereFirstCardProps) {
   const [expanded, setExpanded] = useState(false);
   const ranked: Row[] = files
     .map((f) => {
@@ -53,10 +57,17 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
 
   if (files.length === 0) return null;
 
+  const sectionStyle = boxless ? undefined : card;
+  const headerEl = boxless ? (
+    <h2 style={boxlessHeader}>Look here first</h2>
+  ) : (
+    <div style={header}>Look here first</div>
+  );
+
   if (ranked.length === 0) {
     return (
-      <section data-testid="change-analysis-look-here-first" style={card}>
-        <div style={header}>Look here first</div>
+      <section data-testid="change-analysis-look-here-first" style={sectionStyle}>
+        {headerEl}
         <div style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
           Nothing stands out — diff looks routine.
         </div>
@@ -69,8 +80,8 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
   const moreCount = Math.min(ranked.length, EXPANDED_CAP) - visible.length;
 
   return (
-    <section data-testid="change-analysis-look-here-first" style={card}>
-      <div style={header}>Look here first</div>
+    <section data-testid="change-analysis-look-here-first" style={sectionStyle}>
+      {headerEl}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {visible.map((row) => (
           <div
@@ -142,6 +153,12 @@ const card: React.CSSProperties = {
   padding: 12,
 };
 const header: React.CSSProperties = { fontWeight: 600, marginBottom: 8 };
+const boxlessHeader: React.CSSProperties = {
+  margin: "0 0 8px",
+  fontSize: "var(--text-lg)",
+  fontWeight: 600,
+  color: "var(--text-primary)",
+};
 const pathButton: React.CSSProperties = {
   background: "transparent",
   border: "none",

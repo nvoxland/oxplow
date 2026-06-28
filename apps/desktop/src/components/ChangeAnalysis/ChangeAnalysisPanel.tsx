@@ -25,6 +25,12 @@ export interface ChangeAnalysisPanelProps {
    *  owns its own top "Files Changed" section (with the same toggle), so
    *  it passes `false` to avoid a duplicate file tree. Default `true`. */
   showFilesPanel?: boolean;
+  /** Whether to render the Change Treemap. The diff view hoists it to the
+   *  top, so it passes `false`. Default `true`. */
+  showTreemap?: boolean;
+  /** Whether to render the "Look here first" card. The diff view hoists
+   *  it to the top, so it passes `false`. Default `true`. */
+  showLookHere?: boolean;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
@@ -45,6 +51,8 @@ export function ChangeAnalysisPanel({
   scope,
   showHeader = true,
   showFilesPanel = true,
+  showTreemap = true,
+  showLookHere = true,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
@@ -85,6 +93,8 @@ export function ChangeAnalysisPanel({
           target={target}
           analysis={analysis}
           showFilesPanel={showFilesPanel}
+          showTreemap={showTreemap}
+          showLookHere={showLookHere}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}
           onOpenDiffInTab={onOpenDiffInTab}

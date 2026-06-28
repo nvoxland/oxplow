@@ -34,6 +34,8 @@ import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
 import { ChangeAnalysisFileTree } from "../components/ChangeAnalysis/FileTreeView.js";
+import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCard.js";
+import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
 import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
 import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelpers.js";
 import { TestsRun } from "../components/EffortObservations.js";
@@ -598,6 +600,20 @@ function ResolvedEndpointDiff({
         </section>
       ) : null}
 
+      {analysis.files.length > 0 && onOpenFile ? (
+        <ChangeTreemapCard files={analysis.files} onOpenFile={onOpenFile} />
+      ) : null}
+
+      {analysis.files.length > 0 ? (
+        <LookHereFirstCard
+          boxless
+          files={analysis.files}
+          fileScores={analysis.fileScores}
+          onOpenFile={onOpenFile}
+          onOpenFileDiff={(path) => openDiffAt(path, 1)}
+        />
+      ) : null}
+
       <section data-testid="diff-view-files-changed">
         <h2 style={h2Style}>Files Changed</h2>
         {filesLoading && filesForList.length === 0 ? (
@@ -618,20 +634,6 @@ function ResolvedEndpointDiff({
           />
         ) : null}
       </section>
-
-      {hasFunctionChanges && onOpenFile ? (
-        <section data-testid="diff-view-function-changes">
-          <h2 style={h2Style}>Function Changes</h2>
-          <FunctionsCard
-            boxless
-            functions={functionsForList}
-            churn={analysis.functionChurn}
-            target={tabKey}
-            onOpenFile={(path, opts) => onOpenFile(path, opts)}
-            onOpenFunctionDiff={(path, line) => openDiffAt(path, line)}
-          />
-        </section>
-      ) : null}
 
       <section data-testid="diff-view-tests">
         <h2 style={h2Style}>Tests</h2>
@@ -671,15 +673,31 @@ function ResolvedEndpointDiff({
         )}
       </section>
 
-      {/* Full change analysis: zones bar, treemap, and the function /
-          churn / duplication drilldown — the same panel the snapshot /
-          commit targets render. */}
+      {hasFunctionChanges && onOpenFile ? (
+        <section data-testid="diff-view-function-changes">
+          <h2 style={h2Style}>Function Changes</h2>
+          <FunctionsCard
+            boxless
+            functions={functionsForList}
+            churn={analysis.functionChurn}
+            target={tabKey}
+            onOpenFile={(path, opts) => onOpenFile(path, opts)}
+            onOpenFunctionDiff={(path, line) => openDiffAt(path, line)}
+          />
+        </section>
+      ) : null}
+
+      {/* "The rest" of the change analysis — co-change, churn, code smells,
+          duplication. Treemap + Look-here-first are hoisted above; the
+          Files/Functions panel is the page's own sections. */}
       {analysis.files.length > 0 && onOpenFile ? (
         <ChangeAnalysisPanel
           analysis={analysis}
           target={tabKey}
           showHeader={false}
           showFilesPanel={false}
+          showTreemap={false}
+          showLookHere={false}
           onOpenPage={onOpenPage}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}
