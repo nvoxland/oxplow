@@ -1,26 +1,35 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { BranchChangeEntry } from "../../api-types.js";
+import type { FunctionChurnRow } from "./analysisHelpers.js";
 import { classifyZone, ZONE_COLORS, ZONE_LABELS, type Zone } from "./zones.js";
+import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
+
+type TreemapView = "files" | "functions";
+type AreaMetric = "total" | "added" | "deleted";
 
 interface Props {
   files: BranchChangeEntry[];
+  functionChurn: FunctionChurnRow[];
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  /** Open the file's diff at `line` (function tiles reveal their start
+   *  line). Falls back to `onOpenFile` when absent. */
+  onOpenFileDiff?(path: string, line?: number): void;
 }
 
 /**
- * Squarified treemap of the change's file churn, grouped by
- * architectural zone (WinDirStat-style). Each touched zone gets one
- * contiguous block sized by its total churn; files within the zone are
- * laid out as a sub-treemap inside that block sharing the zone colour.
+ * The **Churn** treemap (subsumes the old Architectural-zones bar AND the
+ * Churn list, tsk350/tsk358). A squarified WinDirStat-style map of the
+ * change's churn, grouped by architectural zone:
  *
- * Subsumes the old Architectural-zones bar (tsk350): the map IS the zone
- * breakdown, and a colour **legend** below names every touched zone —
- * which the per-tile labels can't, since small tiles drop their text.
+ *  - **Area:** Total / + Added / − Deleted picks which churn metric sizes
+ *    each tile (and zone block).
+ *  - **Files / Functions** picks the tile grain — changed files, or
+ *    changed functions (from `functionChurn`).
  *
- * Renders inline SVG sized to the container width — no external graph
- * library dependency.
+ * A colour legend below names every touched zone (the per-tile labels
+ * can't — small tiles drop their text). Inline SVG, no graph library.
  */
-export function ChangeTreemapCard({ files, onOpenFile }: Props) {
+export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFileDiff }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(640);
   useEffect(() => {
@@ -35,117 +44,230 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
     return () => ro.disconnect();
   }, []);
 
+  const [view, setView] = useState<TreemapView>("files");
+  const [area, setArea] = useState<AreaMetric>("total");
+  usePageSnapshot<{ treemapView: TreemapView; treemapArea: AreaMetric }>({
+    serialize: () => ({ treemapView: view, treemapArea: area }),
+    restore: (snap) => {
+      if (snap.treemapView === "files" || snap.treemapView === "functions") setView(snap.treemapView);
+      if (snap.treemapArea === "total" || snap.treemapArea === "added" || snap.treemapArea === "deleted") {
+        setArea(snap.treemapArea);
+      }
+    },
+    deps: [view, area],
+  });
+
+  const items = useMemo<ChurnItem[]>(() => {
+    if (view === "files") {
+      return files.map((f) => ({
+        key: `file::${f.path}`,
+        path: f.path,
+        zone: classifyZone(f.path),
+        label: basename(f.path),
+        fnLabel: null,
+        startLine: null,
+        added: f.additions ?? 0,
+        deleted: f.deletions ?? 0,
+      }));
+    }
+    return functionChurn.map((c) => ({
+      key: `fn::${c.path}::${c.containerPath.join("::")}::${c.name}`,
+      path: c.path,
+      zone: classifyZone(c.path),
+      label: c.name,
+      fnLabel: c.containerPath.length > 0 ? `${c.containerPath.join("::")}::${c.name}` : c.name,
+      startLine: c.startLineHead,
+      added: c.addedLines,
+      deleted: c.deletedLines,
+    }));
+  }, [view, files, functionChurn]);
+
   const layout = useMemo(
-    () => layoutTreemapByZone(files, containerWidth, 240),
-    [files, containerWidth],
+    () => layoutTreemapByZone(items, area, containerWidth, 240),
+    [items, area, containerWidth],
   );
 
-  if (layout.cells.length === 0) {
+  if (files.length === 0 && functionChurn.length === 0) {
     return null;
   }
+
+  const open = (item: ChurnItem, newTab: boolean) => {
+    if (newTab) {
+      onOpenFile(item.path, { newTab: true });
+      return;
+    }
+    if (onOpenFileDiff) onOpenFileDiff(item.path, item.startLine ?? undefined);
+    else onOpenFile(item.path);
+  };
 
   return (
     <div style={card} ref={ref}>
       <header style={cardHeader}>
-        <h3 style={cardTitle}>Change treemap</h3>
-        <span style={muted}>grouped by zone · area ∝ churn</span>
-      </header>
-      <svg
-        width={containerWidth}
-        height={240}
-        style={{ display: "block" }}
-        role="img"
-        aria-label="Treemap of files by churn, grouped by architectural zone"
-      >
-        {layout.cells.map((cell) => (
-          <g key={cell.file.path}>
-            <rect
-              x={cell.x}
-              y={cell.y}
-              width={cell.w}
-              height={cell.h}
-              fill={ZONE_COLORS[cell.zone]}
-              stroke="var(--surface-card)"
-              strokeWidth={1}
-              onClick={(e) =>
-                onOpenFile(cell.file.path, { newTab: e.metaKey || e.ctrlKey })
-              }
-              style={{ cursor: "pointer" }}
-            >
-              <title>
-                {cell.file.path} ({ZONE_LABELS[cell.zone]}) · +
-                {cell.file.additions ?? 0} −{cell.file.deletions ?? 0}
-              </title>
-            </rect>
-            {cell.w > 60 && cell.h > 20 ? (
-              <text
-                x={cell.x + 4}
-                y={cell.y + 14}
-                fontSize={11}
-                fill="white"
-                pointerEvents="none"
-                style={{ fontFamily: "var(--font-mono, monospace)" }}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <h3 style={cardTitle}>Churn</h3>
+          <div
+            style={{ display: "flex", gap: 4, alignItems: "center" }}
+            title="Size each tile by total line churn, additions only, or deletions only."
+          >
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Area:</span>
+            {([
+              ["total", "Total"],
+              ["added", "+ Added"],
+              ["deleted", "− Deleted"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                data-testid={`change-analysis-treemap-area-${key}`}
+                onClick={() => setArea(key)}
+                style={area === key ? activeTab : tab}
               >
-                {truncate(basename(cell.file.path), Math.floor(cell.w / 7))}
-              </text>
-            ) : null}
-          </g>
-        ))}
-      </svg>
-      {layout.zones.length > 0 ? (
-        <div style={legend} aria-label="Architectural zone colors">
-          {layout.zones.map((z) => (
-            <span key={z} style={legendItem}>
-              <span style={{ ...legendSwatch, background: ZONE_COLORS[z] }} />
-              {ZONE_LABELS[z]}
-            </span>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {([
+            ["files", "Files"],
+            ["functions", "Functions"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              data-testid={`change-analysis-treemap-view-${key}`}
+              onClick={() => setView(key)}
+              style={view === key ? activeTab : tab}
+            >
+              {label}
+            </button>
           ))}
         </div>
-      ) : null}
+      </header>
+      {layout.cells.length === 0 ? (
+        <div style={muted}>
+          {view === "functions"
+            ? "No function-level churn for this metric."
+            : "No file churn for this metric."}
+        </div>
+      ) : (
+        <>
+          <svg
+            width={containerWidth}
+            height={240}
+            style={{ display: "block" }}
+            role="img"
+            aria-label="Treemap of churn, grouped by architectural zone"
+          >
+            {layout.cells.map((cell) => (
+              <g key={cell.item.key}>
+                <rect
+                  x={cell.x}
+                  y={cell.y}
+                  width={cell.w}
+                  height={cell.h}
+                  fill={ZONE_COLORS[cell.item.zone]}
+                  stroke="var(--surface-card)"
+                  strokeWidth={1}
+                  onClick={(e) => open(cell.item, e.metaKey || e.ctrlKey)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <title>
+                    {cell.item.fnLabel ? `${cell.item.fnLabel} — ${cell.item.path}` : cell.item.path} (
+                    {ZONE_LABELS[cell.item.zone]}) · +{cell.item.added} −{cell.item.deleted}
+                  </title>
+                </rect>
+                {cell.w > 60 && cell.h > 20 ? (
+                  <text
+                    x={cell.x + 4}
+                    y={cell.y + 14}
+                    fontSize={11}
+                    fill="white"
+                    pointerEvents="none"
+                    style={{ fontFamily: "var(--font-mono, monospace)" }}
+                  >
+                    {truncate(cell.item.label, Math.floor(cell.w / 7))}
+                  </text>
+                ) : null}
+              </g>
+            ))}
+          </svg>
+          <div style={legend} aria-label="Architectural zone colors">
+            {layout.zones.map((z) => (
+              <span key={z} style={legendItem}>
+                <span style={{ ...legendSwatch, background: ZONE_COLORS[z] }} />
+                {ZONE_LABELS[z]}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-interface TreemapCell {
-  file: BranchChangeEntry;
+/** A treemap tile — a changed file or a changed function. */
+interface ChurnItem {
+  key: string;
+  path: string;
   zone: Zone;
+  /** Tile label: basename (files) or function name (functions). */
+  label: string;
+  /** Fully-qualified function name for the tooltip; null for files. */
+  fnLabel: string | null;
+  /** Function start line (head side) for the diff reveal; null for files. */
+  startLine: number | null;
+  added: number;
+  deleted: number;
+}
+
+interface TreemapCell {
+  item: ChurnItem;
   x: number;
   y: number;
   w: number;
   h: number;
 }
 
+/** The churn value that sizes a tile, per the chosen Area metric. */
+function metricValue(item: ChurnItem, area: AreaMetric): number {
+  if (area === "added") return item.added;
+  if (area === "deleted") return item.deleted;
+  return item.added + item.deleted;
+}
+
 /**
- * Two-level squarified treemap: outer pass packs zones by total churn,
- * inner pass packs each zone's files into its rect. Returns the touched
- * zones (churn-desc, for the legend) and the file cells (the fill rects).
+ * Two-level squarified treemap: outer pass packs zones by total churn (in
+ * the chosen metric), inner pass packs each zone's items into its rect.
+ * Items with zero churn in the chosen metric are dropped — this is an
+ * explicit churn display. Returns the touched zones (metric-desc, for the
+ * legend) and the tile cells.
  */
 function layoutTreemapByZone(
-  files: BranchChangeEntry[],
+  items: ChurnItem[],
+  area: AreaMetric,
   width: number,
   height: number,
 ): { zones: Zone[]; cells: TreemapCell[] } {
-  if (files.length === 0 || width <= 0 || height <= 0) {
+  if (items.length === 0 || width <= 0 || height <= 0) {
     return { zones: [], cells: [] };
   }
 
-  // Bucket files by zone, accumulating churn. Floor each file at 1
-  // so rename-only / binary files still take a sliver of space.
-  type Bucket = { zone: Zone; files: BranchChangeEntry[]; churn: number };
+  type Bucket = { zone: Zone; items: Array<{ item: ChurnItem; value: number }>; total: number };
   const bucketMap = new Map<Zone, Bucket>();
-  for (const f of files) {
-    const z = classifyZone(f.path);
-    const churn = Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0));
-    const entry = bucketMap.get(z) ?? { zone: z, files: [], churn: 0 };
-    entry.files.push(f);
-    entry.churn += churn;
-    bucketMap.set(z, entry);
+  for (const item of items) {
+    const value = metricValue(item, area);
+    if (value <= 0) continue;
+    const b = bucketMap.get(item.zone) ?? { zone: item.zone, items: [], total: 0 };
+    b.items.push({ item, value });
+    b.total += value;
+    bucketMap.set(item.zone, b);
   }
-  const buckets = [...bucketMap.values()].sort((a, b) => b.churn - a.churn);
+  const buckets = [...bucketMap.values()].sort((a, b) => b.total - a.total);
 
-  // Outer pass: each item is a zone, value = zone churn.
+  // Outer pass: each item is a zone, value = zone's total churn.
   const zoneRects = squarify(
-    buckets.map((b) => ({ value: b.churn, payload: b })),
+    buckets.map((b) => ({ value: b.total, payload: b })),
     0,
     0,
     width,
@@ -156,28 +278,16 @@ function layoutTreemapByZone(
   for (const zr of zoneRects) {
     const b = zr.payload;
     if (zr.h <= 0 || zr.w <= 0) continue;
-
-    // Inner pass: each item is a file, value = per-file churn. Files fill
-    // the whole zone rect — no header band is reserved anymore.
-    const fileRects = squarify(
-      b.files.map((f) => ({
-        value: Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0)),
-        payload: f,
-      })),
+    // Inner pass: each item is a tile, value = its churn in the metric.
+    const tileRects = squarify(
+      b.items.map((it) => ({ value: it.value, payload: it.item })),
       zr.x,
       zr.y,
       zr.w,
       zr.h,
     );
-    for (const fr of fileRects) {
-      cells.push({
-        file: fr.payload,
-        zone: b.zone,
-        x: fr.x,
-        y: fr.y,
-        w: fr.w,
-        h: fr.h,
-      });
+    for (const tr of tileRects) {
+      cells.push({ item: tr.payload, x: tr.x, y: tr.y, w: tr.w, h: tr.h });
     }
   }
 
@@ -298,7 +408,9 @@ const card: React.CSSProperties = {
 const cardHeader: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "baseline",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
 };
 const cardTitle: React.CSSProperties = {
   margin: 0,
@@ -307,7 +419,7 @@ const cardTitle: React.CSSProperties = {
   color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
-  color: "var(--text-secondary)",
+  color: "var(--text-muted)",
   fontSize: 11,
 };
 const legend: React.CSSProperties = {
@@ -329,4 +441,21 @@ const legendSwatch: React.CSSProperties = {
   borderRadius: 2,
   flexShrink: 0,
   display: "inline-block",
+};
+const tab: React.CSSProperties = {
+  padding: "3px 8px",
+  background: "transparent",
+  color: "var(--text-muted)",
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "var(--border-subtle)",
+  borderRadius: 4,
+  cursor: "pointer",
+  fontSize: "var(--text-xs)",
+};
+const activeTab: React.CSSProperties = {
+  ...tab,
+  background: "var(--accent-soft-bg, var(--surface-app))",
+  color: "var(--text-primary)",
+  borderColor: "var(--text-link, #2563eb)",
 };

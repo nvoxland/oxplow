@@ -601,7 +601,12 @@ function ResolvedEndpointDiff({
       ) : null}
 
       {analysis.files.length > 0 && onOpenFile ? (
-        <ChangeTreemapCard files={analysis.files} onOpenFile={onOpenFile} />
+        <ChangeTreemapCard
+          files={analysis.files}
+          functionChurn={analysis.functionChurn}
+          onOpenFile={onOpenFile}
+          onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
+        />
       ) : null}
 
       {analysis.files.length > 0 ? (

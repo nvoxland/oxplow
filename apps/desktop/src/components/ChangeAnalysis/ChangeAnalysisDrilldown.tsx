@@ -7,7 +7,6 @@ import { diffRef } from "../../diff-id.js";
 import type { NavSiblingEntry, NavSiblings } from "../../tabs/PageNavigationContext.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
-import { ChurnCard } from "./ChurnCard.js";
 import { CodeSmellsCard } from "./CodeSmellsCard.js";
 import { CoChangeSurpriseCard } from "./CoChangeSurpriseCard.js";
 import { ChangeTreemapCard } from "./ChangeTreemapCard.js";
@@ -188,7 +187,14 @@ export function ChangeAnalysisDrilldown({
 
   return (
     <>
-      {showTreemap ? <ChangeTreemapCard files={filesAfterStatus} onOpenFile={onOpenFile} /> : null}
+      {showTreemap ? (
+        <ChangeTreemapCard
+          files={filesAfterStatus}
+          functionChurn={churnAfterStatus}
+          onOpenFile={onOpenFile}
+          onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
+        />
+      ) : null}
       <CoChangeSurpriseCard
         surprise={analysis.coChangeSurprise.filter((s) => filteredPathSet.has(s.path))}
         onOpenFile={onOpenFile}
@@ -215,12 +221,6 @@ export function ChangeAnalysisDrilldown({
           onOpenFileDiff={(path) => openDiffAt(path, 1)}
         />
       ) : null}
-      <ChurnCard
-        files={filesAfterStatus}
-        functionChurn={churnAfterStatus}
-        onOpenFile={onOpenFile}
-        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
-      />
       <CodeSmellsCard
         functions={functionsAfterStatus}
         onOpenFile={onOpenFile}
