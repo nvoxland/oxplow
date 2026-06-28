@@ -98,6 +98,20 @@ hook + MCP wiring):
   reports merge into one `diff-coverage` observation over the effort's changed
   lines; analysis reports merge into one `static-analysis` observation
   (findings + per-severity counts). All `observed`, no agent step.
+  **Attribution (tsk347):** the run is pinned to its effort via the `"run"`
+  ledger. An agent forces EXACT attribution by prefixing the command with
+  `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and `record_test_run`
+  claims the run for that task's open effort (`find_open_for_task`), correct even
+  under concurrent efforts; without it the single-open auto rule applies.
+  **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
+  split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
+  sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a
+  command that merely MENTIONS a pattern (`grep test:collect oxplow.yaml`) is no
+  longer a phantom run (and fires no report-less nudge); leading `VAR=val` env
+  assignments are skipped so the `OXPLOW_TASK=` prefix doesn't mask the real
+  exec. **Background caveat:** the PostToolUse hook fires when the Bash call
+  *returns*; a **backgrounded** `test:collect` returns at launch (before its
+  reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
   **Staleness is the router:** a run only regenerates its own stack's/tool's
   report(s), so the mtime guard (`report_is_stale`, floor = effort start)
   naturally excludes the other stacks' stale reports — a `bun test` run

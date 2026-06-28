@@ -123,14 +123,81 @@ pub fn detect_git_commit(command: &str) -> bool {
     false
 }
 
-/// Case-insensitive: does `command` contain any built-in or extra pattern?
+/// Executables that only READ. A sub-command leading with one of these can
+/// MENTION a test/analysis pattern (a grep needle, an `echo`d reminder, a path)
+/// without being an actual run — so the substring detector must skip it. Keeps
+/// `grep test:collect …` / `cat … | … nextest …` from registering phantom runs
+/// (and firing the report-less nudge).
+const READ_ONLY_EXECUTABLES: &[&str] = &[
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "echo", "printf", "cat", "bat", "less", "more",
+    "head", "tail", "sed", "awk", "cut", "tr", "sort", "uniq", "comm", "diff", "wc", "ls", "find",
+    "fd", "stat", "jq", "yq", "column",
+];
+
+/// The leading executable of one (operator-split) sub-command: lowercased,
+/// basename only, skipping leading `VAR=val` env assignments (so the
+/// `OXPLOW_TASK=tsk42` attribution token doesn't mask the real command).
+/// `None` for an empty sub-command.
+fn subcommand_exec(sub: &str) -> Option<String> {
+    for tok in sub.split_whitespace() {
+        if let Some((key, _)) = tok.split_once('=') {
+            // UPPER_SNAKE=value → an env assignment prefix; keep scanning.
+            if !key.is_empty() && key.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+                continue;
+            }
+        }
+        let base = tok.rsplit(['/', '\\']).next().unwrap_or(tok);
+        return Some(base.to_ascii_lowercase());
+    }
+    None
+}
+
+/// True when a sub-command's executable only reads (so a pattern match inside it
+/// is incidental, not a run).
+fn subcommand_is_read_only(sub: &str) -> bool {
+    subcommand_exec(sub).is_some_and(|e| READ_ONLY_EXECUTABLES.contains(&e.as_str()))
+}
+
+/// Case-insensitive: does `command` actually INVOKE any built-in or extra
+/// pattern? The command is split into sub-commands on shell operators
+/// (`&&` / `||` / `;` / `|` / newline); a sub-command whose leading executable
+/// only reads (grep/echo/cat/…) is ignored. So a command that merely *mentions*
+/// a pattern (e.g. `grep test:collect oxplow.yaml`) no longer counts as a run,
+/// while a real `cd app && OXPLOW_TASK=tsk1 bun run test:collect` still does.
 fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
-    let lower = command.to_ascii_lowercase();
-    builtins
+    let pats: Vec<String> = builtins
         .iter()
         .map(|s| s.to_ascii_lowercase())
         .chain(extras.iter().map(|s| s.to_ascii_lowercase()))
-        .any(|p| !p.trim().is_empty() && lower.contains(p.trim()))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if pats.is_empty() {
+        return false;
+    }
+    let normalized = command
+        .replace("&&", "\n")
+        .replace("||", "\n")
+        .replace([';', '|'], "\n");
+    normalized.split('\n').any(|sub| {
+        let lower = sub.to_ascii_lowercase();
+        pats.iter().any(|p| lower.contains(p.as_str())) && !subcommand_is_read_only(sub)
+    })
+}
+
+/// The optional `OXPLOW_TASK=<id>` attribution token an agent prefixes onto a
+/// test command so the passive PostToolUse ride-along can pin the run to EXACTLY
+/// that task's open effort (`find_open_for_task`), even with several efforts
+/// open. Accepts the human id (`tsk42`) or a bare number (`42`). Returns `None`
+/// when absent/unparseable (the run then uses the single-open auto rule).
+fn parse_task_token(command: &str) -> Option<TaskId> {
+    const KEY: &str = "OXPLOW_TASK=";
+    let idx = command.find(KEY)?;
+    let val = command[idx + KEY.len()..]
+        .split_whitespace()
+        .next()?
+        .trim_matches(['"', '\'']);
+    TaskId::try_from_str(val).or_else(|| val.parse::<i64>().ok().map(TaskId::new))
 }
 
 /// The Bash command + best-effort exit code pulled out of a PostToolUse
@@ -1212,9 +1279,10 @@ impl CollectionService {
             "observed",
             &source,
             report.as_ref(),
-            // Passive PostToolUse is the orchestrator-only enrichment path — no
-            // named task; the single/coarse rule attributes it (tsk265).
-            None,
+            // Exact attribution when the agent prefixed `OXPLOW_TASK=<id>`
+            // (find_open_for_task — survives concurrent efforts); otherwise the
+            // single-open auto rule attributes it (tsk265/tsk271).
+            parse_task_token(&bash.command),
         )
         .await?;
         // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
@@ -2925,6 +2993,36 @@ mod tests {
         assert!(detect_test_run("./run-suite.sh", &["run-suite".into()]));
         // Empty extra patterns are ignored (don't match everything).
         assert!(!detect_test_run("echo hi", &["".into(), "   ".into()]));
+    }
+
+    #[test]
+    fn detect_test_run_ignores_read_only_commands_that_only_mention_a_pattern() {
+        let extra = ["test:collect".to_string()];
+        // grep/echo/cat that merely MENTION a pattern are not runs.
+        assert!(!detect_test_run("grep -n test:collect oxplow.yaml", &extra));
+        assert!(!detect_test_run("echo run cargo test later", &[]));
+        assert!(!detect_test_run("cat notes | grep nextest", &[]));
+        // The real command still detects — compound, env-prefixed, and piped.
+        assert!(detect_test_run("cd app && bun run test:collect", &extra));
+        assert!(detect_test_run(
+            "OXPLOW_TASK=tsk42 bun run test:collect 2>&1 | tail -5",
+            &extra,
+        ));
+    }
+
+    #[test]
+    fn parse_task_token_reads_oxplow_task_prefix() {
+        assert_eq!(
+            parse_task_token("OXPLOW_TASK=tsk42 bun run test:collect"),
+            Some(TaskId::new(42)),
+        );
+        // Bare number is accepted too.
+        assert_eq!(
+            parse_task_token("OXPLOW_TASK=42 cargo test"),
+            Some(TaskId::new(42))
+        );
+        // Absent → None (falls back to the single-open auto rule).
+        assert_eq!(parse_task_token("bun run test:collect"), None);
     }
 
     #[test]

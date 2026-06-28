@@ -17,11 +17,25 @@ When you finish work on a task, **run the project's tests before you
 attribute to the effort. The test command is recorded in the
 `collection:` block of `oxplow.yaml` (`testCommand`).
 
+Run it two specific ways:
+
+- **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <testCommand>`).
+  The collection hook reads the token and pins the run to **exactly** your
+  task's effort via `find_open_for_task` — correct even when several efforts
+  are open. Without it, a run is only auto-attributed when a single effort is
+  open.
+- **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
+  when the Bash call *returns*; a backgrounded run returns at launch (before
+  the reports regenerate), so its reports are never ingested and the effort
+  panel stays empty.
+
 ## How collection works (so you don't double-do it)
 
-- **Test runs are observed automatically.** When you run the tests via
-  Bash, oxplow's PostToolUse hook records a `test-run` observation
-  against the open effort (command + exit code). You don't report it.
+- **Test runs are observed automatically (foreground only).** When you run the
+  tests via Bash, oxplow's PostToolUse hook records a `test-run` observation
+  against the effort (command + exit code, + the parsed suite tree). You don't
+  report it. Attribution uses the `OXPLOW_TASK=` token when present, else the
+  single-open-effort rule.
 - **Individual tests + coverage are parsed by oxplow, not you.** Each
   entry in `collection.reports` (JUnit → per-test tree; lcov / cobertura
   / jacoco-xml → diff coverage over the effort's changed lines) is parsed

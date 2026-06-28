@@ -1214,8 +1214,9 @@ impl SnapshotCaptureService {
         // Send-bound cycle on the anonymous Future types
         // (request_snapshot → capture_inner → tokio::spawn(...) →
         // request_snapshot). In practice, the next external
-        // `request_snapshot` (task lifecycle transition, periodic
-        // sweep) will pick the deferred entries up. Fresh-file
+        // `request_snapshot` (an effort start/end lifecycle transition,
+        // a git-refs change, or the startup sweep — there is no periodic
+        // timer) will pick the deferred entries up. Fresh-file
         // captures may land in a later snapshot than the one that
         // first observed them — a small latency cost for completely
         // suppressing transient-file rows.
