@@ -34,6 +34,8 @@ import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
 import { ChangeAnalysisFileTree } from "../components/ChangeAnalysis/FileTreeView.js";
+import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
+import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelpers.js";
 import { TestsRun } from "../components/EffortObservations.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
@@ -436,6 +438,29 @@ function ResolvedEndpointDiff({
   }, [effortPassed, claimedPaths, analysis.files]);
   const filesLoading = analysis.loading || (effortPassed && claimedPaths === null);
 
+  // Function-level changes for the standalone "Function Changes" section,
+  // scoped to the effort's claimed files when opened for one (mirrors
+  // filesForList). The bottom FilesPanel (which used to host this) is hidden
+  // on the diff view.
+  const functionsForList = useMemo<FunctionsBuckets>(() => {
+    if (!effortPassed || !claimedPaths) return analysis.functions;
+    const claimed = claimedPaths;
+    const keep = <T extends { path: string }>(rows: T[]): T[] =>
+      rows.filter((f) => claimed.has(f.path));
+    return {
+      added: keep(analysis.functions.added),
+      deleted: keep(analysis.functions.deleted),
+      modifiedSignature: keep(analysis.functions.modifiedSignature),
+      modifiedBody: keep(analysis.functions.modifiedBody),
+    };
+  }, [effortPassed, claimedPaths, analysis.functions]);
+  const hasFunctionChanges =
+    functionsForList.added.length +
+      functionsForList.deleted.length +
+      functionsForList.modifiedSignature.length +
+      functionsForList.modifiedBody.length >
+    0;
+
   // Test work in the range — file-based (every test file counts, even
   // ones with only `describe`/`test` blocks and no named functions, which
   // the old function-based summary missed). Scoped to the full range, not
@@ -497,8 +522,9 @@ function ResolvedEndpointDiff({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runEffortKey]);
 
-  // Open a single file's diff in the current tab, mirroring the drilldown.
-  const openFileDiff = (path: string) => {
+  // Open a file's diff in the current tab (revealing `line`), mirroring the
+  // drilldown. Used by both the Files tree and the Functions rows.
+  const openDiffAt = (path: string, line = 1) => {
     if (!analysis.refs) {
       onOpenFile?.(path);
       return;
@@ -509,7 +535,7 @@ function ResolvedEndpointDiff({
       leftVersion: refVersion(baseRef),
       rightVersion: headRef ? refVersion(headRef) : DISK,
       baseLabel: endpointPlain(startDisp),
-      revealLine: 1,
+      revealLine: line,
     };
     if (onOpenDiffInTab) onOpenDiffInTab(spec);
     else if (onOpenDiff) onOpenDiff(spec);
@@ -582,16 +608,30 @@ function ResolvedEndpointDiff({
               ? "This effort claimed no changed files."
               : "No file changes between these endpoints."}
           </div>
-        ) : (
+        ) : onOpenFile ? (
           <ChangeAnalysisFileTree
             files={filesForList}
             target={tabKey}
-            onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
-            onOpenFileDiff={openFileDiff}
+            onOpenFile={(path, opts) => onOpenFile(path, opts)}
+            onOpenFileDiff={(path) => openDiffAt(path, 1)}
             showFileCount={false}
           />
-        )}
+        ) : null}
       </section>
+
+      {hasFunctionChanges && onOpenFile ? (
+        <section data-testid="diff-view-function-changes">
+          <h2 style={h2Style}>Function Changes</h2>
+          <FunctionsCard
+            boxless
+            functions={functionsForList}
+            churn={analysis.functionChurn}
+            target={tabKey}
+            onOpenFile={(path, opts) => onOpenFile(path, opts)}
+            onOpenFunctionDiff={(path, line) => openDiffAt(path, line)}
+          />
+        </section>
+      ) : null}
 
       <section data-testid="diff-view-tests">
         <h2 style={h2Style}>Tests</h2>
@@ -621,7 +661,7 @@ function ResolvedEndpointDiff({
                     files={testFiles}
                     target={tabKey}
                     onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
-                    onOpenFileDiff={openFileDiff}
+                    onOpenFileDiff={(path) => openDiffAt(path, 1)}
                     showFileCount={false}
                   />
                 ) : null}
@@ -639,6 +679,7 @@ function ResolvedEndpointDiff({
           analysis={analysis}
           target={tabKey}
           showHeader={false}
+          showFilesPanel={false}
           onOpenPage={onOpenPage}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}

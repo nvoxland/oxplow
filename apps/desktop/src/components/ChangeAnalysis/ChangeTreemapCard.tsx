@@ -8,15 +8,17 @@ interface Props {
 }
 
 /**
- * Squarified treemap of the commit's file churn, grouped by
- * architectural zone (WinDirStat-style). Each touched zone gets
- * one contiguous block sized by its total churn; files within the
- * zone are laid out as a sub-treemap inside that block sharing the
- * zone colour. A header band labels each zone group when the rect
- * is large enough to fit it.
+ * Squarified treemap of the change's file churn, grouped by
+ * architectural zone (WinDirStat-style). Each touched zone gets one
+ * contiguous block sized by its total churn; files within the zone are
+ * laid out as a sub-treemap inside that block sharing the zone colour.
  *
- * Renders inline SVG sized to the container width — no external
- * graph library dependency.
+ * Subsumes the old Architectural-zones bar (tsk350): the map IS the zone
+ * breakdown, and a colour **legend** below names every touched zone —
+ * which the per-tile labels can't, since small tiles drop their text.
+ *
+ * Renders inline SVG sized to the container width — no external graph
+ * library dependency.
  */
 export function ChangeTreemapCard({ files, onOpenFile }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -46,9 +48,7 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
     <div style={card} ref={ref}>
       <header style={cardHeader}>
         <h3 style={cardTitle}>Change treemap</h3>
-        <span style={muted}>
-          grouped by zone · area ∝ churn
-        </span>
+        <span style={muted}>grouped by zone · area ∝ churn</span>
       </header>
       <svg
         width={containerWidth}
@@ -57,34 +57,6 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
         role="img"
         aria-label="Treemap of files by churn, grouped by architectural zone"
       >
-        {layout.zones.map((z) => (
-          <g key={`zone-${z.zone}`} pointerEvents="none">
-            {z.headerVisible ? (
-              <>
-                <rect
-                  x={z.x}
-                  y={z.y}
-                  width={z.w}
-                  height={HEADER_HEIGHT}
-                  fill="rgba(0,0,0,0.35)"
-                />
-                <text
-                  x={z.x + 6}
-                  y={z.y + 11}
-                  fontSize={10}
-                  fontWeight={600}
-                  fill="white"
-                  style={{ fontFamily: "var(--font-mono, monospace)" }}
-                >
-                  {truncate(
-                    `${ZONE_LABELS[z.zone]} · ${z.fileCount} file${z.fileCount === 1 ? "" : "s"} · ±${z.churn}`,
-                    Math.floor(z.w / 6),
-                  )}
-                </text>
-              </>
-            ) : null}
-          </g>
-        ))}
         {layout.cells.map((cell) => (
           <g key={cell.file.path}>
             <rect
@@ -120,6 +92,16 @@ export function ChangeTreemapCard({ files, onOpenFile }: Props) {
           </g>
         ))}
       </svg>
+      {layout.zones.length > 0 ? (
+        <div style={legend} aria-label="Architectural zone colors">
+          {layout.zones.map((z) => (
+            <span key={z} style={legendItem}>
+              <span style={{ ...legendSwatch, background: ZONE_COLORS[z] }} />
+              {ZONE_LABELS[z]}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -133,40 +115,16 @@ interface TreemapCell {
   h: number;
 }
 
-interface ZoneGroup {
-  zone: Zone;
-  /** Total file count in the zone — included in the header band label. */
-  fileCount: number;
-  /** Total churn (additions + deletions) for the whole zone. */
-  churn: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  /** True when the zone rect is big enough to fit a readable header band
-   *  without clipping. Determines whether the band is drawn AND whether
-   *  the inner file layout reserves space for it. */
-  headerVisible: boolean;
-}
-
-/** Height of the zone-label band, when present. */
-const HEADER_HEIGHT = 14;
-/** Minimum rect dimensions before we'll render a header band. Below
- *  this, the band would clip or eat most of the zone's area. */
-const HEADER_MIN_HEIGHT = 36;
-const HEADER_MIN_WIDTH = 60;
-
 /**
- * Two-level squarified treemap: outer pass packs zones by total
- * churn, inner pass packs each zone's files into its rect. Returns
- * both the zone group descriptors (for header bands) and the file
- * cells (for the actual fill rects).
+ * Two-level squarified treemap: outer pass packs zones by total churn,
+ * inner pass packs each zone's files into its rect. Returns the touched
+ * zones (churn-desc, for the legend) and the file cells (the fill rects).
  */
 function layoutTreemapByZone(
   files: BranchChangeEntry[],
   width: number,
   height: number,
-): { zones: ZoneGroup[]; cells: TreemapCell[] } {
+): { zones: Zone[]; cells: TreemapCell[] } {
   if (files.length === 0 || width <= 0 || height <= 0) {
     return { zones: [], cells: [] };
   }
@@ -194,37 +152,22 @@ function layoutTreemapByZone(
     height,
   );
 
-  const zones: ZoneGroup[] = [];
   const cells: TreemapCell[] = [];
   for (const zr of zoneRects) {
     const b = zr.payload;
-    const headerVisible =
-      zr.h >= HEADER_MIN_HEIGHT && zr.w >= HEADER_MIN_WIDTH;
-    const innerY = zr.y + (headerVisible ? HEADER_HEIGHT : 0);
-    const innerH = zr.h - (headerVisible ? HEADER_HEIGHT : 0);
-    zones.push({
-      zone: b.zone,
-      fileCount: b.files.length,
-      churn: b.churn,
-      x: zr.x,
-      y: zr.y,
-      w: zr.w,
-      h: zr.h,
-      headerVisible,
-    });
+    if (zr.h <= 0 || zr.w <= 0) continue;
 
-    if (innerH <= 0 || zr.w <= 0) continue;
-
-    // Inner pass: each item is a file, value = per-file churn.
+    // Inner pass: each item is a file, value = per-file churn. Files fill
+    // the whole zone rect — no header band is reserved anymore.
     const fileRects = squarify(
       b.files.map((f) => ({
         value: Math.max(1, (f.additions ?? 0) + (f.deletions ?? 0)),
         payload: f,
       })),
       zr.x,
-      innerY,
+      zr.y,
       zr.w,
-      innerH,
+      zr.h,
     );
     for (const fr of fileRects) {
       cells.push({
@@ -238,7 +181,7 @@ function layoutTreemapByZone(
     }
   }
 
-  return { zones, cells };
+  return { zones: buckets.map((b) => b.zone), cells };
 }
 
 interface SquarifyInput<T> {
@@ -347,10 +290,6 @@ function truncate(s: string, max: number): string {
 }
 
 const card: React.CSSProperties = {
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 6,
-  padding: 12,
-  background: "var(--surface-card)",
   color: "var(--text-primary)",
   display: "flex",
   flexDirection: "column",
@@ -370,4 +309,24 @@ const cardTitle: React.CSSProperties = {
 const muted: React.CSSProperties = {
   color: "var(--text-secondary)",
   fontSize: 11,
+};
+const legend: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "4px 12px",
+  fontSize: 11,
+  color: "var(--text-secondary)",
+};
+const legendItem: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  fontFamily: "var(--font-mono, monospace)",
+};
+const legendSwatch: React.CSSProperties = {
+  width: 10,
+  height: 10,
+  borderRadius: 2,
+  flexShrink: 0,
+  display: "inline-block",
 };

@@ -55,8 +55,9 @@ export const ZONE_LABELS: Record<Zone, string> = {
 };
 
 // Per-zone fill color, shared by every Change Analysis surface that
-// paints zones (ZoneBarCard bars + chips, ChangeTreemapCard cells +
-// header bands). Single source of truth — don't re-declare locally.
+// paints zones (the ChangeTreemapCard cells + its zone-color legend,
+// the file-tree [zone] badges). Single source of truth — don't
+// re-declare locally.
 export const ZONE_COLORS: Record<Zone, string> = {
   ui: "#4f46e5",
   shell: "#0ea5e9",

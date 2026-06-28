@@ -9,9 +9,10 @@ import { DuplicationCard } from "./DuplicationCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
 import { ChurnCard } from "./ChurnCard.js";
 import { CodeSmellsCard } from "./CodeSmellsCard.js";
-import { ZoneBarCard } from "./ZoneBarCard.js";
 import { CoChangeSurpriseCard } from "./CoChangeSurpriseCard.js";
 import { ChangeTreemapCard } from "./ChangeTreemapCard.js";
+// ZoneBarCard removed (tsk350): the Change Treemap subsumes it, with a
+// zone-color legend below the map.
 import {
   ALL_STATUSES,
   FilesPanel,
@@ -31,6 +32,9 @@ export interface ChangeAnalysisDrilldownProps {
   scope?: ChangeAnalysisScope;
   target: ChangeAnalysisTarget;
   analysis: ChangeAnalysisState;
+  /** When false, the inline Files/Functions panel is omitted — the host
+   *  (the diff view) renders its own. Default true. */
+  showFilesPanel?: boolean;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings): void;
@@ -40,6 +44,7 @@ export function ChangeAnalysisDrilldown({
   scope,
   target,
   analysis,
+  showFilesPanel = true,
   onOpenFile,
   onOpenDiff,
   onOpenDiffInTab,
@@ -175,24 +180,25 @@ export function ChangeAnalysisDrilldown({
 
   return (
     <>
-      <ZoneBarCard files={filesAfterStatus} importDeltas={analysis.importDeltas} />
       <ChangeTreemapCard files={filesAfterStatus} onOpenFile={onOpenFile} />
       <CoChangeSurpriseCard
         surprise={analysis.coChangeSurprise.filter((s) => filteredPathSet.has(s.path))}
         onOpenFile={onOpenFile}
       />
-      <FilesPanel
-        files={filesAfterStatus}
-        functions={functionsAfterStatus}
-        functionChurn={churnAfterStatus}
-        pivots={pivotsAfterStatus}
-        statusFilter={statusFilter}
-        onStatusChange={setStatusFilter}
-        target={target}
-        onOpenFile={onOpenFile}
-        onOpenFunctionDiff={openDiffAt}
-        onOpenFileDiff={(path) => openDiffAt(path, 1)}
-      />
+      {showFilesPanel ? (
+        <FilesPanel
+          files={filesAfterStatus}
+          functions={functionsAfterStatus}
+          functionChurn={churnAfterStatus}
+          pivots={pivotsAfterStatus}
+          statusFilter={statusFilter}
+          onStatusChange={setStatusFilter}
+          target={target}
+          onOpenFile={onOpenFile}
+          onOpenFunctionDiff={openDiffAt}
+          onOpenFileDiff={(path) => openDiffAt(path, 1)}
+        />
+      ) : null}
       <LookHereFirstCard
         files={filesAfterStatus}
         fileScores={analysis.fileScores}

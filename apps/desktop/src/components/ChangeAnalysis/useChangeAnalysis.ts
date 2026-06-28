@@ -112,8 +112,9 @@ export interface ChangeAnalysisState {
    *  row per function with non-zero churn. */
   functionChurn: FunctionChurnRow[];
   /** Per-file import edge deltas (added / removed / cross-zone-added).
-   *  Drives the ZoneBarCard's cross-zone-edge callout. Empty for
-   *  files with stable imports. */
+   *  Computed but not currently surfaced in the UI (was the ZoneBarCard
+   *  cross-zone-edge callout, removed in tsk350). Empty for files with
+   *  stable imports. */
   importDeltas: ImportDelta[];
   /** Per-file co-change surprise classification. Files with reason
    *  `Normal` are still included so the UI can render counts. */

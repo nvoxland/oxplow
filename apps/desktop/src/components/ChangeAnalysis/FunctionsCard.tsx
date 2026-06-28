@@ -31,6 +31,10 @@ interface FunctionsCardProps {
   /** Analysis target. Required so directory-branch clicks can route
    *  to the directory-scoped Change Analysis drilldown. */
   target?: ChangeAnalysisTarget;
+  /** Drop the bordered card wrapper and the inline "Functions" title
+   *  (the host supplies its own section header). Keeps the toggles. Used
+   *  by the diff view's standalone "Function Changes" section. */
+  boxless?: boolean;
 }
 
 type RowStatus = "added" | "modified" | "deleted";
@@ -45,7 +49,7 @@ interface RowEntry {
   visibility: FunctionVisibility;
 }
 
-export function FunctionsCard({ functions, churn, onOpenFile, onOpenFunctionDiff, target }: FunctionsCardProps) {
+export function FunctionsCard({ functions, churn, onOpenFile, onOpenFunctionDiff, target, boxless = false }: FunctionsCardProps) {
   const ctxNav = useOptionalPageNavigation();
   const [showPrivate, setShowPrivate] = useState(true);
   const [showTests, setShowTests] = useState(true);
@@ -76,55 +80,63 @@ export function FunctionsCard({ functions, churn, onOpenFile, onOpenFunctionDiff
     [allRows],
   );
 
+  // The Show-private / Show-tests toggles ride in the tree toolbar (right
+  // side, directly above the list) rather than a separate header band, so
+  // they stay next to the rows they filter — and remain visible even when a
+  // filter hides everything (HierarchyView always renders its toolbar).
+  const toggles = (
+    <div style={togglesGroup}>
+      <label
+        style={toggleLabel}
+        title="Heuristic per language. See language-specific notes for what 'private' means."
+      >
+        <input
+          type="checkbox"
+          data-testid="change-analysis-show-private"
+          checked={showPrivate}
+          onChange={(e) => setShowPrivate(e.target.checked)}
+        />
+        <span>Show private{privateCount > 0 ? ` (${privateCount})` : ""}</span>
+      </label>
+      <label
+        style={toggleLabel}
+        title="Heuristic: a function is a test if its file path looks like a test path or its name matches test_*, Test*, Benchmark*, Example*."
+      >
+        <input
+          type="checkbox"
+          data-testid="change-analysis-show-tests"
+          checked={showTests}
+          onChange={(e) => setShowTests(e.target.checked)}
+        />
+        <span>Show tests{testCount > 0 ? ` (${testCount})` : ""}</span>
+      </label>
+    </div>
+  );
+
   return (
-    <section data-testid="change-analysis-functions" style={card}>
-      <div style={headerRow}>
-        <span style={{ fontWeight: 600 }}>Functions</span>
-        <div style={togglesGroup}>
-          <label
-            style={toggleLabel}
-            title="Heuristic per language. See language-specific notes for what 'private' means."
-          >
-            <input
-              type="checkbox"
-              data-testid="change-analysis-show-private"
-              checked={showPrivate}
-              onChange={(e) => setShowPrivate(e.target.checked)}
-            />
-            <span>Show private{privateCount > 0 ? ` (${privateCount})` : ""}</span>
-          </label>
-          <label
-            style={toggleLabel}
-            title="Heuristic: a function is a test if its file path looks like a test path or its name matches test_*, Test*, Benchmark*, Example*."
-          >
-            <input
-              type="checkbox"
-              data-testid="change-analysis-show-tests"
-              checked={showTests}
-              onChange={(e) => setShowTests(e.target.checked)}
-            />
-            <span>Show tests{testCount > 0 ? ` (${testCount})` : ""}</span>
-          </label>
+    <section data-testid="change-analysis-functions" style={boxless ? undefined : card}>
+      {boxless ? null : (
+        <div style={headerRow}>
+          <span style={{ fontWeight: 600 }}>Functions</span>
         </div>
-      </div>
+      )}
       {allRows.length === 0 ? (
         <div style={muted}>
           No function-level changes detected (the changed files may be in unsupported languages).
-        </div>
-      ) : visibleRows.length === 0 ? (
-        <div style={muted}>
-          {!showPrivate && allRows.every((r) => r.visibility === "private")
-            ? `All function changes are private. Toggle "Show private" to see them.`
-            : !showTests && allRows.every((r) => isTestFunction(r.path, r.name, r.containerPath))
-              ? `All function changes are tests. Toggle "Include tests" to see them.`
-              : `No functions match the current filters.`}
         </div>
       ) : (
         <HierarchyView
           nodes={nodes}
           testIdPrefix="change-analysis-fn"
           searchPlaceholder="Filter by name…"
-          emptyLabel="No functions match the filter."
+          emptyLabel={
+            !showPrivate && allRows.every((r) => r.visibility === "private")
+              ? `All function changes are private — enable "Show private".`
+              : !showTests && allRows.every((r) => isTestFunction(r.path, r.name, r.containerPath))
+                ? `All function changes are tests — enable "Show tests".`
+                : "No functions match the current filters."
+          }
+          toolbarExtra={toggles}
         />
       )}
     </section>

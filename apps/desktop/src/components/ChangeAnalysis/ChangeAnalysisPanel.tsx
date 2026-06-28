@@ -21,6 +21,10 @@ export interface ChangeAnalysisPanelProps {
    *  refresh). Hosts that already have their own header (e.g. the
    *  GitCommitPage) hide it. */
   showHeader?: boolean;
+  /** Whether to render the inline Files/Functions panel. The diff view
+   *  owns its own top "Files Changed" section (with the same toggle), so
+   *  it passes `false` to avoid a duplicate file tree. Default `true`. */
+  showFilesPanel?: boolean;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
@@ -40,6 +44,7 @@ export function ChangeAnalysisPanel({
   target,
   scope,
   showHeader = true,
+  showFilesPanel = true,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
@@ -79,6 +84,7 @@ export function ChangeAnalysisPanel({
           scope={scope}
           target={target}
           analysis={analysis}
+          showFilesPanel={showFilesPanel}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}
           onOpenDiffInTab={onOpenDiffInTab}
