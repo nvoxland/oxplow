@@ -405,9 +405,12 @@ pub trait TaskEffortStore: Send + Sync {
     /// `a.start < range_end AND a.end > range_start`; an open effort
     /// (NULL end) overlaps if it started before `range_end`. Efforts
     /// with a NULL `start_snapshot_id` are skipped (can't be placed on
-    /// the snapshot timeline). Drives the diff view's roster of other
-    /// efforts that overlapped the diffed range. Ordered by
-    /// `started_at` ASC.
+    /// the snapshot timeline). Results are **scoped to the stream that
+    /// `range_end`'s snapshot belongs to** — snapshot ids are global, so
+    /// without this an effort from another stream/branch whose
+    /// snapshot-id window merely overlapped would leak in. Drives the
+    /// diff view's roster of other efforts that overlapped the diffed
+    /// range, within the same stream. Ordered by `started_at` ASC.
     async fn list_efforts_overlapping_range(
         &self,
         range_start: i64,
@@ -1243,12 +1246,26 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 // Half-open overlap (range_start, range_end]:
                 //   start < range_end AND (end IS NULL OR end > range_start).
                 // NULL start ⇒ unplaced ⇒ excluded (NULL < x is NULL).
+                //
+                // Scope to the stream the diffed snapshot (`range_end`)
+                // belongs to. Snapshot ids are global (autoincrement
+                // across every stream), so without this an effort from a
+                // *different* stream/branch whose snapshot-id window
+                // merely overlapped would surface as a bogus "concurrent
+                // effort". A diff lives within one stream's snapshot
+                // timeline, so `range_end`'s stream IS the diff's stream;
+                // we join the effort's thread to recover its stream. When
+                // `range_end` names no `snapshot` row the subquery is NULL
+                // and nothing matches (empty roster) — safer than leaking
+                // cross-stream efforts.
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
-                     WHERE start_snapshot_id IS NOT NULL
-                       AND start_snapshot_id < ?2
-                       AND (end_snapshot_id IS NULL OR end_snapshot_id > ?1)
-                     ORDER BY started_at ASC, id ASC",
+                    "SELECT e.* FROM task_effort e
+                     JOIN threads t ON t.id = e.thread_id
+                     WHERE e.start_snapshot_id IS NOT NULL
+                       AND e.start_snapshot_id < ?2
+                       AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > ?1)
+                       AND t.stream_id = (SELECT stream_id FROM snapshot WHERE id = ?2)
+                     ORDER BY e.started_at ASC, e.id ASC",
                 )?;
                 let rows = stmt.query_map(params![range_start, range_end], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -2132,6 +2149,115 @@ mod tests {
         assert!(
             !ids.contains(&c.id.value()),
             "effort starting at range end excluded"
+        );
+    }
+
+    /// Build a stream (`n`) + one thread + one task, all keyed off `n`.
+    /// Stream 1 is the Primary; any other `n` is a Worktree (the unique
+    /// partial index allows only one Primary).
+    async fn stream_thread_task(db: &Database, n: i64) -> (StreamId, ThreadId, TaskId) {
+        let now = Timestamp::from_unix_ms(1);
+        let s = Stream {
+            id: StreamId::new(n),
+            kind: if n == 1 {
+                StreamKind::Primary
+            } else {
+                StreamKind::Worktree
+            },
+            title: format!("s{n}"),
+            branch: format!("b{n}"),
+            branch_ref: format!("refs/heads/b{n}"),
+            branch_source: "main".into(),
+            worktree_path: format!("/p{n}"),
+            working_pane: String::new(),
+            talking_pane: String::new(),
+            working_session_id: String::new(),
+            talking_session_id: String::new(),
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        };
+        SqliteStreamStore::new(db.clone()).upsert(&s).await.unwrap();
+        let t = Thread {
+            id: ThreadId::new(n),
+            stream_id: s.id,
+            title: format!("t{n}"),
+            status: ThreadStatus::Active,
+            sort_index: 0,
+            pane_target: "working".into(),
+            agent: oxplow_domain::AgentKind::Claude,
+            resume_session_id: String::new(),
+            summary: String::new(),
+            summary_updated_at: None,
+            closed_at: None,
+            custom_prompt: None,
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+        };
+        SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
+        let tid = SqliteTaskStore::new(db.clone())
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(t.id),
+                parent_id: None,
+                title: format!("task{n}"),
+                description: String::new(),
+                status: TaskStatus::Ready,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        (s.id, t.id, tid)
+    }
+
+    /// Concurrent efforts must be scoped to the diffed snapshot's own
+    /// stream. Snapshot ids are global, so two streams' efforts can have
+    /// numerically-overlapping snapshot windows; the query must NOT leak
+    /// the other stream's effort into the diff's "Concurrent Efforts"
+    /// roster.
+    #[tokio::test]
+    async fn overlapping_range_excludes_other_stream_efforts() {
+        let db = Database::in_memory();
+        let (sa, ta, tida) = stream_thread_task(&db, 1).await;
+        let (sb, tb, tidb) = stream_thread_task(&db, 2).await;
+        let snap = crate::SqliteSnapshotStore::new(db.clone());
+
+        // Interleave snapshot creation so the global ids straddle across
+        // streams: a1 < b1 < a2 < b2. Effort A spans (a1, a2], effort B
+        // spans (b1, b2] — B's window numerically overlaps (a1, a2].
+        let a1 = snap.create_snapshot(sa).await.unwrap();
+        let b1 = snap.create_snapshot(sb).await.unwrap();
+        let a2 = snap.create_snapshot(sa).await.unwrap();
+        let b2 = snap.create_snapshot(sb).await.unwrap();
+
+        let store = SqliteTaskEffortStore::new(db);
+        let ea = store.start(tida, &ta, Some(a1)).await.unwrap();
+        store.finish(&ea.id, Some(a2), None).await.unwrap();
+        let eb = store.start(tidb, &tb, Some(b1)).await.unwrap();
+        store.finish(&eb.id, Some(b2), None).await.unwrap();
+
+        // Diff range is stream A's (a1, a2]; range_end (a2) is a stream-A
+        // snapshot, so only stream-A efforts should come back.
+        let rows = store.list_efforts_overlapping_range(a1, a2).await.unwrap();
+        let ids: std::collections::HashSet<i64> = rows.iter().map(|r| r.id.value()).collect();
+        assert!(
+            ids.contains(&ea.id.value()),
+            "the diffed stream's own effort is included"
+        );
+        assert!(
+            !ids.contains(&eb.id.value()),
+            "an effort from another stream must NOT leak in, even though \
+             its snapshot-id window overlaps numerically"
         );
     }
 }

@@ -110,13 +110,7 @@ fn build_submenu(
                 "copy" => PredefinedMenuItem::copy(app, Some(&item.label))?,
                 "paste" => PredefinedMenuItem::paste(app, Some(&item.label))?,
                 "selectAll" => PredefinedMenuItem::select_all(app, Some(&item.label))?,
-                role if role == "separator"
-                    || role.strip_prefix("separator.").is_some_and(|n| {
-                        !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
-                    }) =>
-                {
-                    PredefinedMenuItem::separator(app)?
-                }
+                role if is_separator_role(role) => PredefinedMenuItem::separator(app)?,
                 _ => {
                     tracing::warn!(role, "unknown native menu role; skipping");
                     continue;
@@ -153,6 +147,20 @@ fn normalize_accelerator(s: &str) -> String {
         .replace("Cmd/Ctrl", "CmdOrCtrl")
 }
 
+/// Whether a `native.<role>` id names a separator. Bare `"separator"`
+/// is the common case; the renderer also emits numbered variants
+/// (`"separator.0"`, `"separator.1"`, …) so several separators can
+/// coexist in one menu without colliding on a duplicate id. The digit
+/// suffix is purely a uniqueness tag — `"separator."` (empty suffix)
+/// or a non-numeric suffix (`"separator.x"`) is NOT a separator and
+/// falls through to the unknown-role warning.
+fn is_separator_role(role: &str) -> bool {
+    role == "separator"
+        || role
+            .strip_prefix("separator.")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Install the menu-event forwarder. Called once at app startup
 /// from `main.rs`. Each menu activation re-emits as a Tauri event
 /// the renderer subscribes to.
@@ -169,4 +177,49 @@ pub fn install_menu_handler(app: &AppHandle) {
 #[derive(Debug, Clone, Serialize)]
 struct MenuCommandEvent {
     id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_accelerator_translates_both_combo_spellings() {
+        assert_eq!(normalize_accelerator("Ctrl/Cmd+S"), "CmdOrCtrl+S");
+        assert_eq!(normalize_accelerator("Cmd/Ctrl+S"), "CmdOrCtrl+S");
+        assert_eq!(
+            normalize_accelerator("Ctrl/Cmd+Shift+N"),
+            "CmdOrCtrl+Shift+N"
+        );
+    }
+
+    #[test]
+    fn normalize_accelerator_leaves_plain_shortcuts_untouched() {
+        // No combo token to rewrite — passes through verbatim so Tauri's
+        // codec sees exactly what the renderer sent.
+        assert_eq!(normalize_accelerator("Cmd+K"), "Cmd+K");
+        assert_eq!(normalize_accelerator("F2"), "F2");
+        assert_eq!(normalize_accelerator(""), "");
+    }
+
+    #[test]
+    fn is_separator_role_accepts_bare_and_numbered() {
+        assert!(is_separator_role("separator"));
+        assert!(is_separator_role("separator.0"));
+        assert!(is_separator_role("separator.1"));
+        assert!(is_separator_role("separator.42"));
+    }
+
+    #[test]
+    fn is_separator_role_rejects_empty_or_nonnumeric_suffix() {
+        // The digit suffix is a uniqueness tag; anything else is a real
+        // command id (or a typo) and must fall through, not silently
+        // render as a separator.
+        assert!(!is_separator_role("separator."));
+        assert!(!is_separator_role("separator.x"));
+        assert!(!is_separator_role("separator.1a"));
+        assert!(!is_separator_role("separatorx"));
+        assert!(!is_separator_role("undo"));
+        assert!(!is_separator_role(""));
+    }
 }

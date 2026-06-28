@@ -199,7 +199,11 @@ jobs:
       # before it fails so a single uncovered new file doesn't break
       # CI but a regression sweep does. Per-crate floors below catch
       # localized drops independent of the workspace average. Raise
-      # the floor as crate coverage improves.
+      # the floor as crate coverage improves — EXCEPT the pass-through
+      # adapter crates (oxplow-mcp, oxplow-tauri-ipc), which are
+      # intentionally not coverage-chased (their floors are
+      # catastrophe-catchers, not targets; see the "pass-through
+      # crates" note in .context/working-in-this-repo.md).
       - name: Coverage report (with floor)
         run: cargo llvm-cov --workspace --summary-only --fail-under-lines 62
 

@@ -151,3 +151,39 @@ fn spawn_project_process(dir: &Path) -> Result<(), IpcError> {
     oxplow_app::spawn_project_window(dir, false)
         .map_err(|e| IpcError::internal(format!("spawn project window: {e}")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory with no `.oxplow/` needs first-run setup; once the
+    /// dir exists, it doesn't. The launcher gates window replacement on
+    /// this, so a wrong answer either re-runs setup over a real project
+    /// or boots an un-initialized dir straight into the app shell.
+    #[tokio::test]
+    async fn project_needs_setup_tracks_oxplow_dir_presence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().to_string_lossy().into_owned();
+
+        assert!(
+            project_needs_setup(path.clone()).await.unwrap(),
+            "fresh dir with no .oxplow should need setup"
+        );
+
+        std::fs::create_dir(tmp.path().join(".oxplow")).unwrap();
+        assert!(
+            !project_needs_setup(path).await.unwrap(),
+            "dir with .oxplow should not need setup"
+        );
+    }
+
+    /// A `.oxplow` *file* (not a directory) doesn't count as an
+    /// initialized project — `is_dir()` must drive the decision.
+    #[tokio::test]
+    async fn project_needs_setup_ignores_a_non_dir_oxplow_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".oxplow"), b"not a dir").unwrap();
+        let path = tmp.path().to_string_lossy().into_owned();
+        assert!(project_needs_setup(path).await.unwrap());
+    }
+}

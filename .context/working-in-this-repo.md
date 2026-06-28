@@ -115,6 +115,35 @@ Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
 
+### Coverage floors & pass-through crates
+
+Two CI gates enforce line coverage: a **workspace floor**
+(`cargo llvm-cov --workspace --fail-under-lines N` in
+`.github/workflows/ci.yml`) and **per-crate floors**
+(`scripts/coverage-floors.py`, `FLOORS` dict). Floors sit a few points
+below current measured coverage — a real regression fails CI, normal
+churn doesn't.
+
+**Don't coverage-chase the pass-through adapter crates**
+(`oxplow-tauri-ipc`, `oxplow-mcp`). Most of their commands are one-line
+delegates to `oxplow-rpc` cores (the bodies live there so the headless
+daemon can share them — see `.context/remote-daemon.md`). Those
+delegates are *typed*, so a mis-wire usually fails to compile; a
+"call it, assert it didn't panic" test adds a coverage point and ~zero
+bug-catching. Their per-crate floor is a **catastrophe-catcher** (it
+trips if the adapters regress toward 0% / the test harness breaks), not
+a line-coverage target — keep it well below measured and don't pad to
+raise it.
+
+What *is* worth testing in `oxplow-tauri-ipc`: the genuinely Tauri-only
+files that can't live in `oxplow-rpc` (`menu.rs` accelerator/separator
+parsing, `launch.rs` fs checks, `webview.rs`, `state.rs` `LaunchInfo`
+wire contract) and any adapter that *computes* something locally
+(e.g. `list_recent_projects`' exists-flag). The real safety net for the
+command surface is the `export_ts_bindings` test + the
+`oxplow-surface-parity` crate (they catch a command missing from the
+renderer surface, or the IPC/daemon transports drifting) — not line %.
+
 ## Rust formatting & lints
 
 CI runs `cargo fmt --all -- --check` AND `cargo clippy --workspace
