@@ -589,7 +589,7 @@ function ActivityEffortSection({
             }}
             title="Open the diff view for this effort (start → end)"
           >
-            View diff
+            Details
           </button>
         ) : null}
       </header>
