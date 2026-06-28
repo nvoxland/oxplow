@@ -21,6 +21,10 @@ interface Props {
    *  tab (browser-tab semantic, back returns to this list).
    *  Otherwise falls through to in-tab file open. */
   onOpenFileDiff?(path: string): void;
+  /** Show the "N files" total in the toolbar's far-right slot. Default
+   *  `true`; the diff page's Files Changed control hides it (the dir
+   *  rows already carry per-folder counts). */
+  showFileCount?: boolean;
 }
 
 /**
@@ -29,7 +33,7 @@ interface Props {
  * so the toolbar (filter + Expand all / Collapse all), the chevron
  * toggle, and the status badges all match the Semantic view exactly.
  */
-export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDiff }: Props) {
+export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDiff, showFileCount = true }: Props) {
   const ctxNav = useOptionalPageNavigation();
   // Default click semantic: navigate **in-tab** to the file's diff
   // when an `onOpenFileDiff` is supplied; otherwise fall through to
@@ -62,9 +66,11 @@ export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDi
       searchPlaceholder="Filter by path…"
       emptyLabel="No files match the filter."
       toolbarExtra={
-        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
-          {total} file{total === 1 ? "" : "s"}
-        </span>
+        showFileCount ? (
+          <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+            {total} file{total === 1 ? "" : "s"}
+          </span>
+        ) : undefined
       }
     />
   );

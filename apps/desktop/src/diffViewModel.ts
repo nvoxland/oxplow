@@ -64,42 +64,6 @@ export function resolveSnapshotEndpoints(
   };
 }
 
-export interface EndpointLabel {
-  text: string;
-  /** When set, the label is a clickable git commit (short sha shown). */
-  commitSha: string | null;
-}
-
-/** Human label for one diff endpoint. `snapshotCommits` maps a snapshot
- *  id → its pinned git commit sha (null when the capture had no
- *  corresponding commit). A snapshot that maps to a commit reads as that
- *  commit's short sha (clickable); otherwise as `local snapshot {id}`. */
-export function endpointLabel(
-  ep: DiffEndpoint | null,
-  snapshotCommits: Map<number, string | null>,
-): EndpointLabel {
-  if (ep === null) return { text: "(empty)", commitSha: null };
-  switch (ep.kind) {
-    case "working":
-      return { text: "working tree", commitSha: null };
-    case "commit":
-      return { text: ep.sha.slice(0, 7), commitSha: ep.sha };
-    case "snapshot": {
-      const sha = snapshotCommits.get(ep.snapshot_id) ?? null;
-      if (sha) return { text: sha.slice(0, 7), commitSha: sha };
-      return { text: `local snapshot ${ep.snapshot_id}`, commitSha: null };
-    }
-  }
-}
-
-/** True when both endpoints are commits (or empty↔commit) — a pure
- *  git-history range with no snapshot mapping. The effort roster
- *  (driven by snapshot-id overlap) is hidden for these. */
-export function isPureCommitRange(start: DiffEndpoint | null, end: DiffEndpoint): boolean {
-  const sideIsCommit = (ep: DiffEndpoint | null) => ep === null || ep.kind === "commit";
-  return sideIsCommit(start) && sideIsCommit(end);
-}
-
 /** The snapshot id pair to feed `listEffortsOverlappingRange`, or null
  *  when the range has no snapshot endpoints to overlap against. */
 export function snapshotRange(

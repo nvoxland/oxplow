@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import type { EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import type { BranchChangeEntry, EffortAtSnapshot, EffortObservation, Snapshot, Stream } from "../api.js";
 import {
   getEffort,
   getTaskSummaries,
   listEffortFiles,
+  listEffortObservations,
   listEffortsOverlappingRange,
   listSnapshots,
+  subscribeOxplowEvents,
 } from "../api.js";
-import { groupChangesByEffort, type GroupedChanges } from "../snapshot-effort-grouping.js";
 import {
-  endpointLabel,
-  isPureCommitRange,
   previousSnapshotId,
   resolveEffortEndpoints,
   resolveSnapshotEndpoints,
@@ -19,9 +18,12 @@ import {
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
+import { DISK, refVersion } from "../file-version.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import {
+  effortCoverageRef,
   effortDiffRef,
   endpointDiffRef,
   gitCommitRef,
@@ -31,13 +33,11 @@ import {
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
-import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
+import { ChangeAnalysisFileTree } from "../components/ChangeAnalysis/FileTreeView.js";
+import { TestsRun } from "../components/EffortObservations.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
-import {
-  summarizeTestFunctions,
-  summarizeTestLineRatio,
-} from "../components/ChangeAnalysis/analysisHelpers.js";
-import { formatFullDateTime } from "../components/format.js";
+import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
+import { formatFullDateTime, formatTimeOnly, isSameCalendarDay } from "../components/format.js";
 
 /**
  * What a diff view renders. Reached three ways, all via `DiffViewPage`:
@@ -77,7 +77,12 @@ interface ResolvedDiff {
   start: DiffEndpoint | null;
   end: DiffEndpoint;
   inProgress: boolean;
+  /** Task id of the effort this diff was opened *for* (effort mode);
+   *  null for snapshot/endpoint diffs. */
   taskId: string | null;
+  /** Effort id when the diff was opened *for* an effort (effort mode).
+   *  Drives the claimed-files filter; null otherwise. */
+  effortId: string | null;
 }
 
 /**
@@ -99,9 +104,6 @@ function DiffBody({
 }: DiffViewPageProps) {
   const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
-  // Only snapshot mode needs the row (for the "Snapshot N · <time>"
-  // title); effort/endpoint diffs title as "Diff".
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const key = specKey(spec);
 
   // Backlinks/outbound keyed on the ref that opened this page. A
@@ -131,18 +133,17 @@ function DiffBody({
     let cancelled = false;
     setResolveError(null);
     if (spec.mode === "endpoints") {
-      setSnapshot(null);
       setResolved({
         start: spec.start,
         end: spec.end,
         inProgress: spec.end.kind === "working",
         taskId: null,
+        effortId: null,
       });
       return;
     }
     setResolved(null);
     if (spec.mode === "effort") {
-      setSnapshot(null);
       void getEffort(spec.effortId)
         .then((effort) => {
           if (cancelled) return;
@@ -150,7 +151,11 @@ function DiffBody({
             setResolveError("Effort not found.");
             return;
           }
-          setResolved({ ...resolveEffortEndpoints(effort), taskId: effort.taskId });
+          setResolved({
+            ...resolveEffortEndpoints(effort),
+            taskId: effort.taskId,
+            effortId: effort.effortId,
+          });
         })
         .catch((err) => {
           if (cancelled) return;
@@ -163,7 +168,6 @@ function DiffBody({
     }
     // Snapshot mode: resolve [prev → N] from the stream's capture list.
     if (!stream) {
-      setSnapshot(null);
       setResolved(null);
       return;
     }
@@ -171,12 +175,15 @@ function DiffBody({
     void listSnapshots(stream.id, 500)
       .then((rows) => {
         if (cancelled) return;
-        setSnapshot(rows.find((r) => r.id === snapshotId) ?? null);
         const prev = previousSnapshotId(
           snapshotId,
           rows.map((r) => r.id),
         );
-        setResolved({ ...resolveSnapshotEndpoints(snapshotId, prev), taskId: null });
+        setResolved({
+          ...resolveSnapshotEndpoints(snapshotId, prev),
+          taskId: null,
+          effortId: null,
+        });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -188,15 +195,14 @@ function DiffBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream?.id, key]);
 
-  const title =
-    spec.mode === "snapshot"
-      ? snapshot
-        ? `Snapshot ${spec.snapshotId} · ${formatFullDateTime(snapshot.createdAt)}`
-        : `Snapshot ${spec.snapshotId}`
-      : "Diff";
-
   return (
-    <Page testId="page-diff-view" title={title} kind="diff-view" backlinks={backlinks} outbound={outbound}>
+    <Page
+      testId="page-diff-view"
+      title={resolved ? undefined : "Changes"}
+      kind="diff-view"
+      backlinks={backlinks}
+      outbound={outbound}
+    >
       {resolveError ? (
         <div style={{ ...muted, padding: "12px 16px" }}>{resolveError}</div>
       ) : !resolved ? (
@@ -244,10 +250,11 @@ function ResolvedEndpointDiff({
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }) {
-  const { start, end, inProgress, taskId } = resolved;
+  const { start, end, inProgress, taskId, effortId } = resolved;
+  const effortPassed = effortId != null;
 
-  // Snapshot id → its pinned git commit + capture time, for header
-  // labels. Cheap window fetch, same pattern the snapshot body uses.
+  // Snapshot id → its capture time + pinned git commit, for the title's
+  // start/end labels. Cheap window fetch, same pattern the old body used.
   const [snapshotsById, setSnapshotsById] = useState<Map<number, Snapshot>>(new Map());
   useEffect(() => {
     if (!stream) return;
@@ -263,16 +270,9 @@ function ResolvedEndpointDiff({
     };
   }, [stream?.id]);
 
-  const snapshotCommits = useMemo(() => {
-    const m = new Map<number, string | null>();
-    for (const [id, snap] of snapshotsById) m.set(id, snap.gitCommit ?? null);
-    return m;
-  }, [snapshotsById]);
-
   // Endpoint-diff analysis. An in-progress effort diffs its start
-  // snapshot against the live working tree (the `working` endpoint,
-  // supported by the substrate as of tsk339); a small header note flags
-  // that the end side is moving.
+  // snapshot against the live working tree (the `working` endpoint); a
+  // small header note flags that the end side is moving.
   const endpoints = useMemo(
     () => ({ start, end }),
     [JSON.stringify(start), JSON.stringify(end)],
@@ -283,7 +283,7 @@ function ResolvedEndpointDiff({
     endpoints,
   });
 
-  // Task title for the header link (effort mode).
+  // Task title for the header (effort mode).
   const [taskTitle, setTaskTitle] = useState<string | null>(null);
   useEffect(() => {
     if (!taskId) {
@@ -302,8 +302,9 @@ function ResolvedEndpointDiff({
     };
   }, [taskId]);
 
-  // Other efforts whose snapshot window overlaps this range. Hidden for
-  // a pure commit↔commit range (no snapshot ids to overlap against).
+  // Efforts whose snapshot window overlaps this range. Drives both the
+  // "Concurrent Efforts" list and the lined-up-effort title detection.
+  // Null for a range with no snapshot endpoints to overlap against.
   const range = useMemo(() => snapshotRange(start, end), [JSON.stringify(start), JSON.stringify(end)]);
   const [effortRows, setEffortRows] = useState<EffortRow[]>([]);
   useEffect(() => {
@@ -323,17 +324,6 @@ function ResolvedEndpointDiff({
           Array.from(new Set(overlapping.map((o) => o.taskId))),
         ).catch(() => [] as Array<{ id: string; title: string }>);
         const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
-        type FileRow = { path: string; change: "created" | "updated" | "deleted" };
-        const filesByEffort = await Promise.all(
-          overlapping.map(async (o) => {
-            try {
-              return [o.effortId, await listEffortFiles(o.effortId)] as [string, FileRow[]];
-            } catch {
-              return [o.effortId, [] as FileRow[]] as [string, FileRow[]];
-            }
-          }),
-        );
-        const filesById = new Map(filesByEffort);
         if (cancelled) return;
         setEffortRows(
           overlapping.map((o) => ({
@@ -347,7 +337,7 @@ function ResolvedEndpointDiff({
               completedHere: o.endSnapshotId === range.rangeEnd,
             },
             taskTitle: titleByTask.get(o.taskId) ?? `task ${o.taskId}`,
-            files: filesById.get(o.effortId) ?? [],
+            endedAt: o.endedAt,
           })),
         );
       } catch (err) {
@@ -360,40 +350,192 @@ function ResolvedEndpointDiff({
     };
   }, [range?.rangeStart, range?.rangeEnd]);
 
-  const effortById = useMemo(
-    () => new Map(effortRows.map((r) => [r.effort.effortId, r])),
-    [effortRows],
-  );
-  const grouped = useMemo<GroupedChanges>(
+  // Files this effort CLAIMED — only fetched when a diff was opened *for*
+  // an effort, where the Files Changed list is restricted to them.
+  const [claimedPaths, setClaimedPaths] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!effortPassed || !effortId) {
+      setClaimedPaths(null);
+      return;
+    }
+    let cancelled = false;
+    void listEffortFiles(effortId)
+      .then((rows) => {
+        if (cancelled) return;
+        setClaimedPaths(new Set(rows.map((r) => r.path)));
+      })
+      .catch(() => {
+        if (!cancelled) setClaimedPaths(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effortPassed, effortId]);
+
+  // Effort identity for the title + concurrent-effort exclusion. The diff
+  // is "for an effort" when one was passed (effort mode) OR when the
+  // endpoints line up exactly with an overlapping effort's bracket.
+  const startSnapId = start?.kind === "snapshot" ? start.snapshot_id : null;
+  const endSnapId = end.kind === "snapshot" ? end.snapshot_id : null;
+  // Capture time of the range's start snapshot — used to drop efforts that
+  // ended before this range began from the concurrent list.
+  const rangeStartIso =
+    startSnapId != null ? snapshotsById.get(startSnapId)?.createdAt ?? null : null;
+  const linedUpEffort = useMemo(() => {
+    if (effortPassed || endSnapId == null) return null;
+    return (
+      effortRows.find(
+        (r) => r.effort.startSnapshotId === startSnapId && r.effort.endSnapshotId === endSnapId,
+      ) ?? null
+    );
+  }, [effortPassed, effortRows, startSnapId, endSnapId]);
+  const primaryEffortId = effortPassed ? effortId : linedUpEffort?.effort.effortId ?? null;
+  const effortTitle = effortPassed ? taskTitle : linedUpEffort?.taskTitle ?? null;
+
+  // Concurrent efforts = every overlapping effort other than the one this
+  // diff is for. Drops efforts that had already ENDED before this range began —
+  // they surface only because they never pinned an end snapshot (the overlap
+  // query treats `end_snapshot_id IS NULL` as still-open), not because they
+  // actually ran concurrently.
+  const concurrentEfforts = useMemo(
     () =>
-      groupChangesByEffort(
-        analysis.files.map((f) => ({ path: f.path, status: f.status })),
-        effortRows.map((r) => ({ effortId: r.effort.effortId, title: r.taskTitle, files: r.files })),
-      ),
-    [analysis.files, effortRows],
+      effortRows.filter((r) => {
+        if (r.effort.effortId === primaryEffortId) return false;
+        if (r.endedAt && rangeStartIso && r.endedAt < rangeStartIso) return false;
+        return true;
+      }),
+    [effortRows, primaryEffortId, rangeStartIso],
   );
 
-  const showEffortSection = range !== null && !isPureCommitRange(start, end);
-  const startLbl = endpointLabel(start, snapshotCommits);
-  const endLbl = endpointLabel(end, snapshotCommits);
+  const startDisp = useMemo(
+    () => endpointDisplay(start, snapshotsById),
+    [JSON.stringify(start), snapshotsById],
+  );
+  // When the end falls on the same calendar day as the start, collapse it
+  // to a time-only label so the date isn't repeated in the range.
+  const endDisp = useMemo(() => {
+    const disp = endpointDisplay(end, snapshotsById);
+    if (disp.iso && startDisp.iso && isSameCalendarDay(startDisp.iso, disp.iso)) {
+      return { ...disp, timeText: formatTimeOnly(disp.iso) };
+    }
+    return disp;
+  }, [JSON.stringify(end), snapshotsById, startDisp]);
+
+  // Chrome / tab title — plain-text mirror of the h1.
+  const plainTitle = effortTitle
+    ? `Changes: ${effortTitle}`
+    : `Changes: ${endpointPlain(startDisp)} – ${endpointPlain(endDisp)}`;
+  usePageTitle(plainTitle);
+
+  // Files for the Files Changed tree. All changed files by default; only
+  // the effort's claimed files when a diff was opened *for* an effort.
+  const filesForList = useMemo<BranchChangeEntry[]>(() => {
+    if (!effortPassed) return analysis.files;
+    if (!claimedPaths) return [];
+    return analysis.files.filter((f) => claimedPaths.has(f.path));
+  }, [effortPassed, claimedPaths, analysis.files]);
+  const filesLoading = analysis.loading || (effortPassed && claimedPaths === null);
+
+  // Test work in the range — file-based (every test file counts, even
+  // ones with only `describe`/`test` blocks and no named functions, which
+  // the old function-based summary missed). Scoped to the full range, not
+  // the effort's claimed files.
+  const testFiles = useMemo(
+    () => analysis.files.filter((f) => isTestPath(f.path)),
+    [analysis.files],
+  );
+  const testStats = useMemo(() => {
+    let testLines = 0;
+    let productionLines = 0;
+    for (const f of analysis.files) {
+      const lines = (f.additions ?? 0) + (f.deletions ?? 0);
+      if (isTestPath(f.path)) testLines += lines;
+      else productionLines += lines;
+    }
+    return {
+      testLines,
+      productionLines,
+      ratio: productionLines > 0 ? testLines / productionLines : 0,
+    };
+  }, [analysis.files]);
+
+  // Test RUNS recorded during the range — the times tests were executed,
+  // unioned across the effort(s) overlapping it (the primary effort in
+  // effort mode, plus any concurrent ones). Independent of whether test
+  // files changed: tests can be run without editing them.
+  const runEffortIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (effortId) ids.add(effortId);
+    for (const r of effortRows) ids.add(r.effort.effortId);
+    return [...ids];
+  }, [effortId, effortRows]);
+  const runEffortKey = runEffortIds.join(",");
+  const [testRuns, setTestRuns] = useState<EffortObservation[]>([]);
+  useEffect(() => {
+    if (runEffortIds.length === 0) {
+      setTestRuns([]);
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      void Promise.all(
+        runEffortIds.map((id) =>
+          listEffortObservations(id, "test-run").catch(() => [] as EffortObservation[]),
+        ),
+      ).then((lists) => {
+        if (!cancelled) setTestRuns(lists.flat());
+      });
+    };
+    load();
+    const unsub = subscribeOxplowEvents((event) => {
+      if (event.kind === "effortObservationsChanged") load();
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runEffortKey]);
+
+  // Open a single file's diff in the current tab, mirroring the drilldown.
+  const openFileDiff = (path: string) => {
+    if (!analysis.refs) {
+      onOpenFile?.(path);
+      return;
+    }
+    const { baseRef, headRef } = analysis.refs;
+    const spec: DiffSpec = {
+      path,
+      leftVersion: refVersion(baseRef),
+      rightVersion: headRef ? refVersion(headRef) : DISK,
+      baseLabel: endpointPlain(startDisp),
+      revealLine: 1,
+    };
+    if (onOpenDiffInTab) onOpenDiffInTab(spec);
+    else if (onOpenDiff) onOpenDiff(spec);
+    else onOpenFile?.(path);
+  };
+
+  const openCommit = (sha: string) => onOpenPage(gitCommitRef(sha));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
-      {taskTitle && taskId ? (
-        <button
-          type="button"
-          onClick={() => onOpenPage(taskRef(taskId))}
-          style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600, fontSize: "var(--text-sm)" }}
-        >
-          {taskTitle}
-        </button>
-      ) : null}
-
-      <DiffHeader
-        start={startLbl}
-        end={endLbl}
-        onOpenCommit={(sha) => onOpenPage(gitCommitRef(sha))}
-      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <h1 style={h1Style} data-testid="diff-view-title">
+          {effortTitle ? (
+            `Changes: ${effortTitle}`
+          ) : (
+            <>
+              Changes: <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
+            </>
+          )}
+        </h1>
+        {effortTitle ? (
+          <div style={subtitleStyle} data-testid="diff-view-subtitle">
+            <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
+          </div>
+        ) : null}
+      </div>
 
       {inProgress ? (
         <div
@@ -405,315 +547,198 @@ function ResolvedEndpointDiff({
         </div>
       ) : null}
 
-      {(
-        <>
-          {analysis.error ? (
-            <div style={{ ...card, color: "var(--severity-critical, #f87171)", fontSize: "var(--text-sm)" }}>
-              {analysis.error}
-            </div>
-          ) : null}
+      {analysis.error ? (
+        <div style={{ ...card, color: "var(--severity-critical, #f87171)", fontSize: "var(--text-sm)" }}>
+          {analysis.error}
+        </div>
+      ) : null}
 
-          {analysis.files.length > 0 ? (
-            <div style={{ maxWidth: 420 }}>
-              <SummaryCard
-                fileCount={analysis.files.length}
-                additions={analysis.totals.additions}
-                deletions={analysis.totals.deletions}
-                byStatus={analysis.pivots.byStatus}
-                tests={analysis.tests}
-                testFunctions={summarizeTestFunctions(analysis.functions)}
-                testLineRatio={summarizeTestLineRatio(analysis.functionChurn)}
-              />
-            </div>
-          ) : !analysis.loading && !analysis.error ? (
-            <div style={{ ...card, ...muted }}>No file changes between these endpoints.</div>
-          ) : null}
+      {concurrentEfforts.length > 0 ? (
+        <section data-testid="diff-view-concurrent-efforts">
+          <h2 style={h2Style}>Concurrent Efforts</h2>
+          <ul style={effortListStyle}>
+            {concurrentEfforts.map((r) => (
+              <li key={r.effort.effortId}>
+                <button
+                  type="button"
+                  onClick={() => onOpenPage(taskRef(r.effort.tasksId))}
+                  style={{ ...linkButton, fontFamily: "inherit", fontSize: "var(--text-sm)" }}
+                >
+                  {r.taskTitle}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-          {showEffortSection ? (
-            <ChangesByEffortSection
-              grouped={grouped}
-              effortById={effortById}
-              onOpenTask={(id) => onOpenPage(taskRef(id))}
-              onOpenSnapshot={(id) => onOpenPage(snapshotRef(id))}
-              onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
-            />
-          ) : analysis.files.length > 0 ? (
-            <PlainChangedFiles
-              files={analysis.files.map((f) => ({ path: f.path, status: f.status }))}
-              onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
-            />
-          ) : null}
+      <section data-testid="diff-view-files-changed">
+        <h2 style={h2Style}>Files Changed</h2>
+        {filesLoading && filesForList.length === 0 ? (
+          <div style={muted}>Loading…</div>
+        ) : filesForList.length === 0 ? (
+          <div style={muted}>
+            {effortPassed
+              ? "This effort claimed no changed files."
+              : "No file changes between these endpoints."}
+          </div>
+        ) : (
+          <ChangeAnalysisFileTree
+            files={filesForList}
+            target={tabKey}
+            onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
+            onOpenFileDiff={openFileDiff}
+            showFileCount={false}
+          />
+        )}
+      </section>
 
-          {/* Full change analysis: zones bar, treemap, and the function /
-              churn / duplication drilldown. The endpoint branch now runs
-              the same analyzer the snapshot/commit targets do (tsk341),
-              so this is the identical panel the legacy snapshot page
-              rendered. */}
-          {analysis.files.length > 0 && onOpenFile ? (
-            <ChangeAnalysisPanel
-              analysis={analysis}
-              target={tabKey}
-              showHeader={false}
-              onOpenPage={onOpenPage}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenDiff}
-              onOpenDiffInTab={onOpenDiffInTab}
-            />
-          ) : null}
-        </>
-      )}
+      <section data-testid="diff-view-tests">
+        <h2 style={h2Style}>Tests</h2>
+        {filesLoading && analysis.files.length === 0 ? (
+          <div style={muted}>Loading…</div>
+        ) : testFiles.length === 0 && testRuns.length === 0 ? (
+          <div style={muted}>No test changes or test runs in this range.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {testRuns.length > 0 ? (
+              <TestsRun effortId={effortPassed && effortId ? effortId : undefined} runs={testRuns} />
+            ) : (
+              <div style={muted}>No test runs recorded in this range.</div>
+            )}
+            {testFiles.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {testStats.productionLines > 0 ? (
+                  <div
+                    style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}
+                    data-testid="diff-view-tests-ratio"
+                  >
+                    Test/code line ratio: {(testStats.ratio * 100).toFixed(0)}%
+                  </div>
+                ) : null}
+                {onOpenFile ? (
+                  <ChangeAnalysisFileTree
+                    files={testFiles}
+                    target={tabKey}
+                    onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
+                    onOpenFileDiff={openFileDiff}
+                    showFileCount={false}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </section>
+
+      {/* Full change analysis: zones bar, treemap, and the function /
+          churn / duplication drilldown — the same panel the snapshot /
+          commit targets render. */}
+      {analysis.files.length > 0 && onOpenFile ? (
+        <ChangeAnalysisPanel
+          analysis={analysis}
+          target={tabKey}
+          showHeader={false}
+          onOpenPage={onOpenPage}
+          onOpenFile={onOpenFile}
+          onOpenDiff={onOpenDiff}
+          onOpenDiffInTab={onOpenDiffInTab}
+        />
+      ) : null}
     </div>
   );
 }
 
-/// Diff-oriented header: start → end, each endpoint a clickable commit
-/// short-sha when it maps to one, else a plain label.
-function DiffHeader({
+/** One overlapping effort, resolved to its task title. */
+interface EffortRow {
+  effort: EffortAtSnapshot;
+  taskTitle: string;
+  /** When the effort ended (ISO), or null if still open. Used to drop
+   *  long-ended efforts from the concurrent list. */
+  endedAt: string | null;
+}
+
+interface EndpointDisplay {
+  /** Human time label (snapshot capture time, "working tree", etc.), or
+   *  null when the endpoint is identified solely by a commit. */
+  timeText: string | null;
+  /** Git commit this endpoint maps to, when any (shown as a linked short
+   *  sha after the time). */
+  commitSha: string | null;
+  /** Raw capture timestamp (ISO) when this is a time-based endpoint, so
+   *  the range can collapse a same-day end to time-only. Null otherwise. */
+  iso: string | null;
+}
+
+/** Resolve a diff endpoint to its title-row display: a time label plus an
+ *  optional git commit. */
+function endpointDisplay(
+  ep: DiffEndpoint | null,
+  snapshotsById: Map<number, Snapshot>,
+): EndpointDisplay {
+  if (ep === null) return { timeText: "(initial)", commitSha: null, iso: null };
+  switch (ep.kind) {
+    case "working":
+      return { timeText: "working tree", commitSha: null, iso: null };
+    case "commit":
+      return { timeText: null, commitSha: ep.sha, iso: null };
+    case "snapshot": {
+      const snap = snapshotsById.get(ep.snapshot_id);
+      return {
+        timeText: snap ? formatFullDateTime(snap.createdAt) : `snapshot ${ep.snapshot_id}`,
+        commitSha: snap?.gitCommit ?? null,
+        iso: snap?.createdAt ?? null,
+      };
+    }
+  }
+}
+
+/** Plain-text endpoint label for the chrome/tab title. */
+function endpointPlain(d: EndpointDisplay): string {
+  const sha = d.commitSha ? d.commitSha.slice(0, 7) : null;
+  if (d.timeText && sha) return `${d.timeText} (${sha})`;
+  if (d.timeText) return d.timeText;
+  if (sha) return sha;
+  return "?";
+}
+
+/** `<start> – <end>` with each endpoint's commit (when any) rendered as a
+ *  linked short sha in parentheses. */
+function RangeLabel({
   start,
   end,
   onOpenCommit,
 }: {
-  start: ReturnType<typeof endpointLabel>;
-  end: ReturnType<typeof endpointLabel>;
+  start: EndpointDisplay;
+  end: EndpointDisplay;
   onOpenCommit(sha: string): void;
 }) {
-  const pill = (lbl: ReturnType<typeof endpointLabel>) =>
-    lbl.commitSha ? (
-      <button type="button" onClick={() => onOpenCommit(lbl.commitSha!)} style={linkButton}>
-        {lbl.text}
-      </button>
-    ) : (
-      <span style={{ fontFamily: "var(--mono, monospace)", color: "var(--text-primary)" }}>{lbl.text}</span>
-    );
   return (
-    <div
-      style={{ ...card, display: "flex", alignItems: "center", gap: 10, fontSize: "var(--text-sm)" }}
-      data-testid="diff-view-header"
-    >
-      {pill(start)}
-      <span style={{ color: "var(--text-muted)" }}>→</span>
-      {pill(end)}
-    </div>
+    <>
+      <EndpointSpan d={start} onOpenCommit={onOpenCommit} />
+      <span style={{ color: "var(--text-muted)", margin: "0 6px" }}>–</span>
+      <EndpointSpan d={end} onOpenCommit={onOpenCommit} />
+    </>
   );
 }
 
-/// Flat changed-file list used when there's no effort roster to group
-/// by (e.g. a commit↔commit range).
-function PlainChangedFiles({
-  files,
-  onOpenFile,
+function EndpointSpan({
+  d,
+  onOpenCommit,
 }: {
-  files: Array<{ path: string; status: string }>;
-  onOpenFile?: (path: string) => void;
+  d: EndpointDisplay;
+  onOpenCommit(sha: string): void;
 }) {
-  return (
-    <section style={card}>
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--text-sm)" }}>
-        {files.length} file{files.length === 1 ? "" : "s"} changed
-      </div>
-      <ul style={listStyle}>
-        {files.map((f) => (
-          <li key={f.path} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <StatusBadge status={f.status} />
-            {onOpenFile ? (
-              <button
-                type="button"
-                onClick={() => onOpenFile(f.path)}
-                style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
-                title={f.path}
-              >
-                {f.path}
-              </button>
-            ) : (
-              <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.path}</span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+  const link = d.commitSha ? (
+    <button type="button" onClick={() => onOpenCommit(d.commitSha!)} style={commitLinkStyle}>
+      {d.commitSha.slice(0, 7)}
+    </button>
+  ) : null;
+  if (d.timeText && link) return <>{d.timeText} ({link})</>;
+  if (d.timeText) return <>{d.timeText}</>;
+  if (link) return link;
+  return <>?</>;
 }
-
-/** One row in the overlapping-efforts roster. */
-interface EffortRow {
-  effort: EffortAtSnapshot;
-  taskTitle: string;
-  files: Array<{ path: string; change: "created" | "updated" | "deleted" }>;
-}
-
-/// The page's core: a snapshot's changed files, grouped by the
-/// effort(s) that claim them, then an "Unclaimed" bucket, then a roster
-/// of efforts active here that claimed none of the changes.
-function ChangesByEffortSection({
-  grouped,
-  effortById,
-  onOpenTask,
-  onOpenSnapshot,
-  onOpenFile,
-}: {
-  grouped: GroupedChanges;
-  effortById: Map<string, EffortRow>;
-  onOpenTask(taskId: string): void;
-  onOpenSnapshot(snapshotId: number): void;
-  onOpenFile?: (path: string) => void;
-}) {
-  const changedCount =
-    grouped.byEffort.reduce((n, g) => n + g.files.length, 0) + grouped.unclaimed.length;
-  const idleRows = grouped.idleEffortIds
-    .map((id) => effortById.get(id))
-    .filter((r): r is EffortRow => !!r);
-
-  const fileRow = (
-    f: GroupedChanges["unclaimed"][number],
-    key: string,
-  ) => (
-    <li key={key} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-      <StatusBadge status={f.entry.status} />
-      {onOpenFile ? (
-        <button
-          type="button"
-          onClick={() => onOpenFile(f.entry.path)}
-          style={{ ...linkButton, fontFamily: "var(--mono, monospace)" }}
-          title={f.entry.path}
-        >
-          {f.entry.path}
-        </button>
-      ) : (
-        <span style={{ fontFamily: "var(--mono, monospace)" }}>{f.entry.path}</span>
-      )}
-      {f.declaredChange ? (
-        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>claimed: {f.declaredChange}</span>
-      ) : null}
-      {f.alsoClaimedBy.length > 0 ? (
-        <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
-          · also claimed by {f.alsoClaimedBy.join(", ")}
-        </span>
-      ) : null}
-    </li>
-  );
-
-  return (
-    <section style={card}>
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--text-sm)" }}>
-        {changedCount === 0
-          ? "Changes in this diff"
-          : `${changedCount} file${changedCount === 1 ? "" : "s"} changed`}
-      </div>
-      {changedCount === 0 ? (
-        <div style={{ color: "var(--text-muted)", fontSize: 11 }}>
-          No file changes were captured in this range.
-        </div>
-      ) : null}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {grouped.byEffort.map((group) => {
-          const row = effortById.get(group.effortId);
-          const effort = row?.effort;
-          return (
-            <div key={group.effortId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => effort && onOpenTask(effort.tasksId)}
-                  style={{ ...linkButton, fontFamily: "inherit", fontWeight: 600 }}
-                >
-                  {group.title}
-                </button>
-                {effort ? (
-                  <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>
-                    {effort.completedHere ? "completed here" : "in progress"}
-                  </span>
-                ) : null}
-                {effort?.startSnapshotId != null && !effort.completedHere ? (
-                  <span style={{ color: "var(--text-secondary)", fontSize: 11 }}>
-                    · started at{" "}
-                    <button
-                      type="button"
-                      onClick={() => onOpenSnapshot(effort.startSnapshotId!)}
-                      style={linkButton}
-                    >
-                      snapshot {effort.startSnapshotId}
-                    </button>
-                  </span>
-                ) : null}
-              </div>
-              <ul style={listStyle}>{group.files.map((f) => fileRow(f, f.entry.path))}</ul>
-            </div>
-          );
-        })}
-
-        {grouped.unclaimed.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div
-              style={{ fontWeight: 600, fontSize: 11, color: "var(--freshness-stale)" }}
-              title="Changed in this range but no overlapping effort claimed them — formatters, codegen, parallel actors, or a capture gap."
-            >
-              Unclaimed
-            </div>
-            <ul style={listStyle}>{grouped.unclaimed.map((f) => fileRow(f, f.entry.path))}</ul>
-          </div>
-        ) : null}
-      </div>
-
-      {idleRows.length > 0 ? (
-        <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-          Also overlapping this range (claimed none of these changes):{" "}
-          {idleRows.map((r, i) => (
-            <span key={r.effort.effortId}>
-              {i > 0 ? ", " : ""}
-              <button type="button" onClick={() => onOpenTask(r.effort.tasksId)} style={linkButton}>
-                {r.taskTitle}
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div style={{ color: "var(--text-muted)", fontSize: 10, marginTop: 8 }}>
-        Files are this range's actual diff, attributed to the effort(s) whose declared
-        authorship (via <code>complete_task</code>/<code>amend_effort</code>) includes them.
-      </div>
-    </section>
-  );
-}
-
-/// Small colored chip for a snapshot file status.
-function StatusBadge({ status }: { status: string }) {
-  const color =
-    status === "added"
-      ? "var(--status-done, #4caf50)"
-      : status === "deleted"
-        ? "var(--severity-critical, #f87171)"
-        : "var(--text-secondary)";
-  const label = status === "added" ? "A" : status === "deleted" ? "D" : status === "modified" ? "M" : status[0]?.toUpperCase() ?? "?";
-  return (
-    <span
-      title={status}
-      style={{
-        fontFamily: "var(--mono, monospace)",
-        fontSize: 10,
-        fontWeight: 700,
-        color,
-        minWidth: 12,
-        textAlign: "center",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-
-const listStyle: React.CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-  fontSize: 11,
-  color: "var(--text-secondary)",
-  listStyle: "none",
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
-
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const card: React.CSSProperties = {
@@ -731,4 +756,38 @@ const linkButton: React.CSSProperties = {
   fontFamily: "var(--mono, monospace)",
   fontSize: "var(--text-xs)",
   cursor: "pointer",
+};
+const h1Style: React.CSSProperties = {
+  margin: 0,
+  fontSize: "var(--text-2xl)",
+  fontWeight: 700,
+  color: "var(--text-primary)",
+  lineHeight: 1.2,
+};
+const h2Style: React.CSSProperties = {
+  margin: "0 0 8px",
+  fontSize: "var(--text-lg)",
+  fontWeight: 600,
+  color: "var(--text-primary)",
+};
+const subtitleStyle: React.CSSProperties = {
+  fontSize: "var(--text-sm)",
+  color: "var(--text-secondary)",
+  fontFamily: "var(--mono, monospace)",
+};
+const effortListStyle: React.CSSProperties = {
+  margin: "4px 0 0",
+  paddingLeft: 18,
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+};
+const commitLinkStyle: React.CSSProperties = {
+  padding: 0,
+  background: "transparent",
+  border: "none",
+  color: "var(--text-link, #2563eb)",
+  font: "inherit",
+  cursor: "pointer",
+  textDecoration: "underline",
 };

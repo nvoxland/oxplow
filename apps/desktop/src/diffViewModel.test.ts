@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  endpointLabel,
   previousSnapshotId,
   resolveEffortEndpoints,
   resolveSnapshotEndpoints,
@@ -57,45 +56,6 @@ describe("resolveEffortEndpoints", () => {
       start: null,
       end: { kind: "snapshot", snapshot_id: 9 },
       inProgress: false,
-    });
-  });
-});
-
-describe("endpointLabel", () => {
-  const commits = new Map<number, string | null>([
-    [9, "abcdef1234567890"],
-    [3, null],
-  ]);
-
-  test("null endpoint reads as empty", () => {
-    expect(endpointLabel(null, commits)).toEqual({ text: "(empty)", commitSha: null });
-  });
-
-  test("working endpoint", () => {
-    expect(endpointLabel({ kind: "working" }, commits)).toEqual({
-      text: "working tree",
-      commitSha: null,
-    });
-  });
-
-  test("commit endpoint shows the short sha and is clickable", () => {
-    expect(endpointLabel({ kind: "commit", sha: "abcdef1234567890" }, commits)).toEqual({
-      text: "abcdef1",
-      commitSha: "abcdef1234567890",
-    });
-  });
-
-  test("snapshot with a pinned commit shows the short sha", () => {
-    expect(endpointLabel({ kind: "snapshot", snapshot_id: 9 }, commits)).toEqual({
-      text: "abcdef1",
-      commitSha: "abcdef1234567890",
-    });
-  });
-
-  test("snapshot without a commit reads as a local snapshot", () => {
-    expect(endpointLabel({ kind: "snapshot", snapshot_id: 3 }, commits)).toEqual({
-      text: "local snapshot 3",
-      commitSha: null,
     });
   });
 });

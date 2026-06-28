@@ -41,3 +41,29 @@ export function formatFullDateTime(input: string): string {
     return input;
   }
 }
+
+/**
+ * Time-only label (locale form, no date). Used to collapse a date range
+ * whose endpoints fall on the same day. Falls back to the raw string if
+ * `Date` can't parse it.
+ */
+export function formatTimeOnly(input: string): string {
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input;
+  return d.toLocaleTimeString();
+}
+
+/**
+ * True when two parseable timestamps fall on the same local calendar
+ * day. False if either can't be parsed.
+ */
+export function isSameCalendarDay(a: string, b: string): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}

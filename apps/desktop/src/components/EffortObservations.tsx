@@ -747,7 +747,11 @@ function suiteTotal(node: MultiRunNode): number {
   return Math.max(0, ...node.counts.map((c) => c.passed + c.failed + c.skipped));
 }
 
-function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservation[] }) {
+/** Test-run timeline + top-suite breakdown for a set of runs. `effortId` is
+ *  optional: when present (single-effort context) the header links to that
+ *  effort's coverage detail page; the diff view passes runs unioned across
+ *  several efforts and omits the link. */
+export function TestsRun({ effortId, runs }: { effortId?: string; runs: EffortObservation[] }) {
   const ctxNav = useOptionalPageNavigation();
 
   // One source of truth for the header: per-run totals, oldest-first. The
@@ -766,7 +770,7 @@ function TestsRun({ effortId, runs }: { effortId: string; runs: EffortObservatio
   const top5 = sorted.slice(0, 5);
   const overflow = sorted.length - top5.length;
 
-  const navToDetail = ctxNav ? () => ctxNav.navigate(effortCoverageRef(effortId)) : undefined;
+  const navToDetail = ctxNav && effortId ? () => ctxNav.navigate(effortCoverageRef(effortId)) : undefined;
   const suiteRowStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
