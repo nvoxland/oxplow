@@ -22,7 +22,7 @@ collection:
   - test:junit
   analysisRunPatterns:
   - clippy --message-format=json
-  agentHint: 'Run tests with `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — not bare `cargo test`/`bun test`/`bun run test`, and not backgrounded. Only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s coverage panel; the `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; and a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
+  agentHint: 'Run EVERY test invocation via `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — including red-phase/failing runs and quick single-test runs, not just the final green one. Never use bare `cargo test`/`bun test`/`bun run test` (or background it): only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s Tests/coverage panel, so any other run won''t show there. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
 metrics:
 # Language-idiom metrics (per-language concepts).
 - use: oxplow.rust.unsafe_blocks

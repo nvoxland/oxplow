@@ -94,7 +94,11 @@ hook + MCP wiring):
   **every** entry in `collection.reports` and ingests the ones fresher than
   the effort start (`merge_fresh_test_reports` / `merge_fresh_coverage` /
   `merge_fresh_analysis` in `collection.rs`): JUnit reports merge into one
-  suite/case tree embedded in the `test-run` payload (`suites`); coverage
+  suite/case tree embedded in the `test-run` payload (`suites`) — the
+  `junit.jq` plugin takes each `<testcase>` from its IMMEDIATE parent
+  `<testsuite>`'s direct children (NOT a recursive descent), so a NESTED
+  testsuite (bun emits file-suite → describe-suite → testcase) doesn't
+  double-count a case under both levels (tsk361); coverage
   reports merge into one `diff-coverage` observation over the effort's changed
   lines; analysis reports merge into one `static-analysis` observation
   (findings + per-severity counts). All `observed`, no agent step.

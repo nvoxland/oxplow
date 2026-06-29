@@ -2499,9 +2499,10 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
         .filter(|s| !s.is_empty())
     {
         format!(
-            "Tests ran (`{cmd}`) but produced no report for this effort, so it shows a \
-             command-only test-run and no coverage. Run the configured collection command \
-             `{tc}` so oxplow can attribute the results. See .context/collection.md."
+            "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
+             effort's Tests panel — only report-emitting runs do. Run EVERY test invocation \
+             (including failing/red-phase and single-test runs, not just the final green one) \
+             via `{tc}` in the foreground so they all show. See .context/collection.md."
         )
     } else if !cfg.reports.is_empty() {
         format!(

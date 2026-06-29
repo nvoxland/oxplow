@@ -17,8 +17,13 @@ When you finish work on a task, **run the project's tests before you
 attribute to the effort. The test command is recorded in the
 `collection:` block of `oxplow.yaml` (`testCommand`).
 
-Run it two specific ways:
+Run it three specific ways:
 
+- **Run EVERY test invocation through it** — including **red-phase / failing**
+  runs and quick **single-test** runs, not just the final green one. Only
+  report-emitting runs (`testCommand`) enter the effort's Tests panel; a bare
+  `bun test <file>` / `cargo test <name>` is a report-less run and won't show
+  there (so your red→green progression and any failures stay invisible).
 - **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <testCommand>`).
   The collection hook reads the token and pins the run to **exactly** your
   task's effort via `find_open_for_task` — correct even when several efforts

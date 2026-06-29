@@ -608,6 +608,16 @@ mod tests {
   <testsuite name="s"><testcase classname="m" name="t1"/></testsuite>
 </testsuites>"#;
 
+    // bun nests file-suite → describe-suite → testcase. The case must be
+    // counted ONCE (under its immediate parent), not under both levels.
+    const JUNIT_NESTED: &str = r#"<testsuites failures="1">
+  <testsuite name="src/format.test.ts" file="src/format.test.ts">
+    <testsuite name="describe block">
+      <testcase classname="describe block" name="fails"><failure message="x"/></testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>"#;
+
     #[test]
     fn builtins_resolve_known_coverage_and_test_formats() {
         let reg = CollectorRegistry::with_builtins();
@@ -652,6 +662,20 @@ mod tests {
         let test = out.as_test().expect("test output");
         assert_eq!(test.suites.len(), 1);
         assert_eq!(test.suites[0].cases.len(), 1);
+    }
+
+    #[test]
+    fn nested_junit_counts_each_case_once() {
+        // tsk361: a nested testcase must not be double-counted under both
+        // its file-suite and its describe-suite.
+        let reg = CollectorRegistry::with_builtins();
+        let out = reg.run("junit", JUNIT_NESTED).expect("parses");
+        let test = out.as_test().expect("test output");
+        let total: usize = test.suites.iter().map(|s| s.cases.len()).sum();
+        assert_eq!(
+            total, 1,
+            "nested testcase counted once, not per suite level"
+        );
     }
 
     #[test]
