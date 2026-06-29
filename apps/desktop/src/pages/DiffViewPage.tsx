@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BranchChangeEntry, EffortAtSnapshot, EffortObservation, Snapshot, Stream } from "../api.js";
 import {
   getEffort,
+  getTask,
   getTaskSummaries,
   listEffortFiles,
   listEffortObservations,
@@ -38,7 +39,9 @@ import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCar
 import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
 import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
 import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelpers.js";
-import { TestsRun } from "../components/EffortObservations.js";
+import { AgentNudgesBlock, TestsRun } from "../components/EffortObservations.js";
+import { EffortMetricsBlock } from "../components/EffortMetrics.js";
+import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
 import { formatFullDateTime, formatTimeOnly, isSameCalendarDay } from "../components/format.js";
@@ -87,6 +90,10 @@ interface ResolvedDiff {
   /** Effort id when the diff was opened *for* an effort (effort mode).
    *  Drives the claimed-files filter; null otherwise. */
   effortId: string | null;
+  /** The opened-for effort's start/end timestamps (effort mode) — for the
+   *  Metrics section's drill-in window. Null otherwise. */
+  effortStartedAt: string | null;
+  effortEndedAt: string | null;
 }
 
 /**
@@ -143,6 +150,8 @@ function DiffBody({
         inProgress: spec.end.kind === "working",
         taskId: null,
         effortId: null,
+        effortStartedAt: null,
+        effortEndedAt: null,
       });
       return;
     }
@@ -159,6 +168,8 @@ function DiffBody({
             ...resolveEffortEndpoints(effort),
             taskId: effort.taskId,
             effortId: effort.effortId,
+            effortStartedAt: effort.startedAt,
+            effortEndedAt: effort.endedAt,
           });
         })
         .catch((err) => {
@@ -187,6 +198,8 @@ function DiffBody({
           ...resolveSnapshotEndpoints(snapshotId, prev),
           taskId: null,
           effortId: null,
+          effortStartedAt: null,
+          effortEndedAt: null,
         });
       })
       .catch((err) => {
@@ -254,7 +267,7 @@ function ResolvedEndpointDiff({
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }) {
-  const { start, end, inProgress, taskId, effortId } = resolved;
+  const { start, end, inProgress, taskId, effortId, effortStartedAt, effortEndedAt } = resolved;
   const effortPassed = effortId != null;
 
   // Snapshot id → its capture time + pinned git commit, for the title's
@@ -341,6 +354,7 @@ function ResolvedEndpointDiff({
               completedHere: o.endSnapshotId === range.rangeEnd,
             },
             taskTitle: titleByTask.get(o.taskId) ?? `task ${o.taskId}`,
+            startedAt: o.startedAt,
             endedAt: o.endedAt,
           })),
         );
@@ -395,6 +409,32 @@ function ResolvedEndpointDiff({
   }, [effortPassed, effortRows, startSnapId, endSnapId]);
   const primaryEffortId = effortPassed ? effortId : linedUpEffort?.effort.effortId ?? null;
   const effortTitle = effortPassed ? taskTitle : linedUpEffort?.taskTitle ?? null;
+  // Start/end window of the effort the diff is for — feeds the Metrics
+  // section (its drill-in scopes the metric detail to this window).
+  const primaryEffortStartedAt = effortPassed ? effortStartedAt : linedUpEffort?.startedAt ?? null;
+  const primaryEffortEndedAt = effortPassed ? effortEndedAt : linedUpEffort?.endedAt ?? null;
+  const primaryTaskId = effortPassed ? taskId : linedUpEffort?.effort.tasksId ?? null;
+
+  // The effort's task description, rendered at the top when the diff is for
+  // an effort, so the reader has its intent in context.
+  const [effortDescription, setEffortDescription] = useState<string | null>(null);
+  useEffect(() => {
+    if (!primaryTaskId) {
+      setEffortDescription(null);
+      return;
+    }
+    let cancelled = false;
+    void getTask(primaryTaskId)
+      .then((t) => {
+        if (!cancelled) setEffortDescription(t?.description ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setEffortDescription(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryTaskId]);
 
   // Concurrent efforts = every overlapping effort other than the one this
   // diff is for. Drops efforts that had already ENDED before this range began —
@@ -565,6 +605,19 @@ function ResolvedEndpointDiff({
         ) : null}
       </div>
 
+      {effortDescription && effortDescription.trim() ? (
+        <div data-testid="diff-view-effort-description" style={{ fontSize: "var(--text-sm)" }}>
+          {/* Override `.oxplow-md`'s `margin: 0 auto` so the description
+              left-aligns with the page's other sections instead of centering. */}
+          <MarkdownView
+            body={effortDescription}
+            onOpenFile={onOpenFile ? (path) => onOpenFile(path) : undefined}
+            renderMermaid
+            style={{ marginLeft: 0, marginRight: 0 }}
+          />
+        </div>
+      ) : null}
+
       {inProgress ? (
         <div
           style={{ ...card, color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}
@@ -692,6 +745,17 @@ function ResolvedEndpointDiff({
         </section>
       ) : null}
 
+      {/* Metrics oxplow collected during the effort this diff is for —
+          code-health/activity deltas (before→after). Self-hides when the
+          effort moved no tracked metric, or for a non-effort range. */}
+      {primaryEffortId && primaryEffortStartedAt ? (
+        <EffortMetricsBlock
+          effortId={primaryEffortId}
+          startedAt={primaryEffortStartedAt}
+          endedAt={primaryEffortEndedAt}
+        />
+      ) : null}
+
       {/* "The rest" of the change analysis — co-change, churn, code smells,
           duplication. Treemap + Look-here-first are hoisted above; the
           Files/Functions panel is the page's own sections. */}
@@ -710,6 +774,10 @@ function ResolvedEndpointDiff({
           onOpenDiffInTab={onOpenDiffInTab}
         />
       ) : null}
+
+      {/* Agent nudges oxplow fired during this effort (moved here from the
+          task effort activity). Self-hides when none fired. */}
+      {primaryEffortId ? <AgentNudgesBlock effortId={primaryEffortId} /> : null}
     </div>
   );
 }
@@ -718,6 +786,9 @@ function ResolvedEndpointDiff({
 interface EffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
+  /** When the effort started (ISO) — feeds the Metrics drill-in window
+   *  when this effort is the one the diff lines up with. */
+  startedAt: string;
   /** When the effort ended (ISO), or null if still open. Used to drop
    *  long-ended efforts from the concurrent list. */
   endedAt: string | null;

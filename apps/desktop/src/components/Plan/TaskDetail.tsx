@@ -11,7 +11,7 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { FileTree } from "../FileTree/FileTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
-import { AgentNudgesBlock, EffortObservationsBlock } from "../EffortObservations.js";
+import { EffortObservationsBlock } from "../EffortObservations.js";
 import { EffortMetricsBlock } from "../EffortMetrics.js";
 
 /**
@@ -651,7 +651,6 @@ function ActivityEffortSection({
           startedAt={detail.effort.started_at}
           endedAt={detail.effort.ended_at}
         />
-        <AgentNudgesBlock effortId={detail.effort.id} />
       </div>
     </section>
   );
