@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Pencil } from "lucide-react";
 import type { EffortDetail, Task, TaskPriority, TaskStatus } from "../../api.js";
@@ -8,11 +8,13 @@ import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
 import { inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
-import { FileTree } from "../FileTree/FileTree.js";
+import { ChangeAnalysisFileTree } from "../ChangeAnalysis/FileTreeView.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
 import { EffortObservationsBlock } from "../EffortObservations.js";
-import { EffortMetricsBlock } from "../EffortMetrics.js";
+import { resolveEffortEndpoints } from "../../diffViewModel.js";
+import { diffEndpoints } from "../../api.js";
+import type { BranchChangeEntry } from "../../api.js";
 
 /**
  * One entry in the tasks Activity timeline. Each effort
@@ -530,6 +532,55 @@ function ActivityEffortSection({
       baseLabel: "effort changes",
     });
   };
+  // Per-file status + churn for the effort's snapshot bracket, so the
+  // Modified Files list can use the same rich tree as the diff view (A/M/D
+  // + churn) instead of bare filenames. Mapped onto `changed_paths` (the
+  // effort's claimed files); falls back to status "modified"/0 churn until
+  // the diff resolves.
+  const [diffByPath, setDiffByPath] = useState<
+    Map<string, { status: string; additions: number; deletions: number }>
+  >(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    const startId = detail.effort.start_snapshot_id;
+    const endId = detail.effort.end_snapshot_id;
+    const { start, end } = resolveEffortEndpoints({
+      startSnapshotId: startId != null ? Number(startId) : null,
+      endSnapshotId: endId != null ? Number(endId) : null,
+    });
+    void diffEndpoints(start, end)
+      .then((entries) => {
+        if (cancelled) return;
+        setDiffByPath(
+          new Map(
+            entries.map((e) => [
+              e.path,
+              { status: e.status, additions: e.additions, deletions: e.deletions },
+            ]),
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setDiffByPath(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.effort.start_snapshot_id, detail.effort.end_snapshot_id]);
+  const effortFiles = useMemo<BranchChangeEntry[]>(
+    () =>
+      detail.changed_paths.map((path) => {
+        const e = diffByPath.get(path);
+        return {
+          path,
+          status: (e?.status ?? "modified") as BranchChangeEntry["status"],
+          additions: e?.additions ?? 0,
+          deletions: e?.deletions ?? 0,
+        };
+      }),
+    [detail.changed_paths, diffByPath],
+  );
+
   const subheader = active
     ? `In progress · started ${formatTimestamp(detail.effort.started_at)}`
     : `${formatTimestamp(detail.effort.started_at)} → ${formatEffortEnd(detail.effort.started_at, detail.effort.ended_at!, formatTimestamp)}`;
@@ -609,48 +660,16 @@ function ActivityEffortSection({
       {detail.changed_paths.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h2 className="task-activity-heading">Modified Files</h2>
-          <FileTree
-            items={detail.changed_paths.map((path) => ({ path, data: path }))}
-            testId={`tasks-effort-files-${detail.effort.id}`}
-            showSearch={false}
-            renderItem={(item) => {
-              const name = item.path.split("/").pop() ?? item.path;
-              const canDiff = !!onOpenDiff;
-              return (
-                <button
-                  type="button"
-                  data-testid={`tasks-effort-file-${item.path}`}
-                  onClick={() => (canDiff ? openDiff(item.path) : void openFile(item.path))}
-                  title={canDiff ? `Open diff: ${item.path}` : `Open ${item.path}`}
-                  style={{
-                    background: "transparent",
-                    border: "none",
-                    padding: "1px 0",
-                    color: "var(--text-primary)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    font: "inherit",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "var(--text-sm)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    maxWidth: "100%",
-                  }}
-                >
-                  {name}
-                </button>
-              );
-            }}
+          <ChangeAnalysisFileTree
+            files={effortFiles}
+            target={`effort:${detail.effort.id}`}
+            onOpenFile={(path) => openFile(path)}
+            onOpenFileDiff={onOpenDiff ? (path) => openDiff(path) : undefined}
+            showFileCount={false}
           />
         </div>
       ) : null}
         <EffortObservationsBlock effortId={detail.effort.id} onOpenFile={onOpenFile} />
-        <EffortMetricsBlock
-          effortId={detail.effort.id}
-          startedAt={detail.effort.started_at}
-          endedAt={detail.effort.ended_at}
-        />
       </div>
     </section>
   );
