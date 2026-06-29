@@ -86,7 +86,7 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
         {visible.map((row) => (
           <li key={row.path} data-testid="change-analysis-look-here-first-row" style={fileItem}>
             <div style={fileHead}>
-              <span style={badgeStyle(row.score)}>{row.score.toFixed(1)}</span>
+              <span style={badgeStyle(row.score)}>{row.score.toFixed(1)}</span>{" "}
               <button
                 type="button"
                 onClick={(e) => {
@@ -101,10 +101,10 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
                 title={row.path}
               >
                 {row.path}
-              </button>
-              <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 11 }}>
-                +{row.additions} −{row.deletions}
-              </span>
+              </button>{" "}
+              {row.additions > 0 ? <span style={addCol}>+{row.additions}</span> : null}
+              {row.additions > 0 && row.deletions > 0 ? " " : null}
+              {row.deletions > 0 ? <span style={delCol}>−{row.deletions}</span> : null}
             </div>
             {row.reasons.length > 0 ? (
               <ul style={reasonList}>
@@ -141,9 +141,6 @@ function badgeStyle(score: number): React.CSSProperties {
     fontSize: 11,
     fontWeight: 600,
     color,
-    minWidth: 32,
-    textAlign: "right",
-    flexShrink: 0,
   };
 }
 
@@ -161,6 +158,7 @@ const boxlessHeader: React.CSSProperties = {
   color: "var(--text-primary)",
 };
 const pathButton: React.CSSProperties = {
+  display: "inline",
   background: "transparent",
   border: "none",
   padding: 0,
@@ -168,11 +166,8 @@ const pathButton: React.CSSProperties = {
   cursor: "pointer",
   fontSize: "var(--text-xs)",
   textAlign: "left",
-  flexShrink: 0,
-  maxWidth: 320,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
+  fontFamily: "var(--font-mono, monospace)",
+  wordBreak: "break-all",
 };
 const fileList: React.CSSProperties = {
   margin: 0,
@@ -185,9 +180,18 @@ const fileItem: React.CSSProperties = {
   fontSize: "var(--text-xs)",
 };
 const fileHead: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  gap: 8,
+  fontSize: "var(--text-xs)",
+  lineHeight: "var(--leading-prose, 1.5)",
+};
+const addCol: React.CSSProperties = {
+  color: "var(--text-success, #16a34a)",
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 11,
+};
+const delCol: React.CSSProperties = {
+  color: "var(--text-danger, #dc2626)",
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 11,
 };
 const reasonList: React.CSSProperties = {
   margin: "3px 0 0",
