@@ -1539,7 +1539,7 @@ impl OxplowMcp {
             over the lines that effort changed. oxplow parses it deterministically (cobertura / \
             lcov / jacoco-xml) — point at the report, NEVER report numbers yourself (keeps the \
             result `observed`/trustworthy). `report_path`/`format` default to the project's \
-            `collection` profile (oxplow.yaml). Returns a status: stored (with summaryPct) or \
+            `collection` profile (.oxplow/project.yaml). Returns a status: stored (with summaryPct) or \
             why nothing landed (no_open_effort / not_configured / report_missing / no_baseline / \
             no_changed_coverage)."
     )]
@@ -1569,7 +1569,7 @@ impl OxplowMcp {
             it deterministically via the collector registry (e.g. `eslint-json`, `clippy-json`) \
             and records a `static-analysis` observation (`observed`) — point at the report, NEVER \
             report counts yourself. `report_path`/`format` default to the first analysis report \
-            in the `collection` profile (oxplow.yaml). Returns a status: stored (per-severity \
+            in the `collection` profile (.oxplow/project.yaml). Returns a status: stored (per-severity \
             counts) or why nothing landed (no_open_effort / not_configured / report_missing / \
             parse_error). Findings are absolute, so no baseline is needed."
     )]
@@ -1832,7 +1832,7 @@ impl OxplowMcp {
 
     #[tool(
         description = "Run a configured `metrics:` gauge NOW (the `manual` trigger) and record its \
-            samples. `key` is a configured metric key (see list_metric_definitions / oxplow.yaml \
+            samples. `key` is a configured metric key (see list_metric_definitions / .oxplow/project.yaml \
             `metrics:`). Computes against the stream's latest snapshot; returns the number of \
             samples recorded. Use after editing a metric script, or to refresh a `manual`-trigger \
             metric."
@@ -3459,7 +3459,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List every configured language server (oxplow.yaml + Mason-installed): \
+        description = "List every configured language server (.oxplow/project.yaml + Mason-installed): \
                        languageId, command, source, binary presence, running streams. Use to \
                        check what LSP coverage exists before lsp_hover/definition/references, \
                        and to verify an lsp_install_server took effect."
@@ -3829,7 +3829,7 @@ fn ingest_outcome_json(outcome: &oxplow_app::collection::CoverageIngest) -> serd
         C::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
         C::NotConfigured => serde_json::json!({
             "status": "not_configured",
-            "hint": "set collection.coverageReportPath + coverageFormat in oxplow.yaml (run /oxplow:configure)",
+            "hint": "set collection.coverageReportPath + coverageFormat in .oxplow/project.yaml (run /oxplow:configure)",
         }),
         C::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
         C::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
@@ -3857,7 +3857,7 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
         A::NoOpenEffort => serde_json::json!({ "status": "no_open_effort" }),
         A::NotConfigured => serde_json::json!({
             "status": "not_configured",
-            "hint": "add an analysis report (e.g. format eslint-json / clippy-json) to collection.reports in oxplow.yaml, or pass report_path + format explicitly",
+            "hint": "add an analysis report (e.g. format eslint-json / clippy-json) to collection.reports in .oxplow/project.yaml, or pass report_path + format explicitly",
         }),
         A::ReportMissing(path) => serde_json::json!({ "status": "report_missing", "path": path }),
         A::StaleReport(path) => serde_json::json!({ "status": "stale_report", "path": path }),
@@ -4393,7 +4393,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
         assert!(msg.contains("lsp_install_server"), "got: {msg}");
-        assert!(msg.contains("oxplow.yaml"), "got: {msg}");
+        assert!(msg.contains("project.yaml"), "got: {msg}");
     }
 
     #[tokio::test]
@@ -5476,14 +5476,14 @@ mod tests {
     #[tokio::test]
     async fn run_metric_computes_a_configured_gauge() {
         let (project, services, server) = boot();
-        // A constant gauge (no snapshot dependency) declared in oxplow.yaml.
+        // A constant gauge (no snapshot dependency) declared in project.yaml.
         std::fs::write(
             project.path().join("count.star"),
             "def transform(input):\n    return {\"samples\": [{\"value\": 42}]}\n",
         )
         .unwrap();
         std::fs::write(
-            project.path().join("oxplow.yaml"),
+            project.path().join(".oxplow").join("project.yaml"),
             "metrics:\n  - key: repo.answer\n    kind: gauge\n    title: \"answer\"\n    compute: { runtime: starlark, entryFile: count.star }\n",
         )
         .unwrap();

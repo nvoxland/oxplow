@@ -23,7 +23,7 @@ export function groupCatalog(
 /**
  * Metric Catalog (epic tsk213, P4): browse the available catalog
  * (built-in ∪ global ∪ project) and enable/disable a metric in this project —
- * the toggle writes a `use:` entry into `oxplow.yaml` (or removes it) and the
+ * the toggle writes a `use:` entry into `.oxplow/project.yaml` (or removes it) and the
  * runner reseeds. The add-and-configure home; no per-metric UI code.
  */
 export function MetricsCatalog({
@@ -74,7 +74,7 @@ export function MetricsCatalog({
     }
   };
 
-  // Write a target override into oxplow.yaml (tsk233). An empty target clears
+  // Write a target override into .oxplow/project.yaml (tsk233). An empty target clears
   // it. `trigger` is inherent to the definition — not overridable (tsk290).
   const override = async (entry: MetricCatalogEntry, next: { target: number | null }) => {
     setBusy(entry.key);
@@ -314,7 +314,7 @@ export function MetricsCatalog({
                   {editable ? (
                     <input
                       // Uncontrolled (so typing isn't clobbered mid-edit), but keyed
-                      // on the resolved target so an external oxplow.yaml edit
+                      // on the resolved target so an external .oxplow/project.yaml edit
                       // arriving via `configChanged` remounts it with the new value
                       // instead of showing a stale one.
                       key={`target-${m.key}-${m.target ?? "none"}`}

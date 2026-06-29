@@ -91,7 +91,7 @@ export function MetricsExplorerPage({
           <div style={{ opacity: 0.6, lineHeight: 1.6 }}>
             No metrics recorded yet. Run tests, coverage, or static analysis —
             oxplow records them into the substrate automatically. Custom metrics
-            can be declared in <code>oxplow.yaml</code>.
+            can be declared in <code>.oxplow/project.yaml</code>.
           </div>
         ) : (
           <MetricsExplorer

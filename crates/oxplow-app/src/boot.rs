@@ -230,7 +230,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Config watcher: hot-reload `oxplow.yaml` on out-of-band edits so
+    // Config watcher: hot-reload `.oxplow/project.yaml` on out-of-band edits so
     // config changes go live without a restart.
     {
         let cfg_services = state.clone();

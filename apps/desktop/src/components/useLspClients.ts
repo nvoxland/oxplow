@@ -224,7 +224,7 @@ export function useLspClients(opts: {
   // On stream switch, drop every client + tracked-doc state and reset the
   // marker owner so the new stream's diagnostics don't collide. Also
   // refresh the server list — a different worktree may carry a different
-  // oxplow.yaml.
+  // .oxplow/project.yaml.
   useEffect(() => {
     markerOwnerRef.current = `oxplow-lsp-${stream.id}`;
     setLspStatus(null);

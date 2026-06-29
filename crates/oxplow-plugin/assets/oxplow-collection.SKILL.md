@@ -15,7 +15,7 @@ automatic; your job is small and is about making sure the data exists,
 When you finish work on a task, **run the project's tests before you
 `complete_task`**, so fresh test + coverage reports exist for oxplow to
 attribute to the effort. The test command is recorded in the
-`collection:` block of `oxplow.yaml` (`testCommand`).
+`collection:` block of `.oxplow/project.yaml` (`testCommand`).
 
 Run it three specific ways:
 
@@ -65,7 +65,7 @@ configured and automatic, or you run `/oxplow:configure` now.
 
 Parsers are **pluggable** — the built-ins (cobertura, lcov, jacoco,
 junit) are jaq plugins, and you can add a new format with **no recompile**
-by writing a `collection.plugins` entry in `oxplow.yaml`: a `jaq`
+by writing a `collection.plugins` entry in `.oxplow/project.yaml`: a `jaq`
 (JSON→JSON, primary), `starlark`, or `exec` transform that maps the
 report into oxplow's coverage/test schema. The host pre-parses the
 container for you (`input: xml | json | lcov | lines | text`) and the

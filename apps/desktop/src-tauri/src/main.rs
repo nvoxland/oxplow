@@ -368,7 +368,7 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
     let layout = AppLayout::for_project(&project_dir);
 
     // Per-project single-instance guard. Two processes on the same
-    // `.oxplow/state.sqlite` would double the fs/git watchers and
+    // `.oxplow/local.sqlite` would double the fs/git watchers and
     // contend on SQLite's writer lock, so refuse the second boot. Held
     // for the life of the process (leaked); the OS frees it on exit.
     match oxplow_app::try_acquire_instance_lock(&layout) {

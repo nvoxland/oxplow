@@ -298,7 +298,7 @@ Zone badges also render inline in `FileTreeView` rows via the muted
 ## Adding a new code/quality signal
 
 Code/quality signals are now authored as **metrics** (bundled or project
-`oxplow.yaml` `metrics:` entries) over the `code_metrics()` / `ast_query()` host
+`.oxplow/project.yaml` `metrics:` entries) over the `code_metrics()` / `ast_query()` host
 builtins — see [metrics.md](./metrics.md). Duplication is the lone exception:
 cross-file token matching has no Starlark equivalent, so it stays an inherent
 in-process scan here.

@@ -370,7 +370,7 @@ export interface OxplowConfig {
    *  ignored automatically. */
   generated: { exclude: string[]; include: string[] };
   injectSessionContext: boolean;
-  /** Per-agent launch model overrides (`agentModels:` in oxplow.yaml).
+  /** Per-agent launch model overrides (`agentModels:` in .oxplow/project.yaml).
    *  Only opencode consumes its entry today. */
   agentModels?: Partial<Record<import("./tauri-bridge/generated/bindings.js").AgentKind, string>>;
 }

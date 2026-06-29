@@ -1,6 +1,6 @@
 ---
 name: oxplow-metrics
-description: Author oxplow metrics on request — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the `metrics:` block in oxplow.yaml, the gauge script surface (files/ast_query/code_metrics), and how to verify.
+description: Author oxplow metrics on request — durable, BI-reportable numbers tracked over time (LOC, unsafe blocks, bundle size, TODO count, complexity, …). Loads when the user asks to "make/add/track a metric", "count X over time", "chart X", "set a target on X", or "measure X in the codebase". Teaches the `metrics:` block in .oxplow/project.yaml, the gauge script surface (files/ast_query/code_metrics), and how to verify.
 ---
 
 # Authoring oxplow metrics
@@ -16,7 +16,7 @@ a small script.
 
 Two artifacts:
 
-1. A **`metrics:` entry** in the project's `oxplow.yaml`.
+1. A **`metrics:` entry** in the project's `.oxplow/project.yaml`.
 2. (For a *new* metric) a small **script** under `oxplow/metrics/<name>.star`.
 
 Then verify with the `run_metric` MCP tool and read it back.
@@ -125,7 +125,7 @@ copy-paste templates.
 
 ## Step 3 — scope
 
-- **Project** (default): `oxplow.yaml` + scripts under `oxplow/metrics/` (checked
+- **Project** (default): `.oxplow/project.yaml` + scripts under `oxplow/metrics/` (checked
   into the repo, shared with the team).
 - **User-global** (cross-project): a `*.yaml` under the user's global config dir
   `metrics/` folder (`{ metrics: [ … ] }`), hot-reloaded. Use when the user wants

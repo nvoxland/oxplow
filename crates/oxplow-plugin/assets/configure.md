@@ -1,5 +1,5 @@
 ---
-description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and record them in oxplow.yaml.
+description: Set up oxplow collection — wire EVERY test stack in the project to emit standard-format coverage + test reports and record them in .oxplow/project.yaml.
 ---
 
 Set up oxplow's **collection** so it can track which tests ran (the
@@ -45,7 +45,7 @@ splitting `classname`+`name` on `::` / `.`.
 Make the **smallest** change that makes each report automatic, and
 leave the diffs for the user to review — these are committed files.
 
-## 3. Record every report in oxplow.yaml
+## 3. Record every report in .oxplow/project.yaml
 
 List **all** reports across **all** stacks under `collection.reports`:
 

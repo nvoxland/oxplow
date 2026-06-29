@@ -215,7 +215,7 @@ pub enum OxplowEvent {
         thread_id: ThreadId,
         effort_id: Option<String>,
     },
-    /// `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
+    /// `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.
     ConfigChanged,

@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the oxplow.yaml `metrics:` entry + script and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml `metrics:` entry + script and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -67,4 +67,4 @@ templates.
 2. `get_metric_summary { metric_key: "repo.todo_count" }` — confirm the value.
 3. It now appears on the Metrics page automatically.
 
-Leave the `oxplow.yaml` + script diffs for the user to review (committed files).
+Leave the `.oxplow/project.yaml` + script diffs for the user to review (committed files).

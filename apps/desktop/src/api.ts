@@ -504,7 +504,7 @@ export async function setGenerated(
 }
 
 /// Set (or clear, with null/blank) the launch-model override for one
-/// agent — `agentModels.<agent>` in oxplow.yaml. Only opencode consumes
+/// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
 /// the override today (`opencode -m provider/model`).
 export async function setAgentModel(
   agent: AgentKind,
@@ -1746,12 +1746,12 @@ export async function listMetricCatalog(): Promise<
   ) as unknown as import("./tauri-bridge/index.js").MetricCatalogEntry[];
 }
 
-/** Enable (add a `use:`) or disable (remove) a metric in `oxplow.yaml`. */
+/** Enable (add a `use:`) or disable (remove) a metric in `.oxplow/project.yaml`. */
 export async function setMetricEnabled(key: string, enabled: boolean): Promise<void> {
   unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
-/** Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+/** Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
  *  tsk233). `null` clears that override. `trigger` is inherent to the
  *  definition and not overridable (tsk290). */
 export async function setMetricOverride(
@@ -1762,7 +1762,7 @@ export async function setMetricOverride(
 }
 
 /** Scaffold a new project gauge metric — writes a starter script + a `metrics:`
- *  entry into `oxplow.yaml`; returns the project-relative script path to open
+ *  entry into `.oxplow/project.yaml`; returns the project-relative script path to open
  *  (the Catalog "New metric" action, tsk234). */
 export async function scaffoldMetric(
   key: string,

@@ -61,7 +61,7 @@ section for the column.
   no change to oxplow. See **Pluggable parsers** below for the model + how to
   author one. Paths/classnames are verbatim from the report; the caller maps
   paths to repo-relative and the UI builds the test tree from `classname`+`name`.
-- **Collection profile** (`collection:` block in `oxplow.yaml`, parsed by
+- **Collection profile** (`collection:` block in `.oxplow/project.yaml`, parsed by
   `crates/oxplow-config/src/lib.rs`): `testCommand`, `reports: [{ path,
   format }]`, `testRunPatterns`, `analysisRunPatterns`, and `plugins: [...]`
   (project-defined parsers — see below). `format` is no longer gate-kept against a hardcoded
@@ -78,7 +78,7 @@ section for the column.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
   `crates/oxplow-plugin/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
-  path, and records the profile in `oxplow.yaml`. The standing skill keeps
+  path, and records the profile in `.oxplow/project.yaml`. The standing skill keeps
   coverage flowing after configure (run tests before closing a task; never
   type the numbers) so instrumentation doesn't bit-rot.
 
@@ -110,7 +110,7 @@ hook + MCP wiring):
   **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
   split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
   sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a
-  command that merely MENTIONS a pattern (`grep test:collect oxplow.yaml`) is no
+  command that merely MENTIONS a pattern (`grep test:collect .oxplow/project.yaml`) is no
   longer a phantom run (and fires no report-less nudge); leading `VAR=val` env
   assignments are skipped so the `OXPLOW_TASK=` prefix doesn't mask the real
   exec. **Background caveat:** the PostToolUse hook fires when the Bash call
@@ -387,7 +387,7 @@ null `ruleId` → no rule).
 
 ### Authoring a parser plugin
 
-Register it in `oxplow.yaml` — no recompile. The **script lives in its own
+Register it in `.oxplow/project.yaml` — no recompile. The **script lives in its own
 file** (`entryFile`, project-relative; absolute paths and `..` are rejected),
 not inline in the yaml. Example: a Clover (XML) coverage parser in jaq,
 claiming the `clover` format that a `reports[]` entry then references:

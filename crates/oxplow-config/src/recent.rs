@@ -1,6 +1,6 @@
 //! Global recent-projects store.
 //!
-//! Unlike [`crate::load_project_config`] (per-project `oxplow.yaml`),
+//! Unlike [`crate::load_project_config`] (per-project `.oxplow/project.yaml`),
 //! this is **global** app state: the list of project directories the
 //! launcher offers to reopen. It lives outside any project's
 //! `.oxplow/` dir — the IPC layer resolves the file path via Tauri's

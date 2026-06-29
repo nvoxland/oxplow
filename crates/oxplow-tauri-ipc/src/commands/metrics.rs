@@ -63,7 +63,7 @@ pub async fn list_metric_catalog(
     oxplow_rpc::commands::metrics::list_metric_catalog(&state).await
 }
 
-/// Enable/disable a metric in `oxplow.yaml` (the Catalog toggle).
+/// Enable/disable a metric in `.oxplow/project.yaml` (the Catalog toggle).
 #[tauri::command]
 #[specta::specta]
 pub async fn set_metric_enabled(
@@ -74,7 +74,7 @@ pub async fn set_metric_enabled(
     oxplow_rpc::commands::metrics::set_metric_enabled(&state, key, enabled).await
 }
 
-/// Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+/// Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
 /// tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 #[tauri::command]
 #[specta::specta]

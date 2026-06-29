@@ -534,10 +534,10 @@ export const commands = {
 	 *  Catalog page's browse read.
 	 */
 	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
-	// Enable/disable a metric in `oxplow.yaml` (the Catalog toggle).
+	// Enable/disable a metric in `.oxplow/project.yaml` (the Catalog toggle).
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
 	/**
-	 *  Set a metric's `target` override in `oxplow.yaml` (the Catalog inline edit,
+	 *  Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
 	 *  tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 	 */
 	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
@@ -662,7 +662,7 @@ export const commands = {
 	 */
 	lspNotify: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, paramsJson })),
 	/**
-	 *  All known language servers (oxplow.yaml + Mason-installed), with
+	 *  All known language servers (.oxplow/project.yaml + Mason-installed), with
 	 *  binary presence and live-session metadata for the settings UI.
 	 */
 	listLspServers: () => typedError<LspServerListing[], IpcError>(__TAURI_INVOKE("list_lsp_servers")),
@@ -1886,7 +1886,7 @@ export type MetricCatalogEntry = {
 	// `built-in` | `global` | `project`.
 	scope: string,
 	/**
-	 *  Active in this project's `oxplow.yaml` `metrics:` block. Always `true`
+	 *  Active in this project's `.oxplow/project.yaml` `metrics:` block. Always `true`
 	 *  for non-toggleable (always-on) producer/plugin metrics.
 	 */
 	enabled: boolean,
@@ -2102,7 +2102,7 @@ export type OxplowConfig = {
 	agents: AgentKind[],
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
-	 *  project dir when not set in oxplow.yaml.
+	 *  project dir when not set in .oxplow/project.yaml.
 	 */
 	projectName: string,
 	// Extra language servers registered on top of the built-ins.
@@ -2262,7 +2262,7 @@ export type OxplowEvent =
  */
 { kind: "agentTokenUsageChanged"; threadId: ThreadId; effortId: string | null } | 
 /**
- *  `oxplow.yaml` was reloaded from disk (external edit, e.g. the agent
+ *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
@@ -2344,7 +2344,7 @@ export type PluginConfig = {
 	/**
 	 *  Project-relative path to the script file: the jaq/Starlark program, or
 	 *  the program to spawn for `exec`. Scripts live in their own files, not
-	 *  inline in `oxplow.yaml`. Required for all three runtimes.
+	 *  inline in `.oxplow/project.yaml`. Required for all three runtimes.
 	 */
 	entryFile?: string | null,
 	// Extra arguments for the `exec` runtime.

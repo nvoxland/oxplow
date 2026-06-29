@@ -160,7 +160,7 @@ Add a new helper any time more than one component would write the same
 filter.
 
 Config IPC includes `set_agents(agents: Vec<AgentKind>)`, which writes the
-project's ordered enabled-agent list in `oxplow.yaml`. Thread creation accepts
+project's ordered enabled-agent list in `.oxplow/project.yaml`. Thread creation accepts
 an optional `agent`; the command validates that the requested agent is enabled
 and otherwise uses the first configured agent.
 

@@ -43,7 +43,7 @@ manager owns:
   `didOpen`. Crash detection: pump sees `Closed`, removes the session
   (generation-checked so intentional restarts don't double-report) and
   emits `SessionStatus crashed`; the next request respawns.
-- **Config resolution**: `oxplow.yaml` `lsp.servers[]` first, then the
+- **Config resolution**: `.oxplow/project.yaml` `lsp.servers[]` first, then the
   Mason-installed registry (`InstalledServers`, carries package
   name/version). `NoConfig` errors are self-describing — they embed
   the curated Mason suggestion (`mason_suggestion`, mirrored by

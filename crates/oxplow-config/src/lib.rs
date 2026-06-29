@@ -19,7 +19,22 @@ pub use recent::{RecentProject, RecentProjects};
 pub mod session;
 pub use session::SessionProjects;
 
-pub const OXPLOW_CONFIG_FILE: &str = "oxplow.yaml";
+/// Project-relative state directory holding oxplow's per-project config
+/// and local data (DB, snapshots, wiki, …).
+pub const OXPLOW_STATE_DIR: &str = ".oxplow";
+
+/// Config file name, inside [`OXPLOW_STATE_DIR`]
+/// (`<project>/.oxplow/project.yaml`).
+pub const OXPLOW_CONFIG_FILE: &str = "project.yaml";
+
+/// Absolute path to a project's config file:
+/// `<project_dir>/.oxplow/project.yaml`.
+pub fn config_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
+    project_dir
+        .as_ref()
+        .join(OXPLOW_STATE_DIR)
+        .join(OXPLOW_CONFIG_FILE)
+}
 
 /// Reverse-DNS app identifier. Mirrors `identifier` in
 /// `tauri.conf.json`; used to derive the global app-config dir so code
@@ -86,7 +101,7 @@ pub struct PluginConfig {
     pub input: Option<String>,
     /// Project-relative path to the script file: the jaq/Starlark program, or
     /// the program to spawn for `exec`. Scripts live in their own files, not
-    /// inline in `oxplow.yaml`. Required for all three runtimes.
+    /// inline in `.oxplow/project.yaml`. Required for all three runtimes.
     #[serde(rename = "entryFile", default)]
     pub entry_file: Option<String>,
     /// Extra arguments for the `exec` runtime.
@@ -289,7 +304,7 @@ pub struct OxplowConfig {
     /// The first entry is the default for newly-created threads.
     pub agents: Vec<AgentKind>,
     /// Human-readable project name. Defaults to the basename of the
-    /// project dir when not set in oxplow.yaml.
+    /// project dir when not set in .oxplow/project.yaml.
     #[serde(rename = "projectName")]
     pub project_name: String,
     /// Extra language servers registered on top of the built-ins.
@@ -337,9 +352,9 @@ pub struct OxplowConfig {
 pub enum ConfigError {
     #[error("config IO error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("oxplow.yaml parse error: {0}")]
+    #[error(".oxplow/project.yaml parse error: {0}")]
     Parse(#[from] serde_yaml::Error),
-    #[error("oxplow.yaml validation: {0}")]
+    #[error(".oxplow/project.yaml validation: {0}")]
     Invalid(String),
 }
 
@@ -415,7 +430,7 @@ struct RawCollectionBlock {
     #[serde(default)]
     reports: Option<Vec<RawReport>>,
     // Back-compat: the pre-`reports` singular fields. Folded into
-    // `reports` on load so existing oxplow.yaml files keep working.
+    // `reports` on load so existing .oxplow/project.yaml files keep working.
     #[serde(rename = "coverageReportPath", default)]
     coverage_report_path: Option<String>,
     #[serde(rename = "coverageFormat", default)]
@@ -452,12 +467,12 @@ struct RawLspServer {
     args: Vec<String>,
 }
 
-/// Load `oxplow.yaml` from `project_dir`, falling back to defaults
+/// Load `.oxplow/project.yaml` from `project_dir`, falling back to defaults
 /// when the file is absent. The default `project_name` is the
 /// basename of the resolved project directory.
 pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig, ConfigError> {
     let project_dir = project_dir.as_ref();
-    let config_path = project_dir.join(OXPLOW_CONFIG_FILE);
+    let config_path = config_path(project_dir);
     let fallback_name = basename(project_dir);
 
     if !config_path.exists() {
@@ -482,7 +497,7 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     Ok(config)
 }
 
-/// Re-serialize an `OxplowConfig` back to `oxplow.yaml`.
+/// Re-serialize an `OxplowConfig` back to `.oxplow/project.yaml`.
 ///
 /// **Comment preservation:** none of the maintained Rust YAML
 /// crates (serde_yaml, yaml-rust2, saphyr) round-trip comments,
@@ -491,12 +506,12 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
 ///
 /// - Any top-level keys the user added that aren't in oxplow's
 ///   schema (read here, copied through, written back). This
-///   matters when a third tool shares `oxplow.yaml`.
+///   matters when a third tool shares `.oxplow/project.yaml`.
 /// - The minimal-default behavior — keys whose value matches the
 ///   default are omitted entirely, so a hand-edited file stays
 ///   minimal across writes.
 ///
-/// If you maintain heavy comments in `oxplow.yaml`, prefer
+/// If you maintain heavy comments in `.oxplow/project.yaml`, prefer
 /// editing the file by hand; oxplow only writes through the
 /// settings UI's explicit save actions.
 pub fn write_project_config(
@@ -504,7 +519,10 @@ pub fn write_project_config(
     config: &OxplowConfig,
 ) -> Result<(), ConfigError> {
     let project_dir = project_dir.as_ref();
-    let path = project_dir.join(OXPLOW_CONFIG_FILE);
+    let path = config_path(project_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let fallback_name = basename(project_dir);
 
     // Schema-managed keys we own. Anything outside this set found
@@ -695,7 +713,7 @@ pub fn write_project_config(
     }
 
     // Carry forward any unknown top-level keys the user (or a
-    // sibling tool) added to oxplow.yaml.
+    // sibling tool) added to .oxplow/project.yaml.
     for (k, v) in existing_extras {
         doc.insert(k, v);
     }
@@ -1264,7 +1282,7 @@ fn resolve_one(
 
 /// Load metric definitions from the user-global scope
 /// (`<global_dir>/metrics/*.yaml`). Each file is a `{ metrics: [ … ] }`
-/// document (same shape as the `oxplow.yaml` block). Best-effort: an unreadable
+/// document (same shape as the `.oxplow/project.yaml` block). Best-effort: an unreadable
 /// or malformed file is logged and skipped, never an error. Returns the entries
 /// in filename order for deterministic precedence.
 pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
@@ -1509,6 +1527,15 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Resolve the project config path under `<dir>/.oxplow/`, creating the
+    /// `.oxplow` parent so a subsequent write succeeds. Used by tests that
+    /// author a config file directly (simulating a user-edited file).
+    fn cfg_path(project_dir: &Path) -> std::path::PathBuf {
+        let p = config_path(project_dir);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        p
+    }
+
     #[test]
     fn load_defaults_when_file_absent() {
         let dir = tempdir().unwrap();
@@ -1531,7 +1558,7 @@ mod tests {
     fn loads_enabled_agents_and_project_name() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "agents: [claude, codex]\nprojectName: explicit-name\n",
         )
         .unwrap();
@@ -1543,11 +1570,7 @@ mod tests {
     #[test]
     fn loads_all_three_agent_kinds() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "agents: [claude, codex, opencode]\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "agents: [claude, codex, opencode]\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
             cfg.agents,
@@ -1559,7 +1582,7 @@ mod tests {
     fn loads_legacy_agent_as_single_enabled_agent() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "agent: codex\nprojectName: explicit-name\n",
         )
         .unwrap();
@@ -1572,7 +1595,7 @@ mod tests {
     fn rejects_agents_and_legacy_agent_together() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "agent: claude\nagents: [claude, codex]\n",
         )
         .unwrap();
@@ -1583,7 +1606,7 @@ mod tests {
     #[test]
     fn rejects_invalid_agent_in_agents() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: [emacs]\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "agents: [emacs]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Parse(_)));
     }
@@ -1591,7 +1614,7 @@ mod tests {
     #[test]
     fn rejects_empty_agents() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: []\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "agents: []\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("at least one")));
     }
@@ -1599,11 +1622,7 @@ mod tests {
     #[test]
     fn rejects_duplicate_agents() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "agents: [claude, claude]\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "agents: [claude, claude]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("duplicates")));
     }
@@ -1611,7 +1630,7 @@ mod tests {
     #[test]
     fn rejects_unknown_keys() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "bogusKey: 1\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "bogusKey: 1\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Parse(_)));
     }
@@ -1619,11 +1638,7 @@ mod tests {
     #[test]
     fn rejects_empty_project_name() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "projectName: \"   \"\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "projectName: \"   \"\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("projectName")));
     }
@@ -1632,7 +1647,7 @@ mod tests {
     fn parses_lsp_servers() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             r#"
 lsp:
   servers:
@@ -1654,7 +1669,7 @@ lsp:
     fn rejects_lsp_extensions_without_dot() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             r#"
 lsp:
   servers:
@@ -1672,7 +1687,7 @@ lsp:
     fn generated_accepts_exclude_and_include_entries() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "generated:\n  exclude:\n    - target\n    - apps/desktop/dist\n  include:\n    - dist/keep.json\n",
         )
         .unwrap();
@@ -1687,7 +1702,7 @@ lsp:
     #[test]
     fn generated_defaults_to_empty_when_absent() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), "agents: [claude]\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "agents: [claude]\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert!(cfg.generated.exclude.is_empty());
         assert!(cfg.generated.include.is_empty());
@@ -1697,7 +1712,7 @@ lsp:
     fn rejects_generated_absolute_path() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "generated:\n  exclude: [\"/etc/passwd\"]\n",
         )
         .unwrap();
@@ -1709,7 +1724,7 @@ lsp:
     fn rejects_generated_include_parent_escape() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "generated:\n  include: [\"../sibling\"]\n",
         )
         .unwrap();
@@ -1721,7 +1736,7 @@ lsp:
     fn write_round_trips_generated_exclude_include() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "generated:\n  exclude: [target]\n  include: [dist/keep.json]\n",
         )
         .unwrap();
@@ -1739,7 +1754,7 @@ lsp:
     fn agent_models_round_trip() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "agentModels:\n  opencode: github-copilot/gpt-5-mini\n",
         )
         .unwrap();
@@ -1751,7 +1766,7 @@ lsp:
             Some("github-copilot/gpt-5-mini")
         );
         write_project_config(dir.path(), &cfg).unwrap();
-        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("agentModels:"), "got:\n{raw}");
         assert!(
             raw.contains("opencode: github-copilot/gpt-5-mini"),
@@ -1762,20 +1777,12 @@ lsp:
     #[test]
     fn agent_models_rejects_unknown_agent_and_blank_model() {
         let dir = tempdir().unwrap();
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "agentModels:\n  goose: some/model\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "agentModels:\n  goose: some/model\n").unwrap();
         assert!(matches!(
             load_project_config(dir.path()).unwrap_err(),
             ConfigError::Parse(_)
         ));
-        std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
-            "agentModels:\n  opencode: \"  \"\n",
-        )
-        .unwrap();
+        std::fs::write(cfg_path(dir.path()), "agentModels:\n  opencode: \"  \"\n").unwrap();
         assert!(matches!(
             load_project_config(dir.path()).unwrap_err(),
             ConfigError::Invalid(msg) if msg.contains("agentModels.opencode")
@@ -1786,7 +1793,7 @@ lsp:
     fn rejects_lsp_missing_required_fields() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             r#"
 lsp:
   servers:
@@ -1822,7 +1829,7 @@ lsp:
     fn parses_collection_block() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             r#"
 collection:
   testCommand: cargo cov
@@ -1857,7 +1864,7 @@ collection:
     fn back_compat_singular_fields_fold_into_reports() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  coverageReportPath: cov.info\n  coverageFormat: lcov\n  testReportPath: j.xml\n  testReportFormat: junit\n",
         )
         .unwrap();
@@ -1873,7 +1880,7 @@ collection:
         // resolves against the collector registry at collection time.
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  reports:\n    - { path: x.tap, format: tap }\n",
         )
         .unwrap();
@@ -1885,7 +1892,7 @@ collection:
     fn rejects_empty_report_format() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  reports:\n    - { path: x.tap, format: \"\" }\n",
         )
         .unwrap();
@@ -1897,7 +1904,7 @@ collection:
     fn parses_project_plugin_definition() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  reports:\n    - { path: c.xml, format: clover }\n  plugins:\n    - name: acme.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: oxplow/plugins/clover.jq\n",
         )
         .unwrap();
@@ -1915,7 +1922,7 @@ collection:
     fn rejects_plugin_entry_file_escaping_project() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: jaq\n      entryFile: ../../etc/passwd\n",
         )
         .unwrap();
@@ -1927,7 +1934,7 @@ collection:
     fn rejects_plugin_in_reserved_oxplow_namespace() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  plugins:\n    - name: oxplow.clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
         )
         .unwrap();
@@ -1939,7 +1946,7 @@ collection:
     fn rejects_plugin_without_namespace_prefix() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  plugins:\n    - name: clover\n      kind: coverage\n      formats: [clover]\n      runtime: jaq\n      entryFile: p.jq\n",
         )
         .unwrap();
@@ -1951,7 +1958,7 @@ collection:
     fn rejects_plugin_with_unknown_runtime() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  plugins:\n    - name: acme.x\n      kind: coverage\n      formats: [x]\n      runtime: wasm\n      entryFile: p.jq\n",
         )
         .unwrap();
@@ -1963,7 +1970,7 @@ collection:
     fn rejects_plugin_missing_entry_file() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "collection:\n  plugins:\n    - name: acme.x\n      kind: test\n      formats: [x]\n      runtime: starlark\n",
         )
         .unwrap();
@@ -2003,7 +2010,7 @@ collection:
             ..default_config("test".into())
         };
         write_project_config(dir.path(), &cfg).unwrap();
-        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("collection:"), "got:\n{raw}");
         let loaded = load_project_config(dir.path()).unwrap();
         assert_eq!(loaded.collection, cfg.collection);
@@ -2012,13 +2019,13 @@ collection:
     /// Third-party keys that aren't part of oxplow's schema should
     /// survive a write. Comments still get stripped (no Rust YAML
     /// crate round-trips them), but the keys themselves persist —
-    /// otherwise a sibling tool sharing oxplow.yaml would lose its
+    /// otherwise a sibling tool sharing .oxplow/project.yaml would lose its
     /// state every time the user touched oxplow's settings UI.
     #[test]
     fn write_preserves_unknown_top_level_keys() {
         let dir = tempdir().unwrap();
         std::fs::write(
-            dir.path().join(OXPLOW_CONFIG_FILE),
+            cfg_path(dir.path()),
             "agents: [claude]\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
         )
         .unwrap();
@@ -2029,7 +2036,7 @@ collection:
         };
         write_project_config(dir.path(), &cfg).unwrap();
 
-        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(
             raw.contains("thirdPartyTool"),
             "third-party key should survive write, got:\n{raw}"
@@ -2042,7 +2049,7 @@ collection:
 
     fn load_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join(OXPLOW_CONFIG_FILE), yaml).unwrap();
+        std::fs::write(cfg_path(dir.path()), yaml).unwrap();
         load_project_config(dir.path())
     }
 
@@ -2216,7 +2223,7 @@ metrics:
             ..default_config("test".into())
         };
         write_project_config(dir.path(), &cfg).unwrap();
-        let raw = std::fs::read_to_string(dir.path().join(OXPLOW_CONFIG_FILE)).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.contains("metrics:"), "got:\n{raw}");
         // No null fields written for unset options.
         assert!(!raw.contains("null"), "minimal write, got:\n{raw}");

@@ -32,7 +32,7 @@ describe("describeServerRow", () => {
     const row = describeServerRow(
       listing({ source: "yaml", packageName: null, version: null }),
     );
-    expect(row.badges).toEqual(["oxplow.yaml"]);
+    expect(row.badges).toEqual(["project.yaml"]);
     expect(row.canRemove).toBe(false);
   });
 

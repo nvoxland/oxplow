@@ -18,7 +18,7 @@
 //!   - surfaces lifecycle transitions as
 //!     [`LspSessionEvent::SessionStatus`].
 //!
-//! Session lookup uses `oxplow.yaml`'s `lsp.servers` first, then the
+//! Session lookup uses `.oxplow/project.yaml`'s `lsp.servers` first, then the
 //! Mason-installed registry; if neither matches, the error message is
 //! self-describing (suggests the Mason package to install).
 
@@ -62,12 +62,12 @@ fn no_config_message(language: &str) -> String {
         Some(pkg) => format!(
             "no language server configured for `{language}` — install one via \
              lsp_install_server (suggested Mason package: \"{pkg}\") or add an \
-             lsp.servers entry to oxplow.yaml"
+             lsp.servers entry to .oxplow/project.yaml"
         ),
         None => format!(
             "no language server configured for `{language}` — install one via \
              lsp_install_server (see mason-registry for package names) or add \
-             an lsp.servers entry to oxplow.yaml"
+             an lsp.servers entry to .oxplow/project.yaml"
         ),
     }
 }
@@ -155,7 +155,7 @@ pub struct LspServerListing {
 }
 
 /// Runtime registry of language servers installed via the Mason
-/// installer. These layer on top of `oxplow.yaml`'s `lspServers` —
+/// installer. These layer on top of `.oxplow/project.yaml`'s `lspServers` —
 /// installer-installed servers are picked up only when no yaml entry
 /// matches the language.
 #[derive(Clone, Default)]
@@ -967,7 +967,7 @@ while True:
         let msg = err.to_string();
         assert!(msg.contains("rust-analyzer"), "got: {msg}");
         assert!(msg.contains("lsp_install_server"), "got: {msg}");
-        assert!(msg.contains("oxplow.yaml"), "got: {msg}");
+        assert!(msg.contains("project.yaml"), "got: {msg}");
     }
 
     #[test]

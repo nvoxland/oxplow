@@ -78,7 +78,7 @@ pub async fn list_metric_catalog(svc: &Services) -> Result<Vec<MetricCatalogEntr
     Ok(svc.metrics.catalog().await)
 }
 
-/// Enable (add a `use:`) or disable (remove) a metric in `oxplow.yaml`, then
+/// Enable (add a `use:`) or disable (remove) a metric in `.oxplow/project.yaml`, then
 /// reseed. The Catalog toggle.
 pub async fn set_metric_enabled(
     svc: &Services,
@@ -91,7 +91,7 @@ pub async fn set_metric_enabled(
         .map_err(IpcError::internal)
 }
 
-/// Set a metric's `target` override in `oxplow.yaml` (enabling it if needed;
+/// Set a metric's `target` override in `.oxplow/project.yaml` (enabling it if needed;
 /// `None` clears that override), then reseed. The Catalog inline edit (tsk233).
 /// `trigger` is inherent to the definition and is not overridable (tsk290).
 pub async fn set_metric_override(
@@ -106,7 +106,7 @@ pub async fn set_metric_override(
 }
 
 /// Scaffold a new project gauge metric: write a starter script + a `metrics:`
-/// `key:` entry into `oxplow.yaml`, then reseed. Returns the project-relative
+/// `key:` entry into `.oxplow/project.yaml`, then reseed. Returns the project-relative
 /// script path so the UI can open it (the Catalog "New metric" action, tsk234).
 pub async fn scaffold_metric(
     svc: &Services,

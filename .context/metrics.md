@@ -306,7 +306,7 @@ The **configure** page (tsk282):
   on" badge and read-only fields (they're free side-bands, not opt-in compute —
   the old "built-in vs hardcoded" split was an artifact; both are `scope:
   built-in` in the DB). Enable/disable via `set_metric_enabled` (→ writes a
-  `use:` into `oxplow.yaml`); **inline-edit the target** (tsk233) via
+  `use:` into `.oxplow/project.yaml`); **inline-edit the target** (tsk233) via
   `set_metric_override` → `MetricsService::set_metric_override` writes the
   target override onto the `use:` entry. **Trigger is inherent to the
   definition** — *when* a metric is collected is a property of what it measures,
@@ -316,7 +316,7 @@ The **configure** page (tsk282):
   **"New metric"** (tsk234/tsk235) scaffolds a gauge at **project** or **global**
   scope: `scaffold_metric` → `MetricsService::scaffold_metric` writes a starter
   Starlark stub + a `key:` `metrics:` entry. *Project* writes under
-  `oxplow/metrics/<slug>.star` + `oxplow.yaml`, returns the project-relative path,
+  `oxplow/metrics/<slug>.star` + `.oxplow/project.yaml`, returns the project-relative path,
   and the page opens it (`onOpenPage(fileRef(path))`). *Global* writes the script
   + a `metrics:` manifest under `<global_config_dir>/metrics/` (shared across the
   user's projects, via `oxplow_config::write_global_metrics_file`) **and** adds a
@@ -410,13 +410,13 @@ metrics:
       (`empty_catch`, `blocking_async_calls`).
 
     This repo dogfoods the language-idiom Rust/TS sets + all four unified code
-    metrics in its own `oxplow.yaml`. The
+    metrics in its own `.oxplow/project.yaml`. The
     complexity/`code_metrics()`-backed gauges and the C# grammar
     (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
     tsk229/tsk230.
   - **user-global** — `global_config_dir()/metrics/*.yaml`, shared across
     projects, hot-reloaded by the config watcher.
-  - **project** — `oxplow.yaml` + scripts under `oxplow/metrics/`.
+  - **project** — `.oxplow/project.yaml` + scripts under `oxplow/metrics/`.
 
   `use:` references a catalog key and layers overrides; `key:` defines a new one.
   `oxplow.*` is reserved for built-ins (a project may `use:` one but not

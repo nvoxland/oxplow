@@ -162,7 +162,7 @@ fn subcommand_is_read_only(sub: &str) -> bool {
 /// pattern? The command is split into sub-commands on shell operators
 /// (`&&` / `||` / `;` / `|` / newline); a sub-command whose leading executable
 /// only reads (grep/echo/cat/…) is ignored. So a command that merely *mentions*
-/// a pattern (e.g. `grep test:collect oxplow.yaml`) no longer counts as a run,
+/// a pattern (e.g. `grep test:collect .oxplow/project.yaml`) no longer counts as a run,
 /// while a real `cd app && OXPLOW_TASK=tsk1 bun run test:collect` still does.
 fn matches_any(command: &str, builtins: &[&str], extras: &[String]) -> bool {
     let pats: Vec<String> = builtins
@@ -2508,7 +2508,7 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
         format!(
             "Tests ran (`{cmd}`) but refreshed none of the configured collection reports, so \
              this effort has no parsed tests/coverage. Re-run via the command that regenerates \
-             them and set `collection.testCommand` in oxplow.yaml to make it one step."
+             them and set `collection.testCommand` in .oxplow/project.yaml to make it one step."
         )
     } else {
         format!(
@@ -3022,7 +3022,10 @@ mod tests {
     fn detect_test_run_ignores_read_only_commands_that_only_mention_a_pattern() {
         let extra = ["test:collect".to_string()];
         // grep/echo/cat that merely MENTION a pattern are not runs.
-        assert!(!detect_test_run("grep -n test:collect oxplow.yaml", &extra));
+        assert!(!detect_test_run(
+            "grep -n test:collect .oxplow/project.yaml",
+            &extra
+        ));
         assert!(!detect_test_run("echo run cargo test later", &[]));
         assert!(!detect_test_run("cat notes | grep nextest", &[]));
         // The real command still detects — compound, env-prefixed, and piped.

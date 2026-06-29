@@ -145,7 +145,7 @@ oxplow agent:
 
 `build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
 constructs a shell command for the thread's assigned `AgentKind`.
-`oxplow.yaml` lists enabled agents as `agents: [...]`; the first entry
+`.oxplow/project.yaml` lists enabled agents as `agents: [...]`; the first entry
 is the default for newly-created threads, and each thread persists its
 own `agent` at creation time so Claude and Codex threads can run
 concurrently.
@@ -215,7 +215,7 @@ details.
   description + body template) as `/oxplow-work-next` etc. — opencode
   has no plugin namespacing, hence the `oxplow-` prefix instead of
   Claude's `/oxplow:` form. The launch model comes from
-  `agentModels.opencode` in oxplow.yaml (falling back to the
+  `agentModels.opencode` in .oxplow/project.yaml (falling back to the
   `OPENCODE_MODEL` const). Known gaps vs the Claude bridge: no
   SessionStart/SessionEnd/Notification events.
 
@@ -889,7 +889,7 @@ names the suggested Mason package and both fix paths. The agent can fix
 it itself: `lsp_install_server({ package_name })` installs from the
 Mason registry (picked up immediately by editor + tools), and
 `lsp_list_servers` shows what's configured/installed/running. Adding an
-`lsp.servers` entry to `oxplow.yaml` is the manual alternative for
+`lsp.servers` entry to `.oxplow/project.yaml` is the manual alternative for
 servers not in Mason.
 
 **Unified backlinks graph (`list_backlinks` / `list_outbound`).** Every
@@ -986,7 +986,7 @@ The `/oxplow:configure` command (asset `crates/oxplow-plugin/assets/configure.md
 sets up the **collection** subsystem (see `.context/collection.md`): it has
 the agent instrument the project's test tooling to emit a standard-format
 coverage report at a stable path, then records the `collection:` profile in
-`oxplow.yaml`. The standing `oxplow-collection` skill
+`.oxplow/project.yaml`. The standing `oxplow-collection` skill
 (`crates/oxplow-plugin/assets/oxplow-collection.SKILL.md`) loads when a task
 closes and on `/oxplow:configure`; it tells the agent to run the tests
 before completing (so a report exists) and — critically — to **never parse
@@ -1009,7 +1009,7 @@ without inferring it from task state or the UI.
 Report parsing is **pluggable**: those tools resolve a report's `format`
 against a `CollectorRegistry` (`crates/oxplow-collect-plugin`) — the four
 first-party parsers ship as bundled jaq plugins and a project can add its own
-via `collection.plugins` in `oxplow.yaml`, no recompile. No new MCP tool was
+via `collection.plugins` in `.oxplow/project.yaml`, no recompile. No new MCP tool was
 added; the existing tools are now registry-backed.
 When the PostToolUse hook detects a test run but no configured report was
 refreshed, it returns a one-shot nudge via `hookSpecificOutput.additionalContext`
@@ -1140,7 +1140,7 @@ in-progress changes.
   allowed even on non-writer threads — the per-project wiki is not
   committed to git and doesn't collide with the writer's in-progress
   code, so capture is safe from any thread. Other `.oxplow/` paths
-  (`state.sqlite`, `snapshots/`, `runtime/`) stay blocked.
+  (`local.sqlite`, `snapshots/`, `runtime/`) stay blocked.
 - **Prompt enforcement.** `NON_WRITER_PROMPT_BLOCK` (same file) is
   appended to the system prompt for non-writer threads, telling the agent
   to avoid Bash mutations too (the hook can't reliably classify shell
@@ -1222,7 +1222,7 @@ turn after the block's contents change (thread flip, writer promotion,
 title edit), emits normally. `SessionStart` clears the baseline so
 startup, resume, clear, and compact receive one fresh note. If a project
 wants to disable injection entirely, set `injectSessionContext: false`
-in `oxplow.yaml` — default is `true`.
+in `.oxplow/project.yaml` — default is `true`.
 
 ### ROLE CHANGE banner
 
@@ -1283,7 +1283,7 @@ tools).
 
 ## Custom prompt addendum
 
-`config.agentPromptAppend` (loaded from `oxplow.yaml` via
+`config.agentPromptAppend` (loaded from `.oxplow/project.yaml` via
 `loadProjectConfig` in `crates/oxplow-config/src/lib.rs`) is concatenated into every
 agent's system prompt by `buildBatchAgentPrompt` (in `crates/oxplow-runtime/src/lib.rs`). The
 Settings modal (`apps/desktop/src/components/SettingsModal.tsx`) reads/writes this

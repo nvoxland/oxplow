@@ -285,7 +285,7 @@ mod tests {
         let t = read_only_thread();
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".oxplow/runtime")).unwrap();
-        let target = project.path().join(".oxplow/runtime/state.sqlite");
+        let target = project.path().join(".oxplow/runtime/local.sqlite");
         std::fs::write(&target, "").unwrap();
         let input = json!({"file_path": target.to_str().unwrap()});
         let result = build_write_guard_response(

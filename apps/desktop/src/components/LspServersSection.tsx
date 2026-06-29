@@ -1,5 +1,5 @@
 /// "Language servers" section body for SettingsPage: every known
-/// server (oxplow.yaml + Mason-installed) with source/binary/running
+/// server (.oxplow/project.yaml + Mason-installed) with source/binary/running
 /// state, restart + remove actions, and an install strip (free-text
 /// Mason package name + curated suggestion chips).
 ///
@@ -37,7 +37,7 @@ export interface ServerRowModel {
 export function describeServerRow(info: LspServerListing): ServerRowModel {
   const badges: string[] = [];
   if (info.source === "yaml") {
-    badges.push("oxplow.yaml");
+    badges.push("project.yaml");
   } else {
     badges.push(info.version ? `installed ${info.version}` : "installed");
   }
@@ -138,7 +138,7 @@ export function LspServersSection() {
       {servers.length === 0 ? (
         <div style={emptyStyle}>
           No language servers configured. Install one below, or add an <code>lsp.servers</code>{" "}
-          entry to <code>oxplow.yaml</code>.
+          entry to <code>.oxplow/project.yaml</code>.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -171,7 +171,7 @@ export function LspServersSection() {
                     onConfirm={() => void remove(info)}
                   />
                 ) : (
-                  <span style={yamlHintStyle}>edit oxplow.yaml</span>
+                  <span style={yamlHintStyle}>edit .oxplow/project.yaml</span>
                 )}
               </div>
             );

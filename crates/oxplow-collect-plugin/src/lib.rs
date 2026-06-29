@@ -239,7 +239,7 @@ impl CollectorInput {
 }
 
 /// The declarative, serde-friendly definition of a collector — the shape a
-/// project lists in `oxplow.yaml` (parsed in a later step) and the shape
+/// project lists in `.oxplow/project.yaml` (parsed in a later step) and the shape
 /// `crates/oxplow-plugin` ships bundled plugins as. `entry`/`args` are
 /// runtime-specific: a jaq/Starlark script body (or path), or an exec argv.
 /// Builtin-rust collectors are constructed in code and need no descriptor.

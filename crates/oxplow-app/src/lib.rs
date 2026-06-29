@@ -118,7 +118,7 @@ impl AppLayout {
     pub fn for_project(project_dir: impl Into<PathBuf>) -> Self {
         let project_dir = project_dir.into();
         let state_dir = project_dir.join(".oxplow");
-        let state_db_path = state_dir.join("state.sqlite");
+        let state_db_path = state_dir.join("local.sqlite");
         Self {
             project_dir,
             state_dir,
@@ -132,17 +132,21 @@ impl AppLayout {
     }
 }
 
-/// Ensure the `.oxplow/` state directory exists and is self-ignoring.
+/// Ensure the `.oxplow/` state directory exists and carries a `.gitignore`
+/// that keeps the project config tracked but ignores oxplow's local state.
 ///
-/// Creates `state_dir` (recursively) and drops a `.gitignore` holding a
-/// single `*` so the whole directory — including the gitignore itself —
-/// is excluded from the host repo without touching the project's root
-/// `.gitignore`. Idempotent: an existing `.gitignore` is left untouched.
+/// Creates `state_dir` (recursively) and drops a `.gitignore` that ignores
+/// everything in the directory except `project.yaml` (the shareable config)
+/// and the `.gitignore` itself — so a project can commit its oxplow config
+/// while the DB / snapshots / wiki / runtime files stay local. Idempotent:
+/// an existing `.gitignore` is left untouched. Whether the directory as a
+/// whole is tracked is the host repo's call (its root `.gitignore`); oxplow
+/// doesn't manage that.
 pub fn ensure_state_dir(state_dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(state_dir)?;
     let gitignore = state_dir.join(".gitignore");
     if !gitignore.exists() {
-        std::fs::write(gitignore, "*\n")?;
+        std::fs::write(gitignore, "*\n!.gitignore\n!project.yaml\n")?;
     }
     Ok(())
 }
@@ -151,7 +155,7 @@ pub fn ensure_state_dir(state_dir: &std::path::Path) -> std::io::Result<()> {
 /// held [`std::fs::File`] is returned — keep it alive for the whole
 /// process (the OS releases the advisory lock when it drops). `None`
 /// means another live oxplow process already holds it, so this process
-/// must not boot a second `Services` on the same `state.sqlite`
+/// must not boot a second `Services` on the same `local.sqlite`
 /// (double fs/git watchers + a serialized SQLite writer lock).
 pub fn try_acquire_instance_lock(layout: &AppLayout) -> std::io::Result<Option<std::fs::File>> {
     use fs2::FileExt;
@@ -300,7 +304,7 @@ mod instance_lock_tests {
     }
 
     #[test]
-    fn ensure_state_dir_writes_self_ignoring_gitignore() {
+    fn ensure_state_dir_writes_gitignore_tracking_only_the_config() {
         let dir = tempfile::tempdir().unwrap();
         let state_dir = dir.path().join(".oxplow");
 
@@ -308,7 +312,8 @@ mod instance_lock_tests {
 
         assert!(state_dir.is_dir());
         let gitignore = std::fs::read_to_string(state_dir.join(".gitignore")).unwrap();
-        assert_eq!(gitignore, "*\n");
+        // Ignore everything except the shareable config (and the gitignore).
+        assert_eq!(gitignore, "*\n!.gitignore\n!project.yaml\n");
     }
 
     #[test]
@@ -712,13 +717,13 @@ impl Services {
         let layout = AppLayout {
             project_dir: project_dir.clone(),
             state_dir: state_dir.clone(),
-            state_db_path: state_dir.join("state.sqlite"),
+            state_db_path: state_dir.join("local.sqlite"),
         };
         let config = oxplow_config::load_project_config(&project_dir)?;
         Self::build(layout, config, Database::in_memory())
     }
 
-    /// Reload `oxplow.yaml` from disk into the in-memory config, re-apply
+    /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply
     /// derived state (the snapshot workspace filter, mirroring
     /// `set_generated`), and emit `ConfigChanged`. Called by the config
     /// fs-watcher when the file changes out-of-band — e.g. the agent
@@ -848,7 +853,7 @@ mod tests {
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
         std::fs::write(
-            project.path().join(oxplow_config::OXPLOW_CONFIG_FILE),
+            oxplow_config::config_path(project.path()),
             "collection:\n  reports:\n    - { path: target/coverage/lcov.info, format: lcov }\n",
         )
         .unwrap();

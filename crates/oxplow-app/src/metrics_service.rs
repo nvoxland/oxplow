@@ -68,7 +68,7 @@ pub struct MetricCatalogEntry {
     pub language: Option<String>,
     /// `built-in` | `global` | `project`.
     pub scope: String,
-    /// Active in this project's `oxplow.yaml` `metrics:` block. Always `true`
+    /// Active in this project's `.oxplow/project.yaml` `metrics:` block. Always `true`
     /// for non-toggleable (always-on) producer/plugin metrics.
     pub enabled: bool,
     pub target: Option<f64>,
@@ -289,7 +289,7 @@ impl MetricsService {
     }
 
     /// Enable (add a `use:` entry) or disable (remove all entries for the key)
-    /// a metric in this project's `oxplow.yaml`, then reseed. Persists the
+    /// a metric in this project's `.oxplow/project.yaml`, then reseed. Persists the
     /// config to disk + emits `ConfigChanged` (the Catalog toggle, tsk219).
     pub async fn set_metric_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
         {
@@ -319,7 +319,7 @@ impl MetricsService {
     }
 
     /// Set the `target` / `trigger` override for a metric in this project's
-    /// `oxplow.yaml`, then reseed (the Catalog inline edit, tsk233). Enabling
+    /// `.oxplow/project.yaml`, then reseed (the Catalog inline edit, tsk233). Enabling
     /// it if not already present (an override implies the metric is active);
     /// `None` for a field clears that override (falls back to the definition's
     /// default). Persists + emits `ConfigChanged`.
@@ -358,7 +358,7 @@ impl MetricsService {
     /// stub. The metric runs `on-snapshot` and charts as soon as it has samples.
     ///
     /// `scope`: `project` (default) writes the script under `oxplow/metrics/`
-    /// and the entry into `oxplow.yaml`, returning the **project-relative** path
+    /// and the entry into `.oxplow/project.yaml`, returning the **project-relative** path
     /// (so the UI can open it). `global` writes both under
     /// `<global_config_dir>/metrics/` (shared across the user's projects),
     /// returning the **absolute** script path. The runner resolves each scope's
@@ -462,7 +462,9 @@ impl MetricsService {
                     .iter()
                     .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
                 {
-                    return Err(format!("metric `{key}` already exists in oxplow.yaml"));
+                    return Err(format!(
+                        "metric `{key}` already exists in .oxplow/project.yaml"
+                    ));
                 }
                 let abs = self.project_dir.join(&script_rel);
                 if let Some(parent) = abs.parent() {
@@ -1170,7 +1172,7 @@ def transform(input):
     async fn seed_definitions_upserts_configured_metrics() {
         let (svc, dir) = fixture().await;
         std::fs::write(
-            dir.path().join("oxplow.yaml"),
+            oxplow_config::config_path(dir.path()),
             "metrics:\n  - key: repo.loc\n    kind: gauge\n    title: \"lines\"\n    compute: { runtime: starlark, entryFile: m.star }\n",
         )
         .unwrap();
@@ -1193,7 +1195,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         // A user enables a bundled built-in by `use:` — no project script.
         std::fs::write(
-            dir.path().join("oxplow.yaml"),
+            oxplow_config::config_path(dir.path()),
             "metrics:\n  - use: oxplow.rust.unsafe_blocks\n    target: 3\n",
         )
         .unwrap();
@@ -1242,7 +1244,7 @@ def transform(input):
         assert!(entry.toggleable, "code gauges are toggleable");
         assert_eq!(entry.category.as_deref(), Some("custom"));
 
-        // Enable end-to-end: writes a `use:` into oxplow.yaml + seeds the def.
+        // Enable end-to-end: writes a `use:` into .oxplow/project.yaml + seeds the def.
         svc.metrics
             .set_metric_enabled("oxplow.rust.unsafe_blocks", true)
             .await
@@ -1264,10 +1266,10 @@ def transform(input):
             .unwrap()
             .expect("definition seeded on enable");
         assert_eq!(def.scope, "built-in");
-        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("oxplow.rust.unsafe_blocks"),
-            "use: persisted to oxplow.yaml; got:\n{yaml}"
+            "use: persisted to .oxplow/project.yaml; got:\n{yaml}"
         );
 
         // Disable removes it from config.
@@ -1357,7 +1359,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
 
         // Setting a target override on a not-yet-enabled metric enables it and
-        // persists the target into oxplow.yaml.
+        // persists the target into .oxplow/project.yaml.
         svc.metrics
             .set_metric_override("oxplow.rust.unsafe_blocks", Some(0.0))
             .await
@@ -1376,7 +1378,7 @@ def transform(input):
         // never overridable (tsk290).
         assert_eq!(entry.trigger, "on-snapshot");
 
-        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(yaml.contains("target"), "target persisted; got:\n{yaml}");
         assert!(
             !yaml.contains("trigger"),
@@ -1426,7 +1428,7 @@ def transform(input):
         );
 
         // metrics: key entry persisted with the compute block.
-        let yaml = std::fs::read_to_string(dir.path().join("oxplow.yaml")).unwrap();
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("acme.todo_density"),
             "key persisted; got:\n{yaml}"

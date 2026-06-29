@@ -5,7 +5,7 @@
 //! 2. An Oxplow session-context note describing the active stream/thread.
 //! 3. The thread's `custom_prompt` if set.
 //! 4. The stream's `custom_prompt` if set.
-//! 5. The user's `agentPromptAppend` from `oxplow.yaml`.
+//! 5. The user's `agentPromptAppend` from `.oxplow/project.yaml`.
 //!
 //! The combined string is passed through the selected agent's
 //! system-prompt mechanism.

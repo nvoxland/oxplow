@@ -114,7 +114,7 @@ async fn main() {
     let layout = AppLayout::for_project(&project_dir);
 
     // Same per-project single-instance guard as the desktop shell —
-    // two processes on one `.oxplow/state.sqlite` would double the
+    // two processes on one `.oxplow/local.sqlite` would double the
     // watchers and contend on SQLite's writer lock.
     match oxplow_app::try_acquire_instance_lock(&layout) {
         Ok(Some(lock)) => {

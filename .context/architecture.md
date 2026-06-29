@@ -60,7 +60,7 @@ Both kinds can switch branches — either via the StreamRail "Switch branch…" 
 ## Process-per-window & launcher
 
 Oxplow is **one OS process per project window**. Each window boots its
-own `Services` (its own `.oxplow/state.sqlite`, event bus, control
+own `Services` (its own `.oxplow/local.sqlite`, event bus, control
 plane on an ephemeral `127.0.0.1` port, watchers, etc.). There is no
 shared in-process state across windows — windows are as isolated as two
 separate app launches. This was a deliberate choice over an in-process

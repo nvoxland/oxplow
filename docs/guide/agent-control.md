@@ -110,7 +110,7 @@ Most of this is infrastructure — set up once, then invisible.
 You can:
 
 - Enable and order Claude Code and Codex for the project (project
-  Settings or `oxplow.yaml`). The selected agent is fixed when a thread
+  Settings or `.oxplow/project.yaml`). The selected agent is fixed when a thread
   is created.
 - Switch the writer thread per stream (thread kebab → "Promote
   to writer").

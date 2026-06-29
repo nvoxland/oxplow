@@ -7,7 +7,7 @@ read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Storage
 
-All persistence lives in one SQLite file under `.oxplow/state.sqlite`, opened
+All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
 through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 migrations (`crates/oxplow-db/migrations/V1__initial_schema.sql`) gated by `PRAGMA user_version`
@@ -102,7 +102,7 @@ because they're either global or must survive without a booted
   any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
   for the life of a project process, so a second process can't boot on
-  the same `state.sqlite`. Helpers: `AppLayout::instance_lock_path` /
+  the same `local.sqlite`. Helpers: `AppLayout::instance_lock_path` /
   `oxplow_app::{try_acquire_instance_lock, is_project_locked}`. It lives
   inside `.oxplow/` but is not part of the SQLite schema.
 - **`.oxplow/instance.json`** — `{ focus_port, nonce }` published by a
@@ -222,7 +222,7 @@ to the thread at creation time. Values are `claude`, `codex`, or
 `foreign_keys=ON`, V32 swaps the column — ADD/copy/DROP/RENAME —
 instead of rebuilding the table, since `DROP TABLE threads` would
 cascade-delete child rows). Project
-config (`oxplow.yaml` `agents: [...]`) controls which values can be selected
+config (`.oxplow/project.yaml` `agents: [...]`) controls which values can be selected
 for new threads and the first configured agent is the default. Existing
 threads migrated at V30 default to `claude`; the assignment is immutable in
 v1 so resume/session history stays unambiguous.
@@ -612,7 +612,7 @@ never at this risk.
 
 **Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
 deletes snapshots older than the cutoff (default 7 days, configurable
-via `oxplow.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
+via `.oxplow/project.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
 most recent snapshot per stream is always kept. `gcBlobs()` then sweeps
 `.oxplow/snapshots/objects/` and removes any blob whose hash isn't
 referenced by a surviving `file_snapshot` row (only `oxplow`-class rows
@@ -631,7 +631,7 @@ seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
 `.oxplow/worktrees/`, and a hardcoded list of common build/cache dir
 names (`node_modules`, `dist`, `build`, `target`, `.next`, `.turbo`,
 `.cache`, `.venv`, `__pycache__`, …). Users can extend the list via
-`generatedDirs: [...]` in `oxplow.yaml` — names are single path
+`generatedDirs: [...]` in `.oxplow/project.yaml` — names are single path
 segments matched anywhere in the relative path, and apply to both
 the workspace watcher and the snapshot store. No changes to
 existing snapshots on toggle; newly ignored paths simply stop

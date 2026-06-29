@@ -10,7 +10,7 @@ use oxplow_domain::Stream;
 
 /// Model opencode launches with (`-m provider/model`) when the project
 /// config doesn't override it (`agentModels: { opencode: … }` in
-/// oxplow.yaml). Assumes GitHub Copilot auth in opencode's own auth
+/// .oxplow/project.yaml). Assumes GitHub Copilot auth in opencode's own auth
 /// store.
 pub const OPENCODE_MODEL: &str = "github-copilot/gpt-5-mini";
 
@@ -22,7 +22,7 @@ pub struct AgentCommandOptions {
     pub mcp_config: Option<String>,
     pub codex_config_overrides: Vec<String>,
     pub env: Vec<(String, String)>,
-    /// `agentModels.opencode` from oxplow.yaml — overrides
+    /// `agentModels.opencode` from .oxplow/project.yaml — overrides
     /// [`OPENCODE_MODEL`] when set. Claude/codex launch with their
     /// own defaults and ignore this.
     pub opencode_model: Option<String>,

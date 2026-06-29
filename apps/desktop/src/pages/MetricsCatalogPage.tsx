@@ -8,7 +8,7 @@ import { MetricsCatalog } from "./MetricsCatalog.js";
  * (epic tsk213), split off from the *observe* Metrics page (tsk282).
  *
  * Browse the available catalog (built-in ∪ global ∪ project), enable/disable
- * a metric (writes a `use:` into `oxplow.yaml`), inline-edit target/trigger,
+ * a metric (writes a `use:` into `.oxplow/project.yaml`), inline-edit target/trigger,
  * and scaffold new gauges. The Metrics page stays read-only (Explorer +
  * Recorded metrics + detail); this page owns every write.
  */

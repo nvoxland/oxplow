@@ -19,7 +19,7 @@ inside it:
 
 ```
 .oxplow/
-  state.sqlite           # tasks, threads, snapshots, settings
+  local.sqlite           # tasks, threads, snapshots, settings
   wiki/                  # wiki markdown files (`<slug>.md`)
   snapshots/             # per-effort file snapshots (Local History)
   runtime/               # generated agent runtime files

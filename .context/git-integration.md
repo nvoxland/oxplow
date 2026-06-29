@@ -134,7 +134,7 @@ re-baseline freshness — so the watcher is the single sync path for
 `crates/oxplow-app/src/config_watch.rs` — `ConfigWatcher`. A
 non-recursive `FsWatcher` on `projectDir`, spawned once at boot from
 `main.rs` (held via `Box::leak` for the process). On a debounced event
-whose basename is `oxplow.yaml`, it calls
+whose basename is `.oxplow/project.yaml`, it calls
 `Services::reload_config_from_disk`, which re-runs
 `load_project_config`, swaps the in-memory `Arc<RwLock<OxplowConfig>>`,
 re-applies the snapshot `WorkspaceFilter` (mirroring `set_generated`),

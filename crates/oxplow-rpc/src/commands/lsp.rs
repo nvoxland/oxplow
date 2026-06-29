@@ -126,7 +126,7 @@ pub async fn lsp_notify(
     Ok(())
 }
 
-/// All known language servers (oxplow.yaml + Mason-installed), with
+/// All known language servers (.oxplow/project.yaml + Mason-installed), with
 /// binary presence and live-session metadata for the settings UI.
 pub async fn list_lsp_servers(svc: &Services) -> Result<Vec<LspServerListing>, IpcError> {
     Ok(svc.lsp_sessions.list_servers().await)

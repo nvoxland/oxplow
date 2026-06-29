@@ -22,7 +22,7 @@ export interface SettingsPageProps {
 
 /**
  * Settings rendered as a full page rather than a modal. Saves apply
- * immediately to oxplow.yaml (server side), so there's no lost-edit-on-stray-
+ * immediately to .oxplow/project.yaml (server side), so there's no lost-edit-on-stray-
  * click risk; the slideover/modal-bag of tradeoffs doesn't apply here.
  */
 export function SettingsPage({ onClose }: SettingsPageProps) {
@@ -33,7 +33,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
   const [maxFileMiB, setMaxFileMiB] = useState("5");
   const [generatedText, setGeneratedText] = useState("");
   // The textarea edits `generated.exclude`; preserve any `include`
-  // overrides set in oxplow.yaml across a save.
+  // overrides set in .oxplow/project.yaml across a save.
   const [generatedInclude, setGeneratedInclude] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -141,7 +141,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         <Section title="Agent Prompt Additions">
           <Hint>
             Text appended to every agent's system prompt. Applies to agent sessions started after Save —
-            existing sessions keep the prompt they launched with. Stored in <code>oxplow.yaml</code>.
+            existing sessions keep the prompt they launched with. Stored in <code>.oxplow/project.yaml</code>.
           </Hint>
           <textarea
             data-testid="settings-page-prompt-append"
@@ -210,7 +210,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
 
         <Section title="Language Servers">
           <Hint>
-            Servers come from <code>oxplow.yaml</code> (<code>lsp.servers</code>) or one-click
+            Servers come from <code>.oxplow/project.yaml</code> (<code>lsp.servers</code>) or one-click
             installs from the Mason registry (landed in <code>.oxplow/lsp/</code>). Changes apply
             immediately — no Save needed. Agents can also configure these for you.
           </Hint>

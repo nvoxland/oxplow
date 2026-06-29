@@ -639,7 +639,7 @@ mod tests {
             ".oxplow/wiki/local-snapshots.md"
         )));
         assert!(should_ignore_workspace_watch_path(Path::new(
-            ".oxplow/state.sqlite"
+            ".oxplow/local.sqlite"
         )));
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".git/index.lock"
@@ -704,7 +704,7 @@ mod tests {
     fn workspace_filter_oxplow_wiki_passes_through() {
         let f = WorkspaceFilter::default();
         assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
-        assert!(f.ignore(Path::new(".oxplow/state.sqlite"), false));
+        assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
     }
 
     #[test]

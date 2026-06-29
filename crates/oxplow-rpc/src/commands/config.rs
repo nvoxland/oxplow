@@ -60,7 +60,7 @@ pub async fn set_snapshot_max_file_bytes(
 }
 
 /// Set (or clear, with `None`/blank) the launch-model override for one
-/// agent — `agentModels.<agent>` in oxplow.yaml. Only opencode consumes
+/// agent — `agentModels.<agent>` in .oxplow/project.yaml. Only opencode consumes
 /// the override today.
 pub async fn set_agent_model(
     svc: &Services,

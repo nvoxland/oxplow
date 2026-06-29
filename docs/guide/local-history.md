@@ -130,7 +130,7 @@ working-tree shape between commits.
 
 ## Filtering out generated paths
 
-Snapshots respect the `generated` list in `oxplow.yaml`:
+Snapshots respect the `generated` list in `.oxplow/project.yaml`:
 
 - The capture pipeline doesn't watch them in the first place.
 - Read paths (snapshot list IPCs, effort file-reviews, the

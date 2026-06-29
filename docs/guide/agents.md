@@ -16,7 +16,7 @@ Open the project **Settings** page and enable Claude, Codex, or both.
 Use **Up** and **Down** to set their priority. The first enabled agent is
 the default when a new thread is created.
 
-The same setting lives in `oxplow.yaml`:
+The same setting lives in `.oxplow/project.yaml`:
 
 ```yaml
 agents:
@@ -97,5 +97,5 @@ available on `PATH`:
 - `claude` for Claude Code
 - `codex` for Codex
 
-Enabling an agent in `oxplow.yaml` does not install its CLI or configure
+Enabling an agent in `.oxplow/project.yaml` does not install its CLI or configure
 its provider credentials.

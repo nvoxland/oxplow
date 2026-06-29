@@ -2,7 +2,7 @@
 /// replacement for the old hardcoded `isLspCandidateLanguage`. Monaco
 /// provider callbacks and menu gating consult `hasLspServer`
 /// synchronously; the cache refreshes on `lspServersChanged` (Mason
-/// install/remove) and `configChanged` (oxplow.yaml edits).
+/// install/remove) and `configChanged` (.oxplow/project.yaml edits).
 
 import {
   listLspServers,

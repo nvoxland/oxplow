@@ -61,10 +61,10 @@ surface), and each language's behavior reviewable in-tree.
 Users extend oxplow **without recompiling** along two axes that are *not*
 new languages:
 
-- **Metrics** — `oxplow.yaml` `metrics:` + a Starlark/jaq script over the
+- **Metrics** — `.oxplow/project.yaml` `metrics:` + a Starlark/jaq script over the
   `files()`/`ast_query()`/`code_metrics()`/`source_files()`/`markers()`
   host builtins (see `.context/metrics.md`).
-- **LSP servers** — `oxplow.yaml` `lsp.servers[]` (any `languageId`), or
+- **LSP servers** — `.oxplow/project.yaml` `lsp.servers[]` (any `languageId`), or
   `lsp_install_server` (see `.context/lsp.md`).
 
 Adding a brand-new language **with static analysis** (complexity, containers,

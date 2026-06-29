@@ -55,7 +55,7 @@ pub async fn lsp_notify(
     oxplow_rpc::commands::lsp::lsp_notify(&state, stream_id, language_id, method, params_json).await
 }
 
-/// All known language servers (oxplow.yaml + Mason-installed), with
+/// All known language servers (.oxplow/project.yaml + Mason-installed), with
 /// binary presence and live-session metadata for the settings UI.
 #[tauri::command]
 #[specta::specta]

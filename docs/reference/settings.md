@@ -1,6 +1,6 @@
 # Settings
 
-Oxplow stores per-project state in `.oxplow/state.sqlite` and a
+Oxplow stores per-project state in `.oxplow/local.sqlite` and a
 small amount of per-user state in your OS user-config directory.
 Most settings are toggles in the UI; almost nothing requires
 editing a file.
@@ -12,7 +12,7 @@ editing a file.
 
     ```
     .oxplow/
-      state.sqlite        # tasks, threads, snapshots, settings
+      local.sqlite        # tasks, threads, snapshots, settings
       wiki/               # wiki pages (markdown)
       snapshots/          # per-effort file snapshots (Local History)
       runtime/            # generated agent runtime files
@@ -53,7 +53,7 @@ never edit").
 
 Per-project `agents` controls which agent implementations are offered
 when a thread is created. Configure it from the project Settings page
-or in `oxplow.yaml`:
+or in `.oxplow/project.yaml`:
 
 ```yaml
 agents:
@@ -113,7 +113,7 @@ page if the default doesn't fit (most users never touch this).
 
 ### Generated paths
 
-`oxplow.yaml` carries a `generated` list of paths the project
+`.oxplow/project.yaml` carries a `generated` list of paths the project
 should treat as build output / generated content. Anything on
 the list is invisible to fs-watch, snapshot capture, the
 startup sweep, code-quality scans, and every snapshot list view
@@ -127,7 +127,7 @@ in the UI. Entries can be:
   filters just that file.
 
 ```yaml
-# oxplow.yaml
+# .oxplow/project.yaml
 generated:
   - target
   - node_modules
@@ -141,7 +141,7 @@ dirs that used to be hardcoded (`node_modules`, `target`,
 `.next`, …) are now the user's call — projects without a
 `generated` list will see them captured.
 
-You can edit `oxplow.yaml` directly, or right-click any
+You can edit `.oxplow/project.yaml` directly, or right-click any
 directory in the file tree → **Mark as generated** to append
 its name to the list. Read-side filtering applies on every
 read, so paths added after they were already captured drop
@@ -156,7 +156,7 @@ start, so a polyglot repo lights up per stack. Run
 `/oxplow:configure` to wire this up automatically.
 
 ```yaml
-# oxplow.yaml
+# .oxplow/project.yaml
 collection:
   testCommand: bun run test:collect    # informational; surfaced to the agent
   reports:
