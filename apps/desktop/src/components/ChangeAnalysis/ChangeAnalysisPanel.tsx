@@ -31,6 +31,9 @@ export interface ChangeAnalysisPanelProps {
   /** Whether to render the "Look here first" card. The diff view hoists
    *  it to the top, so it passes `false`. Default `true`. */
   showLookHere?: boolean;
+  /** Render the Duplication card boxless (h2 header, no border) to match
+   *  the diff view's other sections. Default `false`. */
+  duplicationBoxless?: boolean;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
@@ -53,6 +56,7 @@ export function ChangeAnalysisPanel({
   showFilesPanel = true,
   showTreemap = true,
   showLookHere = true,
+  duplicationBoxless = false,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
@@ -95,6 +99,7 @@ export function ChangeAnalysisPanel({
           showFilesPanel={showFilesPanel}
           showTreemap={showTreemap}
           showLookHere={showLookHere}
+          duplicationBoxless={duplicationBoxless}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}
           onOpenDiffInTab={onOpenDiffInTab}

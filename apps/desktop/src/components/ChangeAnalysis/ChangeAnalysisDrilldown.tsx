@@ -40,6 +40,9 @@ export interface ChangeAnalysisDrilldownProps {
   /** When false, the "Look here first" card is omitted (the diff view
    *  hoists it to the top). Default true. */
   showLookHere?: boolean;
+  /** Render the Duplication card boxless (h2 header, no border) to match
+   *  the diff view's other sections. Default false. */
+  duplicationBoxless?: boolean;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../../tabs/PageNavigationContext.js").NavSiblings): void;
@@ -52,6 +55,7 @@ export function ChangeAnalysisDrilldown({
   showFilesPanel = true,
   showTreemap = true,
   showLookHere = true,
+  duplicationBoxless = false,
   onOpenFile,
   onOpenDiff,
   onOpenDiffInTab,
@@ -179,12 +183,6 @@ export function ChangeAnalysisDrilldown({
     else onOpenFile(path);
   };
 
-  // The duplication card needs to know which tree version the scan
-  // ran against so it can stamp every duplicate-block ref with that
-  // version. For working-tree analysis it's `disk`; for a commit it
-  // matches the analyzed commit's tree.
-  const scanVersion: FileVersion = target === "working" ? DISK : refVersion(target);
-
   return (
     <>
       {showTreemap ? (
@@ -226,7 +224,7 @@ export function ChangeAnalysisDrilldown({
         onOpenFile={onOpenFile}
         onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
       />
-      <DuplicationCard duplication={dupAfterStatus} scanVersion={scanVersion} onOpenFile={onOpenFile} />
+      <DuplicationCard duplication={dupAfterStatus} onOpenFile={onOpenFile} boxless={duplicationBoxless} />
     </>
   );
 }

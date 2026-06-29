@@ -703,6 +703,7 @@ function ResolvedEndpointDiff({
           showFilesPanel={false}
           showTreemap={false}
           showLookHere={false}
+          duplicationBoxless
           onOpenPage={onOpenPage}
           onOpenFile={onOpenFile}
           onOpenDiff={onOpenDiff}

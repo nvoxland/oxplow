@@ -32,6 +32,22 @@ export function snapshotVersion(id: string): FileVersion {
   return { kind: "snapshot", id };
 }
 
+/** True when `s` looks like a git commit sha (7–40 hex chars) — used to
+ *  tell a real ref-able Change-Analysis target apart from a synthetic
+ *  diff-view tab-key like `endpoints:…` / `effort:…`. */
+export function isGitSha(s: string): boolean {
+  return /^[0-9a-f]{7,40}$/i.test(s);
+}
+
+/** The tree version a Change-Analysis `target` reads/scans against:
+ *  `"working"` and synthetic diff-view keys → the working tree (disk);
+ *  a commit sha → that ref. Centralized so the duplication scan, its
+ *  freshness lookup, and the ref-stamping all agree. */
+export function targetTreeVersion(target: string): FileVersion {
+  if (target !== "working" && isGitSha(target)) return refVersion(target);
+  return DISK;
+}
+
 /** Compact label for UI rendering: `disk`, `<sha7>`, `snap:<id7>`. */
 export function shortLabelForVersion(version: FileVersion): string {
   switch (version.kind) {

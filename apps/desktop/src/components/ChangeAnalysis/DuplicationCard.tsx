@@ -14,15 +14,21 @@ interface DuplicationCardProps {
      *  list and renders the "Scan now" CTA — never substitutes a
      *  scan from a different version. */
     hasScan: boolean;
+    /** Last scan error, shown inline in this card (not the panel banner). */
+    error: string | null;
+    /** Tree version the scan ran against — stamped onto every
+     *  duplicate-block ref so the side-by-side page reads files at the
+     *  same version, never silently substituting the working tree. */
+    scanVersion: FileVersion;
   };
-  /** Tree version the scan ran against — gets stamped onto every
-   *  duplicate-block ref so the side-by-side page reads files at the
-   *  same version, never silently substituting the working tree. */
-  scanVersion: FileVersion;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
+  /** Drop the bordered card and render the title as a section `<h2>`,
+   *  matching the diff view's other boxless sections. Default false. */
+  boxless?: boolean;
 }
 
-export function DuplicationCard({ duplication, scanVersion, onOpenFile }: DuplicationCardProps) {
+export function DuplicationCard({ duplication, onOpenFile, boxless = false }: DuplicationCardProps) {
+  const scanVersion = duplication.scanVersion;
   const dupes = duplication.findings.filter((f) => f.kind === "duplicate-block");
   const versionLabel =
     scanVersion.kind === "disk"
@@ -33,9 +39,9 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
           : scanVersion.ref
         : `snapshot ${scanVersion.id.slice(0, 7)}`;
   return (
-    <section data-testid="change-analysis-duplication" style={card}>
+    <section data-testid="change-analysis-duplication" style={boxless ? undefined : card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div style={header}>Duplication</div>
+        {boxless ? <h2 style={boxlessHeader}>Duplication</h2> : <div style={header}>Duplication</div>}
         {!duplication.hasScan && !duplication.scanning ? (
           <button
             type="button"
@@ -47,6 +53,11 @@ export function DuplicationCard({ duplication, scanVersion, onOpenFile }: Duplic
           </button>
         ) : null}
       </div>
+      {duplication.error ? (
+        <div data-testid="change-analysis-duplication-error" style={errorLine}>
+          {duplication.error}
+        </div>
+      ) : null}
       {!duplication.hasScan ? (
         <div style={muted}>
           {duplication.scanning
@@ -154,6 +165,17 @@ const card: React.CSSProperties = {
   padding: 12,
 };
 const header: React.CSSProperties = { fontWeight: 600 };
+const boxlessHeader: React.CSSProperties = {
+  margin: 0,
+  fontSize: "var(--text-lg)",
+  fontWeight: 600,
+  color: "var(--text-primary)",
+};
+const errorLine: React.CSSProperties = {
+  color: "var(--severity-critical, #f87171)",
+  fontSize: "var(--text-xs)",
+  marginBottom: 8,
+};
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
 const smallButton: React.CSSProperties = {
   padding: "4px 10px",

@@ -19,7 +19,7 @@ import type {
 } from "../../api-types.js";
 import type { FileSurprise, ImportDelta } from "../../tauri-bridge/index.js";
 import { commands } from "../../tauri-bridge/index.js";
-import { DISK, refVersion, type FileVersion } from "../../file-version.js";
+import { DISK, refVersion, targetTreeVersion, type FileVersion } from "../../file-version.js";
 import {
   attachChurn,
   buildFilePivots,
@@ -106,6 +106,13 @@ export interface ChangeAnalysisState {
      *  list — the data the card had previously been surfacing was
      *  stale findings from a *different* scan. */
     hasScan: boolean;
+    /** Last scan error (e.g. an unresolvable tree version), shown inside
+     *  the Duplication card rather than the panel-level banner. */
+    error: string | null;
+    /** Tree version the scan runs against (DISK for the diff view / a
+     *  commit ref for the commit page) — stamped onto duplicate-block
+     *  refs so the side-by-side view reads the same content. */
+    scanVersion: FileVersion;
   };
   tests: TestSummary;
   /** Per-function churn rows (added/deleted/modified lines). One
@@ -257,17 +264,20 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Duplication-scan error, kept separate from the panel-level `error` so
+  // a failed scan surfaces inside the Duplication card, not as a top-of-
+  // panel banner.
+  const [dupError, setDupError] = useState<string | null>(null);
   const [resolvedRefs, setResolvedRefs] = useState<{ baseRef: string; headRef: string | null } | null>(null);
   const reqIdRef = useRef(0);
 
-  // Derive the tree version + file filter the duplication scan is
-  // expected to run against. Working-tree → DISK; commit sha → that
-  // ref. The filter is "all changed files in this analysis" — both
-  // the lookup and the trigger use the same value so they line up.
-  const treeVersion: FileVersion = useMemo(
-    () => (target === "working" ? DISK : refVersion(target)),
-    [target],
-  );
+  // The tree version the duplication scan runs against + the freshness
+  // lookup keys on. Working-tree / synthetic diff-view targets → DISK;
+  // a commit sha → that ref (`targetTreeVersion`). The diff view's
+  // `target` is a tab-key (`endpoints:…`/`effort:…`), NOT a git ref, so
+  // it scans the working tree — which is also the right thing for an
+  // in-progress effort whose head IS the working tree.
+  const treeVersion: FileVersion = useMemo(() => targetTreeVersion(target), [target]);
 
   const refresh = useCallback(async () => {
     if (!streamId) {
@@ -554,6 +564,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
   const triggerScan = useCallback(async () => {
     if (!streamId) return;
     setScanning(true);
+    setDupError(null);
     try {
       // Scan against the analyzed tree version, restricted to the
       // currently-known changed files. `files` is derived state — by
@@ -569,7 +580,7 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
         "diff",
       );
       if (result.status === "error") {
-        setError(typeof result.error === "string" ? result.error : "Scan failed.");
+        setDupError(typeof result.error === "string" ? result.error : "Scan failed.");
       }
       // The CodeQualityScanned event will fire `refresh()` which
       // re-pulls the new findings.
@@ -679,6 +690,8 @@ export function useChangeAnalysis(input: UseChangeAnalysisInput): ChangeAnalysis
       scanning,
       refresh: triggerScan,
       hasScan: duplication.hasScan,
+      error: dupError,
+      scanVersion: treeVersion,
     },
     tests,
     functionChurn: filteredChurn,
