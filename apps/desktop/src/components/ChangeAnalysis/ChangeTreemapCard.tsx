@@ -104,14 +104,13 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
     <div style={card} ref={ref}>
       <header style={cardHeader}>
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <h3 style={cardTitle}>Churn</h3>
           <div
             style={{ display: "flex", gap: 4, alignItems: "center" }}
-            title="Size each tile by total line churn, additions only, or deletions only."
+            title="Size each tile by all changed lines, additions only, or deletions only."
           >
             <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Area:</span>
             {([
-              ["total", "Total"],
+              ["total", "All changes"],
               ["added", "+ Added"],
               ["deleted", "− Deleted"],
             ] as const).map(([key, label]) => (
@@ -411,12 +410,6 @@ const cardHeader: React.CSSProperties = {
   alignItems: "center",
   flexWrap: "wrap",
   gap: 8,
-};
-const cardTitle: React.CSSProperties = {
-  margin: 0,
-  fontSize: "var(--text-base, 14px)",
-  fontWeight: 600,
-  color: "var(--text-primary)",
 };
 const muted: React.CSSProperties = {
   color: "var(--text-muted)",

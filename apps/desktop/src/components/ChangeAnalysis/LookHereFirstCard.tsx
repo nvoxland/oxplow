@@ -82,43 +82,42 @@ export function LookHereFirstCard({ files, fileScores, onOpenFile, onOpenFileDif
   return (
     <section data-testid="change-analysis-look-here-first" style={sectionStyle}>
       {headerEl}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <ul style={fileList}>
         {visible.map((row) => (
-          <div
-            key={row.path}
-            style={{ display: "flex", alignItems: "center", gap: 10, fontSize: "var(--text-xs)" }}
-            data-testid="change-analysis-look-here-first-row"
-            title={row.reasons.join(" · ")}
-          >
-            <span style={badgeStyle(row.score)}>▲ {row.score.toFixed(1)}</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey) {
-                  onOpenFile?.(row.path, { newTab: true });
-                  return;
-                }
-                if (onOpenFileDiff) onOpenFileDiff(row.path);
-                else onOpenFile?.(row.path);
-              }}
-              style={pathButton}
-              title={row.path}
-            >
-              {row.path}
-            </button>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {row.reasons.slice(0, 4).map((r) => (
-                <span key={r} style={reasonStyle}>
-                  {r}
-                </span>
-              ))}
+          <li key={row.path} data-testid="change-analysis-look-here-first-row" style={fileItem}>
+            <div style={fileHead}>
+              <span style={badgeStyle(row.score)}>{row.score.toFixed(1)}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey) {
+                    onOpenFile?.(row.path, { newTab: true });
+                    return;
+                  }
+                  if (onOpenFileDiff) onOpenFileDiff(row.path);
+                  else onOpenFile?.(row.path);
+                }}
+                style={pathButton}
+                title={row.path}
+              >
+                {row.path}
+              </button>
+              <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 11 }}>
+                +{row.additions} −{row.deletions}
+              </span>
             </div>
-            <span style={{ marginLeft: "auto", color: "var(--text-muted)", fontSize: 11 }}>
-              +{row.additions} −{row.deletions}
-            </span>
-          </div>
+            {row.reasons.length > 0 ? (
+              <ul style={reasonList}>
+                {row.reasons.map((r) => (
+                  <li key={r} style={reasonItem}>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </li>
         ))}
-      </div>
+      </ul>
       {moreCount > 0 && !expanded ? (
         <button type="button" onClick={() => setExpanded(true)} style={showMoreButton}>
           Show {moreCount} more
@@ -140,9 +139,11 @@ function badgeStyle(score: number): React.CSSProperties {
   return {
     fontFamily: "ui-monospace, monospace",
     fontSize: 11,
+    fontWeight: 600,
     color,
-    minWidth: 56,
+    minWidth: 32,
     textAlign: "right",
+    flexShrink: 0,
   };
 }
 
@@ -173,13 +174,33 @@ const pathButton: React.CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
-const reasonStyle: React.CSSProperties = {
+const fileList: React.CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+const fileItem: React.CSSProperties = {
+  fontSize: "var(--text-xs)",
+};
+const fileHead: React.CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 8,
+};
+const reasonList: React.CSSProperties = {
+  margin: "3px 0 0",
+  paddingLeft: 18,
+  listStyleType: "circle",
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  color: "var(--text-secondary)",
+};
+const reasonItem: React.CSSProperties = {
   fontSize: 11,
-  color: "var(--text-muted)",
-  background: "var(--surface-muted, var(--surface-card))",
-  border: "1px solid var(--border-subtle)",
-  borderRadius: 3,
-  padding: "0 6px",
+  lineHeight: "var(--leading-prose, 1.5)",
 };
 const showMoreButton: React.CSSProperties = {
   marginTop: 8,
