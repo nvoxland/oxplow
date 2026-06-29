@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { BranchChangeEntry, EffortAtSnapshot, EffortObservation, Snapshot, Stream } from "../api.js";
 import {
   getEffort,
@@ -212,30 +213,27 @@ function DiffBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream?.id, key]);
 
+  // Loading / error keep the simple full-layout chrome; the resolved view
+  // owns its own Page (it needs the range data for the details rail).
+  if (resolveError || !resolved) {
+    return (
+      <Page testId="page-diff-view" title="Changes" kind="diff-view" backlinks={backlinks} outbound={outbound}>
+        <div style={{ ...muted, padding: "12px 16px" }}>{resolveError ?? "Loading…"}</div>
+      </Page>
+    );
+  }
   return (
-    <Page
-      testId="page-diff-view"
-      title={resolved ? undefined : "Changes"}
-      kind="diff-view"
+    <ResolvedEndpointDiff
+      stream={stream}
+      resolved={resolved}
+      tabKey={key}
       backlinks={backlinks}
       outbound={outbound}
-    >
-      {resolveError ? (
-        <div style={{ ...muted, padding: "12px 16px" }}>{resolveError}</div>
-      ) : !resolved ? (
-        <div style={{ ...muted, padding: "12px 16px" }}>Loading…</div>
-      ) : (
-        <ResolvedEndpointDiff
-          stream={stream}
-          resolved={resolved}
-          tabKey={key}
-          onOpenPage={onOpenPage}
-          onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
-          onOpenDiffInTab={onOpenDiffInTab}
-        />
-      )}
-    </Page>
+      onOpenPage={onOpenPage}
+      onOpenFile={onOpenFile}
+      onOpenDiff={onOpenDiff}
+      onOpenDiffInTab={onOpenDiffInTab}
+    />
   );
 }
 
@@ -254,6 +252,8 @@ function ResolvedEndpointDiff({
   stream,
   resolved,
   tabKey,
+  backlinks,
+  outbound,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
@@ -262,6 +262,8 @@ function ResolvedEndpointDiff({
   stream: Stream | null;
   resolved: ResolvedDiff;
   tabKey: string;
+  backlinks: { count: number; body: ReactNode };
+  outbound?: { count: number; body: ReactNode };
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile?(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
@@ -465,10 +467,16 @@ function ResolvedEndpointDiff({
     return disp;
   }, [JSON.stringify(end), snapshotsById, startDisp]);
 
-  // Chrome / tab title — plain-text mirror of the h1.
+  // Page title. For an effort: "Changes: <effort title>". Otherwise a
+  // comparison label — "Commit comparison" when BOTH sides are git versions
+  // (commits / commit-pinned snapshots), else "Snapshot comparison". The
+  // date/commit range itself lives in the details rail.
+  const bothGit = startDisp.commitSha != null && endDisp.commitSha != null;
   const plainTitle = effortTitle
     ? `Changes: ${effortTitle}`
-    : `Changes: ${endpointPlain(startDisp)} – ${endpointPlain(endDisp)}`;
+    : bothGit
+      ? "Commit comparison"
+      : "Snapshot comparison";
   usePageTitle(plainTitle);
 
   // Files for the Files Changed tree. All changed files by default; only
@@ -586,24 +594,24 @@ function ResolvedEndpointDiff({
 
   const openCommit = (sha: string) => onOpenPage(gitCommitRef(sha));
 
+  // The date/commit range lives in the details rail, not the title.
+  const rail = (
+    <div data-testid="diff-view-range" style={subtitleStyle}>
+      <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
+    </div>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <h1 style={h1Style} data-testid="diff-view-title">
-          {effortTitle ? (
-            `Changes: ${effortTitle}`
-          ) : (
-            <>
-              Changes: <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
-            </>
-          )}
-        </h1>
-        {effortTitle ? (
-          <div style={subtitleStyle} data-testid="diff-view-subtitle">
-            <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
-          </div>
-        ) : null}
-      </div>
+    <Page
+      testId="page-diff-view"
+      kind="diff-view"
+      backlinks={backlinks}
+      outbound={outbound}
+      layout="details"
+      rightRail={rail}
+    >
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <h1 style={h1Style} data-testid="diff-view-title">{plainTitle}</h1>
 
       {effortDescription && effortDescription.trim() ? (
         <div data-testid="diff-view-effort-description" style={{ fontSize: "var(--text-sm)" }}>
@@ -779,6 +787,7 @@ function ResolvedEndpointDiff({
           task effort activity). Self-hides when none fired. */}
       {primaryEffortId ? <AgentNudgesBlock effortId={primaryEffortId} /> : null}
     </div>
+    </Page>
   );
 }
 
