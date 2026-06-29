@@ -611,6 +611,33 @@ mod tests {
     }
 
     #[test]
+    fn shipped_plugin_assets_never_mention_dot_context() {
+        // `.context/` is THIS repo's own docs convention — it must never
+        // leak into the skills / prompts / hooks / commands oxplow writes
+        // into a user's project (those docs don't exist downstream).
+        let tmp = TempDir::new().unwrap();
+        write_plugin(tmp.path(), "http://h/hook", "http://h/mcp", "tok").unwrap();
+        let mut offenders = Vec::new();
+        let mut stack = vec![tmp.path().to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(body) = fs::read_to_string(&path) {
+                    if body.contains(".context") {
+                        offenders.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "emitted plugin files mention .context: {offenders:?}"
+        );
+    }
+
+    #[test]
     fn manifest_name_drives_oxplow_command_prefix() {
         // The plugin `name` is the Claude Code command/skill prefix:
         // commands surface as `/<name>:<command>`. Keep it `oxplow`

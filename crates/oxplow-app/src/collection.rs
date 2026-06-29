@@ -2502,20 +2502,19 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
             "Tests ran (`{cmd}`) but produced no report, so this run won't appear in the \
              effort's Tests panel — only report-emitting runs do. Run EVERY test invocation \
              (including failing/red-phase and single-test runs, not just the final green one) \
-             via `{tc}` in the foreground so they all show. See .context/collection.md."
+             via `{tc}` in the foreground so they all show."
         )
     } else if !cfg.reports.is_empty() {
         format!(
             "Tests ran (`{cmd}`) but refreshed none of the configured collection reports, so \
              this effort has no parsed tests/coverage. Re-run via the command that regenerates \
-             them and set `collection.testCommand` in oxplow.yaml to make it one step. See \
-             .context/collection.md."
+             them and set `collection.testCommand` in oxplow.yaml to make it one step."
         )
     } else {
         format!(
             "Tests ran (`{cmd}`) but this project has no collection profile, so oxplow can't \
              attribute tests/coverage to the effort. Run /oxplow:configure to wire this stack's \
-             report(s). See .context/collection.md."
+             report(s)."
         )
     }
 }
@@ -2931,6 +2930,29 @@ mod tests {
         let msg = report_nudge_message(&cfg, "pytest -q tests/");
         assert!(msg.contains("/oxplow:configure"), "{msg}");
         assert!(msg.contains("pytest -q tests/"), "{msg}");
+    }
+
+    #[test]
+    fn report_nudge_has_no_repo_specific_context_path() {
+        // The nudge ships in oxplow-app and fires in every downstream
+        // project — it must never point at this repo's own `.context/`
+        // docs, which don't exist in a user's project.
+        let with_cmd = oxplow_config::CollectionConfig {
+            test_command: Some("bun run test:collect".into()),
+            ..Default::default()
+        };
+        let with_reports = oxplow_config::CollectionConfig {
+            reports: vec![oxplow_config::ReportConfig {
+                path: "coverage/lcov.info".into(),
+                format: "lcov".into(),
+            }],
+            ..Default::default()
+        };
+        let no_profile = oxplow_config::CollectionConfig::default();
+        for cfg in [&with_cmd, &with_reports, &no_profile] {
+            let msg = report_nudge_message(cfg, "bun test");
+            assert!(!msg.contains(".context/"), "leaked repo path: {msg}");
+        }
     }
 
     #[test]

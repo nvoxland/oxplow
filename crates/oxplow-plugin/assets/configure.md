@@ -98,5 +98,5 @@ inline in the yaml. Prefer `jaq` (jq) — the host pre-parses the
 container (`input`) so the script just reshapes JSON. Use `starlark`
 for logic jq can't express, or `exec` (`entryFile` is the executable;
 raw report on stdin → JSON on stdout) as
-a last resort. The full host-helper API + output schemas are in
-`.context/collection.md`.
+a last resort. The host pre-parses the report (per `input:`); the
+parser's job is to emit oxplow's coverage/test JSON schema.

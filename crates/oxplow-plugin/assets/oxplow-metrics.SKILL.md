@@ -158,4 +158,3 @@ For a CI-imported or agent-asserted number oxplow can't compute itself, use
 - If a sample doesn't appear, the run is best-effort (errors are logged, not
   surfaced) — check the daemon log, or re-run with `run_metric` and read the
   return value.
-- Full design + the producer/runner internals: `.context/metrics.md`.

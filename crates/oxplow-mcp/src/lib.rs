@@ -3794,8 +3794,8 @@ impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces. \
-                 Authoritative tool list lives at .context/agent-model.md."
+                "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces \
+                 for managing oxplow work items and project knowledge."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -4401,6 +4401,20 @@ mod tests {
         let (_proj, _svc, server) = boot();
         let info = server.get_info();
         assert!(info.capabilities.tools.is_some());
+    }
+
+    #[tokio::test]
+    async fn get_info_instructions_have_no_repo_specific_context_path() {
+        // The instructions ship to every downstream agent — they must not
+        // point at this repo's own `.context/` docs, which don't exist
+        // in a user's project.
+        let (_proj, _svc, server) = boot();
+        let info = server.get_info();
+        let instructions = info.instructions.unwrap_or_default();
+        assert!(
+            !instructions.contains(".context/"),
+            "leaked repo path: {instructions}"
+        );
     }
 
     #[tokio::test]

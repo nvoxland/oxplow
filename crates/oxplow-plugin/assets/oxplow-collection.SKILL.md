@@ -68,8 +68,6 @@ junit) are jaq plugins, and you can add a new format with **no recompile**
 by writing a `collection.plugins` entry in `oxplow.yaml`: a `jaq`
 (JSON→JSON, primary), `starlark`, or `exec` transform that maps the
 report into oxplow's coverage/test schema. The host pre-parses the
-container for you (`input: xml | json | lcov | lines | text`). See the
-**Pluggable parsers** + **Authoring a parser plugin** sections in
-`.context/collection.md` for the host-helper API, output schemas, and a
-worked example. Coverage stays `observed` because the in-process tiers
-can't do I/O.
+container for you (`input: xml | json | lcov | lines | text`) and the
+transform emits oxplow's coverage/test JSON schema. Coverage stays
+`observed` because the in-process tiers can't do I/O.

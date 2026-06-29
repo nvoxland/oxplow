@@ -1,6 +1,6 @@
 ---
 name: oxplow-mermaid
-description: Authoring mermaid diagrams (```mermaid fences) inside wiki pages, .context/ docs, or any markdown the agent writes. Loads whenever you're about to emit a ```mermaid block — flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, etc. Mermaid v11's renderer is fragile on unquoted shape labels and surfaces the failure as the unhelpful `TypeError: null is not an object (evaluating 'element.firstChild')` rather than a real parse error, so the failure mode looks like a runtime bug instead of a syntax issue. The rules in this skill prevent the most common author-time mistakes.
+description: Authoring mermaid diagrams (```mermaid fences) inside wiki pages or any markdown the agent writes. Loads whenever you're about to emit a ```mermaid block — flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, etc. Mermaid v11's renderer is fragile on unquoted shape labels and surfaces the failure as the unhelpful `TypeError: null is not an object (evaluating 'element.firstChild')` rather than a real parse error, so the failure mode looks like a runtime bug instead of a syntax issue. The rules in this skill prevent the most common author-time mistakes.
 ---
 
 # Authoring mermaid diagrams

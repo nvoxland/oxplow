@@ -16,7 +16,7 @@
 ///                          re-prompt via client.session.prompt)
 ///
 /// Everything is best-effort: a hook POST failure must never break the
-/// agent, matching the side-band policy in .context/agent-model.md.
+/// agent, matching oxplow's side-band hook policy.
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
 export const OxplowHooks = async ({ client }) => {
