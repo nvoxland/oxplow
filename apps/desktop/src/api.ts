@@ -1883,6 +1883,9 @@ export interface Snapshot {
   createdAt: string;
   fileCount: number;
   gitCommit: string | null;
+  /** Short name of the branch HEAD was on at capture; null for pre-V42
+   *  rows, a detached HEAD, or a non-git directory. */
+  gitBranch: string | null;
 }
 
 /** Per-file snapshot history — every `file_snapshot` row for this
@@ -1937,6 +1940,7 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     created_at: string;
     file_count: number;
     git_commit: string | null;
+    git_branch: string | null;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -1944,6 +1948,7 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     createdAt: r.created_at,
     fileCount: r.file_count,
     gitCommit: r.git_commit,
+    gitBranch: r.git_branch,
   }));
 }
 

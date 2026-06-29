@@ -54,6 +54,16 @@ export function formatTimeOnly(input: string): string {
 }
 
 /**
+ * Date-only label (locale form, no time). Used for the diff range's
+ * date line. Falls back to the raw string if `Date` can't parse it.
+ */
+export function formatDateOnly(input: string): string {
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input;
+  return d.toLocaleDateString();
+}
+
+/**
  * True when two parseable timestamps fall on the same local calendar
  * day. False if either can't be parsed.
  */

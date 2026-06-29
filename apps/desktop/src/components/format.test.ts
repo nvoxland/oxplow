@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { formatTimeOnly, isSameCalendarDay } from "./format.js";
+import { formatDateOnly, formatTimeOnly, isSameCalendarDay } from "./format.js";
+
+describe("formatDateOnly", () => {
+  test("returns a non-empty date label for a valid timestamp", () => {
+    expect(formatDateOnly("2026-06-27T03:00:00").length).toBeGreaterThan(0);
+  });
+  test("falls back to the raw string when unparseable", () => {
+    expect(formatDateOnly("not a date")).toBe("not a date");
+  });
+});
 
 describe("isSameCalendarDay", () => {
   test("true for two times on the same local day", () => {

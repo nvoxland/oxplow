@@ -1260,6 +1260,28 @@ impl SnapshotCaptureService {
             row.snapshot_id = Some(snapshot_id);
         }
 
+        // Stamp the branch HEAD is on right now. Unlike the clean-tree
+        // `git_commit` stamp below, this is recorded whether the tree was
+        // clean or dirty — the branch is what lets callers tell snapshots
+        // captured on different branches of the same worktree apart.
+        if let Some(branch) = tokio::task::spawn_blocking({
+            let p = self.inner.project_dir.clone();
+            move || oxplow_git::detect_current_branch(&p)
+        })
+        .await
+        .ok()
+        .flatten()
+        {
+            if let Err(e) = self
+                .inner
+                .store
+                .set_snapshot_git_branch(snapshot_id, branch)
+                .await
+            {
+                debug!(error = %e, "snapshot: failed to record git branch");
+            }
+        }
+
         let assembled = rows.len() as u64;
         let insert_started = Instant::now();
         let ids = self.inner.store.capture_batch(rows).await?;

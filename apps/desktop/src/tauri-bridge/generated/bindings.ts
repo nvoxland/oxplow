@@ -2467,6 +2467,13 @@ export type Snapshot = {
 	 *  track.
 	 */
 	git_commit: string | null,
+	/**
+	 *  Short name of the git branch HEAD was on when this snapshot was
+	 *  captured (e.g. `main`). `None` for pre-V42 rows, a detached
+	 *  HEAD, or a non-git directory. Lets callers distinguish snapshots
+	 *  taken on different branches within the same stream's worktree.
+	 */
+	git_branch: string | null,
 };
 
 /**

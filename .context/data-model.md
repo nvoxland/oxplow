@@ -483,11 +483,17 @@ Time-ordered snapshots in two tables (the actual schema; an earlier
 draft of this doc described a single `snapshot_entry` table with a
 `version_hash`/`source` manifest — that pre-V13 shape is gone):
 
-- **`snapshot`** (V13/V16) — the grouping row, one per
+- **`snapshot`** (V13/V16/V42) — the grouping row, one per
   `request_snapshot()` call that had dirty files. Columns: `id,
-  stream_id, created_at, git_commit`. `git_commit` is the 40-char sha
-  the worktree was clean against (else NULL); it's re-stamped in place
-  when HEAD moves but the tree didn't change.
+  stream_id, created_at, git_commit, git_branch`. `git_commit` is the
+  40-char sha the worktree was clean against (else NULL); it's
+  re-stamped in place when HEAD moves but the tree didn't change.
+  `git_branch` (V42) is the short branch name HEAD was on at capture
+  (set unconditionally, dirty or clean, via
+  `detect_current_branch`; NULL for pre-V42 rows / detached HEAD /
+  non-git dir) — it lets callers tell snapshots captured on different
+  branches of the *same* stream's worktree apart (the diff page's
+  snapshot picker filters by it).
 - **`file_snapshot`** — the per-path rows: `id, stream_id, path,
   blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms`.
   Each points back at its `snapshot_id`. `storage` (V37) is the

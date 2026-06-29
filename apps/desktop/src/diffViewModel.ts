@@ -2,7 +2,26 @@
 // React-free so the endpoint resolution + header labeling can be
 // unit-tested without mounting the page.
 
+import { formatDateOnly, isSameCalendarDay } from "./components/format.js";
 import type { DiffEndpoint } from "./tauri-bridge/generated/bindings.js";
+
+/** A date (or date range) label for the diff's range, shown above the
+ *  Start/End time pickers in the rail. One date when both endpoints fall
+ *  on the same calendar day; a "start – end" range when they span
+ *  multiple days; the single known date when only one endpoint is
+ *  time-based; null when neither is (commit↔commit / working). */
+export function rangeDateLabel(
+  startIso: string | null,
+  endIso: string | null,
+): string | null {
+  if (startIso && endIso) {
+    return isSameCalendarDay(startIso, endIso)
+      ? formatDateOnly(startIso)
+      : `${formatDateOnly(startIso)} – ${formatDateOnly(endIso)}`;
+  }
+  const only = startIso ?? endIso;
+  return only ? formatDateOnly(only) : null;
+}
 
 export interface EffortLike {
   startSnapshotId: number | null;
@@ -62,6 +81,61 @@ export function resolveSnapshotEndpoints(
     end: { kind: "snapshot", snapshot_id: snapshotId },
     inProgress: false,
   };
+}
+
+/** The branch a diff's snapshot picker should be scoped to: the branch
+ *  the diffed endpoints sit on (the `end` snapshot preferred, then
+ *  `start`), falling back to the stream's current branch. Null when none
+ *  is known — the caller then leaves the list unfiltered. */
+export function pickerBranch(
+  endSnap: { gitBranch: string | null } | undefined,
+  startSnap: { gitBranch: string | null } | undefined,
+  streamBranch: string | null,
+): string | null {
+  return endSnap?.gitBranch ?? startSnap?.gitBranch ?? streamBranch ?? null;
+}
+
+/** Drop snapshots *known* to be on a different branch than `branch`, so
+ *  the diff picker never mixes in another branch of the same stream's
+ *  worktree. A snapshot with an unrecorded branch (null/undefined —
+ *  pre-V42 rows, detached HEAD) is kept: it isn't provably different, and
+ *  excluding it would empty the picker on existing snapshots. A null
+ *  reference `branch` (unknown) disables filtering entirely. */
+export function snapshotsOnBranch<T extends { gitBranch?: string | null }>(
+  snapshots: T[],
+  branch: string | null,
+): T[] {
+  if (branch == null) return snapshots;
+  return snapshots.filter((s) => s.gitBranch == null || s.gitBranch === branch);
+}
+
+/** Options for one end of the diff range's snapshot picker, newest
+ *  first, capped at `limit`. Keeps the range valid: a `"start"` picker
+ *  only offers snapshots strictly *before* `bound` (the end snapshot's
+ *  id), and an `"end"` picker only snapshots strictly *after* `bound`
+ *  (the start's id) — so the user can't pick an inverted range. A null
+ *  `bound` (the opposite endpoint isn't a snapshot — working tree /
+ *  commit) means no constraint. `currentId` (this side's selected
+ *  snapshot) is always kept, even when it falls outside the newest-N
+ *  window or the bound. */
+export function rangeEndpointOptions<T extends { id: number }>(
+  snapshots: T[],
+  side: "start" | "end",
+  bound: number | null,
+  currentId: number | null,
+  limit: number,
+): T[] {
+  const valid = snapshots.filter((s) => {
+    if (s.id === currentId) return true; // never drop the live selection
+    if (bound == null) return true;
+    return side === "start" ? s.id < bound : s.id > bound;
+  });
+  const picked = valid.sort((a, b) => b.id - a.id).slice(0, limit);
+  if (currentId != null && !picked.some((s) => s.id === currentId)) {
+    const cur = snapshots.find((s) => s.id === currentId);
+    if (cur) picked.push(cur);
+  }
+  return picked.sort((a, b) => b.id - a.id);
 }
 
 /** The snapshot id pair to feed `listEffortsOverlappingRange`, or null

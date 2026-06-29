@@ -7,7 +7,6 @@ import { diffRef } from "../../diff-id.js";
 import type { NavSiblingEntry, NavSiblings } from "../../tabs/PageNavigationContext.js";
 import { DuplicationCard } from "./DuplicationCard.js";
 import { LookHereFirstCard } from "./LookHereFirstCard.js";
-import { CodeSmellsCard } from "./CodeSmellsCard.js";
 import { CoChangeSurpriseCard } from "./CoChangeSurpriseCard.js";
 import { ChangeTreemapCard } from "./ChangeTreemapCard.js";
 // ZoneBarCard removed (tsk350): the Change Treemap subsumes it, with a
@@ -219,11 +218,6 @@ export function ChangeAnalysisDrilldown({
           onOpenFileDiff={(path) => openDiffAt(path, 1)}
         />
       ) : null}
-      <CodeSmellsCard
-        functions={functionsAfterStatus}
-        onOpenFile={onOpenFile}
-        onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
-      />
       <DuplicationCard duplication={dupAfterStatus} onOpenFile={onOpenFile} boxless={duplicationBoxless} />
     </>
   );

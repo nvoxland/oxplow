@@ -969,6 +969,11 @@ pub struct Snapshot {
     /// the same commit when local history captures files git doesn't
     /// track.
     pub git_commit: Option<String>,
+    /// Short name of the git branch HEAD was on when this snapshot was
+    /// captured (e.g. `main`). `None` for pre-V42 rows, a detached
+    /// HEAD, or a non-git directory. Lets callers distinguish snapshots
+    /// taken on different branches within the same stream's worktree.
+    pub git_branch: Option<String>,
 }
 
 /// Most-recent stat (hash + size + mtime) for a single path. The
@@ -1140,6 +1145,27 @@ impl SqliteSnapshotStore {
             .await
     }
 
+    /// Record the git branch HEAD was on when this snapshot was
+    /// captured. Called by the capture layer right after
+    /// `create_snapshot` (independent of the clean-tree `git_commit`
+    /// stamp — the branch is meaningful whether the tree was clean or
+    /// dirty). A no-op when `branch` is empty.
+    pub async fn set_snapshot_git_branch(
+        &self,
+        snapshot_id: i64,
+        branch: String,
+    ) -> Result<(), DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE snapshot SET git_branch = ?1 WHERE id = ?2",
+                    params![branch, snapshot_id],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
     /// Most recent `snapshot.id` for the stream. Returns `None` when
     /// no snapshots exist yet for the stream.
     pub async fn latest_snapshot_id_for_stream(
@@ -1173,7 +1199,7 @@ impl SqliteSnapshotStore {
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
                              WHERE f.snapshot_id = s.id) AS file_count,
-                            s.git_commit
+                            s.git_commit, s.git_branch
                      FROM snapshot s
                      WHERE s.stream_id = ?1
                      ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
@@ -1184,6 +1210,7 @@ impl SqliteSnapshotStore {
                     let created_at: String = row.get(2)?;
                     let file_count: i64 = row.get(3)?;
                     let git_commit: Option<String> = row.get(4)?;
+                    let git_branch: Option<String> = row.get(5)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1197,6 +1224,7 @@ impl SqliteSnapshotStore {
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                         file_count,
                         git_commit,
+                        git_branch,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1984,6 +2012,40 @@ mod tests {
         assert_eq!(file_exact, 1);
         assert_eq!(edge_sha.as_deref(), Some("bbbb"));
         assert_eq!(edge_exact, 1);
+    }
+
+    #[tokio::test]
+    async fn set_snapshot_git_branch_is_listed() {
+        // The branch a snapshot was captured on round-trips through
+        // `set_snapshot_git_branch` → `list_snapshots_for_stream`, so the
+        // diff picker can filter to a single branch. Unset snapshots read
+        // back as `None`.
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db);
+        let stream = StreamId::new(1);
+
+        let on_main = store.create_snapshot(stream).await.unwrap();
+        let on_feature = store.create_snapshot(stream).await.unwrap();
+        let unstamped = store.create_snapshot(stream).await.unwrap();
+        store
+            .set_snapshot_git_branch(on_main, "main".into())
+            .await
+            .unwrap();
+        store
+            .set_snapshot_git_branch(on_feature, "feature-x".into())
+            .await
+            .unwrap();
+
+        let rows = store.list_snapshots_for_stream(stream, 50).await.unwrap();
+        let branch_of = |id: i64| {
+            rows.iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.git_branch.clone())
+        };
+        assert_eq!(branch_of(on_main).as_deref(), Some("main"));
+        assert_eq!(branch_of(on_feature).as_deref(), Some("feature-x"));
+        assert_eq!(branch_of(unstamped), None);
     }
 
     #[tokio::test]

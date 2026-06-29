@@ -12,10 +12,14 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import {
+  pickerBranch,
   previousSnapshotId,
+  rangeDateLabel,
+  rangeEndpointOptions,
   resolveEffortEndpoints,
   resolveSnapshotEndpoints,
   snapshotRange,
+  snapshotsOnBranch,
 } from "../diffViewModel.js";
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
 import { logUi } from "../logger.js";
@@ -28,7 +32,6 @@ import {
   effortCoverageRef,
   effortDiffRef,
   endpointDiffRef,
-  gitCommitRef,
   snapshotRef,
   taskRef,
 } from "../tabs/pageRefs.js";
@@ -45,7 +48,8 @@ import { EffortMetricsBlock } from "../components/EffortMetrics.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
-import { formatFullDateTime } from "../components/format.js";
+import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
+import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 
 /**
  * What a diff view renders. Reached three ways, all via `DiffViewPage`:
@@ -462,6 +466,32 @@ function ResolvedEndpointDiff({
     [JSON.stringify(end), snapshotsById],
   );
 
+  // Candidate snapshots for the Start/End pickers: the 20 newest captures in
+  // this stream *on the same branch as the diffed endpoints* (so a branch
+  // switch within the stream's worktree never mixes in other branches'
+  // snapshots), constrained per side so the range stays valid — the Start
+  // list stops before the End, the End list starts after the Start — while
+  // always keeping the current selection visible.
+  const { startOptions, endOptions } = useMemo(() => {
+    const branch = pickerBranch(
+      endSnapId != null ? snapshotsById.get(endSnapId) : undefined,
+      startSnapId != null ? snapshotsById.get(startSnapId) : undefined,
+      stream?.branch ?? null,
+    );
+    const onBranch = snapshotsOnBranch([...snapshotsById.values()], branch);
+    const toOption = (s: Snapshot): EndpointSnapshotOption => ({
+      snapshotId: s.id,
+      createdAt: s.createdAt,
+      gitCommit: s.gitCommit,
+    });
+    return {
+      startOptions: rangeEndpointOptions(onBranch, "start", endSnapId, startSnapId, 20).map(
+        toOption,
+      ),
+      endOptions: rangeEndpointOptions(onBranch, "end", startSnapId, endSnapId, 20).map(toOption),
+    };
+  }, [snapshotsById, startSnapId, endSnapId, stream?.branch]);
+
   // Page title. For an effort: "Changes: <effort title>". Otherwise a
   // comparison label — "Commit comparison" when BOTH sides are git versions
   // (commits / commit-pinned snapshots), else "Snapshot comparison". The
@@ -587,13 +617,47 @@ function ResolvedEndpointDiff({
     else onOpenFile?.(path);
   };
 
-  const openCommit = (sha: string) => onOpenPage(gitCommitRef(sha));
+  // Rescope the diff in place by re-pointing one endpoint at a chosen
+  // snapshot — navigates the tab to the new endpoint pair (Back returns).
+  const pickStart = (snapshotId: number) =>
+    onOpenPage(endpointDiffRef({ kind: "snapshot", snapshot_id: snapshotId }, end));
+  const pickEnd = (snapshotId: number) =>
+    onOpenPage(endpointDiffRef(start, { kind: "snapshot", snapshot_id: snapshotId }));
 
-  // The date/commit range lives in the details rail as two labeled fields.
+  // The date/commit range lives in the details rail: a date (or date range
+  // when the endpoints span days) header above two selectable fields — a
+  // "Start"/"End" caption beside a snapshot dropdown (time-only when closed,
+  // full date+time + commit in the menu) that rescopes the diff when picked.
+  const dateLabel = rangeDateLabel(startDisp.iso, endDisp.iso);
   const rail = (
-    <div data-testid="diff-view-range" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <RailEndpoint label="Start" disp={startDisp} onOpenCommit={openCommit} />
-      <RailEndpoint label="End" disp={endDisp} onOpenCommit={openCommit} />
+    <div data-testid="diff-view-range" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {dateLabel ? (
+        <div data-testid="diff-view-range-date" style={railDateStyle}>
+          {dateLabel}
+        </div>
+      ) : null}
+      <div style={railRowStyle}>
+        <span style={railLabelStyle}>Start</span>
+        <EndpointPicker
+          testId="diff-range-start"
+          ariaLabel="Start of range"
+          triggerText={endpointShort(startDisp)}
+          currentSnapshotId={startSnapId}
+          options={startOptions}
+          onPick={pickStart}
+        />
+      </div>
+      <div style={railRowStyle}>
+        <span style={railLabelStyle}>End</span>
+        <EndpointPicker
+          testId="diff-range-end"
+          ariaLabel="End of range"
+          triggerText={endpointShort(endDisp)}
+          currentSnapshotId={endSnapId}
+          options={endOptions}
+          onPick={pickEnd}
+        />
+      </div>
     </div>
   );
 
@@ -843,52 +907,14 @@ function endpointPlain(d: EndpointDisplay): string {
   return "?";
 }
 
-/** A single labeled endpoint field for the details rail: an uppercase caption
- *  ("Start" / "End") above the date/time + linked commit (when any). */
-function RailEndpoint({
-  label,
-  disp,
-  onOpenCommit,
-}: {
-  label: string;
-  disp: EndpointDisplay;
-  onOpenCommit(sha: string): void;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span
-        style={{
-          fontSize: "var(--text-xs)",
-          color: "var(--text-muted)",
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-        <EndpointSpan d={disp} onOpenCommit={onOpenCommit} />
-      </span>
-    </div>
-  );
-}
-
-function EndpointSpan({
-  d,
-  onOpenCommit,
-}: {
-  d: EndpointDisplay;
-  onOpenCommit(sha: string): void;
-}) {
-  const link = d.commitSha ? (
-    <button type="button" onClick={() => onOpenCommit(d.commitSha!)} style={commitLinkStyle}>
-      {d.commitSha.slice(0, 7)}
-    </button>
-  ) : null;
-  if (d.timeText && link) return <>{d.timeText} ({link})</>;
-  if (d.timeText) return <>{d.timeText}</>;
-  if (link) return link;
-  return <>?</>;
+/** Short (time-only) endpoint label for the rail's dropdown trigger: just the
+ *  capture time when it's a snapshot, else the working/initial label or a
+ *  short commit sha. The full date+time lives inside the dropdown. */
+function endpointShort(d: EndpointDisplay): string {
+  if (d.iso) return formatTimeOnly(d.iso);
+  if (d.timeText) return d.timeText;
+  if (d.commitSha) return d.commitSha.slice(0, 7);
+  return "?";
 }
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
@@ -928,12 +954,22 @@ const effortListStyle: React.CSSProperties = {
   flexDirection: "column",
   gap: 2,
 };
-const commitLinkStyle: React.CSSProperties = {
-  padding: 0,
-  background: "transparent",
-  border: "none",
-  color: "var(--text-link, #2563eb)",
-  font: "inherit",
-  cursor: "pointer",
-  textDecoration: "underline",
+const railDateStyle: React.CSSProperties = {
+  fontSize: "var(--text-sm)",
+  fontWeight: 600,
+  color: "var(--text-primary)",
+  marginBottom: 2,
+};
+const railRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+};
+const railLabelStyle: React.CSSProperties = {
+  width: 38,
+  flexShrink: 0,
+  fontSize: "var(--text-xs)",
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
 };
