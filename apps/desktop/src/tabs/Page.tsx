@@ -114,7 +114,9 @@ export interface PageProps {
   rightRailTitle?: ReactNode;
 }
 
-/** Body-container width below which the right rail is unmounted. */
+/** Body-container width below which the right rail moves inline (it never
+ *  disappears — `DetailsBody` relocates the same panel to the top of the
+ *  center column). */
 const DETAILS_RAIL_THRESHOLD_PX = 960;
 
 /**
@@ -375,7 +377,59 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
     return () => ro.disconnect();
   }, []);
 
-  const railVisible = showRail && rightRail !== undefined && rightRail !== null;
+  const railProvided = rightRail !== undefined && rightRail !== null;
+  const railAside = showRail && railProvided;
+  // Narrow + has rail content → keep the SAME panel, just stacked at the top
+  // of the center column instead of the side. The rail never just vanishes.
+  const railInline = !showRail && railProvided;
+
+  // The details panel — identical look (card surface + tinted header band +
+  // ⋯ actions) whether it sits in the side rail (`aside`, sticky) or stacked
+  // inline at the top of the center column when the rail collapses.
+  const railPanel = (variant: "aside" | "inline") => (
+    <aside
+      data-testid="page-details-rail"
+      style={{
+        ...(variant === "aside"
+          ? {
+              position: "sticky",
+              top: 0,
+              alignSelf: "start",
+              maxHeight: "calc(100vh - 48px)",
+              overflow: "auto",
+            }
+          : { marginBottom: 24 }),
+        minWidth: 0,
+        background: "var(--surface-card)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 8,
+        overflowX: "hidden",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          background: "var(--panel-header-bg)",
+          borderBottom: "1px solid var(--border-subtle)",
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--text-secondary)",
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+          ...(variant === "aside" ? { position: "sticky", top: 0 } : {}),
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0 }}>{rightRailTitle ?? "Details"}</span>
+        {rightRailActions ? (
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{rightRailActions}</div>
+        ) : null}
+      </div>
+      <div style={{ padding: 12 }}>{rightRail}</div>
+    </aside>
+  );
 
   return (
     <div
@@ -387,8 +441,8 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
         minWidth: 0,
         overflow: "auto",
         display: "grid",
-        gridTemplateColumns: railVisible ? "1fr 320px" : "1fr",
-        gap: railVisible ? 24 : 0,
+        gridTemplateColumns: railAside ? "1fr 320px" : "1fr",
+        gap: railAside ? 24 : 0,
         padding: 24,
         alignItems: "start",
       }}
@@ -403,51 +457,10 @@ function DetailsBody({ children, rightRail, rightRailTitle, rightRailActions }: 
         className="oxplow-reading-column"
         style={{ minWidth: 0 }}
       >
+        {railInline ? railPanel("inline") : null}
         {children}
       </div>
-      {railVisible ? (
-        <aside
-          data-testid="page-details-rail"
-          style={{
-            position: "sticky",
-            top: 0,
-            alignSelf: "start",
-            maxHeight: "calc(100vh - 48px)",
-            overflow: "auto",
-            minWidth: 0,
-            // Match the other panels: a card surface with a border, rounded
-            // corners, and a tinted header band (title + the ⋯ actions).
-            background: "var(--surface-card)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 8,
-            overflowX: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 10px",
-              background: "var(--panel-header-bg)",
-              borderBottom: "1px solid var(--border-subtle)",
-              fontSize: 11,
-              fontWeight: 600,
-              color: "var(--text-secondary)",
-              textTransform: "uppercase",
-              letterSpacing: 0.4,
-              position: "sticky",
-              top: 0,
-            }}
-          >
-            <span style={{ flex: 1, minWidth: 0 }}>{rightRailTitle ?? "Details"}</span>
-            {rightRailActions ? (
-              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>{rightRailActions}</div>
-            ) : null}
-          </div>
-          <div style={{ padding: 12 }}>{rightRail}</div>
-        </aside>
-      ) : null}
+      {railAside ? railPanel("aside") : null}
     </div>
   );
 }

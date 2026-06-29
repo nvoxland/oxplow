@@ -45,7 +45,7 @@ import { EffortMetricsBlock } from "../components/EffortMetrics.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
-import { formatFullDateTime, formatTimeOnly, isSameCalendarDay } from "../components/format.js";
+import { formatFullDateTime } from "../components/format.js";
 
 /**
  * What a diff view renders. Reached three ways, all via `DiffViewPage`:
@@ -457,15 +457,10 @@ function ResolvedEndpointDiff({
     () => endpointDisplay(start, snapshotsById),
     [JSON.stringify(start), snapshotsById],
   );
-  // When the end falls on the same calendar day as the start, collapse it
-  // to a time-only label so the date isn't repeated in the range.
-  const endDisp = useMemo(() => {
-    const disp = endpointDisplay(end, snapshotsById);
-    if (disp.iso && startDisp.iso && isSameCalendarDay(startDisp.iso, disp.iso)) {
-      return { ...disp, timeText: formatTimeOnly(disp.iso) };
-    }
-    return disp;
-  }, [JSON.stringify(end), snapshotsById, startDisp]);
+  const endDisp = useMemo(
+    () => endpointDisplay(end, snapshotsById),
+    [JSON.stringify(end), snapshotsById],
+  );
 
   // Page title. For an effort: "Changes: <effort title>". Otherwise a
   // comparison label — "Commit comparison" when BOTH sides are git versions
@@ -594,10 +589,11 @@ function ResolvedEndpointDiff({
 
   const openCommit = (sha: string) => onOpenPage(gitCommitRef(sha));
 
-  // The date/commit range lives in the details rail, not the title.
+  // The date/commit range lives in the details rail as two labeled fields.
   const rail = (
-    <div data-testid="diff-view-range" style={subtitleStyle}>
-      <RangeLabel start={startDisp} end={endDisp} onOpenCommit={openCommit} />
+    <div data-testid="diff-view-range" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <RailEndpoint label="Start" disp={startDisp} onOpenCommit={openCommit} />
+      <RailEndpoint label="End" disp={endDisp} onOpenCommit={openCommit} />
     </div>
   );
 
@@ -847,23 +843,33 @@ function endpointPlain(d: EndpointDisplay): string {
   return "?";
 }
 
-/** `<start> – <end>` with each endpoint's commit (when any) rendered as a
- *  linked short sha in parentheses. */
-function RangeLabel({
-  start,
-  end,
+/** A single labeled endpoint field for the details rail: an uppercase caption
+ *  ("Start" / "End") above the date/time + linked commit (when any). */
+function RailEndpoint({
+  label,
+  disp,
   onOpenCommit,
 }: {
-  start: EndpointDisplay;
-  end: EndpointDisplay;
+  label: string;
+  disp: EndpointDisplay;
   onOpenCommit(sha: string): void;
 }) {
   return (
-    <>
-      <EndpointSpan d={start} onOpenCommit={onOpenCommit} />
-      <span style={{ color: "var(--text-muted)", margin: "0 6px" }}>–</span>
-      <EndpointSpan d={end} onOpenCommit={onOpenCommit} />
-    </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+        <EndpointSpan d={disp} onOpenCommit={onOpenCommit} />
+      </span>
+    </div>
   );
 }
 
@@ -914,11 +920,6 @@ const h2Style: React.CSSProperties = {
   fontSize: "var(--text-lg)",
   fontWeight: 600,
   color: "var(--text-primary)",
-};
-const subtitleStyle: React.CSSProperties = {
-  fontSize: "var(--text-sm)",
-  color: "var(--text-secondary)",
-  fontFamily: "var(--mono, monospace)",
 };
 const effortListStyle: React.CSSProperties = {
   margin: "4px 0 0",
