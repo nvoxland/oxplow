@@ -204,6 +204,21 @@ warnings-only / rose on any error) with a findings drill-in grouped by file
 (`path:line — rule — message`), each row opening the file. The analysis
 ride-along has **no nudge** — the report-less nudge is test-specific.
 
+**The task-page effort section never shows Coverage & tests.** On the task
+page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
+- An **in-progress** effort (`ended_at`/`end_snapshot_id` null) renders a
+  minimal `ActiveEffortSection` — just an "In progress" header band
+  (`tasks-effort-in-progress` testid), no changed-files tree, no summary, no
+  fetches.
+- A **completed** effort (`ActivityEffortSection`) shows the summary, the
+  **Modified Files** tree, and **token usage** (`EffortTokenUsageBlock`) — but
+  **not** the `EffortObservationsBlock` (coverage + test-runs + static-analysis).
+  That test/coverage/analysis breakdown was deliberately removed from the task
+  page to keep it focused on *what changed*; it lives only on the standalone
+  effort **diff view** (`DiffViewPage`), which is the effort-review surface.
+  `EffortObservationsBlock` itself is unchanged — only the TaskDetail call site
+  was dropped.
+
 ## Report-less-run nudge (PostToolUse)
 
 When the PostToolUse hook detects a test run but no configured report

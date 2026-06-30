@@ -85,17 +85,22 @@ export function deltaColor(d: EffortMetricDelta): string {
 }
 
 /**
- * The grouped metrics panel for one effort. Self-hides when the effort touched
- * no tracked metric; live-refreshes on `metricSamplesChanged`.
+ * The grouped metrics panel for one effort. By default self-hides when the
+ * effort touched no tracked metric; pass `showWhenEmpty` to instead render an
+ * explicit "No metrics collected" state (used on the diff view so the Metrics
+ * section is always present for an effort). Live-refreshes on
+ * `metricSamplesChanged`.
  */
 export function EffortMetricsBlock({
   effortId,
   startedAt,
   endedAt,
+  showWhenEmpty = false,
 }: {
   effortId: string;
   startedAt: string;
   endedAt: string | null;
+  showWhenEmpty?: boolean;
 }) {
   const [deltas, setDeltas] = useState<EffortMetricDelta[]>([]);
   const nav = useOptionalPageNavigation();
@@ -103,9 +108,15 @@ export function EffortMetricsBlock({
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      void listEffortMetricDeltas(effortId).then((rows) => {
-        if (!cancelled) setDeltas(rows);
-      });
+      void listEffortMetricDeltas(effortId)
+        .then((rows) => {
+          if (!cancelled) setDeltas(rows);
+        })
+        // An IPC failure (or no backend, e.g. in tests) is the same end-state
+        // as "no metric moved" — leave the deltas empty.
+        .catch(() => {
+          if (!cancelled) setDeltas([]);
+        });
     };
     load();
     const unsub = subscribeOxplowEvents((event) => {
@@ -120,7 +131,20 @@ export function EffortMetricsBlock({
   // Drop metrics that already have a dedicated panel above (tests, coverage,
   // analysis, tokens, nudges) — don't repeat them in the generic list.
   const shown = deltas.filter((d) => !hasDedicatedPanel(d));
-  if (shown.length === 0) return null;
+  if (shown.length === 0) {
+    if (!showWhenEmpty) return null;
+    return (
+      <div
+        data-testid={`effort-metrics-empty-${effortId}`}
+        style={{ display: "flex", flexDirection: "column", gap: 8 }}
+      >
+        <h2 className="task-activity-heading">Metrics</h2>
+        <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontStyle: "italic" }}>
+          No metrics collected for this effort.
+        </span>
+      </div>
+    );
+  }
 
   // Group, preserving the backend's within-group ordering.
   const groups = new Map<

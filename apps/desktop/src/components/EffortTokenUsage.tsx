@@ -17,19 +17,34 @@ const PROMPT_PREVIEW_LEN = 140;
  * generated), the model, and the turn's token usage. The panel is a per-turn
  * LOG so an effort review can see what was ASKED next to what it cost.
  *
- * Self-hides when the effort has no usage rows (no Claude Stop captured yet,
- * or a non-Claude agent). Live-updates on `agentTokenUsageChanged` for this
- * effort. Long prompts are collapsible so the log stays scannable.
+ * When the effort has no usage rows (no Claude Stop captured yet, or a
+ * non-Claude agent) the block self-hides by default — pass `showWhenEmpty`
+ * to instead render an explicit "No token data collected" state (used on the
+ * task page effort section so the section always reports its token status).
+ * Live-updates on `agentTokenUsageChanged` for this effort. Long prompts are
+ * collapsible so the log stays scannable.
  */
-export function EffortTokenUsageBlock({ effortId }: { effortId: string }) {
+export function EffortTokenUsageBlock({
+  effortId,
+  showWhenEmpty = false,
+}: {
+  effortId: string;
+  showWhenEmpty?: boolean;
+}) {
   const [rows, setRows] = useState<AgentTokenUsage[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      void listTokenUsageForEffort(effortId).then((r) => {
-        if (!cancelled) setRows(r);
-      });
+      void listTokenUsageForEffort(effortId)
+        .then((r) => {
+          if (!cancelled) setRows(r);
+        })
+        // An IPC failure (or no backend, e.g. in tests) leaves the effort with
+        // no token rows — same end-state as "nothing collected yet".
+        .catch(() => {
+          if (!cancelled) setRows([]);
+        });
     };
     load();
     const unsub = subscribeOxplowEvents((event) => {
@@ -43,7 +58,29 @@ export function EffortTokenUsageBlock({ effortId }: { effortId: string }) {
     };
   }, [effortId]);
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    if (!showWhenEmpty) return null;
+    return (
+      <div
+        data-testid={`effort-token-usage-empty-${effortId}`}
+        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+      >
+        <span
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+          }}
+        >
+          Tokens
+        </span>
+        <span style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)", fontStyle: "italic" }}>
+          No token data collected.
+        </span>
+      </div>
+    );
+  }
 
   const sum = rows.reduce(
     (a, r) => ({

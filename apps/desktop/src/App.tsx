@@ -151,6 +151,7 @@ import { computePagesDirectory } from "./components/RailHud/sections.js";
 import { NON_TRACKED_KINDS } from "./components/RailHud/history.js";
 import { resolveActiveTabRef } from "./tabs/resolveActiveTabRef.js";
 import { useThreadPageTabs } from "./tabs/useThreadPageTabs.js";
+import { dropFromMru, MAX_PAGE_TABS, selectLruEvictions, touchMru } from "./tabs/tabLru.js";
 import {
   readPersistedCenterActive,
   readPersistedFileSessionPaths,
@@ -261,6 +262,8 @@ export function App() {
   const {
     threadCenterActive,
     setThreadCenterActive,
+    threadPageMru,
+    setThreadPageMru,
     threadPageTabs,
     setThreadPageTabs,
     threadPageHistory,
@@ -2199,13 +2202,18 @@ export function App() {
       const { [id]: _drop, ...rest } = prev;
       return rest;
     });
+    setThreadPageMru((prev) => {
+      const cur = prev[selectedThreadId] ?? [];
+      const next = dropFromMru(cur, id);
+      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
+    });
     setCenterActive((current) => (current === id ? "agent" : current));
     // GC the per-page snapshot so closed tabs don't leak forever.
     if (selectedThreadId) {
       const pageKey = `${selectedThreadId}::${id}`;
       clearPageSnapshot(pageKey);
     }
-  }, [selectedThreadId, setCenterActive, stream]);
+  }, [selectedThreadId, setCenterActive, setThreadPageMru, stream]);
 
   // Used when the record a tab shows is *deleted* (wiki page / task).
   // Rather than closing the tab outright, navigate it back one entry in
@@ -2243,6 +2251,50 @@ export function App() {
     const pageKey = `${selectedThreadId}::${id}`;
     clearPageSnapshot(pageKey);
   }, [selectedThreadId, threadPageHistory, threadPageTabs, closePageTab, setCenterActive]);
+
+  // Track tab recency: whatever tab becomes active moves to the front of
+  // its thread's MRU list. Driven off `centerActive` (not setCenterActive)
+  // so it captures every activation path — explicit clicks, opens, history
+  // navigation. ("agent" lands here too but is never a page tab, so it's
+  // harmless filler the eviction pass ignores.)
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    setThreadPageMru((prev) => {
+      const cur = prev[selectedThreadId] ?? [];
+      const next = touchMru(cur, centerActive);
+      return next === cur ? prev : { ...prev, [selectedThreadId]: next };
+    });
+  }, [centerActive, selectedThreadId, setThreadPageMru]);
+
+  // Enforce the page-tab cap on the active thread: when its open tabs
+  // exceed MAX_PAGE_TABS, evict the least-recently-used ones. The active
+  // tab and any dirty file tabs are protected (a soft cap never discards
+  // unsaved work). Eviction routes through closePageTab — the same cleanup
+  // a manual close does (drops file session / history / title / snapshot).
+  // Closing shrinks threadPageTabs, re-running this effect until it
+  // settles at or below the cap.
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    const tabsList = threadPageTabs[selectedThreadId] ?? [];
+    if (tabsList.length <= MAX_PAGE_TABS) return;
+    const protect = new Set<string>();
+    if (centerActive) protect.add(centerActive);
+    const session = stream ? fileSessions[stream.id] : undefined;
+    if (session) {
+      for (const t of tabsList) {
+        if (!t.id.startsWith("file:")) continue;
+        const file = session.files[t.id.slice("file:".length)];
+        if (file && file.draftContent !== file.savedContent) protect.add(t.id);
+      }
+    }
+    const mru = threadPageMru[selectedThreadId] ?? [];
+    const victims = selectLruEvictions(
+      tabsList.map((t) => t.id),
+      mru,
+      { max: MAX_PAGE_TABS, protect },
+    );
+    for (const id of victims) closePageTab(id);
+  }, [threadPageTabs, selectedThreadId, centerActive, threadPageMru, fileSessions, stream, closePageTab]);
 
   // Keep the forward ref in sync with the latest handleOpenPage. Used by
   // commandHandlers (declared above handleOpenPage) so menu/keyboard

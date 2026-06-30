@@ -6,6 +6,7 @@ import { useContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { ErrorBoundary } from "../ErrorBoundary.js";
 import { leadingPinnedCount, moveToIndex, reorderToAfterPinned } from "./centerTabsReorder.js";
+import { tabsToCloseOthers, tabsToCloseRight } from "./tabClose.js";
 
 export interface CenterTab {
   id: string;
@@ -13,11 +14,11 @@ export interface CenterTab {
   closable: boolean;
   render: () => ReactNode;
   agentStatus?: AgentStatus;
-  /** Per-tab kebab menu. When present, a `⋯` button appears on the
-   *  tab chip; clicking it opens a popover with these entries.
-   *  (The legacy right-click affordance was retired in phase 5 of the
-   *  IA redesign — visible kebab buttons are the new primary path.)
-   */
+  /** Kind-specific right-click menu entries for this tab. They render at
+   *  the top of the tab's context menu, above the universal "Close Other
+   *  Tabs" / "Close Tabs to the Right" pair that CenterTabs appends for
+   *  every tab. (Right-click is the per-row action surface project-wide;
+   *  there is no visible kebab — see `.context/usability.md`.) */
   contextMenu?: MenuItem[];
   /** When true, this tab does NOT appear in the strip but its body
    *  still mounts (kept hidden via display:none). Used by the host
@@ -73,6 +74,47 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
   // front and is never a drag source or drop target. Every other tab
   // can be dragged anywhere in the strip — there are no per-kind groups.
   const isReorderable = (tab: CenterTab): boolean => !!onReorder && tab.closable;
+
+  // Close a batch of tabs through the host's single-tab close path, then —
+  // only if the close swept away the active tab — fall the selection back to
+  // the anchor the user right-clicked (so the strip doesn't snap to Agent
+  // when a perfectly good neighbour is still open).
+  const closeMany = (ids: string[], anchorId: string): void => {
+    if (!onClose || ids.length === 0) return;
+    const closingActive = ids.includes(activeId);
+    for (const id of ids) onClose(id);
+    if (closingActive) onActivate(anchorId);
+  };
+
+  // Per-tab right-click menu: the tab's own entries (if any) followed by the
+  // universal "Close Other Tabs" / "Close Tabs to the Right" pair. The pair
+  // only appears when the host wired a close handler; each is disabled when it
+  // has no targets. Targets are computed over the real open tabs (`stripTabs`)
+  // so overflowed-but-open tabs still close while back/forward stack entries
+  // (`hidden`) are excluded.
+  const buildTabMenu = (tab: CenterTab): MenuItem[] => {
+    const items: MenuItem[] = tab.contextMenu ? [...tab.contextMenu] : [];
+    if (onClose) {
+      const others = tabsToCloseOthers(stripTabs, tab.id);
+      const toRight = tabsToCloseRight(stripTabs, tab.id);
+      if (items.length > 0) {
+        items.push({ id: "tab.close-sep", label: "", enabled: false, separator: true });
+      }
+      items.push({
+        id: "tab.close-others",
+        label: "Close Other Tabs",
+        enabled: others.length > 0,
+        run: () => closeMany(others, tab.id),
+      });
+      items.push({
+        id: "tab.close-right",
+        label: "Close Tabs to the Right",
+        enabled: toRight.length > 0,
+        run: () => closeMany(toRight, tab.id),
+      });
+    }
+    return items;
+  };
 
   useLayoutEffect(() => {
     const outer = outerBarRef.current;
@@ -177,12 +219,10 @@ export function CenterTabs({ tabs, activeId, onActivate, onClose, header, onReor
               data-testid={`center-tab-${tab.id}`}
               data-tab-id={tab.id}
               draggable={canDrag}
+              tabIndex={0}
               onClick={() => onActivate(tab.id)}
-              onContextMenu={
-                tab.contextMenu && tab.contextMenu.length > 0
-                  ? (e) => cm.open(e, tab.contextMenu!)
-                  : undefined
-              }
+              onContextMenu={(e) => cm.open(e, buildTabMenu(tab))}
+              onKeyDown={(e) => cm.openForKey(e, buildTabMenu(tab))}
               onMouseEnter={() => setHoverId(tab.id)}
               onMouseLeave={() => setHoverId((prev) => (prev === tab.id ? null : prev))}
               onDragStart={canDrag ? (event) => {

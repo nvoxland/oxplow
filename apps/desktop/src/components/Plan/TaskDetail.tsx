@@ -11,7 +11,7 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { ChangeAnalysisFileTree } from "../ChangeAnalysis/FileTreeView.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
-import { EffortObservationsBlock } from "../EffortObservations.js";
+import { EffortTokenUsageBlock } from "../EffortTokenUsage.js";
 import { resolveEffortEndpoints } from "../../diffViewModel.js";
 import { diffEndpoints } from "../../api.js";
 import type { BranchChangeEntry } from "../../api.js";
@@ -474,40 +474,83 @@ export function ActivityTimeline({
       data-testid="tasks-activity"
       style={{ display: "flex", flexDirection: "column", gap: 28 }}
     >
-      {rows.map((row) => (
-        <ActivityEffortSection
-          key={`effort-${row.id}`}
-          detail={row.detail}
-          active={row.active}
-          formatTimestamp={formatTimestamp}
-          onOpenFile={onOpenFile}
-          onShowEffortDiff={onShowEffortDiff}
-          onOpenDiff={onOpenDiff}
-        />
-      ))}
+      {rows.map((row) =>
+        // An in-progress effort shows ONLY "In progress" — no changed
+        // files, tests, coverage, or summary until it closes. The full
+        // breakdown (and the underlying snapshot/observation fetches) is
+        // reserved for completed efforts.
+        row.active ? (
+          <ActiveEffortSection key={`effort-${row.id}`} />
+        ) : (
+          <ActivityEffortSection
+            key={`effort-${row.id}`}
+            detail={row.detail}
+            formatTimestamp={formatTimestamp}
+            onOpenFile={onOpenFile}
+            onShowEffortDiff={onShowEffortDiff}
+            onOpenDiff={onOpenDiff}
+          />
+        ),
+      )}
     </div>
   );
 }
 
 /**
- * One effort rendered as a page section: time-range subheader, summary
- * note (markdown), changed-files list, and a "View snapshot" link at
- * the bottom. No bordered card — these read as part of the page.
- *
- * For the active effort, the subheader reads "In progress since
- * {started}" and the snapshot link is suppressed (no end snapshot
- * yet).
+ * A still-open effort. We deliberately show ONLY an "In progress" marker
+ * — no changed files, tests, coverage, or summary — until the effort
+ * closes. Mid-effort those numbers are noisy and incomplete (the snapshot
+ * bracket has no end yet, runs are still landing), so they're reserved for
+ * the completed view. No data fetching here on purpose.
+ */
+function ActiveEffortSection() {
+  return (
+    <section
+      data-testid="tasks-effort-in-progress"
+      style={{
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 8,
+        overflow: "hidden",
+        background: "var(--surface-card)",
+      }}
+    >
+      <header
+        style={{
+          padding: "8px 14px",
+          background: "var(--panel-header-bg)",
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            color: "var(--accent)",
+          }}
+        >
+          In progress
+        </h3>
+      </header>
+    </section>
+  );
+}
+
+/**
+ * One completed effort rendered as a page section: time-range subheader,
+ * summary note (markdown), changed-files list, observations, and a
+ * "Details" link to the effort diff. No bordered card — these read as part
+ * of the page. (In-progress efforts use {@link ActiveEffortSection}.)
  */
 function ActivityEffortSection({
   detail,
-  active,
   formatTimestamp,
   onOpenFile,
   onShowEffortDiff,
   onOpenDiff,
 }: {
   detail: EffortDetail;
-  active: boolean;
   formatTimestamp(iso: string): string;
   onOpenFile?(path: string): void | Promise<void>;
   onShowEffortDiff?(effortId: string): void;
@@ -581,12 +624,10 @@ function ActivityEffortSection({
     [detail.changed_paths, diffByPath],
   );
 
-  const subheader = active
-    ? `In progress · started ${formatTimestamp(detail.effort.started_at)}`
-    : `${formatTimestamp(detail.effort.started_at)} → ${formatEffortEnd(detail.effort.started_at, detail.effort.ended_at!, formatTimestamp)}`;
+  const subheader = `${formatTimestamp(detail.effort.started_at)} → ${formatEffortEnd(detail.effort.started_at, detail.effort.ended_at!, formatTimestamp)}`;
   return (
     <section
-      data-testid={active ? "tasks-effort-in-progress" : `tasks-effort-${detail.effort.id}`}
+      data-testid={`tasks-effort-${detail.effort.id}`}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -616,13 +657,11 @@ function ActivityEffortSection({
           fontWeight: 600,
           textTransform: "uppercase",
           letterSpacing: 0.4,
-          // Active effort keeps the accent as an in-progress status cue;
-          // completed efforts use the neutral panel-header label color.
-          color: active ? "var(--accent)" : "var(--text-secondary)",
+          color: "var(--text-secondary)",
         }}>
           {subheader}
         </h3>
-        {!active && onShowEffortDiff ? (
+        {onShowEffortDiff ? (
           <button
             type="button"
             data-testid={`tasks-show-in-history-${detail.effort.id}`}
@@ -649,14 +688,14 @@ function ActivityEffortSection({
         <div data-testid={`tasks-effort-summary-${detail.effort.id}`}>
           <MarkdownView body={detail.effort.summary} />
         </div>
-      ) : !active ? (
+      ) : (
         <div
           data-testid={`tasks-effort-summary-${detail.effort.id}`}
           style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}
         >
           No summary recorded.
         </div>
-      ) : null}
+      )}
       {detail.changed_paths.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h2 className="task-activity-heading">Modified Files</h2>
@@ -669,7 +708,13 @@ function ActivityEffortSection({
           />
         </div>
       ) : null}
-        <EffortObservationsBlock effortId={detail.effort.id} onOpenFile={onOpenFile} />
+        {/* Coverage / tests / static-analysis are intentionally NOT shown
+            here — the task-page effort section stays focused on what changed.
+            That breakdown lives on the effort diff view (DiffViewPage). Token
+            usage stays: it's effort metadata, not test information. It always
+            reports its status here (showWhenEmpty) — "No token data collected"
+            rather than vanishing. */}
+        <EffortTokenUsageBlock effortId={detail.effort.id} showWhenEmpty />
       </div>
     </section>
   );

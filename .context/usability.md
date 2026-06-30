@@ -372,7 +372,10 @@ declaring *what it is* and mounting the generic layer.
     were likewise removed earlier in the IA cleanup.
   - `center-tab-<id>` on CenterTabs tabs (id is `agent` for the
     agent tab, `file:<path>` for open-file tabs);
-    `center-tab-close-<id>` on the × close button
+    `center-tab-close-<id>` on the × close button. Right-click the tab
+    (`fireEvent.contextMenu`) → `menu-item-tab.close-others` /
+    `menu-item-tab.close-right` for the universal close actions (plus
+    any kind-specific entries)
   - `thread-rail-create-input`, `thread-rail-create-submit` on the
     new-thread creation row; `thread-chip-rename-input-<id>` on the
     inline rename input; `thread-chip-promote-<id>` and
@@ -440,6 +443,19 @@ declaring *what it is* and mounting the generic layer.
   (not a box on the target tab): the cursor's half of the hovered tab
   picks before/after, and the drop lands exactly there (`moveToIndex`).
   Pure reorder math lives in `centerTabsReorder.ts` (unit-tested).
+- **Right-clicking a center tab** opens its action menu: any kind-specific
+  entries (the `CenterTab.contextMenu` slot — e.g. external-url's "Open in
+  Browser") followed by the universal **"Close Other Tabs"** /
+  **"Close Tabs to the Right"** pair that `CenterTabs` appends for every
+  tab. Each close item is disabled when it has no targets; targets are
+  computed over the real open tabs in strip order (overflowed-but-open tabs
+  still close; `hidden` back/forward stack entries don't). Closes route
+  through the host's single-tab `onClose` (file/diff/page dispatch); if the
+  sweep takes the active tab, selection falls back to the right-clicked
+  anchor. Keyboard parity: tabs are focusable and the Menu key / Shift+F10
+  opens the same menu. Pure target-selection math lives in `tabClose.ts`
+  (unit-tested); the menu ids are `tab.close-others` / `tab.close-right`
+  (→ `menu-item-tab.*` testids).
 
 ## Capitalization
 

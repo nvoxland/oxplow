@@ -631,6 +631,32 @@ function ResolvedEndpointDiff({
   const dateLabel = rangeDateLabel(startDisp.iso, endDisp.iso);
   const rail = (
     <div data-testid="diff-view-range" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* When this diff lines up with an effort, name its task and link to it
+          (effort passed, or a snapshot range that matches an overlapping
+          effort's bracket — `primaryTaskId`/`effortTitle`). */}
+      {primaryTaskId && effortTitle ? (
+        <div style={railRowStyle}>
+          <span style={railLabelStyle}>Task</span>
+          <button
+            type="button"
+            data-testid="diff-view-task-link"
+            onClick={() => onOpenPage(taskRef(primaryTaskId))}
+            title={effortTitle}
+            style={{
+              ...linkButton,
+              fontFamily: "inherit",
+              fontSize: "var(--text-sm)",
+              textAlign: "left",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {effortTitle}
+          </button>
+        </div>
+      ) : null}
       {dateLabel ? (
         <div data-testid="diff-view-range-date" style={railDateStyle}>
           {dateLabel}
@@ -814,13 +840,15 @@ function ResolvedEndpointDiff({
       ) : null}
 
       {/* Metrics oxplow collected during the effort this diff is for —
-          code-health/activity deltas (before→after). Self-hides when the
-          effort moved no tracked metric, or for a non-effort range. */}
+          code-health/activity deltas (before→after). Always present for an
+          effort (showWhenEmpty → "No metrics collected" when nothing moved);
+          only absent for a non-effort range. */}
       {primaryEffortId && primaryEffortStartedAt ? (
         <EffortMetricsBlock
           effortId={primaryEffortId}
           startedAt={primaryEffortStartedAt}
           endedAt={primaryEffortEndedAt}
+          showWhenEmpty
         />
       ) : null}
 

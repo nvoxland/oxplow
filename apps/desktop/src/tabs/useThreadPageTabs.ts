@@ -30,6 +30,11 @@ import {
  */
 export function useThreadPageTabs() {
   const [threadCenterActive, setThreadCenterActive] = useState<Record<string, string>>({});
+  // Per-thread MRU (most-recently-used first) order of tab ids, used to
+  // pick LRU eviction victims when a thread exceeds the page-tab cap.
+  // In-memory only (like `threadCenterActive`): recency is a session
+  // concern, rebuilt as tabs are activated.
+  const [threadPageMru, setThreadPageMru] = useState<Record<string, string[]>>({});
   const [threadPageTabs, setThreadPageTabs] = useState<Record<string, TabRef[]>>(() =>
     readPersistedThreadPageTabs(),
   );
@@ -56,6 +61,8 @@ export function useThreadPageTabs() {
   return {
     threadCenterActive,
     setThreadCenterActive,
+    threadPageMru,
+    setThreadPageMru,
     threadPageTabs,
     setThreadPageTabs,
     threadPageHistory,

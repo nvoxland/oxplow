@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
 import type { AgentTokenUsage } from "../api.js";
-import { TurnRow } from "./EffortTokenUsage.js";
+import { EffortTokenUsageBlock, TurnRow } from "./EffortTokenUsage.js";
 
 afterEach(cleanup);
 
@@ -52,4 +52,18 @@ test("a long prompt is collapsed until clicked, then expands fully", () => {
   // Collapsing again restores the truncated preview.
   fireEvent.click(btn);
   expect(btn.textContent).toContain("…");
+});
+
+// With no backend in the test env the fetch rejects → rows stay empty.
+test("with showWhenEmpty and no token rows, renders an explicit empty state", () => {
+  const { getByTestId } = render(<EffortTokenUsageBlock effortId="eff1" showWhenEmpty />);
+  expect(getByTestId("effort-token-usage-empty-eff1").textContent).toContain(
+    "No token data collected",
+  );
+});
+
+test("without showWhenEmpty and no token rows, renders nothing", () => {
+  const { queryByTestId } = render(<EffortTokenUsageBlock effortId="eff1" />);
+  expect(queryByTestId("effort-token-usage-empty-eff1")).toBeNull();
+  expect(queryByTestId("effort-token-usage-eff1")).toBeNull();
 });
