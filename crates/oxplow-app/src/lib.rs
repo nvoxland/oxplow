@@ -30,6 +30,7 @@ pub mod hook_ingest;
 pub mod indexer;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod metric_engine;
 pub mod metrics_service;
 pub mod output_activity;
 pub mod page_ref_backfill;
