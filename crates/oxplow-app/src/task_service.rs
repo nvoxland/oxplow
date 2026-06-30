@@ -21,8 +21,9 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, NewMetricRun, NewMetricSample, SqliteAttributionStore, SqliteMetricStore,
-    SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
+    EffortFileChange, NewFact, NewMetricCapture, NewMetricRun, NewMetricSample,
+    SqliteAttributionStore, SqliteFactStore, SqliteMetricStore, SqliteSnapshotStore,
+    SqliteTaskEffortStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -122,6 +123,11 @@ pub struct TaskService {
     /// tests skip the projection. Paired with `events` so the renderer
     /// refetches on a new sample.
     metrics: Option<Arc<SqliteMetricStore>>,
+    /// Durable fact layer (epic tsk12): when set (alongside `metrics`),
+    /// closing an effort also dual-writes a `oxplow.cycle_time` fact under a
+    /// capture that stamps the producing `effort_id`. Optional so bare
+    /// TaskService tests skip it; attached together with `metrics`.
+    fact_store: Option<Arc<SqliteFactStore>>,
     events: Option<EventBus>,
     /// Config-declared gauge runner (tsk213, P3): when set, closing an effort
     /// also runs any `on-effort-complete` gauges against the effort's end
@@ -146,6 +152,7 @@ impl TaskService {
             snapshot_captures: None,
             thread_store: None,
             metrics: None,
+            fact_store: None,
             events: None,
             gauge_runner: None,
             attribution: None,
@@ -166,11 +173,18 @@ impl TaskService {
         self
     }
 
-    /// Attach the metric substrate + event bus. When present (together
-    /// with `with_effort_store`), closing an effort projects derived
-    /// process metrics (`effort.cycle_time_ms`, `task.efforts`).
-    pub fn with_metrics(mut self, metrics: Arc<SqliteMetricStore>, events: EventBus) -> Self {
+    /// Attach the metric substrate (legacy samples + durable fact layer) and
+    /// event bus. When present (together with `with_effort_store`), closing an
+    /// effort projects derived process metrics (`effort.cycle_time_ms`,
+    /// `task.efforts`) and dual-writes a `oxplow.cycle_time` fact (epic tsk12).
+    pub fn with_metrics(
+        mut self,
+        metrics: Arc<SqliteMetricStore>,
+        facts: Arc<SqliteFactStore>,
+        events: EventBus,
+    ) -> Self {
         self.metrics = Some(metrics);
+        self.fact_store = Some(facts);
         self.events = Some(events);
         self
     }
@@ -578,6 +592,36 @@ impl TaskService {
             }
             Err(e) => {
                 tracing::warn!(error = %e, "failed to project effort lifecycle metrics");
+            }
+        }
+
+        // Dual-write into the durable fact layer (epic tsk12): cycle time as a
+        // fact on `oxplow.cycle_time`, subject = the just-closed effort. The
+        // capture stamps `effort_id` directly — this producer knows the exact
+        // producing effort, so attribution is unambiguous (decision #11) — plus
+        // the thread/branch spine. Best-effort beside the legacy samples above.
+        if let Some(facts) = self.fact_store.as_ref() {
+            let dual = async {
+                let Some(measure) = facts.get_measure("oxplow.cycle_time").await? else {
+                    return Ok::<(), DomainError>(());
+                };
+                let fact = NewFact {
+                    subject_kind: Some("effort".into()),
+                    subject_ref: Some(effort_id.to_string()),
+                    ..NewFact::new(measure.id, cycle_ms as f64)
+                };
+                let mut capture =
+                    NewMetricCapture::done(stream_val, "effort-lifecycle", "effort-lifecycle");
+                capture.thread_id = Some(thread_id.value());
+                capture.effort_id = Some(effort_id.value());
+                capture.trigger = Some("on-effort-complete".into());
+                capture.branch = branch.clone();
+                facts.record_facts(capture, vec![fact]).await?;
+                Ok(())
+            }
+            .await;
+            if let Err(e) = dual {
+                tracing::warn!(error = %e, "effort lifecycle: cycle-time fact dual-write failed");
             }
         }
     }
@@ -1307,11 +1351,12 @@ mod tests {
         };
         threads.upsert(&t).await.unwrap();
         let thread_store_for_svc = Arc::new(oxplow_db::SqliteThreadStore::new(db.clone()));
+        let fact_store = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
         let svc = TaskService::new(task_store)
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store_for_svc)
-            .with_metrics(metric_store.clone(), event_bus.clone());
+            .with_metrics(metric_store.clone(), fact_store, event_bus.clone());
         (
             svc,
             t.id,
@@ -1450,6 +1495,33 @@ mod tests {
         let efforts = metrics.list_samples(efforts_def.id).await.unwrap();
         assert_eq!(efforts.len(), 1);
         assert_eq!(efforts[0].value, 1.0, "first effort for the task");
+
+        // Dual-written into the durable fact layer (epic tsk12): one
+        // `oxplow.cycle_time` fact, subject = the closed effort, on a capture
+        // that stamped the producing effort_id (unambiguous, decision #11).
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let cycle_measure = facts
+            .get_measure("oxplow.cycle_time")
+            .await
+            .unwrap()
+            .expect("cycle_time measure seeded by V43");
+        let cycle_facts = facts.facts_for_measure(cycle_measure.id).await.unwrap();
+        assert_eq!(cycle_facts.len(), 1, "one cycle-time fact per close");
+        assert_eq!(cycle_facts[0].subject_kind.as_deref(), Some("effort"));
+        assert!(cycle_facts[0].value >= 0.0, "cycle time is non-negative");
+        assert!(
+            cycle_facts[0].effort_id.is_some(),
+            "capture stamped the producing effort_id (unambiguous close)"
+        );
+        assert_eq!(
+            cycle_facts[0].subject_ref.as_deref(),
+            Some(
+                EffortId::new(cycle_facts[0].effort_id.unwrap())
+                    .to_string()
+                    .as_str()
+            ),
+            "subject_ref is the producing effort's display id"
+        );
     }
 
     #[tokio::test]
