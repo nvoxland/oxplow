@@ -26,8 +26,8 @@ use std::sync::Arc;
 
 use oxplow_db::TaskEffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewMetricRun, NewMetricSample, SqliteMetricStore, SqliteTaskEffortStore,
-    SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewFact, NewMetricCapture, NewMetricRun, NewMetricSample, SqliteFactStore,
+    SqliteMetricStore, SqliteTaskEffortStore, SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
@@ -292,6 +292,9 @@ pub struct TokenUsageService {
     /// Unified metric substrate (tsk213): token samples are projected here
     /// for the Metrics surface, without touching the `agent_token_usage` source.
     metrics: Arc<SqliteMetricStore>,
+    /// Durable fact layer (epic tsk12): token totals also land as facts on the
+    /// `oxplow.tokens` measure, dual-written beside the legacy samples.
+    facts: Arc<SqliteFactStore>,
     events: EventBus,
 }
 
@@ -301,6 +304,7 @@ impl TokenUsageService {
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
         metrics: Arc<SqliteMetricStore>,
+        facts: Arc<SqliteFactStore>,
         events: EventBus,
     ) -> Self {
         Self {
@@ -308,6 +312,7 @@ impl TokenUsageService {
             efforts,
             threads,
             metrics,
+            facts,
             events,
         }
     }
@@ -498,6 +503,28 @@ impl TokenUsageService {
         self.metrics
             .record_run_with_data(run, samples, Vec::new())
             .await?;
+
+        // Dual-write into the durable fact layer (epic tsk12): one fact per model
+        // on the `oxplow.tokens` measure (total tokens), under one capture that
+        // carries the spine (thread, continuous trigger). Tokens are an additive
+        // event measure — the model is a conformed dimension. Best-effort beside
+        // the legacy samples above.
+        if let Some(measure) = self.facts.get_measure("oxplow.tokens").await? {
+            let mut facts = Vec::new();
+            for (model, agg) in by_model {
+                let total = agg.input + agg.output;
+                facts.push(NewFact {
+                    subject_kind: Some("model".into()),
+                    subject_ref: Some(format!("model:{model}")),
+                    dims_json: Some(format!("{{\"oxplow.model\":\"{model}\"}}")),
+                    ..NewFact::new(measure.id, total as f64)
+                });
+            }
+            let mut capture = NewMetricCapture::done(stream_val, "token-parse", "token-parse");
+            capture.thread_id = Some(thread.value());
+            capture.trigger = Some("continuous".into());
+            self.facts.record_facts(capture, facts).await?;
+        }
         Ok(())
     }
 }
@@ -944,5 +971,26 @@ mod tests {
                 .is_none(),
             "agent.cost_usd must not be defined — oxplow tracks tokens, not price"
         );
+
+        // Dual-written into the durable fact layer (epic tsk12): one fact per
+        // model on the `oxplow.tokens` measure, carrying the capture's spine.
+        let tokens_measure = svc
+            .fact_store
+            .get_measure("oxplow.tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let token_facts = svc
+            .fact_store
+            .facts_for_measure(tokens_measure.id)
+            .await
+            .unwrap();
+        assert_eq!(token_facts.len(), 1);
+        assert_eq!(token_facts[0].value, 120.0, "input 100 + output 20");
+        assert_eq!(
+            token_facts[0].subject_ref.as_deref(),
+            Some("model:claude-opus-4-8")
+        );
+        assert_eq!(token_facts[0].thread_id, Some(thread.value()));
     }
 }

@@ -86,11 +86,11 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteCommentStore, SqliteMetricStore, SqlitePageRefStore, SqlitePageVisitStore,
-    SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
-    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
-    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
-    SqliteWikiPageThreadUpdateStore,
+    SqliteCommentStore, SqliteFactStore, SqliteMetricStore, SqlitePageRefStore,
+    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
+    SqliteTaskEffortStore, SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore,
+    SqliteTaskStore, SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
+    SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -421,6 +421,12 @@ pub struct Services {
     /// Unified metric substrate (durable typed metrics; epic tsk213). The
     /// successor to the retired `effort_observation` + `code_quality_*`.
     pub metric_store: Arc<SqliteMetricStore>,
+    /// Durable atomic fact layer (epic tsk12) — the inverted substrate that
+    /// `metric_store` is migrating onto. Producers dual-write facts here; the
+    /// read surface aggregates them through `metric_engine`.
+    pub fact_store: Arc<SqliteFactStore>,
+    /// Aggregation engine over `fact_store` (metrics-as-specs; epic tsk12).
+    pub metric_engine: metric_engine::MetricEngine,
     /// Kind-agnostic attribution ledger (tsk262/263) — run claim/acknowledge
     /// state; the agent claims/disclaims runs via `amend_effort`.
     pub attribution_store: Arc<oxplow_db::SqliteAttributionStore>,
@@ -511,6 +517,8 @@ impl Services {
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let metric_store = Arc::new(SqliteMetricStore::new(db.clone()));
+        let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
+        let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()));
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -649,6 +657,7 @@ impl Services {
             effort_store.clone(),
             thread_store.clone(),
             metric_store.clone(),
+            fact_store.clone(),
             event_bus.clone(),
         );
 
@@ -681,6 +690,8 @@ impl Services {
             thread_runtime,
             effort_store,
             metric_store,
+            fact_store,
+            metric_engine,
             attribution_store,
             metrics,
             nudge_store,
