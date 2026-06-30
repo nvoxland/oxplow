@@ -25,7 +25,10 @@ use oxplow_collect_plugin::{
 };
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{NewMetricFinding, NewMetricRun, NewMetricSample, SqliteMetricStore};
+use oxplow_db::{
+    NewFact, NewMetricCapture, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteFactStore,
+    SqliteMetricStore,
+};
 use oxplow_db::{
     SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
     TaskEffort, TaskEffortStore, STATE_CLAIMED,
@@ -338,6 +341,10 @@ pub struct CollectionService {
     /// was dropped in tsk215). The effort panel reconstructs its rows from here
     /// via `effort_observations_from_metrics`.
     metrics: Arc<SqliteMetricStore>,
+    /// Durable fact layer (epic tsk12): coverage/test/analysis producers
+    /// dual-write atomic facts here beside the legacy samples/findings. The
+    /// aggregation engine reads these; the samples are the rebuildable cache.
+    facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
@@ -376,6 +383,7 @@ impl CollectionService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         metrics: Arc<SqliteMetricStore>,
+        facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
@@ -388,6 +396,7 @@ impl CollectionService {
     ) -> Self {
         Self {
             metrics,
+            facts,
             nudges,
             efforts,
             threads,
@@ -1047,6 +1056,54 @@ impl CollectionService {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: oxplow_domain::StreamId::new(stream_val),
                 });
+                // Dual-write per-lint-hit facts into the durable fact layer
+                // (epic tsk12): one fact on `oxplow.lint_hit` per finding,
+                // carrying the reported severity/rule/message in the dedicated
+                // columns + the file location, under one capture. Count() over
+                // these reconstructs the errors/warnings headline; the legacy
+                // located findings above stay until the read surface (D) flips.
+                let dual = async {
+                    let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
+                        return Ok::<(), DomainError>(());
+                    };
+                    if report.findings.is_empty() {
+                        return Ok(());
+                    }
+                    use oxplow_coverage::Severity::*;
+                    let mut facts = Vec::with_capacity(report.findings.len());
+                    for f in &report.findings {
+                        let severity = match f.severity {
+                            Error => "error",
+                            Warning => "warning",
+                            Info => "info",
+                            Note => "note",
+                        };
+                        facts.push(NewFact {
+                            subject_kind: Some("file".into()),
+                            subject_ref: Some(format!("file:{}", f.path)),
+                            path: Some(f.path.clone()),
+                            line: f.line.map(|l| l as i64),
+                            severity: Some(severity.into()),
+                            rule: f.rule.clone(),
+                            detail: Some(f.message.clone()),
+                            ..NewFact::new(measure.id, 1.0)
+                        });
+                    }
+                    let mut capture =
+                        NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
+                    capture.thread_id = Some(thread.value());
+                    capture.trigger = Some("on-report".into());
+                    capture.snapshot_id = snapshot_id;
+                    capture.closest_git_version = git_version.clone();
+                    capture.git_version_exact = git_version_exact;
+                    capture.branch = branch.clone();
+                    self.facts.record_facts(capture, facts).await?;
+                    Ok(())
+                }
+                .await;
+                if let Err(e) = dual {
+                    tracing::warn!(error = %e, "failed to dual-write lint-hit facts");
+                }
                 Some(run_id)
             }
             Err(e) => {
@@ -3350,6 +3407,7 @@ mod tests {
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             let service = CollectionService::new(
                 Arc::new(SqliteMetricStore::new(db.clone())),
+                Arc::new(oxplow_db::SqliteFactStore::new(db.clone())),
                 nudges.clone(),
                 efforts.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
@@ -5264,6 +5322,28 @@ mod tests {
                 findings.iter().any(|f| f.kind == "analysis-detail"),
                 "verbatim analysis payload kept on the substrate"
             );
+
+            // Dual-written into the durable fact layer (epic tsk12): one
+            // `oxplow.lint_hit` fact per finding, reported severity/rule/detail
+            // in the dedicated columns + the file location on the fact.
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts
+                .get_measure("oxplow.lint_hit")
+                .await
+                .unwrap()
+                .expect("lint_hit measure seeded by V43");
+            let hits = facts.facts_for_measure(measure.id).await.unwrap();
+            assert_eq!(hits.len(), 2, "one fact per lint hit");
+            assert!(hits.iter().all(|f| f.value == 1.0), "each hit counts as 1");
+            let err_hit = hits
+                .iter()
+                .find(|f| f.rule.as_deref() == Some("E0308"))
+                .expect("the error hit landed as a fact");
+            assert_eq!(err_hit.severity.as_deref(), Some("error"));
+            assert_eq!(err_hit.detail.as_deref(), Some("boom"));
+            assert_eq!(err_hit.path.as_deref(), Some("src/a.rs"));
+            assert_eq!(err_hit.line, Some(10));
+            assert_eq!(err_hit.subject_ref.as_deref(), Some("file:src/a.rs"));
         }
 
         #[tokio::test]

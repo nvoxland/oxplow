@@ -641,6 +641,7 @@ impl Services {
             .with_gauge_runner(metrics.clone());
         let collection = collection::CollectionService::new(
             metric_store.clone(),
+            fact_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
             thread_store.clone(),
