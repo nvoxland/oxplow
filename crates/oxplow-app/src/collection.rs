@@ -1167,6 +1167,60 @@ impl CollectionService {
         if let Some(e) = attribute_to.as_ref() {
             self.emit(thread, e);
         }
+
+        // Dual-write per-file coverage facts into the durable fact layer (epic
+        // tsk12): one fact on `oxplow.coverage` per file, value = its line-%,
+        // numerator/denominator = covered/instrumented counts so the engine
+        // re-derives the headline as Σcovered/Σinstrumented (non-additive
+        // ratio) instead of averaging pre-rolled percentages. Best-effort
+        // beside the absolute headline sample above.
+        if let Some(stream_val) =
+            oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
+        {
+            let dual = async {
+                let Some(measure) = self.facts.get_measure("oxplow.coverage").await? else {
+                    return Ok::<(), DomainError>(());
+                };
+                let mut facts = Vec::new();
+                for (path, fc) in &report.files {
+                    let instr = fc.instrumented.len();
+                    if instr == 0 {
+                        continue;
+                    }
+                    let covered = fc.covered.len();
+                    let pct = covered as f64 / instr as f64 * 100.0;
+                    facts.push(NewFact {
+                        numerator: Some(covered as f64),
+                        denominator: Some(instr as f64),
+                        subject_kind: Some("file".into()),
+                        subject_ref: Some(format!("file:{path}")),
+                        path: Some(path.clone()),
+                        ..NewFact::new(measure.id, pct)
+                    });
+                }
+                if facts.is_empty() {
+                    return Ok(());
+                }
+                let branch = oxplow_git::detect_current_branch(&self.project_dir);
+                let snapshot_id =
+                    (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
+                let mut capture = NewMetricCapture::done(stream_val, "coverage", "coverage-report");
+                capture.thread_id = Some(thread.value());
+                capture.trigger = Some("on-report".into());
+                capture.snapshot_id = snapshot_id;
+                capture.closest_git_version = version.closest_git_version.clone();
+                capture.git_version_exact = version.git_version_exact;
+                capture.basis_ref = version.closest_git_version.clone();
+                capture.branch = branch;
+                self.facts.record_facts(capture, facts).await?;
+                Ok(())
+            }
+            .await;
+            if let Err(e) = dual {
+                tracing::warn!(error = %e, "failed to dual-write coverage facts");
+            }
+        }
+
         Ok(CoverageIngest::Stored {
             observation_id: 0,
             summary_pct: abs_pct,
@@ -3581,6 +3635,33 @@ mod tests {
             assert_eq!(s.source, "coverage-report");
             // Branch captured from the git_init'd repo (main/master).
             assert!(s.branch.is_some(), "capture branch tracked");
+
+            // Dual-written into the durable fact layer (epic tsk12): one
+            // `oxplow.coverage` fact for the report's single file, carrying the
+            // covered/instrumented counts so a module/repo roll-up re-derives
+            // Σcovered/Σinstrumented rather than averaging percentages.
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts
+                .get_measure("oxplow.coverage")
+                .await
+                .unwrap()
+                .expect("coverage measure seeded by V43");
+            let cov = facts.facts_for_measure(measure.id).await.unwrap();
+            assert_eq!(cov.len(), 1, "one coverage fact per file");
+            assert!(
+                (cov[0].value - 66.666).abs() < 0.01,
+                "value {}",
+                cov[0].value
+            );
+            assert_eq!(cov[0].numerator, Some(2.0));
+            assert_eq!(cov[0].denominator, Some(3.0));
+            assert_eq!(cov[0].subject_kind.as_deref(), Some("file"));
+            assert!(
+                cov[0].subject_ref.as_deref().unwrap().starts_with("file:"),
+                "subject_ref is file:<path>, got {:?}",
+                cov[0].subject_ref
+            );
+            assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
         }
 
         #[derive(serde::Deserialize)]
