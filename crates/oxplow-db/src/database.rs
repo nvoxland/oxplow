@@ -475,6 +475,13 @@ mod tests {
             "metric_run",
             "metric_sample",
             "metric_finding",
+            // V43 — the durable atomic fact layer (additive; the old tables above
+            // are dropped in a later cleanup once producers/reads move over).
+            "measure",
+            "dimension",
+            "subject",
+            "metric_capture",
+            "fact",
         ];
         // `effort_observation` was dropped in V39 (tsk215) — assert it's gone.
         let expected_absent = ["hook_event", "agent_status", "effort_observation"];

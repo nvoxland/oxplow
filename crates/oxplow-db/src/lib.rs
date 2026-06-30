@@ -11,6 +11,7 @@ pub mod attribution_store;
 pub mod comment_store;
 mod database;
 pub mod effort_store;
+pub mod fact_store;
 pub mod metric_store;
 pub mod observation_store;
 pub mod page_ref_projections;
@@ -40,6 +41,10 @@ pub use database::{Database, DbInitError};
 pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
+};
+pub use fact_store::{
+    Dimension, FactRow, Measure, MetricCapture, NewDimension, NewFact, NewMeasure,
+    NewMetricCapture, SqliteFactStore,
 };
 pub use metric_store::{
     EffortMetricDelta, MetricDefinition, MetricDimensionRollup, MetricFinding, MetricRun,
