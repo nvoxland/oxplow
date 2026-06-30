@@ -33,7 +33,16 @@ show the pencil — that's the consistent signal "this is for reading."
 
 - **`RichTextField.tsx`** — the surface component. Configures Tiptap
   with `StarterKit` + `Markdown` (round-trip) + `Placeholder` +
-  `MermaidBlock` + `InternalLink`. Debounced 300ms save while typing,
+  `MermaidBlock` + `InternalLink` + **GFM tables**
+  (`@tiptap/extension-table` + `-row`/`-header`/`-cell`, `resizable`,
+  block-only so they're off when `inlineOnly`). `tiptap-markdown` ships
+  the GFM table serializer and markdown-it parses tables, so adding the
+  standard table nodes is all the round-trip needs — without them the
+  always-on wiki editor flattened any `| … |` table into run-on text on
+  autosave. Editor-only table CSS (cell-selection overlay, column-resize
+  handle, `table-layout: fixed`) lives in `index.html` next to the
+  `.oxplow-md table` display styles (which the editor inherits via
+  `.oxplow-md`). Round-trip covered by `RichText/tableRoundTrip.test.ts`. Debounced 300ms save while typing,
   immediate commit on blur. The editor's outer `<div>` wears
   `.oxplow-rt-field` (hover tint + pencil reveal) and the inner
   ProseMirror element wears `.oxplow-md .oxplow-rt-editor` so prose

@@ -4,6 +4,10 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import Table from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableHeader from "@tiptap/extension-table-header";
+import TableCell from "@tiptap/extension-table-cell";
 import { Markdown } from "tiptap-markdown";
 import { Pencil } from "lucide-react";
 import { InternalLink } from "./InternalLink.js";
@@ -167,6 +171,13 @@ export function RichTextField({
       }),
       MermaidBlock,
       InternalLink,
+      // GFM tables (block content — off for inline-only fields). tiptap-markdown
+      // ships the GFM table serializer + markdown-it parses tables, so adding
+      // the standard table nodes is all the round-trip needs. Without these the
+      // editor flattens any table in a wiki page to run-on text on autosave.
+      ...(inlineOnly
+        ? []
+        : [Table.configure({ resizable: true }), TableRow, TableHeader, TableCell]),
       // Decorations only — opening is via the right-click menu, not click.
       CommentDecorations.configure({ onClickComment: null }),
       Placeholder.configure({ placeholder: placeholder ?? "" }),

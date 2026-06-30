@@ -352,6 +352,32 @@
       .oxplow-md tbody tr:nth-child(even) { background: var(--surface-app, #161a20); }
       .oxplow-md tbody tr:hover { background: var(--surface-tab-inactive, #2a313a); }
 
+      /* Tiptap table editing affordances (the .oxplow-md rules above style
+         the table itself; these add the editor-only bits). Resizable tables
+         use a colgroup, so fixed layout keeps the column widths honored. */
+      .oxplow-rt-editor .tableWrapper { overflow-x: auto; margin: 14px 0; }
+      .oxplow-rt-editor table { table-layout: fixed; width: 100%; }
+      .oxplow-rt-editor td, .oxplow-rt-editor th { position: relative; min-width: 3em; }
+      .oxplow-rt-editor .selectedCell:after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--accent-soft-bg, rgba(99, 102, 241, 0.18));
+        pointer-events: none;
+        z-index: 2;
+      }
+      .oxplow-rt-editor .column-resize-handle {
+        position: absolute;
+        right: -2px;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--accent, #6366f1);
+        pointer-events: none;
+        z-index: 3;
+      }
+      .oxplow-rt-editor.resize-cursor { cursor: col-resize; }
+
       /* Rich-text editor surface. The .ProseMirror element is what
          Tiptap renders into; we inherit the .oxplow-md prose styles
          and only add the editor-specific affordances (hover tint,
