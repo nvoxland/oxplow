@@ -290,12 +290,17 @@
       .oxplow-md li > p { margin: 0 0 0.4em; }
       .oxplow-md ul, .oxplow-md ol { padding-left: 1.5em; }
 
+      /* Inline code reads as a distinct chip. A translucent light overlay
+         (not a fixed surface tier) keeps it visible on EVERY background —
+         the page body, cards, and popovers are all near-identical darks, so
+         a flat `--surface-*` would vanish on a same-tier surface. Fenced
+         blocks reset this below (`.oxplow-md pre code`). */
       .oxplow-md code {
         font-family: var(--font-mono);
         font-size: 0.88em;
-        background: var(--surface-card);
-        border: 1px solid var(--border-subtle);
-        border-radius: 3px;
+        background: rgba(127, 153, 201, 0.16);
+        border: 1px solid var(--border-strong);
+        border-radius: 4px;
         padding: 0.05em 0.35em;
       }
       .oxplow-md pre {
