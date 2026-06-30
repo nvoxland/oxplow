@@ -11,7 +11,7 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
  * handler see `kind: "empty"` and no-op. Pass our schemes through
  * untouched and defer everything else to the default sanitizer.
  */
-const APP_SCHEMES = /^(file|dir|gitcommit):/i;
+const APP_SCHEMES = /^(file|dir|gitcommit|task):/i;
 function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
   return defaultUrlTransform(value);
@@ -20,9 +20,10 @@ import { useRowContextMenu } from "../useRowContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
+import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef } from "../../tabs/pageRefs.js";
 import { DISK, type FileVersion } from "../../file-version.js";
 import { useWikiTitle } from "../../wikiTitleCache.js";
+import { useTaskTitle } from "../../taskTitleCache.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -183,7 +184,8 @@ export type ParsedLink =
       version: import("../../file-version.js").FileVersion | null;
     }
   | { kind: "directory"; path: string }
-  | { kind: "git-commit"; sha: string };
+  | { kind: "git-commit"; sha: string }
+  | { kind: "task"; id: string };
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
@@ -219,6 +221,8 @@ function parsedLinkIconKind(kind: ParsedLink["kind"]): string | null {
       return "directory";
     case "git-commit":
       return "git-commit";
+    case "task":
+      return "task";
     case "external":
       return "external-url";
     default:
@@ -280,6 +284,11 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     if (!sha) return { kind: "empty" };
     return { kind: "git-commit", sha };
   }
+  if (rawHref.startsWith("task:")) {
+    const id = rawHref.slice("task:".length);
+    if (!id) return { kind: "empty" };
+    return { kind: "task", id };
+  }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
@@ -335,7 +344,7 @@ function collapseLinksOutsideInlineCode(text: string): string {
     // Then collapse `[label](url)` for our internal schemes — but
     // NOT `![alt](url)` (images).
     return unmangled.replace(
-      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit):[^)\s]+)\)/g,
+      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit|task):[^)\s]+)\)/g,
       (_match, lead: string, label: string, url: string) => {
         const collapsed = collapseInternalLink(label, url);
         return collapsed == null ? _match : `${lead}${collapsed}`;
@@ -363,6 +372,14 @@ function collapseInternalLink(label: string, url: string): string | null {
     // bare wikilink. Otherwise preserve it.
     const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
     return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
+  }
+  if (url.startsWith("task:")) {
+    const id = url.slice("task:".length);
+    if (!id) return null;
+    // Bare `[[tsk42]]` renders with the id as text (the title swap is a
+    // render-time overlay, not stored), so a label equal to the id
+    // collapses to the bare form.
+    return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
   }
   return null;
 }
@@ -436,6 +453,14 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
           return `[${dirDisplay}](dir:${dir})`;
         }
       }
+      // Task ref: `[[tsk<digits>]]` (the whole token is the task id). The
+      // rendered link text defaults to the token; the task title is swapped
+      // in at render time (WikiLinkSpan + useTaskTitle). Matches the backend
+      // ref extractor (refs.rs), which recognizes the same `tsk<digits>`
+      // form for backlinks.
+      if (/^tsk\d+$/i.test(target)) {
+        return `[${display}](task:${target})`;
+      }
       if (looksLikeFilePath(target)) {
         // The target may carry a `@<version>` segment; the file:
         // URL preserves it verbatim and parseMarkdownLink decodes it
@@ -459,27 +484,31 @@ function WikiLinkSpan({
   items,
   iconKind,
   internalSlug,
+  taskId,
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   items: MenuItem[];
   iconKind: string | null;
   internalSlug: string | null;
+  taskId: string | null;
 }) {
   const title = useWikiTitle(internalSlug);
+  const taskTitle = useTaskTitle(taskId);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
-  // The link text is the page title when:
-  //  - this is an internal wiki link, AND
-  //  - the rendered text equals the slug (i.e., authored as
-  //    `[[slug]]` with no `|label`), AND
-  //  - the cache resolved the slug to a real title.
-  // Otherwise preserve the original children verbatim — that
-  // includes author-supplied labels (`[[slug|Custom]]`) and
-  // unknown / not-yet-loaded slugs (fall back to the slug).
+  // The link text is swapped for the resolved title when the link was
+  // authored as a bare ref (the rendered text still equals the slug / id,
+  // i.e. no `|label`) and the cache resolved a real title. Author-supplied
+  // labels (`[[slug|Custom]]`) and unknown / not-yet-loaded refs fall back
+  // to the original children (the slug / id) verbatim.
   const childrenText = flattenChildrenText(children);
   const overrideText =
-    internalSlug && title && childrenText === internalSlug ? title : null;
+    internalSlug && title && childrenText === internalSlug
+      ? title
+      : taskId && taskTitle && childrenText === taskId
+        ? taskTitle
+        : null;
   return (
     <span
       style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
@@ -621,6 +650,13 @@ export function MarkdownView({
       onOpenCommit?.(parsed.sha);
       return;
     }
+    if (parsed.kind === "task") {
+      // Task links route through the page-nav chokepoint (present on wiki
+      // and task pages). No legacy callback fallback — tasks weren't a
+      // wikilink target before.
+      if (ctxNav) ctxNav.navigate(taskRef(parsed.id), { newTab });
+      return;
+    }
     // Internal (wiki) link
     if (ctxNav && !newTab) {
       ctxNav.navigate(wikiPageRef(parsed.slug), { newTab: false });
@@ -677,8 +713,18 @@ export function MarkdownView({
       items.push({ id: "copy-sha", label: "Copy SHA", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.sha).catch(() => {}); } });
       return items;
     }
+    if (parsed.kind === "task") {
+      const id = parsed.id;
+      const items: MenuItem[] = [];
+      if (ctxNav) {
+        items.push({ id: "open", label: "Open", enabled: true, run: () => ctxNav.navigate(taskRef(id), { newTab: false }) });
+        items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => ctxNav.navigate(taskRef(id), { newTab: true }) });
+      }
+      items.push({ id: "copy-id", label: "Copy task id", enabled: true, run: () => { void navigator.clipboard.writeText(id).catch(() => {}); } });
+      return items;
+    }
     return [];
-  }, [onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
+  }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
@@ -817,6 +863,7 @@ export function MarkdownView({
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
             const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
+            const taskId = parsed.kind === "task" ? parsed.id : null;
             return (
               <WikiLinkSpan
                 anchorProps={props}
@@ -824,6 +871,7 @@ export function MarkdownView({
                 items={items}
                 iconKind={iconKind}
                 internalSlug={internalSlug}
+                taskId={taskId}
               />
             );
           },

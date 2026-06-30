@@ -2,7 +2,7 @@ import Link from "@tiptap/extension-link";
 
 /**
  * Tiptap Link mark extended to permit our internal URL schemes
- * (`file:`, `dir:`, `gitcommit:`). Tiptap's default `Link` allowlists
+ * (`file:`, `dir:`, `gitcommit:`, `task:`). Tiptap's default `Link` allowlists
  * http/https/mailto/ftp; without this extension our schemes either
  * get stripped on parse or fail the click-validation in the standard
  * link plugin.
@@ -24,7 +24,7 @@ import Link from "@tiptap/extension-link";
  * name match against its internal `link` extension and invokes
  * `setup(md)` at parse time.
  */
-const INTERNAL_PROTOCOL_RE = /^(file|dir|gitcommit):/i;
+const INTERNAL_PROTOCOL_RE = /^(file|dir|gitcommit|task):/i;
 
 export const InternalLink = Link.extend({
   // Allow our schemes through the URL sanitizer.
@@ -33,7 +33,7 @@ export const InternalLink = Link.extend({
       ...this.parent?.(),
       openOnClick: false,
       autolink: false,
-      protocols: ["file", "dir", "gitcommit"],
+      protocols: ["file", "dir", "gitcommit", "task"],
     };
   },
   addStorage() {

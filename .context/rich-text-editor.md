@@ -50,7 +50,7 @@ show the pencil — that's the consistent signal "this is for reading."
   editable `<pre><code>` when the caret enters. Round-trips as a
   ` ```mermaid …``` ` fenced code block, so storage is unchanged.
 - **`InternalLink.ts`** — extends Tiptap's standard `Link` mark to
-  allow `file:`, `dir:`, `gitcommit:` URL schemes through the URL
+  allow `file:`, `dir:`, `gitcommit:`, `task:` URL schemes through the URL
   sanitizer. `openOnClick: false` — click handling is owned by the
   React layer: the `RichTextField` wrapper's `onClick` /
   `onAuxClick` intercepts clicks on `<a>` descendants, parses the
@@ -82,12 +82,21 @@ the serialized form.
 ## Wikilink round-trip
 
 Wiki pages use `[[ ]]` syntax extensively (`[[path/to/file]]`,
-`[[dir:src/components|the folder]]`, `[[git:<sha>]]`, etc.).
+`[[dir:src/components|the folder]]`, `[[git:<sha>]]`, `[[tsk<id>]]`, etc.).
 `MarkdownView`'s `preprocessWikilinks` converts these to standard
 markdown links (`[label](file:path)`) for read-rendering; the new
 `postprocessWikilinks` helper is the inverse — it collapses standard
 markdown links carrying our internal schemes (`file:`, `dir:`,
-`gitcommit:`) back into `[[ ]]` form on save.
+`gitcommit:`, `task:`) back into `[[ ]]` form on save.
+
+**Task wikilinks** (`[[tsk<id>]]`, matching the backend ref extractor in
+`crates/oxplow-domain/src/refs.rs`) route to a `task:<id>` internal link
+and **resolve to the task's title** at render time via `useTaskTitle`
+(`apps/desktop/src/taskTitleCache.ts`, a lazy per-id sibling of
+`wikiTitleCache`) — same display-swap rule wiki slugs use (bare `[[tsk42]]`
+shows the title; `[[tsk42|label]]` keeps the label). Click routes through
+`taskRef` via the page-nav chokepoint. Tasks are the only object-id scheme
+wired so far; findings/etc. would follow the same pattern.
 
 `WikiPageTab` applies `preprocessWikilinks` to the body before
 handing it to `RichTextField`, and applies `postprocessWikilinks` to

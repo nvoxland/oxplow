@@ -286,8 +286,47 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[src/foo.ts|the helper]] in the codebase",
     "see [[dir:src/components]] for buttons",
     "see [[dir:src/components|the folder]] for buttons",
+    "see [[tsk42]] for the work",
+    "see [[tsk42|fix the parser]] for the work",
   ];
   for (const sample of samples) {
     expect(postprocessWikilinks(preprocessWikilinks(sample))).toBe(sample);
   }
+});
+
+// Task wikilinks: `[[tsk<id>]]` → `task:` scheme; the renderer swaps the
+// `tsk<id>` token for the task title at display time. The backend ref
+// extractor (refs.rs) already recognizes the same form for backlinks.
+
+test("preprocessWikilinks: task ref [[tsk42]] rewrites to task: href", () => {
+  expect(preprocessWikilinks("see [[tsk42]] for context"))
+    .toBe("see [tsk42](task:tsk42) for context");
+});
+
+test("preprocessWikilinks: task ref with custom display label", () => {
+  expect(preprocessWikilinks("[[tsk42|fix the parser]]"))
+    .toBe("[fix the parser](task:tsk42)");
+});
+
+test("preprocessWikilinks: non-numeric tsk token is treated as a wiki slug", () => {
+  // Only `tsk<digits>` is a task ref; `tsk-notes` is an ordinary slug.
+  expect(preprocessWikilinks("[[tsk-notes]]")).toBe("[tsk-notes](tsk-notes)");
+});
+
+test("parseMarkdownLink: task: scheme", () => {
+  expect(parseMarkdownLink("task:tsk42")).toEqual({ kind: "task", id: "tsk42" });
+});
+
+test("parseMarkdownLink: task: with empty target", () => {
+  expect(parseMarkdownLink("task:")).toEqual({ kind: "empty" });
+});
+
+test("postprocessWikilinks: task link with matching label collapses to bare wikilink", () => {
+  expect(postprocessWikilinks("see [tsk42](task:tsk42) here"))
+    .toBe("see [[tsk42]] here");
+});
+
+test("postprocessWikilinks: task link with distinct label preserves the label", () => {
+  expect(postprocessWikilinks("see [fix the parser](task:tsk42) here"))
+    .toBe("see [[tsk42|fix the parser]] here");
 });

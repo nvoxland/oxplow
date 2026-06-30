@@ -85,12 +85,20 @@ Files referenced: [[src/foo.ts]], [[src/bar/baz.ts]]
 - Backticks stay reserved for code-ish things (identifiers, types,
   shell commands, config keys). If it's a clickable path, wikilink it.
 
-Wikilink target shapes — `[[src/foo.ts]]` file (`:42` for a line,
-`|label` for custom text), `[[dir:src/components]]` directory,
-`[[abc1234]]`/`[[git:abc1234]]` commit, `[[some-other-note]]` wiki page
-by slug. Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]]
-calls `onDrop` after validating the target; [[src/ui/index.tsx]] wires
-it up."
+**Reference other oxplow objects by their id as a wikilink — never as
+plain text.** The renderer resolves the id to the object's title and makes
+it clickable; the backend records the reference as a backlink. Target
+shapes:
+
+- `[[src/foo.ts]]` file (`:42` for a line, `|label` for custom text)
+- `[[dir:src/components]]` directory
+- `[[abc1234]]` / `[[git:abc1234]]` commit
+- `[[tsk42]]` **task** — renders as the task's title, links to the task
+- `[[some-other-note]]` wiki page by slug
+
+Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]] calls
+`onDrop` after validating the target; this was fixed in [[tsk42]] and
+wired up by [[src/ui/index.tsx]]."
 
 ## Write mechanics
 
