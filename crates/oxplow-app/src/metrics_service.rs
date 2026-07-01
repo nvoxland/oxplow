@@ -21,7 +21,7 @@ use oxplow_collect_plugin::{builtin_metrics, Collector, CollectorInput, Collecto
 use oxplow_config::{
     global_config_dir, load_global_dimension_entries, load_global_measure_entries,
     load_global_metric_entries, resolve_dimensions, resolve_measures, resolve_metrics,
-    MetricComputeConfig, MetricEntry, OxplowConfig, ResolvedMetric,
+    DimensionEntry, MeasureEntry, MetricComputeConfig, MetricEntry, OxplowConfig, ResolvedMetric,
 };
 use oxplow_db::{
     NewDimension, NewMeasure, NewMetricDefinition, NewMetricRun, NewMetricSample, SnapshotStorage,
@@ -566,6 +566,133 @@ impl MetricsService {
         Ok(returned_path)
     }
 
+    /// Scaffold a custom **measure** (a new fact TYPE) — epic tsk12, E. Appends a
+    /// `measures:` entry to `.oxplow/project.yaml` (project scope, default) or
+    /// writes a shareable `<global>/measures/<slug>.yaml` (global scope), then
+    /// reseeds the catalog. Returns the created measure key. A global measure is
+    /// active in every project automatically (`seed_catalog` loads global +
+    /// project), so — unlike a metric — no project `use:` opt-in is written.
+    pub async fn scaffold_measure(
+        &self,
+        key: &str,
+        title: Option<String>,
+        unit: Option<String>,
+        subject_kind: Option<String>,
+        temporal_semantics: Option<String>,
+        scope: Option<String>,
+    ) -> Result<String, String> {
+        let key = key.trim();
+        if key.is_empty() || !key.contains('.') {
+            return Err("key must be namespaced, e.g. acme.api_latency".to_string());
+        }
+        if key.starts_with("oxplow.") {
+            return Err("`oxplow.` is reserved for built-in measures".to_string());
+        }
+        let entry = MeasureEntry {
+            key: Some(key.to_string()),
+            title: title.filter(|t| !t.is_empty()),
+            unit: unit.filter(|u| !u.is_empty()),
+            subject_kind: subject_kind.filter(|s| !s.is_empty()),
+            temporal_semantics: temporal_semantics.filter(|s| !s.is_empty()),
+            component_role: None,
+            description: None,
+        };
+        if matches!(scope.as_deref(), Some("global")) {
+            let gdir = self
+                .effective_global_dir()
+                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
+            if load_global_measure_entries(&gdir)
+                .iter()
+                .any(|e| e.key.as_deref() == Some(key))
+            {
+                return Err(format!("global measure `{key}` already exists"));
+            }
+            let slug = slugify(key);
+            oxplow_config::write_global_measures_file(
+                &gdir.join("measures").join(format!("{slug}.yaml")),
+                &[entry],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            if cfg.measures.iter().any(|e| e.key.as_deref() == Some(key)) {
+                return Err(format!(
+                    "measure `{key}` already exists in .oxplow/project.yaml"
+                ));
+            }
+            cfg.measures.push(entry);
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_catalog().await;
+        Ok(key.to_string())
+    }
+
+    /// Scaffold a custom **dimension** (a new conformed slice axis) — epic tsk12,
+    /// E. Analogous to [`Self::scaffold_measure`]: appends a `dimensions:` entry
+    /// (project) or writes `<global>/dimensions/<slug>.yaml` (global), reseeds,
+    /// and returns the created key.
+    pub async fn scaffold_dimension(
+        &self,
+        key: &str,
+        label: Option<String>,
+        value_type: Option<String>,
+        scope: Option<String>,
+    ) -> Result<String, String> {
+        let key = key.trim();
+        if key.is_empty() || !key.contains('.') {
+            return Err("key must be namespaced, e.g. acme.license".to_string());
+        }
+        if key.starts_with("oxplow.") {
+            return Err("`oxplow.` is reserved for built-in dimensions".to_string());
+        }
+        let entry = DimensionEntry {
+            key: Some(key.to_string()),
+            label: label.filter(|l| !l.is_empty()),
+            value_type: value_type.filter(|v| !v.is_empty()),
+            subject_kind: None,
+            vocabulary: vec![],
+            promote: false,
+        };
+        if matches!(scope.as_deref(), Some("global")) {
+            let gdir = self
+                .effective_global_dir()
+                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
+            if load_global_dimension_entries(&gdir)
+                .iter()
+                .any(|e| e.key.as_deref() == Some(key))
+            {
+                return Err(format!("global dimension `{key}` already exists"));
+            }
+            let slug = slugify(key);
+            oxplow_config::write_global_dimensions_file(
+                &gdir.join("dimensions").join(format!("{slug}.yaml")),
+                &[entry],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            if cfg.dimensions.iter().any(|e| e.key.as_deref() == Some(key)) {
+                return Err(format!(
+                    "dimension `{key}` already exists in .oxplow/project.yaml"
+                ));
+            }
+            cfg.dimensions.push(entry);
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_catalog().await;
+        Ok(key.to_string())
+    }
+
     /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
     /// gauges when a snapshot batch lands. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
@@ -991,6 +1118,14 @@ fn builtin_collector(key: &str) -> Option<Collector> {
 /// A working tree-derived gauge (counts TODO/FIXME markers across the glob, so
 /// it charts immediately and is language-agnostic) with an `ast_query` example
 /// in a comment for the author to switch to.
+/// A filesystem-safe slug from a namespaced key (non-alphanumerics → `_`), for
+/// naming the global scaffold's `<slug>.yaml` file.
+fn slugify(key: &str) -> String {
+    key.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 fn starter_metric_script(key: &str, glob: &str, language: Option<&str>) -> String {
     let lang = language.unwrap_or("rust");
     format!(
@@ -1308,6 +1443,78 @@ def transform(input):
             .expect("dimension seeded");
         assert_eq!(ep.scope, "project");
         assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
+    }
+
+    #[tokio::test]
+    async fn scaffold_measure_writes_config_and_seeds_catalog() {
+        let (svc, dir) = fixture().await;
+        let key = svc
+            .metrics
+            .scaffold_measure(
+                "acme.api_latency",
+                Some("API latency".into()),
+                Some("ms".into()),
+                Some("endpoint".into()),
+                Some("non-additive".into()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(key, "acme.api_latency");
+        // Persisted to project.yaml AND seeded into the catalog (scaffold reseeds).
+        let raw = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert!(raw.contains("acme.api_latency"), "got:\n{raw}");
+        let m = svc
+            .fact_store
+            .get_measure("acme.api_latency")
+            .await
+            .unwrap()
+            .expect("seeded");
+        assert_eq!(m.unit.as_deref(), Some("ms"));
+        assert_eq!(m.temporal_semantics, "non-additive");
+        // Reserved namespace + duplicate both rejected.
+        assert!(svc
+            .metrics
+            .scaffold_measure("oxplow.x", None, None, None, None, None)
+            .await
+            .is_err());
+        assert!(svc
+            .metrics
+            .scaffold_measure("acme.api_latency", None, None, None, None, None)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn scaffold_dimension_writes_config_and_seeds_catalog() {
+        let (svc, dir) = fixture().await;
+        let key = svc
+            .metrics
+            .scaffold_dimension(
+                "acme.license",
+                Some("License".into()),
+                Some("categorical".into()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(key, "acme.license");
+        let raw = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert!(raw.contains("acme.license"), "got:\n{raw}");
+        let dims = svc.fact_store.list_dimensions().await.unwrap();
+        assert!(dims
+            .iter()
+            .any(|d| d.key == "acme.license" && d.scope == "project"));
+        assert!(svc
+            .metrics
+            .scaffold_dimension("oxplow.x", None, None, None)
+            .await
+            .is_err());
+        assert!(svc
+            .metrics
+            .scaffold_dimension("acme.license", None, None, None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

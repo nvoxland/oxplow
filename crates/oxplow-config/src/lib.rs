@@ -866,6 +866,43 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
     Ok(())
 }
 
+/// Write a **global** measures manifest (`global_config_dir()/measures/<name>.yaml`)
+/// — a clean `measures:` doc. Creates parent dirs. Loaded by
+/// [`load_global_measure_entries`]; used by the "New measure" scaffold at global
+/// scope (epic tsk12, E).
+pub fn write_global_measures_file(
+    path: &Path,
+    entries: &[MeasureEntry],
+) -> Result<(), ConfigError> {
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(measure_entry_to_yaml).collect();
+    let mut doc = serde_yaml::Mapping::new();
+    doc.insert("measures".into(), serde_yaml::Value::Sequence(seq));
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
+/// Write a **global** dimensions manifest
+/// (`global_config_dir()/dimensions/<name>.yaml`). Loaded by
+/// [`load_global_dimension_entries`]; used by the "New dimension" scaffold.
+pub fn write_global_dimensions_file(
+    path: &Path,
+    entries: &[DimensionEntry],
+) -> Result<(), ConfigError> {
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(dimension_entry_to_yaml).collect();
+    let mut doc = serde_yaml::Mapping::new();
+    doc.insert("dimensions".into(), serde_yaml::Value::Sequence(seq));
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
 /// Serialize one [`MetricEntry`] to a YAML mapping, omitting unset fields so a
 /// hand-edited `metrics:` block stays minimal across UI-driven writes (mirrors
 /// the per-field plugin serialization above).
