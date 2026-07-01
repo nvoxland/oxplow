@@ -157,7 +157,24 @@ pub async fn run_duplication_scan_at(
     };
     match run_duplication_scan_scoped(source, filter, workspace_filter, None, None).await {
         Ok(findings) => {
+            // Dual-write duplication facts beside the code_quality store (epic
+            // tsk12, B). Resolve the built-in `oxplow.duplicate_lines` measure
+            // once; build a fact per duplicate block alongside the finding rows,
+            // then persist them under a single capture after the scan is done —
+            // best-effort (never fails the scan).
+            let dup_measure_id = svc
+                .fact_store
+                .get_measure("oxplow.duplicate_lines")
+                .await
+                .ok()
+                .flatten()
+                .map(|m| m.id);
+            let mut dup_facts: Vec<oxplow_db::NewFact> = Vec::new();
+
             for f in findings {
+                if let Some(mid) = dup_measure_id {
+                    dup_facts.extend(duplication_fact(&f, mid));
+                }
                 svc.code_quality_store
                     .append_finding(
                         scan_id,
@@ -177,6 +194,14 @@ pub async fn run_duplication_scan_at(
             svc.code_quality_store
                 .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
                 .await?;
+
+            if !dup_facts.is_empty() {
+                if let Err(e) =
+                    write_duplication_facts(svc, dup_facts, &kind_tag, value_str.as_deref()).await
+                {
+                    tracing::warn!(error = %e, scan_id, "duplication: fact dual-write failed");
+                }
+            }
             svc.events.emit(OxplowEvent::CodeQualityScanned {
                 stream_id: None,
                 scan_id,
@@ -202,6 +227,59 @@ pub async fn run_duplication_scan_at(
             Err(IpcError::internal(e.to_string()))
         }
     }
+}
+
+/// Map one duplication finding to an `oxplow.duplicate_lines` fact (epic tsk12,
+/// B): value = the duplicated line count, subject = the block's `path:start-end`,
+/// `path`/`line` the coordinate, the peer side carried verbatim in `detail`.
+/// Only `duplicate-block` findings become facts (the sole kind the scan emits).
+fn duplication_fact(
+    f: &oxplow_app::code_quality_runner::CodeQualityFinding,
+    measure_id: i64,
+) -> Option<oxplow_db::NewFact> {
+    if f.kind != "duplicate-block" {
+        return None;
+    }
+    Some(oxplow_db::NewFact {
+        subject_kind: Some("block".into()),
+        subject_ref: Some(format!("{}:{}-{}", f.path, f.start_line, f.end_line)),
+        path: Some(f.path.clone()),
+        line: Some(f.start_line as i64),
+        detail: f.extra_json.clone(),
+        ..oxplow_db::NewFact::new(measure_id, f.metric_value)
+    })
+}
+
+/// Persist duplication facts under one capture (epic tsk12, B). A duplication
+/// scan has **no natural stream**, so the capture is stamped with the PRIMARY
+/// stream (the scan runs over the primary worktree's tree); `basis_ref` + git
+/// version carry the scanned tree version so the facts stay interpretable after
+/// the fact. Best-effort — the caller logs on error and never fails the scan.
+async fn write_duplication_facts(
+    svc: &Services,
+    facts: Vec<oxplow_db::NewFact>,
+    kind_tag: &str,
+    value: Option<&str>,
+) -> Result<(), IpcError> {
+    let streams = svc.streams.list_streams().await?;
+    let Some(primary) = streams
+        .iter()
+        .find(|s| matches!(s.kind, oxplow_domain::StreamKind::Primary))
+    else {
+        return Ok(()); // no primary stream yet — nothing to attribute to
+    };
+    let basis = match value {
+        Some(v) => format!("{kind_tag}:{v}"),
+        None => kind_tag.to_string(),
+    };
+    let capture = oxplow_db::NewMetricCapture {
+        basis_ref: Some(basis),
+        closest_git_version: value.map(str::to_string),
+        trigger: Some("manual".into()),
+        ..oxplow_db::NewMetricCapture::done(primary.id.value(), "duplication", "duplication")
+    };
+    svc.fact_store.record_facts(capture, facts).await?;
+    Ok(())
 }
 
 /// Look up the most recent successful scan for `(tool, treeVersion,
@@ -678,6 +756,68 @@ mod tests {
         // We still emit empty sides so the caller can see "we looked".
         assert_eq!(result.sides.len(), 2);
         assert!(result.sides[0].functions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn duplication_scan_dual_writes_facts() {
+        let (svc, dir) = crate::test_support::services();
+        svc.streams.ensure_primary().await.unwrap();
+        // Two files sharing a >=10-line identical block → a duplicate-block finding
+        // (production DupOptions::default().n == 10).
+        let body = "pub fn compute(input: &[i64]) -> i64 {\n\
+        \x20   let mut total = 0;\n\
+        \x20   for value in input {\n\
+        \x20       if *value > 0 {\n\
+        \x20           total += *value;\n\
+        \x20       } else {\n\
+        \x20           total -= *value;\n\
+        \x20       }\n\
+        \x20   }\n\
+        \x20   total * 2 + 1\n\
+        }\n";
+        std::fs::write(dir.path().join("a.rs"), body).unwrap();
+        std::fs::write(dir.path().join("b.rs"), body).unwrap();
+
+        let scan_id = run_duplication_scan_at(
+            &svc,
+            TreeVersion::Disk,
+            FileFilterSpec::All,
+            "project".into(),
+        )
+        .await
+        .unwrap();
+        assert!(scan_id > 0);
+
+        // The scan's duplicate blocks are mirrored as oxplow.duplicate_lines facts.
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.duplicate_lines")
+            .await
+            .unwrap()
+            .expect("built-in measure seeded");
+        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert!(!facts.is_empty(), "duplication facts written");
+        assert!(
+            facts.iter().all(|f| f.value >= 10.0),
+            "value is the duplicated line count (>= min block size), got {:?}",
+            facts.iter().map(|f| f.value).collect::<Vec<_>>()
+        );
+        assert!(facts
+            .iter()
+            .all(|f| f.subject_kind.as_deref() == Some("block")));
+        assert!(
+            facts.iter().all(|f| f.detail.is_some()),
+            "peer side carried in detail"
+        );
+        // The capture is stamped with the primary stream + tree basis_ref.
+        let cap = svc
+            .fact_store
+            .get_capture(facts[0].capture_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cap.producer, "duplication");
+        assert!(cap.basis_ref.is_some());
     }
 
     #[tokio::test]

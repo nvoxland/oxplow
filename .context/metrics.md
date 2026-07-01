@@ -111,13 +111,23 @@ tree stays green through the migration. Landed:
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`) |
+| duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref` |
 
 Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 `metric_engine: MetricEngine`; `TaskService`/`CollectionService`/
-`TokenUsageService` carry the fact store. Still to come (see the epic's tasks):
-the **code-gauge unbake** (per-function complexity/length/param + marker facts;
-count-over-threshold becomes a metric spec — the design-heavy keystone), the
-deferred **duplication + nudge** producers.
+`TokenUsageService` carry the fact store; the duplication write lives in the rpc
+layer (`svc.fact_store`). Still to come (see the epic's tasks): the **code-gauge
+unbake** (per-function complexity/length/param + marker facts; count-over-threshold
+becomes a metric spec — the design-heavy keystone).
+
+**Decision — nudges stay OUT of the substrate (tsk24).** The advisory nudges
+`collection.rs` fires (report-less, coverage-target, commit-hygiene,
+gauge-crossing) are *operational events* — reactions to state × policy, not
+measurements of code state — and are already durable in `agent_nudge`. Modeling
+them as facts (an `oxplow.nudge` event measure + run-less captures) would dilute
+"facts about the code" for marginal telemetry value, so they are intentionally
+**not** dual-written. Revisit only if nudge-rate-over-time analytics become a
+real ask.
 
 ### Read surface (MCP, additive)
 
