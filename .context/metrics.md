@@ -163,6 +163,23 @@ tree stays green through the migration. Landed:
 | code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
 | per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 
+**Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The
+read-side effort attribution (T-D) resolves an effort's facts from *its captures*
+(`captures_for_effort`). So the effort-scoped producers stamp `capture.effort_id`
+at write time using the **same** resolution the run-ledger auto-claim uses —
+`CollectionService::resolve_owning_effort(thread, task)`: a named task is
+exact-or-nothing (`find_open_for_task`); an unnamed one claims only the single
+open effort (`find_single_open_for_thread`), else stays null (deferred to
+reconcile). Stamped by: **tokens/turns** (`token_usage.rs`, the effort resolved
+once in `on_stop` and threaded to the capture), **tests / lint-hits / coverage /
+nudges** (`collection.rs`), and **effort-lifecycle** (`task_service.rs`, which
+knows its exact effort). The **snapshot code-gauge** captures are deliberately
+NOT stamped — they're whole-tree scans whose baseline predates the effort, so
+T-D's File family attributes them by *claimed files × time window*, not by
+`effort_id`. `auto_attribute_run` now composes `resolve_owning_effort` +
+`claim_run` (the `run:<id>` ledger write is unchanged) so the run claim and the
+capture stamp always agree.
+
 **Code-gauge unbake (tsk23) — the keystone, and the one non-mechanical producer.**
 A gauge's `MetricReport` gained a third channel beside `samples` (baked headline)
 and `findings` (offenders drill-in): `facts: [GaugeFact { measure, value, subject?,

@@ -531,6 +531,12 @@ impl CollectionService {
             )
             .await;
 
+        // Resolve the owning effort ONCE — used to stamp the fact-capture below
+        // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
+        // the ledger at the tail. Same resolution the auto-claim uses.
+        let owning = self.resolve_owning_effort(thread, task).await;
+        let owning_val = owning.as_ref().map(|e| e.id.value());
+
         // Dual-write per-test-case facts into the durable fact layer (epic
         // tsk12): one fact on `oxplow.test_case` per case, the pass/fail/skip
         // status carried as the `oxplow.status` dimension (and the suite as
@@ -581,6 +587,7 @@ impl CollectionService {
                 capture.trigger = Some("on-report".into());
                 capture.branch = branch;
                 capture.snapshot_id = snapshot_id;
+                capture.effort_id = owning_val;
                 self.facts.record_facts(capture, facts).await?;
                 Ok(())
             }
@@ -590,14 +597,11 @@ impl CollectionService {
             }
         }
         let _ = (stream_id, payload);
-        // ATTRIBUTE via the unified run ledger, then refresh the panel for the
-        // effort it landed on (if any). Observe-always: the run is already
-        // recorded above regardless of effort.
-        let attribute_to = match run_id {
-            Some(rid) => self.auto_attribute_run(thread, rid, task).await,
-            None => None,
-        };
-        if let Some(effort) = attribute_to.as_ref() {
+        // ATTRIBUTE via the unified run ledger (the effort resolved above), then
+        // refresh the panel for the effort it landed on (if any). Observe-always:
+        // the run is already recorded above regardless of effort.
+        if let (Some(rid), Some(effort)) = (run_id, owning.as_ref()) {
+            self.claim_run(effort, rid).await;
             self.emit(thread, effort);
         }
         Ok(run_id.map(|_| 0))
@@ -628,9 +632,26 @@ impl CollectionService {
         run_id: i64,
         task: Option<TaskId>,
     ) -> Option<TaskEffort> {
-        // A named task is exact-or-nothing — never fall back to the single-open
-        // thread guess, which could claim a DIFFERENT task's effort.
-        let attribute_to = match task {
+        let attribute_to = self.resolve_owning_effort(thread, task).await;
+        if let Some(effort) = attribute_to.as_ref() {
+            self.claim_run(effort, run_id).await;
+        }
+        attribute_to
+    }
+
+    /// The effort a just-produced run/capture belongs to, by the SAME
+    /// exact-or-nothing (a named task's open effort) / single-open (unnamed)
+    /// resolution the run auto-claim uses (tsk271). A named task is
+    /// exact-or-nothing — never the single-open thread guess, which could claim a
+    /// DIFFERENT task's effort. Used both to claim the run in the ledger AND to
+    /// stamp `metric_capture.effort_id`, so the fact-attribution read
+    /// (`captures_for_effort`, T-D) attributes the producer's facts (tsk37).
+    async fn resolve_owning_effort(
+        &self,
+        thread: &ThreadId,
+        task: Option<TaskId>,
+    ) -> Option<TaskEffort> {
+        match task {
             Some(tid) => self.efforts.find_open_for_task(tid).await.ok().flatten(),
             None => self
                 .efforts
@@ -638,20 +659,22 @@ impl CollectionService {
                 .await
                 .ok()
                 .flatten(),
-        };
-        if let Some(effort) = attribute_to.as_ref() {
-            let _ = self
-                .attribution
-                .set_state(
-                    &effort.id,
-                    "run",
-                    &format!("run:{run_id}"),
-                    STATE_CLAIMED,
-                    None,
-                )
-                .await;
         }
-        attribute_to
+    }
+
+    /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
+    /// ledger write error never fails the host path).
+    async fn claim_run(&self, effort: &TaskEffort, run_id: i64) {
+        let _ = self
+            .attribution
+            .set_state(
+                &effort.id,
+                "run",
+                &format!("run:{run_id}"),
+                STATE_CLAIMED,
+                None,
+            )
+            .await;
     }
 
     /// Ingest a SINGLE coverage report (the explicit MCP path). Uses the
@@ -1149,6 +1172,13 @@ impl CollectionService {
                             ..NewFact::new(measure.id, 1.0)
                         });
                     }
+                    // Stamp the owning effort (single-open, matching the run
+                    // auto-claim below) so `captures_for_effort` attributes these
+                    // lint facts (tsk37).
+                    let owning_val = self
+                        .resolve_owning_effort(thread, None)
+                        .await
+                        .map(|e| e.id.value());
                     let mut capture =
                         NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
                     capture.thread_id = Some(thread.value());
@@ -1157,6 +1187,7 @@ impl CollectionService {
                     capture.closest_git_version = git_version.clone();
                     capture.git_version_exact = git_version_exact;
                     capture.branch = branch.clone();
+                    capture.effort_id = owning_val;
                     self.facts.record_facts(capture, facts).await?;
                     Ok(())
                 }
@@ -1227,6 +1258,9 @@ impl CollectionService {
         if let Some(e) = attribute_to.as_ref() {
             self.emit(thread, e);
         }
+        // The effort resolved above stamps the coverage fact-capture too, so
+        // `captures_for_effort` attributes it (tsk37).
+        let owning_val = attribute_to.as_ref().map(|e| e.id.value());
 
         // Dual-write per-file coverage facts into the durable fact layer (epic
         // tsk12): one fact on `oxplow.coverage` per file, value = its line-%,
@@ -1272,6 +1306,7 @@ impl CollectionService {
                 capture.git_version_exact = version.git_version_exact;
                 capture.basis_ref = version.closest_git_version.clone();
                 capture.branch = branch;
+                capture.effort_id = owning_val;
                 self.facts.record_facts(capture, facts).await?;
                 Ok(())
             }
@@ -1593,10 +1628,15 @@ impl CollectionService {
                     dims_json: Some(format!("{{\"kind\":\"{kind}\"}}")),
                     ..NewFact::new(measure.id, 1.0)
                 };
+                let owning_val = self
+                    .resolve_owning_effort(thread, None)
+                    .await
+                    .map(|e| e.id.value());
                 let mut capture = NewMetricCapture::done(stream_val, "nudges", "nudges");
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
                 capture.branch = branch;
+                capture.effort_id = owning_val;
                 self.facts.record_facts(capture, vec![fact]).await?;
             }
             Ok::<(), DomainError>(())
@@ -3891,6 +3931,67 @@ mod tests {
                     "{key}: Count(oxplow.test_case) by status == baked count",
                 );
             }
+        }
+
+        #[tokio::test]
+        async fn record_test_run_stamps_test_case_capture_with_the_open_effort() {
+            // tsk37: the on-report test producer stamps its fact-capture with the
+            // owning effort (the harness opens one on the thread), so
+            // `captures_for_effort` — the T-D fact-attribution read — attributes the
+            // test facts. Same resolution the run auto-claim uses.
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let report = TestReport {
+                suites: vec![TestSuite {
+                    name: "oxplow-app".into(),
+                    cases: vec![TestCase {
+                        classname: "mod".into(),
+                        name: "t1".into(),
+                        status: TestStatus::Passed,
+                        time_ms: Some(3),
+                    }],
+                }],
+            };
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    Some(&report),
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let caps = facts.captures_for_effort(eid.value()).await.unwrap();
+            let test_cap = caps
+                .iter()
+                .find(|c| c.producer == "tests")
+                .expect("the test capture is attributed to the open effort");
+            assert_eq!(test_cap.effort_id, Some(eid.value()));
+            // Its facts are reachable through the fact-attribution read.
+            let measure = facts
+                .get_measure("oxplow.test_case")
+                .await
+                .unwrap()
+                .unwrap();
+            let scoped = facts
+                .facts_for_captures(measure.id, vec![test_cap.id])
+                .await
+                .unwrap();
+            assert_eq!(
+                scoped.len(),
+                1,
+                "the one test case, attributed to the effort"
+            );
         }
 
         #[tokio::test]

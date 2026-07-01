@@ -375,11 +375,11 @@ impl TokenUsageService {
         // Attribute tokens to the effort only when unambiguous; under parallel
         // sub-agents (two open efforts) the turn isn't a single effort's, so it
         // stays unattributed rather than guessing (tsk263).
-        let effort_id = self
-            .efforts
-            .find_single_open_for_thread(thread)
-            .await?
-            .map(|e| e.id.to_string());
+        let open_effort = self.efforts.find_single_open_for_thread(thread).await?;
+        let effort_id = open_effort.as_ref().map(|e| e.id.to_string());
+        // The i64 form stamps the fact-capture so `captures_for_effort` (the T-D
+        // fact-attribution read) attributes the token facts (tsk37).
+        let effort_val = open_effort.as_ref().map(|e| e.id.value());
 
         // One row per turn — each carrying its opening prompt, model, and the
         // usage of the assistant messages that answered it (tsk143). While we
@@ -424,7 +424,7 @@ impl TokenUsageService {
             effort_id,
         });
         // Project token samples into the unified substrate (best-effort).
-        self.project_token_metrics(thread, &stream_id, &by_model)
+        self.project_token_metrics(thread, &stream_id, &by_model, effort_val)
             .await;
         Ok(last_id)
     }
@@ -437,6 +437,7 @@ impl TokenUsageService {
         thread: &ThreadId,
         stream_id: &str,
         by_model: &std::collections::HashMap<String, TokenAgg>,
+        effort_val: Option<i64>,
     ) {
         if by_model.is_empty() {
             return;
@@ -445,7 +446,7 @@ impl TokenUsageService {
             return;
         };
         if let Err(e) = self
-            .record_token_metrics(thread, stream_val, by_model)
+            .record_token_metrics(thread, stream_val, by_model, effort_val)
             .await
         {
             tracing::warn!(error = %e, "failed to project token usage into metric substrate");
@@ -461,6 +462,7 @@ impl TokenUsageService {
         thread: &ThreadId,
         stream_val: i64,
         by_model: &std::collections::HashMap<String, TokenAgg>,
+        effort_val: Option<i64>,
     ) -> Result<(), DomainError> {
         // Definitions come from the shared producer registry (tsk287) so the
         // Catalog can't drift from what's emitted here.
@@ -546,6 +548,7 @@ impl TokenUsageService {
                 let mut capture = NewMetricCapture::done(stream_val, "token-parse", "token-parse");
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
+                capture.effort_id = effort_val;
                 self.facts.record_facts(capture, facts).await?;
             }
         }
@@ -1061,5 +1064,99 @@ mod tests {
                 "{key}: spec headline over facts == baked total",
             );
         }
+    }
+
+    #[tokio::test]
+    async fn on_stop_stamps_token_capture_with_the_open_effort() {
+        // tsk37: the token fact-capture is stamped with the thread's single open
+        // effort (the same resolution the run-ledger auto-claim uses), so
+        // `captures_for_effort` — the T-D fact-attribution read — picks it up.
+        use oxplow_domain::stores::TaskStore;
+        use oxplow_domain::{
+            Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, Timestamp,
+        };
+        let (svc, _dir, thread) = service_fixture().await;
+        // One open effort on the thread → the unambiguous single-open case.
+        let now = Timestamp::now();
+        let task_id = svc
+            .task_store
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(thread),
+                parent_id: None,
+                title: "t".into(),
+                description: String::new(),
+                status: TaskStatus::InProgress,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        let effort = svc
+            .effort_store
+            .start(task_id, &thread, None)
+            .await
+            .unwrap();
+
+        let tdir = tempfile::tempdir().unwrap();
+        let path = tdir.path().join("session.jsonl");
+        let payload = format!(
+            "{{\"transcript_path\":{:?},\"session_id\":\"sess-e\"}}",
+            path.to_string_lossy()
+        );
+        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        svc.token_usage
+            .on_stop(&thread, Some("sess-e"), &payload)
+            .await
+            .unwrap();
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
+            f.write_all(format!("{ASSISTANT_LINE}\n").as_bytes())
+                .unwrap();
+        }
+        svc.token_usage
+            .on_stop(&thread, Some("sess-e"), &payload)
+            .await
+            .unwrap();
+
+        // The token capture is attributed to the open effort.
+        let caps = svc
+            .fact_store
+            .captures_for_effort(effort.id.value())
+            .await
+            .unwrap();
+        assert!(
+            !caps.is_empty(),
+            "the token capture is attributed to the open effort"
+        );
+        assert!(caps.iter().all(|c| c.effort_id == Some(effort.id.value())));
+        // …and its facts are reachable through the fact-attribution read.
+        let tokens_measure = svc
+            .fact_store
+            .get_measure("oxplow.tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
+        let facts = svc
+            .fact_store
+            .facts_for_captures(tokens_measure.id, cap_ids)
+            .await
+            .unwrap();
+        assert_eq!(
+            facts.len(),
+            2,
+            "input + output token facts under the effort's capture"
+        );
     }
 }
