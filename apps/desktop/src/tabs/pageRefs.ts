@@ -116,13 +116,16 @@ export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | 
 
 /** Drill-in to a single **recording** of a metric — the located items (the
  *  metric's facts for that capture) the gauge counted. Opened by clicking a row
- *  in the Metric Detail recordings table (tsk313, epic tsk12). */
+ *  in the Metric Detail recordings table (tsk313, epic tsk12). The metric key
+ *  rides in the tab id (after the capture id) because the finding read needs
+ *  it — a tab restored from history has no payload (tsk46). */
 export function metricRecordingRef(
   captureId: number,
   payload?: { metricKey?: string; capturedAt?: string; value?: number },
 ): TabRef {
+  const keySuffix = payload?.metricKey ? `:${payload.metricKey}` : "";
   return {
-    id: `metric-recording:${captureId}`,
+    id: `metric-recording:${captureId}${keySuffix}`,
     kind: "metric-recording",
     payload: { captureId, ...payload },
   };
@@ -428,10 +431,14 @@ export function refFromTabId(id: string): TabRef {
       // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
     case "metric-recording": {
-      // Only the capture id is in the id; metric context is best-effort payload.
-      const n = Number(rest);
-      return Number.isFinite(n)
-        ? metricRecordingRef(n)
+      // `<captureId>` or `<captureId>:<metricKey>` — the key is needed to
+      // fetch the findings after a restore (tsk46); capturedAt/value stay
+      // best-effort payload.
+      const [idPart, ...keyParts] = rest.split(":");
+      const n = Number(idPart);
+      const metricKey = keyParts.join(":");
+      return Number.isFinite(n) && idPart !== ""
+        ? metricRecordingRef(n, metricKey ? { metricKey } : undefined)
         : { id, kind: "metric-recording", payload: null };
     }
     case "directory":

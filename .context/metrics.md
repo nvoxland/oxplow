@@ -276,7 +276,8 @@ resolve a `metric_spec` by key (seeded catalog) and compute over its
 - `list_metric_samples(metric_key, limit)` → `series_for_spec` (newest-first,
   capped) — the metric-key ergonomic wrapper over `metric_series`.
 - `metric_breakdown(metric_key, dimension?)` → `rollup_for_spec` (default dim
-  `oxplow.package`; the old per-stream `stream` arg is gone — facts aren't
+  `oxplow.package`; an optional `stream` arg scopes to one worktree's scans
+  (restored in tsk46) — facts aren't
   stream-partitioned at this grain).
 - `get_metric_summary(metric_key)` → `headline_for_spec` (series collapsed per
   the measure's temporal semantics) + the latest series point's captured_at/branch.

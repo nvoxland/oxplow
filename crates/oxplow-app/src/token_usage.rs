@@ -526,9 +526,16 @@ impl TokenUsageService {
                         facts.push(NewFact {
                             subject_kind: Some("model".into()),
                             subject_ref: Some(format!("model:{model}")),
-                            dims_json: Some(format!(
-                                "{{\"oxplow.model\":\"{model}\",\"oxplow.token_kind\":\"{kind}\"}}"
-                            )),
+                            // json! (not format!) — the model id comes verbatim
+                            // from external session JSONL; a quote/backslash in
+                            // it must not poison the dims JSON (tsk46).
+                            dims_json: Some(
+                                serde_json::json!({
+                                    "oxplow.model": model,
+                                    "oxplow.token_kind": kind,
+                                })
+                                .to_string(),
+                            ),
                             ..NewFact::new(m.id, value as f64)
                         });
                     }
@@ -538,7 +545,9 @@ impl TokenUsageService {
                         facts.push(NewFact {
                             subject_kind: Some("model".into()),
                             subject_ref: Some(format!("model:{model}")),
-                            dims_json: Some(format!("{{\"oxplow.model\":\"{model}\"}}")),
+                            dims_json: Some(
+                                serde_json::json!({ "oxplow.model": model }).to_string(),
+                            ),
                             ..NewFact::new(tm.id, agg.turns as f64)
                         });
                     }

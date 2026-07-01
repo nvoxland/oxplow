@@ -714,6 +714,18 @@ impl MetricEngine {
         spec: &MetricSpec,
         dimension: &str,
     ) -> Result<Vec<RollupRow>, DomainError> {
+        self.rollup_for_spec_in_stream(spec, dimension, None).await
+    }
+
+    /// [`rollup_for_spec`] scoped to one stream (worktree) — a per-worktree
+    /// breakdown that doesn't mix another stream's scans (tsk46). `None` rolls
+    /// up across all streams.
+    pub async fn rollup_for_spec_in_stream(
+        &self,
+        spec: &MetricSpec,
+        dimension: &str,
+        stream: Option<i64>,
+    ) -> Result<Vec<RollupRow>, DomainError> {
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
         };
@@ -723,7 +735,11 @@ impl MetricEngine {
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let filter = spec_filter(spec)?;
         let facts = self.facts.facts_for_measure(measure.id).await?;
-        let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
+        let kept: Vec<FactRow> = facts
+            .into_iter()
+            .filter(|f| filter.matches(f))
+            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+            .collect();
         let current = self.current_captures(&kept).await?;
         Ok(compute_rollup(&kept, dimension, temporal, &current))
     }

@@ -365,7 +365,13 @@ impl MetricsService {
                 target: r.map_or(b.target, |m| m.target),
                 trigger: b.trigger.to_string(),
                 toggleable: true,
-                category: Some("custom".to_string()),
+                // Match the seeded spec's category (builtin_metric_specs /
+                // builtin_ast_specs seed "static-quality"), letting a resolved
+                // config override win — the Catalog must agree with the spec
+                // catalog it toggles (tsk46).
+                category: r
+                    .and_then(|m| m.category.clone())
+                    .or_else(|| Some("static-quality".to_string())),
             });
         }
         // Project/global-defined metric specs not already shown as a built-in.
@@ -2390,7 +2396,9 @@ def transform(input):
         assert_eq!(entry.scope, "built-in");
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code gauges are toggleable");
-        assert_eq!(entry.category.as_deref(), Some("custom"));
+        // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
+        // agrees with the spec catalog it toggles (tsk46).
+        assert_eq!(entry.category.as_deref(), Some("static-quality"));
 
         // Enable end-to-end: writes a `use:` into .oxplow/project.yaml + seeds the def.
         svc.metrics

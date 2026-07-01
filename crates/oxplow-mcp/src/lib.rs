@@ -619,6 +619,10 @@ pub struct MetricBreakdownParams {
     /// carry, e.g. `oxplow.severity` / `language`. Omit for `oxplow.package`.
     #[serde(default)]
     pub dimension: Option<String>,
+    /// Optional stream id (`str<N>` or bare number) to scope the rollup to one
+    /// worktree's scans. Omit for all streams.
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2033,10 +2037,14 @@ impl OxplowMcp {
             .0
             .dimension
             .unwrap_or_else(|| "oxplow.package".to_string());
+        let stream = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?.value()),
+            None => None,
+        };
         let rollup = self
             .services
             .metric_engine
-            .rollup_for_spec(&spec, &dimension)
+            .rollup_for_spec_in_stream(&spec, &dimension, stream)
             .await
             .map_err(internal)?;
         json_result(&rollup)
@@ -4858,6 +4866,7 @@ mod tests {
                 .metric_breakdown(Parameters(MetricBreakdownParams {
                     metric_key: "oxplow.todos".into(),
                     dimension: None,
+                    stream: None,
                 }))
                 .await
                 .unwrap(),
@@ -4907,6 +4916,7 @@ mod tests {
             .metric_breakdown(Parameters(MetricBreakdownParams {
                 metric_key: "nope.nope".into(),
                 dimension: None,
+                stream: None,
             }))
             .await
             .is_err());
