@@ -79,6 +79,46 @@ impl Temporal {
     }
 }
 
+/// A binary op combining two aligned base-metric values into a derived one — the
+/// constrained "formula" vocabulary (no general DSL; decision #8). `Div` is the
+/// ratio primitive (bugs-per-KLOC, cost-per-token).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl BinaryOp {
+    /// Parse the spec string — word or symbol form. `ratio` aliases `div`.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "add" | "+" => Self::Add,
+            "sub" | "-" => Self::Sub,
+            "mul" | "*" => Self::Mul,
+            "div" | "/" | "ratio" => Self::Div,
+            _ => return None,
+        })
+    }
+
+    /// Apply to `(a, b)`; `Div` by zero is undefined ⇒ `None` (the derived row is
+    /// dropped, never coerced to 0/∞).
+    fn apply(self, a: f64, b: f64) -> Option<f64> {
+        Some(match self {
+            Self::Add => a + b,
+            Self::Sub => a - b,
+            Self::Mul => a * b,
+            Self::Div => {
+                if b == 0.0 {
+                    return None;
+                }
+                a / b
+            }
+        })
+    }
+}
+
 /// A simple conjunctive predicate over a fact. Covers the common metric filters
 /// (count-over-threshold; severity/dimension equality). Richer predicates land
 /// with the config layer (tsk17).
@@ -316,6 +356,39 @@ pub fn compute_rollup(facts: &[FactRow], dimension: &str) -> Vec<RollupRow> {
             key,
             value,
             subject_count,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.value
+            .partial_cmp(&a.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    out
+}
+
+/// Combine two base metrics' by-dimension rollups into a **derived metric**,
+/// inner-joining on the shared dimension key. The inner join is what enforces
+/// drill-across compatibility (decision #8): a derived value exists only for
+/// keys BOTH base metrics carry — a package with LOC but no bugs (or vice-versa)
+/// is *dropped*, never silently treated as zero, which would fabricate a ratio.
+/// `Div` by zero drops the row (undefined). This is also the server-side home of
+/// the Explorer's `buildScatterPoints` pairing: roll each metric up by the same
+/// grain (subject or dimension), then pair here. The result keeps `left`'s
+/// `subject_count` (the derived metric reads "left per right") and sorts
+/// largest-value first, ties on key — matching [`compute_rollup`].
+pub fn evaluate_formula(left: &[RollupRow], right: &[RollupRow], op: BinaryOp) -> Vec<RollupRow> {
+    let right_by: HashMap<&str, f64> = right.iter().map(|r| (r.key.as_str(), r.value)).collect();
+    let mut out: Vec<RollupRow> = left
+        .iter()
+        .filter_map(|l| {
+            let rv = right_by.get(l.key.as_str())?;
+            let value = op.apply(l.value, *rv)?;
+            Some(RollupRow {
+                key: l.key.clone(),
+                value,
+                subject_count: l.subject_count,
+            })
         })
         .collect();
     out.sort_by(|a, b| {
@@ -566,5 +639,72 @@ mod tests {
                 ("src/app".to_string(), 7.0, 2),
             ]
         );
+    }
+
+    fn roll(key: &str, value: f64, subject_count: i64) -> RollupRow {
+        RollupRow {
+            key: key.to_string(),
+            value,
+            subject_count,
+        }
+    }
+
+    #[test]
+    fn binary_op_parse_word_and_symbol_forms() {
+        assert_eq!(BinaryOp::parse("div"), Some(BinaryOp::Div));
+        assert_eq!(BinaryOp::parse("/"), Some(BinaryOp::Div));
+        assert_eq!(BinaryOp::parse("ratio"), Some(BinaryOp::Div));
+        assert_eq!(BinaryOp::parse("+"), Some(BinaryOp::Add));
+        assert_eq!(BinaryOp::parse("mul"), Some(BinaryOp::Mul));
+        assert_eq!(BinaryOp::parse("pow"), None);
+    }
+
+    #[test]
+    fn evaluate_formula_inner_joins_on_shared_key() {
+        // "bugs per KLOC" by package: bugs / loc, joined on package.
+        let bugs = vec![roll("src/app", 10.0, 3), roll("src/util", 4.0, 1)];
+        let loc = vec![
+            roll("src/app", 2.0, 3),
+            roll("src/util", 8.0, 1),
+            // src/lib has LOC but no bugs — must NOT appear (inner join, not zero-fill).
+            roll("src/lib", 5.0, 2),
+        ];
+        let derived = evaluate_formula(&bugs, &loc, BinaryOp::Div);
+        let rows: Vec<(String, f64, i64)> = derived
+            .iter()
+            .map(|r| (r.key.clone(), r.value, r.subject_count))
+            .collect();
+        // app 10/2=5.0 (kept left's subject_count=3), util 4/8=0.5; sorted desc.
+        assert_eq!(
+            rows,
+            vec![
+                ("src/app".to_string(), 5.0, 3),
+                ("src/util".to_string(), 0.5, 1),
+            ]
+        );
+        assert!(
+            !derived.iter().any(|r| r.key == "src/lib"),
+            "a key present in only one operand is dropped, not zero-filled"
+        );
+    }
+
+    #[test]
+    fn evaluate_formula_drops_divide_by_zero() {
+        let num = vec![roll("a", 3.0, 1), roll("b", 6.0, 1)];
+        let den = vec![roll("a", 0.0, 1), roll("b", 2.0, 1)];
+        let derived = evaluate_formula(&num, &den, BinaryOp::Div);
+        // a: 3/0 is undefined → dropped. b: 6/2 = 3.
+        assert_eq!(derived.len(), 1);
+        assert_eq!(derived[0].key, "b");
+        assert_eq!(derived[0].value, 3.0);
+    }
+
+    #[test]
+    fn evaluate_formula_supports_other_ops() {
+        let a = vec![roll("x", 5.0, 1)];
+        let b = vec![roll("x", 3.0, 1)];
+        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Add)[0].value, 8.0);
+        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Sub)[0].value, 2.0);
+        assert_eq!(evaluate_formula(&a, &b, BinaryOp::Mul)[0].value, 15.0);
     }
 }
