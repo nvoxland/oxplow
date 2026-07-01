@@ -504,26 +504,50 @@ impl TokenUsageService {
             .record_run_with_data(run, samples, Vec::new())
             .await?;
 
-        // Dual-write into the durable fact layer (epic tsk12): one fact per model
-        // on the `oxplow.tokens` measure (total tokens), under one capture that
-        // carries the spine (thread, continuous trigger). Tokens are an additive
-        // event measure — the model is a conformed dimension. Best-effort beside
-        // the legacy samples above.
-        if let Some(measure) = self.facts.get_measure("oxplow.tokens").await? {
+        // Dual-write into the durable fact layer (epic tsk12): PER-KIND token
+        // facts on the `oxplow.tokens` measure — one input + one output fact per
+        // model, sliced by the `oxplow.token_kind` conformed dimension — plus a
+        // turn fact on `oxplow.turn`, under one capture carrying the spine. The
+        // `agent.tokens.total` spec sums both kinds (= the old total); the
+        // input/output specs filter by `token_kind`. Tokens/turns are additive
+        // event measures; model is a conformed dimension. Best-effort.
+        let tokens_measure = self.facts.get_measure("oxplow.tokens").await?;
+        let turn_measure = self.facts.get_measure("oxplow.turn").await?;
+        if tokens_measure.is_some() || turn_measure.is_some() {
             let mut facts = Vec::new();
             for (model, agg) in by_model {
-                let total = agg.input + agg.output;
-                facts.push(NewFact {
-                    subject_kind: Some("model".into()),
-                    subject_ref: Some(format!("model:{model}")),
-                    dims_json: Some(format!("{{\"oxplow.model\":\"{model}\"}}")),
-                    ..NewFact::new(measure.id, total as f64)
-                });
+                if let Some(m) = &tokens_measure {
+                    for (kind, value) in [("input", agg.input), ("output", agg.output)] {
+                        if value == 0 {
+                            continue;
+                        }
+                        facts.push(NewFact {
+                            subject_kind: Some("model".into()),
+                            subject_ref: Some(format!("model:{model}")),
+                            dims_json: Some(format!(
+                                "{{\"oxplow.model\":\"{model}\",\"oxplow.token_kind\":\"{kind}\"}}"
+                            )),
+                            ..NewFact::new(m.id, value as f64)
+                        });
+                    }
+                }
+                if let Some(tm) = &turn_measure {
+                    if agg.turns > 0 {
+                        facts.push(NewFact {
+                            subject_kind: Some("model".into()),
+                            subject_ref: Some(format!("model:{model}")),
+                            dims_json: Some(format!("{{\"oxplow.model\":\"{model}\"}}")),
+                            ..NewFact::new(tm.id, agg.turns as f64)
+                        });
+                    }
+                }
             }
-            let mut capture = NewMetricCapture::done(stream_val, "token-parse", "token-parse");
-            capture.thread_id = Some(thread.value());
-            capture.trigger = Some("continuous".into());
-            self.facts.record_facts(capture, facts).await?;
+            if !facts.is_empty() {
+                let mut capture = NewMetricCapture::done(stream_val, "token-parse", "token-parse");
+                capture.thread_id = Some(thread.value());
+                capture.trigger = Some("continuous".into());
+                self.facts.record_facts(capture, facts).await?;
+            }
         }
         Ok(())
     }
@@ -972,8 +996,9 @@ mod tests {
             "agent.cost_usd must not be defined — oxplow tracks tokens, not price"
         );
 
-        // Dual-written into the durable fact layer (epic tsk12): one fact per
-        // model on the `oxplow.tokens` measure, carrying the capture's spine.
+        // Dual-written into the durable fact layer (epic tsk12): PER-KIND facts on
+        // the `oxplow.tokens` measure — input + output, sliced by oxplow.token_kind
+        // — so the total spec sums both and input/output specs filter by kind.
         let tokens_measure = svc
             .fact_store
             .get_measure("oxplow.tokens")
@@ -985,12 +1010,56 @@ mod tests {
             .facts_for_measure(tokens_measure.id)
             .await
             .unwrap();
-        assert_eq!(token_facts.len(), 1);
-        assert_eq!(token_facts[0].value, 120.0, "input 100 + output 20");
+        assert_eq!(token_facts.len(), 2, "one input + one output fact");
+        let sum: f64 = token_facts.iter().map(|f| f.value).sum();
+        assert_eq!(sum, 120.0, "input 100 + output 20 = total");
+        let input_fact = token_facts
+            .iter()
+            .find(|f| {
+                f.dims_json.as_deref()
+                    == Some(
+                        "{\"oxplow.model\":\"claude-opus-4-8\",\"oxplow.token_kind\":\"input\"}",
+                    )
+            })
+            .expect("input-kind fact");
+        assert_eq!(input_fact.value, 100.0);
         assert_eq!(
-            token_facts[0].subject_ref.as_deref(),
+            input_fact.subject_ref.as_deref(),
             Some("model:claude-opus-4-8")
         );
-        assert_eq!(token_facts[0].thread_id, Some(thread.value()));
+        assert_eq!(input_fact.thread_id, Some(thread.value()));
+
+        // …and a turn fact on the `oxplow.turn` measure.
+        let turn_measure = svc
+            .fact_store
+            .get_measure("oxplow.turn")
+            .await
+            .unwrap()
+            .unwrap();
+        let turn_facts = svc
+            .fact_store
+            .facts_for_measure(turn_measure.id)
+            .await
+            .unwrap();
+        assert_eq!(turn_facts.len(), 1);
+        assert_eq!(turn_facts[0].value, 1.0, "one turn");
+
+        // Keystone: the producer specs re-aggregate the facts to the baked totals
+        // through the engine (the read-flip, tsk26, can then serve them).
+        svc.metrics.seed_catalog().await;
+        let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
+        for (key, expected) in [
+            ("agent.tokens.total", 120.0),
+            ("agent.tokens.input", 100.0),
+            ("agent.tokens.output", 20.0),
+            ("agent.turns", 1.0),
+        ] {
+            let spec = svc.fact_store.get_spec(key).await.unwrap().unwrap();
+            assert_eq!(
+                engine.headline_for_spec(&spec).await.unwrap(),
+                Some(expected),
+                "{key}: spec headline over facts == baked total",
+            );
+        }
     }
 }
