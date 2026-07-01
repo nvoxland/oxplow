@@ -43,7 +43,10 @@ welded to collection.
 - **`measure`** — the namespaced catalog of *fact types*: `key` (`oxplow.*`
   reserved), `title`, `unit`, `subject_kind` (the grain), `temporal_semantics`
   (`additive` | `semi-additive` | `non-additive` — additivity **over time**:
-  tokens additive, complexity/coverage semi-additive, ratios non-additive),
+  tokens additive; complexity + test/lint SNAPSHOTS semi-additive (a run
+  replaces the last — V47/tsk42 fixed test_case/lint_hit from V43's wrong
+  `additive`); ratios + mean-across-closes measures (cycle_time, task_effort)
+  non-additive),
   `component_role` (`numerator`|`denominator`|`none`), `scope`, `description`.
   Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
@@ -158,7 +161,7 @@ tree stays green through the migration. Landed:
 | producer | where | facts |
 |---|---|---|
 | tokens (T-B) | `token_usage.rs` | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim) + a turn fact on `oxplow.turn`, capture per Stop. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind` |
-| effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
+| effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |

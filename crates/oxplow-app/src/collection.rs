@@ -4014,6 +4014,74 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn test_headlines_report_the_latest_run_not_a_lifetime_sum() {
+            // tsk42: `oxplow.test_case` is a SNAPSHOT of the suite state (a new
+            // run replaces the previous one — semi-additive), so the tests.total
+            // headline is the LATEST run's count, never the sum of every run
+            // ever ("run a 100-test suite 10 times" must read 100, not 1000).
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let case = |name: &str, status: TestStatus| TestCase {
+                classname: "mod".into(),
+                name: name.into(),
+                status,
+                time_ms: None,
+            };
+            let report = |cases: Vec<TestCase>| TestReport {
+                suites: vec![TestSuite {
+                    name: "oxplow-app".into(),
+                    cases,
+                }],
+            };
+            for r in [
+                report(vec![
+                    case("t1", TestStatus::Passed),
+                    case("t2", TestStatus::Passed),
+                ]),
+                report(vec![
+                    case("t1", TestStatus::Passed),
+                    case("t2", TestStatus::Failed),
+                    case("t3", TestStatus::Passed),
+                ]),
+            ] {
+                h.service
+                    .record_test_run(
+                        &h.thread,
+                        "cargo test",
+                        Some(0),
+                        None,
+                        None,
+                        None,
+                        None,
+                        "observed",
+                        "post-tool-bash",
+                        Some(&r),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            for spec in crate::producer_metrics::builtin_producer_specs() {
+                facts.upsert_spec(spec).await.unwrap();
+            }
+            let engine = crate::metric_engine::MetricEngine::new(facts.clone());
+            for (key, expected) in [
+                ("oxplow.tests.total", 3.0),
+                ("oxplow.tests.passed", 2.0),
+                ("oxplow.tests.failed", 1.0),
+            ] {
+                let spec = facts.get_spec(key).await.unwrap().unwrap();
+                assert_eq!(
+                    engine.headline_for_spec(&spec).await.unwrap(),
+                    Some(expected),
+                    "{key}: headline is the latest run's count, not a lifetime sum",
+                );
+            }
+        }
+
+        #[tokio::test]
         async fn record_test_run_stamps_test_case_capture_with_the_open_effort() {
             // tsk37: the on-report test producer stamps its fact-capture with the
             // owning effort (the harness opens one on the thread), so

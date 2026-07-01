@@ -605,10 +605,15 @@ impl TaskService {
         if let Some(facts) = self.fact_store.as_ref() {
             let dual = async {
                 let mut rows = Vec::new();
+                // Both measures are NON-ADDITIVE with denominator 1 (V47): the
+                // cross-time collapse Σn/Σd is the MEAN across closes (average
+                // cycle time / efforts-per-task), never a lifetime sum.
                 if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
                     rows.push(NewFact {
                         subject_kind: Some("effort".into()),
                         subject_ref: Some(effort_id.to_string()),
+                        numerator: Some(cycle_ms as f64),
+                        denominator: Some(1.0),
                         ..NewFact::new(measure.id, cycle_ms as f64)
                     });
                 }
@@ -616,6 +621,8 @@ impl TaskService {
                     rows.push(NewFact {
                         subject_kind: Some("task".into()),
                         subject_ref: Some(item.id.to_string()),
+                        numerator: Some(efforts_so_far as f64),
+                        denominator: Some(1.0),
                         ..NewFact::new(measure.id, efforts_so_far as f64)
                     });
                 }
@@ -1521,6 +1528,11 @@ mod tests {
         assert_eq!(cycle_facts.len(), 1, "one cycle-time fact per close");
         assert_eq!(cycle_facts[0].subject_kind.as_deref(), Some("effort"));
         assert!(cycle_facts[0].value >= 0.0, "cycle time is non-negative");
+        // Ratio components (tsk42): the measure is non-additive with den=1, so
+        // the cross-time collapse Σn/Σd is the MEAN cycle time across closed
+        // efforts — never a lifetime sum.
+        assert_eq!(cycle_facts[0].numerator, Some(cycle_facts[0].value));
+        assert_eq!(cycle_facts[0].denominator, Some(1.0));
         assert!(
             cycle_facts[0].effort_id.is_some(),
             "capture stamped the producing effort_id (unambiguous close)"
@@ -1550,6 +1562,10 @@ mod tests {
             effort_facts[0].subject_ref.as_deref(),
             Some(item.id.to_string().as_str())
         );
+        // Ratio components (tsk42): `task.efforts` collapses Σn/Σd across closes
+        // — the mean efforts-per-task, not the last-closed task's count.
+        assert_eq!(effort_facts[0].numerator, Some(1.0));
+        assert_eq!(effort_facts[0].denominator, Some(1.0));
     }
 
     #[tokio::test]
