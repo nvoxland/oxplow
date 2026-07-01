@@ -1149,9 +1149,9 @@ impl CollectionService {
                     let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
                         return Ok::<(), DomainError>(());
                     };
-                    if report.findings.is_empty() {
-                        return Ok(());
-                    }
+                    // A CLEAN report still writes its (empty) capture — "this
+                    // analysis ran and found nothing" is what lets the errors/
+                    // warnings series drop back to zero (tsk44).
                     use oxplow_coverage::Severity::*;
                     let mut facts = Vec::with_capacity(report.findings.len());
                     for f in &report.findings {
@@ -2364,14 +2364,13 @@ impl CollectionService {
         // The effort's OWN captures (stamped `effort_id` at ingest, tsk37) — the
         // attribution spine for the run + operational families. File gauges are
         // snapshot scans (unstamped), so they read by claimed files × time below.
-        let effort_caps: Vec<i64> = self
+        // Full rows (not just ids): an EMPTY capture (a clean analysis run) is a
+        // zero record the stamped read fills in (tsk44).
+        let effort_caps = self
             .facts
             .captures_for_effort(effort.id.value())
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
+            .unwrap_or_default();
         let claimed: Vec<String> = self
             .efforts
             .list_files(&eid)
@@ -2466,6 +2465,29 @@ impl CollectionService {
             if f.effort_id == Some(effort.id.value()) {
                 stamped.insert(f.capture_id);
             }
+        }
+        // Splice in the producers' remaining captures — including EMPTY zero-hit
+        // scans (tsk44): "scanned, found nothing" must be eligible as the
+        // baseline/current capture, or a drop-to-zero during the effort is
+        // invisible (every kept fact predates it). Stream-scoped like the facts.
+        let producers: std::collections::BTreeSet<String> =
+            kept.iter().map(|f| f.producer.clone()).collect();
+        if let Ok(all_caps) = self
+            .facts
+            .captures_for_producers(producers.into_iter().collect())
+            .await
+        {
+            for c in all_caps {
+                if stream.map_or(true, |s| c.stream_id == s)
+                    && !caps.iter().any(|(id, _)| *id == c.id)
+                {
+                    caps.push((c.id, c.captured_at));
+                    if c.effort_id == Some(effort.id.value()) {
+                        stamped.insert(c.id);
+                    }
+                }
+            }
+            caps.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
         }
         let baseline_cap = caps
             .iter()
@@ -2580,12 +2602,14 @@ impl CollectionService {
     /// the effort's OWN captures (`metric_capture.effort_id`, stamped at ingest —
     /// tsk37). One series point per capture (within-capture aggregation is the
     /// spec's); `sum`-aggregation specs (token/turn/nudge flows) are summed across
-    /// captures, everything else is first→last. `None` when the effort has no
-    /// captures carrying this measure's facts.
+    /// captures, everything else is first→last. A count/sum spec's EMPTY effort
+    /// capture (a clean analysis run — tsk44) reads as an explicit 0 point, so
+    /// "3 errors → 0" shows in the panel. `None` when the effort has no
+    /// captures carrying (or zero-recording) this metric's facts.
     async fn effort_stamped_delta(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort_caps: &[i64],
+        effort_caps: &[oxplow_db::MetricCapture],
     ) -> Option<oxplow_db::EffortMetricDelta> {
         if effort_caps.is_empty() {
             return None;
@@ -2594,15 +2618,59 @@ impl CollectionService {
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let agg = crate::metric_engine::Aggregation::parse(&spec.aggregation)?;
         let filter = spec_fact_filter(spec).ok()?;
+        let cap_ids: Vec<i64> = effort_caps.iter().map(|c| c.id).collect();
         let facts = self
             .facts
-            .facts_for_captures(measure.id, effort_caps.to_vec())
+            .facts_for_captures(measure.id, cap_ids)
             .await
             .ok()?;
-        if facts.is_empty() {
-            return None;
+        let mut series = crate::metric_engine::aggregate_series(&facts, agg, &filter, None);
+        if matches!(
+            agg,
+            crate::metric_engine::Aggregation::Count | crate::metric_engine::Aggregation::Sum
+        ) {
+            // Which producers emit this metric's slice — from the effort's own
+            // kept facts, else the measure's global facts (the effort whose only
+            // run was clean). An effort capture from those producers that
+            // aggregated to no point is an explicit zero.
+            let mut producers: std::collections::BTreeSet<String> = facts
+                .iter()
+                .filter(|f| filter.matches(f))
+                .map(|f| f.producer.clone())
+                .collect();
+            if producers.is_empty() {
+                if let Ok(all) = self.facts.facts_for_measure(measure.id).await {
+                    producers = all
+                        .iter()
+                        .filter(|f| filter.matches(f))
+                        .map(|f| f.producer.clone())
+                        .collect();
+                }
+            }
+            let have: std::collections::HashSet<i64> =
+                series.iter().map(|p| p.capture_id).collect();
+            for c in effort_caps {
+                if producers.contains(&c.producer) && !have.contains(&c.id) {
+                    series.push(crate::metric_engine::SeriesPoint {
+                        capture_id: c.id,
+                        captured_at: c.captured_at,
+                        value: 0.0,
+                        numerator: None,
+                        denominator: None,
+                        group: None,
+                        branch: c.branch.clone(),
+                        provenance: Some(c.provenance.clone()),
+                        git_version: c.closest_git_version.clone(),
+                        source: Some(c.source.clone()),
+                    });
+                }
+            }
+            series.sort_by(|a, b| {
+                a.captured_at
+                    .cmp(&b.captured_at)
+                    .then(a.capture_id.cmp(&b.capture_id))
+            });
         }
-        let series = crate::metric_engine::aggregate_series(&facts, agg, &filter, None);
         let (first, last) = (series.first()?, series.last()?);
         let latest = Some(last.capture_id);
         if spec.aggregation == "sum" {
@@ -4696,6 +4764,62 @@ mod tests {
                     .any(|d| d.category.as_deref() == Some("static-quality")),
                 "a capture stamped to another effort must not pollute a concurrent effort"
             );
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_shows_analysis_dropping_to_zero() {
+            // tsk44: a CLEAN analysis run writes an EMPTY effort-stamped capture;
+            // the stamped read zero-fills it, so the panel shows "3 → 0" instead
+            // of a stuck 3 (or no row) after the agent fixes every lint.
+            let h = build(None).await;
+            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let now = Timestamp::now();
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let m = facts
+                .upsert_measure(oxplow_db::NewMeasure::new("oxplow.lint_hit", "Lint hits"))
+                .await
+                .unwrap();
+            let mut s = oxplow_db::NewMetricSpec::base(
+                "oxplow.analysis.errors",
+                "Analysis errors",
+                "oxplow.lint_hit",
+                "count",
+            );
+            s.direction = "lower-better".into();
+            s.category = Some("static-quality".into());
+            s.display_kind = "findings".into();
+            s.filter_json = Some(r#"{"severity":"error"}"#.into());
+            facts.upsert_spec(s).await.unwrap();
+
+            // Run 1 (stamped to the effort): three errors.
+            let mut cap1 = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
+            cap1.captured_at = Some(now);
+            cap1.thread_id = Some(h.thread.value());
+            cap1.effort_id = Some(eid1.value());
+            let lint = |sev: &str| oxplow_db::NewFact {
+                severity: Some(sev.into()),
+                ..oxplow_db::NewFact::new(m, 1.0)
+            };
+            facts
+                .record_facts(cap1, vec![lint("error"), lint("error"), lint("error")])
+                .await
+                .unwrap();
+            // Run 2 (stamped, later): CLEAN — an empty capture, no facts.
+            let mut cap2 = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
+            cap2.captured_at = Some(Timestamp::from_unix_ms(now.unix_ms() + 60_000));
+            cap2.thread_id = Some(h.thread.value());
+            cap2.effort_id = Some(eid1.value());
+            facts.record_facts(cap2, vec![]).await.unwrap();
+
+            let d1 = h.service.effort_metric_deltas(&h.effort_id).await;
+            let analysis = d1
+                .iter()
+                .find(|d| d.category.as_deref() == Some("static-quality"))
+                .expect("the clean run still yields a row");
+            assert_eq!(analysis.baseline, Some(3.0));
+            assert_eq!(analysis.current, 0.0, "the clean run reads as zero");
+            assert_eq!(analysis.delta, Some(-3.0));
         }
 
         #[tokio::test]

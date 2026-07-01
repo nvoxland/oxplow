@@ -120,17 +120,27 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
 - Pure cores: `aggregate_series(facts, agg, filter, group_by)` → one `SeriesPoint`
   per capture (preserving time order), optionally one series per group-by
   dimension value; `range_value(series, temporal)` collapses a series to one
-  number the additivity-correct way; `compute_rollup(facts, dimension, temporal)`
-  → `RollupRow`s, additivity-aware like `range_value` (tsk41): semi-additive →
-  latest-per-subject summed per dim value; additive → EVERY fact counts (tokens
-  by model is a running total, not the last turn); non-additive → latest per
-  subject then per-group Σnumerator/Σdenominator, never a naive sum/average of
+  number the additivity-correct way; `compute_rollup(facts, dimension, temporal,
+  current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
+  scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
+  latest capture per (stream, producer) (`current_capture_ids` — else a deleted
+  file's stale last fact haunts the breakdown forever), latest-per-subject,
+  summed per dim value; additive → EVERY fact counts (tokens by model is a
+  running total, not the last turn); non-additive → current captures, latest per
+  subject, per-group Σnumerator/Σdenominator, never a naive sum/average of
   percentages. `dim_value` reads the `severity`/`rule` columns and
-  `package`-from-path directly, else `dims_json[key]`.
+  `package`-from-path directly, else `dims_json[key]`. `FactRow` carries the
+  capture's `producer` for exactly this scan-currency logic.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
   `rollup(measure_key, dimension)` fetch a measure's facts and aggregate
   (`rollup` parses the measure's `temporal_semantics`, erroring on a malformed
-  value rather than guessing).
+  value rather than guessing). **Zero-fill (tsk44):** a scan that found nothing
+  writes an EMPTY capture (see the producer section), and `series` splices a
+  value-0 point for every such capture of the metric's producers (count/sum
+  aggregations, ungrouped) — so a count metric drops back to zero after the last
+  offender is fixed instead of showing the previous scan forever. Producers are
+  derived from the facts that ever matched the spec's filter
+  (`captures_for_producers` on the fact store fetches their captures).
 - **Spec-driven reads** (tsk29 — a metric *key* → its computed result): given a
   `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` /
   `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
@@ -194,7 +204,10 @@ path?, line?, dims? }]` — measure-bound atomics. `record_gauge_facts` resolves
 fact's `measure` against the catalog (**declare-to-collect**, decision #4: a fact on
 an undefined measure is dropped with a `tracing::warn!`, never silently written) and
 writes the resolvable facts under one capture — the **only** output now (facts-only,
-T-C3b). The count-over-threshold headline is the **spec** (`builtin_metric_specs`),
+T-C3b). A ZERO-fact run still writes its (empty) capture — "this scan ran and found
+nothing" is the record the engine zero-fills a series from, so a count metric drops
+back to zero after the last offender is fixed (tsk44; the analysis ingest records
+its capture for a clean report the same way). The count-over-threshold headline is the **spec** (`builtin_metric_specs`),
 and the equivalence test `code_gauge_facts_reaggregate_to_the_expected_headline`
 pins `engine.headline_for_spec(spec) == the expected gauge total` for every bundled
 code metric — the proof the inversion is faithful. (Strict `> N` in the old gauge
@@ -420,7 +433,7 @@ families:
 
 | family | how the delta is computed |
 |---|---|
-| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)` fact value; facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
+| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)` fact value; facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
 | **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
 | **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
 | **Coverage** (category `coverage`) | **documented scope-guard special case**: still on the legacy detail payload. `coverage_delta_for_spec` resolves the spec's legacy `MetricDefinition` by key and derives the effort-relative **diff-coverage** at read (`diff_coverage_for_effort`) from the run's stored ABSOLUTE per-file **line-sets** (the `coverage-detail` finding). The coverage FACTS carry num/den counts, not line-sets, so migrating this needs a producer change — deferred |

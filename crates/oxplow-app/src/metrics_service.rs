@@ -1069,9 +1069,13 @@ impl MetricsService {
     /// via `tracing::warn!`, never silently written) if its measure is undefined
     /// in the catalog OR not in the gauge's own `emits` allow-list (a config gauge
     /// may only emit the measures it declares). A built-in gauge has an empty
-    /// `emits` — the catalog check alone governs it. Returns the number of facts
-    /// recorded (0 without a fact store, with no facts, or with no resolvable
-    /// facts). Emits `MetricSamplesChanged` when it writes. Best-effort.
+    /// `emits` — the catalog check alone governs it.
+    ///
+    /// A ZERO-fact run still writes its (empty) capture — "this scan ran and
+    /// found nothing" is the record that lets a count metric drop back to zero
+    /// after the last offender is fixed; the engine zero-fills the series from
+    /// the producer's captures (tsk44). Returns the number of facts recorded.
+    /// Emits `MetricSamplesChanged` when it writes. Best-effort.
     async fn record_gauge_facts(
         &self,
         gauge: &ResolvedGauge,
@@ -1082,9 +1086,6 @@ impl MetricsService {
         let Some(facts) = self.fact_store.as_ref() else {
             return 0;
         };
-        if gauge_facts.is_empty() {
-            return 0;
-        }
         // Resolve the measure catalog once (one query), then map each fact's key.
         let by_key: HashMap<String, i64> = match facts.list_measures().await {
             Ok(ms) => ms.into_iter().map(|m| (m.key, m.id)).collect(),
@@ -1139,9 +1140,7 @@ impl MetricsService {
                 ..oxplow_db::NewFact::new(measure_id, gf.value)
             });
         }
-        if rows.is_empty() {
-            return 0;
-        }
+        // No `rows.is_empty()` bail: the empty capture IS the zero record.
         let count = rows.len();
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
@@ -1646,6 +1645,66 @@ def transform(input):
         assert_eq!(
             facts[0].dims_json.as_deref(),
             Some("{\"language\":\"rust\"}")
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_hit_gauge_run_drops_the_series_to_zero() {
+        // tsk44: fixing the last offender must show. The zero-hit scan records
+        // an EMPTY capture, and the engine zero-fills the series from it — the
+        // count/sum metric reads 0, not the previous scan's value forever.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        };
+        // Scan 1: one unsafe block.
+        let mut files = HashMap::new();
+        files.insert(
+            "src/a.rs".to_string(),
+            "fn a() { unsafe { x(); } }".to_string(),
+        );
+        svc.metrics
+            .run_one_gauge(
+                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
+                &ctx,
+                Arc::new(files),
+            )
+            .await;
+        // Scan 2: the unsafe block is gone — zero facts, but the scan records.
+        svc.metrics
+            .run_one_gauge(
+                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
+                &ctx,
+                Arc::new(HashMap::new()),
+            )
+            .await;
+
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .expect("ast spec seeded");
+        let series = svc
+            .metric_engine
+            .series_for_spec(&spec, None)
+            .await
+            .unwrap();
+        assert_eq!(series.len(), 2, "the zero-hit scan is an explicit point");
+        assert_eq!(series[0].value, 1.0);
+        assert_eq!(series[1].value, 0.0, "the metric drops back to zero");
+        assert_eq!(
+            svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
+            Some(0.0),
+            "the headline (semi-additive → last capture) reads the zero scan"
         );
     }
 

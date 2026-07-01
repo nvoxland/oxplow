@@ -512,13 +512,17 @@ pub struct FactRow {
     pub effort_id: Option<i64>,
     pub provenance: String,
     pub source: String,
+    /// The capture's producer (gauge key / ingest kind) — identifies which scan
+    /// emitted the fact, so reads can zero-fill a producer's EMPTY captures and
+    /// scope "latest scan" currency per (stream, producer) (tsk44).
+    pub producer: String,
 }
 
 const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numerator, \
      f.denominator, f.subject_kind, f.subject_ref, f.path, f.line, f.severity, f.rule, \
      f.detail, f.dims_json, c.captured_at, c.branch, c.closest_git_version, \
      c.git_version_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
-     c.effort_id, c.provenance, c.source";
+     c.effort_id, c.provenance, c.source, c.producer";
 
 fn row_to_fact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
     let captured_at: String = row.get(14)?;
@@ -548,6 +552,7 @@ fn row_to_fact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
         effort_id: row.get(22)?,
         provenance: row.get(23)?,
         source: row.get(24)?,
+        producer: row.get(25)?,
     })
 }
 
@@ -812,6 +817,36 @@ impl SqliteFactStore {
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![effort_id], row_to_capture)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Every capture recorded by the given producers (gauge keys / ingest
+    /// kinds), oldest first — INCLUDING empty captures (a scan that found zero
+    /// offenders writes a capture with no facts). The engine zero-fills a
+    /// series from these so a count metric can drop back to zero (tsk44).
+    pub async fn captures_for_producers(
+        &self,
+        producers: Vec<String>,
+    ) -> Result<Vec<MetricCapture>, DomainError> {
+        if producers.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.db
+            .call(move |conn| {
+                let placeholders = (1..=producers.len())
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT {CAPTURE_COLS} FROM metric_capture
+                      WHERE producer IN ({placeholders})
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows =
+                    stmt.query_map(rusqlite::params_from_iter(producers.iter()), row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await

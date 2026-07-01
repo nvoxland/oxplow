@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FactRow, MetricSpec, SqliteFactStore};
+use oxplow_db::{FactRow, MetricCapture, MetricSpec, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// How the subjects measured in a single capture combine into the capture's
@@ -398,19 +398,28 @@ pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
 /// Roll a measure's facts up by a dimension — the "breakdown" card (which
 /// package / language / model holds the most). Additivity-aware per the
 /// measure's `temporal_semantics` (the same BI distinction as [`range_value`]):
-/// - **semi-additive** (level gauge): the LATEST fact per subject, summed per
-///   group — summing snapshots across time would double-count;
+/// - **semi-additive** (level gauge): only facts from the CURRENT captures
+///   (`current_caps` — the latest scan per (stream, producer), see
+///   [`current_capture_ids`]), the latest per subject, summed per group.
+///   Without the currency scope, a deleted file / renamed symbol keeps its
+///   stale last fact contributing to the breakdown forever (tsk44);
 /// - **additive** (event): EVERY fact counts — the group value is the running
-///   total (tokens by model is a total, not the last turn);
-/// - **non-additive** (ratio): the latest fact per subject, then per group
-///   Σnumerator/Σdenominator — never a sum (or mean) of percentages. Facts
-///   without ratio components fall back to the mean of their values.
+///   total (tokens by model is a total, not the last turn); `current_caps` is
+///   ignored;
+/// - **non-additive** (ratio): current captures, latest per subject, then per
+///   group Σnumerator/Σdenominator — never a sum (or mean) of percentages.
+///   Facts without ratio components fall back to the mean of their values.
 ///
 /// Largest first; ties broken on key for determinism. Facts are expected
 /// oldest-first, so the last fact seen per subject is its latest.
-pub fn compute_rollup(facts: &[FactRow], dimension: &str, temporal: Temporal) -> Vec<RollupRow> {
+pub fn compute_rollup(
+    facts: &[FactRow],
+    dimension: &str,
+    temporal: Temporal,
+    current_caps: &std::collections::HashSet<i64>,
+) -> Vec<RollupRow> {
     // The facts that contribute: all of them for an additive event measure;
-    // the latest per subject otherwise (oldest-first ⇒ last write wins).
+    // the current captures' latest-per-subject otherwise.
     let mut latest: HashMap<String, &FactRow> = HashMap::new();
     let kept: Vec<&FactRow> = match temporal {
         Temporal::Additive => facts
@@ -419,6 +428,9 @@ pub fn compute_rollup(facts: &[FactRow], dimension: &str, temporal: Temporal) ->
             .collect(),
         Temporal::SemiAdditive | Temporal::NonAdditive => {
             for f in facts {
+                if !current_caps.contains(&f.capture_id) {
+                    continue;
+                }
                 let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) else {
                     continue;
                 };
@@ -477,6 +489,49 @@ pub fn compute_rollup(facts: &[FactRow], dimension: &str, temporal: Temporal) ->
     out
 }
 
+/// The CURRENT capture per (stream, producer): the newest capture in the union
+/// of the kept facts' captures and the producers' capture rows (which include
+/// EMPTY zero-hit captures — so a scan that found nothing empties the rollup
+/// rather than leaving the previous scan's values standing, tsk44). A stream is
+/// a worktree and a producer is one scan kind, so "the latest scan" is per
+/// (stream, producer) — a measure fed by several gauges keeps each gauge's
+/// latest capture.
+pub fn current_capture_ids(
+    kept: &[FactRow],
+    captures: &[MetricCapture],
+) -> std::collections::HashSet<i64> {
+    fn consider(
+        best: &mut HashMap<(i64, String), (Timestamp, i64)>,
+        stream: i64,
+        producer: &str,
+        at: Timestamp,
+        id: i64,
+    ) {
+        let candidate = (at, id);
+        best.entry((stream, producer.to_string()))
+            .and_modify(|cur| {
+                if *cur < candidate {
+                    *cur = candidate;
+                }
+            })
+            .or_insert(candidate);
+    }
+    let mut best: HashMap<(i64, String), (Timestamp, i64)> = HashMap::new();
+    for f in kept {
+        consider(
+            &mut best,
+            f.stream_id,
+            &f.producer,
+            f.captured_at,
+            f.capture_id,
+        );
+    }
+    for c in captures {
+        consider(&mut best, c.stream_id, &c.producer, c.captured_at, c.id);
+    }
+    best.values().map(|&(_, id)| id).collect()
+}
+
 /// Combine two base metrics' by-dimension rollups into a **derived metric**,
 /// inner-joining on the shared dimension key. The inner join is what enforces
 /// drill-across compatibility (decision #8): a derived value exists only for
@@ -524,6 +579,9 @@ impl MetricEngine {
 
     /// The time series for a measure under an aggregation + filter, optionally
     /// sliced by a conformed dimension. Empty when the measure is unknown.
+    /// Count/sum series are ZERO-FILLED from the producers' captures (tsk44):
+    /// a scan that found nothing writes an EMPTY capture, and the fill turns it
+    /// into an explicit value-0 point so the metric drops back to zero.
     pub async fn series(
         &self,
         measure_key: &str,
@@ -535,11 +593,68 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let facts = self.facts.facts_for_measure(measure.id).await?;
-        Ok(aggregate_series(&facts, agg, filter, group_by))
+        let points = aggregate_series(&facts, agg, filter, group_by);
+        // The producers whose scans emit this metric's slice — derived from the
+        // facts that (ever) matched the filter, so an unrelated producer's
+        // captures never inject zero points.
+        let producers: std::collections::BTreeSet<String> = facts
+            .iter()
+            .filter(|f| filter.matches(f))
+            .map(|f| f.producer.clone())
+            .collect();
+        self.zero_fill(points, producers, agg, group_by).await
+    }
+
+    /// Splice value-0 points into `points` for every capture of `producers`
+    /// that produced none (the empty "scanned, found nothing" record — tsk44).
+    /// Only count/sum aggregations have a meaningful zero (avg/min/max/last/
+    /// ratio of nothing is undefined → left sparse), and only ungrouped series
+    /// are filled (an empty capture carries no group values).
+    async fn zero_fill(
+        &self,
+        mut points: Vec<SeriesPoint>,
+        producers: std::collections::BTreeSet<String>,
+        agg: Aggregation,
+        group_by: Option<&str>,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
+        if group_by.is_some()
+            || !matches!(agg, Aggregation::Count | Aggregation::Sum)
+            || producers.is_empty()
+        {
+            return Ok(points);
+        }
+        let caps = self
+            .facts
+            .captures_for_producers(producers.into_iter().collect())
+            .await?;
+        let have: std::collections::HashSet<i64> = points.iter().map(|p| p.capture_id).collect();
+        for c in caps {
+            if !have.contains(&c.id) {
+                points.push(SeriesPoint {
+                    capture_id: c.id,
+                    captured_at: c.captured_at,
+                    value: 0.0,
+                    numerator: None,
+                    denominator: None,
+                    group: None,
+                    branch: c.branch.clone(),
+                    provenance: Some(c.provenance.clone()),
+                    git_version: c.closest_git_version.clone(),
+                    source: Some(c.source.clone()),
+                });
+            }
+        }
+        points.sort_by(|a, b| {
+            a.captured_at
+                .cmp(&b.captured_at)
+                .then(a.capture_id.cmp(&b.capture_id))
+        });
+        Ok(points)
     }
 
     /// The by-dimension rollup (breakdown) for a measure, additivity-aware per
-    /// its `temporal_semantics` (see [`compute_rollup`]). Empty when unknown.
+    /// its `temporal_semantics` and scoped to the CURRENT captures (see
+    /// [`compute_rollup`] / [`current_capture_ids`]). Empty when unknown.
     pub async fn rollup(
         &self,
         measure_key: &str,
@@ -550,7 +665,24 @@ impl MetricEngine {
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let facts = self.facts.facts_for_measure(measure.id).await?;
-        Ok(compute_rollup(&facts, dimension, temporal))
+        let current = self.current_captures(&facts).await?;
+        Ok(compute_rollup(&facts, dimension, temporal, &current))
+    }
+
+    /// The current-capture set for a fact slice: the latest capture per
+    /// (stream, producer), including the producers' EMPTY zero-hit captures
+    /// (see [`current_capture_ids`], tsk44).
+    async fn current_captures(
+        &self,
+        kept: &[FactRow],
+    ) -> Result<std::collections::HashSet<i64>, DomainError> {
+        let producers: std::collections::BTreeSet<String> =
+            kept.iter().map(|f| f.producer.clone()).collect();
+        let caps = self
+            .facts
+            .captures_for_producers(producers.into_iter().collect())
+            .await?;
+        Ok(current_capture_ids(kept, &caps))
     }
 
     // --- spec-driven reads (a metric key → its computed result) -----------
@@ -592,7 +724,8 @@ impl MetricEngine {
         let filter = spec_filter(spec)?;
         let facts = self.facts.facts_for_measure(measure.id).await?;
         let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
-        Ok(compute_rollup(&kept, dimension, temporal))
+        let current = self.current_captures(&kept).await?;
+        Ok(compute_rollup(&kept, dimension, temporal, &current))
     }
 
     /// The single headline number for a spec: its series collapsed across TIME per
@@ -753,6 +886,7 @@ mod tests {
             effort_id: None,
             provenance: "observed".into(),
             source: "test".into(),
+            producer: "test.gauge".into(),
         }
     }
 
@@ -901,7 +1035,12 @@ mod tests {
                 ..fact(2, "2026-06-30T11:00:00Z", 20.0)
             },
         ];
-        let rollup = compute_rollup(&facts, "package", Temporal::SemiAdditive);
+        let rollup = compute_rollup(
+            &facts,
+            "package",
+            Temporal::SemiAdditive,
+            &current_capture_ids(&facts, &[]),
+        );
         let rows: Vec<(String, f64, i64)> = rollup
             .iter()
             .map(|r| (r.key.clone(), r.value, r.subject_count))
@@ -914,6 +1053,35 @@ mod tests {
                 ("src/app".to_string(), 7.0, 2),
             ]
         );
+    }
+
+    #[test]
+    fn rollup_drops_subjects_missing_from_the_current_capture() {
+        // tsk44: a deleted file's facts stop at an older capture; scoping the
+        // semi-additive collapse to the CURRENT capture per (stream, producer)
+        // keeps its stale value out of the breakdown forever-after.
+        let facts = vec![
+            FactRow {
+                subject_ref: Some("src/app/old.rs".into()),
+                path: Some("src/app/old.rs".into()),
+                ..fact(1, "2026-06-30T10:00:00Z", 4.0)
+            },
+            FactRow {
+                subject_ref: Some("src/app/kept.rs".into()),
+                path: Some("src/app/kept.rs".into()),
+                ..fact(2, "2026-06-30T11:00:00Z", 1.0)
+            },
+        ];
+        let rollup = compute_rollup(
+            &facts,
+            "package",
+            Temporal::SemiAdditive,
+            &current_capture_ids(&facts, &[]),
+        );
+        assert_eq!(rollup.len(), 1);
+        assert_eq!(rollup[0].key, "src/app");
+        assert_eq!(rollup[0].value, 1.0, "old.rs (deleted) contributes nothing");
+        assert_eq!(rollup[0].subject_count, 1);
     }
 
     #[test]
@@ -931,7 +1099,7 @@ mod tests {
             by_model(2, "2026-06-30T11:00:00Z", "opus", 50.0),
             by_model(2, "2026-06-30T11:00:00Z", "haiku", 30.0),
         ];
-        let rollup = compute_rollup(&facts, "subject", Temporal::Additive);
+        let rollup = compute_rollup(&facts, "subject", Temporal::Additive, &Default::default());
         let rows: Vec<(String, f64, i64)> = rollup
             .iter()
             .map(|r| (r.key.clone(), r.value, r.subject_count))
@@ -965,7 +1133,12 @@ mod tests {
             cov(2, "2026-06-30T11:00:00Z", "src/app/b.rs", 5.0, 10.0),
             cov(2, "2026-06-30T11:00:00Z", "src/util/c.rs", 9.0, 10.0),
         ];
-        let rollup = compute_rollup(&facts, "package", Temporal::NonAdditive);
+        let rollup = compute_rollup(
+            &facts,
+            "package",
+            Temporal::NonAdditive,
+            &current_capture_ids(&facts, &[]),
+        );
         let rows: Vec<(String, f64, i64)> = rollup
             .iter()
             .map(|r| (r.key.clone(), r.value, r.subject_count))
