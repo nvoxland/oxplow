@@ -101,6 +101,11 @@ struct GaugeRunContext {
     closest_git_version: Option<String>,
     git_version_exact: bool,
     branch: Option<String>,
+    /// The producing effort, when the trigger knows it unambiguously (the
+    /// `on-effort-complete` ride-along) — stamped onto the capture so the
+    /// effort-attribution read (`captures_for_effort`) sees the run (tsk43).
+    /// Snapshot/manual scans are effort-less (`None`).
+    effort_id: Option<i64>,
 }
 
 impl MetricsService {
@@ -872,7 +877,7 @@ impl MetricsService {
             Some(sid) => self.build_file_map(sid).await,
             None => HashMap::new(),
         });
-        let ctx = self
+        let mut ctx = self
             .snapshot_context(
                 stream_val,
                 Some(thread_id.value()),
@@ -880,6 +885,10 @@ impl MetricsService {
                 snapshot_id.unwrap_or(0),
             )
             .await;
+        // This trigger KNOWS the producing effort — stamp it so the capture is
+        // attributable via `captures_for_effort` (tsk43; the pre-arc effort
+        // subject default was removed without a replacement).
+        ctx.effort_id = Some(effort_id.value());
         for g in &gauges {
             self.run_one_gauge(g, &ctx, files.clone()).await;
         }
@@ -985,6 +994,7 @@ impl MetricsService {
                 .map(|v| v.git_version_exact)
                 .unwrap_or(false),
             branch: oxplow_git::detect_current_branch(&self.project_dir),
+            effort_id: None,
         }
     }
 
@@ -1135,6 +1145,7 @@ impl MetricsService {
         let count = rows.len();
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
+            effort_id: ctx.effort_id,
             scope: Some(gauge.scope.clone()),
             trigger: Some(ctx.trigger.into()),
             basis_ref: ctx.closest_git_version.clone(),
@@ -1606,6 +1617,7 @@ def transform(input):
             closest_git_version: Some("abc1234".into()),
             git_version_exact: true,
             branch: Some("metrics-substrate".into()),
+            effort_id: None,
         };
         // Only src/a.rs has unsafe blocks → one fact recorded.
         let count = svc
@@ -1635,6 +1647,75 @@ def transform(input):
             facts[0].dims_json.as_deref(),
             Some("{\"language\":\"rust\"}")
         );
+    }
+
+    #[tokio::test]
+    async fn effort_complete_gauge_capture_is_effort_stamped() {
+        // tsk43: the on-effort-complete trigger KNOWS its producing effort —
+        // `record_gauge_facts` stamps the capture's `effort_id` so the T-D
+        // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
+        // (the other fixtures, `effort_id: None`) stay unstamped.
+        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
+        let (svc, dir) = fixture().await;
+        // A real effort row (the capture's effort_id is a foreign key).
+        let now = oxplow_domain::Timestamp::now();
+        let thread = ThreadId::new(1);
+        let task = svc
+            .task_store
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(thread),
+                parent_id: None,
+                title: "t".into(),
+                description: String::new(),
+                status: TaskStatus::InProgress,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        let effort = svc.effort_store.start(task, &thread, None).await.unwrap();
+
+        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/metrics/eff.star"),
+            r#"
+def transform(input):
+    return {"facts": [{"measure": "oxplow.ast_hit", "value": 1, "rule": "eff", "subject": "tree:."}]}
+"#,
+        )
+        .unwrap();
+        let metric = starlark_gauge("acme.effgauge", "oxplow/metrics/eff.star");
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: Some(1),
+            trigger: "on-effort-complete",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: Some(effort.id.value()),
+        };
+        let count = svc
+            .metrics
+            .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
+            .await;
+        assert_eq!(count, 1);
+        let caps = svc
+            .fact_store
+            .captures_for_effort(effort.id.value())
+            .await
+            .unwrap();
+        assert_eq!(caps.len(), 1, "the capture is stamped with the effort");
+        assert_eq!(caps[0].producer, "acme.effgauge");
     }
 
     #[tokio::test]
@@ -1670,6 +1751,7 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
+            effort_id: None,
         };
         let count = svc
             .metrics
@@ -1743,6 +1825,7 @@ def transform(input):
             closest_git_version: Some("abc1234".into()),
             git_version_exact: true,
             branch: Some("main".into()),
+            effort_id: None,
         };
         for key in [
             "oxplow.fn_count",
@@ -1804,6 +1887,7 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
+            effort_id: None,
         };
         svc.metrics
             .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
@@ -1866,6 +1950,7 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
+            effort_id: None,
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -1934,6 +2019,7 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
+            effort_id: None,
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -1998,6 +2084,7 @@ def transform(input):
             closest_git_version: Some("def5678".into()),
             git_version_exact: true,
             branch: Some("main".into()),
+            effort_id: None,
         };
 
         let keys = [
@@ -2562,6 +2649,7 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
+            effort_id: None,
         };
         let count = m.run_one_gauge(&metric, &ctx, Arc::new(files)).await;
         assert_eq!(count, 1, "global-scope script resolved + ran");

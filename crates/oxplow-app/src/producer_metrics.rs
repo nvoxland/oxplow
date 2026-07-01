@@ -311,6 +311,14 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
     })
 }
 
+/// Whether `key` names a built-in PRODUCER metric (tokens/turns/tests/coverage/
+/// analysis/lifecycle/nudges). The attribution classifier uses this to keep the
+/// analysis pair run-attributed: their facts arrive on effort-stamped run-ingest
+/// captures, unlike the (also path-grained, also static-quality) code gauges.
+pub fn is_producer_metric_key(key: &str) -> bool {
+    builtin_producer_metrics().iter().any(|m| m.key == key)
+}
+
 /// Look up a producer metric's descriptor by key. Producers call this and
 /// `.definition()` instead of inlining the descriptor.
 pub fn producer_metric(key: &str) -> &'static ProducerMetric {

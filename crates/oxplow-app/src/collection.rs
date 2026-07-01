@@ -2380,6 +2380,15 @@ impl CollectionService {
             .into_iter()
             .map(|f| f.path)
             .collect();
+        // The effort's stream (via its thread): gauge captures are per-worktree
+        // scans, so the File family must not read another stream's facts (tsk43).
+        let stream = self
+            .threads
+            .get(&effort.thread_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.stream_id.value());
 
         use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
         let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
@@ -2389,7 +2398,8 @@ impl CollectionService {
             // is the only place each family's read computation is named (tsk274).
             let row = match classify_effort_attribution(spec) {
                 EffortAttributionFamily::File => {
-                    self.file_delta_from_facts(spec, &effort, &claimed).await
+                    self.file_delta_from_facts(spec, &effort, &claimed, stream)
+                        .await
                 }
                 // Coverage stays effort-relative + on the legacy detail payload
                 // (line-sets aren't in facts yet) — derive the diff at read via the
@@ -2418,29 +2428,43 @@ impl CollectionService {
     /// Per-file attribution for a code gauge, over facts: Σ over the effort's
     /// claimed files of the file's `(current − baseline)` value, treating a file
     /// absent from a capture as 0 (sparse emission — how a drop-to-zero is
-    /// detected). Baseline capture = the latest before the effort started; current
-    /// = the latest at/before the effort end (the newest when open). With no
-    /// claimed files it falls back to the repo-wide before→after so an early effort
-    /// still shows movement. `None` when the measure is unknown or nothing moved.
+    /// detected). Facts are scoped to the effort's `stream` (gauge captures are
+    /// per-worktree scans — another stream's values must not pollute the delta,
+    /// tsk43). Baseline capture = the latest before the effort started; current
+    /// = the latest at/before the effort end (the newest when open; a capture
+    /// STAMPED with this effort — an on-effort-complete gauge landing just after
+    /// the close — also counts). A closed effort with no capture in its window
+    /// yields `None` — never a post-close capture's repo changes. `None` when
+    /// the measure is unknown or nothing moved.
     async fn file_delta_from_facts(
         &self,
         spec: &oxplow_db::MetricSpec,
         effort: &TaskEffort,
         claimed: &[String],
+        stream: Option<i64>,
     ) -> Option<oxplow_db::EffortMetricDelta> {
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let filter = spec_fact_filter(spec).ok()?;
         let facts = self.facts.facts_for_measure(measure.id).await.ok()?;
-        let kept: Vec<&oxplow_db::FactRow> = facts.iter().filter(|f| filter.matches(f)).collect();
+        let kept: Vec<&oxplow_db::FactRow> = facts
+            .iter()
+            .filter(|f| filter.matches(f))
+            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+            .collect();
         if kept.is_empty() {
             return None;
         }
-        // Distinct captures in time-ascending order (facts arrive oldest-first).
+        // Distinct captures in time-ascending order (facts arrive oldest-first),
+        // plus which of them this effort stamped (on-effort-complete gauges).
         let mut caps: Vec<(i64, oxplow_domain::Timestamp)> = Vec::new();
+        let mut stamped: std::collections::HashSet<i64> = std::collections::HashSet::new();
         for f in &kept {
             if !caps.iter().any(|(id, _)| *id == f.capture_id) {
                 caps.push((f.capture_id, f.captured_at));
+            }
+            if f.effort_id == Some(effort.id.value()) {
+                stamped.insert(f.capture_id);
             }
         }
         let baseline_cap = caps
@@ -2451,12 +2475,15 @@ impl CollectionService {
         let current_cap = caps
             .iter()
             .rev()
-            .find(|(_, at)| match effort.ended_at {
-                Some(end) => *at <= end,
+            .find(|(id, at)| match effort.ended_at {
+                Some(end) => *at <= end || stamped.contains(id),
                 None => true,
             })
-            .map(|(id, _)| *id)
-            .or_else(|| caps.last().map(|(id, _)| *id));
+            .map(|(id, _)| *id);
+        // A closed effort with no capture in (or stamped into) its window has
+        // nothing attributable — never fabricate a drop-to-zero against a
+        // pre-effort baseline, and never read a post-close capture (tsk43).
+        current_cap?;
         // A claimed file's value in a capture: Σ of the kept facts on that path
         // there (one for a per-file gauge), else 0.
         let file_value = |cap: Option<i64>, path: &str| -> f64 {
@@ -2487,9 +2514,13 @@ impl CollectionService {
         )
         .map(str::to_string);
 
-        if claimed.is_empty() {
-            // No claimed files → the repo-wide before→after, so an early effort (or
-            // a gauge with no per-file grain) still surfaces its movement.
+        // Per-file attribution needs path-grained facts. A repo-scalar gauge
+        // (facts with no path) sums 0/0 over the claimed paths and would
+        // silently drop the row — its movement is the repo-wide window (tsk43).
+        let path_grained = kept.iter().any(|f| f.path.is_some());
+        if claimed.is_empty() || !path_grained {
+            // No claimed files (an early effort) or no per-file grain → the
+            // repo-wide before→after, so the movement still surfaces.
             let baseline = repo_total(baseline_cap);
             let current = repo_total(current_cap);
             if baseline == 0.0 && current == 0.0 {
@@ -4326,15 +4357,18 @@ mod tests {
         ) -> (i64, oxplow_db::SqliteFactStore) {
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure_key = format!("{key}.m");
-            let m = facts
-                .upsert_measure(oxplow_db::NewMeasure::new(&measure_key, key))
-                .await
-                .unwrap();
+            // Production parity (tsk43): the built-in code gauges seed a
+            // path-grain measure (`subject_kind: file`) + a `static-quality`
+            // spec — the classifier must still route them to the File family
+            // (their snapshot-scan captures are never effort-stamped).
+            let mut nm = oxplow_db::NewMeasure::new(&measure_key, key);
+            nm.subject_kind = Some("file".into());
+            let m = facts.upsert_measure(nm).await.unwrap();
             let mut s = oxplow_db::NewMetricSpec::base(key, key, &measure_key, "sum");
             s.unit = Some("count".into());
             s.direction = direction.into();
-            s.display_kind = "gauge".into();
-            s.category = Some("custom".into());
+            s.display_kind = "findings".into();
+            s.category = Some("static-quality".into());
             s.target = target;
             facts.upsert_spec(s).await.unwrap();
             (m, facts)
@@ -4350,7 +4384,19 @@ mod tests {
             at: Timestamp,
             per_file: &[(&str, f64)],
         ) -> i64 {
-            let mut cap = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
+            seed_gauge_capture_in_stream(facts, measure_id, 1, at, per_file).await
+        }
+
+        /// [`seed_gauge_capture`] against an explicit stream — the cross-worktree
+        /// pollution fixture (tsk43).
+        async fn seed_gauge_capture_in_stream(
+            facts: &oxplow_db::SqliteFactStore,
+            measure_id: i64,
+            stream: i64,
+            at: Timestamp,
+            per_file: &[(&str, f64)],
+        ) -> i64 {
+            let mut cap = oxplow_db::NewMetricCapture::done(stream, "test.gauge", "test");
             cap.captured_at = Some(at);
             let rows: Vec<oxplow_db::NewFact> = per_file
                 .iter()
@@ -4475,6 +4521,89 @@ mod tests {
             assert_eq!(d2[0].current, 9.0);
             assert_eq!(d2[0].delta, Some(5.0));
             assert_eq!(d2[0].attributed_files, Some(1));
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_ignores_other_streams_captures() {
+            // tsk43: gauge captures are per-worktree scans. A LATER capture from
+            // another stream (same repo-relative path, different worktree content)
+            // must not become this effort's "current" — the effort reads only its
+            // own stream's timeline.
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let later = Timestamp::from_unix_ms(start.unix_ms() + 120_000);
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
+            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
+            // A second stream (worktree) whose scan covers the same path.
+            let now = Timestamp::now();
+            SqliteStreamStore::new(h.db.clone())
+                .upsert(&Stream {
+                    id: StreamId::new(2),
+                    kind: StreamKind::Worktree,
+                    title: "w".into(),
+                    branch: "feat".into(),
+                    branch_ref: "refs/heads/feat".into(),
+                    branch_source: "main".into(),
+                    worktree_path: "/tmp/other".into(),
+                    working_pane: String::new(),
+                    talking_pane: String::new(),
+                    working_session_id: String::new(),
+                    talking_session_id: String::new(),
+                    custom_prompt: None,
+                    created_at: now,
+                    updated_at: now,
+                    archived_at: None,
+                })
+                .await
+                .unwrap();
+            // Stream 2's worktree scans the same path — newer, different value.
+            seed_gauge_capture_in_stream(&facts, m, 2, later, &[("src/a.rs", 100.0)]).await;
+
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(deltas.len(), 1);
+            assert_eq!(deltas[0].baseline, Some(2.0));
+            assert_eq!(
+                deltas[0].current, 3.0,
+                "stream 2's later capture must not pollute stream 1's delta"
+            );
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_skips_closed_effort_with_only_post_close_captures() {
+            // tsk43: a CLOSED effort whose window contains no gauge capture gets
+            // no row — never a post-close capture's repo changes (the old
+            // `.or_else(caps.last())` fallback), and never a fabricated
+            // drop-to-zero against a pre-effort baseline.
+            let h = build(None).await;
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            // The effort closes with no capture at all in its window (e.g. the
+            // gauge was first enabled after the close)…
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            h.efforts.finish(&eid, None, None).await.unwrap();
+            let end = h
+                .efforts
+                .get_effort(&eid)
+                .await
+                .unwrap()
+                .unwrap()
+                .ended_at
+                .unwrap();
+            // …and the only later capture lands AFTER the close.
+            let post = Timestamp::from_unix_ms(end.unix_ms() + 60_000);
+            seed_gauge_capture(&facts, m, post, &[("src/a.rs", 9.0)]).await;
+
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert!(
+                deltas.is_empty(),
+                "no in-window capture → no row, not a post-close delta: {deltas:?}"
+            );
         }
 
         #[tokio::test]

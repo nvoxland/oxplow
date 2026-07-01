@@ -410,16 +410,19 @@ age sweep only.
 families:
 
 - **claimed files × time** — code gauges are snapshot scans, so their captures are
-  **not** effort-stamped; the File family reads them by claimed path + capture time.
+  **not** effort-stamped; the File family reads them by claimed path + capture time,
+  scoped to the effort's stream. Exception: an `on-effort-complete` gauge run KNOWS
+  its producing effort and stamps the capture (tsk43 — `GaugeRunContext.effort_id`),
+  so its just-after-close capture still counts as the effort's "current".
 - **`metric_capture.effort_id`** — the run/operational producers stamp the owning
   effort at ingest (tsk37, `resolve_owning_effort`), so an effort's run + token +
   nudge facts are exactly `captures_for_effort(effort_id)` → `facts_for_captures`.
 
 | family | how the delta is computed |
 |---|---|
-| **File** — per-file gauge (`display_kind = gauge`, has a source measure, non-operational key) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)` fact value, where baseline capture = latest before the effort start, current = latest at/before the effort end (newest when open). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen). **No claims** → the repo-wide before→after fallback. `file_delta_from_facts` |
-| **Run** — tests + analysis (category ∈ {`testing`, `static-quality`}) | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is `gauge`-display but classified Run **first**, so it never reaches the File branch (the tsk272 guard) |
-| **Window** — operational (`agent.*`/`effort.*`/`task.*`) | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
+| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)` fact value; facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
+| **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
+| **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
 | **Coverage** (category `coverage`) | **documented scope-guard special case**: still on the legacy detail payload. `coverage_delta_for_spec` resolves the spec's legacy `MetricDefinition` by key and derives the effort-relative **diff-coverage** at read (`diff_coverage_for_effort`) from the run's stored ABSOLUTE per-file **line-sets** (the `coverage-detail` finding). The coverage FACTS carry num/den counts, not line-sets, so migrating this needs a producer change — deferred |
 
 The family is chosen by **one classifier** — `classify_effort_attribution(spec)
