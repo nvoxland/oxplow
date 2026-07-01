@@ -132,12 +132,53 @@ the untouched V38 sample/definition tools:
   sliced by a dimension.
 - `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
 
+### Catalog authoring surface (`measures:` / `dimensions:` config — workstream E)
+
+Custom fact types and slice axes are **pluggable**, namespaced exactly like
+metrics (`oxplow.*` reserved — those are the migration seed; config only *adds*
+global/project entries). `crates/oxplow-config/src/lib.rs`:
+
+```yaml
+measures:                          # custom fact TYPES a collector may emit
+  - key: acme.api_latency
+    unit: ms
+    subjectKind: endpoint
+    temporalSemantics: non-additive   # additive | semi-additive | non-additive
+    componentRole: numerator          # none | numerator | denominator
+dimensions:                        # custom conformed slice axes
+  - key: acme.license
+    valueType: categorical            # categorical | numeric | temporal | entity-ref
+    vocabulary: [MIT, Apache-2.0]     # optional controlled value set
+    promote: true                     # request a generated column + index (see below)
+```
+
+- **Definition-only** (no `use:`/`key:` split like metrics — you declare a fact
+  type / axis, you don't "enable" one). `validate_measures`/`validate_dimensions`
+  mirror `validate_metrics` (namespacing, `oxplow.*` reserved, per-key
+  uniqueness, enum checks). `resolve_measures`/`resolve_dimensions` merge the
+  **global + project** scopes (project > global) into flat `Resolved*`.
+- **Global scope** = `<global_config_dir>/{measures,dimensions}/*.yaml`
+  (`load_global_measure_entries`/`load_global_dimension_entries`); auto-active in
+  every project (unlike a global metric, which needs a project `use:`).
+- **Boot seeding:** `MetricsService::seed_catalog()` runs once at boot and on
+  every `ConfigChanged` (beside `seed_definitions`), upserting resolved
+  measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
+  holds a `fact_store` via `.with_fact_store()`.
+- **Scaffolds:** `MetricsService::scaffold_measure` / `scaffold_dimension` —
+  one-call "create a custom measure/dimension" (append config entry or write a
+  shareable `<global>/…/<slug>.yaml`, reseed, return the key). The IPC/UI "New
+  measure/dimension" buttons that surface these land with the UI task.
+- **`promote`** is threaded through but currently **inert** (see tsk28): the
+  engine loads all facts and filters in-app, so an index bites nothing until
+  reads go DB-side. Carried, not acted on.
+
 **Not yet done:** flipping the *existing* reads (`list_metric_samples`,
 `metric_breakdown`, `get_metric_summary`, `list_metric_findings`) onto the engine,
 the IPC/Tauri counterparts + TS bindings, the UI pages (incl. a **Dimensions
-catalog** page), config `measures:`/`dimensions:` blocks, the metric-spec model
-(`metric_definition` → `source_measure` + `aggregation`), and retiring V38. Those
-are the open children of the epic.
+catalog** page), the metric-spec model (`metric_definition` → `source_measure` +
+`aggregation`), **declare-to-collect enforcement** (a gauge emitting an undefined
+measure/dim is a run error — lands with the code-gauge unbake), `promote_dimension`
+teeth, and retiring V38. Those are the open children of the epic.
 
 ---
 
