@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_db::{FactRow, SqliteFactStore};
+use oxplow_db::{FactRow, MetricSpec, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// How the subjects measured in a single capture combine into the capture's
@@ -120,19 +120,29 @@ impl BinaryOp {
 }
 
 /// A simple conjunctive predicate over a fact. Covers the common metric filters
-/// (count-over-threshold; severity/dimension equality). Richer predicates land
-/// with the config layer (tsk17).
-#[derive(Debug, Clone, Default)]
+/// (count-over-threshold; severity/dimension equality). This is the deserialized
+/// shape of a spec's `filter_json`. Richer predicates land with the config layer
+/// (tsk17).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FactFilter {
     /// Keep facts with `value >= min_value` (e.g. complexity ≥ threshold).
+    #[serde(default)]
     pub min_value: Option<f64>,
     /// Keep facts whose reported `severity` equals this (e.g. `error`).
+    #[serde(default)]
     pub severity: Option<String>,
-    /// Keep facts whose `dims_json[key]` equals this value.
+    /// Keep facts whose `dims_json[key]` equals this value (a `[key, value]` pair).
+    #[serde(default)]
     pub dim_eq: Option<(String, String)>,
 }
 
 impl FactFilter {
+    /// Parse a spec's `filter_json` into a filter. A malformed predicate is a
+    /// config/spec error (surfaced), never silently ignored.
+    pub fn from_json(s: &str) -> Result<Self, DomainError> {
+        serde_json::from_str(s).map_err(|e| DomainError::Invalid(format!("bad filter_json: {e}")))
+    }
+
     pub fn matches(&self, f: &FactRow) -> bool {
         if let Some(min) = self.min_value {
             if f.value < min {
@@ -440,6 +450,87 @@ impl MetricEngine {
         let facts = self.facts.facts_for_measure(measure.id).await?;
         Ok(compute_rollup(&facts, dimension))
     }
+
+    // --- spec-driven reads (a metric key → its computed result) -----------
+
+    /// The time series for a metric SPEC: resolve its `source_measure`,
+    /// `aggregation`, and `filter`, then aggregate the source measure's facts.
+    /// Empty for a formula metric (no source measure) or an unknown measure.
+    /// Errors on an aggregation the engine can't yet compute or a malformed
+    /// `filter_json`.
+    pub async fn series_for_spec(
+        &self,
+        spec: &MetricSpec,
+        group_by: Option<&str>,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
+        let Some(measure_key) = spec.source_measure.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let agg = spec_aggregation(spec)?;
+        let filter = spec_filter(spec)?;
+        self.series(measure_key, agg, &filter, group_by).await
+    }
+
+    /// The by-dimension rollup for a spec — the source measure's facts filtered by
+    /// the spec's predicate, then rolled up by `dimension`. Empty for a formula /
+    /// unknown-measure spec.
+    pub async fn rollup_for_spec(
+        &self,
+        spec: &MetricSpec,
+        dimension: &str,
+    ) -> Result<Vec<RollupRow>, DomainError> {
+        let Some(measure_key) = spec.source_measure.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let Some(measure) = self.facts.get_measure(measure_key).await? else {
+            return Ok(Vec::new());
+        };
+        let filter = spec_filter(spec)?;
+        let facts = self.facts.facts_for_measure(measure.id).await?;
+        let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
+        Ok(compute_rollup(&kept, dimension))
+    }
+
+    /// The single headline number for a spec: its series collapsed across TIME per
+    /// the source measure's `temporal_semantics` (semi-additive → last capture;
+    /// additive → sum; ratio → Σn/Σd). `None` for a formula / unknown / empty spec.
+    pub async fn headline_for_spec(&self, spec: &MetricSpec) -> Result<Option<f64>, DomainError> {
+        let Some(measure_key) = spec.source_measure.as_deref() else {
+            return Ok(None);
+        };
+        let Some(measure) = self.facts.get_measure(measure_key).await? else {
+            return Ok(None);
+        };
+        let temporal = Temporal::parse(&measure.temporal_semantics).ok_or_else(|| {
+            DomainError::Invalid(format!(
+                "measure `{}` has unknown temporal_semantics `{}`",
+                measure_key, measure.temporal_semantics
+            ))
+        })?;
+        let series = self.series_for_spec(spec, None).await?;
+        Ok(range_value(&series, temporal))
+    }
+}
+
+/// Map a spec's `aggregation` string onto the engine's [`Aggregation`]. The spec
+/// vocabulary is a superset (`count_distinct`/`p95` are reserved in the schema);
+/// an aggregation the engine can't yet compute is an honest error, not a silent
+/// wrong number.
+fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
+    Aggregation::parse(&spec.aggregation).ok_or_else(|| {
+        DomainError::Invalid(format!(
+            "aggregation `{}` is not yet supported by the engine",
+            spec.aggregation
+        ))
+    })
+}
+
+/// A spec's `filter_json` as a [`FactFilter`] (the empty filter when absent).
+fn spec_filter(spec: &MetricSpec) -> Result<FactFilter, DomainError> {
+    match spec.filter_json.as_deref() {
+        Some(j) => FactFilter::from_json(j),
+        None => Ok(FactFilter::default()),
+    }
 }
 
 #[cfg(test)]
@@ -706,5 +797,191 @@ mod tests {
         assert_eq!(evaluate_formula(&a, &b, BinaryOp::Add)[0].value, 8.0);
         assert_eq!(evaluate_formula(&a, &b, BinaryOp::Sub)[0].value, 2.0);
         assert_eq!(evaluate_formula(&a, &b, BinaryOp::Mul)[0].value, 15.0);
+    }
+
+    #[test]
+    fn fact_filter_parses_from_json() {
+        let f = FactFilter::from_json("{\"min_value\":10.0}").unwrap();
+        assert_eq!(f.min_value, Some(10.0));
+        assert!(f.severity.is_none());
+        // Partial JSON is fine; a full filter round-trips including the dim pair.
+        let f2 = FactFilter::from_json(
+            "{\"severity\":\"error\",\"dim_eq\":[\"oxplow.language\",\"rust\"]}",
+        )
+        .unwrap();
+        assert_eq!(f2.severity.as_deref(), Some("error"));
+        assert_eq!(
+            f2.dim_eq,
+            Some(("oxplow.language".to_string(), "rust".to_string()))
+        );
+        // Malformed → surfaced error, never silently dropped.
+        assert!(FactFilter::from_json("{not json").is_err());
+    }
+
+    // --- spec-wrapper (DB-backed) -----------------------------------------
+
+    use oxplow_db::{Database, NewFact, NewMetricCapture, NewMetricSpec, SqliteFactStore};
+
+    /// A migrated in-memory store with stream(1) so capture FKs resolve, plus the
+    /// engine over it and the seeded `oxplow.complexity` measure id.
+    async fn engine_fixture() -> (MetricEngine, SqliteFactStore, i64) {
+        use oxplow_domain::stores::StreamStore;
+        let db = Database::in_memory();
+        oxplow_db::SqliteStreamStore::new(db.clone())
+            .upsert(&oxplow_domain::Stream {
+                id: oxplow_domain::StreamId::new(1),
+                kind: oxplow_domain::StreamKind::Primary,
+                title: "t".into(),
+                branch: "main".into(),
+                branch_ref: "refs/heads/main".into(),
+                branch_source: "main".into(),
+                worktree_path: "/r".into(),
+                working_pane: String::new(),
+                talking_pane: String::new(),
+                working_session_id: String::new(),
+                talking_session_id: String::new(),
+                custom_prompt: None,
+                created_at: oxplow_domain::Timestamp::from_unix_ms(0),
+                updated_at: oxplow_domain::Timestamp::from_unix_ms(0),
+                archived_at: None,
+            })
+            .await
+            .unwrap();
+        let facts = SqliteFactStore::new(db);
+        let complexity = facts
+            .get_measure("oxplow.complexity")
+            .await
+            .unwrap()
+            .expect("migration seeds oxplow.complexity")
+            .id;
+        (MetricEngine::new(facts.clone()), facts, complexity)
+    }
+
+    fn cap_at(captured_at: &str) -> NewMetricCapture {
+        NewMetricCapture {
+            captured_at: Some(ts(captured_at)),
+            ..NewMetricCapture::done(1, "metrics", "builtin")
+        }
+    }
+
+    #[tokio::test]
+    async fn series_for_spec_counts_over_threshold_and_headline_is_last_snapshot() {
+        let (engine, facts, complexity) = engine_fixture().await;
+        // Capture 1 (10:00): two functions ≥10. Capture 2 (11:00): one ≥10.
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact::new(complexity, 14.0),
+                    NewFact::new(complexity, 11.0),
+                    NewFact::new(complexity, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_at("2026-06-30T11:00:00Z"),
+                vec![
+                    NewFact::new(complexity, 20.0),
+                    NewFact::new(complexity, 2.0),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let mut spec =
+            NewMetricSpec::base("acme.hotspots", "Hotspots", "oxplow.complexity", "count");
+        spec.filter_json = Some("{\"min_value\":10.0}".into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.hotspots").await.unwrap().unwrap();
+
+        let series = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(
+            series.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0],
+            "one point per capture, time-ascending"
+        );
+        // complexity is semi-additive → headline is the LAST capture's value.
+        assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn rollup_for_spec_applies_filter_then_groups_by_dimension() {
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact {
+                        subject_ref: Some("src/app/a.rs".into()),
+                        path: Some("src/app/a.rs".into()),
+                        ..NewFact::new(complexity, 12.0)
+                    },
+                    NewFact {
+                        // Below the threshold — must be filtered out before rollup.
+                        subject_ref: Some("src/app/b.rs".into()),
+                        path: Some("src/app/b.rs".into()),
+                        ..NewFact::new(complexity, 3.0)
+                    },
+                    NewFact {
+                        subject_ref: Some("src/util/c.rs".into()),
+                        path: Some("src/util/c.rs".into()),
+                        ..NewFact::new(complexity, 20.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+        let mut spec = NewMetricSpec::base("acme.h", "H", "oxplow.complexity", "sum");
+        spec.filter_json = Some("{\"min_value\":10.0}".into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.h").await.unwrap().unwrap();
+
+        let rollup = engine.rollup_for_spec(&spec, "package").await.unwrap();
+        let rows: Vec<(String, f64)> = rollup.iter().map(|r| (r.key.clone(), r.value)).collect();
+        // b.rs (3.0) filtered out; util (20) sorts above app (12).
+        assert_eq!(
+            rows,
+            vec![
+                ("src/util".to_string(), 20.0),
+                ("src/app".to_string(), 12.0),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn spec_wrapper_returns_empty_for_formula_metric() {
+        let (engine, facts, _c) = engine_fixture().await;
+        let mut spec = NewMetricSpec::base("acme.derived", "Derived", "", "ratio");
+        spec.source_measure = None;
+        spec.formula = Some("{\"op\":\"div\",\"left\":\"a\",\"right\":\"b\"}".into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.derived").await.unwrap().unwrap();
+
+        assert!(engine
+            .series_for_spec(&spec, None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(engine
+            .rollup_for_spec(&spec, "package")
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn spec_wrapper_errors_on_aggregation_the_engine_cannot_compute() {
+        let (engine, facts, _c) = engine_fixture().await;
+        // `p95` is a valid schema aggregation but not yet implemented by the engine.
+        let spec = NewMetricSpec::base("acme.p", "P", "oxplow.complexity", "p95");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.p").await.unwrap().unwrap();
+
+        let err = engine.series_for_spec(&spec, None).await.unwrap_err();
+        assert!(matches!(err, DomainError::Invalid(_)), "got {err:?}");
     }
 }

@@ -171,6 +171,132 @@ fn row_to_dimension(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dimension> {
 }
 
 // ---------------------------------------------------------------------------
+// MetricSpec (the metric-as-a-spec catalog — the third catalog beside measure
+// + dimension). A metric is NOT a stored sample stream; it is a spec computed
+// over facts: a source measure + an aggregation + an optional filter/formula,
+// plus read-time presentation (direction + thresholds + display kind).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct MetricSpec {
+    pub id: i64,
+    pub key: String,
+    pub title: String,
+    pub unit: Option<String>,
+    /// The measure whose facts this metric aggregates; `None` for a formula metric.
+    pub source_measure: Option<String>,
+    /// `count` | `count_distinct` | `sum` | `avg` | `min` | `max` | `last` | `p95`
+    /// | `ratio` — how source facts combine WITHIN a capture.
+    pub aggregation: String,
+    /// Conjunctive fact predicate (min_value / severity / dim equality), JSON.
+    pub filter_json: Option<String>,
+    /// Derived-metric formula referencing other metric keys; `None` for a base.
+    pub formula: Option<String>,
+    /// Conformed dims this metric may be sliced by (JSON array of dim keys).
+    pub sliceable_dims_json: Option<String>,
+    /// `higher-better` | `lower-better` | `neutral`.
+    pub direction: String,
+    pub target: Option<f64>,
+    pub warn_at: Option<f64>,
+    pub fail_at: Option<f64>,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub language: Option<String>,
+    /// `built-in` | `global` | `project`.
+    pub scope: String,
+    /// Read-time presentation: `gauge` | `findings` | `test` | `coverage` | `event`.
+    pub display_kind: String,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Write-side input for [`SqliteFactStore::upsert_spec`]. Build with
+/// [`NewMetricSpec::base`] then override fields.
+#[derive(Debug, Clone)]
+pub struct NewMetricSpec {
+    pub key: String,
+    pub title: String,
+    pub unit: Option<String>,
+    pub source_measure: Option<String>,
+    pub aggregation: String,
+    pub filter_json: Option<String>,
+    pub formula: Option<String>,
+    pub sliceable_dims_json: Option<String>,
+    pub direction: String,
+    pub target: Option<f64>,
+    pub warn_at: Option<f64>,
+    pub fail_at: Option<f64>,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub language: Option<String>,
+    pub scope: String,
+    pub display_kind: String,
+}
+
+impl NewMetricSpec {
+    /// A base metric over `source_measure` with `aggregation`; neutral direction,
+    /// `gauge` display, `built-in` scope. For a formula metric, set
+    /// `source_measure = None` and populate `formula`.
+    pub fn base(
+        key: impl Into<String>,
+        title: impl Into<String>,
+        source_measure: impl Into<String>,
+        aggregation: impl Into<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            title: title.into(),
+            unit: None,
+            source_measure: Some(source_measure.into()),
+            aggregation: aggregation.into(),
+            filter_json: None,
+            formula: None,
+            sliceable_dims_json: None,
+            direction: "neutral".into(),
+            target: None,
+            warn_at: None,
+            fail_at: None,
+            description: None,
+            category: None,
+            language: None,
+            scope: "built-in".into(),
+            display_kind: "gauge".into(),
+        }
+    }
+}
+
+const SPEC_COLS: &str = "id, key, title, unit, source_measure, aggregation, filter_json, \
+     formula, sliceable_dims_json, direction, target, warn_at, fail_at, description, \
+     category, language, scope, display_kind, created_at, updated_at";
+
+fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
+    let created_at: String = row.get(18)?;
+    let updated_at: String = row.get(19)?;
+    Ok(MetricSpec {
+        id: row.get(0)?,
+        key: row.get(1)?,
+        title: row.get(2)?,
+        unit: row.get(3)?,
+        source_measure: row.get(4)?,
+        aggregation: row.get(5)?,
+        filter_json: row.get(6)?,
+        formula: row.get(7)?,
+        sliceable_dims_json: row.get(8)?,
+        direction: row.get(9)?,
+        target: row.get(10)?,
+        warn_at: row.get(11)?,
+        fail_at: row.get(12)?,
+        description: row.get(13)?,
+        category: row.get(14)?,
+        language: row.get(15)?,
+        scope: row.get(16)?,
+        display_kind: row.get(17)?,
+        created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
+        updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Capture (the context row)
 // ---------------------------------------------------------------------------
 
@@ -556,6 +682,80 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Insert or update (by `key`) a metric spec; returns its row id. `created_at`
+    /// is preserved across updates.
+    pub async fn upsert_spec(&self, s: NewMetricSpec) -> Result<i64, DomainError> {
+        self.db
+            .call(move |conn| {
+                let now = ts_to_string(Timestamp::now());
+                conn.execute(
+                    "INSERT INTO metric_spec
+                       (key, title, unit, source_measure, aggregation, filter_json, formula,
+                        sliceable_dims_json, direction, target, warn_at, fail_at, description,
+                        category, language, scope, display_kind, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                             ?16, ?17, ?18, ?18)
+                     ON CONFLICT(key) DO UPDATE SET
+                        title=excluded.title, unit=excluded.unit,
+                        source_measure=excluded.source_measure, aggregation=excluded.aggregation,
+                        filter_json=excluded.filter_json, formula=excluded.formula,
+                        sliceable_dims_json=excluded.sliceable_dims_json,
+                        direction=excluded.direction, target=excluded.target,
+                        warn_at=excluded.warn_at, fail_at=excluded.fail_at,
+                        description=excluded.description, category=excluded.category,
+                        language=excluded.language, scope=excluded.scope,
+                        display_kind=excluded.display_kind, updated_at=excluded.updated_at",
+                    params![
+                        s.key,
+                        s.title,
+                        s.unit,
+                        s.source_measure,
+                        s.aggregation,
+                        s.filter_json,
+                        s.formula,
+                        s.sliceable_dims_json,
+                        s.direction,
+                        s.target,
+                        s.warn_at,
+                        s.fail_at,
+                        s.description,
+                        s.category,
+                        s.language,
+                        s.scope,
+                        s.display_kind,
+                        now,
+                    ],
+                )?;
+                conn.query_row(
+                    "SELECT id FROM metric_spec WHERE key = ?1",
+                    params![s.key],
+                    |r| r.get(0),
+                )
+            })
+            .await
+    }
+
+    pub async fn get_spec(&self, key: &str) -> Result<Option<MetricSpec>, DomainError> {
+        let key = key.to_string();
+        self.db
+            .call(move |conn| {
+                let sql = format!("SELECT {SPEC_COLS} FROM metric_spec WHERE key = ?1");
+                conn.query_row(&sql, params![key], row_to_spec).optional()
+            })
+            .await
+    }
+
+    pub async fn list_specs(&self) -> Result<Vec<MetricSpec>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!("SELECT {SPEC_COLS} FROM metric_spec ORDER BY key");
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map([], row_to_spec)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     // --- captures + facts -------------------------------------------------
 
     /// Insert one capture; returns its id. `captured_at` defaults to now.
@@ -773,6 +973,75 @@ mod tests {
             .expect("custom dim registered");
         assert_eq!(lic.scope, "project");
         assert!(!lic.promoted);
+    }
+
+    #[tokio::test]
+    async fn upsert_spec_round_trips_and_updates_in_place() {
+        let store = fixture().await;
+        // The migration seeds NO specs — this is the first row.
+        assert!(store.list_specs().await.unwrap().is_empty());
+
+        let mut s = NewMetricSpec::base(
+            "acme.hotspots",
+            "Complexity hotspots",
+            "oxplow.complexity",
+            "count",
+        );
+        s.unit = Some("count".into());
+        s.filter_json = Some("{\"min_value\":10.0}".into());
+        s.sliceable_dims_json = Some("[\"oxplow.package\"]".into());
+        s.direction = "lower-better".into();
+        s.warn_at = Some(5.0);
+        s.fail_at = Some(10.0);
+        s.scope = "project".into();
+        s.display_kind = "gauge".into();
+        let id = store.upsert_spec(s.clone()).await.unwrap();
+
+        // Same key updates in place, preserving the id.
+        let mut s2 = s.clone();
+        s2.title = "Hotspots (\u{2265}10)".into();
+        let id2 = store.upsert_spec(s2).await.unwrap();
+        assert_eq!(id, id2, "same key updates in place");
+
+        let got = store
+            .get_spec("acme.hotspots")
+            .await
+            .unwrap()
+            .expect("spec exists");
+        assert_eq!(got.title, "Hotspots (\u{2265}10)");
+        assert_eq!(got.source_measure.as_deref(), Some("oxplow.complexity"));
+        assert_eq!(got.aggregation, "count");
+        assert_eq!(got.filter_json.as_deref(), Some("{\"min_value\":10.0}"));
+        assert_eq!(
+            got.sliceable_dims_json.as_deref(),
+            Some("[\"oxplow.package\"]")
+        );
+        assert_eq!(got.direction, "lower-better");
+        assert_eq!(got.warn_at, Some(5.0));
+        assert_eq!(got.fail_at, Some(10.0));
+        assert_eq!(got.scope, "project");
+        assert_eq!(got.display_kind, "gauge");
+
+        let all = store.list_specs().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].key, "acme.hotspots");
+    }
+
+    #[tokio::test]
+    async fn upsert_spec_allows_formula_metric_without_source_measure() {
+        let store = fixture().await;
+        // A derived (formula) metric has no source measure.
+        let mut s = NewMetricSpec::base("acme.bugs_per_kloc", "Bugs per KLOC", "", "ratio");
+        s.source_measure = None;
+        s.formula = Some("{\"op\":\"div\",\"left\":\"acme.bugs\",\"right\":\"acme.kloc\"}".into());
+        store.upsert_spec(s).await.unwrap();
+
+        let got = store.get_spec("acme.bugs_per_kloc").await.unwrap().unwrap();
+        assert!(got.source_measure.is_none());
+        assert_eq!(
+            got.formula.as_deref(),
+            Some("{\"op\":\"div\",\"left\":\"acme.bugs\",\"right\":\"acme.kloc\"}")
+        );
     }
 
     #[tokio::test]

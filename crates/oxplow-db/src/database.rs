@@ -482,6 +482,9 @@ mod tests {
             "subject",
             "metric_capture",
             "fact",
+            // V44 — the metric SPEC layer (additive beside the old
+            // `metric_definition`, which the retire migration drops).
+            "metric_spec",
         ];
         // `effort_observation` was dropped in V39 (tsk215) — assert it's gone.
         let expected_absent = ["hook_event", "agent_status", "effort_observation"];

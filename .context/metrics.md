@@ -73,11 +73,29 @@ welded to collection.
   `subject_ref`/`path`/`line` (location-at-capture); reported finding metadata
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
+- **`metric_spec`** (`V44__metric_spec.sql`, tsk29) — the **metric-as-a-spec**
+  catalog (the third catalog beside measure + dimension). A metric is NOT a stored
+  sample stream (V38's `metric_definition` *owned* `metric_sample` rows); it is a
+  **spec computed over facts at read time**: `key` (`oxplow.*` reserved), `title`,
+  `unit`, `source_measure` (the measure whose facts it aggregates; NULL for a
+  formula metric), `aggregation` (`count`|`count_distinct`|`sum`|`avg`|`min`|`max`|
+  `last`|`p95`|`ratio` — how source facts combine *within* a capture; cross-time
+  collapse is the source measure's `temporal_semantics`, not stored here),
+  `filter_json` (the conjunctive predicate that turns a raw measure into a
+  count-over-threshold), `formula` (derived-metric spec referencing other metric
+  keys; NULL for a base), `sliceable_dims_json`, presentation
+  `direction`/`target`/`warn_at`/`fail_at`/`display_kind` (`gauge`|`findings`|
+  `test`|`coverage`|`event` — read-time only; severity/threshold-state are DERIVED
+  from `value` × these, never stored on a fact), `scope`/`category`/`language`.
+  **Additive** beside the old `metric_definition` (still FK-referenced by the V38
+  `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
+  cluster once reads flip (tsk26). No seed rows — specs seed from resolved config
+  with the read-flip.
 
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
-`upsert_dimension`/`list_dimensions`, `record_capture`,
-`record_facts(capture, facts)` (atomic — inserts the capture, backfills
-`capture_id` into every fact, commits together), `get_capture`,
+`upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
+`record_capture`, `record_facts(capture, facts)` (atomic — inserts the capture,
+backfills `capture_id` into every fact, commits together), `get_capture`,
 `facts_for_measure` (joined to the capture for the time/version/effort spine),
 `facts_for_captures` (the attribution-by-claim read), `aggregate_ratio`.
 
@@ -97,6 +115,15 @@ welded to collection.
   and `package`-from-path directly, else `dims_json[key]`.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
   `rollup(measure_key, dimension)` fetch a measure's facts and aggregate.
+- **Spec-driven reads** (tsk29 — a metric *key* → its computed result): given a
+  `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` /
+  `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
+  (`FactFilter::from_json` parses `filter_json`) and run the pure cores;
+  `headline_for_spec` collapses across time per the *source measure's*
+  `temporal_semantics`. A formula metric (no `source_measure`) yields empty/None;
+  an aggregation the engine can't yet compute (`count_distinct`/`p95`) or a
+  malformed `filter_json` is a surfaced `DomainError::Invalid`, never a silent
+  wrong number. This is the bridge the read flip (tsk26) and UI (tsk18) consume.
 
 ### Producers — dual-writing facts beside the legacy samples
 

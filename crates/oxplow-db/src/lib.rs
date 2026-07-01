@@ -43,8 +43,8 @@ pub use effort_store::{
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use fact_store::{
-    Dimension, FactRow, Measure, MetricCapture, NewDimension, NewFact, NewMeasure,
-    NewMetricCapture, SqliteFactStore,
+    Dimension, FactRow, Measure, MetricCapture, MetricSpec, NewDimension, NewFact, NewMeasure,
+    NewMetricCapture, NewMetricSpec, SqliteFactStore,
 };
 pub use metric_store::{
     EffortMetricDelta, MetricDefinition, MetricDimensionRollup, MetricFinding, MetricRun,
