@@ -19,7 +19,7 @@
 use async_trait::async_trait;
 
 use oxplow_db::{
-    MetricDefinition, SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore,
+    MetricSpec, SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore,
     SqliteTaskEffortStore, TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
 };
 use oxplow_domain::EffortId;
@@ -29,7 +29,7 @@ use oxplow_domain::EffortId;
 /// user/other-actor edits) and the agent can't triage a wall of items.
 pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
 
-/// Which **read-side attribution family** a metric definition belongs to — the
+/// Which **read-side attribution family** a metric SPEC belongs to — the
 /// single source of truth for how an effort's delta for that metric is computed
 /// AND which claim-set (the write/reconcile path's [`AttributionKind`]) backs it.
 /// Adding a new fact-kind is a variant here + one match arm in
@@ -47,33 +47,41 @@ pub enum EffortAttributionFamily {
     /// Per-file code gauges: Σ over the effort's CLAIMED FILES of each file's
     /// `(current − baseline)`. Backed by [`FileKind`].
     File,
-    /// Coverage: run-claimed AND effort-relative — the diff is DERIVED at read
-    /// against the effort's start snapshot (`coverage_delta`). Backed by [`RunKind`].
+    /// Coverage: effort-relative — the diff is DERIVED at read against the
+    /// effort's start snapshot (`coverage_delta`), a documented special case still
+    /// on the legacy detail payload (line-sets aren't in facts yet). Backed by
+    /// [`RunKind`].
     Coverage,
-    /// Other run-kind facts (tests, analysis): before→after over the effort's
-    /// CLAIMED RUNS' samples (`run_attributed_delta`). Backed by [`RunKind`].
+    /// Other run-kind facts (tests, analysis): before→after / `sum` over the facts
+    /// of the effort's own captures (`metric_capture.effort_id`, stamped at ingest
+    /// — tsk37). Backed by [`RunKind`].
     Run,
-    /// Operational / everything else: the effort's thread + time window, no claim.
+    /// Operational / everything else (tokens, nudges, cycle-time): before→after /
+    /// `sum` over the facts of the effort's own captures. Read identically to
+    /// [`Run`](Self::Run) now that captures carry `effort_id`; kept a distinct
+    /// family only to document that it has no run-claim write side.
     Window,
 }
 
-/// Classify a metric definition into its [`EffortAttributionFamily`]. Run-kind
-/// families (coverage, then tests/analysis) are tested BEFORE the per-file
-/// `gauge`/`tree` heuristic on purpose: analysis is a `gauge`/`tree` def but is
-/// run-claimed, so keying it on `gauge`/`tree` would wrongly route it to the
-/// per-file path it never populates (tsk272). Operational `agent.*`/`effort.*`/
-/// `task.*` keys are never per-file gauges even when `gauge`/`tree`.
-pub fn classify_effort_attribution(def: &MetricDefinition) -> EffortAttributionFamily {
-    if def.category.as_deref() == Some("coverage") {
+/// Classify a metric SPEC into its [`EffortAttributionFamily`]. Run-kind families
+/// (coverage, then tests/analysis) are tested BEFORE the per-file `gauge`
+/// heuristic on purpose: analysis is a `gauge`-display spec but is run-attributed,
+/// so keying it on the display kind would wrongly route it to the per-file path it
+/// never populates (tsk272). Operational `agent.*`/`effort.*`/`task.*` keys are
+/// never per-file gauges even when `gauge`-display. A formula spec (no source
+/// measure) has no facts of its own → falls through to [`Window`], which no-ops.
+pub fn classify_effort_attribution(spec: &MetricSpec) -> EffortAttributionFamily {
+    if spec.category.as_deref() == Some("coverage") {
         EffortAttributionFamily::Coverage
     } else if matches!(
-        def.category.as_deref(),
+        spec.category.as_deref(),
         Some("testing") | Some("static-quality")
     ) {
         EffortAttributionFamily::Run
-    } else if def.kind == "gauge"
-        && def.grain.as_deref() == Some("tree")
-        && !is_operational_metric_key(&def.key)
+    } else if spec.display_kind == "gauge"
+        && spec.source_measure.is_some()
+        && spec.formula.is_none()
+        && !is_operational_metric_key(&spec.key)
     {
         EffortAttributionFamily::File
     } else {
@@ -395,28 +403,34 @@ mod tests {
     use super::*;
     use oxplow_domain::Timestamp;
 
-    /// Minimal `MetricDefinition` carrying only the fields the classifier reads
-    /// (`kind`/`grain`/`category`/`key`); the rest are dummy.
-    fn def(kind: &str, grain: Option<&str>, category: Option<&str>, key: &str) -> MetricDefinition {
-        MetricDefinition {
+    /// Minimal `MetricSpec` carrying only the fields the classifier reads
+    /// (`display_kind`/`category`/`key`/`source_measure`); the rest are dummy. A
+    /// `None` source measure models a formula spec (no facts of its own).
+    fn spec(
+        display_kind: &str,
+        category: Option<&str>,
+        key: &str,
+        source_measure: Option<&str>,
+    ) -> MetricSpec {
+        MetricSpec {
             id: 1,
             key: key.into(),
-            kind: kind.into(),
             title: "t".into(),
             unit: None,
+            source_measure: source_measure.map(Into::into),
+            aggregation: "last".into(),
+            filter_json: None,
+            formula: None,
+            sliceable_dims_json: None,
             direction: "neutral".into(),
-            default_agg: "last".into(),
-            grain: grain.map(Into::into),
-            basis: "absolute".into(),
-            producer: None,
+            target: None,
+            warn_at: None,
+            fail_at: None,
             description: None,
             category: category.map(Into::into),
             language: None,
             scope: "project".into(),
-            dimensions_json: None,
-            target: None,
-            warn_at: None,
-            fail_at: None,
+            display_kind: display_kind.into(),
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
         }
@@ -427,53 +441,69 @@ mod tests {
         use EffortAttributionFamily::*;
         // Coverage by category (its own diff-at-read branch).
         assert_eq!(
-            classify_effort_attribution(&def(
+            classify_effort_attribution(&spec(
                 "coverage",
-                None,
                 Some("coverage"),
-                "oxplow.coverage.abs_pct"
+                "oxplow.coverage.abs_pct",
+                Some("oxplow.coverage"),
             )),
             Coverage
         );
-        // Tests + analysis are run-claimed.
+        // Tests + analysis are run-attributed (by category, before the gauge check).
         assert_eq!(
-            classify_effort_attribution(&def(
-                "gauge",
-                Some("effort"),
+            classify_effort_attribution(&spec(
+                "test",
                 Some("testing"),
-                "oxplow.tests.total"
+                "oxplow.tests.total",
+                Some("oxplow.test_case"),
             )),
             Run
         );
-        // Analysis is gauge/tree but MUST be Run, not File (the tsk272 regression
-        // guard): run-kind families are classified before the per-file heuristic.
+        // Analysis is a `gauge`-display spec but MUST be Run, not File (the tsk272
+        // regression guard): run-kind families are classified before the per-file
+        // heuristic.
         assert_eq!(
-            classify_effort_attribution(&def(
+            classify_effort_attribution(&spec(
                 "gauge",
-                Some("tree"),
                 Some("static-quality"),
-                "oxplow.analysis.errors"
+                "oxplow.analysis.errors",
+                Some("oxplow.lint_hit"),
             )),
             Run
         );
-        // A code-health gauge (category custom) is per-file attributed.
+        // A code-health gauge (category custom, over a measure) is per-file.
         assert_eq!(
-            classify_effort_attribution(&def(
+            classify_effort_attribution(&spec(
                 "gauge",
-                Some("tree"),
                 Some("custom"),
-                "oxplow.rust.unsafe_blocks"
+                "oxplow.rust.unsafe_blocks",
+                Some("oxplow.unsafe_blocks"),
             )),
             File
         );
-        // Operational keys are window-attributed even when gauge/tree.
+        // Operational keys are window-attributed even when gauge-display.
         assert_eq!(
-            classify_effort_attribution(&def("gauge", Some("tree"), None, "effort.cycle_time_ms")),
+            classify_effort_attribution(&spec(
+                "gauge",
+                None,
+                "effort.cycle_time_ms",
+                Some("oxplow.cycle_time"),
+            )),
             Window
         );
         // An event metric falls through to Window.
         assert_eq!(
-            classify_effort_attribution(&def("event", None, None, "agent.nudges.fired")),
+            classify_effort_attribution(&spec(
+                "event",
+                None,
+                "agent.nudges.fired",
+                Some("oxplow.nudge"),
+            )),
+            Window
+        );
+        // A formula spec (no source measure) falls through to Window (no facts).
+        assert_eq!(
+            classify_effort_attribution(&spec("gauge", Some("custom"), "acme.ratio", None)),
             Window
         );
     }

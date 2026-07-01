@@ -312,10 +312,11 @@ dimensions:                        # custom conformed slice axes
 **Not yet done:** the **IPC/Tauri** counterparts of the metric-key reads + TS
 bindings (T-C3, atomic — Rust return types + `bindings.ts` + the ~6 frontend
 consumers land together), which also carries the **baked-write removal + 4-script
-unbake**; the UI pages (incl. a **Dimensions catalog** page); attribution collapse
-(T-D); `promote_dimension` teeth (tsk28); and retiring V38 (tsk20). Those are the
-open children of the epic. The **MCP** metric-key reads are already flipped (T-C2,
-above).
+unbake**; the UI pages (incl. a **Dimensions catalog** page); `promote_dimension`
+teeth (tsk28); and retiring V38 (tsk20). Those are the open children of the epic.
+The **MCP** metric-key reads (T-C2) and the **effort-attribution read** (T-D —
+`effort_metric_deltas` over specs + facts, coverage kept as a scope-guarded special
+case) are already flipped.
 
 ---
 
@@ -374,61 +375,62 @@ overlays** read from `task_effort` (`started_at`/`ended_at`) — so:
 (`SqliteMetricStore::samples_for_effort`). No count-prune, no CASCADE; optional
 age sweep only.
 
-### Per-file attribution grain (concurrency-safe efforts, tsk250)
+### Effort attribution — spec-driven, over facts (T-D, tsk36)
 
-Time-window bucketing alone mis-attributes under **overlapping efforts** (two
-threads/streams working at once). So the code gauges emit **two grains**:
+`CollectionService::effort_metric_deltas` reads the **spec catalog**
+(`list_specs()`) and, per **metric family**, aggregates the effort's own **facts**
+(no legacy sample read; the `EffortMetricDelta` DTO shape is preserved, so the IPC
++ `EffortMetrics.tsx` are untouched). Two capture-resolution spines back the four
+families:
 
-- the **headline** `tree:.` sample (one per run) — the repo total every existing
-  read uses (Metrics page, trend, `get_metric_summary`, `effort_metric_context`);
-- sparse **`file:<path>`** samples (nonzero files only) — the *attribution*
-  grain, read **only** by the effort roll-up.
+- **claimed files × time** — code gauges are snapshot scans, so their captures are
+  **not** effort-stamped; the File family reads them by claimed path + capture time.
+- **`metric_capture.effort_id`** — the run/operational producers stamp the owning
+  effort at ingest (tsk37, `resolve_owning_effort`), so an effort's run + token +
+  nudge facts are exactly `captures_for_effort(effort_id)` → `facts_for_captures`.
 
-`list_samples` / `samples_for_effort` filter out `subject_kind='file'` so the
-headline series is unchanged; `file_samples_for_paths(metric_id, stream_id,
-paths)` reads the per-file grain. `CollectionService::effort_metric_deltas`
-attributes **per metric family** (each already has a sound key — using time alone
-was the bug):
-
-| family | attribution key |
+| family | how the delta is computed |
 |---|---|
-| per-file gauges (`gauge`/`tree`, category `custom`) | the effort's **claimed files** (`task_effort_file`) + stream: Δ = Σ over claimed paths of `(current_file − baseline_file)`, run-relative (a claimed file absent from a run = 0, so a drop-to-zero is seen). NB: analysis is *also* `gauge`/`tree` but is run-attributed, not per-file (it emits no `file:` samples) — the classifier (below) tests the run-kind families **first**, so analysis never reaches this branch (tsk272) |
-| operational (`agent.*`/`effort.*`/`task.*`) | the effort's **thread** + window (`sum` flows summed, else before→after) |
-| tests + analysis (the unified `"run"` kind) | the effort's **claimed run rows** in the `effort_attribution` ledger (`run:<id>` → `samples_for_runs`), NOT a time window — observe-always, so the ledger claim is the only safe attribution under concurrency (`run_attributed_delta`). Category ∈ {`testing`, `static-quality`} |
+| **File** — per-file gauge (`display_kind = gauge`, has a source measure, non-operational key) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)` fact value, where baseline capture = latest before the effort start, current = latest at/before the effort end (newest when open). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen). **No claims** → the repo-wide before→after fallback. `file_delta_from_facts` |
+| **Run** — tests + analysis (category ∈ {`testing`, `static-quality`}) | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is `gauge`-display but classified Run **first**, so it never reaches the File branch (the tsk272 guard) |
+| **Window** — operational (`agent.*`/`effort.*`/`task.*`) | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
+| **Coverage** (category `coverage`) | **documented scope-guard special case**: still on the legacy detail payload. `coverage_delta_for_spec` resolves the spec's legacy `MetricDefinition` by key and derives the effort-relative **diff-coverage** at read (`diff_coverage_for_effort`) from the run's stored ABSOLUTE per-file **line-sets** (the `coverage-detail` finding). The coverage FACTS carry num/den counts, not line-sets, so migrating this needs a producer change — deferred |
 
-The family is chosen by **one classifier** — `classify_effort_attribution(def) →
-EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`, beside the
-write-side `AttributionKind` each family maps to: File↔`FileKind`,
-Coverage/Run↔`RunKind`, Window↔no-claim). `effort_metric_deltas` `match`es on it;
-adding a new fact-kind is one variant + one match arm, not a scattered if/else
-chain (tsk274).
-| coverage | observe-always (tsk270): the **absolute** whole-report % is stored per run (`oxplow.coverage.abs_pct`) + per-file instrumented/covered line-sets in the `coverage-detail` finding; the effort-relative **diff-coverage** is DERIVED at read (`diff_coverage_for_effort`) against the claiming effort's start snapshot — `coverage_delta` reads the claimed runs, never a time window |
+The family is chosen by **one classifier** — `classify_effort_attribution(spec)
+→ EffortAttributionFamily` (`crates/oxplow-app/src/attribution.rs`, beside the
+write-side `AttributionKind` each maps to: File↔`FileKind`, Coverage/Run↔`RunKind`,
+Window↔no-claim). `effort_metric_deltas` `match`es on it; adding a fact-kind is one
+variant + one match arm, not a scattered if/else chain (tsk274). A formula spec (no
+source measure) falls through to Window and no-ops.
 
-A gauge with no per-file samples (or an effort with no claims) falls back to the
-in-window headline before→after.
+The ledger-run-claim ∪ (the `capture.effort_id` spine) is the intended end state;
+T-D lands on the stamped spine alone (the common auto-attributed case). A run
+CLAIMED post-hoc (`claim_runs` at close) whose capture wasn't stamped at ingest is
+the deferred backfill (tsk38). The now-orphaned legacy reads
+(`file_samples_for_paths`, `samples_for_effort`) are swept in T-E (tsk20);
+`samples_for_runs` + `list_findings` stay for the kept coverage path + the
+`effort_observations_from_metrics` path.
 
 ### Run attribution grain — the ledger, not the clock (tsk260/tsk269)
 
 Agent-work runs — **tests and analysis** today, **coverage** in Phase 2 — are
-**observe-always**: every run writes its `metric_run`/`metric_sample` regardless
-of how many efforts are open, attributed through the `effort_attribution` ledger,
-never by time window — because parallel sub-agents in one thread run different
-runs concurrently and the clock can't tell them apart. All three stamp
-`trigger='on-report'`, so one OBSERVE (`runs_in_window_by_trigger`) + one ledger
-kind `"run"` covers them. At record time `auto_attribute_run` writes a `claimed`
-ledger row for `run:<id>` when the caller named a `task_id` (exact) or exactly
-one effort is open; the concurrent case is left for the agent to claim at close
-(`claim_runs` on `complete_task`/`update_task`/`amend_effort`). Effort reads
-therefore join through the ledger: `effort_observations_from_metrics` and
-`run_attributed_delta` list the effort's `claimed` run refs, parse the ids, and
-read `samples_for_runs(metric_id, run_ids)` — `samples_for_runs` filters to the
-metric, so the test/analysis specs share one claimed set. An effort shows exactly
-the runs it owns; a concurrent/unclaimed run can't pollute its rollup. **Coverage**
-is effort-relative (diff vs the effort's start snapshot), so it observes the
-ABSOLUTE report always and DERIVES the effort diff at read
-(`diff_coverage_for_effort`, `coverage_delta`) — a run claimed after close still
-yields a diff (tsk270). The mechanic + trait (`AttributionKind`/`RunKind`) live in
-`.context/agent-model.md` + `.context/data-model.md`.
+**observe-always**: every run writes its capture/facts (and, for now, dual-writes
+`metric_run`/`metric_sample`) regardless of how many efforts are open, attributed
+through the `capture.effort_id` stamp (T-D read) + the `effort_attribution` ledger
+(the write/reconcile side), never by time window — because parallel sub-agents in
+one thread run different runs concurrently and the clock can't tell them apart. All
+stamp `trigger='on-report'`. At record time `auto_attribute_run` resolves the
+owning effort — when the caller named a `task_id` (exact) or exactly one effort is
+open — stamps `capture.effort_id`, and writes a `claimed` ledger row for `run:<id>`;
+the concurrent-unnamed case is left for the agent to claim at close (`claim_runs`
+on `complete_task`/`update_task`/`amend_effort`). The `effort_observations_from_metrics`
+read still joins the ledger (`run_ids` → `samples_for_runs`); the metric-delta read
+(above) joins `capture.effort_id`. **Coverage** is effort-relative (diff vs the
+effort's start snapshot), so it observes the ABSOLUTE report always and DERIVES the
+effort diff at read (`diff_coverage_for_effort`, `coverage_delta`) — a run claimed
+after close still yields a diff (tsk270). The mechanic + trait
+(`AttributionKind`/`RunKind`) live in `.context/agent-model.md` +
+`.context/data-model.md`.
 
 ### Additivity
 
