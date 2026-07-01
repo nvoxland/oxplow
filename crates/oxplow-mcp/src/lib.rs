@@ -620,6 +620,35 @@ pub struct MetricBreakdownParams {
     pub stream: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListMeasuresParams {
+    /// Optional scope filter: `built-in` | `global` | `project`.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Optional subject-kind (grain) filter, e.g. `function` / `file` / `test`.
+    #[serde(default)]
+    pub subject_kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListDimensionsParams {
+    /// Optional scope filter: `built-in` | `global` | `project`.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Optional subject-kind (grain) filter the dimension applies to.
+    #[serde(default)]
+    pub subject_kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListFactsParams {
+    /// Measure key, e.g. `oxplow.coverage` or `oxplow.lint_hit` (see list_measures).
+    pub measure_key: String,
+    /// Max rows (the most-recent facts). Default 50.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -1753,6 +1782,95 @@ impl OxplowMcp {
             defs.retain(|d| d.scope == scope);
         }
         json_result(&defs)
+    }
+
+    #[tool(
+        description = "List the MEASURE catalog — every declared fact type (key, title, unit, \
+            subject_kind/grain, temporal_semantics, component_role, scope). Measures are the \
+            namespaced types of atomic fact the substrate collects (epic tsk12); a metric is an \
+            aggregation defined OVER a measure, not a second store of rows. Optional `scope` / \
+            `subject_kind` filter."
+    )]
+    async fn list_measures(
+        &self,
+        params: Parameters<ListMeasuresParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut rows = self
+            .services
+            .fact_store
+            .list_measures()
+            .await
+            .map_err(internal)?;
+        if let Some(scope) = params.0.scope.as_deref() {
+            rows.retain(|m| m.scope == scope);
+        }
+        if let Some(sk) = params.0.subject_kind.as_deref() {
+            rows.retain(|m| m.subject_kind.as_deref() == Some(sk));
+        }
+        json_result(&rows)
+    }
+
+    #[tool(
+        description = "List the DIMENSION catalog — every declared slice axis (key, label, \
+            value_type, subject_kind, scope, promoted). Dimensions are the namespaced, conformed \
+            attributes facts can be grouped/filtered by (epic tsk12). A fact carrying a dimension \
+            with no catalog definition is kept but hidden as a slice axis. Optional `scope` / \
+            `subject_kind` filter."
+    )]
+    async fn list_dimensions(
+        &self,
+        params: Parameters<ListDimensionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut rows = self
+            .services
+            .fact_store
+            .list_dimensions()
+            .await
+            .map_err(internal)?;
+        if let Some(scope) = params.0.scope.as_deref() {
+            rows.retain(|d| d.scope == scope);
+        }
+        if let Some(sk) = params.0.subject_kind.as_deref() {
+            rows.retain(|d| d.subject_kind.as_deref() == Some(sk));
+        }
+        json_result(&rows)
+    }
+
+    #[tool(
+        description = "List durable atomic FACTS for one measure — value (+ numerator/denominator), \
+            subject, path/line, reported severity/rule/detail, dims, and the capture spine \
+            (captured_at, branch, git version, effort). `measure_key` is a measure like \
+            `oxplow.coverage` or `oxplow.lint_hit` (see list_measures). Returns up to `limit` \
+            most-recent facts in chronological (oldest→newest) order. Facts are the source of \
+            truth; metrics aggregate them."
+    )]
+    async fn list_facts(
+        &self,
+        params: Parameters<ListFactsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(measure) = self
+            .services
+            .fact_store
+            .get_measure(&params.0.measure_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown measure_key (see list_measures)",
+                None,
+            ));
+        };
+        let mut rows = self
+            .services
+            .fact_store
+            .facts_for_measure(measure.id)
+            .await
+            .map_err(internal)?;
+        let limit = params.0.limit.unwrap_or(50).max(0) as usize;
+        if rows.len() > limit {
+            rows.drain(0..rows.len() - limit);
+        }
+        json_result(&rows)
     }
 
     #[tool(
@@ -4294,6 +4412,88 @@ mod tests {
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot();
+    }
+
+    #[tokio::test]
+    async fn fact_catalog_and_facts_reads_surface_the_substrate() {
+        // Epic tsk12 read surface (additive): the measure/dimension catalogs
+        // and the raw facts of the durable substrate are queryable over MCP,
+        // beside the legacy sample/definition tools.
+        use oxplow_db::{NewFact, NewMetricCapture};
+        let (_proj, services, server) = boot();
+        let stream_id = services.streams.list_streams().await.unwrap()[0].id.value();
+
+        // Measure catalog: the V43-seeded built-ins are visible.
+        let measures: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_measures(Parameters(ListMeasuresParams {
+                    scope: None,
+                    subject_kind: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let keys: Vec<&str> = measures.iter().filter_map(|m| m["key"].as_str()).collect();
+        assert!(keys.contains(&"oxplow.coverage"), "measures: {keys:?}");
+        assert!(keys.contains(&"oxplow.lint_hit"), "measures: {keys:?}");
+
+        // Dimension catalog.
+        let dims: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_dimensions(Parameters(ListDimensionsParams {
+                    scope: None,
+                    subject_kind: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let dim_keys: Vec<&str> = dims.iter().filter_map(|d| d["key"].as_str()).collect();
+        assert!(dim_keys.contains(&"oxplow.severity"), "dims: {dim_keys:?}");
+
+        // Record a fact, then read it back via list_facts.
+        let measure = services
+            .fact_store
+            .get_measure("oxplow.lint_hit")
+            .await
+            .unwrap()
+            .unwrap();
+        let capture = NewMetricCapture::done(stream_id, "test", "test");
+        let fact = NewFact {
+            severity: Some("error".into()),
+            rule: Some("E1".into()),
+            path: Some("src/x.rs".into()),
+            ..NewFact::new(measure.id, 1.0)
+        };
+        services
+            .fact_store
+            .record_facts(capture, vec![fact])
+            .await
+            .unwrap();
+
+        let facts: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_facts(Parameters(ListFactsParams {
+                    measure_key: "oxplow.lint_hit".into(),
+                    limit: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(facts.len(), 1, "the one recorded fact comes back");
+        assert_eq!(facts[0]["severity"], "error");
+        assert_eq!(facts[0]["rule"], "E1");
+
+        // Unknown measure_key → invalid params (not an empty list).
+        assert!(server
+            .list_facts(Parameters(ListFactsParams {
+                measure_key: "nope.nope".into(),
+                limit: None,
+            }))
+            .await
+            .is_err());
     }
 
     #[tokio::test]

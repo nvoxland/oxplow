@@ -141,6 +141,13 @@ pub const MANIFEST: &[Capability] = &[
     agent("record_metric"),
     agent("get_metric_summary"),
     agent("metric_breakdown"),
+    // Durable fact substrate reads (epic tsk12) — agent-only for now (the
+    // additive MCP read surface lands before the IPC/UI catalog pages; flip
+    // these to `both`/`both_named` when the Metrics + Dimensions catalog pages
+    // read them over IPC).
+    agent("list_measures"),
+    agent("list_dimensions"),
+    agent("list_facts"),
     ui("list_nudges_for_effort"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),
