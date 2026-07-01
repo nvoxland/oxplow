@@ -219,10 +219,10 @@ per fired nudge is cheap and makes the `agent.nudges.fired` operational metric a
 first-class spec like every other. The nudge rows in `agent_nudge` stay the
 authoritative store; the fact is the analytics grain.
 
-### Read surface (MCP, additive)
+### Read surface (MCP)
 
-`crates/oxplow-mcp/src/lib.rs`, agent-only in the surface-parity MANIFEST, beside
-the untouched V38 sample/definition tools:
+`crates/oxplow-mcp/src/lib.rs`, agent-only in the surface-parity MANIFEST. The
+measure-level primitives:
 - `list_measures` / `list_dimensions` — the two catalogs (optional scope/
   subject_kind filter).
 - `list_facts(measure_key, limit)` — raw atomic facts, most-recent, with the
@@ -231,6 +231,26 @@ the untouched V38 sample/definition tools:
   the metrics-as-definitions read: one aggregated point per capture, optionally
   sliced by a dimension.
 - `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
+
+**The five metric-KEY reads are flipped onto the engine (T-C2, tsk35)** — they
+resolve a `metric_spec` by key (seeded catalog) and compute over its
+`source_measure` facts, no longer reading the legacy V38 `metric_sample`/
+`metric_finding`/`metric_definition` store:
+- `list_metric_definitions` → `fact_store.list_specs()` (the spec catalog; each
+  row carries `source_measure` + `aggregation`, not a baked sample stream).
+- `list_metric_samples(metric_key, limit)` → `series_for_spec` (newest-first,
+  capped) — the metric-key ergonomic wrapper over `metric_series`.
+- `metric_breakdown(metric_key, dimension?)` → `rollup_for_spec` (default dim
+  `oxplow.package`; the old per-stream `stream` arg is gone — facts aren't
+  stream-partitioned at this grain).
+- `get_metric_summary(metric_key)` → `headline_for_spec` (series collapsed per
+  the measure's temporal semantics) + the latest series point's captured_at/branch.
+- `list_metric_findings(metric_key, capture_id?)` → `findings_for_spec` — the
+  read-time offenders view (args changed from `run_id`).
+
+The **baked writes still run** (`record_baked_run`) so the legacy IPC/UI reads
+stay fed; removing them + unbaking the 4 code scripts lands with the IPC flip
+(T-C3), when the baked store becomes fully unread.
 
 ### Catalog authoring surface (`measures:` / `dimensions:` config — workstream E)
 
@@ -272,13 +292,13 @@ dimensions:                        # custom conformed slice axes
   engine loads all facts and filters in-app, so an index bites nothing until
   reads go DB-side. Carried, not acted on.
 
-**Not yet done:** flipping the *existing* reads (`list_metric_samples`,
-`metric_breakdown`, `get_metric_summary`, `list_metric_findings`) onto the engine,
-the IPC/Tauri counterparts + TS bindings, the UI pages (incl. a **Dimensions
-catalog** page), the metric-spec model (`metric_definition` → `source_measure` +
-`aggregation`), **declare-to-collect enforcement** (a gauge emitting an undefined
-measure/dim is a run error — lands with the code-gauge unbake), `promote_dimension`
-teeth, and retiring V38. Those are the open children of the epic.
+**Not yet done:** the **IPC/Tauri** counterparts of the metric-key reads + TS
+bindings (T-C3, atomic — Rust return types + `bindings.ts` + the ~6 frontend
+consumers land together), which also carries the **baked-write removal + 4-script
+unbake**; the UI pages (incl. a **Dimensions catalog** page); attribution collapse
+(T-D); `promote_dimension` teeth (tsk28); and retiring V38 (tsk20). Those are the
+open children of the epic. The **MCP** metric-key reads are already flipped (T-C2,
+above).
 
 ---
 
@@ -449,6 +469,11 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 > coverage producer on top of the registry descriptor, not part of the registry.
 
 ## Read surface
+
+> **Flipped (T-C2, tsk35):** the five metric-key MCP tools below now read the
+> fact substrate via `MetricEngine` spec-wrappers, NOT this V38 store — see
+> "Read surface (MCP)" above for the current wiring. The paragraph below is the
+> historical V38 shape (still how the **IPC** side reads until T-C3).
 
 - **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
   (optional language/scope filter), `list_metric_samples` (by key, newest-first),

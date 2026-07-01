@@ -231,8 +231,13 @@ pub struct RecordMetricParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListMetricFindingsParams {
-    /// The `metric_run` id whose located findings to list.
-    pub run_id: i64,
+    /// Metric key whose located offenders to list, e.g. `oxplow.high_complexity_fns`
+    /// (see list_metric_definitions).
+    pub metric_key: String,
+    /// Optional capture id to scope the drill-in to one recording; omit for every
+    /// matching fact across captures.
+    #[serde(default)]
+    pub capture_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -609,15 +614,11 @@ pub struct LspCallHierarchyParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MetricBreakdownParams {
     pub metric_key: String,
-    /// Dimension to group by: "package" (default — each file's parent
-    /// directory) or any per-file `dims_json` key the metric carries, e.g.
-    /// "language". Omit for "package".
+    /// Dimension to group by: `oxplow.package` (default — each subject's parent
+    /// directory) or any conformed dimension / `dims_json` key the metric's facts
+    /// carry, e.g. `oxplow.severity` / `language`. Omit for `oxplow.package`.
     #[serde(default)]
     pub dimension: Option<String>,
-    /// Stream to scope to (e.g. "str1"). Omit to roll up across all streams
-    /// (the project-wide view, matching the UI breakdown).
-    #[serde(default)]
-    pub stream: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1789,28 +1790,28 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List the metric catalog — every known metric definition (key, kind, unit, \
-            direction, default_agg, grain, basis, scope, targets). The unified metric substrate \
-            (epic tsk213) is the successor to effort observations + code-quality scans. Optional \
-            `language` / `scope` filter."
+        description = "List the metric catalog — every known metric SPEC (key, title, unit, \
+            source_measure, aggregation, filter, formula, direction, thresholds, display_kind, \
+            scope). A metric is an aggregation defined OVER a measure (epic tsk12), not a second \
+            store of rows; this lists those definitions. Optional `language` / `scope` filter."
     )]
     async fn list_metric_definitions(
         &self,
         params: Parameters<ListMetricDefinitionsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let mut defs = self
+        let mut specs = self
             .services
-            .metric_store
-            .list_definitions()
+            .fact_store
+            .list_specs()
             .await
             .map_err(internal)?;
         if let Some(lang) = params.0.language.as_deref() {
-            defs.retain(|d| d.language.as_deref() == Some(lang));
+            specs.retain(|s| s.language.as_deref() == Some(lang));
         }
         if let Some(scope) = params.0.scope.as_deref() {
-            defs.retain(|d| d.scope == scope);
+            specs.retain(|s| s.scope == scope);
         }
-        json_result(&defs)
+        json_result(&specs)
     }
 
     #[tool(
@@ -1965,20 +1966,20 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List recorded samples for one metric, newest-first — value (+ numerator/\
-            denominator for ratios), captured_at, branch, git version, subject, provenance. \
-            `metric_key` is a definition key like `oxplow.coverage.diff_pct` or `oxplow.tests.passed` \
-            (see list_metric_definitions). Samples are time-anchored and durable (they outlive the \
-            effort that produced them)."
+        description = "Time SERIES for one metric, newest-first — one point per capture, aggregated \
+            over the metric's source-measure facts (epic tsk12): value (+ numerator/denominator for \
+            ratios), captured_at, branch, provenance. `metric_key` is a spec key like \
+            `oxplow.tests.passed` or `oxplow.todos` (see list_metric_definitions). Points are \
+            time-anchored and durable (they outlive the effort that produced them)."
     )]
     async fn list_metric_samples(
         &self,
         params: Parameters<ListMetricSamplesParams>,
     ) -> Result<CallToolResult, McpError> {
-        let Some(def) = self
+        let Some(spec) = self
             .services
-            .metric_store
-            .get_definition(&params.0.metric_key)
+            .fact_store
+            .get_spec(&params.0.metric_key)
             .await
             .map_err(internal)?
         else {
@@ -1987,36 +1988,37 @@ impl OxplowMcp {
                 None,
             ));
         };
-        let mut rows = self
+        let mut series = self
             .services
-            .metric_store
-            .list_samples(def.id)
+            .metric_engine
+            .series_for_spec(&spec, None)
             .await
             .map_err(internal)?;
+        // The engine returns oldest→newest; this read is newest-first, capped.
+        series.reverse();
         let limit = params.0.limit.unwrap_or(50).max(0) as usize;
-        rows.truncate(limit);
-        json_result(&rows)
+        series.truncate(limit);
+        json_result(&series)
     }
 
     #[tool(
-        description = "Roll up a code metric by a DIMENSION. For a metric that emits per-file \
-            samples — the bundled code gauges (oxplow.todos, oxplow.fn_count, \
-            oxplow.high_complexity_fns, oxplow.long_functions) and the oxplow.<lang>.* idiom \
-            metrics — returns its latest value summed per dimension key, largest first, with the \
-            contributing file count. `dimension` is \"package\" (default — each file's parent \
-            directory) or any per-file dims_json key the metric carries, e.g. \"language\". \
-            Answers 'which package / language holds the most complexity / TODOs / unsafe blocks'. \
-            `stream` scopes to one stream (e.g. \"str1\"); omit it to roll up across all streams \
-            (the project-wide view). Empty if the metric has no matching per-file samples."
+        description = "Roll up a metric by a DIMENSION — the metric's source-measure facts, latest \
+            value per subject, summed per dimension key, largest first, with the contributing \
+            subject count (epic tsk12). Works for the bundled code gauges (oxplow.todos, \
+            oxplow.fn_count, oxplow.high_complexity_fns, oxplow.long_functions), the oxplow.<lang>.* \
+            idiom metrics, and any spec. `dimension` is `oxplow.package` (default — each subject's \
+            parent directory), a conformed dim (oxplow.severity / oxplow.status), or any dims_json \
+            key the facts carry. Answers 'which package / severity / language holds the most'. \
+            Empty if the metric has no matching facts."
     )]
     async fn metric_breakdown(
         &self,
         params: Parameters<MetricBreakdownParams>,
     ) -> Result<CallToolResult, McpError> {
-        let Some(def) = self
+        let Some(spec) = self
             .services
-            .metric_store
-            .get_definition(&params.0.metric_key)
+            .fact_store
+            .get_spec(&params.0.metric_key)
             .await
             .map_err(internal)?
         else {
@@ -2025,15 +2027,14 @@ impl OxplowMcp {
                 None,
             ));
         };
-        let dimension = params.0.dimension.unwrap_or_else(|| "package".to_string());
-        let stream_id = match params.0.stream.as_deref() {
-            Some(s) => Some(parse_stream_id(s)?.value()),
-            None => None,
-        };
+        let dimension = params
+            .0
+            .dimension
+            .unwrap_or_else(|| "oxplow.package".to_string());
         let rollup = self
             .services
-            .metric_store
-            .dimension_rollup_for_metric(def.id, stream_id, dimension)
+            .metric_engine
+            .rollup_for_spec(&spec, &dimension)
             .await
             .map_err(internal)?;
         json_result(&rollup)
@@ -2118,36 +2119,21 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "List the located findings (path/line, severity, rule, message) recorded by \
-            one `metric_run` — the drill-in detail for the `findings` kind. `run_id` comes from a \
-            sample's `run_id`."
+        description = "List the located offenders behind a metric (subject, path/line, severity, \
+            rule, message, value) — the read-time finding view over the metric's filtered facts \
+            (epic tsk12). Severity is the fact's reported severity (lint) or, absent one, DERIVED \
+            from its value against the spec's thresholds × direction. `metric_key` is a spec key \
+            (see list_metric_definitions); `capture_id` scopes to one recording's drill-in (omit \
+            for every matching fact)."
     )]
     async fn list_metric_findings(
         &self,
         params: Parameters<ListMetricFindingsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let rows = self
+        let Some(spec) = self
             .services
-            .metric_store
-            .list_findings(params.0.run_id)
-            .await
-            .map_err(internal)?;
-        json_result(&rows)
-    }
-
-    #[tool(
-        description = "Summarize one metric: its latest sample value + capture time/branch, the \
-            target/warn/fail thresholds, and the delta-vs-target (interpreted via `direction`). A \
-            quick 'where does this metric stand' read without paging all samples."
-    )]
-    async fn get_metric_summary(
-        &self,
-        params: Parameters<GetMetricSummaryParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let Some(def) = self
-            .services
-            .metric_store
-            .get_definition(&params.0.metric_key)
+            .fact_store
+            .get_spec(&params.0.metric_key)
             .await
             .map_err(internal)?
         else {
@@ -2156,30 +2142,68 @@ impl OxplowMcp {
                 None,
             ));
         };
-        let samples = self
+        let findings = self
             .services
-            .metric_store
-            .list_samples(def.id)
+            .metric_engine
+            .findings_for_spec(&spec, params.0.capture_id)
             .await
             .map_err(internal)?;
-        let latest = samples.first();
-        let latest_value = latest.map(|s| s.value);
-        let delta_vs_target = match (latest_value, def.target) {
+        json_result(&findings)
+    }
+
+    #[tool(
+        description = "Summarize one metric: its headline value (its time series collapsed per the \
+            source measure's temporal semantics — semi-additive→last capture, additive→sum, \
+            ratio→Σn/Σd), the latest capture time/branch, the target/warn/fail thresholds, and the \
+            delta-vs-target (interpreted via `direction`). A quick 'where does this metric stand' \
+            read without paging the series (epic tsk12)."
+    )]
+    async fn get_metric_summary(
+        &self,
+        params: Parameters<GetMetricSummaryParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(spec) = self
+            .services
+            .fact_store
+            .get_spec(&params.0.metric_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "unknown metric_key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let series = self
+            .services
+            .metric_engine
+            .series_for_spec(&spec, None)
+            .await
+            .map_err(internal)?;
+        let headline = self
+            .services
+            .metric_engine
+            .headline_for_spec(&spec)
+            .await
+            .map_err(internal)?;
+        // The engine returns oldest→newest, so the last point is the most recent.
+        let latest = series.last();
+        let delta_vs_target = match (headline, spec.target) {
             (Some(v), Some(t)) => Some(v - t),
             _ => None,
         };
         json_result(&serde_json::json!({
-            "key": def.key,
-            "kind": def.kind,
-            "unit": def.unit,
-            "direction": def.direction,
-            "sample_count": samples.len(),
-            "latest_value": latest_value,
-            "latest_captured_at": latest.map(|s| &s.captured_at),
-            "latest_branch": latest.and_then(|s| s.branch.clone()),
-            "target": def.target,
-            "warn_at": def.warn_at,
-            "fail_at": def.fail_at,
+            "key": spec.key,
+            "display_kind": spec.display_kind,
+            "unit": spec.unit,
+            "direction": spec.direction,
+            "point_count": series.len(),
+            "headline_value": headline,
+            "latest_captured_at": latest.map(|p| &p.captured_at),
+            "latest_branch": latest.and_then(|p| p.branch.clone()),
+            "target": spec.target,
+            "warn_at": spec.warn_at,
+            "fail_at": spec.fail_at,
             "delta_vs_target": delta_vs_target,
         }))
     }
@@ -4695,6 +4719,174 @@ mod tests {
                 group_by: None,
                 min_value: None,
                 severity: None,
+            }))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn list_metric_definitions_lists_seeded_specs() {
+        // T-C2: the metric catalog read is the seeded `metric_spec` list (a spec
+        // carries source_measure + aggregation), not the legacy `metric_definition`
+        // store. `seed_catalog` populates specs; the run loop that normally seeds
+        // isn't spawned under `in_memory`, so the test seeds explicitly.
+        let (_proj, services, server) = boot();
+        services.metrics.seed_catalog().await;
+
+        let specs: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_metric_definitions(Parameters(ListMetricDefinitionsParams {
+                    language: None,
+                    scope: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let keys: Vec<&str> = specs.iter().filter_map(|s| s["key"].as_str()).collect();
+        assert!(keys.contains(&"oxplow.todos"), "specs: {keys:?}");
+        let todos = specs.iter().find(|s| s["key"] == "oxplow.todos").unwrap();
+        assert_eq!(todos["source_measure"], "oxplow.todo");
+        assert_eq!(todos["aggregation"], "count");
+
+        // scope filter keeps only built-ins.
+        let builtin: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_metric_definitions(Parameters(ListMetricDefinitionsParams {
+                    language: None,
+                    scope: Some("built-in".into()),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(!builtin.is_empty());
+        assert!(builtin.iter().all(|s| s["scope"] == "built-in"));
+    }
+
+    #[tokio::test]
+    async fn metric_key_reads_compute_from_facts_via_engine() {
+        // T-C2: the metric-key reads (samples/summary/breakdown/findings) resolve
+        // the spec, then compute over its source-measure facts via MetricEngine —
+        // no longer the legacy baked `metric_sample`/`metric_finding` store.
+        use oxplow_db::{NewFact, NewMetricCapture};
+        let (_proj, services, server) = boot();
+        services.metrics.seed_catalog().await;
+        let stream_id = services.streams.list_streams().await.unwrap()[0].id.value();
+
+        // `oxplow.todos` = count over `oxplow.todo` facts (semi-additive). Three
+        // TODO facts in one capture across two packages (src ×2, lib ×1).
+        let measure = services
+            .fact_store
+            .get_measure("oxplow.todo")
+            .await
+            .unwrap()
+            .unwrap();
+        let mk = |path: &str| NewFact {
+            subject_kind: Some("file".into()),
+            subject_ref: Some(format!("file:{path}")),
+            path: Some(path.into()),
+            ..NewFact::new(measure.id, 1.0)
+        };
+        services
+            .fact_store
+            .record_facts(
+                NewMetricCapture::done(stream_id, "test", "test"),
+                vec![mk("src/a.rs"), mk("src/b.rs"), mk("lib/c.rs")],
+            )
+            .await
+            .unwrap();
+
+        // Series (list_metric_samples): one capture → one point, value 3.
+        let series: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_metric_samples(Parameters(ListMetricSamplesParams {
+                    metric_key: "oxplow.todos".into(),
+                    limit: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0]["value"], 3.0);
+
+        // Summary: headline = last capture (semi-additive) = 3.
+        let summary: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .get_metric_summary(Parameters(GetMetricSummaryParams {
+                    metric_key: "oxplow.todos".into(),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(summary["headline_value"], 3.0);
+        assert_eq!(summary["point_count"], 1);
+        assert_eq!(summary["display_kind"], "findings");
+
+        // Breakdown by package (default dim): src 2, lib 1 (largest first).
+        let by_pkg: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .metric_breakdown(Parameters(MetricBreakdownParams {
+                    metric_key: "oxplow.todos".into(),
+                    dimension: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(by_pkg[0]["key"], "src");
+        assert_eq!(by_pkg[0]["value"], 2.0);
+        assert_eq!(by_pkg[0]["subject_count"], 2);
+        assert_eq!(by_pkg[1]["key"], "lib");
+
+        // Findings: the three offenders; no thresholds ⇒ derived severity null.
+        let findings: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_metric_findings(Parameters(ListMetricFindingsParams {
+                    metric_key: "oxplow.todos".into(),
+                    capture_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(findings.len(), 3);
+        assert!(findings.iter().any(|f| f["path"] == "src/a.rs"));
+        assert!(findings.iter().all(|f| f["severity"].is_null()));
+    }
+
+    #[tokio::test]
+    async fn metric_key_reads_reject_unknown_key() {
+        // T-C2: an unknown metric key is invalid params (not an empty result) —
+        // the spec must resolve first.
+        let (_proj, services, server) = boot();
+        services.metrics.seed_catalog().await;
+        assert!(server
+            .list_metric_samples(Parameters(ListMetricSamplesParams {
+                metric_key: "nope.nope".into(),
+                limit: None,
+            }))
+            .await
+            .is_err());
+        assert!(server
+            .get_metric_summary(Parameters(GetMetricSummaryParams {
+                metric_key: "nope.nope".into(),
+            }))
+            .await
+            .is_err());
+        assert!(server
+            .metric_breakdown(Parameters(MetricBreakdownParams {
+                metric_key: "nope.nope".into(),
+                dimension: None,
+            }))
+            .await
+            .is_err());
+        assert!(server
+            .list_metric_findings(Parameters(ListMetricFindingsParams {
+                metric_key: "nope.nope".into(),
+                capture_id: None,
             }))
             .await
             .is_err());
