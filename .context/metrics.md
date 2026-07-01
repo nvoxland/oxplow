@@ -13,6 +13,135 @@ coverage/test/analysis facts — the legacy `effort_observation` table was
 substrate (`CollectionService::effort_observations_from_metrics`); the
 `EffortObservation` type survives only as the read/IPC shape.
 
+> **⚠ In-flight successor — the fact substrate (epic tsk12).** Everything below
+> from "## The model" down describes the **V38** substrate, which is still the
+> live path. A **second, inverted** substrate is being built *alongside* it
+> (dual-write phase) and will eventually replace it. Read the next section first;
+> the V38 sections stay accurate until the cutover (tsk20). New work targets the
+> fact substrate, not V38.
+
+## The fact substrate (epic tsk12 — the inversion, in flight)
+
+**The defect being fixed.** V38 has facts and metrics *inverted*. `metric_sample`
+is labelled "the BI fact grain" but holds *pre-aggregated, per-metric* values
+(a count-over-threshold, a `tree:.` repo sum) — aggregation baked in by the
+collector. `metric_finding` holds the *atomic, re-aggregatable* facts
+(function→complexity, test-case→pass/fail, lint hit) — but ephemerally, as
+CASCADE-with-run drill-in, not as a durable queryable series. So a new metric
+over the same reality needs a *new gauge that re-walks the code*: aggregation is
+welded to collection.
+
+**The fix (headless-BI / semantic-layer model).** Invert the source of truth:
+- **facts** = durable atomic measurements (the real grain) — the source of truth,
+- **measures / dimensions** = the conformed catalogs facts are typed by,
+- **metrics** = *aggregation/formula definitions computed over facts at read time*
+  — never a second pile of stored rows. The materialized series is a rebuildable
+  cache, not the truth.
+
+### Schema — `crates/oxplow-db/migrations/V43__metric_facts.sql`, store `crates/oxplow-db/src/fact_store.rs` (`SqliteFactStore`)
+
+- **`measure`** — the namespaced catalog of *fact types*: `key` (`oxplow.*`
+  reserved), `title`, `unit`, `subject_kind` (the grain), `temporal_semantics`
+  (`additive` | `semi-additive` | `non-additive` — additivity **over time**:
+  tokens additive, complexity/coverage semi-additive, ratios non-additive),
+  `component_role` (`numerator`|`denominator`|`none`), `scope`, `description`.
+  Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
+  `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
+  `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
+  `oxplow.cycle_time`.
+- **`dimension`** — the namespaced slice-axis catalog: `key`, `label`,
+  `value_type`, `subject_kind`, `vocabulary_json`, `scope`, `promoted` (whether a
+  generated column + expression index exists). Seeded: `oxplow.language`,
+  `oxplow.severity`, `oxplow.status`, `oxplow.branch`, `oxplow.model`,
+  `oxplow.agent`, `oxplow.package`, `oxplow.test_suite`. **Declare-to-collect**
+  (planned, tsk17): a fact may only be emitted on defined measures/dimensions;
+  historical facts carrying a now-undefined dim are kept but hidden as a slice
+  axis (the axis list is catalog-driven).
+- **`subject`** — the subject hierarchy (file→package→repo) for roll-ups.
+- **`metric_capture`** (the renamed/generalized `metric_run`) — the **one context
+  row**: it holds ALL the "when/where/who/trust" metadata so it isn't duplicated
+  on every fact. `producer`, `trigger`, `status`/`error`, `scope`; when
+  `captured_at`/`ended_at`; where `snapshot_id`/`closest_git_version`/
+  `git_version_exact`/`branch`/`basis_ref`; who `stream_id` (NOT NULL, the CASCADE
+  scope) / `thread_id` / **`effort_id`** (nullable, `ON DELETE SET NULL` — the
+  *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
+  trust `provenance`/`source`. **Captures are durable** (they carry the facts'
+  context — no independent sweep).
+- **`fact`** — the durable atomic measurement (folds `metric_sample` +
+  `metric_finding`): `capture_id` **NOT NULL** (→ all context via the capture),
+  `measure_id`, `value`, `numerator`/`denominator`; subject `subject_kind`/
+  `subject_ref`/`path`/`line` (location-at-capture); reported finding metadata
+  `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
+  dims). **No when/where/who columns** — those are the capture's.
+
+`SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
+`upsert_dimension`/`list_dimensions`, `record_capture`,
+`record_facts(capture, facts)` (atomic — inserts the capture, backfills
+`capture_id` into every fact, commits together), `get_capture`,
+`facts_for_measure` (joined to the capture for the time/version/effort spine),
+`facts_for_captures` (the attribution-by-claim read), `aggregate_ratio`.
+
+### The aggregation engine — `crates/oxplow-app/src/metric_engine.rs`
+
+`MetricEngine { facts: SqliteFactStore }` turns facts into metrics at read time:
+- `Aggregation` (`Count|Sum|Avg|Min|Max|Last|Ratio`, `parse`),
+  `Temporal` (`Additive|SemiAdditive|NonAdditive`), `FactFilter`
+  (`min_value` / `severity` / `dim_eq` — the count-over-threshold + slice filters).
+- Pure cores: `aggregate_series(facts, agg, filter, group_by)` → one `SeriesPoint`
+  per capture (preserving time order), optionally one series per group-by
+  dimension value; `range_value(series, temporal)` collapses a series to one
+  number the additivity-correct way; `compute_rollup(facts, dimension)` →
+  `RollupRow`s (latest-per-subject, summed per dim value, largest first). Ratio
+  re-aggregation is Σnumerator/Σdenominator via `numerator`/`denominator`, never a
+  naive average of percentages. `dim_value` reads the `severity`/`rule` columns
+  and `package`-from-path directly, else `dims_json[key]`.
+- Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
+  `rollup(measure_key, dimension)` fetch a measure's facts and aggregate.
+
+### Producers — dual-writing facts beside the legacy samples
+
+Each producer writes atomic facts through `record_facts` (a lightweight capture +
+the facts), **additively** beside its existing V38 sample/finding write, so the
+tree stays green through the migration. Landed:
+
+| producer | where | facts |
+|---|---|---|
+| tokens | `token_usage.rs` | one `oxplow.tokens` fact per model (`oxplow.model` dim), capture per Stop |
+| effort lifecycle | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close, subject=effort; capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
+| lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
+| coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |
+| test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`) |
+
+Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
+`metric_engine: MetricEngine`; `TaskService`/`CollectionService`/
+`TokenUsageService` carry the fact store. Still to come (see the epic's tasks):
+the **code-gauge unbake** (per-function complexity/length/param + marker facts;
+count-over-threshold becomes a metric spec — the design-heavy keystone), the
+deferred **duplication + nudge** producers.
+
+### Read surface (MCP, additive)
+
+`crates/oxplow-mcp/src/lib.rs`, agent-only in the surface-parity MANIFEST, beside
+the untouched V38 sample/definition tools:
+- `list_measures` / `list_dimensions` — the two catalogs (optional scope/
+  subject_kind filter).
+- `list_facts(measure_key, limit)` — raw atomic facts, most-recent, with the
+  capture spine.
+- `metric_series(measure_key, aggregation, group_by?, min_value?, severity?)` —
+  the metrics-as-definitions read: one aggregated point per capture, optionally
+  sliced by a dimension.
+- `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
+
+**Not yet done:** flipping the *existing* reads (`list_metric_samples`,
+`metric_breakdown`, `get_metric_summary`, `list_metric_findings`) onto the engine,
+the IPC/Tauri counterparts + TS bindings, the UI pages (incl. a **Dimensions
+catalog** page), config `measures:`/`dimensions:` blocks, the metric-spec model
+(`metric_definition` → `source_measure` + `aggregation`), and retiring V38. Those
+are the open children of the epic.
+
+---
+
+
 ## Why it exists
 
 `effort_observation` (see [collection.md](./collection.md)) was the first cut,
