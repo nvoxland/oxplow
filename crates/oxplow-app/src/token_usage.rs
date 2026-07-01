@@ -26,14 +26,13 @@ use std::sync::Arc;
 
 use oxplow_db::TaskEffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewFact, NewMetricCapture, NewMetricRun, NewMetricSample, SqliteFactStore,
-    SqliteMetricStore, SqliteTaskEffortStore, SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteFactStore, SqliteTaskEffortStore,
+    SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, ThreadId};
 
 use crate::events::{EventBus, OxplowEvent};
-use crate::producer_metrics::producer_metric;
 
 /// Summed usage across a chunk of transcript (one Stop's delta).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -289,11 +288,8 @@ pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
     efforts: Arc<SqliteTaskEffortStore>,
     threads: Arc<SqliteThreadStore>,
-    /// Unified metric substrate (tsk213): token samples are projected here
-    /// for the Metrics surface, without touching the `agent_token_usage` source.
-    metrics: Arc<SqliteMetricStore>,
-    /// Durable fact layer (epic tsk12): token totals also land as facts on the
-    /// `oxplow.tokens` measure, dual-written beside the legacy samples.
+    /// Durable fact layer (epic tsk12): per-kind token totals land as facts
+    /// on the `oxplow.tokens` measure (the legacy sample write is gone, T-E2).
     facts: Arc<SqliteFactStore>,
     events: EventBus,
 }
@@ -303,7 +299,6 @@ impl TokenUsageService {
         usage: Arc<SqliteTokenUsageStore>,
         efforts: Arc<SqliteTaskEffortStore>,
         threads: Arc<SqliteThreadStore>,
-        metrics: Arc<SqliteMetricStore>,
         facts: Arc<SqliteFactStore>,
         events: EventBus,
     ) -> Self {
@@ -311,7 +306,6 @@ impl TokenUsageService {
             usage,
             efforts,
             threads,
-            metrics,
             facts,
             events,
         }
@@ -464,55 +458,13 @@ impl TokenUsageService {
         by_model: &std::collections::HashMap<String, TokenAgg>,
         effort_val: Option<i64>,
     ) -> Result<(), DomainError> {
-        // Definitions come from the shared producer registry (tsk287) so the
-        // Catalog can't drift from what's emitted here.
-        let mut ids = std::collections::HashMap::new();
-        for key in [
-            "agent.tokens.input",
-            "agent.tokens.output",
-            "agent.tokens.total",
-            "agent.turns",
-        ] {
-            let def = producer_metric(key).definition();
-            ids.insert(key, self.metrics.upsert_definition(def).await?);
-        }
-
-        let mut run = NewMetricRun::done(stream_val, "token-parse", "token-parse");
-        run.thread_id = Some(thread.value());
-        run.trigger = Some("continuous".into());
-
-        let mut samples = Vec::new();
-        for (model, agg) in by_model {
-            let subject = format!("model:{model}");
-            let total = agg.input + agg.output;
-            let rows = [
-                ("agent.tokens.input", agg.input as f64),
-                ("agent.tokens.output", agg.output as f64),
-                ("agent.tokens.total", total as f64),
-                ("agent.turns", agg.turns as f64),
-            ];
-            for (key, value) in rows {
-                let metric_id = ids[key];
-                let mut s = NewMetricSample::observed(metric_id, stream_val, value, "token-parse");
-                s.thread_id = Some(thread.value());
-                s.subject_kind = Some("model".into());
-                s.subject_ref = Some(subject.clone());
-                s.dims_json = Some(format!("{{\"model\":\"{model}\"}}"));
-                samples.push(s);
-            }
-        }
-        // Atomic: the run and all its samples land together (or not at all).
-        self.metrics
-            .record_run_with_data(run, samples, Vec::new())
-            .await?;
-
-        // Dual-write into the durable fact layer (epic tsk12): PER-KIND token
-        // facts on the `oxplow.tokens` measure — one input + one output fact per
-        // model, sliced by the `oxplow.token_kind` conformed dimension — plus a
-        // turn fact on `oxplow.turn`, under one capture carrying the spine. The
-        // `agent.tokens.total` spec sums both kinds (= the old total); the
-        // input/output specs filter by `token_kind`. Tokens/turns are additive
-        // event measures; model is a conformed dimension. Best-effort.
+        // The durable facts (epic tsk12; the legacy run/sample writes are gone,
+        // T-E2): PER-KIND token facts on the `oxplow.tokens` measure — one
+        // input + one output fact per model, sliced by the `oxplow.token_kind`
+        // conformed dimension — plus a turn fact on `oxplow.turn`, under one
+        // capture carrying the spine. The `agent.tokens.total` spec sums both
+        // kinds; the input/output specs filter by `token_kind`. Tokens/turns
+        // are additive event measures; model is a conformed dimension.
         let tokens_measure = self.facts.get_measure("oxplow.tokens").await?;
         let turn_measure = self.facts.get_measure("oxplow.turn").await?;
         if tokens_measure.is_some() || turn_measure.is_some() {
@@ -979,38 +931,10 @@ mod tests {
             .await
             .unwrap();
 
-        let samples_for = |key: &str| {
-            let store = svc.metric_store.clone();
-            let key = key.to_string();
-            async move {
-                let def = store.get_definition(&key).await.unwrap().unwrap();
-                store.list_samples(def.id).await.unwrap()
-            }
-        };
-        let total = samples_for("agent.tokens.total").await;
-        assert_eq!(total.len(), 1);
-        assert_eq!(total[0].value, 120.0, "input 100 + output 20");
-        assert_eq!(
-            total[0].subject_ref.as_deref(),
-            Some("model:claude-opus-4-8")
-        );
-
-        let input = samples_for("agent.tokens.input").await;
-        assert_eq!(input[0].value, 100.0);
-
-        // No price/cost metric is derived — tokens only.
-        assert!(
-            svc.metric_store
-                .get_definition("agent.cost_usd")
-                .await
-                .unwrap()
-                .is_none(),
-            "agent.cost_usd must not be defined — oxplow tracks tokens, not price"
-        );
-
-        // Dual-written into the durable fact layer (epic tsk12): PER-KIND facts on
-        // the `oxplow.tokens` measure — input + output, sliced by oxplow.token_kind
-        // — so the total spec sums both and input/output specs filter by kind.
+        // The durable fact layer (epic tsk12; the legacy samples are gone,
+        // T-E2): PER-KIND facts on the `oxplow.tokens` measure — input +
+        // output, sliced by oxplow.token_kind — so the total spec sums both
+        // and input/output specs filter by kind.
         let tokens_measure = svc
             .fact_store
             .get_measure("oxplow.tokens")

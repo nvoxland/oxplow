@@ -25,9 +25,8 @@ use oxplow_config::{
     MeasureEntry, MetricEntry, OxplowConfig, ResolvedGauge, ResolvedSpec,
 };
 use oxplow_db::{
-    NewDimension, NewMeasure, NewMetricDefinition, NewMetricSpec, SnapshotStorage, SqliteFactStore,
-    SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
-    TaskEffortStore,
+    NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteFactStore, SqliteSnapshotStore,
+    SqliteTaskEffortStore, SqliteThreadStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{EffortId, StreamId, ThreadId};
@@ -45,7 +44,6 @@ const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 /// leaf `Arc`s) — deliberately NOT holding `Arc<Services>`, to avoid a cycle.
 #[derive(Clone)]
 pub struct MetricsService {
-    metrics: Arc<SqliteMetricStore>,
     snapshot_store: Arc<SqliteSnapshotStore>,
     thread_store: Arc<SqliteThreadStore>,
     effort_store: Arc<SqliteTaskEffortStore>,
@@ -111,7 +109,6 @@ struct GaugeRunContext {
 impl MetricsService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        metrics: Arc<SqliteMetricStore>,
         snapshot_store: Arc<SqliteSnapshotStore>,
         thread_store: Arc<SqliteThreadStore>,
         effort_store: Arc<SqliteTaskEffortStore>,
@@ -121,7 +118,6 @@ impl MetricsService {
         events: EventBus,
     ) -> Self {
         Self {
-            metrics,
             snapshot_store,
             thread_store,
             effort_store,
@@ -219,22 +215,6 @@ impl MetricsService {
             .read()
             .map(|c| c.snapshot_max_file_bytes)
             .unwrap_or(DEFAULT_MAX_FILE_BYTES)
-    }
-
-    /// Upsert a `metric_definition` for every resolved entry so the catalog /
-    /// Metrics page list them and samples have a stable FK — even before the
-    /// first run. Idempotent; best-effort. Returns the count seeded.
-    pub async fn seed_definitions(&self) -> usize {
-        let mut n = 0;
-        for m in self.resolved_specs() {
-            match self.metrics.upsert_definition(spec_definition(&m)).await {
-                Ok(_) => n += 1,
-                Err(e) => {
-                    tracing::warn!(key = %m.key, error = %e, "failed to seed metric definition")
-                }
-            }
-        }
-        n
     }
 
     /// Seed the fact-substrate catalogs (`measure` + `dimension`) from config —
@@ -411,26 +391,29 @@ impl MetricsService {
                 });
             }
         }
-        // Every other seeded definition — installed plugin metrics (and legacy
-        // rows) not covered above. Best-effort: a store read error just yields
-        // the set assembled so far.
-        if let Ok(defs) = self.metrics.list_definitions().await {
-            for d in defs {
-                if seen.insert(d.key.clone()) {
-                    out.push(MetricCatalogEntry {
-                        key: d.key.clone(),
-                        title: d.title.clone(),
-                        kind: d.kind.clone(),
-                        language: d.language.clone(),
-                        scope: d.scope.clone(),
-                        enabled: true,
-                        target: d.target,
-                        // No config trigger for a producer-seeded metric; it runs
-                        // on its producer's own cadence.
-                        trigger: "auto".to_string(),
-                        toggleable: false,
-                        category: d.category.clone(),
-                    });
+        // Every other seeded SPEC — installed plugin metrics and anything else
+        // in the spec catalog not covered above (T-E2: the legacy definition
+        // table is gone). Best-effort: a store read error just yields the set
+        // assembled so far.
+        if let Some(facts) = self.fact_store.as_ref() {
+            if let Ok(specs) = facts.list_specs().await {
+                for s in specs {
+                    if seen.insert(s.key.clone()) {
+                        out.push(MetricCatalogEntry {
+                            key: s.key.clone(),
+                            title: s.title.clone(),
+                            kind: s.display_kind.clone(),
+                            language: s.language.clone(),
+                            scope: s.scope.clone(),
+                            enabled: true,
+                            target: s.target,
+                            // No config trigger for a producer-seeded metric; it
+                            // runs on its producer's own cadence.
+                            trigger: "auto".to_string(),
+                            toggleable: false,
+                            category: s.category.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -464,7 +447,7 @@ impl MetricsService {
                 .map_err(|e| e.to_string())?;
         }
         self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_definitions().await;
+        self.seed_catalog().await;
         Ok(())
     }
 
@@ -499,7 +482,7 @@ impl MetricsService {
                 .map_err(|e| e.to_string())?;
         }
         self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_definitions().await;
+        self.seed_catalog().await;
         Ok(())
     }
 
@@ -667,7 +650,6 @@ impl MetricsService {
         };
 
         self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_definitions().await;
         self.seed_catalog().await;
         Ok(returned_path)
     }
@@ -802,12 +784,10 @@ impl MetricsService {
     /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
     /// gauges when a snapshot batch lands. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
-        self.seed_definitions().await;
         self.seed_catalog().await;
         loop {
             match rx.recv().await {
                 Ok(OxplowEvent::ConfigChanged) => {
-                    self.seed_definitions().await;
                     self.seed_catalog().await;
                 }
                 Ok(OxplowEvent::FileSnapshotsBatchCreated {
@@ -1173,29 +1153,6 @@ impl MetricsService {
         });
         count
     }
-}
-
-/// Map a resolved metric `ResolvedSpec` to a legacy `metric_definition` row
-/// (idempotent by key). Kept until the read-flip (tsk26) retires the legacy
-/// substrate: `display_kind`→`kind`, `aggregation`→`default_agg`,
-/// `sliceable_dims`→`dimensions_json`. Grain is a legacy notion with no spec
-/// equivalent → left unset.
-fn spec_definition(s: &ResolvedSpec) -> NewMetricDefinition {
-    let mut def = NewMetricDefinition::new(s.key.clone(), s.display_kind.clone(), s.title.clone());
-    def.unit = s.unit.clone();
-    def.direction = s.direction.clone();
-    def.default_agg = s.aggregation.clone();
-    def.language = s.language.clone();
-    def.description = s.description.clone();
-    def.producer = Some(s.key.clone());
-    def.category = s.category.clone().or_else(|| Some("custom".into()));
-    def.scope = s.scope.clone();
-    def.dimensions_json =
-        Some(serde_json::to_string(&s.sliceable_dims).unwrap_or_else(|_| "[]".into()));
-    def.target = s.target;
-    def.warn_at = s.warn_at;
-    def.fail_at = s.fail_at;
-    def
 }
 
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
@@ -2215,7 +2172,9 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn seed_definitions_upserts_configured_metrics() {
+    async fn seed_catalog_upserts_configured_metric_specs() {
+        // T-E2: config `metrics:` entries seed metric SPECS (the legacy
+        // definition seeding is gone).
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
@@ -2223,18 +2182,17 @@ def transform(input):
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
-        let n = svc.metrics.seed_definitions().await;
-        assert_eq!(n, 1);
-        let def = svc
-            .metric_store
-            .get_definition("repo.loc")
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("repo.loc")
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(def.kind, "gauge"); // displayKind defaults to gauge
-        assert_eq!(def.default_agg, "sum");
-        assert_eq!(def.scope, "project");
-        assert_eq!(def.producer.as_deref(), Some("repo.loc"));
+        assert_eq!(spec.display_kind, "gauge"); // displayKind defaults to gauge
+        assert_eq!(spec.aggregation, "sum");
+        assert_eq!(spec.scope, "project");
+        assert_eq!(spec.source_measure.as_deref(), Some("acme.lines"));
     }
 
     #[tokio::test]
@@ -2358,18 +2316,23 @@ def transform(input):
         .unwrap();
         svc.reload_config_from_disk().unwrap();
 
-        // Seeding registers the definition at built-in scope, with the project's
-        // target override applied.
-        assert_eq!(svc.metrics.seed_definitions().await, 1);
-        let def = svc
-            .metric_store
-            .get_definition("oxplow.rust.unsafe_blocks")
+        // Seeding registers the SPEC (T-E2: the legacy definition seeding is
+        // gone); the resolved config carries the project's target override into
+        // the catalog entry.
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(def.scope, "built-in");
-        assert_eq!(def.language.as_deref(), Some("rust"));
-        assert_eq!(def.target, Some(3.0), "project override merged");
+        assert_eq!(spec.scope, "built-in");
+        let cat = svc.metrics.catalog().await;
+        let entry = cat
+            .iter()
+            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
+            .expect("catalog entry");
+        assert_eq!(entry.target, Some(3.0), "project override merged");
 
         // Running it executes the EMBEDDED script (no project-disk file). With no
         // snapshot the file map is empty, so the facts-only gauge cleanly yields 0
@@ -2415,13 +2378,13 @@ def transform(input):
                 .enabled,
             "now enabled"
         );
-        let def = svc
-            .metric_store
-            .get_definition("oxplow.rust.unsafe_blocks")
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
             .await
             .unwrap()
-            .expect("definition seeded on enable");
-        assert_eq!(def.scope, "built-in");
+            .expect("spec seeded on enable (T-E2)");
+        assert_eq!(spec.scope, "built-in");
         let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
             yaml.contains("oxplow.rust.unsafe_blocks"),
@@ -2482,16 +2445,18 @@ def transform(input):
     async fn catalog_unions_always_on_producer_definitions() {
         let (svc, _dir) = fixture().await;
 
-        // Simulate a producer (or external plugin) seeding a definition directly,
-        // the way token-parse / tests / coverage do at runtime.
-        let mut def = NewMetricDefinition::new(
-            "agent.tokens.total".to_string(),
-            "gauge".to_string(),
-            "Total tokens".to_string(),
+        // Simulate a producer (or external plugin) seeding a SPEC directly, the
+        // way seed_catalog does for the always-on producers at boot (T-E2: the
+        // catalog's tail sweep reads the spec catalog, not legacy definitions).
+        let mut spec = oxplow_db::NewMetricSpec::base(
+            "agent.tokens.total",
+            "Total tokens",
+            "oxplow.tokens",
+            "sum",
         );
-        def.category = Some("operational".to_string());
-        def.producer = Some("token-parse".to_string());
-        svc.metric_store.upsert_definition(def).await.unwrap();
+        spec.display_kind = "gauge".into();
+        spec.category = Some("operational".to_string());
+        svc.fact_store.upsert_spec(spec).await.unwrap();
 
         let cat = svc.metrics.catalog().await;
         let entry = cat
@@ -2601,15 +2566,15 @@ def transform(input):
             "entryFile persisted; got:\n{yaml}"
         );
 
-        // Metric definition seeded as a project-scoped gauge (spec-derived).
-        let def = svc
-            .metric_store
-            .get_definition("acme.todo_density")
+        // Metric SPEC seeded as a project-scoped gauge (T-E2).
+        let spec = svc
+            .fact_store
+            .get_spec("acme.todo_density")
             .await
             .unwrap()
-            .expect("scaffolded definition seeded");
-        assert_eq!(def.kind, "gauge");
-        assert_eq!(def.scope, "project");
+            .expect("scaffolded spec seeded");
+        assert_eq!(spec.display_kind, "gauge");
+        assert_eq!(spec.scope, "project");
 
         // Scaffolding the same key again is rejected (no duplicate entry).
         assert!(svc

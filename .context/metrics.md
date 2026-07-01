@@ -13,12 +13,12 @@ coverage/test/analysis facts — the legacy `effort_observation` table was
 substrate (`CollectionService::effort_observations_from_metrics`); the
 `EffortObservation` type survives only as the read/IPC shape.
 
-> **⚠ In-flight successor — the fact substrate (epic tsk12).** Everything below
-> from "## The model" down describes the **V38** substrate, which is still the
-> live path. A **second, inverted** substrate is being built *alongside* it
-> (dual-write phase) and will eventually replace it. Read the next section first;
-> the V38 sections stay accurate until the cutover (tsk20). New work targets the
-> fact substrate, not V38.
+> **⚠ Cutover nearly complete — the fact substrate (epic tsk12).** The V38
+> `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` cluster is
+> now **unread and unwritten** (reads flipped in T-C2/T-C3/T-D/T-E1; writes
+> dropped in T-E2, tsk49). Sections below describing V38 mechanics are
+> historical context; only T-E3 (drop the tables + `metric_store.rs`, tsk20)
+> remains. New work targets the fact substrate exclusively.
 
 ## The fact substrate (epic tsk12 — the inversion, in flight)
 
@@ -162,11 +162,12 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   an effort's captures (the attribution-by-claim spine for T-D). These stay
   non-`Type` (out of `bindings.ts`) until T-C3 wires the IPC.
 
-### Producers — dual-writing facts beside the legacy samples
+### Producers — facts on the capture spine (the ONLY write since T-E2)
 
-Each producer writes atomic facts through `record_facts` (a lightweight capture +
-the facts), **additively** beside its existing V38 sample/finding write, so the
-tree stays green through the migration. Landed:
+Each producer writes atomic facts through `record_facts` (a capture + the
+facts). The legacy V38 sample/finding/run/definition writes were removed in
+T-E2 (tsk49); producers emit `MetricSamplesChanged` after their capture write.
+Landed:
 
 | producer | where | facts |
 |---|---|---|
@@ -457,8 +458,7 @@ the deferred backfill (tsk38). The now-orphaned legacy reads
 
 **The capture IS the run (T-E1, tsk48).** Agent-work runs — tests, coverage,
 analysis — are **observe-always**: every run writes its `metric_capture` + facts
-(and, until T-E2, dual-writes the legacy `metric_run`/`metric_sample`) regardless
-of how many efforts are open, attributed through the `capture.effort_id` stamp
+regardless of how many efforts are open, attributed through the `capture.effort_id` stamp
 (T-D read) + the `effort_attribution` ledger (the write/reconcile side), never by
 time window — because parallel sub-agents in one thread run different runs
 concurrently and the clock can't tell them apart. All stamp `trigger='on-report'`,

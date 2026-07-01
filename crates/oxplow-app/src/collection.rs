@@ -25,10 +25,7 @@ use oxplow_collect_plugin::{
 };
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{
-    NewFact, NewMetricCapture, NewMetricFinding, NewMetricRun, NewMetricSample, SqliteFactStore,
-    SqliteMetricStore,
-};
+use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_db::{
     SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
     TaskEffort, TaskEffortStore, STATE_CLAIMED,
@@ -40,7 +37,6 @@ use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
 use crate::file_ref_version;
 use crate::metric_engine::threshold_state;
-use crate::producer_metrics::producer_metric;
 
 /// Built-in command substrings that count as a test run. The collection
 /// profile's `testRunPatterns` extends (never replaces) this list.
@@ -337,11 +333,6 @@ impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
 
 #[derive(Clone)]
 pub struct CollectionService {
-    /// Unified metric substrate (epic tsk213) — the **sole** store for
-    /// coverage/test/analysis facts now (the legacy `effort_observation` table
-    /// was dropped in tsk215). The effort panel reconstructs its rows from here
-    /// via `effort_observations_from_metrics`.
-    metrics: Arc<SqliteMetricStore>,
     /// Durable fact layer (epic tsk12): coverage/test/analysis producers
     /// dual-write atomic facts here beside the legacy samples/findings. The
     /// aggregation engine reads these; the samples are the rebuildable cache.
@@ -383,7 +374,6 @@ pub struct CollectionService {
 impl CollectionService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        metrics: Arc<SqliteMetricStore>,
         facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
@@ -396,7 +386,6 @@ impl CollectionService {
         attribution: Arc<SqliteAttributionStore>,
     ) -> Self {
         Self {
-            metrics,
             facts,
             nudges,
             efforts,
@@ -515,22 +504,6 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
-        // Dual-write into the unified metric substrate (best-effort) — counts as
-        // samples + the full payload (suite/case tree) as a `test-detail`
-        // finding so the effort panel can render off the substrate (tsk215).
-        let run_id = self
-            .mirror_test_metrics(
-                thread,
-                &stream_id,
-                provenance,
-                source,
-                passed,
-                failed,
-                total,
-                Some(serde_json::Value::Object(payload.clone())),
-            )
-            .await;
-
         // Resolve the owning effort ONCE — used to stamp the fact-capture below
         // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
         // the ledger at the tail. Same resolution the auto-claim uses.
@@ -601,7 +574,12 @@ impl CollectionService {
             }
             .await;
             match dual {
-                Ok(id) => capture_id = id,
+                Ok(id) => {
+                    capture_id = id;
+                    self.events.emit(OxplowEvent::MetricSamplesChanged {
+                        stream_id: oxplow_domain::StreamId::new(stream_val),
+                    });
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to write the test-run capture")
                 }
@@ -616,7 +594,7 @@ impl CollectionService {
             self.claim_run(effort, cid).await;
             self.emit(thread, effort);
         }
-        Ok(run_id.map(|_| 0))
+        Ok(capture_id.map(|_| 0))
     }
 
     /// Attribute a just-recorded run (`run:<id>`) to an effort via the unified
@@ -834,106 +812,6 @@ impl CollectionService {
         }
     }
 
-    /// Compute diff coverage from a (possibly merged) report and store a
-    /// `diff-coverage` observation over the effort's changed lines.
-    /// Mirror a diff-coverage result into the unified metric substrate
-    /// (epic tsk213), best-effort: upsert the `oxplow.coverage.diff_pct`
-    /// definition, open a `coverage` run, and record one sample carrying the
-    /// covered/changed components (so module/branch roll-ups re-aggregate
-    /// correctly) plus the capture branch + git version. A metric write error
-    /// is logged and swallowed so it never fails the legacy observation path.
-    #[allow(clippy::too_many_arguments)]
-    async fn mirror_coverage_metric(
-        &self,
-        thread: &ThreadId,
-        stream_id: &str,
-        summary_pct: f64,
-        covered: usize,
-        changed: usize,
-        version: &file_ref_version::ResolvedFileVersion,
-        detail: Option<serde_json::Value>,
-    ) -> Option<i64> {
-        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
-        match self
-            .record_coverage_metric(
-                thread,
-                stream_val,
-                summary_pct,
-                covered,
-                changed,
-                version,
-                detail,
-            )
-            .await
-        {
-            Ok(run_id) => Some(run_id),
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to mirror coverage into metric substrate");
-                None
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn record_coverage_metric(
-        &self,
-        thread: &ThreadId,
-        stream_val: i64,
-        summary_pct: f64,
-        covered: usize,
-        changed: usize,
-        version: &file_ref_version::ResolvedFileVersion,
-        detail: Option<serde_json::Value>,
-    ) -> Result<i64, DomainError> {
-        let branch = oxplow_git::detect_current_branch(&self.project_dir);
-
-        // ABSOLUTE whole-report coverage (tsk270): observe-always, no effort
-        // baseline. The effort-relative diff-coverage is derived at READ from the
-        // stored per-file line-sets (`diff_coverage_for_effort`). The descriptor
-        // (kind/unit/grain/dims/…) is the shared registry's (tsk287); the
-        // coverage-specific thresholds are policy applied here.
-        let mut def = producer_metric("oxplow.coverage.abs_pct").definition();
-        // Targets live in DATA, not a hardcoded UI ramp (tsk220): the renderer
-        // colors red/green from these (fail < 50%, warn < 80%, ok ≥ 80%).
-        def.target = Some(COVERAGE_TARGET_PCT);
-        def.warn_at = Some(COVERAGE_TARGET_PCT);
-        def.fail_at = Some(COVERAGE_FAIL_PCT);
-        let metric_id = self.metrics.upsert_definition(def).await?;
-
-        let mut run = NewMetricRun::done(stream_val, "coverage", "coverage-report");
-        run.thread_id = Some(thread.value());
-        run.trigger = Some("on-report".into());
-        run.snapshot_id = Some(version.local_snapshot_id);
-        run.closest_git_version = version.closest_git_version.clone();
-        run.git_version_exact = version.git_version_exact;
-        run.branch = branch.clone();
-
-        let mut sample =
-            NewMetricSample::observed(metric_id, stream_val, summary_pct, "coverage-report");
-        sample.numerator = Some(covered as f64);
-        sample.denominator = Some(changed as f64);
-        sample.thread_id = Some(thread.value());
-        sample.snapshot_id = Some(version.local_snapshot_id);
-        sample.closest_git_version = version.closest_git_version.clone();
-        sample.git_version_exact = version.git_version_exact;
-        sample.basis_ref = version.closest_git_version.clone();
-        sample.branch = branch;
-
-        // Atomic: the run, its sample, and the verbatim per-file absolute
-        // instrumented/covered detail finding (tsk215/tsk270) commit together.
-        let findings: Vec<NewMetricFinding> = Self::detail_finding("coverage-detail", detail)
-            .into_iter()
-            .collect();
-        let run_id = self
-            .metrics
-            .record_run_with_data(run, vec![sample], findings)
-            .await?;
-        self.events.emit(OxplowEvent::MetricSamplesChanged {
-            stream_id: oxplow_domain::StreamId::new(stream_val),
-        });
-        Ok(run_id)
-    }
-
     /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
     /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
     /// `metric_capture.detail_json`. The kind discriminates the three run
@@ -941,116 +819,6 @@ impl CollectionService {
     /// observations panel + the read-time diff-coverage derivation.
     fn capture_detail(kind: &str, payload: &serde_json::Value) -> Option<String> {
         serde_json::to_string(&json!({ "kind": kind, "payload": payload })).ok()
-    }
-
-    /// Build one run-scoped detail finding carrying a verbatim `payload_json`
-    /// (the rich per-effort detail — test tree / coverage files / analysis
-    /// findings — kept on the substrate so the effort panel renders off the
-    /// model, tsk215). `None` detail → no finding. The `run_id` is a placeholder
-    /// (`0`); `record_run_with_data` overwrites it with the real run id when the
-    /// run + its samples + findings commit together.
-    fn detail_finding(kind: &str, detail: Option<serde_json::Value>) -> Option<NewMetricFinding> {
-        let detail = detail?;
-        Some(NewMetricFinding {
-            run_id: 0,
-            metric_id: None,
-            subject_kind: None,
-            subject_ref: None,
-            path: None,
-            start_line: None,
-            end_line: None,
-            col: None,
-            kind: kind.to_string(),
-            severity: None,
-            rule: None,
-            message: None,
-            value: None,
-            extra_json: Some(serde_json::to_string(&detail).unwrap_or_default()),
-        })
-    }
-
-    /// Mirror a test run into the metric substrate (best-effort): a `tests` run
-    /// with `oxplow.tests.{passed,failed,total}` gauge samples + a `test-detail`
-    /// finding (the suite/case tree). Provenance flows through (a hook-observed
-    /// run is `observed`; an MCP `record_test_run` is `asserted`).
-    #[allow(clippy::too_many_arguments)]
-    async fn mirror_test_metrics(
-        &self,
-        thread: &ThreadId,
-        stream_id: &str,
-        provenance: &str,
-        source: &str,
-        passed: Option<i64>,
-        failed: Option<i64>,
-        total: Option<i64>,
-        detail: Option<serde_json::Value>,
-    ) -> Option<i64> {
-        if passed.is_none() && failed.is_none() && total.is_none() {
-            return None;
-        }
-        let stream_val = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())?;
-        let branch = oxplow_git::detect_current_branch(&self.project_dir);
-        // Stamp the run + samples with the stream's current snapshot — the code
-        // state the tests ran against — so the effort panel groups runs into
-        // exact TDD iterations by code state (NOT a time heuristic, and NOT an
-        // effort FK: the substrate stays time-primary; see metrics.md / V38).
-        let snapshot_id = self
-            .snapshots
-            .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
-            .await
-            .ok()
-            .flatten();
-        let result = async {
-            let mut run = NewMetricRun::done(stream_val, "tests", source.to_string());
-            run.provenance = provenance.to_string();
-            run.thread_id = Some(thread.value());
-            run.trigger = Some("on-report".into());
-            run.branch = branch.clone();
-            run.snapshot_id = snapshot_id;
-
-            // (key, value); definitions come from the shared producer registry (tsk287).
-            let specs = [
-                ("oxplow.tests.passed", passed),
-                ("oxplow.tests.failed", failed),
-                ("oxplow.tests.total", total),
-            ];
-            let mut samples = Vec::new();
-            for (key, value) in specs {
-                let Some(v) = value else { continue };
-                let def = producer_metric(key).definition();
-                let metric_id = self.metrics.upsert_definition(def).await?;
-                let mut sample =
-                    NewMetricSample::observed(metric_id, stream_val, v as f64, source.to_string());
-                sample.provenance = provenance.to_string();
-                sample.thread_id = Some(thread.value());
-                sample.branch = branch.clone();
-                sample.snapshot_id = snapshot_id;
-                samples.push(sample);
-            }
-            // Atomic: the run, its samples, and the verbatim suite/case-tree
-            // `test-detail` finding (tsk215) commit together.
-            let findings: Vec<NewMetricFinding> = Self::detail_finding("test-detail", detail)
-                .into_iter()
-                .collect();
-            let run_id = self
-                .metrics
-                .record_run_with_data(run, samples, findings)
-                .await?;
-            Ok::<i64, DomainError>(run_id)
-        }
-        .await;
-        match result {
-            Ok(run_id) => {
-                self.events.emit(OxplowEvent::MetricSamplesChanged {
-                    stream_id: oxplow_domain::StreamId::new(stream_val),
-                });
-                Some(run_id)
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to mirror test run into metric substrate");
-                None
-            }
-        }
     }
 
     /// Mirror a static-analysis result into the metric substrate (best-effort):
@@ -1080,54 +848,15 @@ impl CollectionService {
         let capture_detail_json = detail
             .as_ref()
             .and_then(|d| Self::capture_detail("analysis-detail", d));
-        let result = async {
+        let dual = async {
+            let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
+                return Ok::<Option<i64>, DomainError>(None);
+            };
+            // A CLEAN report still writes its (empty) capture — "this
+            // analysis ran and found nothing" is what lets the errors/
+            // warnings series drop back to zero (tsk44).
             use oxplow_coverage::Severity::*;
-            let (mut errors, mut warnings) = (0u64, 0u64);
-            for f in &report.findings {
-                match f.severity {
-                    Error => errors += 1,
-                    Warning => warnings += 1,
-                    _ => {}
-                }
-            }
-
-            let mut run = NewMetricRun::done(stream_val, analyzer.clone(), source.to_string());
-            run.thread_id = Some(thread.value());
-            run.trigger = Some("on-report".into());
-            run.snapshot_id = snapshot_id;
-            run.closest_git_version = git_version.clone();
-            run.git_version_exact = git_version_exact;
-            run.branch = branch.clone();
-
-            let mut samples = Vec::new();
-            // Definitions come from the shared producer registry (tsk287).
-            for (key, value) in [
-                ("oxplow.analysis.errors", errors),
-                ("oxplow.analysis.warnings", warnings),
-            ] {
-                let def = producer_metric(key).definition();
-                let metric_id = self.metrics.upsert_definition(def).await?;
-                let mut sample = NewMetricSample::observed(
-                    metric_id,
-                    stream_val,
-                    value as f64,
-                    source.to_string(),
-                );
-                sample.thread_id = Some(thread.value());
-                sample.snapshot_id = snapshot_id;
-                sample.closest_git_version = git_version.clone();
-                sample.git_version_exact = git_version_exact;
-                sample.branch = branch.clone();
-                samples.push(sample);
-            }
-
-            // Verbatim analyzer payload (command/analyzer/counts/findings) so the
-            // effort panel renders off the substrate (tsk215), plus one located
-            // `metric_finding` per lint hit for the substrate's findings drill-in.
-            let mut findings: Vec<NewMetricFinding> =
-                Self::detail_finding("analysis-detail", detail)
-                    .into_iter()
-                    .collect();
+            let mut facts = Vec::with_capacity(report.findings.len());
             for f in &report.findings {
                 let severity = match f.severity {
                     Error => "error",
@@ -1135,101 +864,47 @@ impl CollectionService {
                     Info => "info",
                     Note => "note",
                 };
-                findings.push(NewMetricFinding {
-                    run_id: 0,
-                    metric_id: None,
+                facts.push(NewFact {
                     subject_kind: Some("file".into()),
                     subject_ref: Some(format!("file:{}", f.path)),
                     path: Some(f.path.clone()),
-                    start_line: f.line.map(|l| l as i64),
-                    end_line: f.line.map(|l| l as i64),
-                    col: f.column.map(|c| c as i64),
-                    kind: "lint".into(),
+                    line: f.line.map(|l| l as i64),
                     severity: Some(severity.into()),
                     rule: f.rule.clone(),
-                    message: Some(f.message.clone()),
-                    value: None,
-                    extra_json: None,
+                    detail: Some(f.message.clone()),
+                    ..NewFact::new(measure.id, 1.0)
                 });
             }
-            // Atomic: run + samples + all findings commit together.
-            let run_id = self
-                .metrics
-                .record_run_with_data(run, samples, findings)
-                .await?;
-            Ok::<i64, DomainError>(run_id)
+            // Stamp the owning effort (single-open, matching the run
+            // auto-claim below) so `captures_for_effort` attributes these
+            // lint facts (tsk37).
+            let owning_val = self
+                .resolve_owning_effort(thread, None)
+                .await
+                .map(|e| e.id.value());
+            let mut capture =
+                NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
+            capture.thread_id = Some(thread.value());
+            capture.trigger = Some("on-report".into());
+            capture.snapshot_id = snapshot_id;
+            capture.closest_git_version = git_version.clone();
+            capture.git_version_exact = git_version_exact;
+            capture.branch = branch.clone();
+            capture.effort_id = owning_val;
+            capture.detail_json = capture_detail_json;
+            let id = self.facts.record_facts(capture, facts).await?;
+            Ok(Some(id))
         }
         .await;
-        match result {
-            Ok(run_id) => {
+        match dual {
+            Ok(capture_id) => {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: oxplow_domain::StreamId::new(stream_val),
                 });
-                // The run CAPTURE (T-E1, tsk48): one fact on `oxplow.lint_hit`
-                // per finding (reported severity/rule/message in the dedicated
-                // columns + the file location), the verbatim payload in
-                // `detail_json`, and the capture id as the run identity the
-                // ledger claims. Count() over the facts reconstructs the
-                // errors/warnings headline.
-                let dual = async {
-                    let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
-                        return Ok::<Option<i64>, DomainError>(None);
-                    };
-                    // A CLEAN report still writes its (empty) capture — "this
-                    // analysis ran and found nothing" is what lets the errors/
-                    // warnings series drop back to zero (tsk44).
-                    use oxplow_coverage::Severity::*;
-                    let mut facts = Vec::with_capacity(report.findings.len());
-                    for f in &report.findings {
-                        let severity = match f.severity {
-                            Error => "error",
-                            Warning => "warning",
-                            Info => "info",
-                            Note => "note",
-                        };
-                        facts.push(NewFact {
-                            subject_kind: Some("file".into()),
-                            subject_ref: Some(format!("file:{}", f.path)),
-                            path: Some(f.path.clone()),
-                            line: f.line.map(|l| l as i64),
-                            severity: Some(severity.into()),
-                            rule: f.rule.clone(),
-                            detail: Some(f.message.clone()),
-                            ..NewFact::new(measure.id, 1.0)
-                        });
-                    }
-                    // Stamp the owning effort (single-open, matching the run
-                    // auto-claim below) so `captures_for_effort` attributes these
-                    // lint facts (tsk37).
-                    let owning_val = self
-                        .resolve_owning_effort(thread, None)
-                        .await
-                        .map(|e| e.id.value());
-                    let mut capture =
-                        NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
-                    capture.thread_id = Some(thread.value());
-                    capture.trigger = Some("on-report".into());
-                    capture.snapshot_id = snapshot_id;
-                    capture.closest_git_version = git_version.clone();
-                    capture.git_version_exact = git_version_exact;
-                    capture.branch = branch.clone();
-                    capture.effort_id = owning_val;
-                    capture.detail_json = capture_detail_json;
-                    let id = self.facts.record_facts(capture, facts).await?;
-                    Ok(Some(id))
-                }
-                .await;
-                let _ = run_id;
-                match dual {
-                    Ok(capture_id) => capture_id,
-                    Err(e) => {
-                        tracing::warn!(error = %e, "failed to write the analysis capture");
-                        None
-                    }
-                }
+                capture_id
             }
             Err(e) => {
-                tracing::warn!(error = %e, "failed to mirror analysis into metric substrate");
+                tracing::warn!(error = %e, "failed to write the analysis capture");
                 None
             }
         }
@@ -1271,18 +946,6 @@ impl CollectionService {
                 git_version_exact: false,
             },
         };
-        let run_id = self
-            .mirror_coverage_metric(
-                thread,
-                stream_id,
-                abs_pct,
-                total_cov,
-                total_instr,
-                &version,
-                Some(payload.clone()),
-            )
-            .await;
-        let _ = run_id;
         // The owning effort stamps the coverage capture AND receives the ledger
         // claim below — the capture IS the run now (T-E1, tsk48).
         let attribute_to = self.resolve_owning_effort(thread, None).await;
@@ -1337,7 +1000,12 @@ impl CollectionService {
             }
             .await;
             match dual {
-                Ok(id) => capture_id = id,
+                Ok(id) => {
+                    capture_id = id;
+                    self.events.emit(OxplowEvent::MetricSamplesChanged {
+                        stream_id: oxplow_domain::StreamId::new(stream_val),
+                    });
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "failed to write the coverage capture")
                 }
@@ -1640,21 +1308,9 @@ impl CollectionService {
         };
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
         let result = async {
-            // Definition comes from the shared producer registry (tsk287).
-            let def = producer_metric("agent.nudges.fired").definition();
-            let metric_id = self.metrics.upsert_definition(def).await?;
-            // Event kind: no compute run (run_id stays NULL).
-            let mut sample = NewMetricSample::observed(metric_id, stream_val, 1.0, "nudges");
-            sample.thread_id = Some(thread.value());
-            sample.subject_kind = Some("nudge".into());
-            sample.subject_ref = Some(kind.to_string());
-            sample.dims_json = Some(format!("{{\"kind\":\"{kind}\"}}"));
-            sample.branch = branch.clone();
-            self.metrics.record_sample(sample).await?;
-
-            // Dual-write into the durable fact layer (epic tsk12): one fact on the
-            // `oxplow.nudge` event measure (value 1), the nudge kind as subject so
-            // Sum() reconstructs the fired count. Best-effort beside the sample.
+            // One fact on the `oxplow.nudge` event measure (value 1), the nudge
+            // kind as subject so Sum() reconstructs the fired count (epic tsk12;
+            // the legacy sample write is gone, T-E2).
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
                     subject_kind: Some("nudge".into()),
@@ -2800,21 +2456,6 @@ impl CollectionService {
         ))
     }
 
-    /// Test-only: read the metric samples mirrored under a definition `key`.
-    #[cfg(test)]
-    async fn metric_samples_for_key(&self, key: &str) -> Vec<oxplow_db::MetricSample> {
-        match self.metrics.get_definition(key).await.unwrap() {
-            Some(d) => self.metrics.list_samples(d.id).await.unwrap(),
-            None => vec![],
-        }
-    }
-
-    /// Test-only: read the findings recorded under a run.
-    #[cfg(test)]
-    async fn metric_findings_for_run(&self, run_id: i64) -> Vec<oxplow_db::MetricFinding> {
-        self.metrics.list_findings(run_id).await.unwrap()
-    }
-
     /// End-side changed line numbers (1-based) for `path` between its
     /// start-snapshot content and the current working-tree content.
     /// Files absent from disk (deleted) or unchanged yield an empty set.
@@ -3694,7 +3335,6 @@ mod tests {
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             let service = CollectionService::new(
-                Arc::new(SqliteMetricStore::new(db.clone())),
                 Arc::new(oxplow_db::SqliteFactStore::new(db.clone())),
                 nudges.clone(),
                 efforts.clone(),
@@ -3818,10 +3458,8 @@ mod tests {
 
             // The agent claims the run for eff1 (late-claim is the same path).
             let ledger = SqliteAttributionStore::new(h.db.clone());
-            let runs = h
-                .service
-                .metrics
-                .runs_in_window_by_trigger(
+            let runs = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
                     h.thread.value(),
                     "on-report",
                     Timestamp::from_unix_ms(0),
@@ -3854,26 +3492,11 @@ mod tests {
                 .await
                 .unwrap();
 
-            let samples = h
-                .service
-                .metric_samples_for_key("oxplow.coverage.abs_pct")
-                .await;
-            assert_eq!(samples.len(), 1, "one mirrored coverage sample");
-            let s = &samples[0];
-            // Absolute: covered {1,2}=2 of instrumented {1,2,4}=3 → 66.7%.
-            assert!((s.value - 66.666).abs() < 0.01, "value {}", s.value);
-            // Components stored so module/branch roll-ups re-aggregate correctly.
-            assert_eq!(s.numerator, Some(2.0));
-            assert_eq!(s.denominator, Some(3.0));
-            assert_eq!(s.provenance, "observed");
-            assert_eq!(s.source, "coverage-report");
-            // Branch captured from the git_init'd repo (main/master).
-            assert!(s.branch.is_some(), "capture branch tracked");
-
-            // Dual-written into the durable fact layer (epic tsk12): one
-            // `oxplow.coverage` fact for the report's single file, carrying the
-            // covered/instrumented counts so a module/repo roll-up re-derives
-            // Σcovered/Σinstrumented rather than averaging percentages.
+            // The durable fact layer (epic tsk12; the legacy sample write is
+            // gone, T-E2): one `oxplow.coverage` fact for the report's single
+            // file, carrying the covered/instrumented counts so a module/repo
+            // roll-up re-derives Σcovered/Σinstrumented rather than averaging
+            // percentages. The capture carries the observed spine.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure = facts
                 .get_measure("oxplow.coverage")
@@ -3896,6 +3519,8 @@ mod tests {
                 cov[0].subject_ref
             );
             assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
+            assert_eq!(cov[0].provenance, "observed");
+            assert_eq!(cov[0].source, "coverage-report");
         }
 
         #[derive(serde::Deserialize)]
@@ -3963,28 +3588,31 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let passed = h
-                .service
-                .metric_samples_for_key("oxplow.tests.passed")
-                .await;
-            let failed = h
-                .service
-                .metric_samples_for_key("oxplow.tests.failed")
-                .await;
-            let total = h.service.metric_samples_for_key("oxplow.tests.total").await;
-            assert_eq!(passed.len(), 1);
-            assert_eq!(passed[0].value, 5.0);
-            assert_eq!(failed[0].value, 1.0);
-            assert_eq!(total[0].value, 6.0);
-            assert_eq!(passed[0].provenance, "observed");
-            // All three share one run.
-            assert_eq!(passed[0].run_id, total[0].run_id);
+            // The run CAPTURE carries the counts in its detail envelope (T-E2:
+            // the legacy count samples are gone; per-case facts need a report).
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(caps.len(), 1, "one run capture");
+            assert_eq!(caps[0].provenance, "observed");
             // Stamped with the stream's current snapshot (the code state) so the
             // panel can group runs into exact iterations (tsk259).
             assert!(
-                passed[0].snapshot_id.is_some(),
-                "test sample carries the stream's current snapshot"
+                caps[0].snapshot_id.is_some(),
+                "the run capture carries the stream's current snapshot"
             );
+            let envelope: serde_json::Value =
+                serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
+            assert_eq!(envelope["kind"], "test-detail");
+            assert_eq!(envelope["payload"]["passed"], 5);
+            assert_eq!(envelope["payload"]["failed"], 1);
+            assert_eq!(envelope["payload"]["total"], 6);
         }
 
         #[tokio::test]
@@ -4028,22 +3656,28 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            let total = h.service.metric_samples_for_key("oxplow.tests.total").await;
-            let run_id = total[0].run_id.unwrap();
-            let findings = h.service.metric_findings_for_run(run_id).await;
-            let detail = findings
-                .iter()
-                .find(|f| f.kind == "test-detail")
-                .expect("test-detail finding written");
-            let payload: serde_json::Value =
-                serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
+            // The suite/case tree rides verbatim in the run CAPTURE's detail
+            // envelope (T-E1/T-E2 — the legacy test-detail finding is gone).
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(caps.len(), 1);
+            let envelope: serde_json::Value =
+                serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
+            assert_eq!(envelope["kind"], "test-detail");
+            let payload = &envelope["payload"];
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
 
-            // Dual-written into the durable fact layer (epic tsk12): one
-            // `oxplow.test_case` fact per case, status carried as the
-            // `oxplow.status` dim so Count() sliced by status reconstructs the
-            // passed/failed headline.
+            // The durable fact layer (epic tsk12): one `oxplow.test_case` fact
+            // per case, status carried as the `oxplow.status` dim so Count()
+            // sliced by status reconstructs the passed/failed headline.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure = facts
                 .get_measure("oxplow.test_case")
@@ -5262,20 +4896,24 @@ mod tests {
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
                 .unwrap();
-            let cov = h
-                .service
-                .metric_samples_for_key("oxplow.coverage.abs_pct")
-                .await;
-            let run_id = cov[0].run_id.unwrap();
-            let findings = h.service.metric_findings_for_run(run_id).await;
-            let detail = findings
-                .iter()
-                .find(|f| f.kind == "coverage-detail")
-                .expect("coverage-detail finding written");
+            // The per-file line-sets ride in the coverage CAPTURE's detail
+            // envelope (T-E1/T-E2 — the legacy coverage-detail finding is gone).
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(caps.len(), 1);
+            let envelope: serde_json::Value =
+                serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
+            assert_eq!(envelope["kind"], "coverage-detail");
             // tsk270: the stored detail is ABSOLUTE (per-file instrumented/covered
             // line-sets + whole-report absPct), not the effort-relative diff.
-            let payload: serde_json::Value =
-                serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
+            let payload = envelope["payload"].clone();
             assert!(payload["files"].is_array(), "per-file line-sets kept");
             let foo = payload["files"]
                 .as_array()
@@ -5602,10 +5240,16 @@ mod tests {
                 .await
                 .unwrap();
             assert!(obs.is_empty(), "no substrate row for a report-less run");
-            // The fired nudge also projects an `agent.nudges.fired` event
-            // sample, subject = the nudge kind (tsk216).
-            let fired = h.service.metric_samples_for_key("agent.nudges.fired").await;
-            assert_eq!(fired.len(), 1, "one nudge sample per fired nudge");
+            // The fired nudge also records an `oxplow.nudge` event FACT,
+            // subject = the nudge kind (tsk216; the legacy sample is gone, T-E2).
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts
+                .get_measure("oxplow.nudge")
+                .await
+                .unwrap()
+                .expect("nudge measure seeded by V46");
+            let fired = facts.facts_for_measure(measure.id).await.unwrap();
+            assert_eq!(fired.len(), 1, "one nudge fact per fired nudge");
             assert_eq!(fired[0].value, 1.0);
             assert_eq!(fired[0].subject_kind.as_deref(), Some("nudge"));
             assert_eq!(fired[0].subject_ref.as_deref(), Some("report-less-run"));
@@ -5621,16 +5265,22 @@ mod tests {
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
                 .unwrap();
-            let def = h
-                .service
-                .metrics
-                .get_definition("oxplow.coverage.abs_pct")
+            // The policy rides the producer SPEC (T-E2: the legacy definition
+            // write is gone) — seeded by seed_catalog.
+            for spec in crate::producer_metrics::builtin_producer_specs() {
+                oxplow_db::SqliteFactStore::new(h.db.clone())
+                    .upsert_spec(spec)
+                    .await
+                    .unwrap();
+            }
+            let spec = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .get_spec("oxplow.coverage.abs_pct")
                 .await
                 .unwrap()
-                .expect("coverage definition seeded");
-            assert_eq!(def.target, Some(80.0), "target in data");
-            assert_eq!(def.fail_at, Some(50.0), "fail floor in data");
-            assert_eq!(def.direction, "higher-better");
+                .expect("coverage spec seeded");
+            assert_eq!(spec.target, Some(80.0), "target in data");
+            assert_eq!(spec.fail_at, Some(50.0), "fail floor in data");
+            assert_eq!(spec.direction, "higher-better");
         }
 
         #[test]
@@ -5998,33 +5648,26 @@ mod tests {
                 .await
                 .unwrap();
 
-            let errors = h
-                .service
-                .metric_samples_for_key("oxplow.analysis.errors")
-                .await;
-            let warnings = h
-                .service
-                .metric_samples_for_key("oxplow.analysis.warnings")
-                .await;
-            assert_eq!(errors.len(), 1);
-            assert_eq!(errors[0].value, 1.0);
-            assert_eq!(warnings[0].value, 1.0);
+            // The analysis CAPTURE carries the verbatim payload in its detail
+            // envelope (T-E1/T-E2 — the legacy samples + findings are gone).
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(caps.len(), 1, "one analysis run capture");
+            assert_eq!(caps[0].producer, "clippy");
+            let envelope: serde_json::Value =
+                serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
+            assert_eq!(envelope["kind"], "analysis-detail");
+            assert_eq!(envelope["payload"]["errorCount"], 1);
+            assert_eq!(envelope["payload"]["warningCount"], 1);
 
-            // One `lint` finding per hit (located detail) + one verbatim
-            // `analysis-detail` payload (tsk215) under the run.
-            let run_id = errors[0].run_id.expect("sample carries its run");
-            let findings = h.service.metric_findings_for_run(run_id).await;
-            let lints: Vec<_> = findings.iter().filter(|f| f.kind == "lint").collect();
-            assert_eq!(lints.len(), 2);
-            assert!(lints.iter().any(|f| f.rule.as_deref() == Some("E0308")
-                && f.severity.as_deref() == Some("error")
-                && f.path.as_deref() == Some("src/a.rs")));
-            assert!(
-                findings.iter().any(|f| f.kind == "analysis-detail"),
-                "verbatim analysis payload kept on the substrate"
-            );
-
-            // Dual-written into the durable fact layer (epic tsk12): one
+            // The durable fact layer (epic tsk12): one
             // `oxplow.lint_hit` fact per finding, reported severity/rule/detail
             // in the dedicated columns + the file location on the fact.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());

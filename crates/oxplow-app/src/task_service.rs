@@ -21,9 +21,8 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, NewFact, NewMetricCapture, NewMetricRun, NewMetricSample,
-    SqliteAttributionStore, SqliteFactStore, SqliteMetricStore, SqliteSnapshotStore,
-    SqliteTaskEffortStore, TaskEffortStore,
+    EffortFileChange, NewFact, NewMetricCapture, SqliteAttributionStore, SqliteFactStore,
+    SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -34,7 +33,6 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
-use crate::producer_metrics::producer_metric;
 
 #[derive(Debug, Error)]
 pub enum TaskServiceError {
@@ -117,23 +115,18 @@ pub struct TaskService {
     /// Looks up a thread to read its `stream_id`. Required to drive
     /// the registry-based lookup.
     thread_store: Option<Arc<SqliteThreadStore>>,
-    /// Unified metric substrate (tsk213/tsk216): when set, closing an
-    /// effort projects derived process metrics (`effort.cycle_time_ms`,
-    /// `task.efforts`) into the substrate. Optional so bare TaskService
-    /// tests skip the projection. Paired with `events` so the renderer
-    /// refetches on a new sample.
-    metrics: Option<Arc<SqliteMetricStore>>,
-    /// Durable fact layer (epic tsk12): when set (alongside `metrics`),
-    /// closing an effort also dual-writes a `oxplow.cycle_time` fact under a
-    /// capture that stamps the producing `effort_id`. Optional so bare
-    /// TaskService tests skip it; attached together with `metrics`.
+    /// Durable fact layer (epic tsk12): when set, closing an effort projects
+    /// derived process metrics (`effort.cycle_time_ms`, `task.efforts`) as
+    /// facts under a capture that stamps the producing `effort_id`. Optional
+    /// so bare TaskService tests skip the projection. Paired with `events` so
+    /// the renderer refetches on a new capture.
     fact_store: Option<Arc<SqliteFactStore>>,
     events: Option<EventBus>,
     /// Config-declared gauge runner (tsk213, P3): when set, closing an effort
     /// also runs any `on-effort-complete` gauges against the effort's end
     /// snapshot. Optional so bare TaskService tests skip it.
     gauge_runner: Option<crate::metrics_service::MetricsService>,
-    /// Kind-agnostic attribution ledger (tsk263). When set (with `metrics` +
+    /// Kind-agnostic attribution ledger (tsk263). When set (with
     /// `effort_store`), closing an effort reconciles the run kinds too — the
     /// concurrent-effort runs left unattributed become the close residue.
     attribution: Option<Arc<SqliteAttributionStore>>,
@@ -151,7 +144,6 @@ impl TaskService {
             effort_store: None,
             snapshot_captures: None,
             thread_store: None,
-            metrics: None,
             fact_store: None,
             events: None,
             gauge_runner: None,
@@ -173,17 +165,10 @@ impl TaskService {
         self
     }
 
-    /// Attach the metric substrate (legacy samples + durable fact layer) and
-    /// event bus. When present (together with `with_effort_store`), closing an
-    /// effort projects derived process metrics (`effort.cycle_time_ms`,
-    /// `task.efforts`) and dual-writes a `oxplow.cycle_time` fact (epic tsk12).
-    pub fn with_metrics(
-        mut self,
-        metrics: Arc<SqliteMetricStore>,
-        facts: Arc<SqliteFactStore>,
-        events: EventBus,
-    ) -> Self {
-        self.metrics = Some(metrics);
+    /// Attach the durable fact layer + event bus. When present (together with
+    /// `with_effort_store`), closing an effort projects derived process
+    /// metrics (`effort.cycle_time_ms`, `task.efforts`) as facts (epic tsk12).
+    pub fn with_metrics(mut self, facts: Arc<SqliteFactStore>, events: EventBus) -> Self {
         self.fact_store = Some(facts);
         self.events = Some(events);
         self
@@ -511,9 +496,7 @@ impl TaskService {
         thread_id: &ThreadId,
         effort_id: &EffortId,
     ) {
-        let (Some(metrics), Some(effort_store)) =
-            (self.metrics.as_ref(), self.effort_store.as_ref())
-        else {
+        let Some(effort_store) = self.effort_store.as_ref() else {
             return;
         };
         // Resolve the stream the thread belongs to (the hard CASCADE scope).
@@ -551,57 +534,13 @@ impl TaskService {
             None => None,
         };
 
-        let result = async {
-            let mut run = NewMetricRun::done(stream_val, "effort-lifecycle", "effort-lifecycle");
-            run.thread_id = Some(thread_id.value());
-            run.trigger = Some("on-effort-complete".into());
-            run.branch = branch.clone();
-
-            // (key, value) — definitions come from the shared producer registry
-            // (tsk287) so the Catalog can't drift from what's emitted here.
-            let specs = [
-                ("effort.cycle_time_ms", cycle_ms as f64),
-                ("task.efforts", efforts_so_far as f64),
-            ];
-            let mut samples = Vec::new();
-            for (key, value) in specs {
-                let def = producer_metric(key).definition();
-                let metric_id = metrics.upsert_definition(def).await?;
-                let mut sample =
-                    NewMetricSample::observed(metric_id, stream_val, value, "effort-lifecycle");
-                sample.thread_id = Some(thread_id.value());
-                sample.subject_kind = Some("effort".into());
-                sample.subject_ref = Some(effort_id.to_string());
-                sample.branch = branch.clone();
-                samples.push(sample);
-            }
-            // Atomic: the run and both lifecycle samples commit together.
-            metrics
-                .record_run_with_data(run, samples, Vec::new())
-                .await?;
-            Ok::<(), DomainError>(())
-        }
-        .await;
-        match result {
-            Ok(()) => {
-                if let Some(events) = self.events.as_ref() {
-                    events.emit(OxplowEvent::MetricSamplesChanged {
-                        stream_id: StreamId::new(stream_val),
-                    });
-                }
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to project effort lifecycle metrics");
-            }
-        }
-
-        // Dual-write into the durable fact layer (epic tsk12): cycle time as a
-        // fact on `oxplow.cycle_time` (subject = the just-closed effort) + the
-        // efforts-so-far count on `oxplow.task_effort` (subject = the task, the
-        // redo-rate signal). The capture stamps `effort_id` directly — this
-        // producer knows the exact producing effort, so attribution is unambiguous
-        // (decision #11) — plus the thread/branch spine. Best-effort beside the
-        // legacy samples above.
+        // Write the durable facts (epic tsk12; the legacy run/sample writes are
+        // gone, T-E2): cycle time as a fact on `oxplow.cycle_time` (subject =
+        // the just-closed effort) + the efforts-so-far count on
+        // `oxplow.task_effort` (subject = the task, the redo-rate signal). The
+        // capture stamps `effort_id` directly — this producer knows the exact
+        // producing effort, so attribution is unambiguous (decision #11) — plus
+        // the thread/branch spine. Best-effort.
         if let Some(facts) = self.fact_store.as_ref() {
             let dual = async {
                 let mut rows = Vec::new();
@@ -639,8 +578,17 @@ impl TaskService {
                 Ok(())
             }
             .await;
-            if let Err(e) = dual {
-                tracing::warn!(error = %e, "effort lifecycle: fact dual-write failed");
+            match dual {
+                Ok(()) => {
+                    if let Some(events) = self.events.as_ref() {
+                        events.emit(OxplowEvent::MetricSamplesChanged {
+                            stream_id: StreamId::new(stream_val),
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "effort lifecycle: fact write failed");
+                }
             }
         }
     }
@@ -1286,7 +1234,6 @@ mod tests {
         Arc<SqliteTaskEffortStore>,
         tempfile::TempDir,
         crate::snapshot_capture_registry::SnapshotCaptureRegistry,
-        Arc<SqliteMetricStore>,
     ) {
         let project = tempfile::tempdir().unwrap();
         let db = Database::in_memory();
@@ -1294,7 +1241,6 @@ mod tests {
         let threads = SqliteThreadStore::new(db.clone());
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
-        let metric_store = Arc::new(SqliteMetricStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
         let s = Stream {
@@ -1375,20 +1321,13 @@ mod tests {
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store_for_svc)
-            .with_metrics(metric_store.clone(), fact_store, event_bus.clone());
-        (
-            svc,
-            t.id,
-            effort_store,
-            project,
-            snapshot_captures,
-            metric_store,
-        )
+            .with_metrics(fact_store, event_bus.clone());
+        (svc, t.id, effort_store, project, snapshot_captures)
     }
 
     #[tokio::test]
     async fn in_progress_transition_opens_effort_with_start_snapshot() {
-        let (svc, tid, effort_store, _project, captures, _metrics) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1464,8 +1403,7 @@ mod tests {
         // tsk216: leaving in_progress closes the effort and projects
         // `effort.cycle_time_ms` + `task.efforts` into the metric substrate,
         // reading `task_effort` as the source of truth.
-        let (svc, tid, _effort_store, _project, _captures, metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, _effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1478,14 +1416,23 @@ mod tests {
             .await
             .unwrap();
 
-        // No samples while the effort is still open.
-        assert!(metrics
-            .get_definition("effort.cycle_time_ms")
+        // No facts while the effort is still open.
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let cycle_measure = facts
+            .get_measure("oxplow.cycle_time")
             .await
             .unwrap()
-            .is_none());
+            .expect("cycle_time measure seeded by V43");
+        assert!(facts
+            .facts_for_measure(cycle_measure.id)
+            .await
+            .unwrap()
+            .is_empty());
 
-        // InProgress → Done closes the effort and fires the projection.
+        // InProgress → Done closes the effort and fires the projection: one
+        // `oxplow.cycle_time` fact, subject = the closed effort, on a capture
+        // that stamped the producing effort_id (unambiguous, decision #11).
+        // (The legacy definition/sample writes are gone, T-E2.)
         svc.update(
             item.id,
             UpdateTaskChanges {
@@ -1495,30 +1442,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        let cycle_def = metrics
-            .get_definition("effort.cycle_time_ms")
-            .await
-            .unwrap()
-            .expect("cycle-time definition seeded on close");
-        let cycle = metrics.list_samples(cycle_def.id).await.unwrap();
-        assert_eq!(cycle.len(), 1, "one cycle-time sample per close");
-        assert!(cycle[0].value >= 0.0, "cycle time is non-negative");
-        assert_eq!(cycle[0].subject_kind.as_deref(), Some("effort"));
-
-        let efforts_def = metrics
-            .get_definition("task.efforts")
-            .await
-            .unwrap()
-            .expect("efforts-per-task definition seeded on close");
-        let efforts = metrics.list_samples(efforts_def.id).await.unwrap();
-        assert_eq!(efforts.len(), 1);
-        assert_eq!(efforts[0].value, 1.0, "first effort for the task");
-
-        // Dual-written into the durable fact layer (epic tsk12): one
-        // `oxplow.cycle_time` fact, subject = the closed effort, on a capture
-        // that stamped the producing effort_id (unambiguous, decision #11).
-        let facts = svc.fact_store.as_ref().expect("fact store attached");
         let cycle_measure = facts
             .get_measure("oxplow.cycle_time")
             .await
@@ -1575,8 +1498,7 @@ mod tests {
         // the lifecycle hook — otherwise complete_task's TaskEnd
         // snapshot has no open effort to attach to and the snapshot
         // is orphaned.
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1602,8 +1524,7 @@ mod tests {
         // logging completed work) must NOT open a lifecycle effort —
         // record_effort handles that synthesis itself, with the
         // touched_files payload.
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1624,8 +1545,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_effort_merges_into_lifecycle_effort() {
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1683,8 +1603,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_effort_creates_fresh_effort_when_no_lifecycle() {
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1719,8 +1638,7 @@ mod tests {
         // Auto-claim (PostToolUse path) records a task_effort_file on the
         // thread's open effort, and a repeat claim of the same path is
         // idempotent (INSERT OR REPLACE → still one row).
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),
@@ -1759,7 +1677,7 @@ mod tests {
         // An effort that changes a file nobody claimed, closed via a plain
         // status transition (not complete_task), records that file as
         // unattributed audit residue.
-        let (svc, tid, effort_store, project, captures, _metrics) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
         let dirty = captures.primary().expect("primary capture service");
         let item = svc
             .create(
@@ -1816,7 +1734,7 @@ mod tests {
     async fn claimed_change_is_not_marked_unattributed_on_close() {
         // A file the agent claimed in real time (Child 1 auto-claim) is NOT
         // marked unattributed when the effort closes.
-        let (svc, tid, effort_store, project, captures, _metrics) = fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
         let dirty = captures.primary().expect("primary capture service");
         let item = svc
             .create(
@@ -1873,8 +1791,7 @@ mod tests {
     async fn claim_open_effort_file_no_open_effort_is_noop() {
         // No open effort on the thread → the auto-claim is a no-op
         // (returns false, records nothing).
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let claimed = svc
             .claim_open_effort_file(&effort_store, &tid, "src/edited.rs", None)
             .await
@@ -1884,8 +1801,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_in_progress_transitions_skip_effort_lifecycle() {
-        let (svc, tid, effort_store, _project, _captures, _metrics) =
-            fixture_with_lifecycle().await;
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
                 Some(tid),

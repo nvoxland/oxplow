@@ -267,6 +267,14 @@ pub fn builtin_producer_specs() -> Vec<NewMetricSpec> {
             s.category = Some(m.category.into());
             s.description = m.description.map(Into::into);
             s.filter_json = filter_json;
+            if m.key == "oxplow.coverage.abs_pct" {
+                // Coverage red/green policy in DATA, not a hardcoded UI ramp
+                // (tsk220): fail < 50%, warn < 80%, ok ≥ 80%. Lives on the spec
+                // now that the legacy definition write is gone (T-E2).
+                s.target = Some(crate::collection::COVERAGE_TARGET_PCT);
+                s.warn_at = Some(crate::collection::COVERAGE_TARGET_PCT);
+                s.fail_at = Some(crate::collection::COVERAGE_FAIL_PCT);
+            }
             Some(s)
         })
         .collect()

@@ -623,7 +623,6 @@ impl Services {
         // Arcs only (never `Arc<Services>`); injected into TaskService for the
         // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
         let metrics = metrics_service::MetricsService::new(
-            metric_store.clone(),
             snapshot_store.clone(),
             thread_store.clone(),
             effort_store.clone(),
@@ -637,11 +636,10 @@ impl Services {
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store.clone())
-            .with_metrics(metric_store.clone(), fact_store.clone(), event_bus.clone())
+            .with_metrics(fact_store.clone(), event_bus.clone())
             .with_attribution(attribution_store.clone())
             .with_gauge_runner(metrics.clone());
         let collection = collection::CollectionService::new(
-            metric_store.clone(),
             fact_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
@@ -658,7 +656,6 @@ impl Services {
             token_usage_store.clone(),
             effort_store.clone(),
             thread_store.clone(),
-            metric_store.clone(),
             fact_store.clone(),
             event_bus.clone(),
         );
