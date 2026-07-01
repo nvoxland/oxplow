@@ -430,6 +430,34 @@ fn b() {
     }
 
     #[test]
+    fn per_language_gauges_emit_rule_tagged_ast_hit_facts() {
+        // tsk30: each per-language idiom gauge emits per-file `oxplow.ast_hit`
+        // facts tagged with its rule; the fact values sum to the baked tree total
+        // (so the Sum(ast_hit)-by-rule spec reproduces the headline).
+        let report = report_over("oxplow.rust.unsafe_blocks", corpus());
+        assert!(!report.facts.is_empty(), "emits ast_hit facts");
+        assert!(
+            report
+                .facts
+                .iter()
+                .all(|f| f.measure == "oxplow.ast_hit" && f.rule.as_deref() == Some("unsafe_block")),
+            "every fact is on oxplow.ast_hit tagged rule=unsafe_block"
+        );
+        let fact_sum: f64 = report.facts.iter().map(|f| f.value).sum();
+        let baked = report
+            .samples
+            .iter()
+            .find(|s| s.subject.as_deref() == Some("tree:."))
+            .unwrap()
+            .value;
+        assert_eq!(
+            fact_sum, baked,
+            "per-file ast_hit facts sum to the baked total"
+        );
+        assert_eq!(baked, 2.0);
+    }
+
+    #[test]
     fn rust_unwrap_expect_golden() {
         assert_eq!(run_over("oxplow.rust.unwrap_expect_calls", corpus()), 2.0);
     }

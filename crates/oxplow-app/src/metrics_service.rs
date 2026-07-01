@@ -265,11 +265,16 @@ impl MetricsService {
                 Err(e) => tracing::warn!(key = %rd.key, error = %e, "failed to seed dimension"),
             }
         }
-        // Built-in metric SPECS (epic tsk12): the bundled code metrics are now
-        // COUNT aggregations over per-item facts, not baked sample streams. Seed
-        // them beside the migration's built-in measures (idempotent). Config /
+        // Built-in metric SPECS (epic tsk12): the bundled gauges are now
+        // aggregations over per-item facts, not baked sample streams — the
+        // language-agnostic code metrics (`builtin_metric_specs`) + the
+        // per-language idiom metrics (`builtin_ast_specs`, over `oxplow.ast_hit`).
+        // Seed beside the migration's built-in measures (idempotent). Config /
         // global spec seeding lands with the read-flip (tsk26).
-        for spec in builtin_metric_specs() {
+        for spec in builtin_metric_specs()
+            .into_iter()
+            .chain(builtin_ast_specs())
+        {
             if let Err(e) = facts.upsert_spec(spec.clone()).await {
                 tracing::warn!(key = %spec.key, error = %e, "failed to seed built-in metric spec");
             }
@@ -1122,6 +1127,9 @@ impl MetricsService {
                 subject_ref,
                 path: gf.path.clone(),
                 line: gf.line,
+                // The reported rule/idiom — the engine reads this column as the
+                // `oxplow.rule` dimension, so a spec can `dim_eq` on it.
+                rule: gf.rule.clone(),
                 dims_json: gf.dims.as_ref().and_then(|d| serde_json::to_string(d).ok()),
                 ..oxplow_db::NewFact::new(measure_id, gf.value)
             });
@@ -1263,6 +1271,81 @@ fn builtin_metric_specs() -> Vec<NewMetricSpec> {
             "lower-better",
             "findings",
             "TODO/FIXME/HACK/XXX/BUG markers — count over oxplow.todo facts.",
+        ),
+    ]
+}
+
+/// Built-in metric SPECS for the per-language idiom gauges (epic tsk12, tsk30) —
+/// `oxplow.rust.unsafe_blocks` and friends. Each is a `Sum(oxplow.ast_hit)`
+/// filtered to its idiom via `dim_eq(oxplow.rule, <slug>)`; the per-file
+/// `oxplow.ast_hit` facts each gauge emits (rule-tagged) sum back to the baked
+/// `tree:.` headline — pinned by the equivalence test. The `<slug>` MUST match
+/// the `rule` the gauge script emits.
+fn builtin_ast_specs() -> Vec<NewMetricSpec> {
+    fn ast_spec(key: &str, title: &str, rule: &str, direction: &str) -> NewMetricSpec {
+        let mut s = NewMetricSpec::base(key, title, "oxplow.ast_hit", "sum");
+        s.unit = Some("count".into());
+        s.filter_json = Some(format!("{{\"dim_eq\":[\"oxplow.rule\",\"{rule}\"]}}"));
+        s.direction = direction.into();
+        s.display_kind = "findings".into();
+        s.category = Some("static-quality".into());
+        s
+    }
+    vec![
+        ast_spec(
+            "oxplow.rust.unsafe_blocks",
+            "unsafe blocks",
+            "unsafe_block",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.rust.unwrap_expect_calls",
+            "unwrap / expect calls",
+            "unwrap_expect",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.rust.panic_macros",
+            "panic-family macros",
+            "panic_macro",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.ts.any_usage",
+            "any usage",
+            "any_usage",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.ts.non_null_assertions",
+            "non-null assertions",
+            "non_null_assertion",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.ts.console_calls",
+            "console.* calls",
+            "console_call",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.ts.ts_ignore",
+            "ts-ignore / ts-expect-error",
+            "ts_ignore",
+            "lower-better",
+        ),
+        ast_spec("oxplow.clojure.defn_count", "defn count", "defn", "neutral"),
+        ast_spec(
+            "oxplow.csharp.empty_catch",
+            "empty catch blocks",
+            "empty_catch",
+            "lower-better",
+        ),
+        ast_spec(
+            "oxplow.csharp.blocking_async_calls",
+            "blocking async calls (.Result / .Wait())",
+            "blocking_async",
+            "lower-better",
         ),
     ]
 }
@@ -1724,6 +1807,95 @@ def transform(input):
                 .is_none(),
             "an undefined measure is not conjured by a dropped fact"
         );
+    }
+
+    #[tokio::test]
+    async fn per_language_gauge_facts_reaggregate_to_the_baked_headline() {
+        // tsk30: the per-language idiom gauges emit per-file `oxplow.ast_hit`
+        // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
+        // by rule. Prove the spec headline == the baked tree:. total, so the
+        // read-flip (tsk26) can drop the baked sample. One capture per gauge;
+        // idioms share the measure but never collide (the spec filters by rule).
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+
+        let mut corpus = HashMap::new();
+        corpus.insert(
+            "src/a.rs".to_string(),
+            "fn a() {\n    unsafe { foo(); }\n    let x = maybe().unwrap();\n    \
+             let y = maybe().expect(\"nope\");\n    if x { panic!(\"boom\"); }\n}\n\
+             fn b() {\n    unsafe { bar(); }\n    todo!();\n    std::panic!(\"q\");\n}\n"
+                .to_string(),
+        );
+        corpus.insert(
+            "src/a.ts".to_string(),
+            "// @ts-ignore\nfunction f(x: any): any {\n    console.log(x);\n    \
+             window.console.error(x);\n    const y = x!.foo;\n    return y;\n}\n\
+             const g = (a: any) => a!;\n"
+                .to_string(),
+        );
+        corpus.insert(
+            "src/core.clj".to_string(),
+            ";; TODO\n(defn add [a b] (+ a b))\n(defn- helper [] :ok)\n(def x 1)\n(let [defn 1] defn)\n"
+                .to_string(),
+        );
+        corpus.insert(
+            "src/Service.cs".to_string(),
+            "namespace Acme {\n  class Service {\n    public void Run(int x) {\n      \
+             try { Work(); } catch (System.Exception) { }\n      var r = FetchAsync().Result;\n      \
+             _task.Wait();\n      System.Action w = _task.Wait;\n    }\n  }\n}\n"
+                .to_string(),
+        );
+        let files = Arc::new(corpus);
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(9),
+            closest_git_version: Some("def5678".into()),
+            git_version_exact: true,
+            branch: Some("main".into()),
+            subject_default: None,
+        };
+
+        let keys = [
+            "oxplow.rust.unsafe_blocks",
+            "oxplow.rust.unwrap_expect_calls",
+            "oxplow.rust.panic_macros",
+            "oxplow.ts.any_usage",
+            "oxplow.ts.non_null_assertions",
+            "oxplow.ts.console_calls",
+            "oxplow.ts.ts_ignore",
+            "oxplow.clojure.defn_count",
+            "oxplow.csharp.empty_catch",
+            "oxplow.csharp.blocking_async_calls",
+        ];
+        for key in keys {
+            svc.metrics
+                .run_one_gauge(&builtin_gauge(key), &ctx, files.clone())
+                .await;
+        }
+
+        let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
+        for key in keys {
+            let baked = baked_tree_headline(&svc, key).await;
+            assert!(baked > 0.0, "{key}: corpus should trigger the idiom");
+            let spec = svc
+                .fact_store
+                .get_spec(key)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{key} ast spec seeded"));
+            let engine_headline = engine
+                .headline_for_spec(&spec)
+                .await
+                .unwrap()
+                .unwrap_or(0.0);
+            assert_eq!(
+                engine_headline, baked,
+                "{key}: Sum(oxplow.ast_hit) filtered by rule must equal the baked headline",
+            );
+        }
     }
 
     #[tokio::test]

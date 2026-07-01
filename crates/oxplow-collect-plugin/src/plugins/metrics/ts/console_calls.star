@@ -2,7 +2,9 @@
 # left in shipped code). Matches a call whose callee is a member access on
 # `console`, whether bare (`console.log(...)`) or namespaced
 # (`window.console.log(...)`, `globalThis.console.error(...)`). Emits the
-# repo-total ("tree:.") plus a per-file sample ("file:<path>", nonzero only).
+# repo-total ("tree:.") plus a per-file sample ("file:<path>", nonzero only),
+# and a per-file `oxplow.ast_hit` FACT (rule="console_call") — the metric is the
+# SPEC Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
 def _ts_files():
     out = []
     for f in files("**/*.ts"):
@@ -17,6 +19,7 @@ def transform(input):
         "(call_expression function: (member_expression object: (member_expression property: (property_identifier) @c)))"
     total = 0
     per_file = []
+    facts = []
     for tri in _ts_files():
         c = 0
         for m in ast_query(tri[1], tri[2], q):
@@ -25,4 +28,5 @@ def transform(input):
         total += c
         if c > 0:
             per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"language": "typescript"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "typescript"}}] + per_file}
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "console_call", "subject": "file:" + tri[0], "path": tri[0], "dims": {"language": "typescript"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "typescript"}}] + per_file, "facts": facts}

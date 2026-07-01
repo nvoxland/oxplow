@@ -120,6 +120,12 @@ pub struct GaugeFact {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<i64>,
+    /// Reported rule/idiom this fact belongs to — populates the fact's `rule`
+    /// column, which the engine reads as the `oxplow.rule` dimension (so a spec
+    /// can `dim_eq` on it). The per-language idiom gauges tag each `oxplow.ast_hit`
+    /// fact with the idiom slug here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dims: Option<serde_json::Map<String, serde_json::Value>>,
 }

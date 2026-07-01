@@ -48,12 +48,16 @@ welded to collection.
   Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
-  `oxplow.cycle_time`.
+  `oxplow.cycle_time` (V43), plus `oxplow.ast_hit` (V45 — a per-file AST idiom
+  occurrence; the per-language gauges emit facts on it, distinguished by the
+  `oxplow.rule` dim; see the code-gauge section, tsk30).
 - **`dimension`** — the namespaced slice-axis catalog: `key`, `label`,
   `value_type`, `subject_kind`, `vocabulary_json`, `scope`, `promoted` (whether a
   generated column + expression index exists). Seeded: `oxplow.language`,
   `oxplow.severity`, `oxplow.status`, `oxplow.branch`, `oxplow.model`,
-  `oxplow.agent`, `oxplow.package`, `oxplow.test_suite`. **Declare-to-collect**
+  `oxplow.agent`, `oxplow.package`, `oxplow.test_suite` (V43), `oxplow.rule`
+  (V45 — the lint/idiom name; the engine reads it off the fact's `rule` column).
+  **Declare-to-collect**
   (planned, tsk17): a fact may only be emitted on defined measures/dimensions;
   historical facts carrying a now-undefined dim are kept but hidden as a slice
   axis (the axis list is catalog-driven).
@@ -90,10 +94,12 @@ welded to collection.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
   `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
   cluster once reads flip (tsk26). The migration seeds no rows; the **built-in
-  code-metric specs** (`oxplow.high_complexity_fns` / `long_functions` / `fn_count`
-  / `todos` — each a `count` over its measure, thresholds via `min_value`) are
-  seeded from Rust (`metrics_service.rs::builtin_metric_specs`, in `seed_catalog`,
-  tsk23); config/global spec seeding lands with the read-flip (tsk26).
+  specs** are seeded from Rust in `seed_catalog`: the code-metric specs
+  (`oxplow.high_complexity_fns` / `long_functions` / `fn_count` / `todos` — a
+  `count` over its measure, thresholds via `min_value`; `builtin_metric_specs`,
+  tsk23) and the per-language idiom specs (`oxplow.rust.unsafe_blocks` etc. — a
+  `Sum(oxplow.ast_hit)` filtered by `dim_eq(oxplow.rule, …)`; `builtin_ast_specs`,
+  tsk30). Config/global spec seeding lands with the read-flip (tsk26).
 
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
 `upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
@@ -143,6 +149,7 @@ tree stays green through the migration. Landed:
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`) |
 | duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref` |
 | code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
+| per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 
 **Code-gauge unbake (tsk23) — the keystone, and the one non-mechanical producer.**
 A gauge's `MetricReport` gained a third channel beside `samples` (baked headline)
@@ -159,6 +166,19 @@ metric — the proof the inversion is faithful. (Strict `> N` in the old gauge e
 `min_value = N+1` on the integer complexity/length measures.) The baked
 `tree:.`/`file:` samples are **still written** for the legacy read path; unbaking
 them retires with the read-flip (tsk26) so the headline never has a read gap.
+
+**Per-language idiom gauges (tsk30).** The same pattern extends to the ~10
+per-language AST idiom gauges, but they don't have a natural per-subject measure —
+so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
+occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
+carried on the fact's `rule` column via the new `GaugeFact.rule`). Each gauge emits
+one per-file `ast_hit` fact (value=that file's count, `rule`=its slug) beside its
+per-file sample; each metric is a `Sum(oxplow.ast_hit)` spec filtered by
+`dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`, seeded in `seed_catalog`). Idioms
+sharing the measure never collide because `rollup_for_spec` applies the rule filter
+**before** the per-subject rollup. `per_language_gauge_facts_reaggregate_to_the_baked_headline`
+pins each spec's `Sum` to its baked headline. The `<slug>` in the script and the
+spec MUST match (the equivalence test catches a drift → spec count 0 ≠ baked).
 
 Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 `metric_engine: MetricEngine`; `TaskService`/`CollectionService`/

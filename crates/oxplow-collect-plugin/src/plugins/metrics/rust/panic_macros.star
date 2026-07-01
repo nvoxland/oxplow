@@ -2,11 +2,14 @@
 # `unreachable!` macro invocations (deliberate-abort sites). Matches both the
 # bare form (`panic!`) and the path-qualified form (`std::panic!`,
 # `core::todo!`), where the macro is a `scoped_identifier`. Emits the repo-total
-# ("tree:.") plus a per-file sample ("file:<path>", nonzero only).
+# ("tree:.") plus a per-file sample ("file:<path>", nonzero only), and a per-file
+# `oxplow.ast_hit` FACT (rule="panic_macro") — the metric is the SPEC
+# Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
 def transform(input):
     panicky = ["panic", "unimplemented", "todo", "unreachable"]
     total = 0
     per_file = []
+    facts = []
     q = "(macro_invocation macro: (identifier) @name) " + \
         "(macro_invocation macro: (scoped_identifier name: (identifier) @name))"
     for f in files("**/*.rs"):
@@ -17,4 +20,5 @@ def transform(input):
         total += c
         if c > 0:
             per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"language": "rust"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "rust"}}] + per_file}
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "panic_macro", "subject": "file:" + f["path"], "path": f["path"], "dims": {"language": "rust"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "rust"}}] + per_file, "facts": facts}
