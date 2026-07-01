@@ -19,12 +19,14 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_collect_plugin::{builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost};
 use oxplow_config::{
-    global_config_dir, load_global_metric_entries, resolve_metrics, MetricComputeConfig,
-    MetricEntry, OxplowConfig, ResolvedMetric,
+    global_config_dir, load_global_dimension_entries, load_global_measure_entries,
+    load_global_metric_entries, resolve_dimensions, resolve_measures, resolve_metrics,
+    MetricComputeConfig, MetricEntry, OxplowConfig, ResolvedMetric,
 };
 use oxplow_db::{
-    NewMetricDefinition, NewMetricRun, NewMetricSample, SnapshotStorage, SqliteMetricStore,
-    SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore, TaskEffortStore,
+    NewDimension, NewMeasure, NewMetricDefinition, NewMetricRun, NewMetricSample, SnapshotStorage,
+    SqliteFactStore, SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore,
+    SqliteThreadStore, TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
@@ -54,6 +56,10 @@ pub struct MetricsService {
     /// the platform `global_config_dir()`. A field (not the free fn) so tests
     /// can point it at a tempdir without racing on a process-global env var.
     global_dir: Option<PathBuf>,
+    /// The fact substrate, for seeding config-declared `measures:`/`dimensions:`
+    /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
+    /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
+    fact_store: Option<Arc<SqliteFactStore>>,
 }
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
@@ -120,12 +126,20 @@ impl MetricsService {
             project_dir,
             events,
             global_dir: None,
+            fact_store: None,
         }
     }
 
     /// Override the global config dir (test seam; default `global_config_dir()`).
     pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
         self.global_dir = Some(dir);
+        self
+    }
+
+    /// Wire the fact substrate so `run()` seeds config-declared measures +
+    /// dimensions into the catalog beside the migration-seeded built-ins.
+    pub fn with_fact_store(mut self, fact_store: Arc<SqliteFactStore>) -> Self {
+        self.fact_store = Some(fact_store);
         self
     }
 
@@ -186,6 +200,72 @@ impl MetricsService {
             }
         }
         n
+    }
+
+    /// Seed the fact-substrate catalogs (`measure` + `dimension`) from config —
+    /// the pluggable-data half of the substrate (epic tsk12, E). Resolves the
+    /// global + project `measures:`/`dimensions:` blocks and upserts each beside
+    /// the migration-seeded `oxplow.*` built-ins. Best-effort (a write error is
+    /// logged, never propagated); idempotent (upsert by key). No-op if no fact
+    /// store is wired. Returns `(measures, dimensions)` seeded.
+    ///
+    /// The dimension `promote` flag (a generated column + index) is honored by a
+    /// later `promote_dimension` step; this seeds the catalog row only.
+    pub async fn seed_catalog(&self) -> (usize, usize) {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return (0, 0);
+        };
+        let (project_measures, project_dims) = self
+            .config
+            .read()
+            .map(|c| (c.measures.clone(), c.dimensions.clone()))
+            .unwrap_or_default();
+        let global_dir = self.effective_global_dir();
+        let global_measures = global_dir
+            .as_deref()
+            .map(load_global_measure_entries)
+            .unwrap_or_default();
+        let global_dims = global_dir
+            .as_deref()
+            .map(load_global_dimension_entries)
+            .unwrap_or_default();
+
+        let mut m = 0;
+        for rm in resolve_measures(&global_measures, &project_measures) {
+            let nm = NewMeasure {
+                key: rm.key.clone(),
+                title: rm.title,
+                unit: rm.unit,
+                subject_kind: rm.subject_kind,
+                temporal_semantics: rm.temporal_semantics,
+                component_role: rm.component_role,
+                scope: rm.scope,
+                description: rm.description,
+            };
+            match facts.upsert_measure(nm).await {
+                Ok(_) => m += 1,
+                Err(e) => tracing::warn!(key = %rm.key, error = %e, "failed to seed measure"),
+            }
+        }
+        let mut d = 0;
+        for rd in resolve_dimensions(&global_dims, &project_dims) {
+            let vocabulary_json = (!rd.vocabulary.is_empty())
+                .then(|| serde_json::to_string(&rd.vocabulary).ok())
+                .flatten();
+            let nd = NewDimension {
+                key: rd.key.clone(),
+                label: rd.label,
+                value_type: rd.value_type,
+                subject_kind: rd.subject_kind,
+                vocabulary_json,
+                scope: rd.scope,
+            };
+            match facts.upsert_dimension(nd).await {
+                Ok(()) => d += 1,
+                Err(e) => tracing::warn!(key = %rd.key, error = %e, "failed to seed dimension"),
+            }
+        }
+        (m, d)
     }
 
     /// The **available** catalog (built-in ∪ global ∪ project) with each entry's
@@ -490,10 +570,12 @@ impl MetricsService {
     /// gauges when a snapshot batch lands. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
         self.seed_definitions().await;
+        self.seed_catalog().await;
         loop {
             match rx.recv().await {
                 Ok(OxplowEvent::ConfigChanged) => {
                     self.seed_definitions().await;
+                    self.seed_catalog().await;
                 }
                 Ok(OxplowEvent::FileSnapshotsBatchCreated {
                     stream_id: Some(stream_id),
@@ -1188,6 +1270,44 @@ def transform(input):
         assert_eq!(def.kind, "gauge");
         assert_eq!(def.scope, "project");
         assert_eq!(def.producer.as_deref(), Some("repo.loc"));
+    }
+
+    #[tokio::test]
+    async fn seed_catalog_upserts_configured_measures_and_dimensions() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "measures:\n  - key: acme.api_latency\n    unit: ms\n    \
+             temporalSemantics: non-additive\ndimensions:\n  - key: acme.endpoint\n    \
+             label: Endpoint\n    vocabulary: [list, get]\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        let (m, d) = svc.metrics.seed_catalog().await;
+        assert_eq!(
+            (m, d),
+            (1, 1),
+            "one project measure + one project dimension"
+        );
+
+        // The custom measure lands beside the migration-seeded `oxplow.*` built-ins.
+        let measure = svc
+            .fact_store
+            .get_measure("acme.api_latency")
+            .await
+            .unwrap()
+            .expect("measure seeded");
+        assert_eq!(measure.scope, "project");
+        assert_eq!(measure.unit.as_deref(), Some("ms"));
+        assert_eq!(measure.temporal_semantics, "non-additive");
+
+        let dims = svc.fact_store.list_dimensions().await.unwrap();
+        let ep = dims
+            .iter()
+            .find(|d| d.key == "acme.endpoint")
+            .expect("dimension seeded");
+        assert_eq!(ep.scope, "project");
+        assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
     }
 
     #[tokio::test]

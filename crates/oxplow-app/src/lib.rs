@@ -631,7 +631,8 @@ impl Services {
             config_arc.clone(),
             layout.project_dir.clone(),
             event_bus.clone(),
-        );
+        )
+        .with_fact_store(fact_store.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
