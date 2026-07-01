@@ -529,6 +529,65 @@ impl CollectionService {
                 Some(serde_json::Value::Object(payload.clone())),
             )
             .await;
+
+        // Dual-write per-test-case facts into the durable fact layer (epic
+        // tsk12): one fact on `oxplow.test_case` per case, the pass/fail/skip
+        // status carried as the `oxplow.status` dimension (and the suite as
+        // `oxplow.test_suite`) so Count() sliced by status reconstructs the
+        // passed/failed/total headline. Best-effort beside the count samples.
+        if let (Some(r), Some(stream_val)) = (
+            report,
+            oxplow_domain::StreamId::try_from_str(&stream_id).map(|s| s.value()),
+        ) {
+            let dual = async {
+                let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
+                    return Ok::<(), DomainError>(());
+                };
+                use oxplow_coverage::TestStatus::*;
+                let mut facts = Vec::new();
+                for suite in &r.suites {
+                    for case in &suite.cases {
+                        let status = match case.status {
+                            Passed => "passed",
+                            Failed => "failed",
+                            Skipped => "skipped",
+                        };
+                        facts.push(NewFact {
+                            subject_kind: Some("test".into()),
+                            subject_ref: Some(format!("test:{}::{}", case.classname, case.name)),
+                            dims_json: serde_json::to_string(&json!({
+                                "oxplow.status": status,
+                                "oxplow.test_suite": suite.name,
+                            }))
+                            .ok(),
+                            ..NewFact::new(measure.id, 1.0)
+                        });
+                    }
+                }
+                if facts.is_empty() {
+                    return Ok(());
+                }
+                let branch = oxplow_git::detect_current_branch(&self.project_dir);
+                let snapshot_id = self
+                    .snapshots
+                    .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
+                    .await
+                    .ok()
+                    .flatten();
+                let mut capture = NewMetricCapture::done(stream_val, "tests", source.to_string());
+                capture.provenance = provenance.to_string();
+                capture.thread_id = Some(thread.value());
+                capture.trigger = Some("on-report".into());
+                capture.branch = branch;
+                capture.snapshot_id = snapshot_id;
+                self.facts.record_facts(capture, facts).await?;
+                Ok(())
+            }
+            .await;
+            if let Err(e) = dual {
+                tracing::warn!(error = %e, "failed to dual-write test-case facts");
+            }
+        }
         let _ = (stream_id, payload);
         // ATTRIBUTE via the unified run ledger, then refresh the panel for the
         // effort it landed on (if any). Observe-always: the run is already
@@ -3805,6 +3864,31 @@ mod tests {
                 serde_json::from_str(detail.extra_json.as_deref().unwrap()).unwrap();
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
+
+            // Dual-written into the durable fact layer (epic tsk12): one
+            // `oxplow.test_case` fact per case, status carried as the
+            // `oxplow.status` dim so Count() sliced by status reconstructs the
+            // passed/failed headline.
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts
+                .get_measure("oxplow.test_case")
+                .await
+                .unwrap()
+                .expect("test_case measure seeded by V43");
+            let cases = facts.facts_for_measure(measure.id).await.unwrap();
+            assert_eq!(cases.len(), 2, "one fact per test case");
+            assert!(cases.iter().all(|f| f.value == 1.0));
+            let status_of = |sref: &str| -> String {
+                cases
+                    .iter()
+                    .find(|f| f.subject_ref.as_deref() == Some(sref))
+                    .and_then(|f| f.dims_json.as_deref())
+                    .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+                    .and_then(|v| v["oxplow.status"].as_str().map(String::from))
+                    .unwrap_or_default()
+            };
+            assert_eq!(status_of("test:mod::t1"), "passed");
+            assert_eq!(status_of("test:mod::t2"), "failed");
         }
 
         #[tokio::test]
