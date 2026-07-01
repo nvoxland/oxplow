@@ -1579,8 +1579,25 @@ impl CollectionService {
             sample.subject_kind = Some("nudge".into());
             sample.subject_ref = Some(kind.to_string());
             sample.dims_json = Some(format!("{{\"kind\":\"{kind}\"}}"));
-            sample.branch = branch;
+            sample.branch = branch.clone();
             self.metrics.record_sample(sample).await?;
+
+            // Dual-write into the durable fact layer (epic tsk12): one fact on the
+            // `oxplow.nudge` event measure (value 1), the nudge kind as subject so
+            // Sum() reconstructs the fired count. Best-effort beside the sample.
+            if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
+                let fact = NewFact {
+                    subject_kind: Some("nudge".into()),
+                    subject_ref: Some(kind.to_string()),
+                    dims_json: Some(format!("{{\"kind\":\"{kind}\"}}")),
+                    ..NewFact::new(measure.id, 1.0)
+                };
+                let mut capture = NewMetricCapture::done(stream_val, "nudges", "nudges");
+                capture.thread_id = Some(thread.value());
+                capture.trigger = Some("continuous".into());
+                capture.branch = branch;
+                self.facts.record_facts(capture, vec![fact]).await?;
+            }
             Ok::<(), DomainError>(())
         }
         .await;
@@ -3889,6 +3906,26 @@ mod tests {
             };
             assert_eq!(status_of("test:mod::t1"), "passed");
             assert_eq!(status_of("test:mod::t2"), "failed");
+
+            // Keystone (T-B): the producer test specs re-aggregate these facts to
+            // the baked counts through the engine — Count(oxplow.test_case) sliced
+            // by status. The read-flip (tsk26) then serves them from the engine.
+            for spec in crate::producer_metrics::builtin_producer_specs() {
+                facts.upsert_spec(spec).await.unwrap();
+            }
+            let engine = crate::metric_engine::MetricEngine::new(facts.clone());
+            for (key, expected) in [
+                ("oxplow.tests.passed", 1.0),
+                ("oxplow.tests.failed", 1.0),
+                ("oxplow.tests.total", 2.0),
+            ] {
+                let spec = facts.get_spec(key).await.unwrap().unwrap();
+                assert_eq!(
+                    engine.headline_for_spec(&spec).await.unwrap(),
+                    Some(expected),
+                    "{key}: Count(oxplow.test_case) by status == baked count",
+                );
+            }
         }
 
         #[tokio::test]
@@ -5243,6 +5280,23 @@ mod tests {
             assert!(rows[0].message.contains("bun run test:collect"));
             assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
             assert_eq!(rows[0].effort_id.as_deref(), Some(h.effort_id.as_str()));
+
+            // Dual-written into the durable fact layer (epic tsk12): one fact on
+            // the `oxplow.nudge` event measure so Sum() reconstructs the fired
+            // count (the `agent.nudges.fired` spec).
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let measure = facts
+                .get_measure("oxplow.nudge")
+                .await
+                .unwrap()
+                .expect("nudge measure seeded by V46");
+            let nudge_facts = facts.facts_for_measure(measure.id).await.unwrap();
+            assert_eq!(nudge_facts.len(), 1, "one nudge fact");
+            assert_eq!(nudge_facts[0].value, 1.0);
+            assert_eq!(
+                nudge_facts[0].subject_ref.as_deref(),
+                Some("report-less-run")
+            );
 
             // Second run is deduped (returns None) and stores nothing more.
             let second = h
