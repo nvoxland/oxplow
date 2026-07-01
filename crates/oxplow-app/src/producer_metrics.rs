@@ -14,7 +14,7 @@
 //! `NewMetricDefinition` via [`ProducerMetric::definition`]; the Catalog reads
 //! the same list. Add or rename a producer metric in exactly one place.
 
-use oxplow_db::NewMetricDefinition;
+use oxplow_db::{NewMetricDefinition, NewMetricSpec};
 
 /// A built-in always-on producer metric — the full descriptor needed to build
 /// its `metric_definition`. Static (`&'static str`) because the set is fixed at
@@ -246,6 +246,71 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
     ]
 }
 
+/// The producer metrics as `metric_spec`s (epic tsk12, T-B) — the aggregation
+/// each producer metric is, over the built-in measures its producer now emits
+/// facts on. Conformed dims (not extra measures) distinguish the variants: token
+/// in/out slice `oxplow.tokens` by `oxplow.token_kind`; test pass/fail slice
+/// `oxplow.test_case` by `oxplow.status`; analysis errors/warnings filter
+/// `oxplow.lint_hit` by severity; coverage is a `ratio` over `oxplow.coverage`.
+/// Seeded beside the built-in gauge specs (`MetricsService::seed_catalog`);
+/// consumed by the engine at the read-flip (tsk26). Surface fields (title/unit/
+/// direction/display/category) come from [`builtin_producer_metrics`].
+pub fn builtin_producer_specs() -> Vec<NewMetricSpec> {
+    builtin_producer_metrics()
+        .iter()
+        .filter_map(|m| {
+            let (source_measure, aggregation, filter_json) = producer_spec_shape(m.key)?;
+            let mut s = NewMetricSpec::base(m.key, m.title, source_measure, aggregation);
+            s.unit = Some(m.unit.into());
+            s.direction = m.direction.into();
+            s.display_kind = m.kind.into();
+            s.category = Some(m.category.into());
+            s.description = m.description.map(Into::into);
+            s.filter_json = filter_json;
+            Some(s)
+        })
+        .collect()
+}
+
+/// The `(source_measure, aggregation, filter_json)` a producer metric aggregates.
+/// `None` for a key with no measure home (a producer metric not yet inverted).
+fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<String>)> {
+    let dim_eq = |k: &str, v: &str| format!("{{\"dim_eq\":[\"{k}\",\"{v}\"]}}");
+    let severity = |v: &str| format!("{{\"severity\":\"{v}\"}}");
+    Some(match key {
+        "agent.tokens.input" => (
+            "oxplow.tokens",
+            "sum",
+            Some(dim_eq("oxplow.token_kind", "input")),
+        ),
+        "agent.tokens.output" => (
+            "oxplow.tokens",
+            "sum",
+            Some(dim_eq("oxplow.token_kind", "output")),
+        ),
+        "agent.tokens.total" => ("oxplow.tokens", "sum", None),
+        "agent.turns" => ("oxplow.turn", "sum", None),
+        "effort.cycle_time_ms" => ("oxplow.cycle_time", "avg", None),
+        "task.efforts" => ("oxplow.task_effort", "avg", None),
+        "agent.nudges.fired" => ("oxplow.nudge", "sum", None),
+        "oxplow.tests.passed" => (
+            "oxplow.test_case",
+            "count",
+            Some(dim_eq("oxplow.status", "passed")),
+        ),
+        "oxplow.tests.failed" => (
+            "oxplow.test_case",
+            "count",
+            Some(dim_eq("oxplow.status", "failed")),
+        ),
+        "oxplow.tests.total" => ("oxplow.test_case", "count", None),
+        "oxplow.coverage.abs_pct" => ("oxplow.coverage", "ratio", None),
+        "oxplow.analysis.errors" => ("oxplow.lint_hit", "count", Some(severity("error"))),
+        "oxplow.analysis.warnings" => ("oxplow.lint_hit", "count", Some(severity("warning"))),
+        _ => return None,
+    })
+}
+
 /// Look up a producer metric's descriptor by key. Producers call this and
 /// `.definition()` instead of inlining the descriptor.
 pub fn producer_metric(key: &str) -> &'static ProducerMetric {
@@ -282,5 +347,47 @@ mod tests {
     #[should_panic(expected = "unknown producer metric key")]
     fn unknown_key_panics() {
         producer_metric("nope.not.a.metric");
+    }
+
+    #[test]
+    fn every_producer_metric_has_a_spec() {
+        // T-B: each always-on producer metric inverts to a `metric_spec` over a
+        // built-in measure. The set must be complete (no producer metric left
+        // without a fact home) so the read-flip can serve every one from the
+        // engine.
+        let specs = builtin_producer_specs();
+        assert_eq!(
+            specs.len(),
+            builtin_producer_metrics().len(),
+            "every producer metric maps to exactly one spec"
+        );
+        let by_key: std::collections::HashMap<&str, &NewMetricSpec> =
+            specs.iter().map(|s| (s.key.as_str(), s)).collect();
+
+        // Token in/out slice the ONE tokens measure by a conformed dim.
+        let input = by_key["agent.tokens.input"];
+        assert_eq!(input.source_measure.as_deref(), Some("oxplow.tokens"));
+        assert_eq!(input.aggregation, "sum");
+        assert_eq!(
+            input.filter_json.as_deref(),
+            Some(r#"{"dim_eq":["oxplow.token_kind","input"]}"#)
+        );
+        assert!(by_key["agent.tokens.total"].filter_json.is_none());
+
+        // Coverage is a ratio over Σnum/Σden.
+        assert_eq!(by_key["oxplow.coverage.abs_pct"].aggregation, "ratio");
+        // Tests count the test_case facts, sliced by status.
+        assert_eq!(
+            by_key["oxplow.tests.failed"].source_measure.as_deref(),
+            Some("oxplow.test_case")
+        );
+        assert_eq!(by_key["oxplow.tests.failed"].aggregation, "count");
+        // Analysis filters lint hits by severity.
+        assert_eq!(
+            by_key["oxplow.analysis.errors"].filter_json.as_deref(),
+            Some(r#"{"severity":"error"}"#)
+        );
+        // Surface fields carry over from the producer descriptor.
+        assert_eq!(by_key["oxplow.coverage.abs_pct"].display_kind, "coverage");
     }
 }

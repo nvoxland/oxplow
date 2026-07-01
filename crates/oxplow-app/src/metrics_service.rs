@@ -305,6 +305,7 @@ impl MetricsService {
         for spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
+            .chain(crate::producer_metrics::builtin_producer_specs())
         {
             if let Err(e) = facts.upsert_spec(spec.clone()).await {
                 tracing::warn!(key = %spec.key, error = %e, "failed to seed built-in metric spec");
@@ -2223,6 +2224,29 @@ def transform(input):
             assert_eq!(
                 engine_headline, baked,
                 "{key}: Sum(oxplow.ast_hit) filtered by rule must equal the baked headline",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn seed_catalog_seeds_producer_specs() {
+        // T-B: the always-on producer metrics are seeded as `metric_spec`s beside
+        // the built-in gauge specs, over the V43/V46 measures.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.coverage.abs_pct")
+            .await
+            .unwrap()
+            .expect("producer spec seeded");
+        assert_eq!(spec.source_measure.as_deref(), Some("oxplow.coverage"));
+        assert_eq!(spec.aggregation, "ratio");
+        // The new V46 measures exist for the producers with no prior home.
+        for key in ["oxplow.turn", "oxplow.task_effort", "oxplow.nudge"] {
+            assert!(
+                svc.fact_store.get_measure(key).await.unwrap().is_some(),
+                "{key} measure seeded by V46"
             );
         }
     }
