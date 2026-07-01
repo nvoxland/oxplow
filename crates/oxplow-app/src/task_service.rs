@@ -596,32 +596,44 @@ impl TaskService {
         }
 
         // Dual-write into the durable fact layer (epic tsk12): cycle time as a
-        // fact on `oxplow.cycle_time`, subject = the just-closed effort. The
-        // capture stamps `effort_id` directly — this producer knows the exact
-        // producing effort, so attribution is unambiguous (decision #11) — plus
-        // the thread/branch spine. Best-effort beside the legacy samples above.
+        // fact on `oxplow.cycle_time` (subject = the just-closed effort) + the
+        // efforts-so-far count on `oxplow.task_effort` (subject = the task, the
+        // redo-rate signal). The capture stamps `effort_id` directly — this
+        // producer knows the exact producing effort, so attribution is unambiguous
+        // (decision #11) — plus the thread/branch spine. Best-effort beside the
+        // legacy samples above.
         if let Some(facts) = self.fact_store.as_ref() {
             let dual = async {
-                let Some(measure) = facts.get_measure("oxplow.cycle_time").await? else {
+                let mut rows = Vec::new();
+                if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
+                    rows.push(NewFact {
+                        subject_kind: Some("effort".into()),
+                        subject_ref: Some(effort_id.to_string()),
+                        ..NewFact::new(measure.id, cycle_ms as f64)
+                    });
+                }
+                if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
+                    rows.push(NewFact {
+                        subject_kind: Some("task".into()),
+                        subject_ref: Some(item.id.to_string()),
+                        ..NewFact::new(measure.id, efforts_so_far as f64)
+                    });
+                }
+                if rows.is_empty() {
                     return Ok::<(), DomainError>(());
-                };
-                let fact = NewFact {
-                    subject_kind: Some("effort".into()),
-                    subject_ref: Some(effort_id.to_string()),
-                    ..NewFact::new(measure.id, cycle_ms as f64)
-                };
+                }
                 let mut capture =
                     NewMetricCapture::done(stream_val, "effort-lifecycle", "effort-lifecycle");
                 capture.thread_id = Some(thread_id.value());
                 capture.effort_id = Some(effort_id.value());
                 capture.trigger = Some("on-effort-complete".into());
                 capture.branch = branch.clone();
-                facts.record_facts(capture, vec![fact]).await?;
+                facts.record_facts(capture, rows).await?;
                 Ok(())
             }
             .await;
             if let Err(e) = dual {
-                tracing::warn!(error = %e, "effort lifecycle: cycle-time fact dual-write failed");
+                tracing::warn!(error = %e, "effort lifecycle: fact dual-write failed");
             }
         }
     }
@@ -1521,6 +1533,22 @@ mod tests {
                     .as_str()
             ),
             "subject_ref is the producing effort's display id"
+        );
+
+        // …and the efforts-so-far count on `oxplow.task_effort`, subject = the
+        // task (the redo-rate signal the `task.efforts` spec averages).
+        let effort_measure = facts
+            .get_measure("oxplow.task_effort")
+            .await
+            .unwrap()
+            .expect("task_effort measure seeded by V46");
+        let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
+        assert_eq!(effort_facts.len(), 1, "one task_effort fact per close");
+        assert_eq!(effort_facts[0].value, 1.0, "first effort for the task");
+        assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("task"));
+        assert_eq!(
+            effort_facts[0].subject_ref.as_deref(),
+            Some(item.id.to_string().as_str())
         );
     }
 

@@ -142,8 +142,9 @@ tree stays green through the migration. Landed:
 
 | producer | where | facts |
 |---|---|---|
-| tokens | `token_usage.rs` | one `oxplow.tokens` fact per model (`oxplow.model` dim), capture per Stop |
-| effort lifecycle | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close, subject=effort; capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
+| tokens (T-B) | `token_usage.rs` | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim) + a turn fact on `oxplow.turn`, capture per Stop. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind` |
+| effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
+| nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`) |
@@ -187,14 +188,25 @@ layer (`svc.fact_store`). Still to come (see the epic's tasks): the **code-gauge
 unbake** (per-function complexity/length/param + marker facts; count-over-threshold
 becomes a metric spec — the design-heavy keystone).
 
-**Decision — nudges stay OUT of the substrate (tsk24).** The advisory nudges
-`collection.rs` fires (report-less, coverage-target, commit-hygiene,
-gauge-crossing) are *operational events* — reactions to state × policy, not
-measurements of code state — and are already durable in `agent_nudge`. Modeling
-them as facts (an `oxplow.nudge` event measure + run-less captures) would dilute
-"facts about the code" for marginal telemetry value, so they are intentionally
-**not** dual-written. Revisit only if nudge-rate-over-time analytics become a
-real ask.
+**Producer specs (T-B).** Each always-on producer metric now has a `metric_spec`
+(`producer_metrics.rs::builtin_producer_specs`, seeded in `seed_catalog` beside
+the built-in gauge specs) — the aggregation it *is* over the measure its producer
+emits facts on, with conformed dims (not extra measures) distinguishing variants:
+token in/out slice `oxplow.tokens` by `oxplow.token_kind`; tests slice
+`oxplow.test_case` by `oxplow.status`; analysis filters `oxplow.lint_hit` by
+severity; coverage is a `ratio` over `oxplow.coverage`. `producer_spec_shape`
+holds the `(source_measure, aggregation, filter)` per key. Equivalence tests pin
+each spec's engine headline to the baked total (tokens, tests). New V46 measures:
+`oxplow.turn`, `oxplow.task_effort`, `oxplow.nudge` (the producers with no prior
+measure home); new dim `oxplow.token_kind`.
+
+**Decision reversed — nudges are now IN the substrate (T-B, was tsk24).** The
+earlier call kept the advisory nudges (report-less, coverage-target,
+commit-hygiene, gauge-crossing) out of the substrate. T-B reverses it: with the
+producer-spec layer in place, adding an `oxplow.nudge` event measure + one fact
+per fired nudge is cheap and makes the `agent.nudges.fired` operational metric a
+first-class spec like every other. The nudge rows in `agent_nudge` stay the
+authoritative store; the fact is the analytics grain.
 
 ### Read surface (MCP, additive)
 
