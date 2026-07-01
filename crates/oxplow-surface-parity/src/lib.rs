@@ -148,6 +148,10 @@ pub const MANIFEST: &[Capability] = &[
     agent("list_measures"),
     agent("list_dimensions"),
     agent("list_facts"),
+    // Engine-backed reads over facts (metrics-as-definitions) — agent-only for
+    // now; flip to `both` when the Explorer/Detail pages compute over IPC.
+    agent("metric_series"),
+    agent("metric_rollup"),
     ui("list_nudges_for_effort"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),

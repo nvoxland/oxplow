@@ -649,6 +649,35 @@ pub struct ListFactsParams {
     pub limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MetricSeriesParams {
+    /// Measure key, e.g. `oxplow.coverage` / `oxplow.complexity` (see list_measures).
+    pub measure_key: String,
+    /// Aggregation applied per capture: `count` | `sum` | `avg` | `min` | `max`
+    /// | `last` | `ratio` (ratio = Σnumerator/Σdenominator, e.g. coverage %).
+    pub aggregation: String,
+    /// Optional conformed dimension to slice by — one series per value, e.g.
+    /// `oxplow.package` / `oxplow.severity` / `oxplow.status`.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    /// Optional: keep only facts with `value >= min_value` (count-over-threshold).
+    #[serde(default)]
+    pub min_value: Option<f64>,
+    /// Optional: keep only facts whose reported severity equals this (e.g. `error`).
+    #[serde(default)]
+    pub severity: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MetricRollupParams {
+    /// Measure key (see list_measures).
+    pub measure_key: String,
+    /// Dimension to group by: `oxplow.package` (default), `oxplow.severity`,
+    /// `oxplow.status`, or any `dims_json` key the measure's facts carry.
+    #[serde(default)]
+    pub dimension: Option<String>,
+}
+
 /// Optional stream selector shared by the stream-scoped git read tools.
 /// Omit `stream_id` to target the current/primary worktree.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -1871,6 +1900,68 @@ impl OxplowMcp {
             rows.drain(0..rows.len() - limit);
         }
         json_result(&rows)
+    }
+
+    #[tool(
+        description = "Time SERIES for a measure, aggregated per capture over its atomic facts \
+            (epic tsk12) — the metrics-as-definitions read: one point per capture, additivity-\
+            correct. `aggregation` is count|sum|avg|min|max|last|ratio (ratio = Σnum/Σden, e.g. \
+            coverage %). `group_by` slices by a conformed dimension (oxplow.package / \
+            oxplow.severity / oxplow.status / …). `min_value` keeps facts ≥ a threshold (the \
+            count-over-threshold gauge, e.g. complexity ≥ N); `severity` keeps one lint severity. \
+            Empty when the measure is unknown."
+    )]
+    async fn metric_series(
+        &self,
+        params: Parameters<MetricSeriesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(agg) = oxplow_app::metric_engine::Aggregation::parse(&params.0.aggregation) else {
+            return Err(McpError::invalid_params(
+                "aggregation must be one of count|sum|avg|min|max|last|ratio",
+                None,
+            ));
+        };
+        let filter = oxplow_app::metric_engine::FactFilter {
+            min_value: params.0.min_value,
+            severity: params.0.severity,
+            dim_eq: None,
+        };
+        let series = self
+            .services
+            .metric_engine
+            .series(
+                &params.0.measure_key,
+                agg,
+                &filter,
+                params.0.group_by.as_deref(),
+            )
+            .await
+            .map_err(internal)?;
+        json_result(&series)
+    }
+
+    #[tool(
+        description = "By-dimension ROLLUP (breakdown) for a measure over its atomic facts (epic \
+            tsk12): the latest value per subject, summed per dimension value, largest first, with \
+            the contributing subject count. `dimension` is oxplow.package (default), \
+            oxplow.severity, oxplow.status, or any dims_json key the facts carry. Answers 'which \
+            package / severity / status holds the most'. Empty when the measure is unknown."
+    )]
+    async fn metric_rollup(
+        &self,
+        params: Parameters<MetricRollupParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let dimension = params
+            .0
+            .dimension
+            .unwrap_or_else(|| "oxplow.package".to_string());
+        let rollup = self
+            .services
+            .metric_engine
+            .rollup(&params.0.measure_key, &dimension)
+            .await
+            .map_err(internal)?;
+        json_result(&rollup)
     }
 
     #[tool(
@@ -4491,6 +4582,119 @@ mod tests {
             .list_facts(Parameters(ListFactsParams {
                 measure_key: "nope.nope".into(),
                 limit: None,
+            }))
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn engine_reads_aggregate_facts_by_agg_and_dimension() {
+        // Epic tsk12: the aggregation engine (workstream C) reachable over MCP —
+        // count / filtered-count series + by-dimension rollups over raw facts.
+        use oxplow_db::{NewFact, NewMetricCapture};
+        let (_proj, services, server) = boot();
+        let stream_id = services.streams.list_streams().await.unwrap()[0].id.value();
+        let measure = services
+            .fact_store
+            .get_measure("oxplow.lint_hit")
+            .await
+            .unwrap()
+            .unwrap();
+        // Three lint facts in ONE capture: 2 errors (src/), 1 warning (lib/).
+        let mk = |sev: &str, path: &str| NewFact {
+            severity: Some(sev.into()),
+            subject_kind: Some("file".into()),
+            subject_ref: Some(format!("file:{path}")),
+            path: Some(path.into()),
+            ..NewFact::new(measure.id, 1.0)
+        };
+        services
+            .fact_store
+            .record_facts(
+                NewMetricCapture::done(stream_id, "test", "test"),
+                vec![
+                    mk("error", "src/a.rs"),
+                    mk("error", "src/b.rs"),
+                    mk("warning", "lib/c.rs"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        // Count series: one capture → one point, value 3.
+        let series: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .metric_series(Parameters(MetricSeriesParams {
+                    measure_key: "oxplow.lint_hit".into(),
+                    aggregation: "count".into(),
+                    group_by: None,
+                    min_value: None,
+                    severity: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0]["value"], 3.0);
+
+        // Filtered count: only errors → value 2.
+        let errs: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .metric_series(Parameters(MetricSeriesParams {
+                    measure_key: "oxplow.lint_hit".into(),
+                    aggregation: "count".into(),
+                    group_by: None,
+                    min_value: None,
+                    severity: Some("error".into()),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(errs[0]["value"], 2.0);
+
+        // Rollup by severity: error 2, warning 1 (largest first).
+        let by_sev: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .metric_rollup(Parameters(MetricRollupParams {
+                    measure_key: "oxplow.lint_hit".into(),
+                    dimension: Some("oxplow.severity".into()),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(by_sev[0]["key"], "error");
+        assert_eq!(by_sev[0]["value"], 2.0);
+        assert_eq!(by_sev[0]["subject_count"], 2);
+        assert_eq!(by_sev[1]["key"], "warning");
+
+        // Rollup by package (default dimension): src 2, lib 1.
+        let by_pkg: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .metric_rollup(Parameters(MetricRollupParams {
+                    measure_key: "oxplow.lint_hit".into(),
+                    dimension: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let pkgs: Vec<&str> = by_pkg.iter().filter_map(|r| r["key"].as_str()).collect();
+        assert!(
+            pkgs.contains(&"src") && pkgs.contains(&"lib"),
+            "pkgs: {pkgs:?}"
+        );
+
+        // Unknown aggregation → invalid params.
+        assert!(server
+            .metric_series(Parameters(MetricSeriesParams {
+                measure_key: "oxplow.lint_hit".into(),
+                aggregation: "bogus".into(),
+                group_by: None,
+                min_value: None,
+                severity: None,
             }))
             .await
             .is_err());
