@@ -796,6 +796,27 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The captures produced BY an effort (`effort_id` stamped on the capture) —
+    /// the attribution-by-claim spine for the effort roll-up (epic tsk12, T-D).
+    /// Oldest first.
+    pub async fn captures_for_effort(
+        &self,
+        effort_id: i64,
+    ) -> Result<Vec<MetricCapture>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {CAPTURE_COLS} FROM metric_capture
+                      WHERE effort_id = ?1
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![effort_id], row_to_capture)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// All facts of a measure, joined to their capture for the spine, oldest
     /// capture first.
     pub async fn facts_for_measure(&self, measure_id: i64) -> Result<Vec<FactRow>, DomainError> {
@@ -1093,6 +1114,44 @@ mod tests {
         assert_eq!(rows[0].subject_ref.as_deref(), Some("src/a.rs::foo"));
         assert_eq!(rows[0].value, 14.0);
         assert_eq!(rows[1].value, 3.0);
+    }
+
+    #[tokio::test]
+    async fn captures_for_effort_returns_only_that_efforts_captures() {
+        // The attribution-by-claim spine (T-D): an effort's captures are those
+        // stamped with its effort_id, oldest first — not a time window.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.complexity").await;
+        // The fixture seeds effort 1; a `None`-effort capture (operational) must
+        // be excluded, and an effort with no captures returns empty.
+        for (effort, at_ts) in [
+            (Some(1), "2026-06-30T10:00:00Z"),
+            (Some(1), "2026-06-30T11:00:00Z"),
+            (None, "2026-06-30T12:00:00Z"),
+        ] {
+            store
+                .record_facts(
+                    NewMetricCapture {
+                        effort_id: effort,
+                        captured_at: Some(at(at_ts)),
+                        ..NewMetricCapture::done(1, "metrics", "builtin")
+                    },
+                    vec![NewFact::new(m, 1.0)],
+                )
+                .await
+                .unwrap();
+        }
+        let caps = store.captures_for_effort(1).await.unwrap();
+        assert_eq!(
+            caps.len(),
+            2,
+            "only effort 1's captures (the None one excluded)"
+        );
+        assert!(caps.iter().all(|c| c.effort_id == Some(1)));
+        // Oldest first.
+        assert!(caps[0].captured_at <= caps[1].captured_at);
+        // An effort with no captures returns empty (not a time-window match).
+        assert_eq!(store.captures_for_effort(99).await.unwrap().len(), 0);
     }
 
     #[tokio::test]

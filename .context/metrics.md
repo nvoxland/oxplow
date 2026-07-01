@@ -133,6 +133,17 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   an aggregation the engine can't yet compute (`count_distinct`/`p95`) or a
   malformed `filter_json` is a surfaced `DomainError::Invalid`, never a silent
   wrong number. This is the bridge the read flip (tsk26) and UI (tsk18) consume.
+- **T-C1 plumbing (additive, tsk26 prep):** `SeriesPoint` carries `branch` +
+  `provenance` (one capture → one of each, taken from the bucket's spine in
+  `aggregate_series`); `findings_for_spec(spec, capture_id?)` projects a spec's
+  filtered facts as `FactFinding`s (the offenders drill-in that replaces the baked
+  `metric_finding` — severity is the fact's reported severity or, absent one,
+  DERIVED via the shared `threshold_state(direction, value, warn_at, fail_at)`,
+  lifted here from `collection.rs`); `dim_value` gains branch/subject/model
+  **pseudo-dims** (off the capture/fact spine, not `dims_json`) so `group_by` is
+  uniform server-side. `SqliteFactStore::captures_for_effort(effort_id)` returns
+  an effort's captures (the attribution-by-claim spine for T-D). These stay
+  non-`Type` (out of `bindings.ts`) until T-C3 wires the IPC.
 
 ### Producers — dual-writing facts beside the legacy samples
 

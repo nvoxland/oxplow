@@ -39,6 +39,7 @@ use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 use crate::blob_store::BlobStore;
 use crate::events::{EventBus, OxplowEvent};
 use crate::file_ref_version;
+use crate::metric_engine::threshold_state;
 use crate::producer_metrics::producer_metric;
 
 /// Built-in command substrings that count as a test run. The collection
@@ -2704,42 +2705,6 @@ fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) ->
              report(s)."
         )
     }
-}
-
-/// Classify a value against a metric's thresholds, interpreted via `direction`.
-/// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
-/// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
-/// "higher" for `lower-better` and "lower" for `higher-better`.
-fn threshold_state(
-    direction: &str,
-    value: f64,
-    warn_at: Option<f64>,
-    fail_at: Option<f64>,
-) -> Option<&'static str> {
-    let worse_when_above = match direction {
-        "lower-better" => true,
-        "higher-better" => false,
-        // neutral / unknown: no threshold semantics.
-        _ => return None,
-    };
-    let crosses = |t: f64| {
-        if worse_when_above {
-            value >= t
-        } else {
-            value <= t
-        }
-    };
-    if let Some(f) = fail_at {
-        if crosses(f) {
-            return Some("fail");
-        }
-    }
-    if let Some(w) = warn_at {
-        if crosses(w) {
-            return Some("warn");
-        }
-    }
-    None
 }
 
 /// Effort-panel group ordering: code-health gauges first, then coverage, tests,

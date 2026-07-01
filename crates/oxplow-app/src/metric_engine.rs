@@ -164,6 +164,8 @@ impl FactFilter {
 }
 
 /// One point in a metric's time series: a single capture's aggregated value.
+/// A capture has one branch + one provenance, so a point carries them directly
+/// (the read surface renders them without a second lookup, tsk26).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SeriesPoint {
     pub capture_id: i64,
@@ -174,6 +176,10 @@ pub struct SeriesPoint {
     pub denominator: Option<f64>,
     /// The group-by dimension value, when the series is sliced by a dimension.
     pub group: Option<String>,
+    /// The capture's branch (`None` for operational facts with no worktree).
+    pub branch: Option<String>,
+    /// The capture's trust label (`observed` | `asserted` | …).
+    pub provenance: Option<String>,
 }
 
 /// One row of a by-dimension rollup (the metric's "breakdown" card).
@@ -182,6 +188,24 @@ pub struct RollupRow {
     pub key: String,
     pub value: f64,
     pub subject_count: i64,
+}
+
+/// A located item behind a metric — the read-time "finding" view over a spec's
+/// filtered facts (the offenders drill-in), replacing the baked `metric_finding`
+/// (epic tsk12, tsk26). `severity` is the fact's reported severity (lint) or,
+/// absent one, DERIVED from the value against the spec's thresholds × direction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FactFinding {
+    pub subject_kind: Option<String>,
+    pub subject_ref: Option<String>,
+    pub path: Option<String>,
+    pub line: Option<i64>,
+    pub value: f64,
+    pub severity: Option<String>,
+    pub rule: Option<String>,
+    pub message: Option<String>,
+    pub branch: Option<String>,
+    pub captured_at: Timestamp,
 }
 
 /// The package (parent directory, repo-relative) of a path; root files ⇒ `"."`.
@@ -203,14 +227,30 @@ fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
             let path = f.path.as_deref().or(f.subject_ref.as_deref())?;
             Some(package_of(path))
         }
-        key => {
-            let parsed: serde_json::Value = serde_json::from_str(f.dims_json.as_deref()?).ok()?;
-            match parsed.get(key)? {
-                serde_json::Value::String(s) => Some(s.clone()),
-                serde_json::Value::Null => None,
-                other => Some(other.to_string()),
+        // Pseudo-dimensions off the capture/fact spine (not `dims_json`), so
+        // `group_by` is uniform server-side (tsk26): branch, the raw subject, and
+        // the model (a `model:<id>` subject → the bare id, else the dims_json
+        // `oxplow.model`).
+        "oxplow.branch" | "branch" => f.branch.clone(),
+        "subject" => f.subject_ref.clone(),
+        "oxplow.model" | "model" => match &f.subject_ref {
+            Some(s) if f.subject_kind.as_deref() == Some("model") => {
+                Some(s.strip_prefix("model:").unwrap_or(s).to_string())
             }
-        }
+            _ => dim_from_json(f, "oxplow.model"),
+        },
+        key => dim_from_json(f, key),
+    }
+}
+
+/// A dimension value read from the fact's open `dims_json` map (the long tail not
+/// promoted to a column or a pseudo-dim).
+fn dim_from_json(f: &FactRow, key: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(f.dims_json.as_deref()?).ok()?;
+    match parsed.get(key)? {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
     }
 }
 
@@ -306,6 +346,9 @@ pub fn aggregate_series(
                 numerator,
                 denominator,
                 group,
+                // One capture → one branch/provenance; take the bucket's.
+                branch: fs[0].branch.clone(),
+                provenance: Some(fs[0].provenance.clone()),
             }
         })
         .collect()
@@ -510,6 +553,90 @@ impl MetricEngine {
         let series = self.series_for_spec(spec, None).await?;
         Ok(range_value(&series, temporal))
     }
+
+    /// The located items behind a spec — its filtered facts projected as
+    /// [`FactFinding`]s (the offenders drill-in that replaces the baked
+    /// `metric_finding`). `capture_id` scopes to one capture (a recording's
+    /// drill-in); `None` returns every matching fact. Empty for a formula /
+    /// unknown-measure spec. Severity is the fact's reported severity or, absent
+    /// one, derived from the value × the spec's thresholds × direction.
+    pub async fn findings_for_spec(
+        &self,
+        spec: &MetricSpec,
+        capture_id: Option<i64>,
+    ) -> Result<Vec<FactFinding>, DomainError> {
+        let Some(measure_key) = spec.source_measure.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let Some(measure) = self.facts.get_measure(measure_key).await? else {
+            return Ok(Vec::new());
+        };
+        let filter = spec_filter(spec)?;
+        let facts = self.facts.facts_for_measure(measure.id).await?;
+        Ok(facts
+            .into_iter()
+            .filter(|f| filter.matches(f))
+            .filter(|f| match capture_id {
+                Some(c) => f.capture_id == c,
+                None => true,
+            })
+            .map(|f| {
+                let severity = f.severity.clone().or_else(|| {
+                    threshold_state(&spec.direction, f.value, spec.warn_at, spec.fail_at)
+                        .map(str::to_string)
+                });
+                FactFinding {
+                    subject_kind: f.subject_kind,
+                    subject_ref: f.subject_ref,
+                    path: f.path,
+                    line: f.line,
+                    value: f.value,
+                    severity,
+                    rule: f.rule,
+                    message: f.detail,
+                    branch: f.branch,
+                    captured_at: f.captured_at,
+                }
+            })
+            .collect())
+    }
+}
+
+/// Classify a value against a metric's thresholds, interpreted via `direction`.
+/// Returns `Some("fail")` / `Some("warn")` when the value is in that zone, else
+/// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
+/// "higher" for `lower-better` and "lower" for `higher-better`. Shared by the
+/// legacy effort-panel read (`collection.rs`) and the fact finding view.
+pub fn threshold_state(
+    direction: &str,
+    value: f64,
+    warn_at: Option<f64>,
+    fail_at: Option<f64>,
+) -> Option<&'static str> {
+    let worse_when_above = match direction {
+        "lower-better" => true,
+        "higher-better" => false,
+        // neutral / unknown: no threshold semantics.
+        _ => return None,
+    };
+    let crosses = |t: f64| {
+        if worse_when_above {
+            value >= t
+        } else {
+            value <= t
+        }
+    };
+    if let Some(f) = fail_at {
+        if crosses(f) {
+            return Some("fail");
+        }
+    }
+    if let Some(w) = warn_at {
+        if crosses(w) {
+            return Some("warn");
+        }
+    }
+    None
 }
 
 /// Map a spec's `aggregation` string onto the engine's [`Aggregation`]. The spec
@@ -904,6 +1031,86 @@ mod tests {
         );
         // complexity is semi-additive → headline is the LAST capture's value.
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn findings_for_spec_projects_offenders_with_derived_severity() {
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact {
+                        subject_ref: Some("symbol:a::f".into()),
+                        path: Some("a.rs".into()),
+                        line: Some(3),
+                        ..NewFact::new(complexity, 25.0)
+                    },
+                    NewFact {
+                        subject_ref: Some("symbol:a::g".into()),
+                        ..NewFact::new(complexity, 12.0)
+                    },
+                    // Below the filter — not an offender.
+                    NewFact::new(complexity, 4.0),
+                ],
+            )
+            .await
+            .unwrap();
+        let mut spec = NewMetricSpec::base("acme.hot", "Hot", "oxplow.complexity", "count");
+        spec.filter_json = Some("{\"min_value\":10.0}".into());
+        spec.direction = "lower-better".into();
+        spec.warn_at = Some(15.0);
+        spec.fail_at = Some(20.0);
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.hot").await.unwrap().unwrap();
+
+        let findings = engine.findings_for_spec(&spec, None).await.unwrap();
+        assert_eq!(findings.len(), 2, "the two facts over the threshold");
+        let f = |sref: &str| {
+            findings
+                .iter()
+                .find(|x| x.subject_ref.as_deref() == Some(sref))
+                .unwrap()
+        };
+        // 25 ≥ fail_at 20 (lower-better) → derived "fail"; 12 crosses neither.
+        assert_eq!(f("symbol:a::f").severity.as_deref(), Some("fail"));
+        assert_eq!(f("symbol:a::f").line, Some(3));
+        assert_eq!(f("symbol:a::g").severity, None);
+    }
+
+    #[tokio::test]
+    async fn series_carries_branch_and_provenance_and_groups_by_pseudo_dims() {
+        let (engine, facts, complexity) = engine_fixture().await;
+        let mut cap = cap_at("2026-06-30T10:00:00Z");
+        cap.branch = Some("feature/x".into());
+        facts
+            .record_facts(
+                cap,
+                vec![NewFact {
+                    subject_ref: Some("src/a.rs".into()),
+                    ..NewFact::new(complexity, 5.0)
+                }],
+            )
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.c", "C", "oxplow.complexity", "sum");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.c").await.unwrap().unwrap();
+
+        let series = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(series[0].branch.as_deref(), Some("feature/x"));
+        assert_eq!(series[0].provenance.as_deref(), Some("observed"));
+        // The branch/subject pseudo-dims are groupable server-side.
+        let by_branch = engine
+            .series_for_spec(&spec, Some("oxplow.branch"))
+            .await
+            .unwrap();
+        assert_eq!(by_branch[0].group.as_deref(), Some("feature/x"));
+        let by_subject = engine
+            .series_for_spec(&spec, Some("subject"))
+            .await
+            .unwrap();
+        assert_eq!(by_subject[0].group.as_deref(), Some("src/a.rs"));
     }
 
     #[tokio::test]
