@@ -127,6 +127,9 @@ atomic fact per subject, NOT a pre-aggregated total:
 - `subject` is a `"kind:ref"` string (`file:src/a.rs`, `symbol:src/a.rs::foo`).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
   can `filter: { dimEq: [oxplow.rule, …] }` or slice by it).
+- `num`/`den` (optional) are ratio components — supply them when the measure is a
+  ratio base so a `aggregation: ratio` metric re-derives Σnum/Σden (coverage %,
+  pass rate) instead of averaging pre-divided values.
 
 The Starlark entry is `def transform(input): … return { "facts": [...] }`.
 

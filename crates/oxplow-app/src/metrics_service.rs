@@ -1245,6 +1245,9 @@ impl MetricsService {
                 // The reported rule/idiom — the engine reads this column as the
                 // `oxplow.rule` dimension, so a spec can `dim_eq` on it.
                 rule: gf.rule.clone(),
+                // Ratio components — carried so a `ratio` spec re-derives Σnum/Σden.
+                numerator: gf.num,
+                denominator: gf.den,
                 dims_json: gf.dims.as_ref().and_then(|d| serde_json::to_string(d).ok()),
                 ..oxplow_db::NewFact::new(measure_id, gf.value)
             });
@@ -2084,6 +2087,55 @@ def transform(input):
             0,
             "the off-contract fact (defined but not in `emits`) is dropped"
         );
+    }
+
+    #[tokio::test]
+    async fn gauge_facts_carry_ratio_components() {
+        // A gauge may emit `num`/`den` on a ratio-base fact so a `ratio` spec
+        // re-derives Σnum/Σden exactly (coverage %, pass rate) rather than
+        // averaging pre-divided values. Prove they round-trip onto the fact row.
+        let (svc, dir) = fixture().await;
+        std::fs::create_dir_all(dir.path().join("oxplow/gauges")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/gauges/ratio.star"),
+            r#"
+def transform(input):
+    return {"facts": [
+        {"measure": "oxplow.complexity", "value": 0.5, "num": 3, "den": 6,
+         "subject": "file:src/a.rs"},
+    ]}
+"#,
+        )
+        .unwrap();
+        let gauge = starlark_gauge_emits(
+            "acme.ratio",
+            "oxplow/gauges/ratio.star",
+            vec!["oxplow.complexity".into()],
+        );
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "manual",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            subject_default: None,
+        };
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
+            .await;
+
+        let m = svc
+            .fact_store
+            .get_measure("oxplow.complexity")
+            .await
+            .unwrap()
+            .unwrap();
+        let rows = svc.fact_store.facts_for_measure(m.id).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].numerator, Some(3.0));
+        assert_eq!(rows[0].denominator, Some(6.0));
     }
 
     #[tokio::test]

@@ -126,6 +126,14 @@ pub struct GaugeFact {
     /// fact with the idiom slug here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
+    /// Ratio components (epic tsk12) — when the measure is a ratio base, a fact
+    /// may carry its own `num`/`den` so a `ratio` metric re-derives Σnum/Σden
+    /// exactly (coverage %, pass rate) instead of averaging pre-divided values.
+    /// Both or neither; a bare `value` fact leaves them unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub num: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub den: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dims: Option<serde_json::Map<String, serde_json::Value>>,
 }
