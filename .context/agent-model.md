@@ -747,8 +747,9 @@ intermediate `ready` step.
   CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
   RECONCILE (residue at close) / SURFACE (Stop directive) loop attributes
   **agent-work runs** (tests, analysis, coverage) too, keyed by
-  `(effort, "run", "run:<id>")` rows in
-  the `effort_attribution` ledger (see `crates/oxplow-app/src/attribution.rs`,
+  `(effort, "run", "run:<id>")` rows in the `effort_attribution` ledger,
+  where `<id>` is the run's `metric_capture` id — the capture IS the run
+  (T-E1, tsk48) (see `crates/oxplow-app/src/attribution.rs`,
   `AttributionKind` trait with `FileKind` + `RunKind`; ledger table in
   `.context/data-model.md`; metric reads in `.context/metrics.md`). This
   matters because **`find_open_for_thread` is no longer the attribution

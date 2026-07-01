@@ -19,8 +19,8 @@
 use async_trait::async_trait;
 
 use oxplow_db::{
-    MetricSpec, SqliteAttributionStore, SqliteMetricStore, SqliteSnapshotStore,
-    SqliteTaskEffortStore, TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
+    MetricSpec, SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore,
+    TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
 };
 use oxplow_domain::EffortId;
 
@@ -292,19 +292,20 @@ impl AttributionKind for FileKind<'_> {
     }
 }
 
-/// The unified run kind `"run"` — every agent-work `metric_run` (tests,
+/// The unified run kind `"run"` — every agent-work run CAPTURE (tests,
 /// coverage, analysis) oxplow OBSERVES in the effort's thread+time window
 /// (filtered by `trigger = "on-report"`), attributed via the generic ledger
 /// (`effort_attribution`). Unlike files, a run isn't an object you diff — oxplow
 /// can see *that* it ran and *what* it returned, but not which sub-agent/effort,
-/// so the boundary claim resolves it. `ref` = the `metric_run` id as `run:<id>`.
+/// so the boundary claim resolves it. The capture IS the run (T-E1, tsk48):
+/// `ref` = the `metric_capture` id as `run:<id>`.
 pub struct RunKind<'a> {
     pub efforts: &'a SqliteTaskEffortStore,
-    pub metrics: &'a SqliteMetricStore,
+    pub facts: &'a oxplow_db::SqliteFactStore,
     pub ledger: &'a SqliteAttributionStore,
     /// Attribution kind name — `"run"` (the unified run kind, tsk269).
     pub kind: &'static str,
-    /// The `metric_run.trigger` to observe — `"on-report"`, which every
+    /// The capture `trigger` to observe — `"on-report"`, which every
     /// agent-work run (tests/coverage/analysis) stamps regardless of its
     /// (per-analyzer, varying) producer. One filter captures all three.
     pub trigger: &'static str,
@@ -312,16 +313,16 @@ pub struct RunKind<'a> {
 
 impl<'a> RunKind<'a> {
     /// All agent-work runs — tests, coverage, analysis — under one kind `"run"`,
-    /// observed by `trigger = "on-report"`. Attribution is per-`metric_run`,
+    /// observed by `trigger = "on-report"`. Attribution is per-capture,
     /// producer-agnostic; the producer only drives rendering.
     pub fn runs(
         efforts: &'a SqliteTaskEffortStore,
-        metrics: &'a SqliteMetricStore,
+        facts: &'a oxplow_db::SqliteFactStore,
         ledger: &'a SqliteAttributionStore,
     ) -> Self {
         Self {
             efforts,
-            metrics,
+            facts,
             ledger,
             kind: "run",
             trigger: "on-report",
@@ -337,12 +338,12 @@ impl AttributionKind for RunKind<'_> {
 
     async fn gather(&self, effort_id: &EffortId) -> Option<AttrSets> {
         let effort = self.efforts.get_effort(effort_id).await.ok().flatten()?;
-        // OBSERVE = this producer's runs on the effort's thread in its time
-        // window. (A run a concurrent effort owns falls in BOTH windows; the
+        // OBSERVE = the run captures on the effort's thread in its time window.
+        // (A run a concurrent effort owns falls in BOTH windows; the
         // cross-effort dedup below keeps it off this effort's residue.)
         let runs = self
-            .metrics
-            .runs_in_window_by_trigger(
+            .facts
+            .captures_in_window_by_trigger(
                 effort.thread_id.value(),
                 self.trigger,
                 effort.started_at,
@@ -374,7 +375,7 @@ impl AttributionKind for RunKind<'_> {
                 let ref_ = format!("run:{}", r.id);
                 let dominated = nested.iter().any(|f| match f.ended_at {
                     Some(end) => {
-                        let t = r.started_at.unix_ms();
+                        let t = r.captured_at.unix_ms();
                         t >= f.started_at.unix_ms() && t <= end.unix_ms()
                     }
                     None => false,

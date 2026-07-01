@@ -492,8 +492,8 @@ impl TaskService {
             // another actor's) becomes the close residue for the EFFORT REVIEW.
             // Single-effort runs were already auto-attributed at record, so their
             // residue is empty.
-            if let (Some(attribution), Some(metrics)) = (&self.attribution, &self.metrics) {
-                let kind = crate::attribution::RunKind::runs(effort_store, metrics, attribution);
+            if let (Some(attribution), Some(facts)) = (&self.attribution, &self.fact_store) {
+                let kind = crate::attribution::RunKind::runs(effort_store, facts, attribution);
                 let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }

@@ -321,6 +321,11 @@ pub struct MetricCapture {
     pub branch: Option<String>,
     pub captured_at: Timestamp,
     pub ended_at: Option<Timestamp>,
+    /// The verbatim per-run detail payload, as an envelope
+    /// `{"kind": "<detail kind>", "payload": {…}}` (test suite/case tree,
+    /// coverage per-file line-sets, analysis findings) — the capture-spine home
+    /// of the legacy `metric_finding` `*-detail` rows (T-E1, tsk48).
+    pub detail_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +348,8 @@ pub struct NewMetricCapture {
     /// Defaults to now when `None`.
     pub captured_at: Option<Timestamp>,
     pub ended_at: Option<Timestamp>,
+    /// See [`MetricCapture::detail_json`].
+    pub detail_json: Option<String>,
 }
 
 impl NewMetricCapture {
@@ -366,13 +373,14 @@ impl NewMetricCapture {
             branch: None,
             captured_at: None,
             ended_at: None,
+            detail_json: None,
         }
     }
 }
 
 const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_git_version, git_version_exact, \
-     branch, captured_at, ended_at";
+     branch, captured_at, ended_at, detail_json";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     let captured_at: String = row.get(16)?;
@@ -399,6 +407,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
             Some(s) => Some(string_to_ts(&s).map_err(ts_conv_err)?),
             None => None,
         },
+        detail_json: row.get(18)?,
     })
 }
 
@@ -412,8 +421,8 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_git_version, git_version_exact, branch,
-            captured_at, ended_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            captured_at, ended_at, detail_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             c.stream_id,
             c.thread_id,
@@ -432,6 +441,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             c.branch,
             captured,
             ended,
+            c.detail_json,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -817,6 +827,38 @@ impl SqliteFactStore {
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![effort_id], row_to_capture)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Captures on a thread in a time window, filtered by `trigger` — the
+    /// unified OBSERVE for run attribution now that the capture IS the run
+    /// (T-E1, tsk48). All agent-work runs (tests/coverage/analysis) stamp
+    /// `trigger = "on-report"` regardless of their (per-analyzer, varying)
+    /// producer, so one filter covers all three. Oldest-first.
+    pub async fn captures_in_window_by_trigger(
+        &self,
+        thread_id: i64,
+        trigger: &str,
+        start: Timestamp,
+        end: Option<Timestamp>,
+    ) -> Result<Vec<MetricCapture>, DomainError> {
+        let trigger = trigger.to_string();
+        let start = ts_to_string(start);
+        let end = end.map(ts_to_string);
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {CAPTURE_COLS} FROM metric_capture
+                      WHERE thread_id = ?1 AND trigger = ?2
+                        AND captured_at >= ?3
+                        AND (?4 IS NULL OR captured_at <= ?4)
+                      ORDER BY captured_at ASC, id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows =
+                    stmt.query_map(params![thread_id, trigger, start, end], row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await

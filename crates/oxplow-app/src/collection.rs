@@ -537,42 +537,46 @@ impl CollectionService {
         let owning = self.resolve_owning_effort(thread, task).await;
         let owning_val = owning.as_ref().map(|e| e.id.value());
 
-        // Dual-write per-test-case facts into the durable fact layer (epic
-        // tsk12): one fact on `oxplow.test_case` per case, the pass/fail/skip
-        // status carried as the `oxplow.status` dimension (and the suite as
-        // `oxplow.test_suite`) so Count() sliced by status reconstructs the
-        // passed/failed/total headline. Best-effort beside the count samples.
-        if let (Some(r), Some(stream_val)) = (
-            report,
-            oxplow_domain::StreamId::try_from_str(&stream_id).map(|s| s.value()),
-        ) {
+        // Write the run CAPTURE into the durable fact layer (epic tsk12): one
+        // fact on `oxplow.test_case` per case, the pass/fail/skip status carried
+        // as the `oxplow.status` dimension (and the suite as `oxplow.test_suite`)
+        // so Count() sliced by status reconstructs the passed/failed/total
+        // headline. The capture IS the run (T-E1, tsk48): it carries the verbatim
+        // payload in `detail_json` and its id is what the ledger claims. Recorded
+        // even report-less (observe-always). Best-effort beside the legacy write.
+        let mut capture_id: Option<i64> = None;
+        if let Some(stream_val) =
+            oxplow_domain::StreamId::try_from_str(&stream_id).map(|s| s.value())
+        {
             let dual = async {
-                let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
-                    return Ok::<(), DomainError>(());
-                };
-                use oxplow_coverage::TestStatus::*;
                 let mut facts = Vec::new();
-                for suite in &r.suites {
-                    for case in &suite.cases {
-                        let status = match case.status {
-                            Passed => "passed",
-                            Failed => "failed",
-                            Skipped => "skipped",
-                        };
-                        facts.push(NewFact {
-                            subject_kind: Some("test".into()),
-                            subject_ref: Some(format!("test:{}::{}", case.classname, case.name)),
-                            dims_json: serde_json::to_string(&json!({
-                                "oxplow.status": status,
-                                "oxplow.test_suite": suite.name,
-                            }))
-                            .ok(),
-                            ..NewFact::new(measure.id, 1.0)
-                        });
+                if let Some(r) = report {
+                    let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
+                        return Ok::<Option<i64>, DomainError>(None);
+                    };
+                    use oxplow_coverage::TestStatus::*;
+                    for suite in &r.suites {
+                        for case in &suite.cases {
+                            let status = match case.status {
+                                Passed => "passed",
+                                Failed => "failed",
+                                Skipped => "skipped",
+                            };
+                            facts.push(NewFact {
+                                subject_kind: Some("test".into()),
+                                subject_ref: Some(format!(
+                                    "test:{}::{}",
+                                    case.classname, case.name
+                                )),
+                                dims_json: serde_json::to_string(&json!({
+                                    "oxplow.status": status,
+                                    "oxplow.test_suite": suite.name,
+                                }))
+                                .ok(),
+                                ..NewFact::new(measure.id, 1.0)
+                            });
+                        }
                     }
-                }
-                if facts.is_empty() {
-                    return Ok(());
                 }
                 let branch = oxplow_git::detect_current_branch(&self.project_dir);
                 let snapshot_id = self
@@ -588,20 +592,28 @@ impl CollectionService {
                 capture.branch = branch;
                 capture.snapshot_id = snapshot_id;
                 capture.effort_id = owning_val;
-                self.facts.record_facts(capture, facts).await?;
-                Ok(())
+                capture.detail_json = Self::capture_detail(
+                    "test-detail",
+                    &serde_json::Value::Object(payload.clone()),
+                );
+                let id = self.facts.record_facts(capture, facts).await?;
+                Ok(Some(id))
             }
             .await;
-            if let Err(e) = dual {
-                tracing::warn!(error = %e, "failed to dual-write test-case facts");
+            match dual {
+                Ok(id) => capture_id = id,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to write the test-run capture")
+                }
             }
         }
         let _ = (stream_id, payload);
         // ATTRIBUTE via the unified run ledger (the effort resolved above), then
         // refresh the panel for the effort it landed on (if any). Observe-always:
-        // the run is already recorded above regardless of effort.
-        if let (Some(rid), Some(effort)) = (run_id, owning.as_ref()) {
-            self.claim_run(effort, rid).await;
+        // the run is already recorded above regardless of effort. The claimed ref
+        // is the CAPTURE id (T-E1) — the legacy run row is no longer the identity.
+        if let (Some(cid), Some(effort)) = (capture_id, owning.as_ref()) {
+            self.claim_run(effort, cid).await;
             self.emit(thread, effort);
         }
         Ok(run_id.map(|_| 0))
@@ -922,6 +934,15 @@ impl CollectionService {
         Ok(run_id)
     }
 
+    /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
+    /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
+    /// `metric_capture.detail_json`. The kind discriminates the three run
+    /// producers (test-detail / coverage-detail / analysis-detail) for the
+    /// observations panel + the read-time diff-coverage derivation.
+    fn capture_detail(kind: &str, payload: &serde_json::Value) -> Option<String> {
+        serde_json::to_string(&json!({ "kind": kind, "payload": payload })).ok()
+    }
+
     /// Build one run-scoped detail finding carrying a verbatim `payload_json`
     /// (the rich per-effort detail — test tree / coverage files / analysis
     /// findings — kept on the substrate so the effort panel renders off the
@@ -1054,6 +1075,11 @@ impl CollectionService {
             .first()
             .cloned()
             .unwrap_or_else(|| "analysis".to_string());
+        // The capture-spine copy of the verbatim payload (T-E1, tsk48) — taken
+        // before the legacy detail-finding write consumes `detail`.
+        let capture_detail_json = detail
+            .as_ref()
+            .and_then(|d| Self::capture_detail("analysis-detail", d));
         let result = async {
             use oxplow_coverage::Severity::*;
             let (mut errors, mut warnings) = (0u64, 0u64);
@@ -1139,15 +1165,15 @@ impl CollectionService {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: oxplow_domain::StreamId::new(stream_val),
                 });
-                // Dual-write per-lint-hit facts into the durable fact layer
-                // (epic tsk12): one fact on `oxplow.lint_hit` per finding,
-                // carrying the reported severity/rule/message in the dedicated
-                // columns + the file location, under one capture. Count() over
-                // these reconstructs the errors/warnings headline; the legacy
-                // located findings above stay until the read surface (D) flips.
+                // The run CAPTURE (T-E1, tsk48): one fact on `oxplow.lint_hit`
+                // per finding (reported severity/rule/message in the dedicated
+                // columns + the file location), the verbatim payload in
+                // `detail_json`, and the capture id as the run identity the
+                // ledger claims. Count() over the facts reconstructs the
+                // errors/warnings headline.
                 let dual = async {
                     let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
-                        return Ok::<(), DomainError>(());
+                        return Ok::<Option<i64>, DomainError>(None);
                     };
                     // A CLEAN report still writes its (empty) capture — "this
                     // analysis ran and found nothing" is what lets the errors/
@@ -1188,14 +1214,19 @@ impl CollectionService {
                     capture.git_version_exact = git_version_exact;
                     capture.branch = branch.clone();
                     capture.effort_id = owning_val;
-                    self.facts.record_facts(capture, facts).await?;
-                    Ok(())
+                    capture.detail_json = capture_detail_json;
+                    let id = self.facts.record_facts(capture, facts).await?;
+                    Ok(Some(id))
                 }
                 .await;
-                if let Err(e) = dual {
-                    tracing::warn!(error = %e, "failed to dual-write lint-hit facts");
+                let _ = run_id;
+                match dual {
+                    Ok(capture_id) => capture_id,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to write the analysis capture");
+                        None
+                    }
                 }
-                Some(run_id)
             }
             Err(e) => {
                 tracing::warn!(error = %e, "failed to mirror analysis into metric substrate");
@@ -1248,32 +1279,28 @@ impl CollectionService {
                 total_cov,
                 total_instr,
                 &version,
-                Some(payload),
+                Some(payload.clone()),
             )
             .await;
-        let attribute_to = match run_id {
-            Some(rid) => self.auto_attribute_run(thread, rid, None).await,
-            None => None,
-        };
-        if let Some(e) = attribute_to.as_ref() {
-            self.emit(thread, e);
-        }
-        // The effort resolved above stamps the coverage fact-capture too, so
-        // `captures_for_effort` attributes it (tsk37).
+        let _ = run_id;
+        // The owning effort stamps the coverage capture AND receives the ledger
+        // claim below — the capture IS the run now (T-E1, tsk48).
+        let attribute_to = self.resolve_owning_effort(thread, None).await;
         let owning_val = attribute_to.as_ref().map(|e| e.id.value());
 
-        // Dual-write per-file coverage facts into the durable fact layer (epic
-        // tsk12): one fact on `oxplow.coverage` per file, value = its line-%,
-        // numerator/denominator = covered/instrumented counts so the engine
-        // re-derives the headline as Σcovered/Σinstrumented (non-additive
-        // ratio) instead of averaging pre-rolled percentages. Best-effort
-        // beside the absolute headline sample above.
+        // The run CAPTURE (epic tsk12): one fact on `oxplow.coverage` per file,
+        // value = its line-%, numerator/denominator = covered/instrumented
+        // counts so the engine re-derives the headline as Σcovered/Σinstrumented
+        // (non-additive ratio) instead of averaging pre-rolled percentages; the
+        // verbatim per-file line-sets ride in `detail_json` (the read-time
+        // diff-coverage derivation + observations panel read them, T-E1).
+        let mut capture_id: Option<i64> = None;
         if let Some(stream_val) =
             oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
         {
             let dual = async {
                 let Some(measure) = self.facts.get_measure("oxplow.coverage").await? else {
-                    return Ok::<(), DomainError>(());
+                    return Ok::<Option<i64>, DomainError>(None);
                 };
                 let mut facts = Vec::new();
                 for (path, fc) in &report.files {
@@ -1292,9 +1319,6 @@ impl CollectionService {
                         ..NewFact::new(measure.id, pct)
                     });
                 }
-                if facts.is_empty() {
-                    return Ok(());
-                }
                 let branch = oxplow_git::detect_current_branch(&self.project_dir);
                 let snapshot_id =
                     (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
@@ -1307,13 +1331,23 @@ impl CollectionService {
                 capture.basis_ref = version.closest_git_version.clone();
                 capture.branch = branch;
                 capture.effort_id = owning_val;
-                self.facts.record_facts(capture, facts).await?;
-                Ok(())
+                capture.detail_json = Self::capture_detail("coverage-detail", &payload);
+                let id = self.facts.record_facts(capture, facts).await?;
+                Ok(Some(id))
             }
             .await;
-            if let Err(e) = dual {
-                tracing::warn!(error = %e, "failed to dual-write coverage facts");
+            match dual {
+                Ok(id) => capture_id = id,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to write the coverage capture")
+                }
             }
+        }
+        // ATTRIBUTE via the unified run ledger (the capture id is the ref), then
+        // refresh the panel for the effort it landed on (if any).
+        if let (Some(cid), Some(effort)) = (capture_id, attribute_to.as_ref()) {
+            self.claim_run(effort, cid).await;
+            self.emit(thread, effort);
         }
 
         Ok(CoverageIngest::Stored {
@@ -2228,107 +2262,94 @@ impl CollectionService {
         // Coverage derives its effort-relative diff against the effort's start
         // snapshot, so load the effort once (tsk270).
         let effort = self.efforts.get_effort(&eid).await.ok().flatten();
-        // (headline metric key, detail finding kind, observation kind)
-        let specs = [
-            (
-                "oxplow.coverage.abs_pct",
-                "coverage-detail",
-                "diff-coverage",
-            ),
-            ("oxplow.tests.total", "test-detail", "test-run"),
-            (
-                "oxplow.analysis.errors",
-                "analysis-detail",
-                "static-analysis",
-            ),
-        ];
+        // Every run kind is observe-always → attribute by the unified ledger
+        // CLAIM (exact under concurrency), never a time window (which would mix
+        // concurrent efforts' runs). The capture IS the run (T-E1, tsk48): the
+        // claimed refs are capture ids, and the verbatim payload rides in the
+        // capture's `detail_json` envelope.
+        let mut caps: Vec<oxplow_db::MetricCapture> = Vec::new();
+        for id in self
+            .attribution
+            .list_refs(&eid, "run", STATE_CLAIMED)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse::<i64>().ok()))
+        {
+            if let Ok(Some(c)) = self.facts.get_capture(id).await {
+                caps.push(c);
+            }
+        }
+        // Newest-first for the panel.
+        caps.sort_by(|a, b| b.captured_at.cmp(&a.captured_at).then(b.id.cmp(&a.id)));
         let mut out = Vec::new();
-        for (metric_key, detail_kind, obs_kind) in specs {
+        for c in caps {
+            let Some(envelope) = c
+                .detail_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+            else {
+                continue;
+            };
+            let obs_kind = match envelope["kind"].as_str() {
+                Some("coverage-detail") => "diff-coverage",
+                Some("test-detail") => "test-run",
+                Some("analysis-detail") => "static-analysis",
+                _ => continue,
+            };
             if kind.is_some_and(|k| k != obs_kind) {
                 continue;
             }
-            let Ok(Some(def)) = self.metrics.get_definition(metric_key).await else {
-                continue;
-            };
-            // Every run kind is observe-always → attribute by the unified ledger
-            // CLAIM (exact under concurrency), never a time window (which would mix
-            // concurrent efforts' runs). `samples_for_runs` filters the effort's
-            // claimed runs to this metric, so the whole claimed set is correct.
-            let run_ids: Vec<i64> = self
-                .attribution
-                .list_refs(&eid, "run", STATE_CLAIMED)
-                .await
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
-                .collect();
-            let samples = self
-                .metrics
-                .samples_for_runs(def.id, run_ids)
-                .await
-                .unwrap_or_default();
-            // Samples are time-ASC; newest-first for the panel.
-            for sample in samples.into_iter().rev() {
-                let raw_detail = match sample.run_id {
-                    Some(rid) => self
-                        .metrics
-                        .list_findings(rid)
-                        .await
-                        .ok()
-                        .and_then(|fs| fs.into_iter().find(|f| f.kind == detail_kind))
-                        .and_then(|f| f.extra_json),
-                    None => None,
-                };
-                // Headline numeric + payload per the panel's per-kind convention:
-                // coverage → derive THIS effort's diff from the run's ABSOLUTE
-                // detail (skip when no overlap/baseline); static-analysis →
-                // error+warning count; test-run → none (panel reads the payload).
-                let (payload_json, metric_value) = if obs_kind == "diff-coverage" {
-                    let abs = raw_detail
-                        .as_deref()
-                        .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok());
-                    let derived = match (effort.as_ref(), abs) {
-                        (Some(eff), Some(abs)) => self
-                            .diff_coverage_for_effort(eff, &abs)
+            let payload = envelope
+                .get("payload")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            // Headline numeric + payload per the panel's per-kind convention:
+            // coverage → derive THIS effort's diff from the run's ABSOLUTE
+            // detail (skip when no overlap/baseline); static-analysis →
+            // error+warning count; test-run → none (panel reads the payload;
+            // report-less runs — no `total` — stay off the panel, as before).
+            let (payload_json, metric_value) = match obs_kind {
+                "diff-coverage" => {
+                    let derived = match effort.as_ref() {
+                        Some(eff) => self
+                            .diff_coverage_for_effort(eff, &payload)
                             .await
                             .ok()
                             .flatten(),
-                        _ => None,
+                        None => None,
                     };
                     match derived {
                         Some((pct, diff_payload)) => (Some(diff_payload.to_string()), Some(pct)),
                         None => continue,
                     }
-                } else {
-                    let metric_value = match obs_kind {
-                        "test-run" => None,
-                        "static-analysis" => raw_detail
-                            .as_deref()
-                            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
-                            .map(|v| {
-                                v["errorCount"].as_f64().unwrap_or(0.0)
-                                    + v["warningCount"].as_f64().unwrap_or(0.0)
-                            })
-                            .or(Some(sample.value)),
-                        _ => Some(sample.value),
-                    };
-                    (raw_detail, metric_value)
-                };
-                out.push(oxplow_db::EffortObservation {
-                    id: sample.id,
-                    stream_id: oxplow_domain::StreamId::new(sample.stream_id).to_string(),
-                    effort_id: effort_id.to_string(),
-                    kind: obs_kind.to_string(),
-                    provenance: sample.provenance,
-                    source: sample.source,
-                    metric_value,
-                    payload_json,
-                    local_snapshot_id: sample.snapshot_id,
-                    closest_git_version: sample.closest_git_version,
-                    git_version_exact: sample.git_version_exact,
-                    created_at: sample.captured_at,
-                });
-            }
+                }
+                "static-analysis" => {
+                    let mv = payload["errorCount"].as_f64().unwrap_or(0.0)
+                        + payload["warningCount"].as_f64().unwrap_or(0.0);
+                    (serde_json::to_string(&payload).ok(), Some(mv))
+                }
+                _ => {
+                    if payload.get("total").is_none() {
+                        continue;
+                    }
+                    (serde_json::to_string(&payload).ok(), None)
+                }
+            };
+            out.push(oxplow_db::EffortObservation {
+                id: c.id,
+                stream_id: oxplow_domain::StreamId::new(c.stream_id).to_string(),
+                effort_id: effort_id.to_string(),
+                kind: obs_kind.to_string(),
+                provenance: c.provenance.clone(),
+                source: c.source.clone(),
+                metric_value,
+                payload_json,
+                local_snapshot_id: c.snapshot_id,
+                closest_git_version: c.closest_git_version.clone(),
+                git_version_exact: c.git_version_exact,
+                created_at: c.captured_at,
+            });
         }
         out
     }
@@ -2716,73 +2737,55 @@ impl CollectionService {
         ))
     }
 
-    /// Coverage effort-delta (the `Coverage` family): resolve the legacy metric
-    /// DEFINITION for `spec.key` and reuse [`coverage_delta`], which derives the
-    /// effort-relative diff at read from the run's stored ABSOLUTE line-sets. Kept
-    /// on the legacy detail payload as a documented special case (T-D scope guard):
-    /// the per-file coverage FACTS carry num/den counts, not the line-sets
-    /// `diff_coverage_for_effort` needs. `None` when the definition is absent.
+    /// Coverage effort-delta (the `Coverage` family, tsk270): coverage is
+    /// **observe-always** (absolute) AND **effort-relative** (diff vs the
+    /// effort's start snapshot), so neither the time window nor a stored value
+    /// is right. For each coverage run CAPTURE this effort claimed (ledger —
+    /// the capture is the run, T-E1), derive its diff-coverage from the
+    /// capture's ABSOLUTE per-file line-sets (`detail_json`) at read, then
+    /// before→after over the derived sequence.
     async fn coverage_delta_for_spec(
         &self,
         spec: &oxplow_db::MetricSpec,
         effort: &TaskEffort,
     ) -> Option<oxplow_db::EffortMetricDelta> {
-        let def = self
-            .metrics
-            .get_definition(&spec.key)
-            .await
-            .ok()
-            .flatten()?;
-        self.coverage_delta(&def, effort).await
-    }
-
-    /// Coverage delta (tsk270): coverage is **observe-always** (absolute) AND
-    /// **effort-relative** (diff vs the effort's start snapshot), so neither the
-    /// time window nor the stored sample value is right. For each coverage run
-    /// THIS effort claimed (ledger), derive its diff-coverage from the run's
-    /// absolute detail at read, then before→after over the derived sequence.
-    async fn coverage_delta(
-        &self,
-        def: &oxplow_db::MetricDefinition,
-        effort: &TaskEffort,
-    ) -> Option<oxplow_db::EffortMetricDelta> {
-        let run_ids: Vec<i64> = self
+        let mut caps: Vec<oxplow_db::MetricCapture> = Vec::new();
+        for id in self
             .attribution
             .list_refs(&effort.id, "run", STATE_CLAIMED)
             .await
             .unwrap_or_default()
             .iter()
-            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse().ok()))
-            .collect();
-        // `samples_for_runs` on the abs-coverage def yields one sample per claimed
-        // COVERAGE run (other producers don't carry it), time-ASC.
-        let samples = self.metrics.samples_for_runs(def.id, run_ids).await.ok()?;
+            .filter_map(|r| r.strip_prefix("run:").and_then(|s| s.parse::<i64>().ok()))
+        {
+            if let Ok(Some(c)) = self.facts.get_capture(id).await {
+                caps.push(c);
+            }
+        }
+        caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut derived: Vec<f64> = Vec::new();
-        let mut latest_run = None;
-        for s in &samples {
-            let Some(rid) = s.run_id else { continue };
-            let abs = self
-                .metrics
-                .list_findings(rid)
-                .await
-                .ok()
-                .and_then(|fs| fs.into_iter().find(|f| f.kind == "coverage-detail"))
-                .and_then(|f| f.extra_json)
-                .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok());
-            if let Some(abs) = abs {
+        let mut latest_cap = None;
+        for c in &caps {
+            let payload = c
+                .detail_json
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+                .filter(|env| env["kind"].as_str() == Some("coverage-detail"))
+                .and_then(|env| env.get("payload").cloned());
+            if let Some(abs) = payload {
                 if let Ok(Some((pct, _))) = self.diff_coverage_for_effort(effort, &abs).await {
                     derived.push(pct);
-                    latest_run = Some(rid);
+                    latest_cap = Some(c.id);
                 }
             }
         }
         let (first, last) = (derived.first()?, derived.last()?);
         let (baseline, current) = (*first, *last);
         let changed = (current - baseline).abs() > f64::EPSILON;
-        let crossing =
-            threshold_state(&def.direction, current, def.warn_at, def.fail_at).map(str::to_string);
-        Some(effort_delta_row(
-            def,
+        let crossing = threshold_state(&spec.direction, current, spec.warn_at, spec.fail_at)
+            .map(str::to_string);
+        Some(effort_delta_row_spec(
+            spec,
             DeltaCalc {
                 agg: "level",
                 baseline: Some(baseline),
@@ -2791,7 +2794,7 @@ impl CollectionService {
                 changed,
                 attributed_files: None,
                 sample_count: derived.len() as i64,
-                latest_run_id: latest_run,
+                latest_run_id: latest_cap,
                 crossing,
             },
         ))
@@ -2896,7 +2899,7 @@ fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
 }
 
 /// The computed half of an [`oxplow_db::EffortMetricDelta`] — the per-family
-/// numbers, joined with the definition's metadata by [`effort_delta_row`].
+/// numbers, joined with the spec's metadata by [`effort_delta_row_spec`].
 struct DeltaCalc {
     agg: &'static str,
     baseline: Option<f64>,
@@ -2909,38 +2912,9 @@ struct DeltaCalc {
     crossing: Option<String>,
 }
 
-/// Build an effort-metric row from a definition + the computed `DeltaCalc`.
-fn effort_delta_row(
-    def: &oxplow_db::MetricDefinition,
-    c: DeltaCalc,
-) -> oxplow_db::EffortMetricDelta {
-    oxplow_db::EffortMetricDelta {
-        key: def.key.clone(),
-        title: def.title.clone(),
-        unit: def.unit.clone(),
-        direction: def.direction.clone(),
-        kind: def.kind.clone(),
-        category: def.category.clone(),
-        language: def.language.clone(),
-        agg: c.agg.to_string(),
-        baseline: c.baseline,
-        current: c.current,
-        delta: c.delta,
-        changed: c.changed,
-        attributed_files: c.attributed_files,
-        sample_count: c.sample_count,
-        target: def.target,
-        warn_at: def.warn_at,
-        fail_at: def.fail_at,
-        crossing: c.crossing,
-        latest_run_id: c.latest_run_id,
-    }
-}
-
-/// Build an effort-metric row from a metric SPEC + the computed `DeltaCalc` — the
-/// spec-driven sibling of [`effort_delta_row`] (which the kept coverage path still
-/// builds from a legacy definition). `kind` ← the spec's `display_kind`; the
-/// `latest_run_id` field now carries a capture id (epic tsk12, T-D).
+/// Build an effort-metric row from a metric SPEC + the computed `DeltaCalc`.
+/// `kind` ← the spec's `display_kind`; the `latest_run_id` field carries a
+/// capture id (epic tsk12, T-D/T-E1).
 fn effort_delta_row_spec(
     spec: &oxplow_db::MetricSpec,
     c: DeltaCalc,
@@ -4917,7 +4891,7 @@ mod tests {
             // claimed by nobody. RunKind must keep each effort's residue to only
             // the truly-unattributed run — the other effort's run is deduped out.
             use crate::attribution::{reconcile_close, RunKind};
-            use oxplow_db::{NewMetricRun, SqliteAttributionStore, STATE_CLAIMED};
+            use oxplow_db::{SqliteAttributionStore, STATE_CLAIMED};
 
             let h = build(None).await;
             let now = Timestamp::now();
@@ -4944,13 +4918,15 @@ mod tests {
             let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
             let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
 
-            // Three observed test runs on the thread (after both efforts opened,
-            // so all three fall in both open windows).
+            // Three observed run CAPTURES on the thread (the capture is the run,
+            // T-E1) — after both efforts opened, so all three fall in both
+            // open windows.
+            let facts_store = oxplow_db::SqliteFactStore::new(h.db.clone());
             let seed_run = || async {
-                let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
-                run.thread_id = Some(h.thread.value());
-                run.trigger = Some("on-report".into());
-                h.service.metrics.record_run(run).await.unwrap()
+                let mut cap = oxplow_db::NewMetricCapture::done(1, "tests", "post-tool-bash");
+                cap.thread_id = Some(h.thread.value());
+                cap.trigger = Some("on-report".into());
+                facts_store.record_facts(cap, vec![]).await.unwrap()
             };
             let r1 = seed_run().await;
             let r2 = seed_run().await;
@@ -4966,13 +4942,13 @@ mod tests {
                 .await
                 .unwrap();
 
-            let kind1 = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind1 = RunKind::runs(h.efforts.as_ref(), &facts_store, &ledger);
             // eff1: observed {r1,r2,r3} − claimed {r1} − other-claimed {r2} = {r3}.
             assert_eq!(
                 reconcile_close(&kind1, &eid1).await,
                 vec![format!("run:{r3}")]
             );
-            let kind2 = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind2 = RunKind::runs(h.efforts.as_ref(), &facts_store, &ledger);
             // eff2: observed all − claimed {r2} − other-claimed {r1} = {r3}.
             assert_eq!(
                 reconcile_close(&kind2, &eff2.id).await,
@@ -5007,11 +4983,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            // The run IS in the substrate (observed)…
-            let runs = h
-                .service
-                .metrics
-                .runs_in_window_by_trigger(
+            // The run CAPTURE is in the substrate (observed)…
+            let runs = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
                     h.thread.value(),
                     "on-report",
                     Timestamp::from_unix_ms(0),
@@ -5040,7 +5014,7 @@ mod tests {
             // window stays the wider effort's. Windows are built in real time by
             // ordering start/finish so eff2 ⊂ eff1.
             use crate::attribution::{reconcile_close, RunKind};
-            use oxplow_db::{NewMetricRun, SqliteAttributionStore};
+            use oxplow_db::SqliteAttributionStore;
 
             let h = build(None).await; // eff1 (h.effort_id) opened first
             let now = Timestamp::now();
@@ -5066,11 +5040,12 @@ mod tests {
                 .unwrap();
             let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
 
+            let facts_store = oxplow_db::SqliteFactStore::new(h.db.clone());
             let mk_run = || async {
-                let mut run = NewMetricRun::done(1, "tests", "post-tool-bash");
-                run.thread_id = Some(h.thread.value());
-                run.trigger = Some("on-report".into());
-                h.service.metrics.record_run(run).await.unwrap()
+                let mut cap = oxplow_db::NewMetricCapture::done(1, "tests", "post-tool-bash");
+                cap.thread_id = Some(h.thread.value());
+                cap.trigger = Some("on-report".into());
+                facts_store.record_facts(cap, vec![]).await.unwrap()
             };
 
             // eff2 opens after eff1; r_inner runs while eff2 is open; eff2 closes;
@@ -5089,7 +5064,7 @@ mod tests {
             h.efforts.finish(&eid1, None, None).await.unwrap();
 
             let ledger = SqliteAttributionStore::new(h.db.clone());
-            let kind = RunKind::runs(h.efforts.as_ref(), h.service.metrics.as_ref(), &ledger);
+            let kind = RunKind::runs(h.efforts.as_ref(), &facts_store, &ledger);
             // eff1 observes both, but r_inner is dominated by nested eff2 → only
             // r_outer is eff1's residue.
             let residue = reconcile_close(&kind, &eid1).await;
@@ -5128,6 +5103,20 @@ mod tests {
             let claimed = ledger.list_refs(&eid, "run", STATE_CLAIMED).await.unwrap();
             assert_eq!(claimed.len(), 1, "single open effort → run auto-attributed");
             assert!(claimed[0].starts_with("run:"), "ref is run:<id>");
+            // The capture IS the run (T-E1, tsk48): the claimed id resolves to a
+            // metric_capture carrying the verbatim payload in its detail envelope.
+            let cid: i64 = claimed[0].strip_prefix("run:").unwrap().parse().unwrap();
+            let cap = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .get_capture(cid)
+                .await
+                .unwrap()
+                .expect("the claimed ref is a capture id");
+            assert_eq!(cap.producer, "tests");
+            assert_eq!(cap.trigger.as_deref(), Some("on-report"));
+            let envelope: serde_json::Value =
+                serde_json::from_str(cap.detail_json.as_deref().unwrap()).unwrap();
+            assert_eq!(envelope["kind"], "test-detail");
+            assert_eq!(envelope["payload"]["total"], 5);
         }
 
         #[tokio::test]

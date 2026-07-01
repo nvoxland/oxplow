@@ -1134,7 +1134,7 @@ async fn stop_directive(
             // still parses it (tsk266).
             let mut unattributed_runs = Vec::with_capacity(unattributed_refs.len());
             for r in &unattributed_refs {
-                unattributed_runs.push(describe_run(&ctx.services.metric_store, r).await);
+                unattributed_runs.push(describe_run(&ctx.services.fact_store, r).await);
             }
             // task_id/title come from the file review when present; otherwise
             // resolve from the effort (run-only residue, no file discrepancy).
@@ -1322,30 +1322,23 @@ fn run_summary_from_detail(detail_kind: &str, payload: &serde_json::Value) -> Op
 /// from the substrate. Dispatches on the finding kind so a coverage/analysis run
 /// renders as such, not a malformed test run (tsk266/tsk269). Falls back to the
 /// bare ref when the run can't be looked up — never blocks the review.
-async fn describe_run(metrics: &oxplow_db::SqliteMetricStore, run_ref: &str) -> String {
+async fn describe_run(facts: &oxplow_db::SqliteFactStore, run_ref: &str) -> String {
     let Some(id) = run_ref
         .strip_prefix("run:")
         .and_then(|s| s.parse::<i64>().ok())
     else {
         return run_ref.to_string();
     };
-    let summary = metrics
-        .list_findings(id)
-        .await
-        .ok()
-        .unwrap_or_default()
-        .into_iter()
-        .find_map(|f| {
-            let payload =
-                serde_json::from_str::<serde_json::Value>(f.extra_json.as_deref()?).ok()?;
-            run_summary_from_detail(&f.kind, &payload)
-        });
-    let time_hm = metrics
-        .get_run(id)
-        .await
-        .ok()
-        .flatten()
-        .map(|r| (r.started_at.0.hour(), r.started_at.0.minute()));
+    // The capture IS the run (T-E1, tsk48): the verbatim payload rides in its
+    // `detail_json` envelope `{"kind": …, "payload": …}`.
+    let capture = facts.get_capture(id).await.ok().flatten();
+    let summary = capture.as_ref().and_then(|c| {
+        let envelope = serde_json::from_str::<serde_json::Value>(c.detail_json.as_deref()?).ok()?;
+        run_summary_from_detail(envelope["kind"].as_str()?, envelope.get("payload")?)
+    });
+    let time_hm = capture
+        .as_ref()
+        .map(|c| (c.captured_at.0.hour(), c.captured_at.0.minute()));
     format_run_descriptor(run_ref, summary.as_deref(), time_hm)
 }
 

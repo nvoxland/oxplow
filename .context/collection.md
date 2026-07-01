@@ -161,8 +161,10 @@ is gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of t
 old effort-start floor, so it works with no open effort. **Coverage** is
 effort-relative (diff vs the effort's start snapshot), so it can't store the diff
 at record: `observe_coverage` stores the **absolute** whole-report coverage
-(`oxplow.coverage.abs_pct` + per-file instrumented/covered line-sets in the
-`coverage-detail` finding), and the effort-relative diff is DERIVED at read
+(per-file coverage facts + the instrumented/covered line-sets in the capture's
+`coverage-detail` detail envelope — `metric_capture.detail_json`, T-E1; the
+legacy `coverage-detail` finding is still dual-written until T-E2), and the
+effort-relative diff is DERIVED at read
 (`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
 still produces a diff. The earlier `find_single_open_for_thread` *drop-gates* on
 the producers are gone — the helper stays only as the Class-A auto-attribute
