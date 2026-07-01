@@ -1718,9 +1718,10 @@ export async function listMetricSamples(
 
 /** Roll up a metric (by spec `key`) by a dimension — `"package"` (the file's
  *  parent directory), a conformed dim (`oxplow.severity`), a `subject` roll-up,
- *  or any `dims_json` key — latest value per subject summed per dimension
- *  value, largest first. The Metric Detail Breakdown + subject breakdown
- *  (tsk328 package / tsk319 language). */
+ *  or any `dims_json` key — additivity-aware per the source measure's temporal
+ *  semantics (level gauges: latest per subject; events: every fact; ratios:
+ *  per-group Σnum/Σden), largest first. The Metric Detail Breakdown + subject
+ *  breakdown (tsk328 package / tsk319 language). */
 export async function metricDimensionRollup(
   metricKey: string,
   dimension: string,

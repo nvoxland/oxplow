@@ -110,7 +110,7 @@ test("branchOptions + filterByBranch", () => {
   expect(filterByBranch(rows, null).length).toBe(4);
 });
 
-test("inRangeStat respects default_agg", () => {
+test("inRangeStat respects the spec aggregation", () => {
   const rows = [
     s({ captured_at: "2026-06-01T00:00:00Z", value: 10 }),
     s({ captured_at: "2026-06-02T00:00:00Z", value: 4 }),
@@ -126,7 +126,7 @@ test("inRangeStat respects default_agg", () => {
   expect(inRangeStat([], "sum")).toBeNull();
 });
 
-test("defaultChartMode follows default_agg", () => {
+test("defaultChartMode follows the spec aggregation", () => {
   expect(defaultChartMode("sum")).toBe("cumulative");
   expect(defaultChartMode("avg")).toBe("avg");
   expect(defaultChartMode("last")).toBe("value");

@@ -117,13 +117,17 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
 - Pure cores: `aggregate_series(facts, agg, filter, group_by)` → one `SeriesPoint`
   per capture (preserving time order), optionally one series per group-by
   dimension value; `range_value(series, temporal)` collapses a series to one
-  number the additivity-correct way; `compute_rollup(facts, dimension)` →
-  `RollupRow`s (latest-per-subject, summed per dim value, largest first). Ratio
-  re-aggregation is Σnumerator/Σdenominator via `numerator`/`denominator`, never a
-  naive average of percentages. `dim_value` reads the `severity`/`rule` columns
-  and `package`-from-path directly, else `dims_json[key]`.
+  number the additivity-correct way; `compute_rollup(facts, dimension, temporal)`
+  → `RollupRow`s, additivity-aware like `range_value` (tsk41): semi-additive →
+  latest-per-subject summed per dim value; additive → EVERY fact counts (tokens
+  by model is a running total, not the last turn); non-additive → latest per
+  subject then per-group Σnumerator/Σdenominator, never a naive sum/average of
+  percentages. `dim_value` reads the `severity`/`rule` columns and
+  `package`-from-path directly, else `dims_json[key]`.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
-  `rollup(measure_key, dimension)` fetch a measure's facts and aggregate.
+  `rollup(measure_key, dimension)` fetch a measure's facts and aggregate
+  (`rollup` parses the measure's `temporal_semantics`, erroring on a malformed
+  value rather than guessing).
 - **Spec-driven reads** (tsk29 — a metric *key* → its computed result): given a
   `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` /
   `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
@@ -527,10 +531,13 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `language`, tsk319); `stream` is optional (omit ⇒ all streams), matching the
   UI. The same store method backs the IPC
   `metric_dimension_rollup` + the Metric Detail **Breakdown** card (tsk328/319). Authoring/trigger:
-  `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`)
-  and `record_metric` (an **asserted**, run-less sample for CI/agent-reported
-  numbers). These four are **agent-only** (classified in the surface-parity
-  manifest); the renderer drives compute via config + the runner, not ad-hoc IPC.
+  `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`;
+  returns `facts_recorded`) and `record_metric` (an **asserted FACT** on the
+  metric's source measure, under a `provenance: asserted` / `source:
+  agent-reported` capture — flipped off the legacy sample write in tsk41 so the
+  fact-based reads actually see it; a formula spec is rejected). These four are
+  **agent-only** (classified in the surface-parity manifest); the renderer
+  drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
   `crates/oxplow-tauri-ipc/src/commands/metrics.rs` Tauri adapters, registered
   in `collect_commands!` + the remote `rpc_dispatch!`) — **flipped onto specs +

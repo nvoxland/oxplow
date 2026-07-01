@@ -75,9 +75,10 @@ pub async fn list_metric_findings(
 }
 
 /// Roll up one metric (by spec `key`) by a dimension — its source-measure
-/// facts, latest value per subject, summed per dimension value, largest first,
-/// with the contributing subject count (epic tsk12). `dimension` is
-/// `"package"`, a conformed dim (`oxplow.severity` / …), or any `dims_json`
+/// facts, additivity-aware per the measure's temporal semantics (level gauges:
+/// latest per subject; events: every fact; ratios: per-group Σnum/Σden),
+/// largest first, with the contributing subject count (epic tsk12). `dimension`
+/// is `"package"`, a conformed dim (`oxplow.severity` / …), or any `dims_json`
 /// key. Unknown key → empty (UI-friendly). Backs the Metric Detail
 /// **Breakdown** card + the subject breakdown (tsk328 package / tsk319 language).
 pub async fn metric_dimension_rollup(
@@ -121,8 +122,9 @@ pub async fn metric_series(
 }
 
 /// By-dimension ROLLUP (breakdown) for a MEASURE over its atomic facts (epic
-/// tsk12): latest value per subject, summed per dimension value, largest first,
-/// with the contributing subject count. `dimension` is `oxplow.package`
+/// tsk12), additivity-aware per its temporal semantics (level gauges: latest
+/// per subject; events: every fact; ratios: per-group Σnum/Σden), largest
+/// first, with the contributing subject count. `dimension` is `oxplow.package`
 /// (default), a conformed dim, or any `dims_json` key. Empty when unknown.
 pub async fn metric_rollup(
     svc: &Services,

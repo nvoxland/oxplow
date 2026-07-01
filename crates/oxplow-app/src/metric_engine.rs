@@ -80,6 +80,16 @@ impl Temporal {
     }
 }
 
+/// Parse a measure's `temporal_semantics`, naming the measure in the error —
+/// malformed additivity is a data-integrity problem, not an empty read.
+fn parse_temporal(measure_key: &str, temporal_semantics: &str) -> Result<Temporal, DomainError> {
+    Temporal::parse(temporal_semantics).ok_or_else(|| {
+        DomainError::Invalid(format!(
+            "measure `{measure_key}` has unknown temporal_semantics `{temporal_semantics}`"
+        ))
+    })
+}
+
 /// A binary op combining two aligned base-metric values into a derived one — the
 /// constrained "formula" vocabulary (no general DSL; decision #8). `Div` is the
 /// ratio primitive (bugs-per-KLOC, cost-per-token).
@@ -385,37 +395,77 @@ pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
     })
 }
 
-/// Roll a metric's LATEST value per subject up by a dimension, summing across
-/// subjects — the "breakdown" card (which package / language holds the most).
+/// Roll a measure's facts up by a dimension — the "breakdown" card (which
+/// package / language / model holds the most). Additivity-aware per the
+/// measure's `temporal_semantics` (the same BI distinction as [`range_value`]):
+/// - **semi-additive** (level gauge): the LATEST fact per subject, summed per
+///   group — summing snapshots across time would double-count;
+/// - **additive** (event): EVERY fact counts — the group value is the running
+///   total (tokens by model is a total, not the last turn);
+/// - **non-additive** (ratio): the latest fact per subject, then per group
+///   Σnumerator/Σdenominator — never a sum (or mean) of percentages. Facts
+///   without ratio components fall back to the mean of their values.
+///
 /// Largest first; ties broken on key for determinism. Facts are expected
 /// oldest-first, so the last fact seen per subject is its latest.
-pub fn compute_rollup(facts: &[FactRow], dimension: &str) -> Vec<RollupRow> {
-    // Latest fact per subject (oldest-first ⇒ last write wins).
+pub fn compute_rollup(facts: &[FactRow], dimension: &str, temporal: Temporal) -> Vec<RollupRow> {
+    // The facts that contribute: all of them for an additive event measure;
+    // the latest per subject otherwise (oldest-first ⇒ last write wins).
     let mut latest: HashMap<String, &FactRow> = HashMap::new();
-    for f in facts {
-        let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) else {
-            continue;
-        };
-        latest.insert(subject.to_string(), f);
-    }
+    let kept: Vec<&FactRow> = match temporal {
+        Temporal::Additive => facts
+            .iter()
+            .filter(|f| f.subject_ref.is_some() || f.path.is_some())
+            .collect(),
+        Temporal::SemiAdditive | Temporal::NonAdditive => {
+            for f in facts {
+                let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) else {
+                    continue;
+                };
+                latest.insert(subject.to_string(), f);
+            }
+            latest.values().copied().collect()
+        }
+    };
 
-    let mut by_key: std::collections::BTreeMap<String, (f64, i64)> =
-        std::collections::BTreeMap::new();
-    for f in latest.values() {
+    #[derive(Default)]
+    struct Acc {
+        value_sum: f64,
+        num: f64,
+        den: f64,
+        fact_count: i64,
+        subjects: std::collections::BTreeSet<String>,
+    }
+    let mut by_key: std::collections::BTreeMap<String, Acc> = std::collections::BTreeMap::new();
+    for f in kept {
         let Some(key) = dim_value(f, dimension) else {
             continue;
         };
-        let entry = by_key.entry(key).or_insert((0.0, 0));
-        entry.0 += f.value;
-        entry.1 += 1;
+        let entry = by_key.entry(key).or_default();
+        entry.value_sum += f.value;
+        entry.num += f.numerator.unwrap_or(0.0);
+        entry.den += f.denominator.unwrap_or(0.0);
+        entry.fact_count += 1;
+        if let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) {
+            entry.subjects.insert(subject.to_string());
+        }
     }
 
     let mut out: Vec<RollupRow> = by_key
         .into_iter()
-        .map(|(key, (value, subject_count))| RollupRow {
-            key,
-            value,
-            subject_count,
+        .map(|(key, acc)| {
+            let value = match temporal {
+                Temporal::NonAdditive if acc.den != 0.0 => acc.num / acc.den,
+                // A ratio measure whose facts lack num/den: mean of the latest
+                // per-subject values (defensive — never sum percentages).
+                Temporal::NonAdditive => acc.value_sum / acc.fact_count as f64,
+                _ => acc.value_sum,
+            };
+            RollupRow {
+                key,
+                value,
+                subject_count: acc.subjects.len() as i64,
+            }
         })
         .collect();
     out.sort_by(|a, b| {
@@ -488,7 +538,8 @@ impl MetricEngine {
         Ok(aggregate_series(&facts, agg, filter, group_by))
     }
 
-    /// The by-dimension rollup (breakdown) for a measure. Empty when unknown.
+    /// The by-dimension rollup (breakdown) for a measure, additivity-aware per
+    /// its `temporal_semantics` (see [`compute_rollup`]). Empty when unknown.
     pub async fn rollup(
         &self,
         measure_key: &str,
@@ -497,8 +548,9 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
+        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let facts = self.facts.facts_for_measure(measure.id).await?;
-        Ok(compute_rollup(&facts, dimension))
+        Ok(compute_rollup(&facts, dimension, temporal))
     }
 
     // --- spec-driven reads (a metric key → its computed result) -----------
@@ -522,8 +574,9 @@ impl MetricEngine {
     }
 
     /// The by-dimension rollup for a spec — the source measure's facts filtered by
-    /// the spec's predicate, then rolled up by `dimension`. Empty for a formula /
-    /// unknown-measure spec.
+    /// the spec's predicate, then rolled up by `dimension` additivity-aware per
+    /// the measure's `temporal_semantics` (see [`compute_rollup`]). Empty for a
+    /// formula / unknown-measure spec.
     pub async fn rollup_for_spec(
         &self,
         spec: &MetricSpec,
@@ -535,10 +588,11 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
+        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let filter = spec_filter(spec)?;
         let facts = self.facts.facts_for_measure(measure.id).await?;
         let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
-        Ok(compute_rollup(&kept, dimension))
+        Ok(compute_rollup(&kept, dimension, temporal))
     }
 
     /// The single headline number for a spec: its series collapsed across TIME per
@@ -551,12 +605,7 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(None);
         };
-        let temporal = Temporal::parse(&measure.temporal_semantics).ok_or_else(|| {
-            DomainError::Invalid(format!(
-                "measure `{}` has unknown temporal_semantics `{}`",
-                measure_key, measure.temporal_semantics
-            ))
-        })?;
+        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let series = self.series_for_spec(spec, None).await?;
         Ok(range_value(&series, temporal))
     }
@@ -828,7 +877,8 @@ mod tests {
 
     #[test]
     fn rollup_sums_latest_per_subject_by_package() {
-        // a.rs measured twice — only the latest (3.0) counts.
+        // Semi-additive (level gauge): a.rs measured twice — only the latest
+        // (3.0) counts; summing snapshots across time would double-count.
         let facts = vec![
             FactRow {
                 subject_ref: Some("src/app/a.rs".into()),
@@ -851,7 +901,7 @@ mod tests {
                 ..fact(2, "2026-06-30T11:00:00Z", 20.0)
             },
         ];
-        let rollup = compute_rollup(&facts, "package");
+        let rollup = compute_rollup(&facts, "package", Temporal::SemiAdditive);
         let rows: Vec<(String, f64, i64)> = rollup
             .iter()
             .map(|r| (r.key.clone(), r.value, r.subject_count))
@@ -864,6 +914,70 @@ mod tests {
                 ("src/app".to_string(), 7.0, 2),
             ]
         );
+    }
+
+    #[test]
+    fn rollup_sums_every_fact_for_an_additive_measure() {
+        // Additive (event measure, e.g. tokens): every capture's facts count —
+        // latest-per-subject would report only the most recent event, not the
+        // total ("tokens by model" must be the running total, not the last turn).
+        let by_model = |cap: i64, at: &str, model: &str, v: f64| FactRow {
+            subject_kind: Some("model".into()),
+            subject_ref: Some(format!("model:{model}")),
+            ..fact(cap, at, v)
+        };
+        let facts = vec![
+            by_model(1, "2026-06-30T10:00:00Z", "opus", 100.0),
+            by_model(2, "2026-06-30T11:00:00Z", "opus", 50.0),
+            by_model(2, "2026-06-30T11:00:00Z", "haiku", 30.0),
+        ];
+        let rollup = compute_rollup(&facts, "subject", Temporal::Additive);
+        let rows: Vec<(String, f64, i64)> = rollup
+            .iter()
+            .map(|r| (r.key.clone(), r.value, r.subject_count))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("model:opus".to_string(), 150.0, 1),
+                ("model:haiku".to_string(), 30.0, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn rollup_rederives_ratio_for_a_non_additive_measure() {
+        // Non-additive (ratio, e.g. coverage): per group the value is
+        // Σnumerator/Σdenominator over the latest fact per subject — never a sum
+        // (or mean) of percentages, which weights a 10-line file like a
+        // 1000-line one.
+        let cov = |cap: i64, at: &str, p: &str, num: f64, den: f64| FactRow {
+            subject_ref: Some(p.to_string()),
+            path: Some(p.to_string()),
+            numerator: Some(num),
+            denominator: Some(den),
+            ..fact(cap, at, if den != 0.0 { num / den } else { 0.0 })
+        };
+        let facts = vec![
+            // a.rs re-measured — only the latest (80/100) counts.
+            cov(1, "2026-06-30T10:00:00Z", "src/app/a.rs", 10.0, 100.0),
+            cov(2, "2026-06-30T11:00:00Z", "src/app/a.rs", 80.0, 100.0),
+            cov(2, "2026-06-30T11:00:00Z", "src/app/b.rs", 5.0, 10.0),
+            cov(2, "2026-06-30T11:00:00Z", "src/util/c.rs", 9.0, 10.0),
+        ];
+        let rollup = compute_rollup(&facts, "package", Temporal::NonAdditive);
+        let rows: Vec<(String, f64, i64)> = rollup
+            .iter()
+            .map(|r| (r.key.clone(), r.value, r.subject_count))
+            .collect();
+        // src/util: 9/10 = 0.9 > src/app: (80+5)/(100+10) ≈ 0.7727.
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "src/util");
+        assert_eq!(rows[0].1, 0.9);
+        assert_eq!(rows[0].2, 1);
+        assert_eq!(rows[1].0, "src/app");
+        assert!((rows[1].1 - 85.0 / 110.0).abs() < 1e-9);
+        assert_eq!(rows[1].2, 2);
     }
 
     fn roll(key: &str, value: f64, subject_count: i64) -> RollupRow {

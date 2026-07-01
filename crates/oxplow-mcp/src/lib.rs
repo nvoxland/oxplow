@@ -1943,7 +1943,8 @@ impl OxplowMcp {
 
     #[tool(
         description = "By-dimension ROLLUP (breakdown) for a measure over its atomic facts (epic \
-            tsk12): the latest value per subject, summed per dimension value, largest first, with \
+            tsk12), additivity-aware per the measure's temporal semantics (level gauges: latest \
+            per subject; events: every fact; ratios: per-group Σnum/Σden), largest first, with \
             the contributing subject count. `dimension` is oxplow.package (default), \
             oxplow.severity, oxplow.status, or any dims_json key the facts carry. Answers 'which \
             package / severity / status holds the most'. Empty when the measure is unknown."
@@ -2002,9 +2003,10 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Roll up a metric by a DIMENSION — the metric's source-measure facts, latest \
-            value per subject, summed per dimension key, largest first, with the contributing \
-            subject count (epic tsk12). Works for the bundled code gauges (oxplow.todos, \
+        description = "Roll up a metric by a DIMENSION — the metric's source-measure facts, \
+            additivity-aware per the measure's temporal semantics (level gauges: latest per \
+            subject; events: every fact; ratios: per-group Σnum/Σden), largest first, with the \
+            contributing subject count (epic tsk12). Works for the bundled code gauges (oxplow.todos, \
             oxplow.fn_count, oxplow.high_complexity_fns, oxplow.long_functions), the oxplow.<lang>.* \
             idiom metrics, and any spec. `dimension` is `oxplow.package` (default — each subject's \
             parent directory), a conformed dim (oxplow.severity / oxplow.status), or any dims_json \
@@ -2041,11 +2043,11 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Run a configured `metrics:` gauge NOW (the `manual` trigger) and record its \
-            samples. `key` is a configured metric key (see list_metric_definitions / .oxplow/project.yaml \
-            `metrics:`). Computes against the stream's latest snapshot; returns the number of \
-            samples recorded. Use after editing a metric script, or to refresh a `manual`-trigger \
-            metric."
+        description = "Run a configured gauge NOW (the `manual` trigger) and record its FACTS. \
+            `key` is a configured gauge key (see .oxplow/project.yaml `gauges:` / the built-in \
+            code gauges). Computes against the stream's latest snapshot; returns the number of \
+            facts recorded. Use after editing a gauge script, or to refresh a `manual`-trigger \
+            gauge."
     )]
     async fn run_metric(
         &self,
@@ -2061,29 +2063,48 @@ impl OxplowMcp {
             .run_metric_by_key(&params.0.key, stream)
             .await
             .map_err(|e| McpError::invalid_params(e, None))?;
-        json_result(&serde_json::json!({ "key": params.0.key, "samples_recorded": count }))
+        json_result(&serde_json::json!({ "key": params.0.key, "facts_recorded": count }))
     }
 
     #[tool(
-        description = "Record an ASSERTED metric sample (provenance=asserted) — a number oxplow did \
-            not compute itself (CI import, agent-reported). `key` must be an existing definition. \
-            The UI flags asserted samples as lower-trust than `observed` ones, so prefer a real \
-            collector where possible. Run-less (no compute event)."
+        description = "Record an ASSERTED metric fact (provenance=asserted) — a number oxplow did \
+            not compute itself (CI import, agent-reported). `key` must be an existing metric spec \
+            with a source measure (a formula metric has no fact type to assert on); the fact lands \
+            on that measure under a lower-trust `asserted` capture, so the metric's own \
+            series/summary reads include it. Prefer a real collector where possible."
     )]
     async fn record_metric(
         &self,
         params: Parameters<RecordMetricParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let Some(def) = self
+        let Some(spec) = self
             .services
-            .metric_store
-            .get_definition(&p.key)
+            .fact_store
+            .get_spec(&p.key)
             .await
             .map_err(internal)?
         else {
             return Err(McpError::invalid_params(
                 "unknown metric key (see list_metric_definitions)",
+                None,
+            ));
+        };
+        let Some(measure_key) = spec.source_measure.as_deref() else {
+            return Err(McpError::invalid_params(
+                "a formula metric has no source measure to assert a fact on",
+                None,
+            ));
+        };
+        let Some(measure) = self
+            .services
+            .fact_store
+            .get_measure(measure_key)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(McpError::invalid_params(
+                "the metric's source measure is not defined (see list_measures)",
                 None,
             ));
         };
@@ -2101,21 +2122,27 @@ impl OxplowMcp {
             .as_ref()
             .filter(|d| !d.is_empty())
             .and_then(|d| serde_json::to_string(d).ok());
-        let mut sample =
-            oxplow_db::NewMetricSample::asserted(def.id, stream.value(), p.value, "agent-reported");
-        sample.subject_kind = subject_kind;
-        sample.subject_ref = subject_ref;
-        sample.dims_json = dims_json;
-        let id = self
+        let mut capture =
+            oxplow_db::NewMetricCapture::done(stream.value(), p.key.clone(), "agent-reported");
+        capture.provenance = "asserted".into();
+        let fact = oxplow_db::NewFact {
+            subject_kind,
+            subject_ref,
+            dims_json,
+            ..oxplow_db::NewFact::new(measure.id, p.value)
+        };
+        let capture_id = self
             .services
-            .metric_store
-            .record_sample(sample)
+            .fact_store
+            .record_facts(capture, vec![fact])
             .await
             .map_err(internal)?;
         self.services
             .events
             .emit(oxplow_app::OxplowEvent::MetricSamplesChanged { stream_id: stream });
-        json_result(&serde_json::json!({ "sample_id": id, "key": p.key, "provenance": "asserted" }))
+        json_result(
+            &serde_json::json!({ "capture_id": capture_id, "key": p.key, "provenance": "asserted" }),
+        )
     }
 
     #[tool(
@@ -6014,15 +6041,17 @@ mod tests {
     // ---- metric authoring tools (tsk213, P3) ----
 
     #[tokio::test]
-    async fn record_metric_stores_an_asserted_sample() {
+    async fn record_metric_stores_an_asserted_fact() {
         let (_p, services, server) = boot();
-        // A definition must exist first.
+        // A spec over a defined measure must exist first (the fact lands on the
+        // spec's source measure, so the metric's own reads see it).
         services
-            .metric_store
-            .upsert_definition(oxplow_db::NewMetricDefinition::new(
+            .fact_store
+            .upsert_spec(oxplow_db::NewMetricSpec::base(
                 "ci.flaky_rate",
-                "gauge",
                 "Flaky rate",
+                "oxplow.ast_hit",
+                "last",
             ))
             .await
             .unwrap();
@@ -6039,19 +6068,23 @@ mod tests {
             .unwrap();
         assert!(text_payload(out).contains("asserted"));
 
-        let def = services
-            .metric_store
-            .get_definition("ci.flaky_rate")
+        let measure = services
+            .fact_store
+            .get_measure("oxplow.ast_hit")
             .await
             .unwrap()
             .unwrap();
-        let samples = services.metric_store.list_samples(def.id).await.unwrap();
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].value, 0.12);
-        assert_eq!(samples[0].provenance, "asserted");
-        assert_eq!(samples[0].source, "agent-reported");
-        assert_eq!(samples[0].subject_kind.as_deref(), Some("suite"));
-        assert_eq!(samples[0].subject_ref.as_deref(), Some("unit"));
+        let facts = services
+            .fact_store
+            .facts_for_measure(measure.id)
+            .await
+            .unwrap();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].value, 0.12);
+        assert_eq!(facts[0].provenance, "asserted");
+        assert_eq!(facts[0].source, "agent-reported");
+        assert_eq!(facts[0].subject_kind.as_deref(), Some("suite"));
+        assert_eq!(facts[0].subject_ref.as_deref(), Some("unit"));
     }
 
     #[tokio::test]
@@ -6060,6 +6093,29 @@ mod tests {
         let err = server
             .record_metric(Parameters(RecordMetricParams {
                 key: "nope.unknown".into(),
+                value: 1.0,
+                subject: None,
+                dims: None,
+                stream: None,
+            }))
+            .await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn record_metric_rejects_a_formula_spec() {
+        // A formula metric has no source measure — there is no fact type an
+        // asserted number could land on.
+        let (_p, services, server) = boot();
+        let mut spec =
+            oxplow_db::NewMetricSpec::base("ci.derived", "Derived", "oxplow.ast_hit", "last");
+        spec.source_measure = None;
+        spec.formula = Some("a / b".into());
+        services.fact_store.upsert_spec(spec).await.unwrap();
+
+        let err = server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "ci.derived".into(),
                 value: 1.0,
                 subject: None,
                 dims: None,
@@ -6093,7 +6149,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert!(text_payload(out).contains("\"samples_recorded\": 1"));
+        assert!(text_payload(out).contains("\"facts_recorded\": 1"));
 
         let measure = services
             .fact_store

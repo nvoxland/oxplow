@@ -83,13 +83,13 @@ export const CHART_MODES: Array<{ key: ChartMode; label: string }> = [
 
 const AVG_WINDOW = 5;
 
-/** The chart mode that best matches how a metric rolls up: a `sum`/per-event
+/** The chart mode that best matches the spec's `aggregation`: a `sum`/per-event
  *  metric (tokens, nudges) reads as a running total → `cumulative`; an `avg`
- *  metric → `avg`; a level gauge (`last`) → the raw `value`. The page seeds the
- *  chart with this until the user picks a mode. */
-export function defaultChartMode(defaultAgg: string): ChartMode {
-  if (defaultAgg === "sum") return "cumulative";
-  if (defaultAgg === "avg") return "avg";
+ *  metric → `avg`; a level gauge (`last`/`count`) → the raw `value`. The page
+ *  seeds the chart with this until the user picks a mode. */
+export function defaultChartMode(aggregation: string): ChartMode {
+  if (aggregation === "sum") return "cumulative";
+  if (aggregation === "avg") return "avg";
   return "value";
 }
 
@@ -139,23 +139,23 @@ export function deltaVsFirst(samples: SeriesPoint[]): number | null {
   return pts[pts.length - 1]!.v - pts[0]!.v;
 }
 
-/** The headline "in range" stat, computed the way the metric ROLLS UP
- *  (`default_agg`) rather than always last−first — so a `sum`/per-event metric
- *  like tokens shows its window total, not a meaningless endpoint diff:
+/** The headline "in range" stat, computed the way the spec AGGREGATES rather
+ *  than always last−first — so a `sum`/per-event metric like tokens shows its
+ *  window total, not a meaningless endpoint diff:
  *  - `sum` → "Total in range" (Σ of in-range values);
  *  - `avg` → "Avg in range" (mean);
- *  - anything else (`last`/level gauges) → "Δ in range" (last − first), the
- *    signed change. `null` when there's nothing to show. */
+ *  - anything else (`last`/`count` level gauges) → "Δ in range" (last − first),
+ *    the signed change. `null` when there's nothing to show. */
 export function inRangeStat(
   samples: SeriesPoint[],
-  defaultAgg: string,
+  aggregation: string,
 ): { label: string; value: number; signed: boolean } | null {
   const pts = seriesPoints(samples);
   if (pts.length === 0) return null;
-  if (defaultAgg === "sum") {
+  if (aggregation === "sum") {
     return { label: "Total in range", value: pts.reduce((a, p) => a + p.v, 0), signed: false };
   }
-  if (defaultAgg === "avg") {
+  if (aggregation === "avg") {
     return { label: "Avg in range", value: pts.reduce((a, p) => a + p.v, 0) / pts.length, signed: false };
   }
   if (pts.length < 2) return null;
