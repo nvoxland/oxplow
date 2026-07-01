@@ -392,7 +392,7 @@ capabilities — see [metrics.md](./metrics.md)):
 - coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…] } } }`
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"? } ] } ] }`
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
-- gauge: `{ "samples": [ { "value", "subject"? ("kind:ref"), "dims"? } ] }` (→ `metric_sample`; see [metrics.md](./metrics.md)). A gauge may emit **many** samples with different subjects — the bundled code gauges return a `tree:.` repo total **plus** a sparse `file:<path>` sample per nonzero file, which is the per-file *attribution grain* the effort roll-up reads ([metrics.md](./metrics.md)).
+- gauge: `{ "samples": [ { "value", "subject"? ("kind:ref"), "dims"? } ], "findings"?: [ … ], "facts"?: [ { "measure", "value", "subject"?, "path"?, "line"?, "dims"? } ] }` (see [metrics.md](./metrics.md)). Three channels: `samples` → the baked `metric_sample` headline (a gauge may emit **many** — the bundled code gauges return a `tree:.` repo total **plus** a sparse `file:<path>` sample per nonzero file, the per-file *attribution grain* the effort roll-up reads); `findings` → the offenders drill-in (`metric_finding`); **`facts`** → the durable atomic grain of the inverted substrate (epic tsk12) — each bound to a defined `measure`, re-aggregated by a metric *spec* at read time. Emitting a fact on an **undefined** measure is a declare-to-collect violation (the fact is dropped with a warn).
 
 The two bundled analysis plugins are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps

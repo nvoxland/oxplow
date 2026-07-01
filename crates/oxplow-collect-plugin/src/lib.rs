@@ -84,13 +84,44 @@ pub struct GaugeSample {
 /// `metric_sample`, plus optional located `findings` — the underlying items the
 /// metric counted (e.g. each high-complexity function), persisted on the run so
 /// a recording can be drilled into. Mirrors the JSON a gauge script returns —
-/// `{ "samples": [ … ], "findings"?: [ { "path"?, "line"?, "message"?, … } ] }`.
+/// `{ "samples": [ … ], "findings"?: [ … ], "facts"?: [ … ] }`.
+///
+/// `facts` is the durable atomic channel of the inverted metric substrate (epic
+/// tsk12): each entry is a per-subject measurement bound to a **measure**
+/// (`oxplow.complexity`, `oxplow.todo`, …) — the raw grain a metric SPEC
+/// re-aggregates at read time. It is distinct from `samples` (the legacy baked
+/// headline) and `findings` (the offenders drill-in): a gauge dual-writes a
+/// baked headline AND the facts behind it, and the count-over-threshold headline
+/// becomes a spec over the facts.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct MetricReport {
     #[serde(default)]
     pub samples: Vec<GaugeSample>,
     #[serde(default)]
     pub findings: Vec<GaugeFinding>,
+    #[serde(default)]
+    pub facts: Vec<GaugeFact>,
+}
+
+/// One durable atomic fact a gauge emits (epic tsk12) — a per-subject
+/// measurement bound to a **measure**, the grain a metric spec re-aggregates.
+/// `measure` is the (defined) measure key the fact lands on; emitting a fact on
+/// an undefined measure is a declare-to-collect violation the host surfaces.
+/// `subject` is an optional `"kind:ref"` string (split like `GaugeSample`);
+/// `path`/`line` are the location at capture; `dims` are open author dimensions
+/// carried onto the fact as `dims_json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GaugeFact {
+    pub measure: String,
+    pub value: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dims: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// One located item a gauge counted — projected onto `metric_finding` on the

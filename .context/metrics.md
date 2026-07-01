@@ -89,8 +89,11 @@ welded to collection.
   from `value` × these, never stored on a fact), `scope`/`category`/`language`.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
   `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
-  cluster once reads flip (tsk26). No seed rows — specs seed from resolved config
-  with the read-flip.
+  cluster once reads flip (tsk26). The migration seeds no rows; the **built-in
+  code-metric specs** (`oxplow.high_complexity_fns` / `long_functions` / `fn_count`
+  / `todos` — each a `count` over its measure, thresholds via `min_value`) are
+  seeded from Rust (`metrics_service.rs::builtin_metric_specs`, in `seed_catalog`,
+  tsk23); config/global spec seeding lands with the read-flip (tsk26).
 
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
 `upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
@@ -139,6 +142,23 @@ tree stays green through the migration. Landed:
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`) |
 | duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref` |
+| code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
+
+**Code-gauge unbake (tsk23) — the keystone, and the one non-mechanical producer.**
+A gauge's `MetricReport` gained a third channel beside `samples` (baked headline)
+and `findings` (offenders drill-in): `facts: [GaugeFact { measure, value, subject?,
+path?, line?, dims? }]` — measure-bound atomics. `record_gauge_facts` resolves each
+fact's `measure` against the catalog (**declare-to-collect**, decision #4: a fact on
+an undefined measure is dropped with a `tracing::warn!`, never silently written; the
+gauge's baked sample/findings still land) and writes the resolvable facts under one
+capture. The count-over-threshold headline is now the **spec**
+(`builtin_metric_specs`), and the equivalence test
+`code_gauge_facts_reaggregate_to_the_baked_headline` pins
+`engine.headline_for_spec(spec) == the baked tree:. total` for every bundled code
+metric — the proof the inversion is faithful. (Strict `> N` in the old gauge equals
+`min_value = N+1` on the integer complexity/length measures.) The baked
+`tree:.`/`file:` samples are **still written** for the legacy read path; unbaking
+them retires with the read-flip (tsk26) so the headline never has a read gap.
 
 Wired into `Services` as `fact_store: Arc<SqliteFactStore>` +
 `metric_engine: MetricEngine`; `TaskService`/`CollectionService`/

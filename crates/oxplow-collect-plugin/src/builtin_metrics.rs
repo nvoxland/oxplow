@@ -349,6 +349,24 @@ mod tests {
         total
     }
 
+    /// Every `oxplow.*` FACT the gauge emits (the durable atomic grain), as
+    /// `(measure, value, language)` — the inverted substrate's per-item output.
+    fn facts_over(key: &str, files: HashMap<String, String>) -> Vec<(String, f64, Option<String>)> {
+        report_over(key, files)
+            .facts
+            .iter()
+            .map(|fc| {
+                let lang = fc
+                    .dims
+                    .as_ref()
+                    .and_then(|d| d.get("language"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                (fc.measure.clone(), fc.value, lang)
+            })
+            .collect()
+    }
+
     /// The `(path, value)` of every per-file (`file:<path>`) sample, in emit
     /// order — the attribution grain the effort rollup reads.
     fn per_file_over(key: &str, files: HashMap<String, String>) -> Vec<(String, f64)> {
@@ -547,6 +565,43 @@ const g = (a: any) => a!;
     fn unified_long_functions_across_languages() {
         // Only the Rust `big` (>60 lines) is long.
         assert_eq!(run_over("oxplow.long_functions", mixed_corpus()), 1.0);
+    }
+
+    #[test]
+    fn code_gauges_emit_measure_bound_facts_for_every_item() {
+        // The inverted substrate (epic tsk12): each code gauge emits a durable
+        // per-item FACT on its measure for EVERY function/marker — not just the
+        // offenders the baked count reports — so a spec can re-threshold. 4
+        // functions across the corpus (rust complex+big, ts f, clj g); 2 markers.
+        let complexity = facts_over("oxplow.high_complexity_fns", mixed_corpus());
+        assert_eq!(complexity.len(), 4, "one complexity fact per function");
+        assert!(complexity.iter().all(|(m, _, _)| m == "oxplow.complexity"));
+        // Every fact is language-tagged, and one function (rust `complex`) is >10.
+        assert!(complexity.iter().all(|(_, _, lang)| lang.is_some()));
+        assert_eq!(
+            complexity.iter().filter(|(_, v, _)| *v > 10.0).count(),
+            1,
+            "the baked high_complexity count is recoverable from the facts"
+        );
+
+        let lengths = facts_over("oxplow.long_functions", mixed_corpus());
+        assert_eq!(lengths.len(), 4, "one fn_length fact per function");
+        assert!(lengths.iter().all(|(m, _, _)| m == "oxplow.fn_length"));
+        assert_eq!(lengths.iter().filter(|(_, v, _)| *v > 60.0).count(), 1);
+
+        let params = facts_over("oxplow.fn_count", mixed_corpus());
+        assert_eq!(params.len(), 4, "one parameter_count fact per function");
+        assert!(params.iter().all(|(m, _, _)| m == "oxplow.parameter_count"));
+
+        let todos = facts_over("oxplow.todos", mixed_corpus());
+        assert_eq!(
+            todos.len(),
+            2,
+            "one todo fact per marker (ts TODO + clj FIXME)"
+        );
+        assert!(todos
+            .iter()
+            .all(|(m, v, _)| m == "oxplow.todo" && *v == 1.0));
     }
 
     #[test]
