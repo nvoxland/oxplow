@@ -1555,6 +1555,22 @@ export type FileSurprise = {
 };
 
 /**
+ *  A fact predicate on a `metrics:` spec (the `filter:` block) — the config
+ *  mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
+ *  keeping only the facts that match before aggregation: `minValue` for a
+ *  count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
+ *  for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
+ */
+export type FilterConfig = {
+	// Keep facts with `value >= minValue`.
+	minValue?: number | null,
+	// Keep facts whose reported severity equals this (e.g. `error`).
+	severity?: string | null,
+	// Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.
+	dimEq?: string[] | null,
+};
+
+/**
  *  Recently completed tasks merged with recently updated wiki
  *  notes, sorted by timestamp DESC. Drives the rail's "Finished"
  *  section. Items whose timestamp is `<= finished_cleared_at` are
@@ -1567,6 +1583,74 @@ export type Followup = {
 	thread_id: ThreadId,
 	body: string,
 	created_at: number,
+};
+
+/**
+ *  A derived-metric formula on a `metrics:` spec (the `formula:` block) — a
+ *  constrained binary op over two OTHER metric keys (no source measure). The
+ *  engine aligns the two metrics on their shared rollup key and applies `op`
+ *  (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
+ */
+export type FormulaConfig = {
+	// `add` | `sub` | `mul` | `div` (`ratio` aliases `div`).
+	op: string,
+	// The left operand metric key.
+	left: string,
+	// The right operand metric key.
+	right: string,
+};
+
+/**
+ *  How a gauge produces facts (the `compute:` block on a `gauges:` entry).
+ *  Mirrors [`PluginConfig`]'s runtime fields — the gauge runner maps it to a
+ *  registered collector. `report` is the report path for a report-derived
+ *  gauge; tree-derived gauges read the snapshot via `files()` instead and leave
+ *  it unset. (Renamed from `MetricComputeConfig` in epic tsk12, E: compute is a
+ *  property of the *gauge* that emits facts, not the *metric* that reads them.)
+ */
+export type GaugeComputeConfig = {
+	// Transform tier: `jaq` | `starlark` | `exec`.
+	runtime: string,
+	/**
+	 *  Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
+	 *  `lcov` | `lines` (default `text`). Ignored by `exec`.
+	 */
+	input?: string | null,
+	/**
+	 *  Project-relative path to the script file (jaq/Starlark program or the
+	 *  `exec` program). Required.
+	 */
+	entryFile?: string | null,
+	// Extra arguments for the `exec` runtime.
+	args?: string[],
+	// Optional project-relative report path for a report-derived gauge.
+	report?: string | null,
+};
+
+/**
+ *  One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
+ *  E). A gauge runs its `compute:` collector on its `trigger`, emitting atomic
+ *  facts on the measures it declares in `emits`. Unlike a metric there is no
+ *  `use:`/`key:` split — a gauge is always a definition (you declare the
+ *  producer; a project doesn't "enable" one). Resolved across global+project by
+ *  [`resolve_gauges`]; built-in gauges live in code, not config.
+ */
+export type GaugeEntry = {
+	// The gauge's namespaced key (`<vendor>.<id>`). Required.
+	key?: string | null,
+	title?: string | null,
+	/**
+	 *  `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
+	 *  `continuous` (default `on-snapshot`).
+	 */
+	trigger?: string | null,
+	/**
+	 *  The measure keys this gauge is allowed to emit facts on (declare-to-collect:
+	 *  a fact on a measure outside this list is dropped). At least one required.
+	 */
+	emits?: string[],
+	// How the gauge produces facts (required).
+	compute?: GaugeComputeConfig | null,
 };
 
 /**
@@ -1966,32 +2050,6 @@ export type MetricCatalogEntry = {
 	category: string | null,
 };
 
-/**
- *  How a configured metric is computed (the `compute:` block on a `metrics:`
- *  entry). Mirrors [`PluginConfig`]'s runtime fields — the metric runner maps it
- *  to a registered gauge collector. `report` is the report path for a
- *  report-derived gauge; tree-derived gauges read the snapshot via `files()`
- *  instead and leave it unset.
- */
-export type MetricComputeConfig = {
-	// Transform tier: `jaq` | `starlark` | `exec`.
-	runtime: string,
-	/**
-	 *  Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
-	 *  `lcov` | `lines` (default `text`). Ignored by `exec`.
-	 */
-	input?: string | null,
-	/**
-	 *  Project-relative path to the script file (jaq/Starlark program or the
-	 *  `exec` program). Required.
-	 */
-	entryFile?: string | null,
-	// Extra arguments for the `exec` runtime.
-	args?: string[],
-	// Optional project-relative report path for a report-derived gauge.
-	report?: string | null,
-};
-
 // One row in the measure catalog.
 export type MetricDefinition = {
 	id: number,
@@ -2042,15 +2100,18 @@ export type MetricDimensionRollup = {
 };
 
 /**
- *  One entry in the top-level `metrics:` block — the metric authoring surface
- *  (epic tsk213, P3). Two forms, distinguished by which key is set:
+ *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
+ *  measure (epic tsk12, E). A metric no longer *computes* anything: it names a
+ *  `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
+ *  other metrics, and the engine aggregates the durable facts a `gauges:` entry
+ *  emitted. Two forms, distinguished by which key is set:
  *  - **`use:`** — enable an existing catalog metric by key (built-in/global),
- *    optionally overriding `target`/`trigger`/`dimensions`/… for this project.
- *  - **`key:`** — define a NEW metric (full definition + `compute:`).
+ *    optionally overriding `target`/thresholds for this project.
+ *  - **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).
  * 
- *  The runner resolves these across the three scopes into `ResolvedMetric`s.
- *  All non-discriminant fields are optional so both forms share one struct;
- *  validation enforces the per-form rules.
+ *  Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
+ *  fields are optional so both forms share one struct; validation enforces the
+ *  per-form rules.
  */
 export type MetricEntry = {
 	// `use:` form — the catalog key to enable.
@@ -2058,36 +2119,46 @@ export type MetricEntry = {
 	// `key:` form — the new metric's namespaced key.
 	key?: string | null,
 	title?: string | null,
-	// `gauge` | `findings` | `test` | `coverage` | `event` (default `gauge`).
-	kind?: string | null,
+	/**
+	 *  The measure whose facts this metric aggregates (required for a `key:`
+	 *  metric unless it sets `formula`). NULL for a pure formula metric.
+	 */
+	sourceMeasure?: string | null,
+	/**
+	 *  `count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).
+	 *  Combines the facts WITHIN a capture; cross-time collapse is governed by the
+	 *  source measure's `temporalSemantics`.
+	 */
+	aggregation?: string | null,
+	// Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).
+	filter?: FilterConfig | null,
+	/**
+	 *  Derived-metric formula over other metric keys (mutually exclusive with
+	 *  `sourceMeasure`).
+	 */
+	formula?: FormulaConfig | null,
 	unit?: string | null,
 	// `higher-better` | `lower-better` | `neutral` (default `neutral`).
 	direction?: string | null,
-	defaultAgg?: string | null,
-	// `effort` | `tree` | `file` | `entity`.
-	grain?: string | null,
+	/**
+	 *  Read-time presentation: `gauge` | `findings` | `test` | `coverage` |
+	 *  `event` (default `gauge`).
+	 */
+	displayKind?: string | null,
+	// Catalog grouping: `operational` | `testing` | `static-quality` | `custom`.
+	category?: string | null,
 	// Language this metric measures (e.g. `rust`), for the catalog filter.
 	language?: string | null,
 	/**
-	 *  One-line human description of what the metric measures (shown atop the
-	 *  Metric Detail page). Inherent to the definition — a `use:` can't override.
+	 *  One-line human description (shown atop the Metric Detail page). Inherent to
+	 *  the definition — a `use:` can't override.
 	 */
 	description?: string | null,
-	// Declared conformed-dimension keys this metric carries.
-	dimensions?: string[],
+	// Conformed-dimension keys this metric can be sliced by (drill-across).
+	sliceableDims?: string[],
 	target?: number | null,
 	warnAt?: number | null,
 	failAt?: number | null,
-	/**
-	 *  `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
-	 *  `continuous` (default `manual`).
-	 */
-	trigger?: string | null,
-	/**
-	 *  How the metric computes (required for `key:` form; inherited from the
-	 *  catalog for `use:` form).
-	 */
-	compute?: MetricComputeConfig | null,
 };
 
 export type MetricFinding = {
@@ -2190,12 +2261,18 @@ export type OxplowConfig = {
 	// Per-project collection profile (test + coverage instrumentation).
 	collection: CollectionConfig,
 	/**
-	 *  Project-declared metrics (the `metrics:` block) — the author-able
-	 *  substrate surface (epic tsk213, P3). Each entry enables a catalog metric
-	 *  (`use:`) or defines a new one (`key:`). The runner resolves these across
-	 *  the built-in/global/project scopes; see [`resolve_metrics`].
+	 *  Project-declared metric SPECS (the `metrics:` block) — the author-able
+	 *  read surface (epic tsk12, E). Each entry enables a catalog metric
+	 *  (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
+	 *  these across the built-in/global/project scopes; see [`resolve_metrics`].
 	 */
 	metrics?: MetricEntry[],
+	/**
+	 *  Project-declared gauges (the `gauges:` block) — the fact PRODUCERS (epic
+	 *  tsk12, E). Each runs its `compute:` collector on its trigger and emits
+	 *  facts on the measures it `emits`. Resolved by [`resolve_gauges`].
+	 */
+	gauges?: GaugeEntry[],
 	/**
 	 *  Project-declared measures (the `measures:` block) — custom fact TYPES a
 	 *  collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins

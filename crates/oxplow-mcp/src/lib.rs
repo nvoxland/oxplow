@@ -5888,7 +5888,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             project.path().join(".oxplow").join("project.yaml"),
-            "metrics:\n  - key: repo.answer\n    kind: gauge\n    title: \"answer\"\n    compute: { runtime: starlark, entryFile: count.star }\n",
+            "gauges:\n  - key: repo.answer\n    title: \"answer\"\n    trigger: manual\n    emits: [repo.count]\n    compute: { runtime: starlark, entryFile: count.star }\n",
         )
         .unwrap();
         services.reload_config_from_disk().unwrap();

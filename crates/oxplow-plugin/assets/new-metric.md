@@ -1,5 +1,5 @@
 ---
-description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml `metrics:` entry + script and verifies it.
+description: Author an oxplow metric — a durable, chartable number tracked over time (count of X, complexity, bundle size, …). Scaffolds the .oxplow/project.yaml measure+gauge+metric trio + script and verifies it.
 ---
 
 Author a metric so oxplow tracks a number over time and charts it on the
@@ -26,44 +26,57 @@ metrics:
     target: 0
 ```
 
-## 3. Otherwise define a new one
+## 3. Otherwise define the trio (measure + gauge + metric)
 
-Add a `key:` entry (namespaced — `oxplow.*` is reserved) + a script under
-`oxplow/metrics/`:
+The easiest path is the `scaffold_metric` MCP tool (writes all three + a starter
+gauge script). By hand, add the trio (namespaced — `oxplow.*` is reserved) + a
+gauge script under `oxplow/gauges/`:
 
 ```yaml
+measures:
+  - key: repo.todo_count           # the fact TYPE
+    subjectKind: file
+    unit: count
+gauges:
+  - key: repo.todo                 # the PRODUCER
+    trigger: on-snapshot
+    emits: [repo.todo_count]
+    compute: { runtime: starlark, entryFile: oxplow/gauges/todo.star }
 metrics:
-  - key: repo.todo_count
-    kind: gauge
+  - key: repo.todo_count           # the SPEC
     title: "TODO comments"
+    sourceMeasure: repo.todo_count
+    aggregation: sum
     direction: lower-better
     unit: count
-    trigger: on-snapshot
-    dimensions: [language]
-    compute: { runtime: starlark, entryFile: oxplow/metrics/todo_count.star }
 ```
 
 ```python
-# oxplow/metrics/todo_count.star
+# oxplow/gauges/todo.star — one per-file FACT (not a baked total)
 def transform(input):
-    n = 0
+    facts = []
     for f in files("**/*.rs"):
-        for c in ast_query(f["text"], "rust", "[(line_comment) (block_comment)] @c"):
-            n += len(regex_find(r"(?i)\b(TODO|FIXME)\b", c["text"]))
-    return {"samples": [{"value": n, "dims": {"language": "rust"}}]}
+        c = 0
+        for cm in ast_query(f["text"], "rust", "[(line_comment) (block_comment)] @c"):
+            c += len(regex_find(r"(?i)\b(TODO|FIXME)\b", cm["text"]))
+        if c > 0:
+            facts.append({"measure": "repo.todo_count", "value": c,
+                          "subject": "file:" + f["path"], "path": f["path"]})
+    return {"facts": facts}
 ```
 
-The gauge script returns `{ "samples": [ { "value", "subject"?, "dims"? } ] }`.
-Read the `oxplow-metrics` skill for the full builtin surface
-(`files`/`ast_query`/`code_metrics`/`regex_find`/…) and the report-derived + exec
-patterns. The bundled scripts in
+The gauge returns `{ "facts": [ { "measure", "value", "subject"?, "path"?, "dims"? } ] }`
+— one atomic fact per subject; the `metrics:` spec (`aggregation: sum`) re-adds
+them. Read the `oxplow-metrics` skill for the four-block model, the full builtin
+surface (`files`/`ast_query`/`code_metrics`/`regex_find`/…) and the report-derived
++ exec patterns. The bundled scripts in
 `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/` are copy-paste
 templates.
 
 ## 4. Verify
 
-1. `run_metric { key: "repo.todo_count" }` (MCP) — runs it now, returns the
-   sample count.
+1. `run_metric { key: "repo.todo" }` (MCP) — runs the gauge now, returns the fact
+   count.
 2. `get_metric_summary { metric_key: "repo.todo_count" }` — confirm the value.
 3. It now appears on the Metrics page automatically.
 

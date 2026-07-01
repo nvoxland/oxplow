@@ -852,6 +852,7 @@ mod tests {
             inject_session_context: true,
             collection: Default::default(),
             metrics: Default::default(),
+            gauges: Default::default(),
             measures: Default::default(),
             dimensions: Default::default(),
             agent_models: Default::default(),

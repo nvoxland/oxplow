@@ -19,9 +19,10 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_collect_plugin::{builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost};
 use oxplow_config::{
-    global_config_dir, load_global_dimension_entries, load_global_measure_entries,
-    load_global_metric_entries, resolve_dimensions, resolve_measures, resolve_metrics,
-    DimensionEntry, MeasureEntry, MetricComputeConfig, MetricEntry, OxplowConfig, ResolvedMetric,
+    global_config_dir, load_global_dimension_entries, load_global_gauge_entries,
+    load_global_measure_entries, load_global_metric_entries, resolve_dimensions, resolve_gauges,
+    resolve_measures, resolve_metrics, DimensionEntry, GaugeComputeConfig, GaugeEntry,
+    MeasureEntry, MetricEntry, OxplowConfig, ResolvedGauge, ResolvedSpec,
 };
 use oxplow_db::{
     NewDimension, NewMeasure, NewMetricDefinition, NewMetricRun, NewMetricSample, NewMetricSpec,
@@ -149,23 +150,24 @@ impl MetricsService {
         self.global_dir.clone().or_else(global_config_dir)
     }
 
-    /// Base dir a metric's `compute.entryFile` / `report` resolves against:
-    /// `<global>/metrics` for a global-scope metric, else the project dir
-    /// (tsk235). Falls back to the project dir if no global dir is available.
-    fn script_base_dir(&self, metric: &ResolvedMetric) -> PathBuf {
-        if metric.scope == "global" {
+    /// Base dir a gauge's `compute.entryFile` / `report` resolves against:
+    /// `<global>/gauges` for a global-scope gauge, else the project dir. Falls
+    /// back to the project dir if no global dir is available.
+    fn script_base_dir(&self, gauge: &ResolvedGauge) -> PathBuf {
+        if gauge.scope == "global" {
             if let Some(g) = self.effective_global_dir() {
-                return g.join("metrics");
+                return g.join("gauges");
             }
         }
         self.project_dir.clone()
     }
 
-    /// The active, resolved metrics for this project (built-in ∪ global ∪
+    /// The active, resolved metric SPECS for this project (built-in ∪ global ∪
     /// project, precedence project > global > built-in). Built-ins are the
-    /// bundled catalog (`oxplow_collect_plugin::builtin_metrics`, tsk218); a
-    /// project activates one with `metrics: - use: oxplow.<lang>.<name>`.
-    fn resolved_metrics(&self) -> Vec<ResolvedMetric> {
+    /// bundled catalog (`oxplow_collect_plugin::builtin_metrics`); a project
+    /// activates one with `metrics: - use: oxplow.<lang>.<name>` and its own
+    /// `key:` specs.
+    fn resolved_specs(&self) -> Vec<ResolvedSpec> {
         let project = self
             .config
             .read()
@@ -175,8 +177,38 @@ impl MetricsService {
             .effective_global_dir()
             .map(|d| load_global_metric_entries(&d))
             .unwrap_or_default();
-        let builtin = builtin_metric_entries();
+        let builtin = builtin_spec_entries();
         resolve_metrics(&builtin, &global, &project)
+    }
+
+    /// The active, resolved GAUGES (fact producers) for this project: config
+    /// `gauges:` (global ∪ project, always active once declared) ∪ the built-in
+    /// gauges whose metric is `use:`-enabled in this project. This is what the
+    /// run paths execute.
+    fn resolved_gauges(&self) -> Vec<ResolvedGauge> {
+        let project = self
+            .config
+            .read()
+            .map(|c| c.gauges.clone())
+            .unwrap_or_default();
+        let global = self
+            .effective_global_dir()
+            .map(|d| load_global_gauge_entries(&d))
+            .unwrap_or_default();
+        let mut out = resolve_gauges(&global, &project);
+        // Built-in gauges run only when their metric is enabled (`metrics: use:`).
+        let enabled: std::collections::HashSet<String> = self
+            .resolved_specs()
+            .into_iter()
+            .filter(|s| s.scope == "built-in")
+            .map(|s| s.key)
+            .collect();
+        for m in builtin_metrics() {
+            if enabled.contains(m.key) {
+                out.push(builtin_gauge(m.key, m.trigger));
+            }
+        }
+        out
     }
 
     fn max_file_bytes(&self) -> u64 {
@@ -191,8 +223,8 @@ impl MetricsService {
     /// first run. Idempotent; best-effort. Returns the count seeded.
     pub async fn seed_definitions(&self) -> usize {
         let mut n = 0;
-        for m in self.resolved_metrics() {
-            match self.metrics.upsert_definition(metric_definition(&m)).await {
+        for m in self.resolved_specs() {
+            match self.metrics.upsert_definition(spec_definition(&m)).await {
                 Ok(_) => n += 1,
                 Err(e) => {
                     tracing::warn!(key = %m.key, error = %e, "failed to seed metric definition")
@@ -269,14 +301,25 @@ impl MetricsService {
         // aggregations over per-item facts, not baked sample streams — the
         // language-agnostic code metrics (`builtin_metric_specs`) + the
         // per-language idiom metrics (`builtin_ast_specs`, over `oxplow.ast_hit`).
-        // Seed beside the migration's built-in measures (idempotent). Config /
-        // global spec seeding lands with the read-flip (tsk26).
+        // Seed beside the migration's built-in measures (idempotent).
         for spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
         {
             if let Err(e) = facts.upsert_spec(spec.clone()).await {
                 tracing::warn!(key = %spec.key, error = %e, "failed to seed built-in metric spec");
+            }
+        }
+        // Config-declared metric SPECS (global ∪ project `metrics:` entries). A
+        // `use:` of a built-in re-seeds it with any threshold override; a `key:`
+        // seeds the new spec. Built-in specs are seeded above; skip them here.
+        for s in self
+            .resolved_specs()
+            .into_iter()
+            .filter(|s| s.scope != "built-in")
+        {
+            if let Err(e) = facts.upsert_spec(spec_to_new_spec(&s)).await {
+                tracing::warn!(key = %s.key, error = %e, "failed to seed config metric spec");
             }
         }
         (m, d)
@@ -297,15 +340,16 @@ impl MetricsService {
     /// 4. every other seeded `metric_definition` — installed plugin metrics (and
     ///    legacy rows) not covered above. Also `toggleable: false`.
     pub async fn catalog(&self) -> Vec<MetricCatalogEntry> {
-        let resolved = self.resolved_metrics();
+        let resolved = self.resolved_specs();
         let by_key: std::collections::HashMap<&str, &_> =
             resolved.iter().map(|m| (m.key.as_str(), m)).collect();
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
         for b in builtin_metrics() {
             seen.insert(b.key.to_string());
-            // When enabled, surface the *resolved* target/trigger (so a project
-            // override shows through, tsk233); otherwise the built-in defaults.
+            // When enabled, surface the *resolved* target (so a project override
+            // shows through, tsk233); otherwise the built-in defaults. Trigger is a
+            // property of the built-in gauge, not overridable.
             let r = by_key.get(b.key);
             out.push(MetricCatalogEntry {
                 key: b.key.to_string(),
@@ -315,25 +359,27 @@ impl MetricsService {
                 scope: "built-in".to_string(),
                 enabled: r.is_some(),
                 target: r.map_or(b.target, |m| m.target),
-                trigger: r.map_or_else(|| b.trigger.to_string(), |m| m.trigger.clone()),
+                trigger: b.trigger.to_string(),
                 toggleable: true,
                 category: Some("custom".to_string()),
             });
         }
-        // Project/global-defined metrics not already shown as a built-in.
+        // Project/global-defined metric specs not already shown as a built-in.
         for m in &resolved {
             if seen.insert(m.key.clone()) {
                 out.push(MetricCatalogEntry {
                     key: m.key.clone(),
                     title: m.title.clone(),
-                    kind: m.kind.clone(),
+                    kind: m.display_kind.clone(),
                     language: m.language.clone(),
                     scope: m.scope.clone(),
                     enabled: true,
                     target: m.target,
-                    trigger: m.trigger.clone(),
+                    // A spec has no trigger of its own — its facts arrive on the
+                    // producing gauge's cadence.
+                    trigger: "auto".to_string(),
                     toggleable: true,
-                    category: Some("custom".to_string()),
+                    category: m.category.clone().or_else(|| Some("custom".to_string())),
                 });
             }
         }
@@ -447,16 +493,18 @@ impl MetricsService {
         Ok(())
     }
 
-    /// Scaffold a new gauge metric (tsk234/tsk235): write a starter Starlark
-    /// script + a `key:` `metrics:` entry, then reseed. Returns the path to the
-    /// stub. The metric runs `on-snapshot` and charts as soon as it has samples.
+    /// Scaffold a new gauge-backed metric (epic tsk12, E): write a starter
+    /// Starlark gauge script plus the **trio** that wires it up — a `measures:`
+    /// entry (`<key>.count`, the fact type the gauge emits), a `gauges:` entry
+    /// (`<key>`, the producer) and a `metrics:` spec (`<key>`, a `sum` over that
+    /// measure). Then reseed. Returns the path to the script stub.
     ///
-    /// `scope`: `project` (default) writes the script under `oxplow/metrics/`
-    /// and the entry into `.oxplow/project.yaml`, returning the **project-relative** path
-    /// (so the UI can open it). `global` writes both under
-    /// `<global_config_dir>/metrics/` (shared across the user's projects),
-    /// returning the **absolute** script path. The runner resolves each scope's
-    /// `entryFile` against the matching base dir (`script_base_dir`).
+    /// `scope`: `project` (default) writes the script under `oxplow/gauges/` and
+    /// the three entries into `.oxplow/project.yaml`, returning the
+    /// **project-relative** script path. `global` writes the script + three
+    /// manifests under `<global_config_dir>/{gauges,measures,metrics}/` (shared
+    /// across the user's projects) plus a project `use:` so the metric charts
+    /// here, returning the **absolute** script path.
     pub async fn scaffold_metric(
         &self,
         key: &str,
@@ -477,29 +525,47 @@ impl MetricsService {
             .filter(|g| !g.is_empty())
             .unwrap_or_else(|| "**/*".into());
         let language = language.filter(|l| !l.is_empty());
-        let slug: String = key
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        let script = starter_metric_script(key, &glob, language.as_deref());
-        let entry = MetricEntry {
+        let slug = slugify(key);
+        let measure_key = format!("{key}.count");
+        let title = title.filter(|t| !t.is_empty());
+        let script = starter_gauge_script(key, &measure_key, &glob, language.as_deref());
+
+        // The `<key>.count` measure the gauge emits (per-file counts).
+        let measure = MeasureEntry {
+            key: Some(measure_key.clone()),
+            title: Some(format!("{key} (per-file count)")),
+            unit: Some("count".to_string()),
+            subject_kind: Some("file".to_string()),
+            temporal_semantics: Some("semi-additive".to_string()),
+            component_role: None,
+            description: None,
+        };
+        // The gauge (producer) — emits `<key>.count` facts on every snapshot.
+        let gauge = GaugeEntry {
             key: Some(key.to_string()),
-            title: title.filter(|t| !t.is_empty()),
-            kind: Some("gauge".to_string()),
-            language,
+            title: title.clone(),
             trigger: Some("on-snapshot".to_string()),
-            compute: Some(MetricComputeConfig {
+            emits: vec![measure_key.clone()],
+            compute: Some(GaugeComputeConfig {
                 runtime: "starlark".to_string(),
                 input: None,
-                // entryFile is relative to the scope's base dir.
                 entry_file: Some(if global {
                     format!("{slug}.star")
                 } else {
-                    format!("oxplow/metrics/{slug}.star")
+                    format!("oxplow/gauges/{slug}.star")
                 }),
                 args: vec![],
                 report: None,
             }),
+        };
+        // The metric (spec) — a `sum` over the measure's facts.
+        let metric = MetricEntry {
+            key: Some(key.to_string()),
+            title,
+            source_measure: Some(measure_key.clone()),
+            aggregation: Some("sum".to_string()),
+            display_kind: Some("gauge".to_string()),
+            language,
             ..Default::default()
         };
 
@@ -507,24 +573,39 @@ impl MetricsService {
             let gdir = self
                 .effective_global_dir()
                 .ok_or_else(|| "no global config dir available on this platform".to_string())?;
-            let mdir = gdir.join("metrics");
-            let existing = load_global_metric_entries(&gdir);
-            if existing
+            let already = load_global_metric_entries(&gdir)
                 .iter()
-                .any(|e| e.key.as_deref() == Some(key) || e.use_key.as_deref() == Some(key))
-            {
+                .any(|e| e.key.as_deref() == Some(key))
+                || load_global_gauge_entries(&gdir)
+                    .iter()
+                    .any(|e| e.key.as_deref() == Some(key));
+            if already {
                 return Err(format!("global metric `{key}` already exists"));
             }
-            std::fs::create_dir_all(&mdir).map_err(|e| e.to_string())?;
-            let script_abs = mdir.join(format!("{slug}.star"));
+            let gauges_dir = gdir.join("gauges");
+            std::fs::create_dir_all(&gauges_dir).map_err(|e| e.to_string())?;
+            let script_abs = gauges_dir.join(format!("{slug}.star"));
             if !script_abs.exists() {
                 std::fs::write(&script_abs, script).map_err(|e| e.to_string())?;
             }
-            oxplow_config::write_global_metrics_file(&mdir.join(format!("{slug}.yaml")), &[entry])
-                .map_err(|e| e.to_string())?;
-            // A global `key:` define is library content — only active once the
-            // project opts in. Enable it here with a project `use:` so it charts
-            // in this project (and stays reusable across the user's others).
+            oxplow_config::write_global_measures_file(
+                &gdir.join("measures").join(format!("{slug}.yaml")),
+                &[measure],
+            )
+            .map_err(|e| e.to_string())?;
+            oxplow_config::write_global_gauges_file(
+                &gauges_dir.join(format!("{slug}.yaml")),
+                &[gauge],
+            )
+            .map_err(|e| e.to_string())?;
+            oxplow_config::write_global_metrics_file(
+                &gdir.join("metrics").join(format!("{slug}.yaml")),
+                &[metric],
+            )
+            .map_err(|e| e.to_string())?;
+            // The global metric is library content — enable it here with a project
+            // `use:` so it charts in this project. The global gauge + measure are
+            // active automatically (loaded from the global dir at seed time).
             {
                 let mut cfg = self
                     .config
@@ -545,16 +626,14 @@ impl MetricsService {
             }
             script_abs.to_string_lossy().into_owned()
         } else {
-            let script_rel = format!("oxplow/metrics/{slug}.star");
+            let script_rel = format!("oxplow/gauges/{slug}.star");
             {
                 let mut cfg = self
                     .config
                     .write()
                     .map_err(|_| "config lock poisoned".to_string())?;
-                if cfg
-                    .metrics
-                    .iter()
-                    .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                if cfg.metrics.iter().any(|e| e.key.as_deref() == Some(key))
+                    || cfg.gauges.iter().any(|e| e.key.as_deref() == Some(key))
                 {
                     return Err(format!(
                         "metric `{key}` already exists in .oxplow/project.yaml"
@@ -568,7 +647,9 @@ impl MetricsService {
                 if !abs.exists() {
                     std::fs::write(&abs, script).map_err(|e| e.to_string())?;
                 }
-                cfg.metrics.push(entry);
+                cfg.measures.push(measure);
+                cfg.gauges.push(gauge);
+                cfg.metrics.push(metric);
                 oxplow_config::write_project_config(&self.project_dir, &cfg)
                     .map_err(|e| e.to_string())?;
             }
@@ -577,6 +658,7 @@ impl MetricsService {
 
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_definitions().await;
+        self.seed_catalog().await;
         Ok(returned_path)
     }
 
@@ -748,12 +830,12 @@ impl MetricsService {
 
     /// Run every enabled `on-snapshot` gauge against the just-captured snapshot.
     async fn run_snapshot_gauges(&self, stream_id: StreamId, snapshot_id: i64) {
-        let metrics: Vec<ResolvedMetric> = self
-            .resolved_metrics()
+        let gauges: Vec<ResolvedGauge> = self
+            .resolved_gauges()
             .into_iter()
-            .filter(|m| m.trigger == "on-snapshot" && m.kind == "gauge")
+            .filter(|g| g.trigger == "on-snapshot")
             .collect();
-        if metrics.is_empty() {
+        if gauges.is_empty() {
             return;
         }
         // Build the snapshot file map once and share it across every gauge of
@@ -762,8 +844,8 @@ impl MetricsService {
         let ctx = self
             .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id, None)
             .await;
-        for m in &metrics {
-            self.run_one_gauge(m, &ctx, files.clone()).await;
+        for g in &gauges {
+            self.run_one_gauge(g, &ctx, files.clone()).await;
         }
     }
 
@@ -771,12 +853,12 @@ impl MetricsService {
     /// file map comes from the effort's end snapshot (the worktree as it stood
     /// at close); samples default their subject to the effort.
     pub async fn run_effort_complete_gauges(&self, thread_id: &ThreadId, effort_id: &EffortId) {
-        let metrics: Vec<ResolvedMetric> = self
-            .resolved_metrics()
+        let gauges: Vec<ResolvedGauge> = self
+            .resolved_gauges()
             .into_iter()
-            .filter(|m| m.trigger == "on-effort-complete" && m.kind == "gauge")
+            .filter(|g| g.trigger == "on-effort-complete")
             .collect();
-        if metrics.is_empty() {
+        if gauges.is_empty() {
             return;
         }
         let stream_val = match self.thread_store.get(thread_id).await {
@@ -801,12 +883,12 @@ impl MetricsService {
                 subject,
             )
             .await;
-        for m in &metrics {
-            self.run_one_gauge(m, &ctx, files.clone()).await;
+        for g in &gauges {
+            self.run_one_gauge(g, &ctx, files.clone()).await;
         }
     }
 
-    /// Manually run one configured metric by key, against the stream's latest
+    /// Manually run one configured gauge by key, against the stream's latest
     /// snapshot. Returns the number of samples recorded, or an error string.
     /// (The MCP `run_metric` tool, tsk226, calls this.)
     pub async fn run_metric_by_key(
@@ -815,7 +897,7 @@ impl MetricsService {
         stream: Option<StreamId>,
     ) -> Result<usize, String> {
         let metric = self
-            .resolved_metrics()
+            .resolved_gauges()
             .into_iter()
             .find(|m| m.key == key)
             .ok_or_else(|| format!("no configured metric with key \"{key}\""))?;
@@ -916,38 +998,37 @@ impl MetricsService {
     /// Best-effort — errors are logged and swallowed. Returns the sample count.
     async fn run_one_gauge(
         &self,
-        metric: &ResolvedMetric,
+        gauge: &ResolvedGauge,
         ctx: &GaugeRunContext,
         files: Arc<HashMap<String, String>>,
     ) -> usize {
-        // Built-in metrics run from their embedded script (no project-disk
-        // file); global/project metrics build from their `compute.entryFile`.
-        let collector = if metric.scope == "built-in" {
-            match builtin_collector(&metric.key) {
+        // Built-in gauges run from their embedded script (no project-disk file);
+        // global/project gauges build from their `compute.entryFile`.
+        let collector = if gauge.scope == "built-in" {
+            match builtin_collector(&gauge.key) {
                 Some(c) => c,
                 None => {
-                    tracing::warn!(key = %metric.key, "gauge metric: unknown built-in key");
+                    tracing::warn!(key = %gauge.key, "gauge: unknown built-in key");
                     return 0;
                 }
             }
         } else {
-            // A global metric's script lives under the global config dir, not
-            // the project (tsk235); project/inline metrics resolve against the
-            // project dir.
-            let base = self.script_base_dir(metric);
-            match compute_to_collector(metric, &base) {
+            // A global gauge's script lives under the global config dir, not the
+            // project; project gauges resolve against the project dir.
+            let base = self.script_base_dir(gauge);
+            match compute_to_collector(gauge, &base) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!(key = %metric.key, error = %e, "gauge metric: bad compute");
+                    tracing::warn!(key = %gauge.key, error = %e, "gauge: bad compute");
                     return 0;
                 }
             }
         };
-        let source = gauge_source(metric, &collector);
+        let source = gauge_source(gauge, &collector);
         // The report-derived content (if any); tree-derived gauges ignore it.
-        let content = match &metric.compute.report {
+        let content = match &gauge.compute.report {
             Some(rel) => {
-                std::fs::read_to_string(self.script_base_dir(metric).join(rel)).unwrap_or_default()
+                std::fs::read_to_string(self.script_base_dir(gauge).join(rel)).unwrap_or_default()
             }
             None => String::new(),
         };
@@ -956,11 +1037,11 @@ impl MetricsService {
             match tokio::task::spawn_blocking(move || collector.run_gauge(&content, host)).await {
                 Ok(Ok(out)) => out,
                 Ok(Err(e)) => {
-                    tracing::warn!(key = %metric.key, error = %e, "gauge metric: compute failed");
+                    tracing::warn!(key = %gauge.key, error = %e, "gauge: compute failed");
                     return 0;
                 }
                 Err(e) => {
-                    tracing::warn!(key = %metric.key, error = %e, "gauge metric: join failed");
+                    tracing::warn!(key = %gauge.key, error = %e, "gauge: join failed");
                     return 0;
                 }
             };
@@ -969,12 +1050,41 @@ impl MetricsService {
             _ => return 0,
         };
 
+        // Baked legacy substrate (`metric_run`/`metric_sample`/`metric_finding`):
+        // written only when the gauge produced a headline sample or a located
+        // finding. Facts-only gauges (the clean new model) skip it entirely — they
+        // chart via the engine over the facts recorded below. Kept for the built-in
+        // gauges (whose equivalence tests + legacy reads still read it) until the
+        // read-flip (tsk26) removes it. Best-effort.
+        let count = if samples.is_empty() && gauge_findings.is_empty() {
+            0
+        } else {
+            self.record_baked_run(gauge, ctx, &source, &samples, &gauge_findings)
+                .await
+        };
+        // Inverted substrate (epic tsk12): route the gauge's durable atomic facts
+        // into the `fact` layer. Best-effort; never fails the gauge run.
+        self.record_gauge_facts(gauge, ctx, &source, &gauge_facts)
+            .await;
+        count
+    }
+
+    /// Write the baked legacy run + samples + findings for a gauge that produced
+    /// a headline (built-ins, until the read-flip). Returns the sample count.
+    async fn record_baked_run(
+        &self,
+        gauge: &ResolvedGauge,
+        ctx: &GaugeRunContext,
+        source: &str,
+        samples: &[oxplow_collect_plugin::GaugeSample],
+        gauge_findings: &[oxplow_collect_plugin::GaugeFinding],
+    ) -> usize {
         let result = async {
             let metric_id = self
                 .metrics
-                .upsert_definition(metric_definition(metric))
+                .upsert_definition(gauge_definition(gauge))
                 .await?;
-            let mut run = NewMetricRun::done(ctx.stream_val, metric.key.clone(), source.clone());
+            let mut run = NewMetricRun::done(ctx.stream_val, gauge.key.clone(), source.to_string());
             run.thread_id = ctx.thread_id;
             run.trigger = Some(ctx.trigger.into());
             run.snapshot_id = ctx.snapshot_id;
@@ -984,7 +1094,7 @@ impl MetricsService {
             run.basis_ref = ctx.closest_git_version.clone();
 
             let mut rows = Vec::new();
-            for sample in &samples {
+            for sample in samples {
                 // A non-finite value (NaN/±inf, e.g. an out-of-range literal in
                 // the gauge script) isn't a meaningful measurement — drop it
                 // rather than poison the series.
@@ -996,7 +1106,7 @@ impl MetricsService {
                     metric_id,
                     ctx.stream_val,
                     sample.value,
-                    source.clone(),
+                    source.to_string(),
                 );
                 s.thread_id = ctx.thread_id;
                 s.snapshot_id = ctx.snapshot_id;
@@ -1053,7 +1163,7 @@ impl MetricsService {
         }
         .await;
 
-        let count = match result {
+        match result {
             Ok(count) => {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: StreamId::new(ctx.stream_val),
@@ -1061,27 +1171,23 @@ impl MetricsService {
                 count
             }
             Err(e) => {
-                tracing::warn!(key = %metric.key, error = %e, "gauge metric: record failed");
+                tracing::warn!(key = %gauge.key, error = %e, "gauge: baked record failed");
                 0
             }
-        };
-        // Inverted substrate (epic tsk12): route the gauge's durable atomic facts
-        // into the `fact` layer — dual-written beside the baked sample above until
-        // reads flip to the engine. Best-effort; never fails the gauge run.
-        self.record_gauge_facts(metric, ctx, &source, &gauge_facts)
-            .await;
-        count
+        }
     }
 
     /// Persist a gauge's per-item `facts` (epic tsk12) as `fact` rows under one
     /// `metric_capture`, resolving each fact's measure key to a defined measure.
-    /// Enforces **declare-to-collect** (decision #4): a fact on an undefined
-    /// measure is surfaced via `tracing::warn!` and dropped, never silently
-    /// written. No-op without a fact store, with no facts, or with no resolvable
-    /// facts. Best-effort — a write error is logged, never propagated.
+    /// Enforces **declare-to-collect** (decision #4): a fact is dropped (surfaced
+    /// via `tracing::warn!`, never silently written) if its measure is undefined
+    /// in the catalog OR not in the gauge's own `emits` allow-list (a config gauge
+    /// may only emit the measures it declares). A built-in gauge has an empty
+    /// `emits` — the catalog check alone governs it. No-op without a fact store,
+    /// with no facts, or with no resolvable facts. Best-effort.
     async fn record_gauge_facts(
         &self,
-        metric: &ResolvedMetric,
+        gauge: &ResolvedGauge,
         ctx: &GaugeRunContext,
         source: &str,
         gauge_facts: &[oxplow_collect_plugin::GaugeFact],
@@ -1096,7 +1202,7 @@ impl MetricsService {
         let by_key: HashMap<String, i64> = match facts.list_measures().await {
             Ok(ms) => ms.into_iter().map(|m| (m.key, m.id)).collect(),
             Err(e) => {
-                tracing::warn!(key = %metric.key, error = %e, "gauge facts: measure catalog read failed");
+                tracing::warn!(key = %gauge.key, error = %e, "gauge facts: measure catalog read failed");
                 return;
             }
         };
@@ -1107,10 +1213,19 @@ impl MetricsService {
             if !gf.value.is_finite() {
                 continue;
             }
+            // The gauge's own contract: a config gauge may only emit measures it
+            // declared in `emits` (built-ins declare none → unrestricted).
+            if !gauge.emits.is_empty() && !gauge.emits.iter().any(|m| m == &gf.measure) {
+                tracing::warn!(
+                    key = %gauge.key, measure = %gf.measure,
+                    "gauge facts: measure not in the gauge's `emits` — fact dropped"
+                );
+                continue;
+            }
             let Some(&measure_id) = by_key.get(gf.measure.as_str()) else {
                 // Declare-to-collect: a gauge may only emit DEFINED measures.
                 tracing::warn!(
-                    key = %metric.key, measure = %gf.measure,
+                    key = %gauge.key, measure = %gf.measure,
                     "gauge facts: undefined measure — fact dropped (declare it in `measures:`)"
                 );
                 continue;
@@ -1139,7 +1254,7 @@ impl MetricsService {
         }
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
-            scope: Some(metric.scope.clone()),
+            scope: Some(gauge.scope.clone()),
             trigger: Some(ctx.trigger.into()),
             basis_ref: ctx.closest_git_version.clone(),
             snapshot_id: ctx.snapshot_id,
@@ -1148,66 +1263,175 @@ impl MetricsService {
             branch: ctx.branch.clone(),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
-                metric.key.clone(),
+                gauge.key.clone(),
                 source.to_string(),
             )
         };
         if let Err(e) = facts.record_facts(capture, rows).await {
-            tracing::warn!(key = %metric.key, error = %e, "gauge facts: record failed");
+            tracing::warn!(key = %gauge.key, error = %e, "gauge facts: record failed");
         }
     }
 }
 
-/// Map a `ResolvedMetric` to a `metric_definition` row (idempotent by key).
-fn metric_definition(m: &ResolvedMetric) -> NewMetricDefinition {
-    let mut def = NewMetricDefinition::new(m.key.clone(), m.kind.clone(), m.title.clone());
-    def.unit = m.unit.clone();
-    def.direction = m.direction.clone();
-    def.default_agg = m.default_agg.clone();
-    def.grain = m.grain.clone();
-    def.language = m.language.clone();
-    def.description = m.description.clone();
-    def.producer = Some(m.key.clone());
-    def.category = Some("custom".into());
-    def.scope = m.scope.clone();
+/// Map a resolved metric `ResolvedSpec` to a legacy `metric_definition` row
+/// (idempotent by key). Kept until the read-flip (tsk26) retires the legacy
+/// substrate: `display_kind`→`kind`, `aggregation`→`default_agg`,
+/// `sliceable_dims`→`dimensions_json`. Grain is a legacy notion with no spec
+/// equivalent → left unset.
+fn spec_definition(s: &ResolvedSpec) -> NewMetricDefinition {
+    let mut def = NewMetricDefinition::new(s.key.clone(), s.display_kind.clone(), s.title.clone());
+    def.unit = s.unit.clone();
+    def.direction = s.direction.clone();
+    def.default_agg = s.aggregation.clone();
+    def.language = s.language.clone();
+    def.description = s.description.clone();
+    def.producer = Some(s.key.clone());
+    def.category = s.category.clone().or_else(|| Some("custom".into()));
+    def.scope = s.scope.clone();
     def.dimensions_json =
-        Some(serde_json::to_string(&m.dimensions).unwrap_or_else(|_| "[]".into()));
-    def.target = m.target;
-    def.warn_at = m.warn_at;
-    def.fail_at = m.fail_at;
+        Some(serde_json::to_string(&s.sliceable_dims).unwrap_or_else(|_| "[]".into()));
+    def.target = s.target;
+    def.warn_at = s.warn_at;
+    def.fail_at = s.fail_at;
     def
 }
 
-/// The bundled built-in metric catalog as `MetricEntry` definitions, so the
+/// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
+/// metrics). A formula metric has no `source_measure`.
+fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
+    NewMetricSpec {
+        key: s.key.clone(),
+        title: s.title.clone(),
+        unit: s.unit.clone(),
+        source_measure: s.source_measure.clone(),
+        aggregation: s.aggregation.clone(),
+        filter_json: s.filter.as_ref().map(filter_to_json),
+        formula: s.formula.as_ref().map(formula_to_json),
+        sliceable_dims_json: (!s.sliceable_dims.is_empty())
+            .then(|| serde_json::to_string(&s.sliceable_dims).unwrap_or_else(|_| "[]".into())),
+        direction: s.direction.clone(),
+        target: s.target,
+        warn_at: s.warn_at,
+        fail_at: s.fail_at,
+        description: s.description.clone(),
+        category: s.category.clone(),
+        language: s.language.clone(),
+        scope: s.scope.clone(),
+        display_kind: s.display_kind.clone(),
+    }
+}
+
+/// Serialize a config `FilterConfig` to the engine's `filter_json` shape
+/// (`FactFilter`: `min_value` / `severity` / `dim_eq`).
+fn filter_to_json(f: &oxplow_config::FilterConfig) -> String {
+    let mut m = serde_json::Map::new();
+    if let Some(v) = f.min_value {
+        m.insert("min_value".into(), serde_json::json!(v));
+    }
+    if let Some(s) = &f.severity {
+        m.insert("severity".into(), serde_json::json!(s));
+    }
+    if let Some(pair) = &f.dim_eq {
+        if pair.len() == 2 {
+            m.insert("dim_eq".into(), serde_json::json!([pair[0], pair[1]]));
+        }
+    }
+    serde_json::Value::Object(m).to_string()
+}
+
+/// Serialize a config `FormulaConfig` to the engine's `formula` shape
+/// (`{op, left, right}`).
+fn formula_to_json(f: &oxplow_config::FormulaConfig) -> String {
+    serde_json::json!({ "op": f.op, "left": f.left, "right": f.right }).to_string()
+}
+
+/// The bundled built-in metric catalog as spec-shaped `MetricEntry`s, so the
 /// three-scope resolver knows them (a project `use:`s one to activate it). The
-/// `compute.entryFile` is a sentinel — built-in collectors run from their
-/// embedded script (see [`builtin_collector`]), never a project-disk file.
-fn builtin_metric_entries() -> Vec<MetricEntry> {
+/// structural spec fields (`source_measure`/`aggregation`/`filter`) are joined in
+/// from the hand-written built-in specs by key; the surface fields come from
+/// `builtin_metrics()`.
+fn builtin_spec_entries() -> Vec<MetricEntry> {
+    let specs: HashMap<String, NewMetricSpec> = builtin_metric_specs()
+        .into_iter()
+        .chain(builtin_ast_specs())
+        .map(|s| (s.key.clone(), s))
+        .collect();
     builtin_metrics()
         .iter()
-        .map(|m| MetricEntry {
-            key: Some(m.key.to_string()),
-            title: Some(m.title.to_string()),
-            kind: Some(m.kind.to_string()),
-            unit: Some(m.unit.to_string()),
-            direction: Some(m.direction.to_string()),
-            grain: Some(m.grain.to_string()),
-            // Empty language = a language-agnostic metric (the unified code
-            // metrics) — no single language (NULL on the definition).
-            language: (!m.language.is_empty()).then(|| m.language.to_string()),
-            description: Some(m.description.to_string()),
-            dimensions: m.dimensions.iter().map(|d| d.to_string()).collect(),
-            target: m.target,
-            trigger: Some(m.trigger.to_string()),
-            compute: Some(MetricComputeConfig {
-                runtime: m.runtime.to_string(),
-                input: Some(m.input.to_string()),
-                entry_file: Some(m.key.to_string()),
+        .map(|m| {
+            let spec = specs.get(m.key);
+            MetricEntry {
+                key: Some(m.key.to_string()),
+                title: Some(m.title.to_string()),
+                source_measure: spec.and_then(|s| s.source_measure.clone()),
+                aggregation: spec.map(|s| s.aggregation.clone()),
+                filter: spec.and_then(|s| filter_from_json(s.filter_json.as_deref())),
+                unit: Some(m.unit.to_string()),
+                direction: Some(m.direction.to_string()),
+                display_kind: Some(m.kind.to_string()),
+                category: spec.and_then(|s| s.category.clone()),
+                // Empty language = a language-agnostic metric (the unified code
+                // metrics) — no single language (NULL on the definition).
+                language: (!m.language.is_empty()).then(|| m.language.to_string()),
+                description: Some(m.description.to_string()),
+                sliceable_dims: m.dimensions.iter().map(|d| d.to_string()).collect(),
+                target: m.target,
                 ..Default::default()
-            }),
-            ..Default::default()
+            }
         })
         .collect()
+}
+
+/// Parse a built-in spec's `filter_json` back into a config `FilterConfig` (so a
+/// `use:` re-seed reconstructs the same predicate).
+fn filter_from_json(json: Option<&str>) -> Option<oxplow_config::FilterConfig> {
+    let engine_filter = crate::metric_engine::FactFilter::from_json(json?).ok()?;
+    Some(oxplow_config::FilterConfig {
+        min_value: engine_filter.min_value,
+        severity: engine_filter.severity,
+        dim_eq: engine_filter.dim_eq.map(|(k, v)| vec![k, v]),
+    })
+}
+
+/// A built-in gauge as a `ResolvedGauge` — `run_one_gauge` builds its collector
+/// from the embedded script (never a project-disk file), so the compute is a
+/// default sentinel and `emits` is empty (built-ins are catalog-governed, not
+/// `emits`-restricted).
+fn builtin_gauge(key: &str, trigger: &str) -> ResolvedGauge {
+    ResolvedGauge {
+        key: key.to_string(),
+        title: key.to_string(),
+        trigger: trigger.to_string(),
+        emits: Vec::new(),
+        compute: GaugeComputeConfig::default(),
+        scope: "built-in".to_string(),
+    }
+}
+
+/// Map a `ResolvedGauge` to a legacy `metric_definition` row for the baked
+/// substrate. A built-in gauge derives the full definition from `builtin_metrics`
+/// (so legacy reads stay faithful); a config gauge gets a minimal `gauge` row.
+fn gauge_definition(gauge: &ResolvedGauge) -> NewMetricDefinition {
+    if let Some(m) = builtin_metrics().iter().find(|m| m.key == gauge.key) {
+        let mut def =
+            NewMetricDefinition::new(m.key.to_string(), m.kind.to_string(), m.title.to_string());
+        def.unit = Some(m.unit.to_string());
+        def.direction = m.direction.to_string();
+        def.grain = Some(m.grain.to_string());
+        def.language = (!m.language.is_empty()).then(|| m.language.to_string());
+        def.description = Some(m.description.to_string());
+        def.producer = Some(m.key.to_string());
+        def.category = Some("custom".into());
+        def.scope = "built-in".into();
+        def.target = m.target;
+        return def;
+    }
+    let mut def =
+        NewMetricDefinition::new(gauge.key.clone(), "gauge".to_string(), gauge.title.clone());
+    def.producer = Some(gauge.key.clone());
+    def.category = Some("custom".into());
+    def.scope = gauge.scope.clone();
+    def
 }
 
 /// The built-in metric SPECS (epic tsk12) for the bundled code gauges — the
@@ -1358,39 +1582,44 @@ fn builtin_collector(key: &str) -> Option<Collector> {
         .map(|m| m.collector())
 }
 
-/// The starter Starlark gauge written by [`MetricsService::scaffold_metric`].
-/// A working tree-derived gauge (counts TODO/FIXME markers across the glob, so
-/// it charts immediately and is language-agnostic) with an `ast_query` example
-/// in a comment for the author to switch to.
 /// A filesystem-safe slug from a namespaced key (non-alphanumerics → `_`), for
-/// naming the global scaffold's `<slug>.yaml` file.
+/// naming the global scaffold's `<slug>.yaml` / `<slug>.star` files.
 fn slugify(key: &str) -> String {
     key.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
 }
 
-fn starter_metric_script(key: &str, glob: &str, language: Option<&str>) -> String {
+/// The starter Starlark gauge written by [`MetricsService::scaffold_metric`]. A
+/// working tree-derived gauge that emits one per-file `<measure>` FACT per
+/// matched file (TODO/FIXME count) — the metric spec (`sum` over `<measure>`)
+/// charts it. Emits facts only (no baked sample), the clean substrate model
+/// (epic tsk12); an `ast_query` example is in a comment for the author.
+fn starter_gauge_script(key: &str, measure: &str, glob: &str, language: Option<&str>) -> String {
     let lang = language.unwrap_or("rust");
     format!(
         "# {key} — a tree-derived gauge. Reads the snapshot via files() and (optionally)\n\
-         # the AST via ast_query(); deterministic (no I/O) so samples are `observed`.\n\
+         # the AST via ast_query(); deterministic (no I/O) so facts are `observed`.\n\
          #\n\
-         # Edit the body to measure what you want. Starter: count TODO/FIXME markers.\n\
+         # Emits one per-file fact on the `{measure}` measure (count of TODO/FIXME).\n\
          # To count an AST node instead, e.g.:\n\
-         #   n += len(ast_query(f[\"text\"], \"{lang}\", \"(identifier) @x\"))\n\
+         #   c = len(ast_query(f[\"text\"], \"{lang}\", \"(identifier) @x\"))\n\
          def transform(input):\n    \
-             n = 0\n    \
+             facts = []\n    \
              for f in files(\"{glob}\"):\n        \
-                 n += len(regex_find(r\"(?i)\\b(TODO|FIXME)\\b\", f[\"text\"]))\n    \
-             return {{\"samples\": [{{\"value\": n, \"dims\": {{\"language\": \"{lang}\"}}}}]}}\n"
+                 c = len(regex_find(r\"(?i)\\b(TODO|FIXME)\\b\", f[\"text\"]))\n        \
+                 if c > 0:\n            \
+                     facts.append({{\"measure\": \"{measure}\", \"value\": c, \
+             \"subject\": \"file:\" + f[\"path\"], \"path\": f[\"path\"], \
+             \"dims\": {{\"language\": \"{lang}\"}}}})\n    \
+             return {{\"facts\": facts}}\n"
     )
 }
 
-/// Build a gauge [`Collector`] from a metric's `compute:` block (mirrors
+/// Build a gauge [`Collector`] from a gauge's `compute:` block (mirrors
 /// `collection.rs::plugin_to_collector`, but always `Gauge` kind).
-fn compute_to_collector(metric: &ResolvedMetric, project_dir: &Path) -> Result<Collector, String> {
-    let c: &MetricComputeConfig = &metric.compute;
+fn compute_to_collector(gauge: &ResolvedGauge, project_dir: &Path) -> Result<Collector, String> {
+    let c: &GaugeComputeConfig = &gauge.compute;
     let input = match c.input.as_deref().unwrap_or("text") {
         "text" => CollectorInput::Text,
         "json" => CollectorInput::Json,
@@ -1404,8 +1633,8 @@ fn compute_to_collector(metric: &ResolvedMetric, project_dir: &Path) -> Result<C
         .as_deref()
         .ok_or_else(|| "missing entryFile".to_string())?;
     let abs = project_dir.join(entry_file);
-    let name = metric.key.clone();
-    let formats = [metric.key.clone()];
+    let name = gauge.key.clone();
+    let formats = [gauge.key.clone()];
     Ok(match c.runtime.as_str() {
         "jaq" | "starlark" => {
             let script = std::fs::read_to_string(&abs)
@@ -1427,12 +1656,12 @@ fn compute_to_collector(metric: &ResolvedMetric, project_dir: &Path) -> Result<C
 
 /// Trust label: in-process tiers are `observed` under a `metric:<key>` source;
 /// the `exec` escape hatch is flagged `plugin-exec:<name>` (lower-trust).
-fn gauge_source(metric: &ResolvedMetric, collector: &Collector) -> String {
+fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
     use oxplow_collect_plugin::CollectorRuntime;
     if collector.runtime() == CollectorRuntime::Exec {
-        format!("plugin-exec:{}", metric.key)
+        format!("plugin-exec:{}", gauge.key)
     } else {
-        format!("metric:{}", metric.key)
+        format!("metric:{}", gauge.key)
     }
 }
 
@@ -1457,7 +1686,7 @@ fn resolve_subject(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_config::MetricComputeConfig;
+    use oxplow_config::GaugeComputeConfig;
 
     fn init_git_repo(dir: &Path) {
         let repo = git2::Repository::init(dir).unwrap();
@@ -1480,28 +1709,23 @@ mod tests {
         (svc, dir)
     }
 
-    fn starlark_gauge(key: &str, entry_file: &str) -> ResolvedMetric {
-        ResolvedMetric {
+    fn starlark_gauge(key: &str, entry_file: &str) -> ResolvedGauge {
+        starlark_gauge_emits(key, entry_file, Vec::new())
+    }
+
+    /// A project-scope Starlark gauge with an explicit `emits` allow-list.
+    fn starlark_gauge_emits(key: &str, entry_file: &str, emits: Vec<String>) -> ResolvedGauge {
+        ResolvedGauge {
             key: key.into(),
             title: key.into(),
-            kind: "gauge".into(),
-            unit: Some("count".into()),
-            direction: "lower-better".into(),
-            default_agg: "last".into(),
-            grain: Some("tree".into()),
-            language: Some("rust".into()),
-            description: Some("test gauge".into()),
-            dimensions: vec!["language".into()],
-            target: Some(0.0),
-            warn_at: None,
-            fail_at: None,
-            scope: "project".into(),
             trigger: "on-snapshot".into(),
-            compute: MetricComputeConfig {
+            emits,
+            compute: GaugeComputeConfig {
                 runtime: "starlark".into(),
                 entry_file: Some(entry_file.into()),
                 ..Default::default()
             },
+            scope: "project".into(),
         }
     }
 
@@ -1629,27 +1853,10 @@ def transform(input):
         assert!(findings[0].value.unwrap() >= 3.0);
     }
 
-    /// A built-in-scope gauge `ResolvedMetric` — `run_one_gauge` builds its
-    /// collector from the embedded script (never a project-disk file).
-    fn builtin_gauge(key: &str) -> ResolvedMetric {
-        ResolvedMetric {
-            key: key.into(),
-            title: key.into(),
-            kind: "gauge".into(),
-            unit: Some("count".into()),
-            direction: "lower-better".into(),
-            default_agg: "last".into(),
-            grain: Some("tree".into()),
-            language: None,
-            description: None,
-            dimensions: vec![],
-            target: None,
-            warn_at: None,
-            fail_at: None,
-            scope: "built-in".into(),
-            trigger: "on-snapshot".into(),
-            compute: MetricComputeConfig::default(),
-        }
+    /// A built-in-scope `ResolvedGauge` — `run_one_gauge` builds its collector
+    /// from the embedded script (never a project-disk file).
+    fn builtin_gauge_fixture(key: &str) -> ResolvedGauge {
+        super::builtin_gauge(key, "on-snapshot")
     }
 
     /// The old baked headline: the `tree:.` sample of a gauge's definition.
@@ -1723,7 +1930,7 @@ def transform(input):
             "oxplow.todos",
         ] {
             svc.metrics
-                .run_one_gauge(&builtin_gauge(key), &ctx, files.clone())
+                .run_one_gauge(&builtin_gauge_fixture(key), &ctx, files.clone())
                 .await;
         }
 
@@ -1810,6 +2017,76 @@ def transform(input):
     }
 
     #[tokio::test]
+    async fn gauge_facts_outside_the_emits_allow_list_are_dropped() {
+        // A config gauge's `emits` is its contract: even a fact on a DEFINED
+        // catalog measure is dropped if the gauge didn't declare it. Here the
+        // gauge emits only `oxplow.complexity`; a sibling fact on the (also
+        // defined) `oxplow.fn_length` measure is dropped for being off-contract.
+        let (svc, dir) = fixture().await;
+        std::fs::create_dir_all(dir.path().join("oxplow/gauges")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/gauges/emits.star"),
+            r#"
+def transform(input):
+    return {"facts": [
+        {"measure": "oxplow.complexity", "value": 5, "subject": "symbol:src/a.rs::foo"},
+        {"measure": "oxplow.fn_length", "value": 9, "subject": "symbol:src/a.rs::bar"},
+    ]}
+"#,
+        )
+        .unwrap();
+        let gauge = starlark_gauge_emits(
+            "acme.only_complexity",
+            "oxplow/gauges/emits.star",
+            vec!["oxplow.complexity".into()],
+        );
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "manual",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            subject_default: None,
+        };
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
+            .await;
+
+        let complexity = svc
+            .fact_store
+            .get_measure("oxplow.complexity")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            svc.fact_store
+                .facts_for_measure(complexity.id)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "the declared-measure fact is written"
+        );
+        let fn_length = svc
+            .fact_store
+            .get_measure("oxplow.fn_length")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            svc.fact_store
+                .facts_for_measure(fn_length.id)
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "the off-contract fact (defined but not in `emits`) is dropped"
+        );
+    }
+
+    #[tokio::test]
     async fn per_language_gauge_facts_reaggregate_to_the_baked_headline() {
         // tsk30: the per-language idiom gauges emit per-file `oxplow.ast_hit`
         // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
@@ -1872,7 +2149,7 @@ def transform(input):
         ];
         for key in keys {
             svc.metrics
-                .run_one_gauge(&builtin_gauge(key), &ctx, files.clone())
+                .run_one_gauge(&builtin_gauge_fixture(key), &ctx, files.clone())
                 .await;
         }
 
@@ -1903,7 +2180,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - key: repo.loc\n    kind: gauge\n    title: \"lines\"\n    compute: { runtime: starlark, entryFile: m.star }\n",
+            "metrics:\n  - key: repo.loc\n    title: \"lines\"\n    sourceMeasure: acme.lines\n    aggregation: sum\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -1915,7 +2192,8 @@ def transform(input):
             .await
             .unwrap()
             .expect("seeded");
-        assert_eq!(def.kind, "gauge");
+        assert_eq!(def.kind, "gauge"); // displayKind defaults to gauge
+        assert_eq!(def.default_agg, "sum");
         assert_eq!(def.scope, "project");
         assert_eq!(def.producer.as_deref(), Some("repo.loc"));
     }
@@ -2257,28 +2535,35 @@ def transform(input):
             )
             .await
             .unwrap();
-        assert_eq!(rel, "oxplow/metrics/acme_todo_density.star");
+        assert_eq!(rel, "oxplow/gauges/acme_todo_density.star");
 
-        // Script stub written + uses the public capability surface.
+        // Script stub written + uses the public capability surface + emits facts.
         let script = std::fs::read_to_string(dir.path().join(&rel)).unwrap();
         assert!(script.contains("def transform(input):"), "got:\n{script}");
         assert!(
             script.contains("files(\"**/*.rs\")"),
             "glob threaded; got:\n{script}"
         );
-
-        // metrics: key entry persisted with the compute block.
-        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
         assert!(
-            yaml.contains("acme.todo_density"),
-            "key persisted; got:\n{yaml}"
+            script.contains("acme.todo_density.count"),
+            "emits the measure; got:\n{script}"
+        );
+
+        // The trio (measure + gauge + metric) persisted to project.yaml.
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert!(yaml.contains("metrics:"), "metric spec; got:\n{yaml}");
+        assert!(yaml.contains("gauges:"), "gauge; got:\n{yaml}");
+        assert!(yaml.contains("measures:"), "measure; got:\n{yaml}");
+        assert!(
+            yaml.contains("acme.todo_density.count"),
+            "measure key persisted; got:\n{yaml}"
         );
         assert!(
             yaml.contains("acme_todo_density.star"),
             "entryFile persisted; got:\n{yaml}"
         );
 
-        // Definition seeded as a project-scoped gauge.
+        // Metric definition seeded as a project-scoped gauge (spec-derived).
         let def = svc
             .metric_store
             .get_definition("acme.todo_density")
@@ -2323,13 +2608,21 @@ def transform(input):
             .await
             .unwrap();
 
-        // Script + manifest written under <global>/metrics/, not the project.
+        // Gauge script under <global>/gauges/; metric manifest under
+        // <global>/metrics/; both, not the project.
         assert!(std::path::Path::new(&path).exists(), "script at {path}");
-        assert!(path.ends_with("metrics/myglobal_todo.star"), "got {path}");
+        assert!(path.ends_with("gauges/myglobal_todo.star"), "got {path}");
         let manifest =
             std::fs::read_to_string(gtmp.path().join("metrics/myglobal_todo.yaml")).unwrap();
         assert!(manifest.contains("myglobal.todo"), "got:\n{manifest}");
-        assert!(manifest.contains("myglobal_todo.star"), "got:\n{manifest}");
+        // The gauge manifest names the script; the measure manifest the fact type.
+        let gauge_manifest =
+            std::fs::read_to_string(gtmp.path().join("gauges/myglobal_todo.yaml")).unwrap();
+        assert!(
+            gauge_manifest.contains("myglobal_todo.star"),
+            "got:\n{gauge_manifest}"
+        );
+        assert!(gtmp.path().join("measures/myglobal_todo.yaml").exists());
 
         // Seeded at scope `global` (the resolver read it from the global dir).
         let entry = m
@@ -2358,11 +2651,11 @@ def transform(input):
     async fn run_one_gauge_resolves_global_scope_script_from_global_dir() {
         let (svc, _dir) = fixture().await;
         let gtmp = tempfile::tempdir().unwrap();
-        // The global metric's script lives under <global>/metrics/, NOT the
+        // The global gauge's script lives under <global>/gauges/, NOT the
         // project — the project dir has no such file.
-        std::fs::create_dir_all(gtmp.path().join("metrics")).unwrap();
+        std::fs::create_dir_all(gtmp.path().join("gauges")).unwrap();
         std::fs::write(
-            gtmp.path().join("metrics/g.star"),
+            gtmp.path().join("gauges/g.star"),
             "def transform(input):\n    return {\"samples\": [{\"value\": float(len(files(\"**/*\")))}]}\n",
         )
         .unwrap();

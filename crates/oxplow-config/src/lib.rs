@@ -109,13 +109,14 @@ pub struct PluginConfig {
     pub args: Vec<String>,
 }
 
-/// How a configured metric is computed (the `compute:` block on a `metrics:`
-/// entry). Mirrors [`PluginConfig`]'s runtime fields — the metric runner maps it
-/// to a registered gauge collector. `report` is the report path for a
-/// report-derived gauge; tree-derived gauges read the snapshot via `files()`
-/// instead and leave it unset.
+/// How a gauge produces facts (the `compute:` block on a `gauges:` entry).
+/// Mirrors [`PluginConfig`]'s runtime fields — the gauge runner maps it to a
+/// registered collector. `report` is the report path for a report-derived
+/// gauge; tree-derived gauges read the snapshot via `files()` instead and leave
+/// it unset. (Renamed from `MetricComputeConfig` in epic tsk12, E: compute is a
+/// property of the *gauge* that emits facts, not the *metric* that reads them.)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
-pub struct MetricComputeConfig {
+pub struct GaugeComputeConfig {
     /// Transform tier: `jaq` | `starlark` | `exec`.
     pub runtime: String,
     /// Host pre-parse for a report-derived gauge: `text` | `json` | `xml` |
@@ -134,15 +135,52 @@ pub struct MetricComputeConfig {
     pub report: Option<String>,
 }
 
-/// One entry in the top-level `metrics:` block — the metric authoring surface
-/// (epic tsk213, P3). Two forms, distinguished by which key is set:
+/// A fact predicate on a `metrics:` spec (the `filter:` block) — the config
+/// mirror of the engine's `FactFilter` (epic tsk12). A conjunctive predicate
+/// keeping only the facts that match before aggregation: `minValue` for a
+/// count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
+/// for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FilterConfig {
+    /// Keep facts with `value >= minValue`.
+    #[serde(rename = "minValue", default)]
+    pub min_value: Option<f64>,
+    /// Keep facts whose reported severity equals this (e.g. `error`).
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// Keep facts whose dimension `[key]` equals `[value]` — a 2-element list.
+    #[serde(rename = "dimEq", default)]
+    pub dim_eq: Option<Vec<String>>,
+}
+
+/// A derived-metric formula on a `metrics:` spec (the `formula:` block) — a
+/// constrained binary op over two OTHER metric keys (no source measure). The
+/// engine aligns the two metrics on their shared rollup key and applies `op`
+/// (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct FormulaConfig {
+    /// `add` | `sub` | `mul` | `div` (`ratio` aliases `div`).
+    pub op: String,
+    /// The left operand metric key.
+    pub left: String,
+    /// The right operand metric key.
+    pub right: String,
+}
+
+/// One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
+/// measure (epic tsk12, E). A metric no longer *computes* anything: it names a
+/// `sourceMeasure` + an `aggregation` (+ optional `filter`), or a `formula` over
+/// other metrics, and the engine aggregates the durable facts a `gauges:` entry
+/// emitted. Two forms, distinguished by which key is set:
 /// - **`use:`** — enable an existing catalog metric by key (built-in/global),
-///   optionally overriding `target`/`trigger`/`dimensions`/… for this project.
-/// - **`key:`** — define a NEW metric (full definition + `compute:`).
+///   optionally overriding `target`/thresholds for this project.
+/// - **`key:`** — define a NEW spec (`sourceMeasure` + `aggregation`, or `formula`).
 ///
-/// The runner resolves these across the three scopes into `ResolvedMetric`s.
-/// All non-discriminant fields are optional so both forms share one struct;
-/// validation enforces the per-form rules.
+/// Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
+/// fields are optional so both forms share one struct; validation enforces the
+/// per-form rules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
 #[serde(deny_unknown_fields)]
 pub struct MetricEntry {
@@ -154,68 +192,116 @@ pub struct MetricEntry {
     pub key: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
-    /// `gauge` | `findings` | `test` | `coverage` | `event` (default `gauge`).
+    /// The measure whose facts this metric aggregates (required for a `key:`
+    /// metric unless it sets `formula`). NULL for a pure formula metric.
+    #[serde(rename = "sourceMeasure", default)]
+    pub source_measure: Option<String>,
+    /// `count` | `sum` | `avg` | `min` | `max` | `last` | `ratio` (default `last`).
+    /// Combines the facts WITHIN a capture; cross-time collapse is governed by the
+    /// source measure's `temporalSemantics`.
     #[serde(default)]
-    pub kind: Option<String>,
+    pub aggregation: Option<String>,
+    /// Fact predicate applied before aggregation (`minValue` / `severity` / `dimEq`).
+    #[serde(default)]
+    pub filter: Option<FilterConfig>,
+    /// Derived-metric formula over other metric keys (mutually exclusive with
+    /// `sourceMeasure`).
+    #[serde(default)]
+    pub formula: Option<FormulaConfig>,
     #[serde(default)]
     pub unit: Option<String>,
     /// `higher-better` | `lower-better` | `neutral` (default `neutral`).
     #[serde(default)]
     pub direction: Option<String>,
-    #[serde(rename = "defaultAgg", default)]
-    pub default_agg: Option<String>,
-    /// `effort` | `tree` | `file` | `entity`.
+    /// Read-time presentation: `gauge` | `findings` | `test` | `coverage` |
+    /// `event` (default `gauge`).
+    #[serde(rename = "displayKind", default)]
+    pub display_kind: Option<String>,
+    /// Catalog grouping: `operational` | `testing` | `static-quality` | `custom`.
     #[serde(default)]
-    pub grain: Option<String>,
+    pub category: Option<String>,
     /// Language this metric measures (e.g. `rust`), for the catalog filter.
     #[serde(default)]
     pub language: Option<String>,
-    /// One-line human description of what the metric measures (shown atop the
-    /// Metric Detail page). Inherent to the definition — a `use:` can't override.
+    /// One-line human description (shown atop the Metric Detail page). Inherent to
+    /// the definition — a `use:` can't override.
     #[serde(default)]
     pub description: Option<String>,
-    /// Declared conformed-dimension keys this metric carries.
-    #[serde(default)]
-    pub dimensions: Vec<String>,
+    /// Conformed-dimension keys this metric can be sliced by (drill-across).
+    #[serde(rename = "sliceableDims", default)]
+    pub sliceable_dims: Vec<String>,
     #[serde(default)]
     pub target: Option<f64>,
     #[serde(rename = "warnAt", default)]
     pub warn_at: Option<f64>,
     #[serde(rename = "failAt", default)]
     pub fail_at: Option<f64>,
-    /// `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
-    /// `continuous` (default `manual`).
-    #[serde(default)]
-    pub trigger: Option<String>,
-    /// How the metric computes (required for `key:` form; inherited from the
-    /// catalog for `use:` form).
-    #[serde(default)]
-    pub compute: Option<MetricComputeConfig>,
 }
 
-/// A fully-resolved metric — the flat form the runner (oxplow-app) seeds into
-/// `metric_definition` and runs. Produced by [`resolve_metrics`] after merging
-/// the three scopes (built-in ∪ global ∪ project, precedence project > global >
-/// built-in by key). Not serialized — purely an internal resolution result.
+/// A fully-resolved metric SPEC — the flat form the runner (oxplow-app) seeds
+/// into `metric_spec` (and, until reads flip, `metric_definition`). Produced by
+/// [`resolve_metrics`] after merging the three scopes (built-in ∪ global ∪
+/// project, precedence project > global > built-in by key). Not serialized.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedMetric {
+pub struct ResolvedSpec {
     pub key: String,
     pub title: String,
-    pub kind: String,
+    pub source_measure: Option<String>,
+    pub aggregation: String,
+    pub filter: Option<FilterConfig>,
+    pub formula: Option<FormulaConfig>,
     pub unit: Option<String>,
     pub direction: String,
-    pub default_agg: String,
-    pub grain: Option<String>,
+    pub display_kind: String,
+    pub category: Option<String>,
     pub language: Option<String>,
     pub description: Option<String>,
-    pub dimensions: Vec<String>,
+    pub sliceable_dims: Vec<String>,
     pub target: Option<f64>,
     pub warn_at: Option<f64>,
     pub fail_at: Option<f64>,
     /// `built-in` | `global` | `project`.
     pub scope: String,
+}
+
+/// One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
+/// E). A gauge runs its `compute:` collector on its `trigger`, emitting atomic
+/// facts on the measures it declares in `emits`. Unlike a metric there is no
+/// `use:`/`key:` split — a gauge is always a definition (you declare the
+/// producer; a project doesn't "enable" one). Resolved across global+project by
+/// [`resolve_gauges`]; built-in gauges live in code, not config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct GaugeEntry {
+    /// The gauge's namespaced key (`<vendor>.<id>`). Required.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// `on-report` | `on-snapshot` | `on-effort-complete` | `manual` |
+    /// `continuous` (default `on-snapshot`).
+    #[serde(default)]
+    pub trigger: Option<String>,
+    /// The measure keys this gauge is allowed to emit facts on (declare-to-collect:
+    /// a fact on a measure outside this list is dropped). At least one required.
+    #[serde(default)]
+    pub emits: Vec<String>,
+    /// How the gauge produces facts (required).
+    #[serde(default)]
+    pub compute: Option<GaugeComputeConfig>,
+}
+
+/// A fully-resolved gauge — the flat form the runner executes. Produced by
+/// [`resolve_gauges`] (project > global). Not serialized.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedGauge {
+    pub key: String,
+    pub title: String,
     pub trigger: String,
-    pub compute: MetricComputeConfig,
+    pub emits: Vec<String>,
+    pub compute: GaugeComputeConfig,
+    /// `built-in` | `global` | `project`.
+    pub scope: String,
 }
 
 /// One entry in the top-level `measures:` block — the **measure catalog**
@@ -429,12 +515,17 @@ pub struct OxplowConfig {
     pub inject_session_context: bool,
     /// Per-project collection profile (test + coverage instrumentation).
     pub collection: CollectionConfig,
-    /// Project-declared metrics (the `metrics:` block) — the author-able
-    /// substrate surface (epic tsk213, P3). Each entry enables a catalog metric
-    /// (`use:`) or defines a new one (`key:`). The runner resolves these across
-    /// the built-in/global/project scopes; see [`resolve_metrics`].
+    /// Project-declared metric SPECS (the `metrics:` block) — the author-able
+    /// read surface (epic tsk12, E). Each entry enables a catalog metric
+    /// (`use:`) or defines a new spec (`key:`) over a measure. The runner resolves
+    /// these across the built-in/global/project scopes; see [`resolve_metrics`].
     #[serde(default)]
     pub metrics: Vec<MetricEntry>,
+    /// Project-declared gauges (the `gauges:` block) — the fact PRODUCERS (epic
+    /// tsk12, E). Each runs its `compute:` collector on its trigger and emits
+    /// facts on the measures it `emits`. Resolved by [`resolve_gauges`].
+    #[serde(default)]
+    pub gauges: Vec<GaugeEntry>,
     /// Project-declared measures (the `measures:` block) — custom fact TYPES a
     /// collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
     /// are seeded by the DB migration; these add global/project ones. Resolved
@@ -502,6 +593,8 @@ struct RawConfig {
     collection: Option<RawCollectionBlock>,
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
+    #[serde(default)]
+    gauges: Option<Vec<GaugeEntry>>,
     #[serde(default)]
     measures: Option<Vec<MeasureEntry>>,
     #[serde(default)]
@@ -818,6 +911,11 @@ pub fn write_project_config(
         doc.insert("metrics".into(), serde_yaml::Value::Sequence(metrics));
     }
 
+    if !config.gauges.is_empty() {
+        let gauges: Vec<_> = config.gauges.iter().map(gauge_entry_to_yaml).collect();
+        doc.insert("gauges".into(), serde_yaml::Value::Sequence(gauges));
+    }
+
     if !config.measures.is_empty() {
         let measures: Vec<_> = config.measures.iter().map(measure_entry_to_yaml).collect();
         doc.insert("measures".into(), serde_yaml::Value::Sequence(measures));
@@ -866,6 +964,22 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
     Ok(())
 }
 
+/// Write a **global** gauges manifest (`global_config_dir()/gauges/<name>.yaml`)
+/// — a clean `gauges:` doc. Creates parent dirs. Loaded by
+/// [`load_global_gauge_entries`]; used by the "New gauge" scaffold at global
+/// scope (epic tsk12, E).
+pub fn write_global_gauges_file(path: &Path, entries: &[GaugeEntry]) -> Result<(), ConfigError> {
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(gauge_entry_to_yaml).collect();
+    let mut doc = serde_yaml::Mapping::new();
+    doc.insert("gauges".into(), serde_yaml::Value::Sequence(seq));
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
 /// Write a **global** measures manifest (`global_config_dir()/measures/<name>.yaml`)
 /// — a clean `measures:` doc. Creates parent dirs. Loaded by
 /// [`load_global_measure_entries`]; used by the "New measure" scaffold at global
@@ -903,9 +1017,32 @@ pub fn write_global_dimensions_file(
     Ok(())
 }
 
-/// Serialize one [`MetricEntry`] to a YAML mapping, omitting unset fields so a
-/// hand-edited `metrics:` block stays minimal across UI-driven writes (mirrors
-/// the per-field plugin serialization above).
+/// Serialize a [`GaugeComputeConfig`] to a YAML mapping (shared by the metric →
+/// gauge migration and the `gauges:` writer).
+fn gauge_compute_to_yaml(c: &GaugeComputeConfig) -> serde_yaml::Value {
+    let mut cm = serde_yaml::Mapping::new();
+    cm.insert("runtime".into(), c.runtime.clone().into());
+    if let Some(i) = &c.input {
+        cm.insert("input".into(), i.clone().into());
+    }
+    if let Some(f) = &c.entry_file {
+        cm.insert("entryFile".into(), f.clone().into());
+    }
+    if !c.args.is_empty() {
+        cm.insert(
+            "args".into(),
+            serde_yaml::to_value(&c.args).expect("args serialize"),
+        );
+    }
+    if let Some(r) = &c.report {
+        cm.insert("report".into(), r.clone().into());
+    }
+    serde_yaml::Value::Mapping(cm)
+}
+
+/// Serialize one [`MetricEntry`] (a spec) to a YAML mapping, omitting unset
+/// fields so a hand-edited `metrics:` block stays minimal across UI-driven
+/// writes (mirrors the per-field plugin serialization above).
 fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     let mut m = serde_yaml::Mapping::new();
     let mut put_str = |k: &str, v: &Option<String>| {
@@ -916,16 +1053,30 @@ fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     put_str("use", &e.use_key);
     put_str("key", &e.key);
     put_str("title", &e.title);
-    put_str("kind", &e.kind);
+    put_str("sourceMeasure", &e.source_measure);
+    put_str("aggregation", &e.aggregation);
     put_str("unit", &e.unit);
     put_str("direction", &e.direction);
-    put_str("defaultAgg", &e.default_agg);
-    put_str("grain", &e.grain);
+    put_str("displayKind", &e.display_kind);
+    put_str("category", &e.category);
     put_str("language", &e.language);
-    if !e.dimensions.is_empty() {
+    put_str("description", &e.description);
+    if !e.sliceable_dims.is_empty() {
         m.insert(
-            "dimensions".into(),
-            serde_yaml::to_value(&e.dimensions).expect("dimensions serialize"),
+            "sliceableDims".into(),
+            serde_yaml::to_value(&e.sliceable_dims).expect("sliceableDims serialize"),
+        );
+    }
+    if let Some(f) = &e.filter {
+        m.insert(
+            "filter".into(),
+            serde_yaml::to_value(f).expect("filter serialize"),
+        );
+    }
+    if let Some(f) = &e.formula {
+        m.insert(
+            "formula".into(),
+            serde_yaml::to_value(f).expect("formula serialize"),
         );
     }
     if let Some(t) = e.target {
@@ -937,28 +1088,29 @@ fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     if let Some(t) = e.fail_at {
         m.insert("failAt".into(), t.into());
     }
+    serde_yaml::Value::Mapping(m)
+}
+
+/// Serialize one [`GaugeEntry`] to a YAML mapping, omitting unset fields.
+fn gauge_entry_to_yaml(e: &GaugeEntry) -> serde_yaml::Value {
+    let mut m = serde_yaml::Mapping::new();
+    if let Some(k) = &e.key {
+        m.insert("key".into(), k.clone().into());
+    }
+    if let Some(t) = &e.title {
+        m.insert("title".into(), t.clone().into());
+    }
     if let Some(t) = &e.trigger {
         m.insert("trigger".into(), t.clone().into());
     }
+    if !e.emits.is_empty() {
+        m.insert(
+            "emits".into(),
+            serde_yaml::to_value(&e.emits).expect("emits serialize"),
+        );
+    }
     if let Some(c) = &e.compute {
-        let mut cm = serde_yaml::Mapping::new();
-        cm.insert("runtime".into(), c.runtime.clone().into());
-        if let Some(i) = &c.input {
-            cm.insert("input".into(), i.clone().into());
-        }
-        if let Some(f) = &c.entry_file {
-            cm.insert("entryFile".into(), f.clone().into());
-        }
-        if !c.args.is_empty() {
-            cm.insert(
-                "args".into(),
-                serde_yaml::to_value(&c.args).expect("args serialize"),
-            );
-        }
-        if let Some(r) = &c.report {
-            cm.insert("report".into(), r.clone().into());
-        }
-        m.insert("compute".into(), serde_yaml::Value::Mapping(cm));
+        m.insert("compute".into(), gauge_compute_to_yaml(c));
     }
     serde_yaml::Value::Mapping(m)
 }
@@ -1018,6 +1170,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         collection: CollectionConfig::default(),
         metrics: Vec::new(),
+        gauges: Vec::new(),
         measures: Vec::new(),
         dimensions: Vec::new(),
         agent_models: Default::default(),
@@ -1085,6 +1238,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let collection = validate_collection(raw.collection)?;
     let metrics = validate_metrics(raw.metrics)?;
+    let gauges = validate_gauges(raw.gauges)?;
     let measures = validate_measures(raw.measures)?;
     let dimensions = validate_dimensions(raw.dimensions)?;
 
@@ -1154,6 +1308,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         inject_session_context,
         collection,
         metrics,
+        gauges,
         measures,
         dimensions,
         agent_models,
@@ -1195,15 +1350,18 @@ const PLUGIN_KINDS: &[&str] = &["coverage", "test", "analysis"];
 /// Container pre-parsers a plugin may select for its input.
 const PLUGIN_INPUTS: &[&str] = &["text", "json", "xml", "lcov", "lines"];
 
-/// Metric kinds a `metrics:` entry may declare.
-const METRIC_KINDS: &[&str] = &["gauge", "findings", "test", "coverage", "event"];
+/// Read-time presentation kinds a `metrics:` spec may declare (`displayKind`).
+const METRIC_DISPLAY_KINDS: &[&str] = &["gauge", "findings", "test", "coverage", "event"];
 /// Metric directions.
 const METRIC_DIRECTIONS: &[&str] = &["higher-better", "lower-better", "neutral"];
-/// Metric aggregations.
-const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max"];
-/// Metric grains (the subject granularity a sample is recorded at).
-const METRIC_GRAINS: &[&str] = &["effort", "tree", "file", "entity"];
-/// Compute triggers.
+/// Metric aggregations (mirror the engine's `Aggregation`): combine facts within
+/// a capture.
+const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max", "count", "ratio"];
+/// Formula binary ops a `metrics:` spec may declare (`ratio` aliases `div`).
+const METRIC_FORMULA_OPS: &[&str] = &["add", "sub", "mul", "div", "ratio"];
+/// Catalog groupings a `metrics:` spec may declare.
+const METRIC_CATEGORIES: &[&str] = &["operational", "testing", "static-quality", "custom"];
+/// Gauge triggers (when a `gauges:` producer runs).
 const METRIC_TRIGGERS: &[&str] = &[
     "on-report",
     "on-snapshot",
@@ -1270,14 +1428,6 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             )));
         }
 
-        let kind = opt(e.kind);
-        if let Some(k) = &kind {
-            if !METRIC_KINDS.contains(&k.as_str()) {
-                return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] kind must be one of {METRIC_KINDS:?} (got \"{k}\")"
-                )));
-            }
-        }
         let direction = opt(e.direction);
         if let Some(d) = &direction {
             if !METRIC_DIRECTIONS.contains(&d.as_str()) {
@@ -1286,46 +1436,65 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
                 )));
             }
         }
-        let default_agg = opt(e.default_agg);
-        if let Some(a) = &default_agg {
+        let aggregation = opt(e.aggregation);
+        if let Some(a) = &aggregation {
             if !METRIC_AGGS.contains(&a.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] defaultAgg must be one of {METRIC_AGGS:?} (got \"{a}\")"
+                    "metrics[{i}] aggregation must be one of {METRIC_AGGS:?} (got \"{a}\")"
                 )));
             }
         }
-        let trigger = opt(e.trigger);
-        if let Some(t) = &trigger {
-            if !METRIC_TRIGGERS.contains(&t.as_str()) {
+        let display_kind = opt(e.display_kind);
+        if let Some(k) = &display_kind {
+            if !METRIC_DISPLAY_KINDS.contains(&k.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] trigger must be one of {METRIC_TRIGGERS:?} (got \"{t}\")"
+                    "metrics[{i}] displayKind must be one of {METRIC_DISPLAY_KINDS:?} (got \"{k}\")"
                 )));
             }
         }
-        let grain = opt(e.grain);
-        if let Some(g) = &grain {
-            if !METRIC_GRAINS.contains(&g.as_str()) {
+        let category = opt(e.category);
+        if let Some(c) = &category {
+            if !METRIC_CATEGORIES.contains(&c.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] grain must be one of {METRIC_GRAINS:?} (got \"{g}\")"
+                    "metrics[{i}] category must be one of {METRIC_CATEGORIES:?} (got \"{c}\")"
                 )));
             }
         }
+        let source_measure = opt(e.source_measure);
+        let filter = e.filter.map(|f| validate_filter(i, f)).transpose()?;
+        let formula = e.formula.map(|f| validate_formula(i, f)).transpose()?;
 
-        // `use:` inherits compute from the catalog; `key:` must define it.
-        let compute = match (is_define, e.compute) {
-            (false, Some(_)) => {
-                return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] is a `use:` entry; it inherits `compute` from the catalog"
-                )))
+        // The structural spec fields (measure/aggregation/filter/formula) are
+        // inherent to the DEFINITION; a `use:` may only re-target thresholds.
+        if !is_define
+            && (source_measure.is_some()
+                || aggregation.is_some()
+                || filter.is_some()
+                || formula.is_some())
+        {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] is a `use:` entry; it may only override target/warnAt/failAt, \
+                 not the measure/aggregation/filter/formula (those are inherent to the definition)"
+            )));
+        }
+        // A `key:` metric is either a measure aggregation OR a formula, never both,
+        // never neither.
+        if is_define {
+            match (source_measure.is_some(), formula.is_some()) {
+                (true, true) => {
+                    return Err(ConfigError::Invalid(format!(
+                        "metrics[{i}] sets both `sourceMeasure` and `formula`; use exactly one"
+                    )))
+                }
+                (false, false) => {
+                    return Err(ConfigError::Invalid(format!(
+                        "metrics[{i}] defines key \"{the_key}\" but sets neither `sourceMeasure` \
+                         (a measure aggregation) nor `formula` (a derived metric)"
+                    )))
+                }
+                _ => {}
             }
-            (false, None) => None,
-            (true, None) => {
-                return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}] defines key \"{the_key}\" but has no `compute` block"
-                )))
-            }
-            (true, Some(c)) => Some(validate_metric_compute(i, c)?),
-        };
+        }
 
         let (use_key, key) = if is_define {
             (None, Some(the_key))
@@ -1336,15 +1505,18 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             use_key,
             key,
             title: opt(e.title),
-            kind,
+            source_measure,
+            aggregation,
+            filter,
+            formula,
             unit: opt(e.unit),
             direction,
-            default_agg,
-            grain,
+            display_kind,
+            category,
             language: opt(e.language),
             description: opt(e.description),
-            dimensions: e
-                .dimensions
+            sliceable_dims: e
+                .sliceable_dims
                 .into_iter()
                 .map(|d| d.trim().to_string())
                 .filter(|d| !d.is_empty())
@@ -1352,21 +1524,115 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
             target: e.target,
             warn_at: e.warn_at,
             fail_at: e.fail_at,
-            trigger,
-            compute,
         });
     }
     Ok(out)
 }
 
-fn validate_metric_compute(
+/// Validate a spec's `filter:` block. `dimEq`, if present, must be a two-element
+/// `[key, value]` list; both must be non-empty.
+fn validate_filter(i: usize, f: FilterConfig) -> Result<FilterConfig, ConfigError> {
+    let dim_eq = match f.dim_eq {
+        Some(pair) => {
+            let cleaned: Vec<String> = pair
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect::<Vec<_>>();
+            if cleaned.len() != 2 || cleaned.iter().any(|s| s.is_empty()) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}].filter.dimEq must be a [key, value] pair of non-empty strings"
+                )));
+            }
+            Some(cleaned)
+        }
+        None => None,
+    };
+    Ok(FilterConfig {
+        min_value: f.min_value,
+        severity: f
+            .severity
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        dim_eq,
+    })
+}
+
+/// Validate a spec's `formula:` block: a known op over two non-empty metric keys.
+fn validate_formula(i: usize, f: FormulaConfig) -> Result<FormulaConfig, ConfigError> {
+    let op = f.op.trim().to_ascii_lowercase();
+    if !METRIC_FORMULA_OPS.contains(&op.as_str()) {
+        return Err(ConfigError::Invalid(format!(
+            "metrics[{i}].formula.op must be one of {METRIC_FORMULA_OPS:?} (got \"{}\")",
+            f.op
+        )));
+    }
+    let left = f.left.trim().to_string();
+    let right = f.right.trim().to_string();
+    if left.is_empty() || right.is_empty() {
+        return Err(ConfigError::Invalid(format!(
+            "metrics[{i}].formula must set both `left` and `right` metric keys"
+        )));
+    }
+    Ok(FormulaConfig { op, left, right })
+}
+
+/// Validate the top-level `gauges:` block (the fact PRODUCERs). Namespaced keys,
+/// `oxplow.*` reserved for built-ins, a known trigger, a non-empty `emits`
+/// (declare-to-collect), and a valid `compute:` block. Definition-only (no
+/// `use:`/`key:` split — a gauge is always declared).
+fn validate_gauges(raw: Option<Vec<GaugeEntry>>) -> Result<Vec<GaugeEntry>, ConfigError> {
+    let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (i, e) in raw.into_iter().flatten().enumerate() {
+        let key = validate_catalog_key("gauges", i, e.key, &mut seen)?;
+        let trigger = opt(e.trigger);
+        if let Some(t) = &trigger {
+            if !METRIC_TRIGGERS.contains(&t.as_str()) {
+                return Err(ConfigError::Invalid(format!(
+                    "gauges[{i}] trigger must be one of {METRIC_TRIGGERS:?} (got \"{t}\")"
+                )));
+            }
+        }
+        let emits: Vec<String> = e
+            .emits
+            .into_iter()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect();
+        if emits.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "gauges[{i}] must declare at least one measure in `emits` \
+                 (a gauge may only emit facts on measures it declares)"
+            )));
+        }
+        let compute = match e.compute {
+            Some(c) => validate_gauge_compute(i, c)?,
+            None => {
+                return Err(ConfigError::Invalid(format!(
+                    "gauges[{i}] key \"{key}\" has no `compute` block"
+                )))
+            }
+        };
+        out.push(GaugeEntry {
+            key: Some(key),
+            title: opt(e.title),
+            trigger,
+            emits,
+            compute: Some(compute),
+        });
+    }
+    Ok(out)
+}
+
+fn validate_gauge_compute(
     i: usize,
-    c: MetricComputeConfig,
-) -> Result<MetricComputeConfig, ConfigError> {
+    c: GaugeComputeConfig,
+) -> Result<GaugeComputeConfig, ConfigError> {
     let runtime = c.runtime.trim().to_ascii_lowercase();
     if !PLUGIN_RUNTIMES.contains(&runtime.as_str()) {
         return Err(ConfigError::Invalid(format!(
-            "metrics[{i}].compute.runtime must be jaq | starlark | exec (got \"{}\")",
+            "gauges[{i}].compute.runtime must be jaq | starlark | exec (got \"{}\")",
             c.runtime
         )));
     }
@@ -1374,7 +1640,7 @@ fn validate_metric_compute(
         Some(s) if !s.is_empty() => {
             if !PLUGIN_INPUTS.contains(&s.as_str()) {
                 return Err(ConfigError::Invalid(format!(
-                    "metrics[{i}].compute.input must be text | json | xml | lcov | lines (got \"{s}\")"
+                    "gauges[{i}].compute.input must be text | json | xml | lcov | lines (got \"{s}\")"
                 )));
             }
             Some(s)
@@ -1389,16 +1655,16 @@ fn validate_metric_compute(
         Some(f) => f,
         None => {
             return Err(ConfigError::Invalid(format!(
-                "metrics[{i}].compute.entryFile is required (the script file path)"
+                "gauges[{i}].compute.entryFile is required (the script file path)"
             )))
         }
     };
     if Path::new(&entry_file).is_absolute() || entry_file.split('/').any(|c| c == "..") {
         return Err(ConfigError::Invalid(format!(
-            "metrics[{i}].compute.entryFile must be a project-relative path without `..` (got \"{entry_file}\")"
+            "gauges[{i}].compute.entryFile must be a project-relative path without `..` (got \"{entry_file}\")"
         )));
     }
-    Ok(MetricComputeConfig {
+    Ok(GaugeComputeConfig {
         runtime,
         input,
         entry_file: Some(entry_file),
@@ -1410,19 +1676,19 @@ fn validate_metric_compute(
     })
 }
 
-/// Resolve declared metrics across the three scopes into the flat
-/// [`ResolvedMetric`] list the runner consumes. Definitions (`key:` entries)
-/// from built-in, then global, then project build a catalog by key (later scope
-/// wins → precedence project > global > built-in). The **project's** entries are
-/// what's *active*: a `key:` entry defines + enables (scope `project`); a `use:`
-/// entry enables a catalog metric, layering its override fields on top (scope =
-/// the definition's scope). A `use:` referencing an unknown key is skipped with
-/// a warning.
+/// Resolve declared metric SPECS across the three scopes into the flat
+/// [`ResolvedSpec`] list the runner consumes. Definitions (`key:` entries) from
+/// built-in, then global, then project build a catalog by key (later scope wins →
+/// precedence project > global > built-in). The **project's** entries are what's
+/// *active*: a `key:` entry defines + enables (scope `project`); a `use:` entry
+/// enables a catalog metric, layering its threshold overrides on top (scope = the
+/// definition's scope). A `use:` referencing an unknown key is skipped with a
+/// warning.
 pub fn resolve_metrics(
     builtin: &[MetricEntry],
     global: &[MetricEntry],
     project: &[MetricEntry],
-) -> Vec<ResolvedMetric> {
+) -> Vec<ResolvedSpec> {
     // Catalog of definitions by key, with the scope each came from.
     let mut catalog: std::collections::HashMap<String, (&'static str, &MetricEntry)> =
         std::collections::HashMap::new();
@@ -1441,7 +1707,7 @@ pub fn resolve_metrics(
     let mut out = Vec::new();
     for e in project {
         if let Some(k) = e.key.as_deref() {
-            // A project definition: it is its own resolved metric.
+            // A project definition: it is its own resolved spec.
             out.push(resolve_one(k, "project", e, None));
         } else if let Some(uk) = e.use_key.as_deref() {
             match catalog.get(uk) {
@@ -1456,50 +1722,71 @@ pub fn resolve_metrics(
     out
 }
 
-/// Build a [`ResolvedMetric`] from a definition entry `def` (in `scope`),
-/// optionally layering override fields from a `use:` entry `over`.
+/// Build a [`ResolvedSpec`] from a definition entry `def` (in `scope`),
+/// optionally layering threshold overrides from a `use:` entry `over`. Only the
+/// thresholds (`target`/`warnAt`/`failAt`) are overridable — the structural spec
+/// (measure/aggregation/filter/formula) is inherent to the definition.
 fn resolve_one(
     key: &str,
     scope: &str,
     def: &MetricEntry,
     over: Option<&MetricEntry>,
-) -> ResolvedMetric {
-    // Pick an override first, else the definition's value.
-    let pick_str = |get: fn(&MetricEntry) -> &Option<String>| -> Option<String> {
-        over.and_then(|o| get(o).clone())
-            .or_else(|| get(def).clone())
-    };
+) -> ResolvedSpec {
     let pick_f64 = |get: fn(&MetricEntry) -> Option<f64>| -> Option<f64> {
         over.and_then(get).or_else(|| get(def))
     };
-    let dimensions = match over {
-        Some(o) if !o.dimensions.is_empty() => o.dimensions.clone(),
-        _ => def.dimensions.clone(),
-    };
-    ResolvedMetric {
+    ResolvedSpec {
         key: key.to_string(),
-        title: pick_str(|e| &e.title).unwrap_or_else(|| key.to_string()),
-        kind: pick_str(|e| &e.kind).unwrap_or_else(|| "gauge".into()),
-        unit: pick_str(|e| &e.unit),
-        direction: pick_str(|e| &e.direction).unwrap_or_else(|| "neutral".into()),
-        default_agg: pick_str(|e| &e.default_agg).unwrap_or_else(|| "last".into()),
-        grain: pick_str(|e| &e.grain),
-        language: pick_str(|e| &e.language),
-        // Description is inherent to the definition (like trigger) — a `use:`
-        // override doesn't change what the metric *is*.
+        title: def.title.clone().unwrap_or_else(|| key.to_string()),
+        source_measure: def.source_measure.clone(),
+        aggregation: def.aggregation.clone().unwrap_or_else(|| "last".into()),
+        filter: def.filter.clone(),
+        formula: def.formula.clone(),
+        unit: def.unit.clone(),
+        direction: def.direction.clone().unwrap_or_else(|| "neutral".into()),
+        display_kind: def.display_kind.clone().unwrap_or_else(|| "gauge".into()),
+        category: def.category.clone(),
+        language: def.language.clone(),
         description: def.description.clone(),
-        dimensions,
+        sliceable_dims: def.sliceable_dims.clone(),
         target: pick_f64(|e| e.target),
         warn_at: pick_f64(|e| e.warn_at),
         fail_at: pick_f64(|e| e.fail_at),
         scope: scope.to_string(),
-        // trigger is inherent to the definition — when a metric is collected is a
-        // property of what it measures, not a per-project knob. Like `compute`,
-        // a `use:` entry can't override it (tsk290).
-        trigger: def.trigger.clone().unwrap_or_else(|| "manual".into()),
-        // compute always comes from the definition (use: entries can't set it).
-        compute: def.compute.clone().unwrap_or_default(),
     }
+}
+
+/// Resolve declared gauges across the global + project scopes into the flat
+/// [`ResolvedGauge`] list the runner executes. Both scopes are definition-only (a
+/// gauge is declared, never "enabled"); a project entry with the same key as a
+/// global one wins (precedence project > global). First-seen order is preserved.
+/// Built-in gauges live in code and never flow through here.
+pub fn resolve_gauges(global: &[GaugeEntry], project: &[GaugeEntry]) -> Vec<ResolvedGauge> {
+    let mut out: Vec<ResolvedGauge> = Vec::new();
+    let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (scope, entries) in [("global", global), ("project", project)] {
+        for e in entries {
+            let Some(key) = e.key.as_deref() else {
+                continue;
+            };
+            let resolved = ResolvedGauge {
+                key: key.to_string(),
+                title: e.title.clone().unwrap_or_else(|| key.to_string()),
+                trigger: e.trigger.clone().unwrap_or_else(|| "on-snapshot".into()),
+                emits: e.emits.clone(),
+                compute: e.compute.clone().unwrap_or_default(),
+                scope: scope.to_string(),
+            };
+            match pos.get(key) {
+                Some(&i) => out[i] = resolved,
+                None => {
+                    pos.insert(key.to_string(), out.len());
+                    out.push(resolved);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Load metric definitions from the user-global scope
@@ -1534,9 +1821,39 @@ pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
     out
 }
 
+/// Load gauge definitions from the user-global scope
+/// (`<global_dir>/gauges/*.yaml`, each a `{ gauges: [ … ] }` doc). Best-effort:
+/// a malformed/unreadable file is logged and skipped. Filename order for
+/// deterministic precedence.
+pub fn load_global_gauge_entries(global_dir: &Path) -> Vec<GaugeEntry> {
+    #[derive(Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        gauges: Option<Vec<GaugeEntry>>,
+    }
+    let mut out = Vec::new();
+    for path in global_yaml_files(global_dir, "gauges") {
+        let parsed = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
+        match parsed {
+            Some(doc) => match validate_gauges(doc.gauges) {
+                Ok(entries) => out.extend(entries),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global gauges file")
+                }
+            },
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable global gauges file")
+            }
+        }
+    }
+    out
+}
+
 /// List `*.yaml`/`*.yml` files under `<global_dir>/<subdir>`, sorted by filename
 /// for deterministic precedence. Empty when the directory is absent. Shared by
-/// the three global catalog loaders (metrics / measures / dimensions).
+/// the global catalog loaders (metrics / gauges / measures / dimensions).
 fn global_yaml_files(global_dir: &Path, subdir: &str) -> Vec<PathBuf> {
     let dir = global_dir.join(subdir);
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -2541,13 +2858,14 @@ collection:
             r#"
 metrics:
   - key: repo.unsafe_blocks
-    kind: gauge
     title: "unsafe blocks"
+    sourceMeasure: acme.ast_hit
+    aggregation: sum
     direction: lower-better
     unit: count
-    trigger: on-snapshot
-    dimensions: [language]
-    compute: { runtime: starlark, entryFile: oxplow/metrics/unsafe.star }
+    displayKind: findings
+    sliceableDims: [acme.rule]
+    filter: { dimEq: [acme.rule, unsafe_block] }
   - use: myglobal.todo_density
     target: 5
 "#,
@@ -2556,14 +2874,15 @@ metrics:
         assert_eq!(cfg.metrics.len(), 2);
         assert_eq!(cfg.metrics[0].key.as_deref(), Some("repo.unsafe_blocks"));
         assert_eq!(
-            cfg.metrics[0]
-                .compute
-                .as_ref()
-                .unwrap()
-                .entry_file
-                .as_deref(),
-            Some("oxplow/metrics/unsafe.star")
+            cfg.metrics[0].source_measure.as_deref(),
+            Some("acme.ast_hit")
         );
+        assert_eq!(cfg.metrics[0].aggregation.as_deref(), Some("sum"));
+        assert_eq!(
+            cfg.metrics[0].filter.as_ref().unwrap().dim_eq.as_deref(),
+            Some(["acme.rule".to_string(), "unsafe_block".to_string()].as_slice())
+        );
+        assert_eq!(cfg.metrics[0].sliceable_dims, vec!["acme.rule".to_string()]);
         assert_eq!(
             cfg.metrics[1].use_key.as_deref(),
             Some("myglobal.todo_density")
@@ -2572,54 +2891,67 @@ metrics:
     }
 
     #[test]
+    fn parses_formula_metric() {
+        let cfg = load_from_yaml(
+            r#"
+metrics:
+  - key: acme.bugs_per_kloc
+    title: "bugs per KLOC"
+    formula: { op: div, left: acme.bug_count, right: acme.kloc }
+"#,
+        )
+        .unwrap();
+        let f = cfg.metrics[0].formula.as_ref().unwrap();
+        assert_eq!(f.op, "div");
+        assert_eq!(f.left, "acme.bug_count");
+        assert_eq!(f.right, "acme.kloc");
+        assert!(cfg.metrics[0].source_measure.is_none());
+    }
+
+    #[test]
     fn metric_validation_rejects_bad_entries() {
         // Reserved namespace for a definition.
+        assert!(
+            load_from_yaml("metrics:\n  - key: oxplow.foo\n    sourceMeasure: acme.m\n").is_err()
+        );
+        // `key:` with neither sourceMeasure nor formula.
+        assert!(load_from_yaml("metrics:\n  - key: acme.foo\n    displayKind: gauge\n").is_err());
+        // `key:` with BOTH sourceMeasure and formula.
         assert!(load_from_yaml(
-            "metrics:\n  - key: oxplow.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    formula: { op: div, left: a.c, right: a.d }\n"
         )
         .is_err());
-        // `key:` without compute.
-        assert!(load_from_yaml("metrics:\n  - key: acme.foo\n    kind: gauge\n").is_err());
-        // `use:` carrying compute.
-        assert!(load_from_yaml(
-            "metrics:\n  - use: acme.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
-        )
-        .is_err());
+        // `use:` carrying a structural field (sourceMeasure).
+        assert!(
+            load_from_yaml("metrics:\n  - use: acme.foo\n    sourceMeasure: acme.m\n").is_err()
+        );
         // both use and key.
         assert!(load_from_yaml("metrics:\n  - use: a.b\n    key: c.d\n").is_err());
         // un-namespaced key.
+        assert!(load_from_yaml("metrics:\n  - key: foo\n    sourceMeasure: acme.m\n").is_err());
+        // bad aggregation.
         assert!(load_from_yaml(
-            "metrics:\n  - key: foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: median\n"
         )
         .is_err());
-        // bad runtime.
+        // bad displayKind.
         assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    compute: { runtime: wasm, entryFile: x.jq }\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    displayKind: sparkline\n"
         )
         .is_err());
-        // entryFile escaping the project root.
+        // a full valid spec is accepted.
         assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: ../x.jq }\n"
-        )
-        .is_err());
-        // unknown grain.
-        assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    grain: module\n    compute: { runtime: jaq, entryFile: x.jq }\n"
-        )
-        .is_err());
-        // a valid grain is accepted.
-        assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    grain: tree\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: count\n    displayKind: findings\n    category: static-quality\n"
         )
         .is_ok());
         // the same key declared twice (a `key:` define + a `use:`).
         assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: x.jq }\n  - use: a.b\n    target: 5\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - use: a.b\n    target: 5\n"
         )
         .is_err());
         // the same key defined twice.
         assert!(load_from_yaml(
-            "metrics:\n  - key: a.b\n    compute: { runtime: jaq, entryFile: x.jq }\n  - key: a.b\n    compute: { runtime: jaq, entryFile: y.jq }\n"
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n  - key: a.b\n    sourceMeasure: acme.n\n"
         )
         .is_err());
     }
@@ -2627,12 +2959,9 @@ metrics:
     fn define(key: &str, target: Option<f64>) -> MetricEntry {
         MetricEntry {
             key: Some(key.into()),
+            source_measure: Some("acme.m".into()),
+            aggregation: Some("count".into()),
             target,
-            compute: Some(MetricComputeConfig {
-                runtime: "starlark".into(),
-                entry_file: Some("m.star".into()),
-                ..Default::default()
-            }),
             ..Default::default()
         }
     }
@@ -2654,8 +2983,8 @@ metrics:
         // project's `use:` override wins for the target.
         assert_eq!(resolved[0].scope, "global");
         assert_eq!(resolved[0].target, Some(7.0));
-        // compute comes from the (global) definition.
-        assert_eq!(resolved[0].compute.entry_file.as_deref(), Some("m.star"));
+        // The measure comes from the (global) definition.
+        assert_eq!(resolved[0].source_measure.as_deref(), Some("acme.m"));
     }
 
     #[test]
@@ -2664,8 +2993,8 @@ metrics:
         let resolved = resolve_metrics(&[], &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].scope, "project");
-        assert_eq!(resolved[0].kind, "gauge");
-        assert_eq!(resolved[0].trigger, "manual");
+        assert_eq!(resolved[0].display_kind, "gauge");
+        assert_eq!(resolved[0].aggregation, "count");
     }
 
     #[test]
@@ -2720,7 +3049,7 @@ metrics:
         std::fs::create_dir_all(&metrics_dir).unwrap();
         std::fs::write(
             metrics_dir.join("a.yaml"),
-            "metrics:\n  - key: myglobal.todo\n    compute: { runtime: jaq, entryFile: t.jq }\n",
+            "metrics:\n  - key: myglobal.todo\n    sourceMeasure: myglobal.m\n    aggregation: count\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.
@@ -2728,6 +3057,115 @@ metrics:
         let entries = load_global_metric_entries(dir.path());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
+    }
+
+    // --- gauges (the fact PRODUCERs — workstream E) -------------------------
+
+    #[test]
+    fn parses_gauges_block() {
+        let cfg = load_from_yaml(
+            r#"
+gauges:
+  - key: acme.scan
+    title: "Acme scan"
+    trigger: on-snapshot
+    emits: [acme.complexity, acme.todo]
+    compute: { runtime: starlark, entryFile: oxplow/gauges/scan.star }
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.gauges.len(), 1);
+        assert_eq!(cfg.gauges[0].key.as_deref(), Some("acme.scan"));
+        assert_eq!(cfg.gauges[0].emits, vec!["acme.complexity", "acme.todo"]);
+        assert_eq!(
+            cfg.gauges[0]
+                .compute
+                .as_ref()
+                .unwrap()
+                .entry_file
+                .as_deref(),
+            Some("oxplow/gauges/scan.star")
+        );
+    }
+
+    #[test]
+    fn gauge_validation_rejects_bad_entries() {
+        // Reserved namespace.
+        assert!(load_from_yaml(
+            "gauges:\n  - key: oxplow.foo\n    emits: [acme.m]\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // No emits (declare-to-collect requires at least one).
+        assert!(load_from_yaml(
+            "gauges:\n  - key: acme.foo\n    compute: { runtime: jaq, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // No compute.
+        assert!(load_from_yaml("gauges:\n  - key: acme.foo\n    emits: [acme.m]\n").is_err());
+        // Bad runtime.
+        assert!(load_from_yaml(
+            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: wasm, entryFile: x.jq }\n"
+        )
+        .is_err());
+        // entryFile escaping the project root.
+        assert!(load_from_yaml(
+            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: jaq, entryFile: ../x.jq }\n"
+        )
+        .is_err());
+        // A full valid gauge is accepted.
+        assert!(load_from_yaml(
+            "gauges:\n  - key: acme.foo\n    emits: [acme.m]\n    compute: { runtime: starlark, entryFile: g.star }\n"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn resolve_gauges_project_over_global() {
+        let g = |key: &str, file: &str| GaugeEntry {
+            key: Some(key.into()),
+            emits: vec!["acme.m".into()],
+            compute: Some(GaugeComputeConfig {
+                runtime: "starlark".into(),
+                entry_file: Some(file.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let global = vec![g("acme.scan", "global.star")];
+        let project = vec![g("acme.scan", "project.star")];
+        let resolved = resolve_gauges(&global, &project);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].scope, "project");
+        assert_eq!(
+            resolved[0].compute.entry_file.as_deref(),
+            Some("project.star")
+        );
+        // Default trigger when unset.
+        assert_eq!(resolved[0].trigger, "on-snapshot");
+    }
+
+    #[test]
+    fn gauges_round_trip_through_write() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            gauges: vec![GaugeEntry {
+                key: Some("acme.scan".into()),
+                emits: vec!["acme.m".into()],
+                compute: Some(GaugeComputeConfig {
+                    runtime: "starlark".into(),
+                    entry_file: Some("g.star".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(raw.contains("gauges:"), "got:\n{raw}");
+        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.gauges, cfg.gauges);
     }
 
     // --- measures + dimensions (workstream E) ------------------------------

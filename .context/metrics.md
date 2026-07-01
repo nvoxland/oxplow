@@ -399,7 +399,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_definition` per resolved `metrics:` entry; runs each `gauge` on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | whatever the project/global `metrics:` entry declares — a `metric_sample` per `MetricReport.sample`, version/branch/snapshot-stamped, subject/dims from the script. The bundled code gauges emit both the headline `tree:.` total and sparse `file:<path>` per-file samples (the attribution grain — see the per-file section above) |
+| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped. A gauge that also returns `samples`/`findings` (the built-in code gauges) writes the legacy baked `metric_sample`/`metric_finding` too — `record_baked_run`, kept until the read-flip; a facts-only gauge writes no baked run |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -494,8 +494,8 @@ that **writes**.
 > once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
 > like trigger). Sources: the built-in code gauges (`BuiltinMetric.description`),
 > the always-on producers (`ProducerMetric.description` in `producer_metrics.rs`),
-> and config `key:` entries (`MetricEntry.description` → `ResolvedMetric` →
-> `metric_definition()`).
+> and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
+> `spec_definition()`).
 
 `MetricsExplorer.tsx` itself (the chart component, P4) is a multi-measure
 overlay on one time
@@ -560,18 +560,20 @@ The **configure** page (tsk282):
   not a per-project knob — so it's shown **read-only** and never user-pickable;
   `resolve_one` reads it from the definition (like `compute`), a `use:` entry
   can't override it, and `set_metric_override` no longer accepts it (tsk290).
-  **"New metric"** (tsk234/tsk235) scaffolds a gauge at **project** or **global**
-  scope: `scaffold_metric` → `MetricsService::scaffold_metric` writes a starter
-  Starlark stub + a `key:` `metrics:` entry. *Project* writes under
-  `oxplow/metrics/<slug>.star` + `.oxplow/project.yaml`, returns the project-relative path,
-  and the page opens it (`onOpenPage(fileRef(path))`). *Global* writes the script
-  + a `metrics:` manifest under `<global_config_dir>/metrics/` (shared across the
-  user's projects, via `oxplow_config::write_global_metrics_file`) **and** adds a
-  project `use:` so it's active here (a global `key:` define is library content
-  until a project opts in — see `resolve_metrics`); the global path isn't opened
-  (it's outside the worktree). The runner resolves each metric's `entryFile`
-  against the right base dir (`MetricsService::script_base_dir`: `<global>/metrics`
-  for a global-scope metric, else the project dir).
+  **"New metric"** scaffolds the **trio** (measure + gauge + metric) at
+  **project** or **global** scope: `scaffold_metric` →
+  `MetricsService::scaffold_metric` writes a starter fact-emitting Starlark stub +
+  a `measures:` entry (`<key>.count`) + a `gauges:` entry (`<key>`) + a `metrics:`
+  spec (`<key>`, `sum` over the measure). *Project* writes the script under
+  `oxplow/gauges/<slug>.star` + the three entries in `.oxplow/project.yaml`,
+  returns the project-relative path, and the page opens it. *Global* writes the
+  script + three manifests under `<global_config_dir>/{gauges,measures,metrics}/`
+  (via `write_global_{gauges,measures,metrics}_file`) **and** adds a project `use:`
+  so the metric is active here (the global gauge + measure are active
+  automatically; a global metric is library content until a project opts in). The
+  runner resolves each gauge's `entryFile` against the right base dir
+  (`script_base_dir`: `<global>/gauges` for a global-scope gauge, else the project
+  dir).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 task/effort page renders an `EffortMetricsBlock` (`components/EffortMetrics.tsx`)
@@ -600,39 +602,55 @@ projected into the substrate — see the producers note above.)
 3. It then appears in MCP/IPC reads and on the Metrics page automatically — no
    UI code per metric.
 
-## Authoring surface (`metrics:` config — P3, tsk217)
+## Authoring surface (the four config blocks — epic tsk12, E)
 
 A project (or the user-global library) declares metrics in YAML — no Rust per
-metric. Parsed/validated/resolved in `crates/oxplow-config/src/lib.rs`
-(`MetricEntry` / `MetricComputeConfig` / `resolve_metrics` /
-`load_global_metric_entries`); the runner (`MetricsService`, tsk225) seeds a
-`metric_definition` per resolved entry and runs it on its `trigger`.
-
-Two entry forms in the top-level `metrics:` block:
+metric. The substrate is dimensional, so authoring splits into **four orthogonal
+blocks** (matching the real cardinality): `measures:` (fact TYPEs) ← `gauges:`
+(fact PRODUCERs) → facts → `metrics:` (read SPECs), sliced by `dimensions:`.
+Parsed/validated/resolved in `crates/oxplow-config/src/lib.rs`
+(`MetricEntry`→`ResolvedSpec` + `resolve_metrics`; `GaugeEntry`→`ResolvedGauge` +
+`resolve_gauges`; `GaugeComputeConfig`; `load_global_{metric,gauge}_entries`); the
+runner (`MetricsService`) seeds a `metric_spec` per resolved metric (and a legacy
+`metric_definition` until the read-flip, tsk26) and runs each **gauge** on its
+`trigger`.
 
 ```yaml
-metrics:
-  - key: repo.unsafe_blocks          # DEFINE a new metric (full def + compute)
-    kind: gauge
+measures:                             # the fact TYPE the gauge emits
+  - key: repo.todo_count
+    subjectKind: file
+    unit: count
+    temporalSemantics: semi-additive  # additivity OVER TIME
+gauges:                               # the PRODUCER (runs a script, emits facts)
+  - key: repo.todo
+    trigger: on-snapshot              # on-report|on-snapshot|on-effort-complete|manual|continuous
+    emits: [repo.todo_count]          # declare-to-collect allow-list
+    compute: { runtime: starlark, entryFile: oxplow/gauges/todo.star }
+metrics:                              # the read SPEC (the chartable metric)
+  - key: repo.todo_count              # DEFINE — a measure aggregation
+    sourceMeasure: repo.todo_count
+    aggregation: sum                  # count|sum|avg|min|max|last|ratio (within a capture)
     direction: lower-better
     unit: count
-    trigger: on-snapshot             # on-report|on-snapshot|on-effort-complete|manual|continuous
-    dimensions: [language]
-    compute: { runtime: starlark, entryFile: oxplow/metrics/unsafe.star }
-  - use: myglobal.todo_density        # ENABLE a catalog metric (+ overrides)
+    displayKind: gauge                # gauge|findings|test|coverage|event
+    filter: { minValue: 1 }           # optional predicate before aggregating
+    sliceableDims: [language]
+  - use: myglobal.todo_density        # ENABLE a catalog metric (+ threshold overrides)
     target: 5
 ```
 
-- The **gauge** script returns `{ "samples": [ {value, subject?, dims?} ] }` and
-  may call the `files(glob)` / `ast_query(text, language, sexpr)` host builtins
-  (see [collection.md](./collection.md)). It may **also** return
-  `"findings": [ {path?, line?, message?, value?, subject?, rule?, severity?} ]`
-  (`GaugeFinding`, tsk311) — the *located items the metric counted* (e.g. each
-  high-complexity function). The runner records them as `metric_finding`s on the
-  run (kind `gauge-item`); a recording then drills into them via the Metric
-  Recording page. The bundled complexity/length gauges emit one finding per
-  offending function (`{path, line, message=name, value=complexity|length}`,
-  tsk312).
+- A **metric** no longer computes anything — it's a pure spec (`sourceMeasure` +
+  `aggregation` + optional `filter`, OR a `formula: {op,left,right}` over other
+  metrics). Two-axis aggregation: `aggregation` combines facts *within a capture*;
+  the source measure's `temporalSemantics` governs the cross-time collapse. A
+  `use:` may only re-target thresholds; the structural fields are inherent.
+- The **gauge** script returns `{ "facts": [ {measure, value, subject?, path?,
+  line?, rule?, dims?} ] }` — one atomic fact per subject (never a baked total),
+  each on a measure in the gauge's `emits`, calling the `files(glob)` /
+  `ast_query(text, language, sexpr)` host builtins (see [collection.md](./collection.md)).
+  A gauge may also return `"samples"`/`"findings"` (`GaugeFinding`, tsk311) —
+  the legacy baked channel, kept for the built-in gauges until the read-flip; a
+  facts-only gauge (the clean model) writes no baked run.
 - **Three scopes**, precedence **project > global > built-in** by key:
   - **built-in** — the bundled catalog
     (`oxplow_collect_plugin::builtin_metrics()`; scripts under
@@ -661,21 +679,27 @@ metrics:
     complexity/`code_metrics()`-backed gauges and the C# grammar
     (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
     tsk229/tsk230.
-  - **user-global** — `global_config_dir()/metrics/*.yaml`, shared across
-    projects, hot-reloaded by the config watcher.
-  - **project** — `.oxplow/project.yaml` + scripts under `oxplow/metrics/`.
+  - **user-global** — `global_config_dir()/{metrics,gauges,measures,dimensions}/*.yaml`,
+    shared across projects, hot-reloaded by the config watcher. Global gauges +
+    measures are active everywhere automatically; a global *metric* is enabled
+    per-project with a `use:`.
+  - **project** — `.oxplow/project.yaml` + gauge scripts under `oxplow/gauges/`.
 
-  `use:` references a catalog key and layers overrides; `key:` defines a new one.
-  `oxplow.*` is reserved for built-ins (a project may `use:` one but not
-  `key:`-define under it).
+  `use:` references a catalog metric key and layers threshold overrides; `key:`
+  defines a new spec. `oxplow.*` is reserved for built-ins (a project may `use:`
+  one but not `key:`-define under it). Gauges are definition-only (declared, never
+  `use:`d).
 - Validation mirrors the plugin rules: namespaced keys, project-relative
-  `entryFile` (no `..`), known runtime/kind/trigger/direction; a `use:` with an
-  unknown key resolves to a warning (skipped), not an error.
+  `entryFile` (no `..`), known runtime/aggregation/displayKind/trigger/direction;
+  a `key:` metric must set exactly one of `sourceMeasure`/`formula`; a `use:` with
+  an unknown key resolves to a warning (skipped), not an error.
 
 The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 + the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
-a working `metrics:` entry + script + verification, no oxplow-team involvement.
+the measure+gauge+metric trio + script + verification, no oxplow-team involvement.
+`MetricsService::scaffold_metric` writes that trio (measure `<key>.count`, gauge
+`<key>`, metric `<key>`) + a starter fact-emitting gauge script.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 
