@@ -1354,6 +1354,37 @@ export type DiffEntry = {
 };
 
 /**
+ *  One entry in the top-level `dimensions:` block — the **conformed-dimension
+ *  catalog** authoring surface (epic tsk12, workstream E). A dimension is a
+ *  slice axis that means the same thing to every fact that carries it
+ *  (`oxplow.severity`, `acme.license`, …), enabling cross-metric drill-across.
+ *  Like [`MeasureEntry`] it is definition-only; the `oxplow.*` built-ins are the
+ *  migration seed. Resolved by [`resolve_dimensions`] and seeded into the
+ *  `dimension` table at boot; `promote` requests a generated column + index
+ *  (catalog teeth).
+ */
+export type DimensionEntry = {
+	// The new dimension's namespaced key (`<vendor>.<id>`). Required.
+	key?: string | null,
+	label?: string | null,
+	/**
+	 *  `categorical` | `numeric` | `temporal` | `entity-ref` (default
+	 *  `categorical`).
+	 */
+	valueType?: string | null,
+	// For `entity-ref` dims — the subject kind the value points at.
+	subjectKind?: string | null,
+	// Optional controlled vocabulary (the allowed value set).
+	vocabulary?: string[],
+	/**
+	 *  Request a generated column + expression index on `fact` for this dim
+	 *  (fast group-by/filter). Off by default — the long tail lives in
+	 *  `dims_json`, promoted only when hot.
+	 */
+	promote?: boolean,
+};
+
+/**
  *  One (snapshot, effort) pair returned from
  *  `list_efforts_at_snapshots`. The renderer derives
  *  `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
@@ -1838,6 +1869,33 @@ export type LspServerListing = {
 // Where a server config came from, for the settings UI.
 export type LspServerSource = "yaml" | "installed";
 
+/**
+ *  One entry in the top-level `measures:` block — the **measure catalog**
+ *  authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
+ *  fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
+ *  `oxplow.*` built-ins are seeded by the DB migration, so config only *adds*
+ *  global/project measures. Unlike [`MetricEntry`] there is no `use:`/`key:`
+ *  split — a measure entry is always a definition (you declare the fact type,
+ *  you don't "enable" one). Resolved across the global+project scopes by
+ *  [`resolve_measures`] and seeded into the `measure` table at boot.
+ */
+export type MeasureEntry = {
+	// The new measure's namespaced key (`<vendor>.<id>`). Required.
+	key?: string | null,
+	title?: string | null,
+	unit?: string | null,
+	// The grain's subject kind (`symbol` | `file` | `test` | `model` | …).
+	subjectKind?: string | null,
+	/**
+	 *  `additive` | `semi-additive` | `non-additive` — additivity OVER TIME
+	 *  (default `semi-additive`).
+	 */
+	temporalSemantics?: string | null,
+	// `none` | `numerator` | `denominator` — ratio-base role (default `none`).
+	componentRole?: string | null,
+	description?: string | null,
+};
+
 export type MenuGroupSnapshot = {
 	id: string,
 	label: string,
@@ -2138,6 +2196,19 @@ export type OxplowConfig = {
 	 *  the built-in/global/project scopes; see [`resolve_metrics`].
 	 */
 	metrics?: MetricEntry[],
+	/**
+	 *  Project-declared measures (the `measures:` block) — custom fact TYPES a
+	 *  collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
+	 *  are seeded by the DB migration; these add global/project ones. Resolved
+	 *  by [`resolve_measures`] and seeded into the `measure` catalog at boot.
+	 */
+	measures?: MeasureEntry[],
+	/**
+	 *  Project-declared dimensions (the `dimensions:` block) — custom conformed
+	 *  slice axes (epic tsk12, workstream E). Resolved by [`resolve_dimensions`]
+	 *  and seeded into the `dimension` catalog at boot.
+	 */
+	dimensions?: DimensionEntry[],
 	/**
 	 *  Per-agent launch model overrides, e.g.
 	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.

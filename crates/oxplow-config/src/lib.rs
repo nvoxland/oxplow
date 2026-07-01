@@ -218,6 +218,102 @@ pub struct ResolvedMetric {
     pub compute: MetricComputeConfig,
 }
 
+/// One entry in the top-level `measures:` block — the **measure catalog**
+/// authoring surface (epic tsk12, workstream E). A measure is a *type of atomic
+/// fact* a collector may emit (`oxplow.complexity`, `acme.api_latency`, …); the
+/// `oxplow.*` built-ins are seeded by the DB migration, so config only *adds*
+/// global/project measures. Unlike [`MetricEntry`] there is no `use:`/`key:`
+/// split — a measure entry is always a definition (you declare the fact type,
+/// you don't "enable" one). Resolved across the global+project scopes by
+/// [`resolve_measures`] and seeded into the `measure` table at boot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct MeasureEntry {
+    /// The new measure's namespaced key (`<vendor>.<id>`). Required.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// The grain's subject kind (`symbol` | `file` | `test` | `model` | …).
+    #[serde(rename = "subjectKind", default)]
+    pub subject_kind: Option<String>,
+    /// `additive` | `semi-additive` | `non-additive` — additivity OVER TIME
+    /// (default `semi-additive`).
+    #[serde(rename = "temporalSemantics", default)]
+    pub temporal_semantics: Option<String>,
+    /// `none` | `numerator` | `denominator` — ratio-base role (default `none`).
+    #[serde(rename = "componentRole", default)]
+    pub component_role: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// A fully-resolved measure — the flat form the boot seeder upserts into the
+/// `measure` catalog. Produced by [`resolve_measures`] after merging the global
+/// and project scopes (precedence project > global). Not serialized.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedMeasure {
+    pub key: String,
+    pub title: String,
+    pub unit: Option<String>,
+    pub subject_kind: Option<String>,
+    pub temporal_semantics: String,
+    pub component_role: String,
+    /// `global` | `project` (built-ins are the migration seed, not config).
+    pub scope: String,
+    pub description: Option<String>,
+}
+
+/// One entry in the top-level `dimensions:` block — the **conformed-dimension
+/// catalog** authoring surface (epic tsk12, workstream E). A dimension is a
+/// slice axis that means the same thing to every fact that carries it
+/// (`oxplow.severity`, `acme.license`, …), enabling cross-metric drill-across.
+/// Like [`MeasureEntry`] it is definition-only; the `oxplow.*` built-ins are the
+/// migration seed. Resolved by [`resolve_dimensions`] and seeded into the
+/// `dimension` table at boot; `promote` requests a generated column + index
+/// (catalog teeth).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[serde(deny_unknown_fields)]
+pub struct DimensionEntry {
+    /// The new dimension's namespaced key (`<vendor>.<id>`). Required.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// `categorical` | `numeric` | `temporal` | `entity-ref` (default
+    /// `categorical`).
+    #[serde(rename = "valueType", default)]
+    pub value_type: Option<String>,
+    /// For `entity-ref` dims — the subject kind the value points at.
+    #[serde(rename = "subjectKind", default)]
+    pub subject_kind: Option<String>,
+    /// Optional controlled vocabulary (the allowed value set).
+    #[serde(default)]
+    pub vocabulary: Vec<String>,
+    /// Request a generated column + expression index on `fact` for this dim
+    /// (fast group-by/filter). Off by default — the long tail lives in
+    /// `dims_json`, promoted only when hot.
+    #[serde(default)]
+    pub promote: bool,
+}
+
+/// A fully-resolved dimension — the flat form the boot seeder upserts into the
+/// `dimension` catalog. Produced by [`resolve_dimensions`] (project > global).
+/// Not serialized.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedDimension {
+    pub key: String,
+    pub label: String,
+    pub value_type: String,
+    pub subject_kind: Option<String>,
+    pub vocabulary: Vec<String>,
+    /// `global` | `project` (built-ins are the migration seed, not config).
+    pub scope: String,
+    pub promote: bool,
+}
+
 /// Per-project collection profile (the `collection:` block). Written by
 /// `/oxplow:configure` and read by the collection subsystem
 /// (`.context/collection.md`): the Bash-hook detector reads
@@ -339,6 +435,17 @@ pub struct OxplowConfig {
     /// the built-in/global/project scopes; see [`resolve_metrics`].
     #[serde(default)]
     pub metrics: Vec<MetricEntry>,
+    /// Project-declared measures (the `measures:` block) — custom fact TYPES a
+    /// collector may emit (epic tsk12, workstream E). The `oxplow.*` built-ins
+    /// are seeded by the DB migration; these add global/project ones. Resolved
+    /// by [`resolve_measures`] and seeded into the `measure` catalog at boot.
+    #[serde(default)]
+    pub measures: Vec<MeasureEntry>,
+    /// Project-declared dimensions (the `dimensions:` block) — custom conformed
+    /// slice axes (epic tsk12, workstream E). Resolved by [`resolve_dimensions`]
+    /// and seeded into the `dimension` catalog at boot.
+    #[serde(default)]
+    pub dimensions: Vec<DimensionEntry>,
     /// Per-agent launch model overrides, e.g.
     /// `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
     /// Only opencode consumes this today (its `-m provider/model`
@@ -395,6 +502,10 @@ struct RawConfig {
     collection: Option<RawCollectionBlock>,
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
+    #[serde(default)]
+    measures: Option<Vec<MeasureEntry>>,
+    #[serde(default)]
+    dimensions: Option<Vec<DimensionEntry>>,
     #[serde(rename = "agentModels", default)]
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
 }
@@ -540,6 +651,8 @@ pub fn write_project_config(
         "lsp",
         "collection",
         "metrics",
+        "measures",
+        "dimensions",
         "agentModels",
     ];
 
@@ -705,6 +818,20 @@ pub fn write_project_config(
         doc.insert("metrics".into(), serde_yaml::Value::Sequence(metrics));
     }
 
+    if !config.measures.is_empty() {
+        let measures: Vec<_> = config.measures.iter().map(measure_entry_to_yaml).collect();
+        doc.insert("measures".into(), serde_yaml::Value::Sequence(measures));
+    }
+
+    if !config.dimensions.is_empty() {
+        let dimensions: Vec<_> = config
+            .dimensions
+            .iter()
+            .map(dimension_entry_to_yaml)
+            .collect();
+        doc.insert("dimensions".into(), serde_yaml::Value::Sequence(dimensions));
+    }
+
     if !config.agent_models.is_empty() {
         doc.insert(
             "agentModels".into(),
@@ -799,6 +926,49 @@ fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     serde_yaml::Value::Mapping(m)
 }
 
+/// Serialize one [`MeasureEntry`] to a YAML mapping, omitting unset fields so a
+/// hand-edited `measures:` block stays minimal across UI-driven writes.
+fn measure_entry_to_yaml(e: &MeasureEntry) -> serde_yaml::Value {
+    let mut m = serde_yaml::Mapping::new();
+    let mut put_str = |k: &str, v: &Option<String>| {
+        if let Some(s) = v {
+            m.insert(k.into(), s.clone().into());
+        }
+    };
+    put_str("key", &e.key);
+    put_str("title", &e.title);
+    put_str("unit", &e.unit);
+    put_str("subjectKind", &e.subject_kind);
+    put_str("temporalSemantics", &e.temporal_semantics);
+    put_str("componentRole", &e.component_role);
+    put_str("description", &e.description);
+    serde_yaml::Value::Mapping(m)
+}
+
+/// Serialize one [`DimensionEntry`] to a YAML mapping, omitting unset fields.
+fn dimension_entry_to_yaml(e: &DimensionEntry) -> serde_yaml::Value {
+    let mut m = serde_yaml::Mapping::new();
+    let mut put_str = |k: &str, v: &Option<String>| {
+        if let Some(s) = v {
+            m.insert(k.into(), s.clone().into());
+        }
+    };
+    put_str("key", &e.key);
+    put_str("label", &e.label);
+    put_str("valueType", &e.value_type);
+    put_str("subjectKind", &e.subject_kind);
+    if !e.vocabulary.is_empty() {
+        m.insert(
+            "vocabulary".into(),
+            serde_yaml::to_value(&e.vocabulary).expect("vocabulary serialize"),
+        );
+    }
+    if e.promote {
+        m.insert("promote".into(), true.into());
+    }
+    serde_yaml::Value::Mapping(m)
+}
+
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
         agents: vec![AgentKind::default()],
@@ -811,6 +981,8 @@ fn default_config(project_name: String) -> OxplowConfig {
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         collection: CollectionConfig::default(),
         metrics: Vec::new(),
+        measures: Vec::new(),
+        dimensions: Vec::new(),
         agent_models: Default::default(),
     }
 }
@@ -876,6 +1048,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     let collection = validate_collection(raw.collection)?;
     let metrics = validate_metrics(raw.metrics)?;
+    let measures = validate_measures(raw.measures)?;
+    let dimensions = validate_dimensions(raw.dimensions)?;
 
     let agent_models = {
         let mut out = std::collections::BTreeMap::new();
@@ -943,6 +1117,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         inject_session_context,
         collection,
         metrics,
+        measures,
+        dimensions,
         agent_models,
     })
 }
@@ -998,6 +1174,15 @@ const METRIC_TRIGGERS: &[&str] = &[
     "manual",
     "continuous",
 ];
+
+/// Additivity-over-time a `measures:` entry may declare (mirrors the `measure`
+/// table's CHECK).
+const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
+/// Ratio-base role a `measures:` entry may declare.
+const MEASURE_COMPONENT_ROLES: &[&str] = &["none", "numerator", "denominator"];
+/// Value types a `dimensions:` entry may declare (mirrors the `dimension`
+/// table's CHECK).
+const DIMENSION_VALUE_TYPES: &[&str] = &["categorical", "numeric", "temporal", "entity-ref"];
 
 /// Validate the top-level `metrics:` block (the project scope). Mirrors the
 /// plugin rules: namespaced keys, `oxplow.*` reserved for built-ins,
@@ -1286,7 +1471,37 @@ fn resolve_one(
 /// or malformed file is logged and skipped, never an error. Returns the entries
 /// in filename order for deterministic precedence.
 pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
-    let dir = global_dir.join("metrics");
+    #[derive(Deserialize)]
+    struct GlobalMetricsDoc {
+        #[serde(default)]
+        metrics: Option<Vec<MetricEntry>>,
+    }
+
+    let mut out = Vec::new();
+    for path in global_yaml_files(global_dir, "metrics") {
+        let parsed = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<GlobalMetricsDoc>(&raw).ok());
+        match parsed {
+            Some(doc) => match validate_metrics(doc.metrics) {
+                Ok(entries) => out.extend(entries),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global metrics file")
+                }
+            },
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable global metrics file")
+            }
+        }
+    }
+    out
+}
+
+/// List `*.yaml`/`*.yml` files under `<global_dir>/<subdir>`, sorted by filename
+/// for deterministic precedence. Empty when the directory is absent. Shared by
+/// the three global catalog loaders (metrics / measures / dimensions).
+fn global_yaml_files(global_dir: &Path, subdir: &str) -> Vec<PathBuf> {
+    let dir = global_dir.join(subdir);
     let Ok(read) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -1300,27 +1515,257 @@ pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
         })
         .collect();
     files.sort();
+    files
+}
 
-    #[derive(Deserialize)]
-    struct GlobalMetricsDoc {
-        #[serde(default)]
-        metrics: Option<Vec<MetricEntry>>,
+// ---------------------------------------------------------------------------
+// Measures + dimensions (the fact-catalog authoring surface — epic tsk12, E)
+// ---------------------------------------------------------------------------
+
+/// Shared key check for the `measures:` / `dimensions:` catalogs: the key must
+/// be present, namespaced `<vendor>.<id>`, outside the reserved `oxplow.*`
+/// namespace (those are the migration seed), and unique within its block.
+/// Returns the cleaned key. `block` is the YAML block name for error messages.
+fn validate_catalog_key(
+    block: &str,
+    i: usize,
+    raw_key: Option<String>,
+    seen: &mut std::collections::HashSet<String>,
+) -> Result<String, ConfigError> {
+    let key = raw_key
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ConfigError::Invalid(format!("{block}[{i}] must set a `key`")))?;
+    if !key.contains('.') {
+        return Err(ConfigError::Invalid(format!(
+            "{block}[{i}] key \"{key}\" must be namespaced as \"<vendor>.<id>\""
+        )));
     }
+    if key.starts_with("oxplow.") {
+        return Err(ConfigError::Invalid(format!(
+            "{block}[{i}] key \"{key}\" uses the reserved \"oxplow.\" namespace"
+        )));
+    }
+    if !seen.insert(key.clone()) {
+        return Err(ConfigError::Invalid(format!(
+            "{block}[{i}] key \"{key}\" appears more than once in the {block} block"
+        )));
+    }
+    Ok(key)
+}
 
+/// Validate the top-level `measures:` block. Mirrors [`validate_metrics`]:
+/// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known
+/// temporalSemantics/componentRole enums. Definition-only (no `use:` form).
+fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>, ConfigError> {
+    let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
-    for path in files {
+    let mut seen = std::collections::HashSet::new();
+    for (i, e) in raw.into_iter().flatten().enumerate() {
+        let key = validate_catalog_key("measures", i, e.key, &mut seen)?;
+        let temporal_semantics = match opt(e.temporal_semantics) {
+            Some(s) => {
+                if !MEASURE_TEMPORAL_SEMANTICS.contains(&s.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "measures[{i}] temporalSemantics must be one of \
+                         {MEASURE_TEMPORAL_SEMANTICS:?} (got \"{s}\")"
+                    )));
+                }
+                Some(s)
+            }
+            None => None,
+        };
+        let component_role = match opt(e.component_role) {
+            Some(s) => {
+                if !MEASURE_COMPONENT_ROLES.contains(&s.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "measures[{i}] componentRole must be one of \
+                         {MEASURE_COMPONENT_ROLES:?} (got \"{s}\")"
+                    )));
+                }
+                Some(s)
+            }
+            None => None,
+        };
+        out.push(MeasureEntry {
+            key: Some(key),
+            title: opt(e.title),
+            unit: opt(e.unit),
+            subject_kind: opt(e.subject_kind),
+            temporal_semantics,
+            component_role,
+            description: opt(e.description),
+        });
+    }
+    Ok(out)
+}
+
+/// Validate the top-level `dimensions:` block. Mirrors [`validate_measures`]:
+/// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known valueType.
+fn validate_dimensions(
+    raw: Option<Vec<DimensionEntry>>,
+) -> Result<Vec<DimensionEntry>, ConfigError> {
+    let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (i, e) in raw.into_iter().flatten().enumerate() {
+        let key = validate_catalog_key("dimensions", i, e.key, &mut seen)?;
+        let value_type = match opt(e.value_type) {
+            Some(s) => {
+                if !DIMENSION_VALUE_TYPES.contains(&s.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] valueType must be one of \
+                         {DIMENSION_VALUE_TYPES:?} (got \"{s}\")"
+                    )));
+                }
+                Some(s)
+            }
+            None => None,
+        };
+        let vocabulary = e
+            .vocabulary
+            .into_iter()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect();
+        out.push(DimensionEntry {
+            key: Some(key),
+            label: opt(e.label),
+            value_type,
+            subject_kind: opt(e.subject_kind),
+            vocabulary,
+            promote: e.promote,
+        });
+    }
+    Ok(out)
+}
+
+/// Resolve declared measures across the global + project scopes into the flat
+/// [`ResolvedMeasure`] list the boot seeder upserts into the `measure` catalog.
+/// Both scopes are definition-only (a measure is declared, never "enabled"); a
+/// project entry with the same key as a global one wins (precedence project >
+/// global). First-seen order is preserved. The `oxplow.*` built-ins are the
+/// migration seed and never flow through here.
+pub fn resolve_measures(global: &[MeasureEntry], project: &[MeasureEntry]) -> Vec<ResolvedMeasure> {
+    let mut out: Vec<ResolvedMeasure> = Vec::new();
+    let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (scope, entries) in [("global", global), ("project", project)] {
+        for e in entries {
+            let Some(key) = e.key.as_deref() else {
+                continue;
+            };
+            let resolved = ResolvedMeasure {
+                key: key.to_string(),
+                title: e.title.clone().unwrap_or_else(|| key.to_string()),
+                unit: e.unit.clone(),
+                subject_kind: e.subject_kind.clone(),
+                temporal_semantics: e
+                    .temporal_semantics
+                    .clone()
+                    .unwrap_or_else(|| "semi-additive".into()),
+                component_role: e.component_role.clone().unwrap_or_else(|| "none".into()),
+                scope: scope.to_string(),
+                description: e.description.clone(),
+            };
+            match pos.get(key) {
+                Some(&i) => out[i] = resolved,
+                None => {
+                    pos.insert(key.to_string(), out.len());
+                    out.push(resolved);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Resolve declared dimensions across the global + project scopes (project >
+/// global), analogous to [`resolve_measures`].
+pub fn resolve_dimensions(
+    global: &[DimensionEntry],
+    project: &[DimensionEntry],
+) -> Vec<ResolvedDimension> {
+    let mut out: Vec<ResolvedDimension> = Vec::new();
+    let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (scope, entries) in [("global", global), ("project", project)] {
+        for e in entries {
+            let Some(key) = e.key.as_deref() else {
+                continue;
+            };
+            let resolved = ResolvedDimension {
+                key: key.to_string(),
+                label: e.label.clone().unwrap_or_else(|| key.to_string()),
+                value_type: e.value_type.clone().unwrap_or_else(|| "categorical".into()),
+                subject_kind: e.subject_kind.clone(),
+                vocabulary: e.vocabulary.clone(),
+                scope: scope.to_string(),
+                promote: e.promote,
+            };
+            match pos.get(key) {
+                Some(&i) => out[i] = resolved,
+                None => {
+                    pos.insert(key.to_string(), out.len());
+                    out.push(resolved);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Load measure definitions from the user-global scope
+/// (`<global_dir>/measures/*.yaml`, each a `{ measures: [ … ] }` doc).
+/// Best-effort: a malformed/unreadable file is logged and skipped. Filename
+/// order for deterministic precedence.
+pub fn load_global_measure_entries(global_dir: &Path) -> Vec<MeasureEntry> {
+    #[derive(Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        measures: Option<Vec<MeasureEntry>>,
+    }
+    let mut out = Vec::new();
+    for path in global_yaml_files(global_dir, "measures") {
         let parsed = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|raw| serde_yaml::from_str::<GlobalMetricsDoc>(&raw).ok());
+            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
         match parsed {
-            Some(doc) => match validate_metrics(doc.metrics) {
+            Some(doc) => match validate_measures(doc.measures) {
                 Ok(entries) => out.extend(entries),
                 Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global metrics file")
+                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global measures file")
                 }
             },
             None => {
-                tracing::warn!(path = %path.display(), "skipping unreadable global metrics file")
+                tracing::warn!(path = %path.display(), "skipping unreadable global measures file")
+            }
+        }
+    }
+    out
+}
+
+/// Load dimension definitions from the user-global scope
+/// (`<global_dir>/dimensions/*.yaml`, each a `{ dimensions: [ … ] }` doc).
+/// Best-effort; analogous to [`load_global_measure_entries`].
+pub fn load_global_dimension_entries(global_dir: &Path) -> Vec<DimensionEntry> {
+    #[derive(Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        dimensions: Option<Vec<DimensionEntry>>,
+    }
+    let mut out = Vec::new();
+    for path in global_yaml_files(global_dir, "dimensions") {
+        let parsed = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
+        match parsed {
+            Some(doc) => match validate_dimensions(doc.dimensions) {
+                Ok(entries) => out.extend(entries),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global dimensions file")
+                }
+            },
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable global dimensions file")
             }
         }
     }
@@ -2246,5 +2691,197 @@ metrics:
         let entries = load_global_metric_entries(dir.path());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
+    }
+
+    // --- measures + dimensions (workstream E) ------------------------------
+
+    #[test]
+    fn parses_measures_and_dimensions_blocks() {
+        let cfg = load_from_yaml(
+            r#"
+measures:
+  - key: acme.api_latency
+    title: "API latency"
+    unit: ms
+    subjectKind: endpoint
+    temporalSemantics: non-additive
+    componentRole: numerator
+    description: "p95 request latency"
+dimensions:
+  - key: acme.license
+    label: License
+    valueType: categorical
+    vocabulary: [MIT, Apache-2.0, GPL-3.0]
+  - key: acme.endpoint
+    valueType: entity-ref
+    subjectKind: endpoint
+    promote: true
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.measures.len(), 1);
+        let m = &cfg.measures[0];
+        assert_eq!(m.key.as_deref(), Some("acme.api_latency"));
+        assert_eq!(m.unit.as_deref(), Some("ms"));
+        assert_eq!(m.subject_kind.as_deref(), Some("endpoint"));
+        assert_eq!(m.temporal_semantics.as_deref(), Some("non-additive"));
+        assert_eq!(m.component_role.as_deref(), Some("numerator"));
+
+        assert_eq!(cfg.dimensions.len(), 2);
+        assert_eq!(cfg.dimensions[0].key.as_deref(), Some("acme.license"));
+        assert_eq!(
+            cfg.dimensions[0].vocabulary,
+            vec!["MIT", "Apache-2.0", "GPL-3.0"]
+        );
+        assert!(!cfg.dimensions[0].promote);
+        assert_eq!(cfg.dimensions[1].value_type.as_deref(), Some("entity-ref"));
+        assert!(cfg.dimensions[1].promote);
+    }
+
+    #[test]
+    fn measure_validation_rejects_bad_entries() {
+        // Reserved namespace.
+        assert!(load_from_yaml("measures:\n  - key: oxplow.foo\n").is_err());
+        // Un-namespaced key.
+        assert!(load_from_yaml("measures:\n  - key: foo\n").is_err());
+        // Missing key.
+        assert!(load_from_yaml("measures:\n  - title: nokey\n").is_err());
+        // Bad temporalSemantics.
+        assert!(
+            load_from_yaml("measures:\n  - key: acme.x\n    temporalSemantics: sideways\n")
+                .is_err()
+        );
+        // Bad componentRole.
+        assert!(load_from_yaml("measures:\n  - key: acme.x\n    componentRole: pivot\n").is_err());
+        // Duplicate key.
+        assert!(load_from_yaml("measures:\n  - key: acme.x\n  - key: acme.x\n").is_err());
+        // A minimal valid measure parses.
+        assert!(load_from_yaml("measures:\n  - key: acme.x\n").is_ok());
+    }
+
+    #[test]
+    fn dimension_validation_rejects_bad_entries() {
+        // Reserved namespace.
+        assert!(load_from_yaml("dimensions:\n  - key: oxplow.foo\n").is_err());
+        // Un-namespaced key.
+        assert!(load_from_yaml("dimensions:\n  - key: foo\n").is_err());
+        // Bad valueType.
+        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n    valueType: blob\n").is_err());
+        // Duplicate key.
+        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n  - key: acme.x\n").is_err());
+        // A minimal valid dimension parses (defaults to categorical).
+        assert!(load_from_yaml("dimensions:\n  - key: acme.x\n").is_ok());
+    }
+
+    #[test]
+    fn resolve_measures_precedence_and_defaults() {
+        let global = vec![MeasureEntry {
+            key: Some("acme.loc".into()),
+            title: Some("Global LOC".into()),
+            ..Default::default()
+        }];
+        // Project redefines the same key AND adds a fresh one.
+        let project = vec![
+            MeasureEntry {
+                key: Some("acme.loc".into()),
+                title: Some("Project LOC".into()),
+                temporal_semantics: Some("additive".into()),
+                ..Default::default()
+            },
+            MeasureEntry {
+                key: Some("acme.churn".into()),
+                ..Default::default()
+            },
+        ];
+        let resolved = resolve_measures(&global, &project);
+        assert_eq!(resolved.len(), 2, "same key merges, distinct key adds");
+        let loc = resolved.iter().find(|m| m.key == "acme.loc").unwrap();
+        assert_eq!(loc.title, "Project LOC", "project wins over global");
+        assert_eq!(loc.scope, "project");
+        assert_eq!(loc.temporal_semantics, "additive");
+        let churn = resolved.iter().find(|m| m.key == "acme.churn").unwrap();
+        // Defaults applied.
+        assert_eq!(churn.title, "acme.churn");
+        assert_eq!(churn.temporal_semantics, "semi-additive");
+        assert_eq!(churn.component_role, "none");
+    }
+
+    #[test]
+    fn resolve_dimensions_precedence_and_defaults() {
+        let global = vec![DimensionEntry {
+            key: Some("acme.license".into()),
+            label: Some("Global label".into()),
+            promote: false,
+            ..Default::default()
+        }];
+        let project = vec![DimensionEntry {
+            key: Some("acme.license".into()),
+            label: Some("License".into()),
+            promote: true,
+            ..Default::default()
+        }];
+        let resolved = resolve_dimensions(&global, &project);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].label, "License", "project wins");
+        assert_eq!(resolved[0].scope, "project");
+        assert_eq!(resolved[0].value_type, "categorical", "default valueType");
+        assert!(resolved[0].promote);
+    }
+
+    #[test]
+    fn measures_and_dimensions_round_trip_through_write() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            measures: vec![MeasureEntry {
+                key: Some("acme.loc".into()),
+                unit: Some("lines".into()),
+                temporal_semantics: Some("additive".into()),
+                ..Default::default()
+            }],
+            dimensions: vec![DimensionEntry {
+                key: Some("acme.license".into()),
+                label: Some("License".into()),
+                vocabulary: vec!["MIT".into(), "Apache-2.0".into()],
+                promote: true,
+                ..Default::default()
+            }],
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(raw.contains("measures:"), "got:\n{raw}");
+        assert!(raw.contains("dimensions:"), "got:\n{raw}");
+        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.measures, cfg.measures);
+        assert_eq!(loaded.dimensions, cfg.dimensions);
+    }
+
+    #[test]
+    fn loads_global_measure_and_dimension_entries_from_dir() {
+        let dir = tempdir().unwrap();
+        let measures_dir = dir.path().join("measures");
+        let dims_dir = dir.path().join("dimensions");
+        std::fs::create_dir_all(&measures_dir).unwrap();
+        std::fs::create_dir_all(&dims_dir).unwrap();
+        std::fs::write(
+            measures_dir.join("a.yaml"),
+            "measures:\n  - key: myglobal.loc\n    unit: lines\n",
+        )
+        .unwrap();
+        // A malformed file is skipped, not fatal.
+        std::fs::write(measures_dir.join("bad.yaml"), "measures:\n  - key: nodot\n").unwrap();
+        std::fs::write(
+            dims_dir.join("d.yaml"),
+            "dimensions:\n  - key: myglobal.license\n    label: License\n",
+        )
+        .unwrap();
+
+        let measures = load_global_measure_entries(dir.path());
+        assert_eq!(measures.len(), 1);
+        assert_eq!(measures[0].key.as_deref(), Some("myglobal.loc"));
+        let dims = load_global_dimension_entries(dir.path());
+        assert_eq!(dims.len(), 1);
+        assert_eq!(dims[0].key.as_deref(), Some("myglobal.license"));
     }
 }
