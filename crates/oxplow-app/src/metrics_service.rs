@@ -25,12 +25,12 @@ use oxplow_config::{
     MeasureEntry, MetricEntry, OxplowConfig, ResolvedGauge, ResolvedSpec,
 };
 use oxplow_db::{
-    NewDimension, NewMeasure, NewMetricDefinition, NewMetricRun, NewMetricSample, NewMetricSpec,
-    SnapshotStorage, SqliteFactStore, SqliteMetricStore, SqliteSnapshotStore,
-    SqliteTaskEffortStore, SqliteThreadStore, TaskEffortStore,
+    NewDimension, NewMeasure, NewMetricDefinition, NewMetricSpec, SnapshotStorage, SqliteFactStore,
+    SqliteMetricStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
+    TaskEffortStore,
 };
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId};
+use oxplow_domain::{EffortId, StreamId, ThreadId};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -101,8 +101,6 @@ struct GaugeRunContext {
     closest_git_version: Option<String>,
     git_version_exact: bool,
     branch: Option<String>,
-    /// Default `(subject_kind, subject_ref)` when a sample omits its subject.
-    subject_default: Option<(String, String)>,
 }
 
 impl MetricsService {
@@ -843,7 +841,7 @@ impl MetricsService {
         // this run via an Arc (no per-gauge clone of the whole map).
         let files = Arc::new(self.build_file_map(snapshot_id).await);
         let ctx = self
-            .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id, None)
+            .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
             .await;
         for g in &gauges {
             self.run_one_gauge(g, &ctx, files.clone()).await;
@@ -874,14 +872,12 @@ impl MetricsService {
             Some(sid) => self.build_file_map(sid).await,
             None => HashMap::new(),
         });
-        let subject = Some(("effort".to_string(), effort_id.to_string()));
         let ctx = self
             .snapshot_context(
                 stream_val,
                 Some(thread_id.value()),
                 "on-effort-complete",
                 snapshot_id.unwrap_or(0),
-                subject,
             )
             .await;
         for g in &gauges {
@@ -917,7 +913,7 @@ impl MetricsService {
             None => HashMap::new(),
         });
         let ctx = self
-            .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0), None)
+            .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0))
             .await;
         Ok(self.run_one_gauge(&metric, &ctx, files).await)
     }
@@ -970,7 +966,6 @@ impl MetricsService {
         thread_id: Option<i64>,
         trigger: &'static str,
         snapshot_id: i64,
-        subject_default: Option<(String, String)>,
     ) -> GaugeRunContext {
         let version = if snapshot_id > 0 {
             crate::file_ref_version::resolve(&self.snapshot_store, &self.project_dir, snapshot_id)
@@ -990,7 +985,6 @@ impl MetricsService {
                 .map(|v| v.git_version_exact)
                 .unwrap_or(false),
             branch: oxplow_git::detect_current_branch(&self.project_dir),
-            subject_default,
         }
     }
 
@@ -1046,136 +1040,17 @@ impl MetricsService {
                     return 0;
                 }
             };
-        let (samples, gauge_findings, gauge_facts) = match report {
-            oxplow_collect_plugin::CollectorOutput::Gauge(r) => (r.samples, r.findings, r.facts),
+        let gauge_facts = match report {
+            oxplow_collect_plugin::CollectorOutput::Gauge(r) => r.facts,
             _ => return 0,
         };
 
-        // Baked legacy substrate (`metric_run`/`metric_sample`/`metric_finding`):
-        // written only when the gauge produced a headline sample or a located
-        // finding. Facts-only gauges (the clean new model) skip it entirely — they
-        // chart via the engine over the facts recorded below. Kept for the built-in
-        // gauges (whose equivalence tests + legacy reads still read it) until the
-        // read-flip (tsk26) removes it. Best-effort.
-        let count = if samples.is_empty() && gauge_findings.is_empty() {
-            0
-        } else {
-            self.record_baked_run(gauge, ctx, &source, &samples, &gauge_findings)
-                .await
-        };
-        // Inverted substrate (epic tsk12): route the gauge's durable atomic facts
-        // into the `fact` layer. Best-effort; never fails the gauge run.
+        // Inverted substrate (epic tsk12): the gauge's durable atomic `facts` are
+        // the ONLY output recorded — the metric reads aggregate them via the
+        // engine (the read flip, T-C3). Any legacy `samples`/`findings` a script
+        // still returns are ignored. Best-effort; never fails the gauge run.
         self.record_gauge_facts(gauge, ctx, &source, &gauge_facts)
-            .await;
-        count
-    }
-
-    /// Write the baked legacy run + samples + findings for a gauge that produced
-    /// a headline (built-ins, until the read-flip). Returns the sample count.
-    async fn record_baked_run(
-        &self,
-        gauge: &ResolvedGauge,
-        ctx: &GaugeRunContext,
-        source: &str,
-        samples: &[oxplow_collect_plugin::GaugeSample],
-        gauge_findings: &[oxplow_collect_plugin::GaugeFinding],
-    ) -> usize {
-        let result = async {
-            let metric_id = self
-                .metrics
-                .upsert_definition(gauge_definition(gauge))
-                .await?;
-            let mut run = NewMetricRun::done(ctx.stream_val, gauge.key.clone(), source.to_string());
-            run.thread_id = ctx.thread_id;
-            run.trigger = Some(ctx.trigger.into());
-            run.snapshot_id = ctx.snapshot_id;
-            run.closest_git_version = ctx.closest_git_version.clone();
-            run.git_version_exact = ctx.git_version_exact;
-            run.branch = ctx.branch.clone();
-            run.basis_ref = ctx.closest_git_version.clone();
-
-            let mut rows = Vec::new();
-            for sample in samples {
-                // A non-finite value (NaN/±inf, e.g. an out-of-range literal in
-                // the gauge script) isn't a meaningful measurement — drop it
-                // rather than poison the series.
-                if !sample.value.is_finite() {
-                    continue;
-                }
-                let (subject_kind, subject_ref) = resolve_subject(&sample.subject, ctx);
-                let mut s = NewMetricSample::observed(
-                    metric_id,
-                    ctx.stream_val,
-                    sample.value,
-                    source.to_string(),
-                );
-                s.thread_id = ctx.thread_id;
-                s.snapshot_id = ctx.snapshot_id;
-                s.closest_git_version = ctx.closest_git_version.clone();
-                s.git_version_exact = ctx.git_version_exact;
-                s.basis_ref = ctx.closest_git_version.clone();
-                s.branch = ctx.branch.clone();
-                s.subject_kind = subject_kind;
-                s.subject_ref = subject_ref;
-                s.dims_json = sample
-                    .dims
-                    .as_ref()
-                    .and_then(|d| serde_json::to_string(d).ok());
-                rows.push(s);
-            }
-            // Located items the gauge counted (e.g. each high-complexity
-            // function) → `metric_finding` on this run, so a recording drills in.
-            let findings: Vec<oxplow_db::NewMetricFinding> = gauge_findings
-                .iter()
-                .map(|gf| {
-                    // Split a `"kind:ref"` subject inline — unlike samples, a
-                    // finding never inherits the run's default subject.
-                    let (subject_kind, subject_ref) = match &gf.subject {
-                        Some(s) => match s.split_once(':') {
-                            Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
-                            None => (None, Some(s.clone())),
-                        },
-                        None => (None, None),
-                    };
-                    oxplow_db::NewMetricFinding {
-                        run_id: 0, // backfilled by record_run_with_data
-                        metric_id: Some(metric_id),
-                        subject_kind,
-                        subject_ref,
-                        path: gf.path.clone(),
-                        start_line: gf.line,
-                        end_line: gf.end_line,
-                        col: None,
-                        kind: "gauge-item".to_string(),
-                        severity: gf.severity.clone(),
-                        rule: gf.rule.clone(),
-                        message: gf.message.clone(),
-                        value: gf.value,
-                        extra_json: None,
-                    }
-                })
-                .collect();
-            // Atomic: the run, its samples, and its findings commit together.
-            let count = rows.len();
-            self.metrics
-                .record_run_with_data(run, rows, findings)
-                .await?;
-            Ok::<usize, DomainError>(count)
-        }
-        .await;
-
-        match result {
-            Ok(count) => {
-                self.events.emit(OxplowEvent::MetricSamplesChanged {
-                    stream_id: StreamId::new(ctx.stream_val),
-                });
-                count
-            }
-            Err(e) => {
-                tracing::warn!(key = %gauge.key, error = %e, "gauge: baked record failed");
-                0
-            }
-        }
+            .await
     }
 
     /// Persist a gauge's per-item `facts` (epic tsk12) as `fact` rows under one
@@ -1184,27 +1059,28 @@ impl MetricsService {
     /// via `tracing::warn!`, never silently written) if its measure is undefined
     /// in the catalog OR not in the gauge's own `emits` allow-list (a config gauge
     /// may only emit the measures it declares). A built-in gauge has an empty
-    /// `emits` — the catalog check alone governs it. No-op without a fact store,
-    /// with no facts, or with no resolvable facts. Best-effort.
+    /// `emits` — the catalog check alone governs it. Returns the number of facts
+    /// recorded (0 without a fact store, with no facts, or with no resolvable
+    /// facts). Emits `MetricSamplesChanged` when it writes. Best-effort.
     async fn record_gauge_facts(
         &self,
         gauge: &ResolvedGauge,
         ctx: &GaugeRunContext,
         source: &str,
         gauge_facts: &[oxplow_collect_plugin::GaugeFact],
-    ) {
+    ) -> usize {
         let Some(facts) = self.fact_store.as_ref() else {
-            return;
+            return 0;
         };
         if gauge_facts.is_empty() {
-            return;
+            return 0;
         }
         // Resolve the measure catalog once (one query), then map each fact's key.
         let by_key: HashMap<String, i64> = match facts.list_measures().await {
             Ok(ms) => ms.into_iter().map(|m| (m.key, m.id)).collect(),
             Err(e) => {
                 tracing::warn!(key = %gauge.key, error = %e, "gauge facts: measure catalog read failed");
-                return;
+                return 0;
             }
         };
         let mut rows = Vec::new();
@@ -1254,8 +1130,9 @@ impl MetricsService {
             });
         }
         if rows.is_empty() {
-            return;
+            return 0;
         }
+        let count = rows.len();
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
             scope: Some(gauge.scope.clone()),
@@ -1273,7 +1150,12 @@ impl MetricsService {
         };
         if let Err(e) = facts.record_facts(capture, rows).await {
             tracing::warn!(key = %gauge.key, error = %e, "gauge facts: record failed");
+            return 0;
         }
+        self.events.emit(OxplowEvent::MetricSamplesChanged {
+            stream_id: StreamId::new(ctx.stream_val),
+        });
+        count
     }
 }
 
@@ -1410,32 +1292,6 @@ fn builtin_gauge(key: &str, trigger: &str) -> ResolvedGauge {
         compute: GaugeComputeConfig::default(),
         scope: "built-in".to_string(),
     }
-}
-
-/// Map a `ResolvedGauge` to a legacy `metric_definition` row for the baked
-/// substrate. A built-in gauge derives the full definition from `builtin_metrics`
-/// (so legacy reads stay faithful); a config gauge gets a minimal `gauge` row.
-fn gauge_definition(gauge: &ResolvedGauge) -> NewMetricDefinition {
-    if let Some(m) = builtin_metrics().iter().find(|m| m.key == gauge.key) {
-        let mut def =
-            NewMetricDefinition::new(m.key.to_string(), m.kind.to_string(), m.title.to_string());
-        def.unit = Some(m.unit.to_string());
-        def.direction = m.direction.to_string();
-        def.grain = Some(m.grain.to_string());
-        def.language = (!m.language.is_empty()).then(|| m.language.to_string());
-        def.description = Some(m.description.to_string());
-        def.producer = Some(m.key.to_string());
-        def.category = Some("custom".into());
-        def.scope = "built-in".into();
-        def.target = m.target;
-        return def;
-    }
-    let mut def =
-        NewMetricDefinition::new(gauge.key.clone(), "gauge".to_string(), gauge.title.clone());
-    def.producer = Some(gauge.key.clone());
-    def.category = Some("custom".into());
-    def.scope = gauge.scope.clone();
-    def
 }
 
 /// The built-in metric SPECS (epic tsk12) for the bundled code gauges — the
@@ -1669,24 +1525,6 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
     }
 }
 
-/// Split a sample's optional `"kind:ref"` subject onto `(subject_kind,
-/// subject_ref)`, falling back to the context's default subject.
-fn resolve_subject(
-    subject: &Option<String>,
-    ctx: &GaugeRunContext,
-) -> (Option<String>, Option<String>) {
-    match subject {
-        Some(s) => match s.split_once(':') {
-            Some((kind, rref)) => (Some(kind.to_string()), Some(rref.to_string())),
-            None => (None, Some(s.clone())),
-        },
-        None => match &ctx.subject_default {
-            Some((kind, rref)) => (Some(kind.clone()), Some(rref.clone())),
-            None => (None, None),
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1734,18 +1572,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_one_gauge_records_sample_with_version_and_branch() {
+    async fn run_one_gauge_records_facts_with_version_and_branch() {
         let (svc, dir) = fixture().await;
-        // A tree-derived gauge: count unsafe blocks across .rs files.
+        // A tree-derived gauge emitting a per-file `oxplow.ast_hit` FACT.
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/metrics/unsafe.star"),
             r#"
 def transform(input):
-    n = 0
+    facts = []
     for f in files("**/*.rs"):
-        n += len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
-    return {"samples": [{"value": n, "subject": "tree:.", "dims": {"language": "rust"}}]}
+        c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
+        if c > 0:
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"language": "rust"}})
+    return {"facts": facts}
 "#,
         )
         .unwrap();
@@ -1766,57 +1606,52 @@ def transform(input):
             closest_git_version: Some("abc1234".into()),
             git_version_exact: true,
             branch: Some("metrics-substrate".into()),
-            subject_default: None,
         };
+        // Only src/a.rs has unsafe blocks → one fact recorded.
         let count = svc
             .metrics
             .run_one_gauge(&metric, &ctx, Arc::new(files))
             .await;
         assert_eq!(count, 1);
 
-        let def = svc
-            .metric_store
-            .get_definition("repo.unsafe_blocks")
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.ast_hit")
             .await
             .unwrap()
-            .expect("definition seeded by the run");
-        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].value, 2.0, "two unsafe blocks");
-        assert_eq!(samples[0].subject_kind.as_deref(), Some("tree"));
-        assert_eq!(samples[0].subject_ref.as_deref(), Some("."));
-        assert_eq!(samples[0].snapshot_id, Some(42));
-        assert_eq!(samples[0].closest_git_version.as_deref(), Some("abc1234"));
-        assert_eq!(samples[0].branch.as_deref(), Some("metrics-substrate"));
-        assert_eq!(samples[0].source, "metric:repo.unsafe_blocks");
+            .expect("oxplow.ast_hit seeded by migration");
+        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].value, 2.0, "two unsafe blocks in src/a.rs");
+        assert_eq!(facts[0].subject_kind.as_deref(), Some("file"));
+        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs"));
+        assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
+        assert_eq!(facts[0].rule.as_deref(), Some("unsafe_block"));
+        // The capture spine carries the run's version + branch + source.
+        assert_eq!(facts[0].closest_git_version.as_deref(), Some("abc1234"));
+        assert_eq!(facts[0].branch.as_deref(), Some("metrics-substrate"));
+        assert_eq!(facts[0].source, "metric:repo.unsafe_blocks");
         assert_eq!(
-            samples[0].dims_json.as_deref(),
+            facts[0].dims_json.as_deref(),
             Some("{\"language\":\"rust\"}")
         );
     }
 
     #[tokio::test]
-    async fn run_one_gauge_records_findings_on_the_run() {
+    async fn run_one_gauge_records_per_item_facts() {
         let (svc, dir) = fixture().await;
-        // A gauge that counts long functions AND emits a located finding for each.
+        // A gauge emitting a per-function `oxplow.fn_length` FACT — the located
+        // items behind the metric (the drill-in reads them via findings_for_spec).
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/metrics/longfns.star"),
             r#"
 def transform(input):
-    total = 0
-    findings = []
+    facts = []
     for f in files("**/*.rs"):
         for m in code_metrics(f["text"], "rust"):
-            if m["length"] > 1:
-                total += 1
-                findings.append({
-                    "path": f["path"],
-                    "line": m["start_line"],
-                    "message": m["name"],
-                    "value": m["length"],
-                })
-    return {"samples": [{"value": total, "subject": "tree:."}], "findings": findings}
+            facts.append({"measure": "oxplow.fn_length", "value": m["length"], "subject": "symbol:" + f["path"] + "::" + m["name"], "path": f["path"], "line": m["start_line"], "dims": {"language": "rust"}})
+    return {"facts": facts}
 "#,
         )
         .unwrap();
@@ -1835,48 +1670,31 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
-            subject_default: None,
         };
-        svc.metrics
+        let count = svc
+            .metrics
             .run_one_gauge(&metric, &ctx, Arc::new(files))
             .await;
+        assert_eq!(count, 1, "one function → one fact");
 
-        let def = svc
-            .metric_store
-            .get_definition("repo.long_fns")
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.fn_length")
             .await
             .unwrap()
-            .expect("seeded");
-        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
-        let run_id = samples[0].run_id.expect("sample has a run");
-        let findings = svc.metric_store.list_findings(run_id).await.unwrap();
-        assert_eq!(findings.len(), 1, "one long function → one finding");
-        assert_eq!(findings[0].path.as_deref(), Some("src/a.rs"));
-        assert_eq!(findings[0].message.as_deref(), Some("big"));
-        assert_eq!(findings[0].kind, "gauge-item");
-        assert!(findings[0].value.unwrap() >= 3.0);
+            .expect("oxplow.fn_length seeded by migration");
+        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert_eq!(facts.len(), 1, "one function → one fact");
+        assert_eq!(facts[0].path.as_deref(), Some("src/a.rs"));
+        assert_eq!(facts[0].subject_kind.as_deref(), Some("symbol"));
+        assert_eq!(facts[0].subject_ref.as_deref(), Some("src/a.rs::big"));
+        assert!(facts[0].value >= 3.0);
     }
 
     /// A built-in-scope `ResolvedGauge` — `run_one_gauge` builds its collector
     /// from the embedded script (never a project-disk file).
     fn builtin_gauge_fixture(key: &str) -> ResolvedGauge {
         super::builtin_gauge(key, "on-snapshot")
-    }
-
-    /// The old baked headline: the `tree:.` sample of a gauge's definition.
-    async fn baked_tree_headline(svc: &crate::Services, key: &str) -> f64 {
-        let def = svc
-            .metric_store
-            .get_definition(key)
-            .await
-            .unwrap()
-            .expect("definition seeded by the run");
-        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
-        samples
-            .iter()
-            .find(|s| s.subject_kind.as_deref() == Some("tree"))
-            .expect("a tree:. headline sample")
-            .value
     }
 
     /// A mixed-language corpus: a high-complexity + long Rust fn, a TS fn with a
@@ -1907,11 +1725,11 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn code_gauge_facts_reaggregate_to_the_baked_headline() {
+    async fn code_gauge_facts_reaggregate_to_the_expected_headline() {
         // The keystone proof of the inversion (epic tsk12): a metric SPEC computed
-        // over the per-item FACTS the gauge emitted == the old baked gauge
-        // headline, for every bundled code metric. If this holds, the baked sample
-        // is redundant and reads can flip to the engine (tsk26).
+        // over the per-item FACTS the gauge emitted == the expected gauge total,
+        // for every bundled code metric. This is what let the reads flip to the
+        // engine (T-C3) and the baked sample be removed (T-C3b).
         let (svc, _dir) = fixture().await;
         // Seed the built-in specs (count-over-facts) into the catalog.
         svc.metrics.seed_catalog().await;
@@ -1925,7 +1743,6 @@ def transform(input):
             closest_git_version: Some("abc1234".into()),
             git_version_exact: true,
             branch: Some("main".into()),
-            subject_default: None,
         };
         for key in [
             "oxplow.fn_count",
@@ -1945,8 +1762,6 @@ def transform(input):
             ("oxplow.long_functions", 1.0),
             ("oxplow.todos", 2.0),
         ] {
-            let baked = baked_tree_headline(&svc, key).await;
-            assert_eq!(baked, expected, "{key}: baked headline");
             let spec = svc
                 .fact_store
                 .get_spec(key)
@@ -1956,8 +1771,8 @@ def transform(input):
             let engine_headline = engine.headline_for_spec(&spec).await.unwrap();
             assert_eq!(
                 engine_headline,
-                Some(baked),
-                "{key}: facts re-aggregated through the engine must equal the baked headline",
+                Some(expected),
+                "{key}: facts re-aggregated through the engine must equal the gauge total",
             );
         }
     }
@@ -1989,7 +1804,6 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
-            subject_default: None,
         };
         svc.metrics
             .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
@@ -2052,7 +1866,6 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
-            subject_default: None,
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -2121,7 +1934,6 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
-            subject_default: None,
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -2140,12 +1952,13 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn per_language_gauge_facts_reaggregate_to_the_baked_headline() {
+    async fn per_language_gauge_facts_reaggregate_through_the_spec() {
         // tsk30: the per-language idiom gauges emit per-file `oxplow.ast_hit`
         // facts (rule-tagged); each metric is a Sum(oxplow.ast_hit) spec filtered
-        // by rule. Prove the spec headline == the baked tree:. total, so the
-        // read-flip (tsk26) can drop the baked sample. One capture per gauge;
-        // idioms share the measure but never collide (the spec filters by rule).
+        // by rule. Prove every emitted-fact stream re-aggregates through its spec
+        // to a positive headline (the exact per-idiom counts are pinned by the
+        // collect-plugin golden tests). One capture per gauge; idioms share the
+        // measure but never collide (the spec filters by rule).
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
 
@@ -2185,7 +1998,6 @@ def transform(input):
             closest_git_version: Some("def5678".into()),
             git_version_exact: true,
             branch: Some("main".into()),
-            subject_default: None,
         };
 
         let keys = [
@@ -2208,8 +2020,6 @@ def transform(input):
 
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
         for key in keys {
-            let baked = baked_tree_headline(&svc, key).await;
-            assert!(baked > 0.0, "{key}: corpus should trigger the idiom");
             let spec = svc
                 .fact_store
                 .get_spec(key)
@@ -2221,9 +2031,10 @@ def transform(input):
                 .await
                 .unwrap()
                 .unwrap_or(0.0);
-            assert_eq!(
-                engine_headline, baked,
-                "{key}: Sum(oxplow.ast_hit) filtered by rule must equal the baked headline",
+            assert!(
+                engine_headline > 0.0,
+                "{key}: Sum(oxplow.ast_hit) filtered by rule re-aggregates the \
+                 emitted facts to a positive headline",
             );
         }
     }
@@ -2408,18 +2219,15 @@ def transform(input):
         assert_eq!(def.language.as_deref(), Some("rust"));
         assert_eq!(def.target, Some(3.0), "project override merged");
 
-        // Running it executes the EMBEDDED script (no project-disk file). With
-        // no snapshot the file map is empty, so it cleanly yields a 0 sample.
+        // Running it executes the EMBEDDED script (no project-disk file). With no
+        // snapshot the file map is empty, so the facts-only gauge cleanly yields 0
+        // facts and runs without error (the read flip made it facts-only, T-C3b).
         let count = svc
             .metrics
             .run_metric_by_key("oxplow.rust.unsafe_blocks", None)
             .await
             .unwrap();
-        assert_eq!(count, 1);
-        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].value, 0.0);
-        assert_eq!(samples[0].source, "metric:oxplow.rust.unsafe_blocks");
+        assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
     }
 
     #[tokio::test]
@@ -2732,7 +2540,7 @@ def transform(input):
         std::fs::create_dir_all(gtmp.path().join("gauges")).unwrap();
         std::fs::write(
             gtmp.path().join("gauges/g.star"),
-            "def transform(input):\n    return {\"samples\": [{\"value\": float(len(files(\"**/*\")))}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": float(len(files(\"**/*\"))), \"rule\": \"filecount\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
 
@@ -2754,45 +2562,17 @@ def transform(input):
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
-            subject_default: None,
         };
         let count = m.run_one_gauge(&metric, &ctx, Arc::new(files)).await;
         assert_eq!(count, 1, "global-scope script resolved + ran");
-        let def = svc
-            .metric_store
-            .get_definition("myglobal.filecount")
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.ast_hit")
             .await
             .unwrap()
-            .unwrap();
-        let samples = svc.metric_store.list_samples(def.id).await.unwrap();
-        assert_eq!(samples[0].value, 2.0, "counted both files");
-    }
-
-    #[test]
-    fn resolve_subject_splits_kind_ref_and_falls_back() {
-        let ctx = GaugeRunContext {
-            stream_val: 1,
-            thread_id: None,
-            trigger: "manual",
-            snapshot_id: None,
-            closest_git_version: None,
-            git_version_exact: false,
-            branch: None,
-            subject_default: Some(("effort".into(), "eff7".into())),
-        };
-        assert_eq!(
-            resolve_subject(&Some("file:src/a.rs".into()), &ctx),
-            (Some("file".into()), Some("src/a.rs".into()))
-        );
-        // No colon → bare ref.
-        assert_eq!(
-            resolve_subject(&Some("whole".into()), &ctx),
-            (None, Some("whole".into()))
-        );
-        // None → context default.
-        assert_eq!(
-            resolve_subject(&None, &ctx),
-            (Some("effort".into()), Some("eff7".into()))
-        );
+            .expect("oxplow.ast_hit seeded by migration");
+        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].value, 2.0, "counted both files");
     }
 }

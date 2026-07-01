@@ -185,16 +185,14 @@ A gauge's `MetricReport` gained a third channel beside `samples` (baked headline
 and `findings` (offenders drill-in): `facts: [GaugeFact { measure, value, subject?,
 path?, line?, dims? }]` — measure-bound atomics. `record_gauge_facts` resolves each
 fact's `measure` against the catalog (**declare-to-collect**, decision #4: a fact on
-an undefined measure is dropped with a `tracing::warn!`, never silently written; the
-gauge's baked sample/findings still land) and writes the resolvable facts under one
-capture. The count-over-threshold headline is now the **spec**
-(`builtin_metric_specs`), and the equivalence test
-`code_gauge_facts_reaggregate_to_the_baked_headline` pins
-`engine.headline_for_spec(spec) == the baked tree:. total` for every bundled code
-metric — the proof the inversion is faithful. (Strict `> N` in the old gauge equals
-`min_value = N+1` on the integer complexity/length measures.) The baked
-`tree:.`/`file:` samples are **still written** for the legacy read path; unbaking
-them retires with the read-flip (tsk26) so the headline never has a read gap.
+an undefined measure is dropped with a `tracing::warn!`, never silently written) and
+writes the resolvable facts under one capture — the **only** output now (facts-only,
+T-C3b). The count-over-threshold headline is the **spec** (`builtin_metric_specs`),
+and the equivalence test `code_gauge_facts_reaggregate_to_the_expected_headline`
+pins `engine.headline_for_spec(spec) == the expected gauge total` for every bundled
+code metric — the proof the inversion is faithful. (Strict `> N` in the old gauge
+equals `min_value = N+1` on the integer complexity/length measures.) The 4 code
+scripts are unbaked (no `tree:.`/`file:` samples); the baked write path is gone.
 
 **Per-language idiom gauges (tsk30).** The same pattern extends to the ~10
 per-language AST idiom gauges, but they don't have a natural per-subject measure —
@@ -281,9 +279,14 @@ table — the bespoke suite-tree / line-heat needed the verbatim legacy
 facts** (the same scope-guard the coverage attribution took in T-D); the
 underlying facts still chart + roll up.
 
-The **baked writes still run** (`record_baked_run`) but are now **fully unread**;
-removing them + unbaking the 4 code scripts is the separable follow-on commit
-**T-C3b** (it needs no atomicity with the read flip).
+**The baked writes are gone (T-C3b, tsk40)** — `record_baked_run` is deleted;
+`run_one_gauge` is facts-only (returns the fact count; `record_gauge_facts`
+emits `MetricSamplesChanged`). The 4 `plugins/metrics/code/*.star` scripts are
+unbaked (emit only `{facts:[…]}`, no `tree:.`/`file:` samples). Any `samples`/
+`findings` a script still returns (the per-language idiom scripts, not yet
+unbaked) are computed-but-ignored. The legacy V38 `metric_sample`/`metric_finding`/
+`metric_definition`/`metric_run` tables + `metric_store.rs` retire LAST in T-E
+(tsk20).
 
 ### Catalog authoring surface (`measures:` / `dimensions:` config — workstream E)
 
@@ -325,13 +328,14 @@ dimensions:                        # custom conformed slice axes
   engine loads all facts and filters in-app, so an index bites nothing until
   reads go DB-side. Carried, not acted on.
 
-**Not yet done:** the **baked-write removal + 4-script unbake + equivalence-test
-rewrite** (**T-C3b** — separable from the now-landed read flip); a **Dimensions
-catalog** UI page; `promote_dimension` teeth (tsk28); and retiring V38 (tsk20).
-Those are the open children of the epic. Already flipped: the **MCP** metric-key
-reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a, tsk39), and
-the **effort-attribution read** (T-D — `effort_metric_deltas` over specs + facts,
-coverage kept as a scope-guarded special case).
+**Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth
+(tsk28); unbaking the per-language idiom scripts (still emit dead `tree:.`/
+`file:` samples); and retiring V38 (tsk20). Those are the open children of the
+epic. Already landed: the **MCP** metric-key reads (T-C2), the **IPC + bindings +
+frontend** read surface (T-C3a, tsk39), the **baked-write removal + 4-script
+unbake** (T-C3b, tsk40), and the **effort-attribution read** (T-D —
+`effort_metric_deltas` over specs + facts, coverage kept as a scope-guarded
+special case).
 
 ---
 
@@ -476,7 +480,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped. A gauge that also returns `samples`/`findings` (the built-in code gauges) writes the legacy baked `metric_sample`/`metric_finding` too — `record_baked_run`, kept until the read-flip; a facts-only gauge writes no baked run |
+| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),

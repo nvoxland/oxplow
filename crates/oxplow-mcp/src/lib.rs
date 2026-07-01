@@ -6072,15 +6072,16 @@ mod tests {
     #[tokio::test]
     async fn run_metric_computes_a_configured_gauge() {
         let (project, services, server) = boot();
-        // A constant gauge (no snapshot dependency) declared in project.yaml.
+        // A constant gauge (no snapshot dependency) emitting one durable FACT on
+        // the migration-seeded `oxplow.ast_hit` measure (facts-only, T-C3b).
         std::fs::write(
             project.path().join("count.star"),
-            "def transform(input):\n    return {\"samples\": [{\"value\": 42}]}\n",
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 42, \"rule\": \"answer\", \"subject\": \"tree:.\"}]}\n",
         )
         .unwrap();
         std::fs::write(
             project.path().join(".oxplow").join("project.yaml"),
-            "gauges:\n  - key: repo.answer\n    title: \"answer\"\n    trigger: manual\n    emits: [repo.count]\n    compute: { runtime: starlark, entryFile: count.star }\n",
+            "gauges:\n  - key: repo.answer\n    title: \"answer\"\n    trigger: manual\n    emits: [oxplow.ast_hit]\n    compute: { runtime: starlark, entryFile: count.star }\n",
         )
         .unwrap();
         services.reload_config_from_disk().unwrap();
@@ -6094,15 +6095,19 @@ mod tests {
             .unwrap();
         assert!(text_payload(out).contains("\"samples_recorded\": 1"));
 
-        let def = services
-            .metric_store
-            .get_definition("repo.answer")
+        let measure = services
+            .fact_store
+            .get_measure("oxplow.ast_hit")
             .await
             .unwrap()
+            .expect("oxplow.ast_hit seeded by migration");
+        let facts = services
+            .fact_store
+            .facts_for_measure(measure.id)
+            .await
             .unwrap();
-        let samples = services.metric_store.list_samples(def.id).await.unwrap();
-        assert_eq!(samples.len(), 1);
-        assert_eq!(samples[0].value, 42.0);
-        assert_eq!(samples[0].provenance, "observed");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].value, 42.0);
+        assert_eq!(facts[0].provenance, "observed");
     }
 }

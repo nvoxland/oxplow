@@ -585,14 +585,19 @@ const g = (a: any) => a!;
 
     #[test]
     fn unified_high_complexity_fns_across_languages() {
-        // Only the Rust `complex` (cc 12) exceeds 10 across the whole corpus.
-        assert_eq!(run_over("oxplow.high_complexity_fns", mixed_corpus()), 1.0);
+        // Only the Rust `complex` (cc 12) exceeds 10 across the whole corpus. The
+        // code gauges are facts-only now (unbaked, T-C3b) — the metric total is a
+        // count-over-threshold of the per-function `oxplow.complexity` facts.
+        let complexity = facts_over("oxplow.high_complexity_fns", mixed_corpus());
+        assert_eq!(complexity.iter().filter(|(_, v, _)| *v > 10.0).count(), 1);
     }
 
     #[test]
     fn unified_long_functions_across_languages() {
-        // Only the Rust `big` (>60 lines) is long.
-        assert_eq!(run_over("oxplow.long_functions", mixed_corpus()), 1.0);
+        // Only the Rust `big` (>60 lines) is long — count-over-threshold of the
+        // per-function `oxplow.fn_length` facts (facts-only gauge, T-C3b).
+        let lengths = facts_over("oxplow.long_functions", mixed_corpus());
+        assert_eq!(lengths.iter().filter(|(_, v, _)| *v > 60.0).count(), 1);
     }
 
     #[test]
@@ -635,14 +640,17 @@ const g = (a: any) => a!;
     #[test]
     fn unified_fn_count_across_languages() {
         // rust complex + big (2) + ts f (1) + clojure g (1) = 4. README skipped.
-        assert_eq!(run_over("oxplow.fn_count", mixed_corpus()), 4.0);
+        // Facts-only gauge (T-C3b): the total is a count of `oxplow.parameter_count`
+        // facts (one per function).
+        assert_eq!(facts_over("oxplow.fn_count", mixed_corpus()).len(), 4);
     }
 
     #[test]
     fn unified_todos_across_languages() {
         // TS TODO + Clojure FIXME = 2 (comment-scoped); README's "TODO" is not a
-        // source file → skipped by source_files().
-        assert_eq!(run_over("oxplow.todos", mixed_corpus()), 2.0);
+        // source file → skipped by source_files(). Facts-only gauge (T-C3b): the
+        // total is a count of per-marker `oxplow.todo` facts.
+        assert_eq!(facts_over("oxplow.todos", mixed_corpus()).len(), 2);
     }
 
     fn cs_corpus() -> HashMap<String, String> {
