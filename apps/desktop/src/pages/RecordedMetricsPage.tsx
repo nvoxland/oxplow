@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  type MetricDefinition,
-  type MetricSample,
+  type MetricSpec,
+  type SeriesPoint,
   listMetricDefinitions,
   listMetricSamples,
   subscribeOxplowEvents,
@@ -22,9 +22,9 @@ import {
 } from "./metricDetailData.js";
 
 type Row = {
-  def: MetricDefinition;
-  latest: MetricSample | null;
-  samples: MetricSample[];
+  def: MetricSpec;
+  latest: SeriesPoint | null;
+  samples: SeriesPoint[];
 };
 
 const SAMPLE_LIMIT = 200;
@@ -58,7 +58,7 @@ function Sparkline({ values, color }: { values: number[]; color?: string }) {
 
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
  *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). */
-function statusColor(def: MetricDefinition, value: number): string | undefined {
+function statusColor(def: MetricSpec, value: number): string | undefined {
   if (def.direction === "neutral") return undefined;
   const higher = def.direction === "higher-better";
   const meets = (t: number) => (higher ? value >= t : value <= t);

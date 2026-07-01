@@ -114,17 +114,17 @@ export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | 
   return { id: kind, kind, payload: null };
 }
 
-/** Drill-in to a single **recording** of a metric — the located items
- *  (`metric_finding`s) the gauge counted at that run. Opened by clicking a row
- *  in the Metric Detail recordings table (tsk313). */
+/** Drill-in to a single **recording** of a metric — the located items (the
+ *  metric's facts for that capture) the gauge counted. Opened by clicking a row
+ *  in the Metric Detail recordings table (tsk313, epic tsk12). */
 export function metricRecordingRef(
-  runId: number,
+  captureId: number,
   payload?: { metricKey?: string; capturedAt?: string; value?: number },
 ): TabRef {
   return {
-    id: `metric-recording:${runId}`,
+    id: `metric-recording:${captureId}`,
     kind: "metric-recording",
-    payload: { runId, ...payload },
+    payload: { captureId, ...payload },
   };
 }
 
@@ -428,7 +428,7 @@ export function refFromTabId(id: string): TabRef {
       // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
     case "metric-recording": {
-      // Only the run id is in the id; metric context is best-effort payload.
+      // Only the capture id is in the id; metric context is best-effort payload.
       const n = Number(rest);
       return Number.isFinite(n)
         ? metricRecordingRef(n)

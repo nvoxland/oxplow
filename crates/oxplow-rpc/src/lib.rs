@@ -214,9 +214,11 @@ rpc_dispatch! {
     "list_token_usage_for_effort" => commands::effort::list_token_usage_for_effort { effort_id: oxplow_domain::EffortId },
     // metrics (unified substrate, tsk213)
     "list_metric_definitions" => commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> },
-    "list_metric_samples" => commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64> },
+    "list_metric_samples" => commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64>, group_by: Option<String> },
     "metric_dimension_rollup" => commands::metrics::metric_dimension_rollup { metric_key: String, dimension: String },
-    "list_metric_findings" => commands::metrics::list_metric_findings { run_id: i64 },
+    "list_metric_findings" => commands::metrics::list_metric_findings { metric_key: String, capture_id: Option<i64> },
+    "metric_series" => commands::metrics::metric_series { measure_key: String, aggregation: String, group_by: Option<String>, min_value: Option<f64>, severity: Option<String> },
+    "metric_rollup" => commands::metrics::metric_rollup { measure_key: String, dimension: Option<String> },
     "list_metric_catalog" => commands::metrics::list_metric_catalog {},
     "set_metric_enabled" => commands::metrics::set_metric_enabled { key: String, enabled: bool },
     "set_metric_override" => commands::metrics::set_metric_override { key: String, target: Option<f64> },

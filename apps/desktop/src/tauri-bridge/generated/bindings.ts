@@ -512,23 +512,38 @@ export const commands = {
 	 */
 	listEffortMetricDeltas: (effortId: EffortId) => typedError<EffortMetricDelta[], IpcError>(__TAURI_INVOKE("list_effort_metric_deltas", { effortId })),
 	/**
-	 *  The metric catalog — every known definition. Optional `language` / `scope`
+	 *  The metric catalog — every known metric SPEC. Optional `language` / `scope`
 	 *  filter. Drives the Catalog / Explorer measure picker.
 	 */
-	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricDefinition[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
-	// Durable samples for one metric (by definition `key`), newest-first.
-	listMetricSamples: (metricKey: string, limit: number | null) => typedError<MetricSample[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit })),
+	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricSpec[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
 	/**
-	 *  Roll up a metric's per-file samples by a dimension (`"package"` or a
-	 *  `dims_json` key like `"language"`), largest first — the Metric Detail
-	 *  Breakdown card (tsk328/tsk319).
+	 *  Time series for one metric (by spec `key`), newest-first — one point per
+	 *  capture over the metric's source-measure facts. `group_by` slices by a
+	 *  conformed dimension (`subject` / `branch` / `oxplow.model` / …).
 	 */
-	metricDimensionRollup: (metricKey: string, dimension: string) => typedError<MetricDimensionRollup[], IpcError>(__TAURI_INVOKE("metric_dimension_rollup", { metricKey, dimension })),
+	listMetricSamples: (metricKey: string, limit: number | null, groupBy: string | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit, groupBy })),
 	/**
-	 *  Per-finding detail rows for one metric run — the per-kind Metric detail
-	 *  drill-in (findings table / test tree / coverage heat).
+	 *  Roll up a metric (by spec `key`) by a dimension (`"package"` or a `dims_json`
+	 *  key like `"language"`), largest first — the Metric Detail Breakdown card +
+	 *  subject breakdown (tsk328/tsk319).
 	 */
-	listMetricFindings: (runId: number) => typedError<MetricFinding[], IpcError>(__TAURI_INVOKE("list_metric_findings", { runId })),
+	metricDimensionRollup: (metricKey: string, dimension: string) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_dimension_rollup", { metricKey, dimension })),
+	/**
+	 *  The located items behind one metric (by spec `key`) — the read-time finding
+	 *  view over its filtered facts. `capture_id` scopes to one recording's
+	 *  drill-in (findings table / per-file coverage / per-case tests).
+	 */
+	listMetricFindings: (metricKey: string, captureId: number | null) => typedError<FactFinding[], IpcError>(__TAURI_INVOKE("list_metric_findings", { metricKey, captureId })),
+	/**
+	 *  Time series for a MEASURE, aggregated per capture over its atomic facts —
+	 *  the measure-level read (vs `list_metric_samples`'s spec ergonomics).
+	 */
+	metricSeries: (measureKey: string, aggregation: string, groupBy: string | null, minValue: number | null, severity: string | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("metric_series", { measureKey, aggregation, groupBy, minValue, severity })),
+	/**
+	 *  By-dimension rollup for a MEASURE over its atomic facts — the measure-level
+	 *  breakdown (vs `metric_dimension_rollup`'s spec ergonomics).
+	 */
+	metricRollup: (measureKey: string, dimension: string | null) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_rollup", { measureKey, dimension })),
 	/**
 	 *  The available catalog (built-in ∪ global ∪ project) + enabled flags — the
 	 *  Catalog page's browse read.
@@ -1509,6 +1524,25 @@ export type EffortObservation = {
 };
 
 /**
+ *  A located item behind a metric — the read-time "finding" view over a spec's
+ *  filtered facts (the offenders drill-in), replacing the baked `metric_finding`
+ *  (epic tsk12, tsk26). `severity` is the fact's reported severity (lint) or,
+ *  absent one, DERIVED from the value against the spec's thresholds × direction.
+ */
+export type FactFinding = {
+	subject_kind: string | null,
+	subject_ref: string | null,
+	path: string | null,
+	line: number | null,
+	value: number,
+	severity: string | null,
+	rule: string | null,
+	message: string | null,
+	branch: string | null,
+	captured_at: Timestamp,
+};
+
+/**
  *  File filter the renderer can request: `all` (whole corpus) or an
  *  explicit set of repo-relative paths. The serialized shape mirrors
  *  the persisted `file_filter` column — callers pass `kind: "all"` or
@@ -2050,55 +2084,6 @@ export type MetricCatalogEntry = {
 	category: string | null,
 };
 
-// One row in the measure catalog.
-export type MetricDefinition = {
-	id: number,
-	key: string,
-	// `gauge` | `findings` | `test` | `coverage` | `event`.
-	kind: string,
-	title: string,
-	unit: string | null,
-	// `higher-better` | `lower-better` | `neutral`.
-	direction: string,
-	// `last` | `sum` | `avg` | `min` | `max`.
-	default_agg: string,
-	grain: string | null,
-	basis: string,
-	producer: string | null,
-	description: string | null,
-	category: string | null,
-	language: string | null,
-	// `built-in` | `global` | `project`.
-	scope: string,
-	// JSON array of declared conformed-dimension keys.
-	dimensions_json: string | null,
-	target: number | null,
-	warn_at: number | null,
-	fail_at: number | null,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-};
-
-/**
- *  A metric's per-file values rolled up by one **dimension** — the package
- *  (a file's parent directory) or any `dims_json` key the file samples carry
- *  (e.g. `language`). Sums the latest value of each contributing file. The
- *  `metric_subject` package grain (and the per-file dim breakdown) made
- *  concrete (tsk327/tsk328/tsk319) — answers "which package / language holds
- *  the most of metric X". Files at the repo root roll up under ".".
- */
-export type MetricDimensionRollup = {
-	/**
-	 *  The dimension value the files were grouped by — a directory (for
-	 *  `package`) or a `dims_json` value (e.g. a language name).
-	 */
-	key: string,
-	// Sum of the latest value of each file under this key.
-	value: number,
-	// How many files contributed.
-	file_count: number,
-};
-
 /**
  *  One entry in the top-level `metrics:` block — a **pure read-time SPEC** over a
  *  measure (epic tsk12, E). A metric no longer *computes* anything: it names a
@@ -2161,47 +2146,38 @@ export type MetricEntry = {
 	failAt?: number | null,
 };
 
-export type MetricFinding = {
+export type MetricSpec = {
 	id: number,
-	run_id: number,
-	metric_id: number | null,
-	subject_kind: string | null,
-	subject_ref: string | null,
-	path: string | null,
-	start_line: number | null,
-	end_line: number | null,
-	col: number | null,
-	kind: string,
-	severity: string | null,
-	rule: string | null,
-	message: string | null,
-	value: number | null,
-	extra_json: string | null,
-};
-
-export type MetricSample = {
-	id: number,
-	run_id: number | null,
-	metric_id: number,
-	value: number,
-	numerator: number | null,
-	denominator: number | null,
-	captured_at: Timestamp,
-	snapshot_id: number | null,
-	closest_git_version: string | null,
-	// Branch the fact was captured on, when applicable.
-	branch: string | null,
-	git_version_exact: boolean,
-	basis_ref: string | null,
-	stream_id: number,
-	thread_id: number | null,
-	subject_kind: string | null,
-	subject_ref: string | null,
-	path: string | null,
-	line: number | null,
-	dims_json: string | null,
-	provenance: string,
-	source: string,
+	key: string,
+	title: string,
+	unit: string | null,
+	// The measure whose facts this metric aggregates; `None` for a formula metric.
+	source_measure: string | null,
+	/**
+	 *  `count` | `count_distinct` | `sum` | `avg` | `min` | `max` | `last` | `p95`
+	 *  | `ratio` — how source facts combine WITHIN a capture.
+	 */
+	aggregation: string,
+	// Conjunctive fact predicate (min_value / severity / dim equality), JSON.
+	filter_json: string | null,
+	// Derived-metric formula referencing other metric keys; `None` for a base.
+	formula: string | null,
+	// Conformed dims this metric may be sliced by (JSON array of dim keys).
+	sliceable_dims_json: string | null,
+	// `higher-better` | `lower-better` | `neutral`.
+	direction: string,
+	target: number | null,
+	warn_at: number | null,
+	fail_at: number | null,
+	description: string | null,
+	category: string | null,
+	language: string | null,
+	// `built-in` | `global` | `project`.
+	scope: string,
+	// Read-time presentation: `gauge` | `findings` | `test` | `coverage` | `event`.
+	display_kind: string,
+	created_at: Timestamp,
+	updated_at: Timestamp,
 };
 
 /**
@@ -2567,6 +2543,13 @@ export type ReportConfig = {
 	format: string,
 };
 
+// One row of a by-dimension rollup (the metric's "breakdown" card).
+export type RollupRow = {
+	key: string,
+	value: number,
+	subject_count: number,
+};
+
 /**
  *  One ranked search result. `stream_id` is `None` for project-global
  *  entities (wiki pages); `score` is the BM25 score (lower = better match).
@@ -2583,6 +2566,30 @@ export type SearchHit = {
 export type SelectThreadRequest = {
 	streamId: StreamId,
 	threadId: ThreadId | null,
+};
+
+/**
+ *  One point in a metric's time series: a single capture's aggregated value.
+ *  A capture has one branch + one provenance, so a point carries them directly
+ *  (the read surface renders them without a second lookup, tsk26).
+ */
+export type SeriesPoint = {
+	capture_id: number,
+	captured_at: Timestamp,
+	value: number,
+	// Carried for ratio metrics so downstream roll-ups re-aggregate correctly.
+	numerator: number | null,
+	denominator: number | null,
+	// The group-by dimension value, when the series is sliced by a dimension.
+	group: string | null,
+	// The capture's branch (`None` for operational facts with no worktree).
+	branch: string | null,
+	// The capture's trust label (`observed` | `asserted` | …).
+	provenance: string | null,
+	// The capture's closest git version (short sha), for the recordings table.
+	git_version: string | null,
+	// The capture's collector source (e.g. `nextest`, `agent-reported`).
+	source: string | null,
 };
 
 export type SetStreamPromptRequest = {

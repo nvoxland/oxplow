@@ -1,10 +1,12 @@
-import type { MetricFinding, MetricSample } from "../api.js";
+import type { SeriesPoint } from "../api.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
-// `buildExplorerSeries` in MetricsExplorer.
+// `buildExplorerSeries` in MetricsExplorer. Operates over the engine's
+// per-capture `SeriesPoint`s (epic tsk12); `ChartPoint` is the reduced `{t,v}`
+// shape the trend chart plots.
 
-export type SeriesPoint = { t: number; v: number };
+export type ChartPoint = { t: number; v: number };
 
 /** An inclusive epoch-ms time window the detail page is scoped to. */
 export type TimeRange = { from: number; to: number };
@@ -37,8 +39,8 @@ export function matchPresetKey(range: TimeRange, now: number): string {
   return hit?.key ?? "custom";
 }
 
-/** Samples whose `captured_at` falls inside the window (inclusive). */
-export function filterByRange(samples: MetricSample[], range: TimeRange): MetricSample[] {
+/** Series points whose `captured_at` falls inside the window (inclusive). */
+export function filterByRange(samples: SeriesPoint[], range: TimeRange): SeriesPoint[] {
   return samples.filter((s) => {
     const t = Date.parse(String(s.captured_at));
     return !Number.isNaN(t) && t >= range.from && t <= range.to;
@@ -60,9 +62,9 @@ export function fromLocalInput(value: string): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-/** Samples (any order) → time-ascending `{t,v}` points, dropping unparseable
- *  timestamps. The shared input to every kind's trend chart. */
-export function seriesPoints(samples: MetricSample[]): SeriesPoint[] {
+/** Series points (any order) → time-ascending `{t,v}` chart points, dropping
+ *  unparseable timestamps. The shared input to every kind's trend chart. */
+export function seriesPoints(samples: SeriesPoint[]): ChartPoint[] {
   return samples
     .map((s) => ({ t: Date.parse(String(s.captured_at)), v: s.value }))
     .filter((p) => !Number.isNaN(p.t))
@@ -96,7 +98,7 @@ export function defaultChartMode(defaultAgg: string): ChartMode {
  *  - `cumulative` — running sum;
  *  - `change` — delta vs the previous point (drops the first point);
  *  - `avg` — trailing moving average over the last {@link AVG_WINDOW} points. */
-export function transformSeries(points: SeriesPoint[], mode: ChartMode): SeriesPoint[] {
+export function transformSeries(points: ChartPoint[], mode: ChartMode): ChartPoint[] {
   switch (mode) {
     case "cumulative": {
       let acc = 0;
@@ -115,23 +117,23 @@ export function transformSeries(points: SeriesPoint[], mode: ChartMode): SeriesP
   }
 }
 
-/** Distinct non-null branches present in the samples, sorted. */
-export function branchOptions(samples: MetricSample[]): string[] {
+/** Distinct non-null branches present in the series points, sorted. */
+export function branchOptions(samples: SeriesPoint[]): string[] {
   const set = new Set<string>();
   for (const s of samples) if (s.branch) set.add(s.branch);
   return [...set].sort();
 }
 
-/** Samples on `branch`, or all when `branch` is null (the "All branches"
+/** Series points on `branch`, or all when `branch` is null (the "All branches"
  *  option). */
-export function filterByBranch(samples: MetricSample[], branch: string | null): MetricSample[] {
+export function filterByBranch(samples: SeriesPoint[], branch: string | null): SeriesPoint[] {
   if (branch == null) return samples;
   return samples.filter((s) => s.branch === branch);
 }
 
 /** Latest value minus the earliest (the effort/window delta). `null` when there
  *  are fewer than two points. */
-export function deltaVsFirst(samples: MetricSample[]): number | null {
+export function deltaVsFirst(samples: SeriesPoint[]): number | null {
   const pts = seriesPoints(samples);
   if (pts.length < 2) return null;
   return pts[pts.length - 1]!.v - pts[0]!.v;
@@ -145,7 +147,7 @@ export function deltaVsFirst(samples: MetricSample[]): number | null {
  *  - anything else (`last`/level gauges) → "Δ in range" (last − first), the
  *    signed change. `null` when there's nothing to show. */
 export function inRangeStat(
-  samples: MetricSample[],
+  samples: SeriesPoint[],
   defaultAgg: string,
 ): { label: string; value: number; signed: boolean } | null {
   const pts = seriesPoints(samples);
@@ -158,45 +160,4 @@ export function inRangeStat(
   }
   if (pts.length < 2) return null;
   return { label: "Δ in range", value: pts[pts.length - 1]!.v - pts[0]!.v, signed: true };
-}
-
-/** Top-N subjects by summed value — the `event`/`findings` "where is it
- *  concentrated" breakdown. Groups by `subject_ref` (falling back to
- *  `subject_kind`); samples with no subject are bucketed under "—". */
-export function topSubjects(
-  samples: MetricSample[],
-  n: number,
-): { subject: string; value: number }[] {
-  const sums = new Map<string, number>();
-  for (const s of samples) {
-    const key = s.subject_ref ?? s.subject_kind ?? "—";
-    sums.set(key, (sums.get(key) ?? 0) + s.value);
-  }
-  return [...sums.entries()]
-    .map(([subject, value]) => ({ subject, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, n);
-}
-
-/** The real findings rows (lint hits, complexity, …) for the findings-kind
- *  table — excludes the verbatim `*-detail` payload findings the producers
- *  attach for the effort panel. */
-export function findingRows(findings: MetricFinding[]): MetricFinding[] {
-  return findings.filter((f) => !f.kind.endsWith("-detail"));
-}
-
-/** Parse a `*-detail` finding's `extra_json` payload (the test suite/case tree
- *  or coverage file/line map kept verbatim by the producers). `null` when
- *  absent or unparseable. */
-export function parseDetailPayload(
-  findings: MetricFinding[],
-  detailKind: string,
-): unknown | null {
-  const f = findings.find((x) => x.kind === detailKind);
-  if (!f?.extra_json) return null;
-  try {
-    return JSON.parse(f.extra_json) as unknown;
-  } catch {
-    return null;
-  }
 }

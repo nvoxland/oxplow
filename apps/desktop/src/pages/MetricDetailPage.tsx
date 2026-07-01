@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type EffortMetricDelta,
-  type MetricDefinition,
-  type MetricFinding,
-  type MetricSample,
+  type FactFinding,
+  type MetricSpec,
+  type SeriesPoint,
   listEffortMetricDeltas,
   listMetricDefinitions,
   listMetricFindings,
@@ -63,9 +63,9 @@ export function MetricDetailPage({
   effort?: { effortId: string; start: string; end: string | null };
   onOpenPage?: (ref: TabRef) => void;
 } = {}) {
-  const [def, setDef] = useState<MetricDefinition | null>(null);
-  const [samples, setSamples] = useState<MetricSample[]>([]);
-  const [findings, setFindings] = useState<MetricFinding[]>([]);
+  const [def, setDef] = useState<MetricSpec | null>(null);
+  const [samples, setSamples] = useState<SeriesPoint[]>([]);
+  const [findings, setFindings] = useState<FactFinding[]>([]);
   const [effortDelta, setEffortDelta] = useState<EffortMetricDelta | null>(null);
   const [loading, setLoading] = useState(true);
   // Filters. Default to the last 7 days, all branches, raw value.
@@ -78,7 +78,7 @@ export function MetricDetailPage({
   usePageTitle(def?.title ?? "Metric");
 
   useEffect(() => {
-    if (def && !modeTouched.current) setMode(defaultChartMode(def.default_agg));
+    if (def && !modeTouched.current) setMode(defaultChartMode(def.aggregation));
   }, [def]);
   const handleMode = (m: ChartMode) => {
     modeTouched.current = true;
@@ -101,8 +101,8 @@ export function MetricDetailPage({
       void listMetricSamples(metricKey, SAMPLE_LIMIT).then(async (rows) => {
         if (cancelled) return;
         setSamples(rows);
-        const runId = rows[0]?.run_id ?? null;
-        const fs = runId != null ? await listMetricFindings(runId) : [];
+        const captureId = rows[0]?.capture_id ?? null;
+        const fs = captureId != null ? await listMetricFindings(metricKey, captureId) : [];
         if (!cancelled) setFindings(fs);
       });
     };
@@ -140,7 +140,7 @@ export function MetricDetailPage({
   const body = (() => {
     if (loading) return <div style={{ opacity: 0.6 }}>Loading…</div>;
     if (!def) return <div style={{ opacity: 0.6 }}>Metric not found.</div>;
-    const hasDrillIn = DRILL_IN_KINDS.has(def.kind);
+    const hasDrillIn = DRILL_IN_KINDS.has(def.display_kind);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }} data-testid="metric-detail">
         {def.description ? (
@@ -162,8 +162,8 @@ export function MetricDetailPage({
         <MetricBreakdownCard def={def} />
         {hasDrillIn ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <SectionLabel>Latest run</SectionLabel>
-            <KindDrillIn def={def} findings={findings} samples={filtered} />
+            <SectionLabel>Latest recording</SectionLabel>
+            <KindDrillIn def={def} findings={findings} metricKey={def.key} />
           </div>
         ) : null}
       </div>

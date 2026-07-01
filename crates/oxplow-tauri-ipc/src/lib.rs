@@ -194,6 +194,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::metrics::list_metric_samples,
             commands::metrics::metric_dimension_rollup,
             commands::metrics::list_metric_findings,
+            commands::metrics::metric_series,
+            commands::metrics::metric_rollup,
             commands::metrics::list_metric_catalog,
             commands::metrics::set_metric_enabled,
             commands::metrics::set_metric_override,

@@ -1683,57 +1683,64 @@ export async function listEffortMetricDeltas(
 }
 
 export type {
-  MetricDefinition,
-  MetricSample,
-  MetricFinding,
+  MetricSpec,
+  SeriesPoint,
+  FactFinding,
   MetricCatalogEntry,
-  MetricDimensionRollup,
+  RollupRow,
 } from "./tauri-bridge/index.js";
 
-/** The metric catalog — every known definition (built-in / global / project).
- *  Optional `language` / `scope` filter. (Unified metric substrate, tsk213.) */
+/** The metric catalog — every known metric SPEC (built-in / global / project).
+ *  A metric is an aggregation defined OVER a measure (epic tsk12), not a second
+ *  store of rows. Optional `language` / `scope` filter. */
 export async function listMetricDefinitions(
   language?: string,
   scope?: string,
-): Promise<import("./tauri-bridge/index.js").MetricDefinition[]> {
+): Promise<import("./tauri-bridge/index.js").MetricSpec[]> {
   return unwrap(
     await commands.listMetricDefinitions(language ?? null, scope ?? null),
-  ) as unknown as import("./tauri-bridge/index.js").MetricDefinition[];
+  ) as unknown as import("./tauri-bridge/index.js").MetricSpec[];
 }
 
-/** Durable, time-anchored samples for one metric (by definition `key`),
- *  newest-first. */
+/** Time series for one metric (by spec `key`), newest-first — one point per
+ *  capture aggregated over the metric's source-measure facts (epic tsk12).
+ *  `groupBy` slices by a conformed dimension (`subject` / `branch` /
+ *  `oxplow.model` / …), yielding one series-point per (capture × group). */
 export async function listMetricSamples(
   metricKey: string,
   limit?: number,
-): Promise<import("./tauri-bridge/index.js").MetricSample[]> {
+  groupBy?: string | null,
+): Promise<import("./tauri-bridge/index.js").SeriesPoint[]> {
   return unwrap(
-    await commands.listMetricSamples(metricKey, limit ?? null),
-  ) as unknown as import("./tauri-bridge/index.js").MetricSample[];
+    await commands.listMetricSamples(metricKey, limit ?? null, groupBy ?? null),
+  ) as unknown as import("./tauri-bridge/index.js").SeriesPoint[];
 }
 
-/** Roll up a metric's per-file samples by a dimension — `"package"` (the
- *  file's parent directory) or a per-file `dims_json` key like `"language"` —
- *  summed across streams, largest first. The Metric Detail Breakdown card
+/** Roll up a metric (by spec `key`) by a dimension — `"package"` (the file's
+ *  parent directory), a conformed dim (`oxplow.severity`), a `subject` roll-up,
+ *  or any `dims_json` key — latest value per subject summed per dimension
+ *  value, largest first. The Metric Detail Breakdown + subject breakdown
  *  (tsk328 package / tsk319 language). */
 export async function metricDimensionRollup(
   metricKey: string,
   dimension: string,
-): Promise<import("./tauri-bridge/index.js").MetricDimensionRollup[]> {
+): Promise<import("./tauri-bridge/index.js").RollupRow[]> {
   return unwrap(
     await commands.metricDimensionRollup(metricKey, dimension),
-  ) as unknown as import("./tauri-bridge/index.js").MetricDimensionRollup[];
+  ) as unknown as import("./tauri-bridge/index.js").RollupRow[];
 }
 
-/** Per-finding detail rows for one metric run (`run_id` from a sample) — the
- *  per-kind Metric detail drill-in (findings table / test tree / coverage
- *  heat). (tsk232.) */
+/** The located items behind one metric (by spec `key`) — the read-time finding
+ *  view over its filtered facts (epic tsk12). `captureId` scopes to one
+ *  recording's drill-in (findings table / per-file coverage / per-case tests);
+ *  omit for every matching fact. */
 export async function listMetricFindings(
-  runId: number,
-): Promise<import("./tauri-bridge/index.js").MetricFinding[]> {
+  metricKey: string,
+  captureId?: number | null,
+): Promise<import("./tauri-bridge/index.js").FactFinding[]> {
   return unwrap(
-    await commands.listMetricFindings(runId),
-  ) as unknown as import("./tauri-bridge/index.js").MetricFinding[];
+    await commands.listMetricFindings(metricKey, captureId ?? null),
+  ) as unknown as import("./tauri-bridge/index.js").FactFinding[];
 }
 
 /** The available metric catalog (built-in ∪ global ∪ project) + each entry's

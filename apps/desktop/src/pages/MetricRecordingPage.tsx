@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
 import {
-  type MetricDefinition,
-  type MetricFinding,
+  type FactFinding,
+  type MetricSpec,
   listMetricDefinitions,
   listMetricFindings,
 } from "../api.js";
@@ -16,60 +16,58 @@ function fmt(v: number): string {
 
 /**
  * Metric Recording — the located items a "count of X" gauge counted at one
- * recording (run), so you can drill from a metric's trend to the actual
+ * recording (capture), so you can drill from a metric's trend to the actual
  * contributing functions/lines (tsk313). Opened from a row in the Metric Detail
- * recordings table (`metricRecordingRef(runId, …)`); reads `metric_finding`s by
- * run id. Pure read; degrades gracefully when a run has no findings (e.g. a
- * gauge that doesn't emit them).
+ * recordings table (`metricRecordingRef(captureId, …)`); reads the metric's
+ * facts for that capture as the read-time finding view (`findings_for_spec`,
+ * epic tsk12). Pure read; degrades gracefully when a capture has no findings.
  */
 export function MetricRecordingPage({
-  runId,
+  captureId,
   metricKey,
   capturedAt,
   value,
 }: {
-  runId?: number;
+  captureId?: number;
   metricKey?: string;
   capturedAt?: string;
   value?: number;
   onOpenPage?: (ref: TabRef) => void;
 } = {}) {
-  const [findings, setFindings] = useState<MetricFinding[]>([]);
-  const [def, setDef] = useState<MetricDefinition | null>(null);
+  const [findings, setFindings] = useState<FactFinding[]>([]);
+  const [def, setDef] = useState<MetricSpec | null>(null);
   const [loading, setLoading] = useState(true);
   const title = def?.title ?? "Recording";
   usePageTitle(title);
 
   useEffect(() => {
     let cancelled = false;
-    if (runId == null) {
+    if (captureId == null || !metricKey) {
       setLoading(false);
       return;
     }
-    void listMetricFindings(runId).then((rows) => {
+    void listMetricFindings(metricKey, captureId).then((rows) => {
       if (!cancelled) {
         setFindings(rows);
         setLoading(false);
       }
     });
-    if (metricKey) {
-      void listMetricDefinitions().then((defs) => {
-        if (!cancelled) setDef(defs.find((d) => d.key === metricKey) ?? null);
-      });
-    }
+    void listMetricDefinitions().then((defs) => {
+      if (!cancelled) setDef(defs.find((d) => d.key === metricKey) ?? null);
+    });
     return () => {
       cancelled = true;
     };
-  }, [runId, metricKey]);
+  }, [captureId, metricKey]);
 
   // Sort by descending value (worst first), then path/line.
   const rows = findings
     .slice()
     .sort(
       (a, b) =>
-        (b.value ?? 0) - (a.value ?? 0) ||
+        b.value - a.value ||
         (a.path ?? "").localeCompare(b.path ?? "") ||
-        (a.start_line ?? 0) - (b.start_line ?? 0),
+        (a.line ?? 0) - (b.line ?? 0),
     );
 
   return (
@@ -103,14 +101,14 @@ export function MetricRecordingPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((f) => (
-                <tr key={f.id} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
+              {rows.map((f, i) => (
+                <tr key={i} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
                   <td style={{ padding: "6px 8px", fontWeight: 600 }}>{f.message ?? f.subject_ref ?? "—"}</td>
                   <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>
                     {f.path ?? "—"}
-                    {f.start_line != null ? `:${f.start_line}` : ""}
+                    {f.line != null ? `:${f.line}` : ""}
                   </td>
-                  <td style={{ padding: "6px 8px", textAlign: "right" }}>{f.value != null ? fmt(f.value) : "—"}</td>
+                  <td style={{ padding: "6px 8px", textAlign: "right" }}>{fmt(f.value)}</td>
                 </tr>
               ))}
             </tbody>

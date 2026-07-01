@@ -2800,7 +2800,7 @@ export function App() {
         });
       } else if (ref.kind === "metric-recording") {
         const p = (ref.payload ?? null) as {
-          runId?: number;
+          captureId?: number;
           metricKey?: string;
           capturedAt?: string;
           value?: number;
@@ -2811,7 +2811,7 @@ export function App() {
           closable: true,
           render: () => (
             <MetricRecordingPage
-              runId={p?.runId}
+              captureId={p?.captureId}
               metricKey={p?.metricKey}
               capturedAt={p?.capturedAt}
               value={p?.value}

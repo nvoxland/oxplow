@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { type MetricDefinition, listMetricDefinitions, subscribeOxplowEvents } from "../api.js";
+import { type MetricSpec, listMetricDefinitions, subscribeOxplowEvents } from "../api.js";
 import { cardLinkButton } from "../components/Card.js";
 import { metricRef, metricsCatalogRef, recordedMetricsRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
@@ -29,7 +29,7 @@ export function MetricsExplorerPage({
   initialEffort?: { effortId: string; start: string; end: string | null };
   onOpenPage?: (ref: TabRef) => void;
 } = {}) {
-  const [defs, setDefs] = useState<MetricDefinition[]>([]);
+  const [defs, setDefs] = useState<MetricSpec[]>([]);
   const [loading, setLoading] = useState(true);
   const nav = useOptionalPageNavigation();
 
@@ -53,7 +53,7 @@ export function MetricsExplorerPage({
     };
   }, []);
 
-  const openDetail = (def: MetricDefinition) => {
+  const openDetail = (def: MetricSpec) => {
     const ref = metricRef(def.key);
     if (nav) nav.navigate(ref);
     else onOpenPage?.(ref);

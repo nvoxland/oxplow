@@ -1,25 +1,21 @@
 import { expect, test } from "bun:test";
 
-import type { MetricFinding, MetricSample } from "../api.js";
+import type { SeriesPoint } from "../api.js";
 import {
   branchOptions,
   defaultChartMode,
   deltaVsFirst,
   filterByRange,
-  findingRows,
   filterByBranch,
   fromLocalInput,
   inRangeStat,
   transformSeries,
   matchPresetKey,
-  parseDetailPayload,
   rangeFromPreset,
   seriesPoints,
-  topSubjects,
 } from "./metricDetailData.js";
 
-const s = (o: Partial<MetricSample>) => o as unknown as MetricSample;
-const f = (o: Partial<MetricFinding>) => o as unknown as MetricFinding;
+const s = (o: Partial<SeriesPoint>) => o as unknown as SeriesPoint;
 
 test("seriesPoints sorts ascending and drops bad timestamps", () => {
   const pts = seriesPoints([
@@ -38,43 +34,6 @@ test("deltaVsFirst is last-minus-first, null under two points", () => {
     ]),
   ).toBe(7);
   expect(deltaVsFirst([s({ captured_at: "2026-06-01T00:00:00Z", value: 5 })])).toBeNull();
-});
-
-test("topSubjects sums by subject and ranks", () => {
-  const top = topSubjects(
-    [
-      s({ subject_ref: "module:a", value: 3 }),
-      s({ subject_ref: "module:b", value: 10 }),
-      s({ subject_ref: "module:a", value: 4 }),
-      s({ value: 1 }),
-    ],
-    2,
-  );
-  expect(top).toEqual([
-    { subject: "module:b", value: 10 },
-    { subject: "module:a", value: 7 },
-  ]);
-});
-
-test("findingRows excludes verbatim *-detail payloads", () => {
-  const rows = findingRows([
-    f({ kind: "lint", rule: "no-foo" }),
-    f({ kind: "analysis-detail" }),
-    f({ kind: "complexity" }),
-  ]);
-  expect(rows.map((r) => r.kind)).toEqual(["lint", "complexity"]);
-});
-
-test("parseDetailPayload finds and parses by detail kind", () => {
-  const findings = [
-    f({ kind: "coverage-detail", extra_json: '{"summaryPct":71}' }),
-    f({ kind: "lint" }),
-  ];
-  expect(parseDetailPayload(findings, "coverage-detail")).toEqual({ summaryPct: 71 });
-  expect(parseDetailPayload(findings, "test-detail")).toBeNull();
-  expect(
-    parseDetailPayload([f({ kind: "coverage-detail", extra_json: "bad" })], "coverage-detail"),
-  ).toBeNull();
 });
 
 test("rangeFromPreset builds a [now-span, now] window", () => {
@@ -99,14 +58,14 @@ test("filterByRange keeps inclusive in-window samples, drops bad timestamps", ()
   const range = { from: Date.parse("2026-06-10T00:00:00Z"), to: Date.parse("2026-06-20T00:00:00Z") };
   const kept = filterByRange(
     [
-      s({ id: 1, captured_at: "2026-06-05T00:00:00Z", value: 1 }),
-      s({ id: 2, captured_at: "2026-06-15T00:00:00Z", value: 2 }),
-      s({ id: 3, captured_at: "2026-06-20T00:00:00Z", value: 3 }),
-      s({ id: 4, captured_at: "nonsense", value: 4 }),
+      s({ capture_id: 1, captured_at: "2026-06-05T00:00:00Z", value: 1 }),
+      s({ capture_id: 2, captured_at: "2026-06-15T00:00:00Z", value: 2 }),
+      s({ capture_id: 3, captured_at: "2026-06-20T00:00:00Z", value: 3 }),
+      s({ capture_id: 4, captured_at: "nonsense", value: 4 }),
     ],
     range,
   );
-  expect(kept.map((k) => k.id)).toEqual([2, 3]);
+  expect(kept.map((k) => k.capture_id)).toEqual([2, 3]);
 });
 
 test("fromLocalInput parses or returns null", () => {
@@ -141,13 +100,13 @@ test("transformSeries: value/cumulative/change/avg", () => {
 
 test("branchOptions + filterByBranch", () => {
   const rows = [
-    s({ id: 1, branch: "main" }),
-    s({ id: 2, branch: "feat" }),
-    s({ id: 3, branch: null }),
-    s({ id: 4, branch: "main" }),
+    s({ capture_id: 1, branch: "main" }),
+    s({ capture_id: 2, branch: "feat" }),
+    s({ capture_id: 3, branch: null }),
+    s({ capture_id: 4, branch: "main" }),
   ];
   expect(branchOptions(rows)).toEqual(["feat", "main"]);
-  expect(filterByBranch(rows, "main").map((r) => r.id)).toEqual([1, 4]);
+  expect(filterByBranch(rows, "main").map((r) => r.capture_id)).toEqual([1, 4]);
   expect(filterByBranch(rows, null).length).toBe(4);
 });
 

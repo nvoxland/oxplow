@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use oxplow_db::{FactRow, MetricSpec, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
@@ -166,7 +167,7 @@ impl FactFilter {
 /// One point in a metric's time series: a single capture's aggregated value.
 /// A capture has one branch + one provenance, so a point carries them directly
 /// (the read surface renders them without a second lookup, tsk26).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SeriesPoint {
     pub capture_id: i64,
     pub captured_at: Timestamp,
@@ -180,10 +181,14 @@ pub struct SeriesPoint {
     pub branch: Option<String>,
     /// The capture's trust label (`observed` | `asserted` | …).
     pub provenance: Option<String>,
+    /// The capture's closest git version (short sha), for the recordings table.
+    pub git_version: Option<String>,
+    /// The capture's collector source (e.g. `nextest`, `agent-reported`).
+    pub source: Option<String>,
 }
 
 /// One row of a by-dimension rollup (the metric's "breakdown" card).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct RollupRow {
     pub key: String,
     pub value: f64,
@@ -194,7 +199,7 @@ pub struct RollupRow {
 /// filtered facts (the offenders drill-in), replacing the baked `metric_finding`
 /// (epic tsk12, tsk26). `severity` is the fact's reported severity (lint) or,
 /// absent one, DERIVED from the value against the spec's thresholds × direction.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactFinding {
     pub subject_kind: Option<String>,
     pub subject_ref: Option<String>,
@@ -346,9 +351,11 @@ pub fn aggregate_series(
                 numerator,
                 denominator,
                 group,
-                // One capture → one branch/provenance; take the bucket's.
+                // One capture → one branch/provenance/version/source; take the bucket's.
                 branch: fs[0].branch.clone(),
                 provenance: Some(fs[0].provenance.clone()),
+                git_version: fs[0].closest_git_version.clone(),
+                source: Some(fs[0].source.clone()),
             }
         })
         .collect()

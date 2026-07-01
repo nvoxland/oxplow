@@ -2,10 +2,10 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   EffortMetricDelta,
-  MetricDefinition,
-  MetricDimensionRollup,
-  MetricFinding,
-  MetricSample,
+  FactFinding,
+  MetricSpec,
+  RollupRow,
+  SeriesPoint,
 } from "../api.js";
 import { metricDimensionRollup } from "../api.js";
 import {
@@ -19,17 +19,14 @@ import type { TabRef } from "../tabs/tabState.js";
 import {
   CHART_MODES,
   type ChartMode,
+  type ChartPoint,
   RANGE_PRESETS,
-  type SeriesPoint,
   type TimeRange,
-  findingRows,
   fromLocalInput,
   inRangeStat,
   matchPresetKey,
-  parseDetailPayload,
   rangeFromPreset,
   toLocalInput,
-  topSubjects,
 } from "./metricDetailData.js";
 
 // Composable pieces of the Metric detail page (tsk213, P4 / tsk232 / tsk291).
@@ -65,7 +62,7 @@ export function TrendChart({
   domain,
   unit,
 }: {
-  points: SeriesPoint[];
+  points: ChartPoint[];
   target?: number | null;
   onSelectRange?: (from: number, to: number) => void;
   /** Time-axis span. When set, the x axis covers this whole window (e.g. the
@@ -378,45 +375,46 @@ export function MetricControls({
 
 const PAGE_SIZE = 25;
 
-/** One recordings-table row. When the sample has a `run_id` it's clickable
- *  (browser-style via `useRouteDispatch`) → the recording's item-level findings
- *  page; otherwise it's a plain row. */
+/** One recordings-table row. Each series point is one capture, so every row is
+ *  clickable (browser-style via `useRouteDispatch`) → that capture's item-level
+ *  findings drill-in. */
 function RecordingRow({
   s,
   unit,
   metricKey,
   onOpenPage,
 }: {
-  s: MetricSample;
+  s: SeriesPoint;
   unit?: string | null;
   metricKey?: string;
   onOpenPage?: (ref: TabRef) => void;
 }) {
-  const hasRun = s.run_id != null;
   const { handlers } = useRouteDispatch(
-    metricRecordingRef(s.run_id ?? -1, {
+    metricRecordingRef(s.capture_id, {
       metricKey,
       capturedAt: String(s.captured_at),
       value: s.value,
     }),
     { onNavigate: onOpenPage },
   );
-  const nav = hasRun
-    ? { onClick: handlers.onClick, onAuxClick: handlers.onAuxClick, onContextMenu: handlers.onContextMenu }
-    : {};
   return (
     <tr
-      {...nav}
-      style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: hasRun ? "pointer" : undefined }}
+      onClick={handlers.onClick}
+      onAuxClick={handlers.onAuxClick}
+      onContextMenu={handlers.onContextMenu}
+      style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
     >
       <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{new Date(String(s.captured_at)).toLocaleString()}</td>
       <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmtValue(s.value, unit)}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
-        {s.closest_git_version ? s.closest_git_version.slice(0, 8) : "—"}
+        {s.git_version ? s.git_version.slice(0, 8) : "—"}
       </td>
-      <td style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }} title={s.source}>
-        {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance}`}
+      <td
+        style={{ padding: "4px 8px", opacity: s.provenance === "observed" ? 0.6 : 1 }}
+        title={s.source ?? undefined}
+      >
+        {s.provenance === "observed" ? "observed" : `⚠ ${s.provenance ?? "?"}`}
       </td>
     </tr>
   );
@@ -430,7 +428,7 @@ export function RecordingsTable({
   metricKey,
   onOpenPage,
 }: {
-  samples: MetricSample[];
+  samples: SeriesPoint[];
   unit?: string | null;
   metricKey?: string;
   onOpenPage?: (ref: TabRef) => void;
@@ -463,7 +461,7 @@ export function RecordingsTable({
         </thead>
         <tbody>
           {rows.map((s) => (
-            <RecordingRow key={s.id} s={s} unit={unit} metricKey={metricKey} onOpenPage={onOpenPage} />
+            <RecordingRow key={s.capture_id} s={s} unit={unit} metricKey={metricKey} onOpenPage={onOpenPage} />
           ))}
         </tbody>
       </table>
@@ -500,8 +498,8 @@ export function MetricStatsRail({
   effort,
   effortDelta,
 }: {
-  def: MetricDefinition;
-  samples: MetricSample[];
+  def: MetricSpec;
+  samples: SeriesPoint[];
   effort?: { effortId: string; start: string; end: string | null };
   effortDelta?: EffortMetricDelta | null;
 }) {
@@ -509,7 +507,7 @@ export function MetricStatsRail({
   // The "in range" headline follows how the metric rolls up (Σ for sum metrics
   // like tokens, mean for avg, signed last−first for level gauges) — see
   // `inRangeStat` (tsk301).
-  const rangeStat = inRangeStat(samples, def.default_agg);
+  const rangeStat = inRangeStat(samples, def.aggregation);
   const rangeText = rangeStat
     ? rangeStat.signed
       ? `${rangeStat.value > 0 ? "+" : ""}${fmtValue(rangeStat.value, def.unit)}`
@@ -561,9 +559,8 @@ export function MetricStatsRail({
   );
 }
 
-function FindingsTable({ findings }: { findings: MetricFinding[] }) {
-  const rows = findingRows(findings);
-  if (rows.length === 0) return <div style={{ opacity: 0.6 }}>No findings in the latest run.</div>;
+function FindingsTable({ findings }: { findings: FactFinding[] }) {
+  if (findings.length === 0) return <div style={{ opacity: 0.6 }}>No findings in the latest recording.</div>;
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
       <thead>
@@ -575,11 +572,11 @@ function FindingsTable({ findings }: { findings: MetricFinding[] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
-          <tr key={r.id} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
+        {findings.map((r, i) => (
+          <tr key={i} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
             <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
               {r.path ?? r.subject_ref ?? "—"}
-              {r.start_line != null ? `:${r.start_line}` : ""}
+              {r.line != null ? `:${r.line}` : ""}
             </td>
             <td style={{ padding: "4px 8px" }}>{r.severity ?? "—"}</td>
             <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{r.rule ?? "—"}</td>
@@ -591,88 +588,28 @@ function FindingsTable({ findings }: { findings: MetricFinding[] }) {
   );
 }
 
-type TestCase = { classname?: string; name?: string; status?: string; time_ms?: number | null };
-type TestSuite = { name?: string; cases?: TestCase[] };
-
-function TestTree({ findings }: { findings: MetricFinding[] }) {
-  const payload = parseDetailPayload(findings, "test-detail") as { suites?: TestSuite[] } | null;
-  if (!payload?.suites?.length) return <div style={{ opacity: 0.6 }}>No test detail for the latest run.</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {payload.suites.map((suite, si) => (
-        <div key={si}>
-          <div style={{ fontWeight: 600, fontSize: 12 }}>{suite.name ?? "(suite)"}</div>
-          <ul style={{ margin: "4px 0 0 16px", padding: 0, fontSize: 12, listStyle: "none" }}>
-            {(suite.cases ?? []).map((c, ci) => {
-              const failed = c.status === "failed" || c.status === "error";
-              return (
-                <li key={ci} style={{ color: failed ? "var(--err, #f85149)" : undefined, padding: "1px 0" }}>
-                  {failed ? "✗" : "✓"} {c.classname ? `${c.classname}.` : ""}
-                  {c.name ?? "(case)"}
-                  {c.time_ms != null ? <span style={{ opacity: 0.5 }}> · {c.time_ms}ms</span> : null}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-type CoverageFile = { path?: string; uncoveredChangedLines?: number[] };
-type CoveragePayload = { summaryPct?: number; files?: CoverageFile[] };
-
-function CoverageHeat({ findings }: { findings: MetricFinding[] }) {
-  const payload = parseDetailPayload(findings, "coverage-detail") as CoveragePayload | null;
-  if (!payload?.files?.length) return <div style={{ opacity: 0.6 }}>No coverage detail for the latest run.</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {payload.summaryPct != null ? (
-        <div style={{ fontSize: 12, opacity: 0.7 }}>Summary: {fmt(payload.summaryPct)}%</div>
-      ) : null}
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr style={{ textAlign: "left", opacity: 0.6 }}>
-            <th style={{ padding: "4px 8px" }}>File</th>
-            <th style={{ padding: "4px 8px" }}>Uncovered changed lines</th>
-          </tr>
-        </thead>
-        <tbody>
-          {payload.files.map((file, fi) => {
-            const lines = file.uncoveredChangedLines ?? [];
-            return (
-              <tr key={fi} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-                <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{file.path ?? "—"}</td>
-                <td
-                  style={{
-                    padding: "4px 8px",
-                    fontFamily: "monospace",
-                    fontSize: 11,
-                    color: lines.length ? "var(--err, #f85149)" : "var(--ok, #3fb950)",
-                  }}
-                >
-                  {lines.length ? lines.join(", ") : "fully covered"}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TopSubjects({ samples }: { samples: MetricSample[] }) {
-  const top = topSubjects(samples, 10);
-  if (top.length === 0) return <div style={{ opacity: 0.6 }}>No subject breakdown.</div>;
-  const max = Math.max(...top.map((t) => t.value)) || 1;
+/** Top subjects behind an `event`-kind metric — the server rolls the metric's
+ *  facts up by `subject` (largest first), replacing the old client-side
+ *  `topSubjects` over samples (epic tsk12, T-C3). */
+function TopSubjects({ metricKey }: { metricKey: string }) {
+  const [rows, setRows] = useState<RollupRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void metricDimensionRollup(metricKey, "subject").then((r) => {
+      if (!cancelled) setRows(r.slice(0, 10));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [metricKey]);
+  if (rows.length === 0) return <div style={{ opacity: 0.6 }}>No subject breakdown.</div>;
+  const max = Math.max(...rows.map((t) => t.value)) || 1;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      {top.map((t) => (
-        <div key={t.subject} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+      {rows.map((t) => (
+        <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
           <span style={{ width: 200, fontFamily: "monospace", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {t.subject}
+            {t.key}
           </span>
           <span style={{ flex: 1, background: "var(--border, #2a2a2a)", borderRadius: 2, height: 12 }}>
             <span style={{ display: "block", width: `${(t.value / max) * 100}%`, background: "var(--accent, #58a6ff)", height: 12, borderRadius: 2 }} />
@@ -684,25 +621,26 @@ function TopSubjects({ samples }: { samples: MetricSample[] }) {
   );
 }
 
-/** Kind-specific drill-in for the latest run, or null for plain gauges. */
+/** Kind-specific drill-in for the latest recording, or null for plain gauges.
+ *  Findings/test/coverage metrics render the uniform per-item finding view over
+ *  the recording's facts (`findings_for_spec`); `event` metrics show the
+ *  server-rolled subject breakdown (epic tsk12, T-C3). */
 export function KindDrillIn({
   def,
   findings,
-  samples,
+  metricKey,
 }: {
-  def: MetricDefinition;
-  findings: MetricFinding[];
-  samples: MetricSample[];
+  def: MetricSpec;
+  findings: FactFinding[];
+  metricKey: string;
 }): ReactNode {
-  switch (def.kind) {
+  switch (def.display_kind) {
     case "findings":
-      return <FindingsTable findings={findings} />;
     case "test":
-      return <TestTree findings={findings} />;
     case "coverage":
-      return <CoverageHeat findings={findings} />;
+      return <FindingsTable findings={findings} />;
     case "event":
-      return <TopSubjects samples={samples} />;
+      return <TopSubjects metricKey={metricKey} />;
     default:
       return null;
   }
@@ -712,11 +650,11 @@ export function KindDrillIn({
  *  (the file's directory), plus any per-file `dims_json` key the metric
  *  declares (e.g. `language`). Run/time dims that aren't a per-file grain
  *  (`git_version`, `branch`) are excluded. */
-function breakdownDimensions(def: MetricDefinition): string[] {
+function breakdownDimensions(def: MetricSpec): string[] {
   const out = ["package"];
-  if (def.dimensions_json) {
+  if (def.sliceable_dims_json) {
     try {
-      for (const d of JSON.parse(def.dimensions_json) as string[]) {
+      for (const d of JSON.parse(def.sliceable_dims_json) as string[]) {
         if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
       }
     } catch {
@@ -731,10 +669,10 @@ function breakdownDimensions(def: MetricDefinition): string[] {
  *  largest first. Exercises the `metric_subject` package grain + the per-file
  *  dim breakdown (tsk328 package / tsk319 language). Self-hides when the
  *  metric has no per-file samples (e.g. coverage, operational metrics). */
-export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
+export function MetricBreakdownCard({ def }: { def: MetricSpec }) {
   const dims = useMemo(() => breakdownDimensions(def), [def]);
   const [dim, setDim] = useState<string>(dims[0] ?? "package");
-  const [rows, setRows] = useState<MetricDimensionRollup[]>([]);
+  const [rows, setRows] = useState<RollupRow[]>([]);
   useEffect(() => {
     let cancelled = false;
     void metricDimensionRollup(def.key, dim).then((r) => {
@@ -778,7 +716,7 @@ export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
         <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
           <span
             style={{ width: "32%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            title={`${r.key} · ${r.file_count} file${r.file_count === 1 ? "" : "s"}`}
+            title={`${r.key} · ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`}
           >
             {r.key}
           </span>
@@ -794,7 +732,7 @@ export function MetricBreakdownCard({ def }: { def: MetricDefinition }) {
           </div>
           <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
             {fmt(r.value)}
-            <span style={{ opacity: 0.5 }}> · {r.file_count}</span>
+            <span style={{ opacity: 0.5 }}> · {r.subject_count}</span>
           </span>
         </div>
       ))}

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  type MetricDefinition,
-  type MetricSample,
+  type MetricSpec,
+  type SeriesPoint,
   type TaskEffort,
   listEffortsInWindow,
   listMetricSamples,
@@ -36,33 +36,19 @@ const SERIES_COLORS = [
 type Point = { t: number; v: number };
 type Series = { label: string; color: string; points: Point[] };
 
-/** Group-by options offered on top of any declared conformed dimensions. */
+/** Group-by options offered on top of any declared conformed dimensions. The
+ *  chosen value is passed straight to the server (`series_for_spec` group_by),
+ *  which tags each returned point with its `group` (epic tsk12, T-C3). */
 const BASE_GROUP_BYS = ["none", "branch", "subject"] as const;
 
-export function dimsValue(s: MetricSample, key: string): string | null {
-  if (key === "branch") return s.branch ?? null;
-  if (key === "subject") return s.subject_ref ?? s.subject_kind ?? null;
-  if (s.dims_json) {
-    try {
-      const o = JSON.parse(s.dims_json) as Record<string, unknown>;
-      const v = o[key];
-      if (v != null) return String(v);
-    } catch {
-      /* ignore */
-    }
-  }
-  // Fall back to subject_ref for entity-style dims (e.g. model:opus).
-  if (key === "model" && s.subject_kind === "model") return s.subject_ref ?? null;
-  return null;
-}
-
-/** Bucket the selected metrics' samples into one chart series per
- *  (measure × group-value). Pure — the component just renders the result. */
+/** Bucket the selected metrics' series points into one chart series per
+ *  (measure × group). The server has already sliced by the group-by dimension
+ *  (each point carries `group`), so this just buckets. Pure. */
 export function buildExplorerSeries(
   selected: string[],
-  samplesByKey: Record<string, MetricSample[]>,
+  samplesByKey: Record<string, SeriesPoint[]>,
   groupBy: string,
-  defs: MetricDefinition[],
+  defs: MetricSpec[],
 ): Series[] {
   const out: Series[] = [];
   let ci = 0;
@@ -71,7 +57,7 @@ export function buildExplorerSeries(
     const samples = samplesByKey[key] ?? [];
     const buckets = new Map<string, Point[]>();
     for (const s of samples) {
-      const g = groupBy === "none" ? null : dimsValue(s, groupBy);
+      const g = groupBy === "none" ? null : (s.group ?? null);
       if (groupBy !== "none" && g == null) continue;
       const label = g == null ? (def?.title ?? key) : `${def?.title ?? key} · ${g}`;
       const t = Date.parse(String(s.captured_at));
@@ -94,15 +80,16 @@ export type ScatterPoint = { label: string; x: number; y: number };
  *  `[]` unless exactly two measures are selected with a real group-by. Pure. */
 export function buildScatterPoints(
   selected: string[],
-  samplesByKey: Record<string, MetricSample[]>,
+  samplesByKey: Record<string, SeriesPoint[]>,
   groupBy: string,
 ): ScatterPoint[] {
   if (selected.length !== 2 || groupBy === "none") return [];
-  // Latest value of `key` per group value (samples are newest-first).
+  // Latest value of `key` per group value (points are newest-first). The server
+  // tagged each point with its `group` (the group-by slice).
   const latestByGroup = (key: string): Map<string, number> => {
     const m = new Map<string, number>();
     for (const s of samplesByKey[key] ?? []) {
-      const g = dimsValue(s, groupBy);
+      const g = s.group ?? null;
       if (g == null || m.has(g)) continue;
       m.set(g, s.value);
     }
@@ -311,8 +298,8 @@ export function MetricsExplorer({
   initialPreset,
   initialScope,
 }: {
-  defs: MetricDefinition[];
-  onOpenDetail?: (def: MetricDefinition) => void;
+  defs: MetricSpec[];
+  onOpenDetail?: (def: MetricSpec) => void;
   /** Name of a preset (built-in or saved) to apply on first paint — lets a
    *  recognizable entry point (e.g. "Tokens by model") open the Explorer
    *  pre-scoped (tsk233). */
@@ -325,7 +312,7 @@ export function MetricsExplorer({
   const [selected, setSelected] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<string>("none");
   const [viz, setViz] = useState<"line" | "bar" | "scatter">("line");
-  const [samplesByKey, setSamplesByKey] = useState<Record<string, MetricSample[]>>({});
+  const [samplesByKey, setSamplesByKey] = useState<Record<string, SeriesPoint[]>>({});
   const [presets, setPresets] = useState<ExplorerPreset[]>(() => loadPresets());
   const [presetName, setPresetName] = useState<string>("");
   const [presetApplied, setPresetApplied] = useState(false);
@@ -352,24 +339,27 @@ export function MetricsExplorer({
 
   useEffect(() => {
     let cancelled = false;
+    // Slice server-side: the group-by dimension is passed to `series_for_spec`,
+    // which tags each returned point with its `group` (epic tsk12, T-C3).
+    const dim = groupBy === "none" ? null : groupBy;
     void Promise.all(
-      selected.map(async (key) => [key, await listMetricSamples(key, 200)] as const),
+      selected.map(async (key) => [key, await listMetricSamples(key, 200, dim)] as const),
     ).then((pairs) => {
       if (!cancelled) setSamplesByKey(Object.fromEntries(pairs));
     });
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, groupBy]);
 
   // Group-by options = base dims ∪ the declared dimensions of the selected metrics.
   const groupOptions = useMemo(() => {
     const declared = new Set<string>();
     for (const key of selected) {
       const def = defs.find((d) => d.key === key);
-      if (def?.dimensions_json) {
+      if (def?.sliceable_dims_json) {
         try {
-          for (const d of JSON.parse(def.dimensions_json) as string[]) declared.add(d);
+          for (const d of JSON.parse(def.sliceable_dims_json) as string[]) declared.add(d);
         } catch {
           /* ignore */
         }

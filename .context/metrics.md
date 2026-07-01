@@ -265,9 +265,25 @@ resolve a `metric_spec` by key (seeded catalog) and compute over its
 - `list_metric_findings(metric_key, capture_id?)` → `findings_for_spec` — the
   read-time offenders view (args changed from `run_id`).
 
-The **baked writes still run** (`record_baked_run`) so the legacy IPC/UI reads
-stay fed; removing them + unbaking the 4 code scripts lands with the IPC flip
-(T-C3), when the baked store becomes fully unread.
+**The IPC/Tauri counterparts are flipped too (T-C3a, tsk39)** — the four
+`oxplow-rpc` cores + Tauri adapters now return spec/fact types
+(`MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`), `bindings.ts` is
+regenerated, and every metric frontend consumer moved with them (see the "Reads"
+table below). Two measure-level IPC reads (`metric_series`/`metric_rollup`) were
+added and their parity rows flipped `agent`→`both`. `SeriesPoint` gained
+`git_version` + `source` (one-per-capture, like `branch`/`provenance`) so the
+recordings table stays intact. Two frontend logic moves: the Explorer's group-by
+is now a server `series_for_spec` `group_by` (each point carries `group`); the
+`event`-kind subject breakdown is a server `rollup_for_spec("subject")`. The
+`test`/`coverage` drill-ins fold into the uniform per-file/per-case `FactFinding`
+table — the bespoke suite-tree / line-heat needed the verbatim legacy
+`*-detail` payloads (pass/fail status, uncovered line-sets), which are **not in
+facts** (the same scope-guard the coverage attribution took in T-D); the
+underlying facts still chart + roll up.
+
+The **baked writes still run** (`record_baked_run`) but are now **fully unread**;
+removing them + unbaking the 4 code scripts is the separable follow-on commit
+**T-C3b** (it needs no atomicity with the read flip).
 
 ### Catalog authoring surface (`measures:` / `dimensions:` config — workstream E)
 
@@ -309,14 +325,13 @@ dimensions:                        # custom conformed slice axes
   engine loads all facts and filters in-app, so an index bites nothing until
   reads go DB-side. Carried, not acted on.
 
-**Not yet done:** the **IPC/Tauri** counterparts of the metric-key reads + TS
-bindings (T-C3, atomic — Rust return types + `bindings.ts` + the ~6 frontend
-consumers land together), which also carries the **baked-write removal + 4-script
-unbake**; the UI pages (incl. a **Dimensions catalog** page); `promote_dimension`
-teeth (tsk28); and retiring V38 (tsk20). Those are the open children of the epic.
-The **MCP** metric-key reads (T-C2) and the **effort-attribution read** (T-D —
-`effort_metric_deltas` over specs + facts, coverage kept as a scope-guarded special
-case) are already flipped.
+**Not yet done:** the **baked-write removal + 4-script unbake + equivalence-test
+rewrite** (**T-C3b** — separable from the now-landed read flip); a **Dimensions
+catalog** UI page; `promote_dimension` teeth (tsk28); and retiring V38 (tsk20).
+Those are the open children of the epic. Already flipped: the **MCP** metric-key
+reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a, tsk39), and
+the **effort-attribution read** (T-D — `effort_metric_deltas` over specs + facts,
+coverage kept as a scope-guarded special case).
 
 ---
 
@@ -489,10 +504,11 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 ## Read surface
 
-> **Flipped (T-C2, tsk35):** the five metric-key MCP tools below now read the
-> fact substrate via `MetricEngine` spec-wrappers, NOT this V38 store — see
-> "Read surface (MCP)" above for the current wiring. The paragraph below is the
-> historical V38 shape (still how the **IPC** side reads until T-C3).
+> **Flipped (T-C2, tsk35 + T-C3a, tsk39):** the metric-key reads on BOTH the MCP
+> and the IPC surface now read the fact substrate via `MetricEngine`
+> spec-wrappers, NOT this V38 store. The paragraph below is the historical V38
+> shape, kept for context; the current IPC wiring + types are in the **IPC**
+> bullet.
 
 - **MCP** (`crates/oxplow-mcp/src/lib.rs`): reads `list_metric_definitions`
   (optional language/scope filter), `list_metric_samples` (by key, newest-first),
@@ -513,10 +529,16 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   manifest); the renderer drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
   `crates/oxplow-tauri-ipc/src/commands/metrics.rs` Tauri adapters, registered
-  in `collect_commands!` + the remote `rpc_dispatch!`): `list_metric_definitions`
-  / `list_metric_samples` / `list_metric_findings` (the per-run drill-in,
-  `both`-scoped — tsk232) exposed to the renderer with generated TS bindings
-  (`MetricDefinition`/`MetricSample`/`MetricFinding`). `list_effort_metric_deltas`
+  in `collect_commands!` + the remote `rpc_dispatch!`) — **flipped onto specs +
+  facts (T-C3a, tsk39)**, mirroring the MCP wiring: `list_metric_definitions` →
+  `list_specs` (`MetricSpec`), `list_metric_samples(metric_key, limit, group_by?)`
+  → `series_for_spec` (`SeriesPoint`, newest-first; `group_by` slices server-side),
+  `metric_dimension_rollup(metric_key, dimension)` → `rollup_for_spec` (`RollupRow`,
+  also serves the `event`-kind `subject` breakdown), `list_metric_findings(metric_key,
+  capture_id?)` → `findings_for_spec` (`FactFinding`, `both`-scoped — the per-capture
+  drill-in, args changed from `run_id`). Two measure-level reads `metric_series` /
+  `metric_rollup` are `both`-scoped mirrors of the MCP tools. Bindings regenerate
+  to `MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`. `list_effort_metric_deltas`
   (tsk250, `ui`-scoped — `commands/effort.rs`) returns the family-attributed
   per-effort roll-up (`EffortMetricDelta`) for the task-page panel; the agent
   gets the same numbers as prompt text via `effort_metric_context`.
