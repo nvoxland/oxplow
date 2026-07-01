@@ -493,6 +493,48 @@ impl NewFact {
 
 /// The joined read view of a fact: its own measurement columns PLUS the spine it
 /// inherits from its capture (`captured_at`, `branch`, version, effort, trust).
+/// One metric's roll-up over a single effort — the wire shape the task/effort
+/// page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
+/// row: derived per request from the substrate using the right attribution key
+/// per metric family (file-attributed for gauges, thread-scoped for operational,
+/// effort-diff for coverage/tests). See metrics.md.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct EffortMetricDelta {
+    pub key: String,
+    pub title: String,
+    pub unit: Option<String>,
+    /// `higher-better` | `lower-better` | `neutral`.
+    pub direction: String,
+    /// The definition `kind` (`gauge` | `coverage` | `test` | `event` | …).
+    pub kind: String,
+    pub category: Option<String>,
+    pub language: Option<String>,
+    /// How this delta was computed: `files` (Σ over the effort's claimed files),
+    /// `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
+    pub agg: String,
+    /// The value as the effort began (`None` for a `sum`/flow metric).
+    pub baseline: Option<f64>,
+    /// The value as of the effort's end (or latest, if open).
+    pub current: f64,
+    /// `current − baseline` for a level/file metric; the flow total for `sum`.
+    pub delta: Option<f64>,
+    /// Whether the value moved across the effort (false ⇒ show the value only).
+    pub changed: bool,
+    /// For `files`: how many of the effort's claimed files carry this metric.
+    pub attributed_files: Option<i64>,
+    /// Samples considered (in-window, or per-file for `files`).
+    pub sample_count: i64,
+    pub target: Option<f64>,
+    pub warn_at: Option<f64>,
+    pub fail_at: Option<f64>,
+    /// `warn` | `fail` when `current` (the repo-total headline for gauges) sits
+    /// in that zone, interpreted via `direction`; else `None`.
+    pub crossing: Option<String>,
+    /// The latest contributing CAPTURE (the capture is the run, T-E1), for
+    /// the findings drill-in. Field name kept for wire compatibility.
+    pub latest_run_id: Option<i64>,
+}
+
 /// This is what the aggregation engine and reads consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactRow {
@@ -945,29 +987,6 @@ impl SqliteFactStore {
             })
             .await
     }
-
-    /// Correctly aggregate a ratio measure by re-combining stored components:
-    /// `sum(numerator) / sum(denominator)`. Returns `None` when no fact carries
-    /// components or the denominators sum to zero — this is what makes "coverage %
-    /// by module" right instead of a naive average of per-file %s.
-    pub async fn aggregate_ratio(&self, measure_id: i64) -> Result<Option<f64>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let row: Option<(Option<f64>, Option<f64>)> = conn
-                    .query_row(
-                        "SELECT SUM(numerator), SUM(denominator) FROM fact
-                          WHERE measure_id = ?1 AND numerator IS NOT NULL AND denominator IS NOT NULL",
-                        params![measure_id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?;
-                Ok(match row {
-                    Some((Some(num), Some(den))) if den != 0.0 => Some(num / den),
-                    _ => None,
-                })
-            })
-            .await
-    }
 }
 
 #[cfg(test)]
@@ -1304,43 +1323,6 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-    }
-
-    #[tokio::test]
-    async fn ratio_reaggregates_from_components_not_naive_average() {
-        let store = fixture().await;
-        let m = measure(&store, "oxplow.coverage").await;
-        // File A: 1/1 covered (100%). File B: 0/3 covered (0%).
-        // Naive AVG of the two %s = 50%. True combined = (1+0)/(1+3) = 25%.
-        store
-            .record_facts(
-                NewMetricCapture::done(1, "coverage", "lcov"),
-                vec![
-                    NewFact {
-                        numerator: Some(1.0),
-                        denominator: Some(1.0),
-                        subject_kind: Some("file".into()),
-                        subject_ref: Some("a.rs".into()),
-                        ..NewFact::new(m, 1.0)
-                    },
-                    NewFact {
-                        numerator: Some(0.0),
-                        denominator: Some(3.0),
-                        subject_kind: Some("file".into()),
-                        subject_ref: Some("b.rs".into()),
-                        ..NewFact::new(m, 0.0)
-                    },
-                ],
-            )
-            .await
-            .unwrap();
-
-        let combined = store.aggregate_ratio(m).await.unwrap().unwrap();
-        assert!((combined - 0.25).abs() < 1e-9, "got {combined}");
-        assert!(
-            (combined - 0.5).abs() > 1e-6,
-            "must differ from the naive average of per-file %s"
-        );
     }
 
     #[tokio::test]

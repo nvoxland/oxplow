@@ -1453,6 +1453,8 @@ export type EffortFileChange = "created" | "updated" | "deleted";
 export type EffortId = string;
 
 /**
+ *  The joined read view of a fact: its own measurement columns PLUS the spine it
+ *  inherits from its capture (`captured_at`, `branch`, version, effort, trust).
  *  One metric's roll-up over a single effort — the wire shape the task/effort
  *  page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
  *  row: derived per request from the substrate using the right attribution key
@@ -1494,7 +1496,10 @@ export type EffortMetricDelta = {
 	 *  in that zone, interpreted via `direction`; else `None`.
 	 */
 	crossing: string | null,
-	// The latest contributing run, for findings drill-in.
+	/**
+	 *  The latest contributing CAPTURE (the capture is the run, T-E1), for
+	 *  the findings drill-in. Field name kept for wire compatibility.
+	 */
 	latest_run_id: number | null,
 };
 

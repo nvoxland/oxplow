@@ -469,25 +469,29 @@ mod tests {
             "page_ref",
             "comment",
             "comment_message",
+            // V43 — the durable atomic fact layer (the sole metric substrate
+            // since T-E3 dropped the V38 cluster, V49).
+            "measure",
+            "dimension",
+            "subject",
+            "metric_capture",
+            "fact",
+            // V44 — the metric SPEC layer.
+            "metric_spec",
+        ];
+        // `effort_observation` was dropped in V39 (tsk215); the V38
+        // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
+        let expected_absent = [
+            "hook_event",
+            "agent_status",
+            "effort_observation",
             "metric_definition",
             "metric_dimension",
             "metric_subject",
             "metric_run",
             "metric_sample",
             "metric_finding",
-            // V43 — the durable atomic fact layer (additive; the old tables above
-            // are dropped in a later cleanup once producers/reads move over).
-            "measure",
-            "dimension",
-            "subject",
-            "metric_capture",
-            "fact",
-            // V44 — the metric SPEC layer (additive beside the old
-            // `metric_definition`, which the retire migration drops).
-            "metric_spec",
         ];
-        // `effort_observation` was dropped in V39 (tsk215) — assert it's gone.
-        let expected_absent = ["hook_event", "agent_status", "effort_observation"];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
             .unwrap();

@@ -470,12 +470,13 @@ run that falls inside a strictly-nested sibling effort's time window
 (`SqliteTaskEffortStore::nested_efforts`) is the *narrower* effort's to
 own, so the wider effort drops it; truly-overlapping (non-nested) siblings
 have no dominant effort, so the run stays in both and the agent
-disambiguates by claiming. Because the
-row CASCADEs on `task_effort` but `metric_run`/`metric_sample` do NOT carry
-an `effort_id`, effort attribution is **exact while the effort is alive and
-simply gone once the effort is GC'd** — the metric rows outlive it. See
-`.context/metrics.md` for how reads join through this ledger and
-`.context/agent-model.md` for the claim→reconcile→surface loop.
+disambiguates by claiming. The ledger's `run:<id>` refs are `metric_capture`
+ids — the capture IS the run (T-E1, tsk48). The ledger row CASCADEs on
+`task_effort` while `metric_capture.effort_id` is SET NULL on effort GC, so
+attribution is exact while the effort is alive and degrades gracefully after —
+the capture rows outlive it. See `.context/metrics.md` for how reads join
+through this ledger and `.context/agent-model.md` for the
+claim→reconcile→surface loop.
 
 ### `snapshot` + `file_snapshot` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -984,17 +985,25 @@ refetches.
 ### `effort_observation` — **RETIRED** (dropped in migration `V39__drop_effort_observation.sql`, tsk215)
 
 The `effort_observation` table + `SqliteEffortObservationStore` are **gone**.
-Coverage / test / static-analysis facts now live in the **metric substrate**
-(`metric_sample` + `metric_finding`, see `.context/metrics.md`); the rich detail
-that used to live in `payload_json` (test suite/case tree, coverage per-file
-uncovered lines, analysis payload) is written as verbatim `*-detail`
-`metric_finding` rows by the `mirror_*` helpers in `collection.rs`. The
-effort-review panel reconstructs its rows from there via
-`CollectionService::effort_observations_from_metrics` (the
+Coverage / test / static-analysis facts live in the **fact substrate**
+(`fact` rows under `metric_capture`, see `.context/metrics.md`); the rich
+detail that used to live in `payload_json` (test suite/case tree, coverage
+per-file line-sets, analysis payload) rides verbatim in
+`metric_capture.detail_json` (the `{"kind": …, "payload": …}` envelope, T-E1).
+The effort-review panel reconstructs its rows from the effort's ledger-claimed
+captures via `CollectionService::effort_observations_from_metrics` (the
 `list_effort_observations` IPC/MCP). The `EffortObservation` struct
 (`observation_store.rs`) survives **only** as that read/IPC shape — no table, no
 store. The `provenance`/`source` trust spine and the `observed`/`asserted`
-distinction carry onto every `metric_sample` (see `.context/metrics.md`).
+distinction carry on every capture (see `.context/metrics.md`).
+
+### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/tsk50)
+
+The V38 metric cluster + `metric_store.rs` are **gone**. The fact substrate
+(`measure`/`dimension`/`metric_spec`/`metric_capture`/`fact`, V43+) is the sole
+metric store: producers write facts on captures, metrics are SPECS aggregated
+at read time by `MetricEngine`, and the run identity for attribution is the
+capture id. See `.context/metrics.md`.
 
 > **Timestamp ordering gotcha (tsk243).** Timestamps are stored as RFC 3339
 > TEXT and compared lexicographically by SQLite. The `time` crate trims trailing

@@ -4,21 +4,19 @@
 //! `task_service.rs`, `collection.rs`) — there's nothing to opt into. Two
 //! consumers need the same descriptors:
 //!
-//! - the **producers**, which `upsert_definition` the metric the first time they
-//!   record a sample, and
+//! - the **spec seeding** (`builtin_producer_specs`), which turns each
+//!   descriptor into the `metric_spec` the engine aggregates, and
 //! - the **Catalog** (`MetricsService::catalog`), a registry of *available*
 //!   metrics that must list them even before any data exists.
 //!
 //! To keep those from drifting, the descriptors live here **once**:
-//! [`builtin_producer_metrics`] is the sole source. Producers build their
-//! `NewMetricDefinition` via [`ProducerMetric::definition`]; the Catalog reads
-//! the same list. Add or rename a producer metric in exactly one place.
+//! [`builtin_producer_metrics`] is the sole source. Add or rename a producer
+//! metric in exactly one place.
 
-use oxplow_db::{NewMetricDefinition, NewMetricSpec};
+use oxplow_db::NewMetricSpec;
 
-/// A built-in always-on producer metric — the full descriptor needed to build
-/// its `metric_definition`. Static (`&'static str`) because the set is fixed at
-/// compile time.
+/// A built-in always-on producer metric descriptor. Static (`&'static str`)
+/// because the set is fixed at compile time.
 pub struct ProducerMetric {
     pub key: &'static str,
     pub title: &'static str,
@@ -39,24 +37,6 @@ pub struct ProducerMetric {
     /// Conformed dimensions the producer slices by.
     pub dimensions: &'static [&'static str],
     pub description: Option<&'static str>,
-}
-
-impl ProducerMetric {
-    /// Build the `NewMetricDefinition` the producer upserts. The single place
-    /// the producer/Catalog descriptors agree — see the module docs.
-    pub fn definition(&self) -> NewMetricDefinition {
-        let mut def = NewMetricDefinition::new(self.key, self.kind, self.title);
-        def.unit = Some(self.unit.into());
-        def.direction = self.direction.into();
-        def.default_agg = self.default_agg.into();
-        def.grain = self.grain.map(Into::into);
-        def.producer = Some(self.producer.into());
-        def.category = Some(self.category.into());
-        def.dimensions_json =
-            Some(serde_json::to_string(self.dimensions).unwrap_or_else(|_| "[]".into()));
-        def.description = self.description.map(Into::into);
-        def
-    }
 }
 
 /// The canonical list of always-on producer metrics. Mirrors exactly what the
@@ -339,25 +319,6 @@ pub fn producer_metric(key: &str) -> &'static ProducerMetric {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn lookup_and_definition_match_registry() {
-        let p = producer_metric("oxplow.coverage.abs_pct");
-        let def = p.definition();
-        assert_eq!(def.key, "oxplow.coverage.abs_pct");
-        assert_eq!(def.kind, "coverage");
-        assert_eq!(def.category.as_deref(), Some("coverage"));
-        assert_eq!(def.grain, None, "coverage has no per-sample grain");
-        assert_eq!(
-            def.dimensions_json.as_deref(),
-            Some(r#"["branch","git_version"]"#)
-        );
-
-        // Token dims serialize identically to the old inline literal.
-        let tok = producer_metric("agent.tokens.total").definition();
-        assert_eq!(tok.dimensions_json.as_deref(), Some(r#"["model","agent"]"#));
-        assert_eq!(tok.default_agg, "sum");
-    }
 
     #[test]
     #[should_panic(expected = "unknown producer metric key")]

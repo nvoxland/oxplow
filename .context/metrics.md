@@ -13,12 +13,12 @@ coverage/test/analysis facts — the legacy `effort_observation` table was
 substrate (`CollectionService::effort_observations_from_metrics`); the
 `EffortObservation` type survives only as the read/IPC shape.
 
-> **⚠ Cutover nearly complete — the fact substrate (epic tsk12).** The V38
-> `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` cluster is
-> now **unread and unwritten** (reads flipped in T-C2/T-C3/T-D/T-E1; writes
-> dropped in T-E2, tsk49). Sections below describing V38 mechanics are
-> historical context; only T-E3 (drop the tables + `metric_store.rs`, tsk20)
-> remains. New work targets the fact substrate exclusively.
+> **✅ Cutover complete (epic tsk12).** The V38
+> `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` cluster and
+> `metric_store.rs` are **gone** (reads flipped in T-C2/T-C3/T-D/T-E1; writes
+> dropped in T-E2; tables dropped in V49, T-E3/tsk50). The fact substrate is
+> the sole metric store. Sections below that describe V38 mechanics are
+> historical context for why the model looks the way it does.
 
 ## The fact substrate (epic tsk12 — the inversion, in flight)
 
@@ -352,12 +352,13 @@ dimensions:                        # custom conformed slice axes
 
 **Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth
 (tsk28); unbaking the per-language idiom scripts (still emit dead `tree:.`/
-`file:` samples); and retiring V38 (tsk20). Those are the open children of the
-epic. Already landed: the **MCP** metric-key reads (T-C2), the **IPC + bindings +
-frontend** read surface (T-C3a, tsk39), the **baked-write removal + 4-script
-unbake** (T-C3b, tsk40), and the **effort-attribution read** (T-D —
-`effort_metric_deltas` over specs + facts, coverage kept as a scope-guarded
-special case).
+`file:` samples, harmless — `run_one_gauge` ignores them); formula-spec wiring
+(tsk21). Those are the open children of the epic. Already landed: the **MCP**
+metric-key reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a,
+tsk39), the **baked-write removal + 4-script unbake** (T-C3b, tsk40), the
+**effort-attribution read** (T-D), and the **full V38 retirement** — the
+capture is the run + detail envelopes (T-E1, tsk48), all legacy writes dropped
+(T-E2, tsk49), tables + `metric_store.rs` dropped in V49 (T-E3, tsk50).
 
 ---
 
