@@ -1800,29 +1800,15 @@ pub fn resolve_gauges(global: &[GaugeEntry], project: &[GaugeEntry]) -> Vec<Reso
 /// in filename order for deterministic precedence.
 pub fn load_global_metric_entries(global_dir: &Path) -> Vec<MetricEntry> {
     #[derive(Deserialize)]
-    struct GlobalMetricsDoc {
+    struct Doc {
         #[serde(default)]
         metrics: Option<Vec<MetricEntry>>,
     }
-
-    let mut out = Vec::new();
-    for path in global_yaml_files(global_dir, "metrics") {
-        let parsed = std::fs::read_to_string(&path)
+    load_global_entries(global_dir, "metrics", |raw| {
+        serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .and_then(|raw| serde_yaml::from_str::<GlobalMetricsDoc>(&raw).ok());
-        match parsed {
-            Some(doc) => match validate_metrics(doc.metrics) {
-                Ok(entries) => out.extend(entries),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global metrics file")
-                }
-            },
-            None => {
-                tracing::warn!(path = %path.display(), "skipping unreadable global metrics file")
-            }
-        }
-    }
-    out
+            .map(|d| validate_metrics(d.metrics).map_err(|e| e.to_string()))
+    })
 }
 
 /// Load gauge definitions from the user-global scope
@@ -1835,24 +1821,11 @@ pub fn load_global_gauge_entries(global_dir: &Path) -> Vec<GaugeEntry> {
         #[serde(default)]
         gauges: Option<Vec<GaugeEntry>>,
     }
-    let mut out = Vec::new();
-    for path in global_yaml_files(global_dir, "gauges") {
-        let parsed = std::fs::read_to_string(&path)
+    load_global_entries(global_dir, "gauges", |raw| {
+        serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
-        match parsed {
-            Some(doc) => match validate_gauges(doc.gauges) {
-                Ok(entries) => out.extend(entries),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global gauges file")
-                }
-            },
-            None => {
-                tracing::warn!(path = %path.display(), "skipping unreadable global gauges file")
-            }
-        }
-    }
-    out
+            .map(|d| validate_gauges(d.gauges).map_err(|e| e.to_string()))
+    })
 }
 
 /// List `*.yaml`/`*.yml` files under `<global_dir>/<subdir>`, sorted by filename
@@ -1874,6 +1847,35 @@ fn global_yaml_files(global_dir: &Path, subdir: &str) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Load one global catalog kind from `<global_dir>/<subdir>/*.yaml`, in
+/// filename order. `parse` turns a file's raw text into `Some(Ok(entries))`,
+/// `Some(Err(msg))` (well-formed YAML that fails validation → "malformed"), or
+/// `None` (unreadable/unparseable → "unreadable"). Best-effort: a bad file is
+/// logged and skipped. Shared by the four `load_global_*_entries` loaders — they
+/// differ only in the doc field + validator, which live in `parse`.
+fn load_global_entries<E>(
+    global_dir: &Path,
+    subdir: &str,
+    parse: impl Fn(&str) -> Option<Result<Vec<E>, String>>,
+) -> Vec<E> {
+    let mut out = Vec::new();
+    for path in global_yaml_files(global_dir, subdir) {
+        match std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| parse(&raw))
+        {
+            Some(Ok(entries)) => out.extend(entries),
+            Some(Err(e)) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping malformed global {} file", subdir)
+            }
+            None => {
+                tracing::warn!(path = %path.display(), "skipping unreadable global {} file", subdir)
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -2081,24 +2083,11 @@ pub fn load_global_measure_entries(global_dir: &Path) -> Vec<MeasureEntry> {
         #[serde(default)]
         measures: Option<Vec<MeasureEntry>>,
     }
-    let mut out = Vec::new();
-    for path in global_yaml_files(global_dir, "measures") {
-        let parsed = std::fs::read_to_string(&path)
+    load_global_entries(global_dir, "measures", |raw| {
+        serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
-        match parsed {
-            Some(doc) => match validate_measures(doc.measures) {
-                Ok(entries) => out.extend(entries),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global measures file")
-                }
-            },
-            None => {
-                tracing::warn!(path = %path.display(), "skipping unreadable global measures file")
-            }
-        }
-    }
-    out
+            .map(|d| validate_measures(d.measures).map_err(|e| e.to_string()))
+    })
 }
 
 /// Load dimension definitions from the user-global scope
@@ -2110,24 +2099,11 @@ pub fn load_global_dimension_entries(global_dir: &Path) -> Vec<DimensionEntry> {
         #[serde(default)]
         dimensions: Option<Vec<DimensionEntry>>,
     }
-    let mut out = Vec::new();
-    for path in global_yaml_files(global_dir, "dimensions") {
-        let parsed = std::fs::read_to_string(&path)
+    load_global_entries(global_dir, "dimensions", |raw| {
+        serde_yaml::from_str::<Doc>(raw)
             .ok()
-            .and_then(|raw| serde_yaml::from_str::<Doc>(&raw).ok());
-        match parsed {
-            Some(doc) => match validate_dimensions(doc.dimensions) {
-                Ok(entries) => out.extend(entries),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping malformed global dimensions file")
-                }
-            },
-            None => {
-                tracing::warn!(path = %path.display(), "skipping unreadable global dimensions file")
-            }
-        }
-    }
-    out
+            .map(|d| validate_dimensions(d.dimensions).map_err(|e| e.to_string()))
+    })
 }
 
 fn validate_agents(raw: Option<Vec<AgentKind>>) -> Result<Vec<AgentKind>, ConfigError> {

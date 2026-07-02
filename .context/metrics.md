@@ -377,7 +377,19 @@ dimensions:                        # custom conformed slice axes
   **global + project** scopes (project > global) into flat `Resolved*`.
 - **Global scope** = `<global_config_dir>/{measures,dimensions}/*.yaml`
   (`load_global_measure_entries`/`load_global_dimension_entries`); auto-active in
-  every project (unlike a global metric, which needs a project `use:`).
+  every project (unlike a global metric, which needs a project `use:`). The four
+  `load_global_*_entries` loaders share one generic `load_global_entries` helper
+  (tsk17 — they differ only in the doc field + validator).
+- **Read-path caching (tsk17):** `resolved_specs`/`resolved_gauges` run on
+  **every** snapshot event, so the four global YAML dirs are loaded once into a
+  `MetricsService.global_catalog` (`Arc<Mutex<Option<GlobalCatalog>>>`) and
+  served from cache (`with_global_catalog`); the cache is cleared on every in-app
+  `ConfigChanged` (an external edit to a global file needs any in-app config op
+  to refresh). Project config stays read fresh from the in-memory `RwLock`.
+  `with_global_dir` forks a fresh cache (dir changed). Two more per-read memos:
+  `effort_metric_deltas` loads each measure's history **once** across the
+  File-family specs sharing it (a per-call `fact_cache`), and `dim_value` parses
+  a fact's `dims_json` **once** per lookup (`parse_dims` + `dim_from_map`).
 - **Boot seeding:** `MetricsService::seed_catalog()` runs once at boot and on
   every `ConfigChanged` (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`

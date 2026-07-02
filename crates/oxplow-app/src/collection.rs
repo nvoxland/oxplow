@@ -2134,6 +2134,14 @@ impl CollectionService {
             .map(|t| t.stream_id.value());
 
         use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
+        // Per-call memo: several File-family specs share one `source_measure`
+        // (e.g. the count-over-threshold specs over `oxplow.complexity`), so
+        // load each measure's full history once instead of once per spec
+        // (tsk17). Rebuilt every call — no cross-call staleness.
+        let mut fact_cache: std::collections::HashMap<
+            i64,
+            std::sync::Arc<Vec<oxplow_db::FactRow>>,
+        > = std::collections::HashMap::new();
         let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
         for spec in &specs {
             // One classifier (in `attribution.rs`, beside the write-side
@@ -2141,7 +2149,7 @@ impl CollectionService {
             // is the only place each family's read computation is named (tsk274).
             let row = match classify_effort_attribution(spec) {
                 EffortAttributionFamily::File => {
-                    self.file_delta_from_facts(spec, &effort, &claimed, stream)
+                    self.file_delta_from_facts(spec, &effort, &claimed, stream, &mut fact_cache)
                         .await
                 }
                 // Coverage stays effort-relative + on the legacy detail payload
@@ -2185,6 +2193,7 @@ impl CollectionService {
         effort: &TaskEffort,
         claimed: &[String],
         stream: Option<i64>,
+        fact_cache: &mut std::collections::HashMap<i64, std::sync::Arc<Vec<oxplow_db::FactRow>>>,
     ) -> Option<oxplow_db::EffortMetricDelta> {
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
@@ -2203,7 +2212,17 @@ impl CollectionService {
                 _ => f.value,
             }
         };
-        let facts = self.facts.facts_for_measure(measure.id).await.ok()?;
+        // Load this measure's full history once per `effort_metric_deltas` call
+        // and reuse it across every spec sharing the measure (tsk17).
+        let facts = match fact_cache.get(&measure.id) {
+            Some(cached) => cached.clone(),
+            None => {
+                let loaded =
+                    std::sync::Arc::new(self.facts.facts_for_measure(measure.id).await.ok()?);
+                fact_cache.insert(measure.id, loaded.clone());
+                loaded
+            }
+        };
         let kept: Vec<&oxplow_db::FactRow> = facts
             .iter()
             .filter(|f| filter.matches(f))

@@ -252,24 +252,36 @@ fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
         // before the gauge scripts namespaced their dims carry bare
         // `language` — both request forms read both fact vintages.
         "oxplow.language" | "language" => {
-            dim_from_json(f, "oxplow.language").or_else(|| dim_from_json(f, "language"))
+            // Parse `dims_json` ONCE, then read whichever key vintage is present
+            // (conformed `oxplow.language` V43, or the pre-rename bare
+            // `language`) — was two parses of the same string (tsk17).
+            let dims = parse_dims(f)?;
+            dim_from_map(&dims, "oxplow.language").or_else(|| dim_from_map(&dims, "language"))
         }
         "subject" => f.subject_ref.clone(),
         "oxplow.model" | "model" => match &f.subject_ref {
             Some(s) if f.subject_kind.as_deref() == Some("model") => {
                 Some(s.strip_prefix("model:").unwrap_or(s).to_string())
             }
-            _ => dim_from_json(f, "oxplow.model"),
+            _ => parse_dims(f).and_then(|d| dim_from_map(&d, "oxplow.model")),
         },
-        key => dim_from_json(f, key),
+        key => parse_dims(f).and_then(|d| dim_from_map(&d, key)),
     }
 }
 
-/// A dimension value read from the fact's open `dims_json` map (the long tail not
-/// promoted to a column or a pseudo-dim).
-fn dim_from_json(f: &FactRow, key: &str) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(f.dims_json.as_deref()?).ok()?;
-    match parsed.get(key)? {
+/// Parse a fact's open `dims_json` into its object map — once per lookup.
+/// `None` when the fact carries no dims or the JSON isn't an object.
+fn parse_dims(f: &FactRow) -> Option<serde_json::Map<String, serde_json::Value>> {
+    match serde_json::from_str(f.dims_json.as_deref()?).ok()? {
+        serde_json::Value::Object(m) => Some(m),
+        _ => None,
+    }
+}
+
+/// A dimension value read from an already-parsed `dims_json` map (the long tail
+/// not promoted to a column or a pseudo-dim).
+fn dim_from_map(map: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+    match map.get(key)? {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Null => None,
         other => Some(other.to_string()),

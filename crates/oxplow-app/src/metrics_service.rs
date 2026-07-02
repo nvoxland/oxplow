@@ -42,6 +42,19 @@ const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
 /// Runs config-declared metrics into the substrate. Cheap to clone (a handle of
 /// leaf `Arc`s) — deliberately NOT holding `Arc<Services>`, to avoid a cycle.
+/// The four global-scope catalog blocks parsed from `<global_dir>/{metrics,
+/// gauges,measures,dimensions}/*.yaml`. Cached so the hot read paths
+/// (`resolved_specs`/`resolved_gauges`, run on every snapshot event) don't
+/// re-read + re-parse these files each time (tsk17). Project config stays read
+/// fresh from the in-memory `RwLock` — only the *disk* loads are cached.
+#[derive(Default)]
+struct GlobalCatalog {
+    metrics: Vec<MetricEntry>,
+    gauges: Vec<GaugeEntry>,
+    measures: Vec<MeasureEntry>,
+    dimensions: Vec<DimensionEntry>,
+}
+
 #[derive(Clone)]
 pub struct MetricsService {
     snapshot_store: Arc<SqliteSnapshotStore>,
@@ -59,6 +72,13 @@ pub struct MetricsService {
     /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
     /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
     fact_store: Option<Arc<SqliteFactStore>>,
+    /// Lazily-loaded cache of the global-scope catalog files (tsk17). Cleared on
+    /// every in-app `ConfigChanged` emit, so an in-app scaffold/toggle reflects
+    /// immediately; an *external* edit to a global YAML needs any in-app config
+    /// op to refresh (global files aren't watched — the same semantics as
+    /// before, minus the per-event disk read). `Arc` so clones of the service
+    /// share one cache (and its invalidations).
+    global_catalog: Arc<std::sync::Mutex<Option<GlobalCatalog>>>,
 }
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
@@ -127,12 +147,16 @@ impl MetricsService {
             events,
             global_dir: None,
             fact_store: None,
+            global_catalog: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
     /// Override the global config dir (test seam; default `global_config_dir()`).
     pub fn with_global_dir(mut self, dir: PathBuf) -> Self {
         self.global_dir = Some(dir);
+        // Changing the source dir must not serve the shared cache's entries from
+        // the old dir — give this handle a fresh cache (tsk17).
+        self.global_catalog = Arc::new(std::sync::Mutex::new(None));
         self
     }
 
@@ -147,6 +171,38 @@ impl MetricsService {
     /// `global_config_dir()`); `metrics/` hangs under it.
     fn effective_global_dir(&self) -> Option<PathBuf> {
         self.global_dir.clone().or_else(global_config_dir)
+    }
+
+    /// Run `f` against the cached global catalog, loading it from disk once on
+    /// first use (tsk17). The hot read paths call this instead of re-reading the
+    /// four global YAML dirs every time.
+    fn with_global_catalog<R>(&self, f: impl FnOnce(&GlobalCatalog) -> R) -> R {
+        let mut guard = self
+            .global_catalog
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        if guard.is_none() {
+            let dir = self.effective_global_dir();
+            *guard = Some(match dir {
+                Some(d) => GlobalCatalog {
+                    metrics: load_global_metric_entries(&d),
+                    gauges: load_global_gauge_entries(&d),
+                    measures: load_global_measure_entries(&d),
+                    dimensions: load_global_dimension_entries(&d),
+                },
+                None => GlobalCatalog::default(),
+            });
+        }
+        f(guard.as_ref().expect("populated above"))
+    }
+
+    /// Drop the cached global catalog so the next read reloads it. Called on
+    /// every in-app config mutation (beside each `ConfigChanged` emit).
+    fn invalidate_global_catalog(&self) {
+        *self
+            .global_catalog
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = None;
     }
 
     /// Base dir a gauge's `compute.entryFile` / `report` resolves against:
@@ -172,10 +228,7 @@ impl MetricsService {
             .read()
             .map(|c| c.metrics.clone())
             .unwrap_or_default();
-        let global = self
-            .effective_global_dir()
-            .map(|d| load_global_metric_entries(&d))
-            .unwrap_or_default();
+        let global = self.with_global_catalog(|g| g.metrics.clone());
         let builtin = builtin_spec_entries();
         resolve_metrics(&builtin, &global, &project)
     }
@@ -190,10 +243,7 @@ impl MetricsService {
             .read()
             .map(|c| c.gauges.clone())
             .unwrap_or_default();
-        let global = self
-            .effective_global_dir()
-            .map(|d| load_global_gauge_entries(&d))
-            .unwrap_or_default();
+        let global = self.with_global_catalog(|g| g.gauges.clone());
         let mut out = resolve_gauges(&global, &project);
         // Built-in gauges run only when their metric is enabled (`metrics: use:`).
         let enabled: std::collections::HashSet<String> = self
@@ -235,15 +285,8 @@ impl MetricsService {
             .read()
             .map(|c| (c.measures.clone(), c.dimensions.clone()))
             .unwrap_or_default();
-        let global_dir = self.effective_global_dir();
-        let global_measures = global_dir
-            .as_deref()
-            .map(load_global_measure_entries)
-            .unwrap_or_default();
-        let global_dims = global_dir
-            .as_deref()
-            .map(load_global_dimension_entries)
-            .unwrap_or_default();
+        let (global_measures, global_dims) =
+            self.with_global_catalog(|g| (g.measures.clone(), g.dimensions.clone()));
 
         let mut m = 0;
         for rm in resolve_measures(&global_measures, &project_measures) {
@@ -448,6 +491,7 @@ impl MetricsService {
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
         }
+        self.invalidate_global_catalog();
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_catalog().await;
         Ok(())
@@ -483,6 +527,7 @@ impl MetricsService {
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
         }
+        self.invalidate_global_catalog();
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_catalog().await;
         Ok(())
@@ -651,6 +696,7 @@ impl MetricsService {
             script_rel
         };
 
+        self.invalidate_global_catalog();
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_catalog().await;
         Ok(returned_path)
@@ -717,6 +763,7 @@ impl MetricsService {
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
         }
+        self.invalidate_global_catalog();
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_catalog().await;
         Ok(key.to_string())
@@ -778,6 +825,7 @@ impl MetricsService {
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
         }
+        self.invalidate_global_catalog();
         self.events.emit(OxplowEvent::ConfigChanged);
         self.seed_catalog().await;
         Ok(key.to_string())
@@ -2695,6 +2743,36 @@ def transform(input):
             .scaffold_metric("oxplow.nope", None, None, None, None)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn global_catalog_caches_until_invalidated() {
+        // tsk17: the global catalog loads from disk once, then serves the cache;
+        // a file added after the first read isn't seen until invalidation.
+        let (svc, _dir) = fixture().await;
+        let gtmp = tempfile::tempdir().unwrap();
+        let m = svc
+            .metrics
+            .clone()
+            .with_global_dir(gtmp.path().to_path_buf());
+
+        // First read: empty (no global measures yet) — and caches that.
+        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 0);
+
+        // Write a global measure file directly (an "external" edit).
+        std::fs::create_dir_all(gtmp.path().join("measures")).unwrap();
+        std::fs::write(
+            gtmp.path().join("measures").join("acme.yaml"),
+            "measures:\n  - key: acme.thing\n",
+        )
+        .unwrap();
+
+        // Still 0 — served from cache, the new file isn't re-read.
+        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 0, "cached");
+
+        // After invalidation the reload picks it up.
+        m.invalidate_global_catalog();
+        assert_eq!(m.with_global_catalog(|g| g.measures.len()), 1, "reloaded");
     }
 
     #[tokio::test]
