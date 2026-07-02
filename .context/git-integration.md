@@ -349,6 +349,13 @@ All git invocations go through `crates/oxplow-git/src/lib.rs`. Notable:
   `listFileCommits`, `listAllRefs`,
   `readFileAtRef`, `listGitStatuses` — straight `execFileSync` wrappers
   exposed via IPC for UI consumption.
+- `getCommitDetail(repo, sha)` (`src/log.rs`) resolves **both full and
+  abbreviated** shas — Activity-feed commit links carry 7-char prefixes.
+  Gotcha: `git2::Oid::from_str` zero-pads any ≤40-char hex string into a
+  syntactically-valid-but-**nonexistent** OID and returns `Ok`, so it can
+  never resolve an abbreviation. Trust it only for `sha.len() == 40`; route
+  everything shorter through `repo.revparse_single`, which expands against
+  the object DB. Same rule applies anywhere else a sha is turned into an OID.
 - `gitPush` / `gitPull` / `gitMerge` / `gitRebase` ship sync wrappers
   plus async siblings `gitPushAsync` / `gitPullAsync` / `gitMergeAsync` /
   `gitRebaseAsync` (and a `gitFetchAsync` helper) backed by

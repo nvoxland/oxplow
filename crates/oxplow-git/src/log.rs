@@ -173,10 +173,15 @@ pub struct CommitDetail {
 
 pub fn get_commit_detail(repo_path: &Path, sha: &str) -> Option<CommitDetail> {
     let repo = git2::Repository::open(repo_path).ok()?;
-    let oid = git2::Oid::from_str(sha).ok().or_else(|| {
-        // Allow short shas too.
-        repo.revparse_single(sha).ok().map(|obj| obj.id())
-    })?;
+    // `Oid::from_str` zero-pads anything shorter than 40 hex chars into a
+    // syntactically-valid-but-nonexistent OID, so it can't resolve abbreviated
+    // shas — only trust it for full-length hashes and let `revparse_single`
+    // (which expands against the object DB) handle everything else, including
+    // the abbreviated shas that Activity-feed commit links carry.
+    let oid = git2::Oid::from_str(sha)
+        .ok()
+        .filter(|_| sha.len() == 40)
+        .or_else(|| repo.revparse_single(sha).ok().map(|obj| obj.id()))?;
     let commit = repo.find_commit(oid).ok()?;
     let author = commit.author();
     let parents: Vec<String> = commit.parent_ids().map(|p| p.to_string()).collect();
@@ -338,6 +343,21 @@ mod tests {
     fn commit_detail_unknown_sha_returns_none() {
         let dir = make_repo_with_commits(1);
         assert!(get_commit_detail(dir.path(), "deadbeef").is_none());
+    }
+
+    #[test]
+    fn commit_detail_resolves_abbreviated_sha() {
+        // Activity-feed commit links carry abbreviated shas (e.g. the 7-char
+        // prefixes GitHub-style UIs show). A valid short prefix of a real
+        // commit must resolve — `Oid::from_str` alone zero-pads it into a
+        // nonexistent OID, so this exercises the `revparse_single` fallback.
+        let dir = make_repo_with_commits(2);
+        let log = get_git_log(dir.path(), GitLogOptions::default());
+        let full = &log.commits[0].sha;
+        let short = &full[..7];
+        let detail = get_commit_detail(dir.path(), short).expect("short sha resolves");
+        assert_eq!(&detail.sha, full);
+        assert_eq!(detail.subject, "commit 1");
     }
 
     #[test]
