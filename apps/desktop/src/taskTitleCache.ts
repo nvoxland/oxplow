@@ -41,20 +41,34 @@ function fetchTitle(id: string): Promise<void> {
   return p;
 }
 
+/** Existence state of a ref target. `loading` = lookup in flight;
+ *  `found` / `missing` once it resolves. The renderer shows `missing`
+ *  as a broken, non-clickable link. */
+export type RefStatus = "loading" | "found" | "missing";
+
+/** Snapshot the current `{title, status}` for `id` from the cache. A
+ *  cached value of `null` (a resolved miss) is `missing`; a cache without
+ *  the key yet is still `loading`. */
+function taskRefSnapshot(id: string | null | undefined): { title: string | null; status: RefStatus } {
+  if (!id || !titles.has(id)) return { title: null, status: "loading" };
+  const title = titles.get(id) ?? null;
+  return { title, status: title === null ? "missing" : "found" };
+}
+
 /**
- * Resolve a task id to its title. Returns `null` while the lookup is in
- * flight or if the id isn't known (deleted task, stale wikilink) — callers
- * fall back to the raw id in that case.
+ * Resolve a task id to its title AND existence status. `status` is
+ * `loading` until the per-id lookup resolves, then `found` / `missing`
+ * (deleted task, stale wikilink). Backs the broken-link rendering.
  */
-export function useTaskTitle(id: string | null | undefined): string | null {
-  const [title, setTitle] = useState<string | null>(() => (id ? titles.get(id) ?? null : null));
+export function useTaskRef(id: string | null | undefined): { title: string | null; status: RefStatus } {
+  const [state, setState] = useState(() => taskRefSnapshot(id));
 
   useEffect(() => {
     if (!id) {
-      setTitle(null);
+      setState({ title: null, status: "loading" });
       return;
     }
-    const update = () => setTitle(titles.get(id) ?? null);
+    const update = () => setState(taskRefSnapshot(id));
     listeners.add(update);
     if (titles.has(id)) update();
     else void fetchTitle(id);
@@ -63,5 +77,14 @@ export function useTaskTitle(id: string | null | undefined): string | null {
     };
   }, [id]);
 
-  return title;
+  return state;
+}
+
+/**
+ * Resolve a task id to its title. Returns `null` while the lookup is in
+ * flight or if the id isn't known (deleted task, stale wikilink) — callers
+ * fall back to the raw id in that case.
+ */
+export function useTaskTitle(id: string | null | undefined): string | null {
+  return useTaskRef(id).title;
 }

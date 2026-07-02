@@ -330,3 +330,38 @@ test("postprocessWikilinks: task link with distinct label preserves the label", 
   expect(postprocessWikilinks("see [fix the parser](task:tsk42) here"))
     .toBe("see [[tsk42|fix the parser]] here");
 });
+
+// Broken links: a `[[…]]` target matching no known ref shape (e.g. the
+// GitHub `[[#13]]` form) becomes an `oxplow-invalid:` link that the
+// renderer shows as broken and non-clickable. Valid slugs — including
+// the `.md` form — stay live.
+
+test("preprocessWikilinks: GitHub-style [[#13]] becomes an oxplow-invalid link", () => {
+  expect(preprocessWikilinks("Follow-up in [[#13]]."))
+    .toBe("Follow-up in [#13](oxplow-invalid:%2313).");
+});
+
+test("preprocessWikilinks: valid slugs (incl .md) stay live wiki links", () => {
+  expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](architecture)");
+  expect(preprocessWikilinks("[[some_note-2]]")).toBe("[some_note-2](some_note-2)");
+  expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](some-note.md)");
+});
+
+test("parseMarkdownLink: oxplow-invalid decodes the target into a broken link", () => {
+  const parsed = parseMarkdownLink("oxplow-invalid:%2313");
+  expect(parsed.kind).toBe("broken");
+  if (parsed.kind === "broken") {
+    expect(parsed.reason).toContain("#13");
+    expect(parsed.reason).toContain("not a recognized reference");
+  }
+});
+
+test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]", () => {
+  expect(postprocessWikilinks("Follow-up in [#13](oxplow-invalid:%2313).")).toBe(
+    "Follow-up in [[#13]].",
+  );
+  // Full identity through both directions.
+  expect(postprocessWikilinks(preprocessWikilinks("see [[#13]] please"))).toBe(
+    "see [[#13]] please",
+  );
+});

@@ -11,7 +11,7 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
  * handler see `kind: "empty"` and no-op. Pass our schemes through
  * untouched and defer everything else to the default sanitizer.
  */
-const APP_SCHEMES = /^(file|dir|gitcommit|task):/i;
+const APP_SCHEMES = /^(file|dir|gitcommit|task|oxplow-invalid):/i;
 function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
   return defaultUrlTransform(value);
@@ -22,8 +22,8 @@ import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef } from "../../tabs/pageRefs.js";
 import { DISK, type FileVersion } from "../../file-version.js";
-import { useWikiTitle } from "../../wikiTitleCache.js";
-import { useTaskTitle } from "../../taskTitleCache.js";
+import { useWikiRef } from "../../wikiTitleCache.js";
+import { useTaskRef } from "../../taskTitleCache.js";
 
 // Mermaid is loaded lazily so this module is safe to import in
 // non-DOM test environments (parseMarkdownLink is the main reason
@@ -185,7 +185,10 @@ export type ParsedLink =
     }
   | { kind: "directory"; path: string }
   | { kind: "git-commit"; sha: string }
-  | { kind: "task"; id: string };
+  | { kind: "task"; id: string }
+  /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
+   *  `[[#13]]` form). Rendered as a broken, non-clickable link. */
+  | { kind: "broken"; reason: string };
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
@@ -289,6 +292,13 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     if (!id) return { kind: "empty" };
     return { kind: "task", id };
   }
+  if (rawHref.startsWith("oxplow-invalid:")) {
+    const target = decodeURIComponent(rawHref.slice("oxplow-invalid:".length));
+    return {
+      kind: "broken",
+      reason: `Broken link: “${target}” is not a recognized reference (use [[tsk42]] for a task, [[some-slug]] for a wiki page)`,
+    };
+  }
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
@@ -344,7 +354,7 @@ function collapseLinksOutsideInlineCode(text: string): string {
     // Then collapse `[label](url)` for our internal schemes — but
     // NOT `![alt](url)` (images).
     return unmangled.replace(
-      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit|task):[^)\s]+)\)/g,
+      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit|task|oxplow-invalid):[^)\s]+)\)/g,
       (_match, lead: string, label: string, url: string) => {
         const collapsed = collapseInternalLink(label, url);
         return collapsed == null ? _match : `${lead}${collapsed}`;
@@ -381,6 +391,14 @@ function collapseInternalLink(label: string, url: string): string | null {
     // collapses to the bare form.
     return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
   }
+  if (url.startsWith("oxplow-invalid:")) {
+    // Preserve the author's original (invalid) target verbatim so the
+    // round-trip through the editor doesn't rewrite or lose it — the
+    // author still needs to see and fix it.
+    const target = decodeURIComponent(url.slice("oxplow-invalid:".length));
+    if (!target) return null;
+    return label === target ? `[[${target}]]` : `[[${target}|${label}]]`;
+  }
   return null;
 }
 
@@ -389,6 +407,23 @@ function collapseInternalLink(label: string, url: string): string | null {
  * than a wiki note slug? File paths contain a slash or end in a recognizable
  * extension; bare slugs like `architecture` are routed to wiki navigation.
  */
+/**
+ * Heuristic: is the target a valid wiki-slug shape? Mirrors the backend
+ * `crates/oxplow-domain/src/refs.rs::looks_like_slug` (kebab/snake, no
+ * slash/dot/space, not a bare sha) so the renderer and the MCP link
+ * checker agree on what's a real ref vs. a broken one — with the one
+ * concession that a trailing `.md` is accepted (the renderer strips it),
+ * keeping `[[some-note.md]]` a live link. `#13`, `@foo`, etc. fail here
+ * and render broken.
+ */
+function looksLikeSlug(target: string): boolean {
+  const bare = target.endsWith(".md") ? target.slice(0, -3) : target;
+  if (!bare || bare.length > 80) return false;
+  if (bare.includes("/") || bare.includes(".") || bare.includes(" ")) return false;
+  if (/^[0-9a-f]{7,40}$/i.test(bare)) return false;
+  return /^[A-Za-z0-9_-]+$/.test(bare);
+}
+
 function looksLikeFilePath(target: string): boolean {
   // Strip a trailing `@<version>` segment before the heuristic
   // checks; the version isn't part of the path's slash/extension
@@ -455,7 +490,7 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
       }
       // Task ref: `[[tsk<digits>]]` (the whole token is the task id). The
       // rendered link text defaults to the token; the task title is swapped
-      // in at render time (WikiLinkSpan + useTaskTitle). Matches the backend
+      // in at render time (WikiLinkSpan + useTaskRef). Matches the backend
       // ref extractor (refs.rs), which recognizes the same `tsk<digits>`
       // form for backlinks.
       if (/^tsk\d+$/i.test(target)) {
@@ -467,15 +502,21 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
         // back into a FileVersion at click time.
         return `[${display}](file:${target})`;
       }
-      // Treat as wiki note slug.
-      return `[${display}](${target})`;
+      // Slug-shaped → wiki note. Anything else matches no known ref
+      // shape (e.g. the GitHub `[[#13]]` form) → a broken link the
+      // renderer shows as non-clickable. Encode the target so an odd
+      // interior can't break the markdown link.
+      if (looksLikeSlug(target)) {
+        return `[${display}](${target})`;
+      }
+      return `[${display}](oxplow-invalid:${encodeURIComponent(target)})`;
     });
   }).join("");
 }
 
 /**
  * Inline anchor wrapper that owns the wiki-title swap. Lives as its
- * own component so `useWikiTitle` (a hook) can be called per-link
+ * own component so `useWikiRef` (a hook) can be called per-link
  * without violating rules-of-hooks in the parent's render-prop.
  */
 function WikiLinkSpan({
@@ -493,8 +534,8 @@ function WikiLinkSpan({
   internalSlug: string | null;
   taskId: string | null;
 }) {
-  const title = useWikiTitle(internalSlug);
-  const taskTitle = useTaskTitle(taskId);
+  const wiki = useWikiRef(internalSlug);
+  const task = useTaskRef(taskId);
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
   // The link text is swapped for the resolved title when the link was
@@ -504,11 +545,24 @@ function WikiLinkSpan({
   // to the original children (the slug / id) verbatim.
   const childrenText = flattenChildrenText(children);
   const overrideText =
-    internalSlug && title && childrenText === internalSlug
-      ? title
-      : taskId && taskTitle && childrenText === taskId
-        ? taskTitle
+    internalSlug && wiki.title && childrenText === internalSlug
+      ? wiki.title
+      : taskId && task.title && childrenText === taskId
+        ? task.title
         : null;
+  // A recognized ref whose object doesn't exist (deleted page / task,
+  // stale wikilink) renders broken and non-clickable. `loading` and
+  // `found` both stay a live link so a not-yet-resolved ref isn't
+  // briefly flagged.
+  const brokenReason =
+    internalSlug && wiki.status === "missing"
+      ? `Broken link: wiki page “${internalSlug}” does not exist`
+      : taskId && task.status === "missing"
+        ? `Broken link: task ${taskId} does not exist`
+        : null;
+  if (brokenReason) {
+    return <BrokenLink reason={brokenReason}>{children}</BrokenLink>;
+  }
   return (
     <span
       style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
@@ -526,6 +580,20 @@ function WikiLinkSpan({
         {overrideText ?? children}
       </a>
       {cm.menu}
+    </span>
+  );
+}
+
+/**
+ * A broken wikilink — an unrecognized target (`[[#13]]`) or a recognized
+ * ref whose object doesn't exist. Rendered as inert text (no anchor, no
+ * click handler) with a tooltip explaining why, so a reader can't click
+ * through to nowhere and the author sees it needs fixing.
+ */
+function BrokenLink({ reason, children }: { reason: string; children: React.ReactNode }) {
+  return (
+    <span className="oxplow-broken-link" data-testid="broken-wikilink" title={reason}>
+      {children}
     </span>
   );
 }
@@ -615,6 +683,9 @@ export function MarkdownView({
     if (parsed.kind === "anchor") return;
     event.preventDefault();
     if (parsed.kind === "empty") return;
+    // Broken links render as inert text and never wire this handler;
+    // guard defensively (and to narrow the type below).
+    if (parsed.kind === "broken") return;
     if (parsed.kind === "external") {
       if (onOpenExternalUrl) onOpenExternalUrl(href);
       else window.open(href, "_blank", "noopener,noreferrer");
@@ -851,6 +922,11 @@ export function MarkdownView({
           a: ({ node, ...props }) => {
             const href = (props.href as string | undefined) ?? "";
             const parsed = parseMarkdownLink(href);
+            // Unrecognized-syntax targets (`[[#13]]`) render broken and
+            // non-clickable, with the reason in a tooltip.
+            if (parsed.kind === "broken") {
+              return <BrokenLink reason={parsed.reason}>{props.children}</BrokenLink>;
+            }
             // Anchor and empty links don't get a kebab — there's no useful
             // action besides "jump in page" for those.
             if (parsed.kind === "anchor" || parsed.kind === "empty") {

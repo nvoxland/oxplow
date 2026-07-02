@@ -65,6 +65,97 @@ pub struct ExtractedRefs {
     pub commits: Vec<String>,
 }
 
+/// A single classified reference — the recognized kind + payload of one
+/// `[[…]]` wikilink interior. The typed counterpart of the buckets in
+/// [`ExtractedRefs`]; used by the link checker to existence-check each
+/// recognized target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reference {
+    File(FileRefDetail),
+    Dir(String),
+    Wiki(String),
+    Task(i64),
+    Finding(String),
+    Commit(String),
+}
+
+/// One `[[…]]` wikilink found in a body: its raw interior (the target,
+/// before any `|label`) and the reference it resolves to — or `None`
+/// when the interior matches no known ref shape (e.g. `#13`, the GitHub
+/// form). The link checker turns `reference: None` into an
+/// "unrecognized reference" warning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedWikilink {
+    pub raw: String,
+    pub reference: Option<Reference>,
+}
+
+/// Classify a single `[[…]]` interior (already `|`-split and trimmed)
+/// into its recognized [`Reference`], or `None` if it matches no known
+/// shape. The single source of truth for what counts as a valid ref —
+/// shared by [`extract`] and [`classify_wikilinks`] so the graph writer
+/// and the link checker never drift.
+fn classify_interior(interior: &str) -> Option<Reference> {
+    if interior.is_empty() {
+        return None;
+    }
+    // dir:<path>
+    if let Some(rest) = strip_prefix_ci(interior, "dir:") {
+        return clean_dir(rest).map(Reference::Dir);
+    }
+    // git:<sha>
+    if let Some(rest) = strip_prefix_ci(interior, "git:") {
+        return clean_commit(rest).map(Reference::Commit);
+    }
+    // finding:<id>
+    if let Some(rest) = strip_prefix_ci(interior, "finding:") {
+        return clean_finding(rest).map(Reference::Finding);
+    }
+    // tsk<digits> — falls through to slug/file when the tail isn't
+    // all-digits (e.g. `[[tskfoo]]` is a wiki slug, matching `extract`).
+    if let Some(rest) = strip_prefix_ci(interior, "tsk") {
+        if let Some(id) = parse_task_id(rest) {
+            return Some(Reference::Task(id));
+        }
+    }
+    // path/file.ext[@version][:line]
+    if let Some(detail) = parse_file_ref(interior) {
+        return Some(Reference::File(detail));
+    }
+    // bare commit sha or wiki slug
+    let bare = interior.split(':').next().unwrap_or(interior);
+    if !bare.is_empty() && looks_like_commit_sha(bare) {
+        return Some(Reference::Commit(bare.to_string()));
+    }
+    if looks_like_slug(bare) {
+        return Some(Reference::Wiki(bare.to_string()));
+    }
+    None
+}
+
+/// Classify every `[[…]]` wikilink in `body`. Code spans / fenced
+/// blocks are masked first (via [`mask_code_regions`]) so illustrative
+/// links inside them are skipped, mirroring [`extract`]. Interiors that
+/// match no known ref shape come back with `reference: None`.
+pub fn classify_wikilinks(body: &str) -> Vec<ClassifiedWikilink> {
+    if body.is_empty() {
+        return Vec::new();
+    }
+    let masked = mask_code_regions(body);
+    let mut out = Vec::new();
+    for cap in find_wikilinks(masked.as_str()) {
+        let interior = cap.split('|').next().unwrap_or(cap).trim();
+        if interior.is_empty() {
+            continue;
+        }
+        out.push(ClassifiedWikilink {
+            raw: interior.to_string(),
+            reference: classify_interior(interior),
+        });
+    }
+    out
+}
+
 /// Parse `body` into [`ExtractedRefs`]. Pure; never errors.
 pub fn extract(body: &str) -> ExtractedRefs {
     if body.is_empty() {
@@ -85,59 +176,35 @@ pub fn extract(body: &str) -> ExtractedRefs {
 
     for cap in find_wikilinks(body) {
         let interior = cap.split('|').next().unwrap_or(cap).trim();
-        if interior.is_empty() {
-            continue;
-        }
-        // dir:<path>
-        if let Some(rest) = strip_prefix_ci(interior, "dir:") {
-            if let Some(d) = clean_dir(rest) {
+        match classify_interior(interior) {
+            Some(Reference::Dir(d)) => {
                 dirs.insert(d);
             }
-            continue;
-        }
-        // git:<sha>
-        if let Some(rest) = strip_prefix_ci(interior, "git:") {
-            if let Some(sha) = clean_commit(rest) {
+            Some(Reference::Commit(sha)) => {
                 commits.insert(sha);
             }
-            continue;
-        }
-        // finding:<id>
-        if let Some(rest) = strip_prefix_ci(interior, "finding:") {
-            if let Some(id) = clean_finding(rest) {
+            Some(Reference::Finding(id)) => {
                 findings.insert(id);
             }
-            continue;
-        }
-        // tsk<digits> — bare self-typed task ref (e.g. `[[tsk42]]`).
-        if let Some(rest) = strip_prefix_ci(interior, "tsk") {
-            if let Some(id) = parse_task_id(rest) {
+            Some(Reference::Task(id)) => {
                 tasks.insert(id);
-                continue;
             }
-        }
-        // path/file.ext[@version][:line]
-        if let Some(detail) = parse_file_ref(interior) {
-            if files.insert(detail.path.clone()) {
-                let key = (
-                    detail.path.clone(),
-                    version_key(&detail.version),
-                    detail.line,
-                );
-                if files_seen.insert(key) {
-                    files_detail.push(detail);
+            Some(Reference::File(detail)) => {
+                if files.insert(detail.path.clone()) {
+                    let key = (
+                        detail.path.clone(),
+                        version_key(&detail.version),
+                        detail.line,
+                    );
+                    if files_seen.insert(key) {
+                        files_detail.push(detail);
+                    }
                 }
             }
-            continue;
-        }
-        // bare wikilink slug or commit sha
-        let bare = interior.split(':').next().unwrap_or(interior);
-        if !bare.is_empty() && looks_like_commit_sha(bare) {
-            commits.insert(bare.to_string());
-            continue;
-        }
-        if looks_like_slug(bare) {
-            wikis.insert(bare.to_string());
+            Some(Reference::Wiki(slug)) => {
+                wikis.insert(slug);
+            }
+            None => {}
         }
     }
 
@@ -696,6 +763,40 @@ mod tests {
         let r = extract("[[tsk7]]");
         assert!(r.wikis.is_empty());
         assert_eq!(r.tasks, vec![7]);
+    }
+
+    #[test]
+    fn classify_recognizes_each_kind() {
+        let links = classify_wikilinks(
+            "[[tsk7]] [[architecture]] [[src/lib.rs]] [[dir:src]] \
+             [[git:abc1234]] [[finding:fnd-1]]",
+        );
+        let refs: Vec<Option<Reference>> = links.into_iter().map(|l| l.reference).collect();
+        assert_eq!(refs[0], Some(Reference::Task(7)));
+        assert_eq!(refs[1], Some(Reference::Wiki("architecture".into())));
+        assert!(matches!(refs[2], Some(Reference::File(_))));
+        assert_eq!(refs[3], Some(Reference::Dir("src".into())));
+        assert_eq!(refs[4], Some(Reference::Commit("abc1234".into())));
+        assert_eq!(refs[5], Some(Reference::Finding("fnd-1".into())));
+    }
+
+    #[test]
+    fn classify_flags_github_style_ref_as_unrecognized() {
+        // `#13` is the exact bug: a `[[…]]` interior that matches no known
+        // ref shape → `reference: None`, so the link checker flags it.
+        let links = classify_wikilinks("Follow-ups: [[#13]] and [[#14]].");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].raw, "#13");
+        assert!(links[0].reference.is_none());
+        assert!(links[1].reference.is_none());
+    }
+
+    #[test]
+    fn classify_strips_label_and_ignores_code() {
+        let links = classify_wikilinks("[[tsk7|the task]] but not `[[tsk8]]`.");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].raw, "tsk7");
+        assert_eq!(links[0].reference, Some(Reference::Task(7)));
     }
 
     #[test]

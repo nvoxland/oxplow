@@ -52,24 +52,35 @@ function ensureSubscribed() {
   });
 }
 
+/** Existence state of a ref target. `loading` = the page list hasn't
+ *  loaded yet; `found` / `missing` once it has. The renderer shows
+ *  `missing` as a broken, non-clickable link. */
+export type RefStatus = "loading" | "found" | "missing";
+
+/** Snapshot `{title, status}` for `slug`. Because the cache lists every
+ *  page up front, once `loaded` a slug absent from the map is a real
+ *  `missing`; before that it's still `loading`. */
+function wikiRefSnapshot(slug: string | null | undefined): { title: string | null; status: RefStatus } {
+  if (!slug) return { title: null, status: "loading" };
+  if (titles.has(slug)) return { title: titles.get(slug) ?? null, status: "found" };
+  return { title: null, status: loaded ? "missing" : "loading" };
+}
+
 /**
- * Resolve a wiki slug to its page title. Returns `null` while the
- * cache is still loading or if the slug isn't known (deleted page,
- * stale wikilink, etc.) — callers should fall back to the slug in
- * that case.
+ * Resolve a wiki slug to its page title AND existence status. `status`
+ * is `loading` until the page list loads, then `found` / `missing`
+ * (deleted page, stale wikilink). Backs the broken-link rendering.
  */
-export function useWikiTitle(slug: string | null | undefined): string | null {
-  const [title, setTitle] = useState<string | null>(() =>
-    slug ? titles.get(slug) ?? null : null,
-  );
+export function useWikiRef(slug: string | null | undefined): { title: string | null; status: RefStatus } {
+  const [state, setState] = useState(() => wikiRefSnapshot(slug));
 
   useEffect(() => {
     if (!slug) {
-      setTitle(null);
+      setState({ title: null, status: "loading" });
       return;
     }
     ensureSubscribed();
-    const update = () => setTitle(titles.get(slug) ?? null);
+    const update = () => setState(wikiRefSnapshot(slug));
     listeners.add(update);
     if (!loaded && !inFlight) {
       void refresh();
@@ -81,5 +92,15 @@ export function useWikiTitle(slug: string | null | undefined): string | null {
     };
   }, [slug]);
 
-  return title;
+  return state;
+}
+
+/**
+ * Resolve a wiki slug to its page title. Returns `null` while the
+ * cache is still loading or if the slug isn't known (deleted page,
+ * stale wikilink, etc.) — callers should fall back to the slug in
+ * that case.
+ */
+export function useWikiTitle(slug: string | null | undefined): string | null {
+  return useWikiRef(slug).title;
 }

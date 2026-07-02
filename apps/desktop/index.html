@@ -239,6 +239,15 @@
       .oxplow-md-link-kebab { opacity: 0; transition: opacity 80ms ease; }
       .oxplow-md-link:hover .oxplow-md-link-kebab,
       .oxplow-md-link-kebab:focus-within { opacity: 1; }
+      /* Broken wikilink: unrecognized target or a ref whose object is
+         gone. Inert (no anchor) — muted text with a dotted critical
+         underline signals "this points nowhere; fix it". */
+      .oxplow-broken-link {
+        color: var(--text-muted);
+        text-decoration: underline dotted var(--severity-critical);
+        text-underline-offset: 2px;
+        cursor: default;
+      }
       /* Prose surface — wiki bodies, task descriptions, effort summaries,
          anywhere MarkdownView renders. Serif body, capped width, comfortable
          rhythm. Sans-serif headings for visual contrast (Wikipedia / Metabase

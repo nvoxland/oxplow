@@ -961,21 +961,40 @@ title → body → file backlinks before creating), slug/body
 conventions, and the "fold in `oxplow__get_thread_notes` from any
 query subagents this turn dispatched" guidance.
 
-**Wikilinks for file + commit references.** The skill instructs the
-agent to write repo file references as `[[path/to/file.ts]]` wikilinks,
-with optional `:line` suffix and `|display` override. Git commits are
-written as `[[abc1234]]` (bare 7-40 char hex) or `[[git:abc1234]]` —
-both resolve to the GitCommitPage. Backticks remain for code-ish
+**Wikilinks for file + commit + task references.** The skill instructs
+the agent to write repo file references as `[[path/to/file.ts]]`
+wikilinks, with optional `:line` suffix and `|display` override. Git
+commits are written as `[[abc1234]]` (bare 7-40 char hex) or
+`[[git:abc1234]]` — both resolve to the GitCommitPage. **Tasks are
+`[[tsk42]]`** (always the `tsk` prefix — the GitHub `[[#42]]`/`#42`
+form is *not* a ref: the extractor drops it and the renderer shows it
+as a broken, non-clickable link). Backticks remain for code-ish
 identifiers. The wiki renderer
-(`apps/desktop/src/components/Notes/MarkdownView.tsx`, `preprocessWikilinks`)
+(`apps/desktop/src/components/Wiki/MarkdownView.tsx`, `preprocessWikilinks`)
 rewrites `[[ ]]` into clickable links — SHA-shaped targets become
 `gitcommit:` links that dispatch through `onOpenCommit`; file-shaped
 targets become `file:` links that open in an editor tab via
-`onOpenFile`; bare slugs route to wiki navigation. The reference
+`onOpenFile`; `tsk<digits>` targets become `task:` links; bare slugs
+route to wiki navigation; and any interior that matches no known ref
+shape — plus any recognized ref whose *object doesn't exist* (deleted
+wiki page / task) — renders as a broken, non-clickable link
+(`BrokenLink`, `data-testid="broken-wikilink"`). Existence for wiki/task
+is read from the client-side title caches (`useWikiRef`/`useTaskRef`,
+which now surface a `missing` status). The reference
 parser (in `crates/oxplow-db/src/wiki_page_store.rs`) already picks
 paths out of `[[ ]]` because the bracket characters fall outside its
 lookbehind,
 so backlinks/freshness work without parser changes. The
+
+**Link checker (MCP write-tool feedback).** The MCP write tools
+`create_task`, `update_task`, `complete_task`, `add_thread_note`, and
+`record_wiki_page_update` run `oxplow_app::link_check::check_links` over
+the body/summary they just persisted and return a `link_warnings` array
+(omitted when empty) naming each invalid `[[…]]` — unrecognized syntax
+or a dangling target — so the authoring agent self-corrects in the same
+turn. The shared classifier is `oxplow_domain::refs::classify_wikilinks`
+(the single source of truth for "is this interior a real ref"), and
+existence probes reuse the `ref_resolver` store/git/fs surfaces. The
 `<wiki-capture-hint>` block injected on exploration UserPromptSubmits
 (see "Wiki-capture is a UserPromptSubmit hint" above) auto-loads the
 skill; the `/note` slash command at `.claude/commands/note.md`

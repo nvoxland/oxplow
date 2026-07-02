@@ -28,6 +28,7 @@ pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;
 pub mod indexer;
+pub mod link_check;
 pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod metric_engine;

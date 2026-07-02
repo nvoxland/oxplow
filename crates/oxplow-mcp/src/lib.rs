@@ -264,6 +264,8 @@ pub struct GetOpenEffortParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddThreadNoteParams {
     pub thread_id: String,
+    /// Markdown note body. Wiki-format it (`[[…]]` wikilinks) —
+    /// reference a task as `[[tsk42]]` (never the GitHub `#42` form).
     pub body: String,
     pub author: String,
 }
@@ -349,7 +351,8 @@ pub struct CreateTaskMcpParams {
     /// detail here. The description is the single source of truth;
     /// structure it however the task warrants. Write it for a human
     /// reader and wiki-format it (markdown, `[[…]]` wikilinks) for
-    /// readability.
+    /// readability — reference a task as `[[tsk42]]` (never the GitHub
+    /// `#42` form), a file as `[[src/f.ts]]`, a commit by its sha.
     pub description: String,
     pub kind: Option<String>,
     pub priority: Option<String>,
@@ -371,6 +374,8 @@ pub struct CreateTaskMcpParams {
 pub struct UpdateTaskMcpParams {
     pub id: String,
     pub title: Option<String>,
+    /// Replacement markdown body. Wiki-format it (`[[…]]` wikilinks) —
+    /// reference a task as `[[tsk42]]` (never the GitHub `#42` form).
     pub description: Option<String>,
     /// Reparent (or detach with empty string).
     pub parent_id: Option<String>,
@@ -410,7 +415,8 @@ pub struct CompleteTaskParams {
     /// Summary note appended to the task before marking done
     /// (developer audience — the canonical text). Write it for a
     /// human reader and wiki-format it (markdown, `[[…]]` wikilinks)
-    /// for readability.
+    /// for readability — reference a task as `[[tsk42]]` (never the
+    /// GitHub `#42` form, which isn't a ref and renders broken).
     pub summary: String,
     pub author: Option<String>,
     /// Repo-relative paths edited for this effort. Drives the file-
@@ -1567,7 +1573,11 @@ impl OxplowMcp {
     // purpose was duplicative. Thread-scoped notes stay — they back
     // the Explore-subagent findings flow.
 
-    #[tool(description = "Add a thread-scoped note (not attached to any item).")]
+    #[tool(
+        description = "Add a thread-scoped note (not attached to any item). A non-empty \
+                       `link_warnings` array in the response flags invalid `[[…]]` wikilinks \
+                       in the note body — fix them."
+    )]
     async fn add_thread_note(
         &self,
         params: Parameters<AddThreadNoteParams>,
@@ -1585,7 +1595,9 @@ impl OxplowMcp {
             .add_for_thread(&id, &params.0.body, &params.0.author)
             .await
             .map_err(internal)?;
-        json_result(&note)
+        let link_warnings =
+            oxplow_app::link_check::check_links(&self.services, &params.0.body).await;
+        json_result(&WithLinkWarnings::new(note, link_warnings))
     }
 
     #[tool(description = "List thread-scoped notes.")]
@@ -2724,7 +2736,9 @@ impl OxplowMcp {
         description = "Create a new task (allocates id + sort_index, fires creation event). See \
                        param docs for `thread_id`/`backlog`, and the `status` shortcuts for \
                        starting work (`in_progress`) or filing already-shipped work \
-                       (`done`/`blocked` + `touched_files`) in one call."
+                       (`done`/`blocked` + `touched_files`) in one call. A non-empty \
+                       `link_warnings` array in the response flags invalid `[[…]]` wikilinks \
+                       in the description — fix them."
     )]
     async fn create_task(
         &self,
@@ -2810,14 +2824,18 @@ impl OxplowMcp {
             }
         }
         self.emit_tasks_changed(item.thread_id);
-        json_result(&item)
+        let link_warnings =
+            oxplow_app::link_check::check_links(&self.services, &item.description).await;
+        json_result(&WithLinkWarnings::new(item, link_warnings))
     }
 
     #[tool(
         description = "Update fields on an existing task (partial-patch). Pass `touched_files` \
                        (and/or `claim_runs`/`disclaim_runs` for test runs) alongside a `status` \
                        transition to `done`/`blocked` to attribute the closing effort. \
-                       `parent_id` reparents (empty string detaches)."
+                       `parent_id` reparents (empty string detaches). When you pass a new \
+                       `description`, a non-empty `link_warnings` array flags invalid `[[…]]` \
+                       wikilinks in it — fix them."
     )]
     async fn update_task(
         &self,
@@ -2825,6 +2843,8 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         let id = parse_task_id("update_task", "id", &p.id)?;
+        // Only link-check when the agent wrote a new body this call.
+        let wrote_description = p.description.is_some();
         if let Some(pid) = p.parent_id.as_deref() {
             // Empty string is the "detach" sentinel — only validate non-empty.
             if !pid.is_empty() {
@@ -2905,7 +2925,12 @@ impl OxplowMcp {
             }
         }
         self.emit_tasks_changed(updated.thread_id);
-        json_result(&updated)
+        let link_warnings = if wrote_description {
+            oxplow_app::link_check::check_links(&self.services, &updated.description).await
+        } else {
+            Vec::new()
+        };
+        json_result(&WithLinkWarnings::new(updated, link_warnings))
     }
 
     #[tool(
@@ -2916,7 +2941,9 @@ impl OxplowMcp {
                        `claimed_but_not_changed` / `changed_but_not_claimed` list the \
                        mismatches; call `amend_effort(effort_id, add_files, remove_files)` to \
                        fix, or leave it if your list was right (edited then reverted, or \
-                       another actor changed them)."
+                       another actor changed them). A non-empty `link_warnings` array flags \
+                       invalid `[[…]]` wikilinks in the summary (unrecognized syntax or \
+                       dangling target) — fix the summary so they resolve."
     )]
     async fn complete_task(
         &self,
@@ -3045,9 +3072,11 @@ impl OxplowMcp {
             }
         }
         self.emit_tasks_changed(item.thread_id);
+        let link_warnings = oxplow_app::link_check::check_links(&self.services, &p.summary).await;
         let payload = CompleteTaskResult {
             task: item,
             file_review: review,
+            link_warnings,
         };
         json_result(&payload)
     }
@@ -3873,7 +3902,9 @@ impl OxplowMcp {
                        A verified path may be a file under a directory the body cites via \
                        `[[dir:…]]` — list the specific file to give it a precise pin. Refs left \
                        in place without re-checking go in NEITHER list, keeping their existing \
-                       pin so the staleness signal stays honest."
+                       pin so the staleness signal stays honest. A non-empty `link_warnings` \
+                       array in the response flags invalid `[[…]]` wikilinks in the page body \
+                       (unrecognized syntax or dangling target) — fix the page so they resolve."
     )]
     async fn record_wiki_page_update(
         &self,
@@ -4019,11 +4050,16 @@ impl OxplowMcp {
             }
             restamped.push(path.clone());
         }
-        json_result(&serde_json::json!({
+        let mut result = serde_json::json!({
             "slug": slug,
             "verified": restamped,
             "removed": p.removed_refs,
-        }))
+        });
+        let link_warnings = oxplow_app::link_check::check_links(&self.services, &body).await;
+        if !link_warnings.is_empty() {
+            result["link_warnings"] = serde_json::to_value(&link_warnings).map_err(internal)?;
+        }
+        json_result(&result)
     }
 }
 
@@ -4554,6 +4590,32 @@ fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> St
 pub struct CompleteTaskResult {
     pub task: oxplow_domain::Task,
     pub file_review: Option<oxplow_app::task_service::EffortFileReview>,
+    /// Invalid `[[…]]` wikilinks in the summary (unrecognized syntax or
+    /// dangling target). Omitted when the summary's links all resolve.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub link_warnings: Vec<oxplow_app::link_check::LinkWarning>,
+}
+
+/// Wraps a write-tool result with wikilink-validity warnings for the
+/// body the agent just authored. `#[serde(flatten)]` keeps the wrapped
+/// object's fields at the top level and the empty vec is skipped, so a
+/// clean write serializes exactly as before — only an invalid link adds
+/// a `link_warnings` array the agent can act on.
+#[derive(serde::Serialize)]
+struct WithLinkWarnings<T: serde::Serialize> {
+    #[serde(flatten)]
+    inner: T,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    link_warnings: Vec<oxplow_app::link_check::LinkWarning>,
+}
+
+impl<T: serde::Serialize> WithLinkWarnings<T> {
+    fn new(inner: T, link_warnings: Vec<oxplow_app::link_check::LinkWarning>) -> Self {
+        Self {
+            inner,
+            link_warnings,
+        }
+    }
 }
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
@@ -5864,6 +5926,57 @@ mod tests {
         assert!(
             serde_json::from_value::<CreateTaskMcpParams>(obj).is_err(),
             "missing `description` should fail to deserialize (required)"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_task_reports_invalid_wikilink() {
+        let (_proj, _svc, server) = boot();
+        let r = server
+            .create_task(Parameters(CreateTaskMcpParams {
+                thread_id: None,
+                backlog: true,
+                title: "t".into(),
+                description: "Follow-up in [[#13]].".into(),
+                kind: None,
+                priority: None,
+                status: None,
+                parent_id: None,
+                touched_files: None,
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        assert!(body.contains("link_warnings"), "missing warnings: {body}");
+        assert!(body.contains("#13"), "target missing: {body}");
+        assert!(
+            body.contains("not a recognized reference"),
+            "reason missing: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_task_omits_link_warnings_when_clean() {
+        let (_proj, _svc, server) = boot();
+        let r = server
+            .create_task(Parameters(CreateTaskMcpParams {
+                thread_id: None,
+                backlog: true,
+                title: "t".into(),
+                description: "A clean body with no wikilinks at all.".into(),
+                kind: None,
+                priority: None,
+                status: None,
+                parent_id: None,
+                touched_files: None,
+            }))
+            .await
+            .unwrap();
+        let body = text_payload(r);
+        // No `[[…]]` links → the field is skip-serialized (shape unchanged).
+        assert!(
+            !body.contains("link_warnings"),
+            "clean write must omit link_warnings: {body}"
         );
     }
 

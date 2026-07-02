@@ -94,6 +94,7 @@ shapes:
 - `[[dir:src/components]]` directory
 - `[[abc1234]]` / `[[git:abc1234]]` commit
 - `[[tsk42]]` **task** — renders as the task's title, links to the task
+  (always the `tsk` prefix; **never** `[[#42]]`/`#42` — that isn't a ref)
 - `[[some-other-note]]` wiki page by slug
 
 Example: "The drag handler in [[src/ui/components/Tabs.tsx:88]] calls

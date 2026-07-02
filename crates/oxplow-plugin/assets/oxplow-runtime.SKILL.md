@@ -111,7 +111,8 @@ Cheat sheet (every form is `[[…]]`; add `|label` to override text):
   an extensionless path would otherwise parse as a wiki slug)
 - `[[some-slug]]` — wiki page by slug (renderer shows its title)
 - `[[abc1234]]` or `[[git:abc1234]]` — git commit by SHA
-- `[[#42]]` — another task by id
+- `[[tsk42]]` — another task by id (always the `tsk` prefix; **never**
+  the GitHub `[[#42]]` / `#42` form — it isn't a ref and renders broken)
 
 Reserve inline code (`` `…` ``) for non-entities: identifiers,
 snippets, command fragments, env vars. If it has a page, wikilink it.
