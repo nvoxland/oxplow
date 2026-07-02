@@ -516,7 +516,14 @@ impl CollectionService {
         // so Count() sliced by status reconstructs the passed/failed/total
         // headline. The capture IS the run (T-E1, tsk48): it carries the verbatim
         // payload in `detail_json` and its id is what the ledger claims. Recorded
-        // even report-less (observe-always). Best-effort beside the legacy write.
+        // even report-less (observe-always) — but a run that MEASURED nothing
+        // (no report, no asserted counts) records under the `test-run` producer,
+        // not `tests`: an empty `tests` capture reads as "suite ran, found 0
+        // tests" to the zero-fill/currency logic (tsk44) and would collapse the
+        // semi-additive oxplow.tests.* timeline to 0. Asserted counts (the MCP
+        // sub-agent path) synthesize status-sliced facts — no case identity, but
+        // the counts are real case-grain measurements the specs must read.
+        let counted = passed.is_some() || failed.is_some() || total.is_some();
         let mut capture_id: Option<i64> = None;
         if let Some(stream_val) =
             oxplow_domain::StreamId::try_from_str(&stream_id).map(|s| s.value())
@@ -550,6 +557,25 @@ impl CollectionService {
                             });
                         }
                     }
+                } else if counted {
+                    let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
+                        return Ok::<Option<i64>, DomainError>(None);
+                    };
+                    let p = passed.unwrap_or(0).max(0);
+                    let f = failed.unwrap_or(0).max(0);
+                    let s = total.map(|t| (t - p - f).max(0)).unwrap_or(0);
+                    for (status, n) in [("passed", p), ("failed", f), ("skipped", s)] {
+                        for _ in 0..n {
+                            facts.push(NewFact {
+                                subject_kind: Some("test".into()),
+                                dims_json: serde_json::to_string(&json!({
+                                    "oxplow.status": status,
+                                }))
+                                .ok(),
+                                ..NewFact::new(measure.id, 1.0)
+                            });
+                        }
+                    }
                 }
                 let branch = oxplow_git::detect_current_branch(&self.project_dir);
                 let snapshot_id = self
@@ -558,7 +584,15 @@ impl CollectionService {
                     .await
                     .ok()
                     .flatten();
-                let mut capture = NewMetricCapture::done(stream_val, "tests", source.to_string());
+                // `tests` = a measurement (report or asserted counts — a zero
+                // here is a real "found 0"); `test-run` = a run record only,
+                // invisible to the tests metric timeline.
+                let producer = if report.is_some() || counted {
+                    "tests"
+                } else {
+                    "test-run"
+                };
+                let mut capture = NewMetricCapture::done(stream_val, producer, source.to_string());
                 capture.provenance = provenance.to_string();
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("on-report".into());
@@ -594,7 +628,7 @@ impl CollectionService {
             self.claim_run(effort, cid).await;
             self.emit(thread, effort);
         }
-        Ok(capture_id.map(|_| 0))
+        Ok(capture_id)
     }
 
     /// Attribute a just-recorded run (`run:<id>`) to an effort via the unified
@@ -2122,6 +2156,20 @@ impl CollectionService {
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let filter = spec_fact_filter(spec).ok()?;
+        // The spec's aggregation decides what one kept fact contributes: a
+        // `count` spec counts offenders (each fact = 1) — summing their raw
+        // values would report Σ complexity where the Metrics page counts
+        // functions, and feed a value-sum into count-calibrated thresholds.
+        // Everything else keeps the Σ-of-values read (correct for the per-file
+        // `sum` gauges; the min/avg-style aggregations have no meaningful
+        // per-file Σ and don't reach the File family today).
+        let agg = crate::metric_engine::Aggregation::parse(&spec.aggregation)?;
+        let contribution = |f: &&oxplow_db::FactRow| -> f64 {
+            match agg {
+                crate::metric_engine::Aggregation::Count => 1.0,
+                _ => f.value,
+            }
+        };
         let facts = self.facts.facts_for_measure(measure.id).await.ok()?;
         let kept: Vec<&oxplow_db::FactRow> = facts
             .iter()
@@ -2183,24 +2231,24 @@ impl CollectionService {
         // nothing attributable — never fabricate a drop-to-zero against a
         // pre-effort baseline, and never read a post-close capture (tsk43).
         current_cap?;
-        // A claimed file's value in a capture: Σ of the kept facts on that path
-        // there (one for a per-file gauge), else 0.
+        // A claimed file's value in a capture: the kept facts on that path,
+        // combined per the spec's aggregation (count ⇒ each fact is 1), else 0.
         let file_value = |cap: Option<i64>, path: &str| -> f64 {
             cap.map(|c| {
                 kept.iter()
                     .filter(|f| f.capture_id == c && f.path.as_deref() == Some(path))
-                    .map(|f| f.value)
+                    .map(contribution)
                     .sum()
             })
             .unwrap_or(0.0)
         };
-        // Repo total in a capture = Σ of every kept fact in it (the crossing badge
-        // reflects the repo total, not the claimed-file slice).
+        // Repo total in a capture = every kept fact in it, same aggregation (the
+        // crossing badge reflects the repo total, not the claimed-file slice).
         let repo_total = |cap: Option<i64>| -> f64 {
             cap.map(|c| {
                 kept.iter()
                     .filter(|f| f.capture_id == c)
-                    .map(|f| f.value)
+                    .map(contribution)
                     .sum()
             })
             .unwrap_or(0.0)
@@ -3589,7 +3637,8 @@ mod tests {
                 .await
                 .unwrap();
             // The run CAPTURE carries the counts in its detail envelope (T-E2:
-            // the legacy count samples are gone; per-case facts need a report).
+            // the legacy count samples are gone; asserted counts also become
+            // status-sliced facts — see asserted_counts_without_report_…).
             let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
                 .captures_in_window_by_trigger(
                     h.thread.value(),
@@ -3613,6 +3662,176 @@ mod tests {
             assert_eq!(envelope["payload"]["passed"], 5);
             assert_eq!(envelope["payload"]["failed"], 1);
             assert_eq!(envelope["payload"]["total"], 6);
+        }
+
+        #[tokio::test]
+        async fn report_less_test_run_records_a_run_capture_but_not_a_tests_zero() {
+            // A report-less, count-less run (a bare `cargo test` the hook saw) is
+            // a run RECORD, not a measurement — it must not read as "suite ran,
+            // found 0 tests" and zero the semi-additive oxplow.tests.* timeline
+            // via the tsk44 zero-fill.
+            use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
+            let h = build(None).await;
+            let report = TestReport {
+                suites: vec![TestSuite {
+                    name: "s".into(),
+                    cases: vec![TestCase {
+                        classname: "m".into(),
+                        name: "t1".into(),
+                        status: TestStatus::Passed,
+                        time_ms: None,
+                    }],
+                }],
+            };
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "bun run test:collect",
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    Some(&report),
+                    None,
+                )
+                .await
+                .unwrap();
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test",
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    None,
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let engine = crate::metric_engine::MetricEngine::new(facts.clone());
+            let series = engine
+                .series(
+                    "oxplow.test_case",
+                    crate::metric_engine::Aggregation::Count,
+                    &Default::default(),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                series.iter().map(|p| p.value).collect::<Vec<_>>(),
+                vec![1.0],
+                "the report-less run must not splice a value-0 point"
+            );
+            // The run record itself survives for the ledger/effort panel.
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let caps = facts.captures_for_effort(eid.value()).await.unwrap();
+            let test_caps: Vec<_> = caps
+                .iter()
+                .filter(|c| {
+                    c.detail_json
+                        .as_deref()
+                        .is_some_and(|d| d.contains("test-detail"))
+                })
+                .collect();
+            assert_eq!(test_caps.len(), 2, "both runs recorded as captures");
+        }
+
+        #[tokio::test]
+        async fn asserted_counts_without_report_become_status_sliced_facts() {
+            // The MCP record_test_run path (a sub-agent's run): no report, but
+            // real pass/fail counts — they must land as status-sliced facts so
+            // the oxplow.tests.* specs read them, not ride only detail_json.
+            let h = build(None).await;
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test -p sub",
+                    None,
+                    None,
+                    Some(2),
+                    Some(1),
+                    Some(4),
+                    "asserted",
+                    "agent",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let engine = crate::metric_engine::MetricEngine::new(facts.clone());
+            let total = engine
+                .series(
+                    "oxplow.test_case",
+                    crate::metric_engine::Aggregation::Count,
+                    &Default::default(),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                total.last().map(|p| p.value),
+                Some(4.0),
+                "2 passed + 1 failed + 1 skipped (total 4)"
+            );
+            let failed = engine
+                .series(
+                    "oxplow.test_case",
+                    crate::metric_engine::Aggregation::Count,
+                    &crate::metric_engine::FactFilter {
+                        dim_eq: Some(("oxplow.status".into(), "failed".into())),
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(failed.last().map(|p| p.value), Some(1.0));
+        }
+
+        #[tokio::test]
+        async fn record_test_run_returns_the_real_capture_id() {
+            // The returned id is the capture id (the run identity the ledger
+            // claims, T-E1) — not a placeholder 0.
+            let h = build(None).await;
+            let id = h
+                .service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test --workspace",
+                    Some(0),
+                    None,
+                    Some(3),
+                    Some(0),
+                    Some(3),
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap()
+                .expect("a capture was recorded");
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_for_effort(eid.value())
+                .await
+                .unwrap();
+            assert!(
+                caps.iter().any(|c| c.id == id),
+                "returned id {id} must be the recorded capture's id ({:?})",
+                caps.iter().map(|c| c.id).collect::<Vec<_>>()
+            );
         }
 
         #[tokio::test]
@@ -4141,6 +4360,53 @@ mod tests {
             assert_eq!(d.delta, Some(1.0));
             assert!(d.changed);
             assert_eq!(d.attributed_files, Some(2));
+        }
+
+        #[tokio::test]
+        async fn effort_metric_deltas_count_spec_counts_offenders_not_value_sum() {
+            // A `count` spec (oxplow.high_complexity_fns' shape: count of facts
+            // over a threshold) must COUNT offenders in the effort panel — not
+            // sum their raw values, which contradicts the Metrics page and feeds
+            // a value-sum into the count-calibrated crossing thresholds.
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let mut nm = oxplow_db::NewMeasure::new("acme.cx", "cx");
+            nm.subject_kind = Some("function".into());
+            let m = facts.upsert_measure(nm).await.unwrap();
+            let mut s =
+                oxplow_db::NewMetricSpec::base("acme.hot_fns", "Hot fns", "acme.cx", "count");
+            s.direction = "lower-better".into();
+            s.display_kind = "findings".into();
+            s.category = Some("static-quality".into());
+            s.filter_json = Some("{\"min_value\":10.0}".into());
+            s.warn_at = Some(3.0);
+            s.fail_at = Some(6.0);
+            facts.upsert_spec(s).await.unwrap();
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            // Baseline: one offender (complexity 15). Current: two offenders
+            // (12, 11) plus one function under the threshold (4).
+            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 15.0)]).await;
+            seed_gauge_capture(
+                &facts,
+                m,
+                after,
+                &[("src/a.rs", 12.0), ("src/a.rs", 11.0), ("src/a.rs", 4.0)],
+            )
+            .await;
+
+            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            assert_eq!(deltas.len(), 1);
+            let d = &deltas[0];
+            // Offender COUNT 1 → 2 (Δ +1) — not Σ complexity 15 → 23 (Δ +8).
+            assert_eq!(d.baseline, Some(1.0));
+            assert_eq!(d.current, 2.0);
+            assert_eq!(d.delta, Some(1.0));
+            // The crossing badge reads the offender count (2 < warn 3 ⇒ none);
+            // the value-sum (23) would spuriously cross the fail threshold.
+            assert_eq!(d.crossing, None);
         }
 
         #[tokio::test]

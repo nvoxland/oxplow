@@ -149,7 +149,12 @@ hook + MCP wiring):
   never be exercised end-to-end in a repo that runs no eslint; the active
   entry closes that symmetry gap (and serves on-demand / odd-location
   reports). `record_test_run` is the one `asserted` writer, for richer
-  pass/fail counts the exit code alone can't give.
+  pass/fail counts the exit code alone can't give; its counts also become
+  status-sliced `oxplow.test_case` facts (no case identity) so the
+  `oxplow.tests.*` specs read them, and it returns the capture id (the run
+  identity `claim_runs` refs use). A report-less, count-less run records its
+  capture under the `test-run` producer so it never reads as "found 0 tests"
+  (see [metrics.md](./metrics.md)).
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
 **regardless of how many efforts are open** — attribution is deferred to the
