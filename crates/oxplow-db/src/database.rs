@@ -470,10 +470,10 @@ mod tests {
             "comment",
             "comment_message",
             // V43 — the durable atomic fact layer (the sole metric substrate
-            // since T-E3 dropped the V38 cluster, V49).
+            // since T-E3 dropped the V38 cluster, V49). The `subject` hierarchy
+            // table was dropped in V52 (tsk15) — never read/written.
             "measure",
             "dimension",
-            "subject",
             "metric_capture",
             "fact",
             // V44 — the metric SPEC layer.

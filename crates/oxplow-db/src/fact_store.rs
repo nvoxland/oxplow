@@ -55,8 +55,6 @@ pub struct Measure {
     pub subject_kind: Option<String>,
     /// `additive` | `semi-additive` | `non-additive` — additivity OVER TIME.
     pub temporal_semantics: String,
-    /// `none` | `numerator` | `denominator` — ratio-base role.
-    pub component_role: String,
     /// `built-in` | `global` | `project`.
     pub scope: String,
     pub description: Option<String>,
@@ -72,14 +70,13 @@ pub struct NewMeasure {
     pub unit: Option<String>,
     pub subject_kind: Option<String>,
     pub temporal_semantics: String,
-    pub component_role: String,
     pub scope: String,
     pub description: Option<String>,
 }
 
 impl NewMeasure {
-    /// A `semi-additive`, `none`-role, `built-in` measure (snapshot-measure
-    /// defaults — the common case for code metrics).
+    /// A `semi-additive`, `built-in` measure (snapshot-measure defaults — the
+    /// common case for code metrics).
     pub fn new(key: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
             key: key.into(),
@@ -87,19 +84,21 @@ impl NewMeasure {
             unit: None,
             subject_kind: None,
             temporal_semantics: "semi-additive".into(),
-            component_role: "none".into(),
             scope: "built-in".into(),
             description: None,
         }
     }
 }
 
+// `measure.component_role` (a dead V43 column, tsk15) is intentionally omitted
+// from the read cols + upsert: it's never read, can't be safely `DROP COLUMN`d
+// (a CHECK + the fact→measure CASCADE), and defaults to 'none' on insert.
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
-     component_role, scope, description, created_at, updated_at";
+     scope, description, created_at, updated_at";
 
 fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
-    let created_at: String = row.get(9)?;
-    let updated_at: String = row.get(10)?;
+    let created_at: String = row.get(8)?;
+    let updated_at: String = row.get(9)?;
     Ok(Measure {
         id: row.get(0)?,
         key: row.get(1)?,
@@ -107,9 +106,8 @@ fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
         unit: row.get(3)?,
         subject_kind: row.get(4)?,
         temporal_semantics: row.get(5)?,
-        component_role: row.get(6)?,
-        scope: row.get(7)?,
-        description: row.get(8)?,
+        scope: row.get(6)?,
+        description: row.get(7)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
     })
@@ -669,16 +667,18 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
+                // `component_role` is omitted — it defaults to 'none' and is
+                // never read (dead V43 column, tsk15).
                 conn.execute(
                     "INSERT INTO measure
-                       (key, title, unit, subject_kind, temporal_semantics, component_role, scope,
+                       (key, title, unit, subject_kind, temporal_semantics, scope,
                         description, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
                      ON CONFLICT(key) DO UPDATE SET
                         title=excluded.title, unit=excluded.unit,
                         subject_kind=excluded.subject_kind,
                         temporal_semantics=excluded.temporal_semantics,
-                        component_role=excluded.component_role, scope=excluded.scope,
+                        scope=excluded.scope,
                         description=excluded.description, updated_at=excluded.updated_at",
                     params![
                         m.key,
@@ -686,7 +686,6 @@ impl SqliteFactStore {
                         m.unit,
                         m.subject_kind,
                         m.temporal_semantics,
-                        m.component_role,
                         m.scope,
                         m.description,
                         now,

@@ -330,6 +330,10 @@ pub struct MeasureEntry {
     #[serde(rename = "temporalSemantics", default)]
     pub temporal_semantics: Option<String>,
     /// `none` | `numerator` | `denominator` — ratio-base role (default `none`).
+    /// **Reserved / currently inert** (tsk15): still parsed + validated for
+    /// back-compat (`deny_unknown_fields`), but no longer persisted — the
+    /// `measure.component_role` column is dead (ratio components ride per-fact
+    /// num/den). Kept as an authoring surface for a future component-role join.
     #[serde(rename = "componentRole", default)]
     pub component_role: Option<String>,
     #[serde(default)]

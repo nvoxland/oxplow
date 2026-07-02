@@ -1846,7 +1846,7 @@ impl OxplowMcp {
 
     #[tool(
         description = "List the MEASURE catalog — every declared fact type (key, title, unit, \
-            subject_kind/grain, temporal_semantics, component_role, scope). Measures are the \
+            subject_kind/grain, temporal_semantics, scope). Measures are the \
             namespaced types of atomic fact the substrate collects (epic tsk12); a metric is an \
             aggregation defined OVER a measure, not a second store of rows. Optional `scope` / \
             `subject_kind` filter."

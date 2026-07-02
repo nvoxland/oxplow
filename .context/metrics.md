@@ -51,7 +51,11 @@ welded to collection.
   `non-additive`); only the **accumulating** mean-across-closes ratios
   (cycle_time, task_effort — one observation per close, Σ over all captures =
   the mean) are `non-additive`),
-  `component_role` (`numerator`|`denominator`|`none`), `scope`, `description`.
+  `scope`, `description`. (`component_role` is a **dead** V43 column, tsk15 —
+  never read; ratio components ride per-fact num/den. Its Rust plumbing + config
+  wiring are removed; the column itself stays inert (`DEFAULT 'none'`) because a
+  `DROP COLUMN` isn't safe — a CHECK constraint plus the `fact→measure` CASCADE
+  under `foreign_keys = ON` would wipe the facts on a table rebuild.)
   Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
@@ -68,7 +72,9 @@ welded to collection.
   (planned, tsk17): a fact may only be emitted on defined measures/dimensions;
   historical facts carrying a now-undefined dim are kept but hidden as a slice
   axis (the axis list is catalog-driven).
-- **`subject`** — the subject hierarchy (file→package→repo) for roll-ups.
+- ~~**`subject`** — the subject hierarchy (file→package→repo) for roll-ups.~~
+  **Dropped in V52 (tsk15)** — never got an INSERT/SELECT; the rollup reads
+  package-from-path off the fact directly.
 - **`metric_capture`** (the renamed/generalized `metric_run`) — the **one context
   row**: it holds ALL the "when/where/who/trust" metadata so it isn't duplicated
   on every fact. `producer`, `trigger`, `status`/`error`, `scope`; when

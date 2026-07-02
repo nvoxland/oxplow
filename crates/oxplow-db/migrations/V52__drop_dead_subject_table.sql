@@ -1,0 +1,12 @@
+-- tsk15: drop dead schema. The `subject` hierarchy table (file→package→repo,
+-- V43's "now exercised for roll-up") never got an INSERT or SELECT — the
+-- rollup reads package-from-path off the fact directly. Nothing references it
+-- (no inbound FK), so the drop is clean.
+--
+-- The sibling dead item, `measure.component_role`, is intentionally NOT dropped
+-- here: it carries a column-level CHECK (so SQLite can't `DROP COLUMN`), and a
+-- table rebuild would fire `fact.measure_id`'s `ON DELETE CASCADE` under the
+-- migration connection's `foreign_keys = ON` and wipe every fact. The column
+-- stays (inert, `NOT NULL DEFAULT 'none'`); its dead Rust plumbing (the Measure
+-- struct field, the seed write, the upsert) is removed instead.
+DROP TABLE IF EXISTS subject;

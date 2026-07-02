@@ -247,13 +247,14 @@ impl MetricsService {
 
         let mut m = 0;
         for rm in resolve_measures(&global_measures, &project_measures) {
+            // `rm.component_role` is intentionally not forwarded — the measure
+            // row's `component_role` is a dead column (tsk15).
             let nm = NewMeasure {
                 key: rm.key.clone(),
                 title: rm.title,
                 unit: rm.unit,
                 subject_kind: rm.subject_kind,
                 temporal_semantics: rm.temporal_semantics,
-                component_role: rm.component_role,
                 scope: rm.scope,
                 description: rm.description,
             };

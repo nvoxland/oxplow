@@ -81,8 +81,7 @@ Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`)
 | `key` | namespaced fact-type id (required) |
 | `subjectKind` | what each fact is about: `file` \| `symbol` \| `test` \| `model` … |
 | `unit` | `count` \| `%` \| `ms` \| `kb` \| `usd` … |
-| `temporalSemantics` | additivity **over time**: `additive` (SUM across captures — events/tokens), `semi-additive` (take the LAST capture — stocks/counts, default), `non-additive` (re-derive Σnum/Σden — ratios) |
-| `componentRole` | `numerator` \| `denominator` \| `none` — for ratio bases |
+| `temporalSemantics` | additivity **over time**: `additive` (SUM across captures — events/tokens), `semi-additive` (take the LAST capture — stocks/counts + level ratios like coverage, default), `non-additive` (re-derive Σnum/Σden across all captures — accumulating ratios) |
 
 ### `metrics:` (spec) fields
 
