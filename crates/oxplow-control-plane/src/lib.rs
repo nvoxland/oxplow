@@ -275,6 +275,11 @@ async fn handle_otlp_metrics(
     if !check_bearer(&headers, &ctx.hook_token) {
         return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
     }
+    // Opt-in wire-format diagnostic (tsk25): when `OXPLOW_OTLP_DEBUG` names a
+    // file, append a human-readable dump of every received export to it — used
+    // to discover an agent's real OTEL shape (e.g. Codex) from a live run.
+    // Off by default, zero cost when unset.
+    otlp_debug_dump(&headers, &body);
     let stream_id = headers
         .get("x-oxplow-stream")
         .and_then(|v| v.to_str().ok())
@@ -299,6 +304,39 @@ async fn handle_otlp_metrics(
         Err(err) => warn!(?err, "failed to ingest OTLP token export"),
     }
     otlp_ok()
+}
+
+/// Append a human-readable dump of an OTLP export to the file named by
+/// `OXPLOW_OTLP_DEBUG` (tsk25). No-op when the env var is unset. Best-effort:
+/// a file/IO error is ignored (it's a diagnostic, never load-bearing).
+fn otlp_debug_dump(headers: &HeaderMap, body: &[u8]) {
+    let Ok(path) = std::env::var("OXPLOW_OTLP_DEBUG") else {
+        return;
+    };
+    if path.is_empty() {
+        return;
+    }
+    let hdr = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<none>")
+    };
+    let entry = format!(
+        "=== OTLP export ({} bytes) thread={} stream={} ===\n{}\n\n",
+        body.len(),
+        hdr("x-oxplow-thread"),
+        hdr("x-oxplow-stream"),
+        oxplow_app::otlp_tokens::summarize_metrics_request(body),
+    );
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = f.write_all(entry.as_bytes());
+    }
 }
 
 /// Empty OTLP success ack: a 200 with a protobuf content type and an empty

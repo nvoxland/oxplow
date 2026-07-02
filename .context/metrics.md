@@ -260,6 +260,10 @@ summed every assistant line) and was Claude-only + format-fragile.
   > whether the `--config otel.exporter.otlp-http.*` tagged-union keys select the
   > http exporter) is from docs, not yet confirmed against a running Codex. The
   > mapper is defensive, but a live Codex session may need small adjustments.
+  > **Diagnostic (tsk25):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
+  > oxplow — the receiver appends a decoded dump of every OTLP export (metric
+  > names + attributes) to that file (`otlp_tokens::summarize_metrics_request`),
+  > so one live Codex turn reveals the real shape. Off by default.
   See `.context/agent-model.md`.
 
 **Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The

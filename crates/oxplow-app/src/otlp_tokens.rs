@@ -8,10 +8,11 @@
 //! overcounted because Claude repeats a message's cumulative `usage` on every
 //! content-block line.
 //!
-//! Pure + no IO → fully unit-testable. Phase 1 recognizes Claude Code's
-//! `claude_code.token.usage` counter and keeps only the `input`/`output` token
-//! kinds (cache/reasoning are dropped, matching today's substrate). Codex's
-//! `codex.turn.token_usage` histogram lands in phase 2 ([`tsk24`]).
+//! Pure + no IO → fully unit-testable. Recognizes Claude Code's
+//! `claude_code.token.usage` counter (tsk23) and Codex's `codex.turn.token_usage`
+//! histogram (tsk24), keeping the `input`/`output` token kinds (cache dropped;
+//! Codex `reasoning_output` folds into `output`). [`summarize_metrics_request`]
+//! is the opt-in wire-format diagnostic (tsk25).
 
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, KeyValue};
@@ -180,6 +181,99 @@ fn number_value(v: &Option<number_data_point::Value>) -> i64 {
         Some(number_data_point::Value::AsInt(i)) => *i,
         Some(number_data_point::Value::AsDouble(d)) => *d as i64,
         None => 0,
+    }
+}
+
+/// Diagnostic (tsk25): a human-readable dump of an OTLP metrics export — the
+/// resource attributes plus every metric's name, data type, and each data
+/// point's attributes + value/sum. Used behind the `OXPLOW_OTLP_DEBUG` flag to
+/// discover an agent's real wire format (e.g. Codex's token metric
+/// name/attributes) from a live run, without guessing.
+pub fn summarize_metrics_request(body: &[u8]) -> String {
+    let req = match decode_metrics_request(body) {
+        Ok(r) => r,
+        Err(e) => return format!("<undecodable OTLP metrics: {e}; {} bytes>", body.len()),
+    };
+    let mut lines = Vec::new();
+    for rm in &req.resource_metrics {
+        if let Some(res) = &rm.resource {
+            let a = fmt_attrs(&res.attributes);
+            if !a.is_empty() {
+                lines.push(format!("resource: {a}"));
+            }
+        }
+        for sm in &rm.scope_metrics {
+            for m in &sm.metrics {
+                match &m.data {
+                    Some(metric::Data::Sum(x)) => {
+                        summarize_number_points(&mut lines, &m.name, "sum", &x.data_points)
+                    }
+                    Some(metric::Data::Gauge(x)) => {
+                        summarize_number_points(&mut lines, &m.name, "gauge", &x.data_points)
+                    }
+                    Some(metric::Data::Histogram(x)) => {
+                        for dp in &x.data_points {
+                            lines.push(format!(
+                                "metric {} [histogram] {{{}}} sum={:?} count={}",
+                                m.name,
+                                fmt_attrs(&dp.attributes),
+                                dp.sum,
+                                dp.count
+                            ));
+                        }
+                    }
+                    Some(_) => lines.push(format!("metric {} [other data type]", m.name)),
+                    None => lines.push(format!("metric {} [no data]", m.name)),
+                }
+            }
+        }
+    }
+    if lines.is_empty() {
+        "<no metrics in export>".to_string()
+    } else {
+        lines.join("\n")
+    }
+}
+
+fn summarize_number_points(
+    lines: &mut Vec<String>,
+    name: &str,
+    kind: &str,
+    pts: &[opentelemetry_proto::tonic::metrics::v1::NumberDataPoint],
+) {
+    for dp in pts {
+        lines.push(format!(
+            "metric {name} [{kind}] {{{}}} value={}",
+            fmt_attrs(&dp.attributes),
+            number_value(&dp.value)
+        ));
+    }
+}
+
+/// Render OTLP attributes as `key=value, key2=value2` (scalar values only).
+fn fmt_attrs(attrs: &[KeyValue]) -> String {
+    attrs
+        .iter()
+        .map(|kv| {
+            let val = kv
+                .value
+                .as_ref()
+                .and_then(|a| a.value.as_ref())
+                .map(fmt_attr_value)
+                .unwrap_or_default();
+            format!("{}={}", kv.key, val)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn fmt_attr_value(v: &any_value::Value) -> String {
+    match v {
+        any_value::Value::StringValue(s) => s.clone(),
+        any_value::Value::IntValue(i) => i.to_string(),
+        any_value::Value::DoubleValue(d) => d.to_string(),
+        any_value::Value::BoolValue(b) => b.to_string(),
+        _ => "<complex>".to_string(),
     }
 }
 
@@ -409,6 +503,21 @@ mod tests {
             otlp_metrics_to_token_facts(&req).is_empty(),
             "wrong metric name + zero-valued point both ignored"
         );
+    }
+
+    #[test]
+    fn summary_dumps_metric_names_and_attributes() {
+        let body = encoded_claude_export("claude-opus-4-8", 100, 20);
+        let s = summarize_metrics_request(&body);
+        assert!(
+            s.contains("claude_code.token.usage"),
+            "names the metric: {s}"
+        );
+        assert!(s.contains("type=input"));
+        assert!(s.contains("model=claude-opus-4-8"));
+        assert!(s.contains("value=100"));
+        // A garbage body degrades gracefully rather than panicking.
+        assert!(summarize_metrics_request(b"not protobuf").contains("undecodable"));
     }
 
     #[test]
