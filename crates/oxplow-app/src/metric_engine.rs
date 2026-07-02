@@ -277,7 +277,12 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
         Aggregation::Sum => (facts.iter().map(|f| f.value).sum(), None, None),
         Aggregation::Avg => {
             let sum: f64 = facts.iter().map(|f| f.value).sum();
-            (sum / facts.len() as f64, None, None)
+            let count = facts.len() as f64;
+            // Carry (Σvalues, count) as ratio components so the non-additive
+            // cross-time collapse (Σn/Σd in `range_value`) yields the mean
+            // across ALL facts — the V47 mean-across-closes measures
+            // (cycle_time, task_effort) die to a den=0 → 0.0 otherwise.
+            (sum / count, Some(sum), Some(count))
         }
         Aggregation::Min => (
             facts.iter().map(|f| f.value).fold(f64::INFINITY, f64::min),
@@ -589,10 +594,31 @@ impl MetricEngine {
         filter: &FactFilter,
         group_by: Option<&str>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
+        self.series_in_stream(measure_key, agg, filter, group_by, None)
+            .await
+    }
+
+    /// [`Self::series`] scoped to one stream (worktree) — per-worktree scans
+    /// don't interleave into one timeline (the series sibling of the tsk46
+    /// rollup scoping). `None` reads across all streams.
+    pub async fn series_in_stream(
+        &self,
+        measure_key: &str,
+        agg: Aggregation,
+        filter: &FactFilter,
+        group_by: Option<&str>,
+        stream: Option<i64>,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
-        let facts = self.facts.facts_for_measure(measure.id).await?;
+        let facts: Vec<FactRow> = self
+            .facts
+            .facts_for_measure(measure.id)
+            .await?
+            .into_iter()
+            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+            .collect();
         let points = aggregate_series(&facts, agg, filter, group_by);
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
@@ -602,20 +628,24 @@ impl MetricEngine {
             .filter(|f| filter.matches(f))
             .map(|f| f.producer.clone())
             .collect();
-        self.zero_fill(points, producers, agg, group_by).await
+        self.zero_fill(points, producers, agg, group_by, stream)
+            .await
     }
 
     /// Splice value-0 points into `points` for every capture of `producers`
     /// that produced none (the empty "scanned, found nothing" record — tsk44).
     /// Only count/sum aggregations have a meaningful zero (avg/min/max/last/
     /// ratio of nothing is undefined → left sparse), and only ungrouped series
-    /// are filled (an empty capture carries no group values).
+    /// are filled (an empty capture carries no group values). A stream-scoped
+    /// series only fills from THAT stream's captures — another worktree's
+    /// zero-hit scan is not this timeline's zero.
     async fn zero_fill(
         &self,
         mut points: Vec<SeriesPoint>,
         producers: std::collections::BTreeSet<String>,
         agg: Aggregation,
         group_by: Option<&str>,
+        stream: Option<i64>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
         if group_by.is_some()
             || !matches!(agg, Aggregation::Count | Aggregation::Sum)
@@ -629,6 +659,9 @@ impl MetricEngine {
             .await?;
         let have: std::collections::HashSet<i64> = points.iter().map(|p| p.capture_id).collect();
         for c in caps {
+            if stream.is_some_and(|s| c.stream_id != s) {
+                continue;
+            }
             if !have.contains(&c.id) {
                 points.push(SeriesPoint {
                     capture_id: c.id,
@@ -697,12 +730,24 @@ impl MetricEngine {
         spec: &MetricSpec,
         group_by: Option<&str>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
+        self.series_for_spec_in_stream(spec, group_by, None).await
+    }
+
+    /// [`Self::series_for_spec`] scoped to one stream (worktree) — see
+    /// [`Self::series_in_stream`]. `None` reads across all streams.
+    pub async fn series_for_spec_in_stream(
+        &self,
+        spec: &MetricSpec,
+        group_by: Option<&str>,
+        stream: Option<i64>,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
         };
         let agg = spec_aggregation(spec)?;
         let filter = spec_filter(spec)?;
-        self.series(measure_key, agg, &filter, group_by).await
+        self.series_in_stream(measure_key, agg, &filter, group_by, stream)
+            .await
     }
 
     /// The by-dimension rollup for a spec — the source measure's facts filtered by
@@ -748,6 +793,30 @@ impl MetricEngine {
     /// the source measure's `temporal_semantics` (semi-additive → last capture;
     /// additive → sum; ratio → Σn/Σd). `None` for a formula / unknown / empty spec.
     pub async fn headline_for_spec(&self, spec: &MetricSpec) -> Result<Option<f64>, DomainError> {
+        self.headline_for_spec_in_stream(spec, None).await
+    }
+
+    /// [`Self::headline_for_spec`] scoped to one stream (worktree): the collapse
+    /// runs over that stream's series, so a semi-additive headline is ITS last
+    /// scan — not whichever worktree scanned most recently. `None` = all streams.
+    pub async fn headline_for_spec_in_stream(
+        &self,
+        spec: &MetricSpec,
+        stream: Option<i64>,
+    ) -> Result<Option<f64>, DomainError> {
+        let series = self.series_for_spec_in_stream(spec, None, stream).await?;
+        self.headline_from_series(spec, &series).await
+    }
+
+    /// Collapse an ALREADY-COMPUTED (ungrouped) series to the spec's headline per
+    /// its source measure's `temporal_semantics` — [`Self::headline_for_spec`]
+    /// without paying the fact load + aggregation a second time (the summary
+    /// reads compute the series anyway).
+    pub async fn headline_from_series(
+        &self,
+        spec: &MetricSpec,
+        series: &[SeriesPoint],
+    ) -> Result<Option<f64>, DomainError> {
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(None);
         };
@@ -755,8 +824,7 @@ impl MetricEngine {
             return Ok(None);
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        let series = self.series_for_spec(spec, None).await?;
-        Ok(range_value(&series, temporal))
+        Ok(range_value(series, temporal))
     }
 
     /// The located items behind a spec — its filtered facts projected as
@@ -1259,31 +1327,38 @@ mod tests {
 
     use oxplow_db::{Database, NewFact, NewMetricCapture, NewMetricSpec, SqliteFactStore};
 
-    /// A migrated in-memory store with stream(1) so capture FKs resolve, plus the
+    /// A migrated in-memory store with streams 1 (primary) + 2 (a worktree) so
+    /// capture FKs resolve and cross-worktree scoping is exercisable, plus the
     /// engine over it and the seeded `oxplow.complexity` measure id.
     async fn engine_fixture() -> (MetricEngine, SqliteFactStore, i64) {
         use oxplow_domain::stores::StreamStore;
         let db = Database::in_memory();
-        oxplow_db::SqliteStreamStore::new(db.clone())
-            .upsert(&oxplow_domain::Stream {
-                id: oxplow_domain::StreamId::new(1),
-                kind: oxplow_domain::StreamKind::Primary,
-                title: "t".into(),
-                branch: "main".into(),
-                branch_ref: "refs/heads/main".into(),
-                branch_source: "main".into(),
-                worktree_path: "/r".into(),
-                working_pane: String::new(),
-                talking_pane: String::new(),
-                working_session_id: String::new(),
-                talking_session_id: String::new(),
-                custom_prompt: None,
-                created_at: oxplow_domain::Timestamp::from_unix_ms(0),
-                updated_at: oxplow_domain::Timestamp::from_unix_ms(0),
-                archived_at: None,
-            })
-            .await
-            .unwrap();
+        let streams = oxplow_db::SqliteStreamStore::new(db.clone());
+        for (id, kind) in [
+            (1, oxplow_domain::StreamKind::Primary),
+            (2, oxplow_domain::StreamKind::Worktree),
+        ] {
+            streams
+                .upsert(&oxplow_domain::Stream {
+                    id: oxplow_domain::StreamId::new(id),
+                    kind,
+                    title: "t".into(),
+                    branch: "main".into(),
+                    branch_ref: "refs/heads/main".into(),
+                    branch_source: "main".into(),
+                    worktree_path: "/r".into(),
+                    working_pane: String::new(),
+                    talking_pane: String::new(),
+                    working_session_id: String::new(),
+                    talking_session_id: String::new(),
+                    custom_prompt: None,
+                    created_at: oxplow_domain::Timestamp::from_unix_ms(0),
+                    updated_at: oxplow_domain::Timestamp::from_unix_ms(0),
+                    archived_at: None,
+                })
+                .await
+                .unwrap();
+        }
         let facts = SqliteFactStore::new(db);
         let complexity = facts
             .get_measure("oxplow.complexity")
@@ -1295,9 +1370,13 @@ mod tests {
     }
 
     fn cap_at(captured_at: &str) -> NewMetricCapture {
+        cap_in(1, captured_at)
+    }
+
+    fn cap_in(stream: i64, captured_at: &str) -> NewMetricCapture {
         NewMetricCapture {
             captured_at: Some(ts(captured_at)),
-            ..NewMetricCapture::done(1, "metrics", "builtin")
+            ..NewMetricCapture::done(stream, "metrics", "builtin")
         }
     }
 
@@ -1488,6 +1567,176 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), None);
+    }
+
+    #[test]
+    fn avg_series_carries_components_so_the_non_additive_collapse_is_the_mean() {
+        // Mean-across-closes measures (cycle time, efforts-per-task; V47) are
+        // non-additive with `avg` aggregation: capture 1 has one close (100),
+        // capture 2 has two (200, 400).
+        let facts = vec![
+            fact(1, "2026-06-30T10:00:00Z", 100.0),
+            fact(2, "2026-06-30T11:00:00Z", 200.0),
+            fact(2, "2026-06-30T11:00:00Z", 400.0),
+        ];
+        let series = aggregate_series(&facts, Aggregation::Avg, &FactFilter::default(), None);
+        assert_eq!(
+            series.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![100.0, 300.0]
+        );
+        // Σn/Σd across points must be the mean across ALL closes (700/3) — not
+        // 0.0 (a den=0 short-circuit) and not a mean of the capture means (200).
+        let collapsed = range_value(&series, Temporal::NonAdditive).unwrap();
+        assert!((collapsed - 700.0 / 3.0).abs() < 1e-9, "got {collapsed}");
+    }
+
+    #[tokio::test]
+    async fn avg_spec_over_non_additive_measure_headlines_the_mean_across_captures() {
+        // effort.cycle_time_ms's exact shape: aggregation `avg` over the
+        // non-additive oxplow.cycle_time measure, one fact per close carrying
+        // numerator=value / denominator=1 (tsk42).
+        let (engine, facts, _c) = engine_fixture().await;
+        let cycle = facts
+            .get_measure("oxplow.cycle_time")
+            .await
+            .unwrap()
+            .expect("migration seeds oxplow.cycle_time")
+            .id;
+        for (at, v) in [
+            ("2026-06-30T10:00:00Z", 100.0),
+            ("2026-06-30T11:00:00Z", 200.0),
+        ] {
+            facts
+                .record_facts(
+                    NewMetricCapture {
+                        captured_at: Some(ts(at)),
+                        ..NewMetricCapture::done(1, "effort-lifecycle", "builtin")
+                    },
+                    vec![NewFact {
+                        numerator: Some(v),
+                        denominator: Some(1.0),
+                        ..NewFact::new(cycle, v)
+                    }],
+                )
+                .await
+                .unwrap();
+        }
+        let spec = NewMetricSpec::base("acme.cycle", "Cycle", "oxplow.cycle_time", "avg");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.cycle").await.unwrap().unwrap();
+        assert_eq!(
+            engine.headline_for_spec(&spec).await.unwrap(),
+            Some(150.0),
+            "the mean across closes, not a den=0 collapse to 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn series_and_headline_scoped_to_a_stream_ignore_other_worktrees() {
+        let (engine, facts, complexity) = engine_fixture().await;
+        // The main worktree scans 40; a feature worktree scans 3 an hour later.
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![NewFact::new(complexity, 40.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(2, "2026-06-30T11:00:00Z"),
+                vec![NewFact::new(complexity, 3.0)],
+            )
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.total", "Total", "oxplow.complexity", "sum");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.total").await.unwrap().unwrap();
+
+        // Unscoped read: every worktree's captures (the caller asked for all).
+        assert_eq!(engine.series_for_spec(&spec, None).await.unwrap().len(), 2);
+        // Stream-scoped: only that worktree's timeline, and the semi-additive
+        // headline is ITS last capture — not whichever worktree scanned last.
+        let scoped = engine
+            .series_for_spec_in_stream(&spec, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            scoped.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![40.0]
+        );
+        assert_eq!(
+            engine
+                .headline_for_spec_in_stream(&spec, Some(1))
+                .await
+                .unwrap(),
+            Some(40.0)
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_scoped_zero_fill_skips_other_streams_empty_captures() {
+        // A zero-hit scan in ANOTHER worktree must not splice a value-0 point
+        // into this stream's series (the tsk44 fill is per the scoped slice).
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![NewFact::new(complexity, 14.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(cap_in(2, "2026-06-30T11:00:00Z"), vec![])
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.count", "Count", "oxplow.complexity", "count");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.count").await.unwrap().unwrap();
+
+        let unscoped = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(
+            unscoped.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![1.0, 0.0],
+            "unscoped still zero-fills the other stream's empty scan"
+        );
+        let scoped = engine
+            .series_for_spec_in_stream(&spec, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            scoped.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![1.0]
+        );
+    }
+
+    #[tokio::test]
+    async fn headline_from_series_matches_headline_for_spec() {
+        // The summary read computes the series anyway; collapsing it must equal
+        // the from-scratch headline (one fact load instead of two).
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![NewFact::new(complexity, 5.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_at("2026-06-30T11:00:00Z"),
+                vec![NewFact::new(complexity, 7.0)],
+            )
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.sum", "Sum", "oxplow.complexity", "sum");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.sum").await.unwrap().unwrap();
+
+        let series = engine.series_for_spec(&spec, None).await.unwrap();
+        let from_series = engine.headline_from_series(&spec, &series).await.unwrap();
+        assert_eq!(from_series, engine.headline_for_spec(&spec).await.unwrap());
+        assert_eq!(from_series, Some(7.0), "semi-additive → the last capture");
     }
 
     #[tokio::test]

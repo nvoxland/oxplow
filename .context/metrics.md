@@ -120,7 +120,10 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
 - Pure cores: `aggregate_series(facts, agg, filter, group_by)` → one `SeriesPoint`
   per capture (preserving time order), optionally one series per group-by
   dimension value; `range_value(series, temporal)` collapses a series to one
-  number the additivity-correct way; `compute_rollup(facts, dimension, temporal,
+  number the additivity-correct way. An `avg` point carries `(Σvalues, count)`
+  as its ratio components so the non-additive collapse (Σn/Σd) yields the mean
+  across ALL facts — the V47 mean-across-closes measures (cycle_time,
+  task_effort) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
   current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
@@ -146,7 +149,13 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
   (`FactFilter::from_json` parses `filter_json`) and run the pure cores;
   `headline_for_spec` collapses across time per the *source measure's*
-  `temporal_semantics`. A formula metric (no `source_measure`) yields empty/None;
+  `temporal_semantics`. Each has an `_in_stream` variant (`series_in_stream` /
+  `series_for_spec_in_stream` / `headline_for_spec_in_stream` — the series
+  sibling of the tsk46 rollup scoping): unscoped, per-worktree scans interleave
+  into one timeline and a semi-additive headline flips to whichever worktree
+  scanned last; the zero-fill only splices the scoped stream's empty captures.
+  `headline_from_series` collapses an already-computed series so a summary read
+  pays the fact load once. A formula metric (no `source_measure`) yields empty/None;
   an aggregation the engine can't yet compute (`count_distinct`/`p95`) or a
   malformed `filter_json` is a surfaced `DomainError::Invalid`, never a silent
   wrong number. This is the bridge the read flip (tsk26) and UI (tsk18) consume.
@@ -263,9 +272,10 @@ measure-level primitives:
   subject_kind filter).
 - `list_facts(measure_key, limit)` — raw atomic facts, most-recent, with the
   capture spine.
-- `metric_series(measure_key, aggregation, group_by?, min_value?, severity?)` —
-  the metrics-as-definitions read: one aggregated point per capture, optionally
-  sliced by a dimension.
+- `metric_series(measure_key, aggregation, group_by?, min_value?, severity?,
+  stream?)` — the metrics-as-definitions read: one aggregated point per capture,
+  optionally sliced by a dimension; `stream` scopes to one worktree's scans
+  (like `metric_breakdown`).
 - `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
 
 **The five metric-KEY reads are flipped onto the engine (T-C2, tsk35)** — they
@@ -274,14 +284,17 @@ resolve a `metric_spec` by key (seeded catalog) and compute over its
 `metric_finding`/`metric_definition` store:
 - `list_metric_definitions` → `fact_store.list_specs()` (the spec catalog; each
   row carries `source_measure` + `aggregation`, not a baked sample stream).
-- `list_metric_samples(metric_key, limit)` → `series_for_spec` (newest-first,
-  capped) — the metric-key ergonomic wrapper over `metric_series`.
+- `list_metric_samples(metric_key, limit, stream?)` → `series_for_spec`
+  (newest-first, capped) — the metric-key ergonomic wrapper over
+  `metric_series`; `stream` scopes to one worktree.
 - `metric_breakdown(metric_key, dimension?)` → `rollup_for_spec` (default dim
   `oxplow.package`; an optional `stream` arg scopes to one worktree's scans
   (restored in tsk46) — facts aren't
   stream-partitioned at this grain).
-- `get_metric_summary(metric_key)` → `headline_for_spec` (series collapsed per
-  the measure's temporal semantics) + the latest series point's captured_at/branch.
+- `get_metric_summary(metric_key, stream?)` → one `series_for_spec_in_stream`
+  computation collapsed via `headline_from_series` (per the measure's temporal
+  semantics) + the latest series point's captured_at/branch; `stream` scopes
+  the headline to one worktree's timeline.
 - `list_metric_findings(metric_key, capture_id?)` → `findings_for_spec` — the
   read-time offenders view (args changed from `run_id`).
 

@@ -205,6 +205,11 @@ pub struct ListMetricSamplesParams {
     pub metric_key: String,
     /// Max rows, newest-first. Default 50.
     pub limit: Option<i64>,
+    /// Optional stream id (`str<N>` or bare number) to scope the series to one
+    /// worktree's scans — per-worktree captures don't interleave into one
+    /// timeline. Omit for all streams.
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -244,6 +249,11 @@ pub struct ListMetricFindingsParams {
 pub struct GetMetricSummaryParams {
     /// Metric definition key, e.g. `oxplow.coverage.diff_pct`.
     pub metric_key: String,
+    /// Optional stream id (`str<N>` or bare number) to scope the summary to one
+    /// worktree's scans — a semi-additive headline is then THAT stream's last
+    /// capture, not whichever worktree scanned most recently. Omit for all streams.
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -671,6 +681,10 @@ pub struct MetricSeriesParams {
     /// Optional: keep only facts whose reported severity equals this (e.g. `error`).
     #[serde(default)]
     pub severity: Option<String>,
+    /// Optional stream id (`str<N>` or bare number) to scope the series to one
+    /// worktree's scans. Omit for all streams.
+    #[serde(default)]
+    pub stream: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1931,14 +1945,19 @@ impl OxplowMcp {
             severity: params.0.severity,
             dim_eq: None,
         };
+        let stream = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?.value()),
+            None => None,
+        };
         let series = self
             .services
             .metric_engine
-            .series(
+            .series_in_stream(
                 &params.0.measure_key,
                 agg,
                 &filter,
                 params.0.group_by.as_deref(),
+                stream,
             )
             .await
             .map_err(internal)?;
@@ -1993,10 +2012,14 @@ impl OxplowMcp {
                 None,
             ));
         };
+        let stream = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?.value()),
+            None => None,
+        };
         let mut series = self
             .services
             .metric_engine
-            .series_for_spec(&spec, None)
+            .series_for_spec_in_stream(&spec, None, stream)
             .await
             .map_err(internal)?;
         // The engine returns oldest→newest; this read is newest-first, capped.
@@ -2209,16 +2232,22 @@ impl OxplowMcp {
                 None,
             ));
         };
+        let stream = match params.0.stream.as_deref() {
+            Some(s) => Some(parse_stream_id(s)?.value()),
+            None => None,
+        };
         let series = self
             .services
             .metric_engine
-            .series_for_spec(&spec, None)
+            .series_for_spec_in_stream(&spec, None, stream)
             .await
             .map_err(internal)?;
+        // Collapse the series we already computed — headline_for_spec would
+        // re-run the identical fact load + aggregation.
         let headline = self
             .services
             .metric_engine
-            .headline_for_spec(&spec)
+            .headline_from_series(&spec, &series)
             .await
             .map_err(internal)?;
         // The engine returns oldest→newest, so the last point is the most recent.
@@ -4689,6 +4718,7 @@ mod tests {
                     group_by: None,
                     min_value: None,
                     severity: None,
+                    stream: None,
                 }))
                 .await
                 .unwrap(),
@@ -4706,6 +4736,7 @@ mod tests {
                     group_by: None,
                     min_value: None,
                     severity: Some("error".into()),
+                    stream: None,
                 }))
                 .await
                 .unwrap(),
@@ -4754,6 +4785,7 @@ mod tests {
                 group_by: None,
                 min_value: None,
                 severity: None,
+                stream: None,
             }))
             .await
             .is_err());
@@ -4838,6 +4870,7 @@ mod tests {
                 .list_metric_samples(Parameters(ListMetricSamplesParams {
                     metric_key: "oxplow.todos".into(),
                     limit: None,
+                    stream: None,
                 }))
                 .await
                 .unwrap(),
@@ -4851,6 +4884,7 @@ mod tests {
             server
                 .get_metric_summary(Parameters(GetMetricSummaryParams {
                     metric_key: "oxplow.todos".into(),
+                    stream: None,
                 }))
                 .await
                 .unwrap(),
@@ -4903,12 +4937,14 @@ mod tests {
             .list_metric_samples(Parameters(ListMetricSamplesParams {
                 metric_key: "nope.nope".into(),
                 limit: None,
+                stream: None,
             }))
             .await
             .is_err());
         assert!(server
             .get_metric_summary(Parameters(GetMetricSummaryParams {
                 metric_key: "nope.nope".into(),
+                stream: None,
             }))
             .await
             .is_err());
