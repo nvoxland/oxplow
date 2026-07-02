@@ -295,13 +295,13 @@ impl MetricsService {
             }
         }
         // Config-declared metric SPECS (global ∪ project `metrics:` entries). A
-        // `use:` of a built-in re-seeds it with any threshold override; a `key:`
-        // seeds the new spec. Built-in specs are seeded above; skip them here.
-        for s in self
-            .resolved_specs()
-            .into_iter()
-            .filter(|s| s.scope != "built-in")
-        {
+        // `key:` seeds a new spec; a `use:` of a BUILT-IN resolves to scope
+        // `built-in` carrying the catalog default target plus the project's
+        // threshold overrides (the Catalog inline target editor writes exactly
+        // such a `use:`), so it must re-seed AFTER the override-free built-ins
+        // above — dropping it left target/warn_at/fail_at NULL everywhere the
+        // engine reads the spec row.
+        for s in self.resolved_specs() {
             if let Err(e) = facts.upsert_spec(spec_to_new_spec(&s)).await {
                 tracing::warn!(key = %s.key, error = %e, "failed to seed config metric spec");
             }
@@ -2193,6 +2193,36 @@ def transform(input):
         assert_eq!(spec.aggregation, "sum");
         assert_eq!(spec.scope, "project");
         assert_eq!(spec.source_measure.as_deref(), Some("acme.lines"));
+    }
+
+    #[tokio::test]
+    async fn seed_catalog_applies_use_overrides_to_builtin_specs() {
+        // A project `use:` of a built-in resolves WITH the user's threshold
+        // overrides (the Catalog inline target editor writes exactly this) —
+        // they must land on the persisted metric_spec, not be dropped by the
+        // built-in skip: the Detail page target, delta_vs_target, and the
+        // warn/fail findings all read the spec row.
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "metrics:\n  - use: oxplow.todos\n    target: 5\n    warnAt: 8\n    failAt: 13\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.todos")
+            .await
+            .unwrap()
+            .expect("seeded");
+        assert_eq!(spec.scope, "built-in");
+        assert_eq!(spec.target, Some(5.0));
+        assert_eq!(spec.warn_at, Some(8.0));
+        assert_eq!(spec.fail_at, Some(13.0));
+        // The structural spec survives the override re-seed.
+        assert_eq!(spec.source_measure.as_deref(), Some("oxplow.todo"));
+        assert_eq!(spec.aggregation, "count");
     }
 
     #[tokio::test]

@@ -2100,9 +2100,12 @@ impl OxplowMcp {
     #[tool(
         description = "Record an ASSERTED metric fact (provenance=asserted) — a number oxplow did \
             not compute itself (CI import, agent-reported). `key` must be an existing metric spec \
-            with a source measure (a formula metric has no fact type to assert on); the fact lands \
-            on that measure under a lower-trust `asserted` capture, so the metric's own \
-            series/summary reads include it. Prefer a real collector where possible."
+            with a source measure (a formula metric has no fact type to assert on; a `count` \
+            metric counts fact rows, so it is rejected too — run the collector instead). The fact \
+            lands on that measure under a lower-trust `asserted` capture, stamped to match the \
+            spec's own filter (severity/rule/dims) and carrying ratio components when the spec is \
+            a ratio, so the metric's own series/summary reads include it. Prefer a real collector \
+            where possible."
     )]
     async fn record_metric(
         &self,
@@ -2139,6 +2142,17 @@ impl OxplowMcp {
                 None,
             ));
         };
+        // A count spec aggregates fact ROWS — one asserted fact would read as 1
+        // whatever its value. Reject loudly (run the real collector) rather than
+        // record a number every read disagrees with.
+        if matches!(spec.aggregation.as_str(), "count" | "count_distinct") {
+            return Err(McpError::invalid_params(
+                "a `count` metric counts fact rows, so a single asserted value cannot \
+                 represent it — run the collector instead (run_metric / record_test_run / \
+                 ingest_analysis)",
+                None,
+            ));
+        }
         let stream = match p.stream.as_deref() {
             Some(s) => parse_stream_id(s)?,
             None => oxplow_domain::StreamId::new(1),
@@ -2148,11 +2162,35 @@ impl OxplowMcp {
             Some((k, r)) => (Some(k.to_string()), Some(r.to_string())),
             None => (None, p.subject.clone()),
         };
-        let dims_json = p
-            .dims
-            .as_ref()
-            .filter(|d| !d.is_empty())
-            .and_then(|d| serde_json::to_string(d).ok());
+        // Stamp the fact so the SPEC'S OWN filter matches it (severity /
+        // dim_eq) — otherwise the metric's reads exclude the asserted number
+        // while the tool reports success. `oxplow.rule` is a fact COLUMN
+        // (`dim_value` reads it there, never dims_json), so it lands on `rule`.
+        let filter = match spec.filter_json.as_deref() {
+            Some(j) => oxplow_app::metric_engine::FactFilter::from_json(j).map_err(internal)?,
+            None => oxplow_app::metric_engine::FactFilter::default(),
+        };
+        let mut dims = p.dims.clone().unwrap_or_default();
+        let mut rule = None;
+        if let Some((k, v)) = &filter.dim_eq {
+            if k == "oxplow.rule" {
+                rule = Some(v.clone());
+            } else {
+                dims.insert(k.clone(), v.clone());
+            }
+        }
+        let severity = filter.severity.clone();
+        // A `ratio` spec re-derives Σn/Σd, so the fact needs components; a
+        // %-presented ratio reads ×100, so den=100 makes the asserted percent
+        // round-trip exactly (den=1 for a plain ratio).
+        let (numerator, denominator) = match spec.aggregation.as_str() {
+            "ratio" if spec.unit.as_deref() == Some("%") => (Some(p.value), Some(100.0)),
+            "ratio" => (Some(p.value), Some(1.0)),
+            _ => (None, None),
+        };
+        let dims_json = (!dims.is_empty())
+            .then(|| serde_json::to_string(&dims).ok())
+            .flatten();
         let mut capture =
             oxplow_db::NewMetricCapture::done(stream.value(), p.key.clone(), "agent-reported");
         capture.provenance = "asserted".into();
@@ -2160,6 +2198,10 @@ impl OxplowMcp {
             subject_kind,
             subject_ref,
             dims_json,
+            severity,
+            rule,
+            numerator,
+            denominator,
             ..oxplow_db::NewFact::new(measure.id, p.value)
         };
         let capture_id = self
@@ -6131,6 +6173,97 @@ mod tests {
         assert_eq!(facts[0].source, "agent-reported");
         assert_eq!(facts[0].subject_kind.as_deref(), Some("suite"));
         assert_eq!(facts[0].subject_ref.as_deref(), Some("unit"));
+    }
+
+    #[tokio::test]
+    async fn record_metric_stamps_the_spec_filter_so_reads_include_it() {
+        // An asserted fact must be READABLE BY ITS OWN SPEC: a dim_eq-filtered
+        // spec (the idiom shape) excludes an unlabeled fact, so the tool would
+        // report success while every series/summary read ignores the number.
+        let (_p, services, server) = boot();
+        services.metrics.seed_catalog().await;
+        // oxplow.rust.unsafe_blocks = Sum(oxplow.ast_hit) filtered by
+        // dim_eq(oxplow.rule, unsafe_block) — the rule rides the fact COLUMN.
+        server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "oxplow.rust.unsafe_blocks".into(),
+                value: 42.0,
+                subject: None,
+                dims: None,
+                stream: None,
+            }))
+            .await
+            .unwrap();
+        let spec = services
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            services
+                .metric_engine
+                .headline_for_spec(&spec)
+                .await
+                .unwrap(),
+            Some(42.0),
+            "the asserted value reads back through the spec's own filter"
+        );
+    }
+
+    #[tokio::test]
+    async fn record_metric_asserted_percent_ratio_reads_back() {
+        // A %-ratio spec (coverage's shape) re-derives Σn/Σd ×100 — the
+        // asserted percent must survive that round-trip, not collapse to 0
+        // (no components) or read 100× off.
+        let (_p, services, server) = boot();
+        services.metrics.seed_catalog().await;
+        server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "oxplow.coverage.abs_pct".into(),
+                value: 85.0,
+                subject: None,
+                dims: None,
+                stream: None,
+            }))
+            .await
+            .unwrap();
+        let spec = services
+            .fact_store
+            .get_spec("oxplow.coverage.abs_pct")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            services
+                .metric_engine
+                .headline_for_spec(&spec)
+                .await
+                .unwrap(),
+            Some(85.0)
+        );
+    }
+
+    #[tokio::test]
+    async fn record_metric_rejects_a_count_spec() {
+        // A count spec aggregates fact ROWS — one asserted fact would read as
+        // 1 whatever its value. Reject loudly instead of recording a number
+        // every read disagrees with.
+        let (_p, services, server) = boot();
+        services.metrics.seed_catalog().await;
+        let err = server
+            .record_metric(Parameters(RecordMetricParams {
+                key: "oxplow.todos".into(),
+                value: 42.0,
+                subject: None,
+                dims: None,
+                stream: None,
+            }))
+            .await;
+        assert!(
+            err.is_err(),
+            "count specs cannot represent one asserted value"
+        );
     }
 
     #[tokio::test]

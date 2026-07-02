@@ -359,7 +359,14 @@ dimensions:                        # custom conformed slice axes
 - **Boot seeding:** `MetricsService::seed_catalog()` runs once at boot and on
   every `ConfigChanged` (beside `seed_definitions`), upserting resolved
   measures/dimensions into the `measure`/`dimension` tables. `MetricsService`
-  holds a `fact_store` via `.with_fact_store()`.
+  holds a `fact_store` via `.with_fact_store()`. Metric specs seed in two
+  passes: the override-free built-ins (`builtin_metric_specs` /
+  `builtin_ast_specs` / `builtin_producer_specs`) first, then EVERY resolved
+  config spec — including a `use:` of a built-in, which resolves to scope
+  `built-in` carrying the catalog default target plus the project's
+  target/warnAt/failAt overrides (what `set_metric_override` writes). The
+  second pass must not skip built-in scope, or those thresholds never reach
+  the persisted `metric_spec` the engine reads.
 - **Scaffolds:** `MetricsService::scaffold_measure` / `scaffold_dimension` —
   one-call "create a custom measure/dimension" (append config entry or write a
   shareable `<global>/…/<slug>.yaml`, reseed, return the key). The IPC/UI "New
@@ -579,7 +586,12 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   returns `facts_recorded`) and `record_metric` (an **asserted FACT** on the
   metric's source measure, under a `provenance: asserted` / `source:
   agent-reported` capture — flipped off the legacy sample write in tsk41 so the
-  fact-based reads actually see it; a formula spec is rejected). These four are
+  fact-based reads actually see it; a formula spec is rejected, and so is a
+  `count` spec — one asserted fact would read as 1 whatever its value. The fact
+  is stamped to match the spec's own filter (severity / dim_eq → the `rule`
+  column for `oxplow.rule`, dims_json otherwise) and carries ratio components
+  for a `ratio` spec (den=100 for `%` so the percent round-trips), so the
+  metric's own reads actually include the asserted number). These four are
   **agent-only** (classified in the surface-parity manifest); the renderer
   drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
