@@ -192,7 +192,10 @@ fn number_value(v: &Option<number_data_point::Value>) -> i64 {
 pub fn summarize_metrics_request(body: &[u8]) -> String {
     let req = match decode_metrics_request(body) {
         Ok(r) => r,
-        Err(e) => return format!("<undecodable OTLP metrics: {e}; {} bytes>", body.len()),
+        // Codex points its single OTLP endpoint here and sends its LOG events
+        // too (its token counts may ride the `codex.response.completed` event),
+        // so on a metrics-decode miss fall back to dumping the logs payload.
+        Err(metrics_err) => return summarize_logs_request(body, &metrics_err),
     };
     let mut lines = Vec::new();
     for rm in &req.resource_metrics {
@@ -233,6 +236,56 @@ pub fn summarize_metrics_request(body: &[u8]) -> String {
     } else {
         lines.join("\n")
     }
+}
+
+/// Fallback dump when a body isn't OTLP MetricsData: try OTLP LogsData and list
+/// each log record's event name + attributes + body (tsk26). Codex's token
+/// counts are suspected to ride the `codex.response.completed` log event.
+fn summarize_logs_request(body: &[u8], metrics_err: &prost::DecodeError) -> String {
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    let req = match ExportLogsServiceRequest::decode(body) {
+        Ok(r) => r,
+        Err(logs_err) => {
+            return format!(
+                "<undecodable as metrics ({metrics_err}) or logs ({logs_err}); {} bytes>",
+                body.len()
+            )
+        }
+    };
+    let mut lines = vec!["[OTLP LOGS payload — not metrics]".to_string()];
+    for rl in &req.resource_logs {
+        if let Some(res) = &rl.resource {
+            let a = fmt_attrs(&res.attributes);
+            if !a.is_empty() {
+                lines.push(format!("resource: {a}"));
+            }
+        }
+        for sl in &rl.scope_logs {
+            for lr in &sl.log_records {
+                let name = if !lr.event_name.is_empty() {
+                    lr.event_name.as_str()
+                } else if !lr.severity_text.is_empty() {
+                    lr.severity_text.as_str()
+                } else {
+                    "<log>"
+                };
+                let body_str = lr
+                    .body
+                    .as_ref()
+                    .and_then(|b| b.value.as_ref())
+                    .map(fmt_attr_value)
+                    .unwrap_or_default();
+                lines.push(format!(
+                    "log {name} {{{}}} body={body_str}",
+                    fmt_attrs(&lr.attributes)
+                ));
+            }
+        }
+    }
+    if lines.len() == 1 {
+        lines.push("<no log records>".to_string());
+    }
+    lines.join("\n")
 }
 
 fn summarize_number_points(
@@ -518,6 +571,32 @@ mod tests {
         assert!(s.contains("value=100"));
         // A garbage body degrades gracefully rather than panicking.
         assert!(summarize_metrics_request(b"not protobuf").contains("undecodable"));
+    }
+
+    #[test]
+    fn logs_payload_falls_back_to_a_logs_dump() {
+        // tsk26: a body that isn't MetricsData is retried as LogsData so the
+        // dump reveals Codex's log events (where its token counts may live).
+        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+        let body = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord {
+                        event_name: "codex.response.completed".into(),
+                        attributes: vec![kv("input_tokens", "100"), kv("output_tokens", "20")],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+        let s = summarize_metrics_request(&body);
+        assert!(s.contains("[OTLP LOGS payload"), "{s}");
+        assert!(s.contains("codex.response.completed"));
+        assert!(s.contains("input_tokens=100"));
     }
 
     #[test]
