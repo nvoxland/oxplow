@@ -15,6 +15,6 @@ def transform(input):
         c = len(ast_query(f["text"], "rust", "(unsafe_block) @u"))
         total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"language": "rust"}})
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"language": "rust"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "rust"}}] + per_file, "facts": facts}
+            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"oxplow.language": "rust"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "unsafe_block", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "rust"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "rust"}}] + per_file, "facts": facts}

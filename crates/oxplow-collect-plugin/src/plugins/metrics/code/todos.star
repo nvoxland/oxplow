@@ -12,5 +12,5 @@ def transform(input):
     for f in source_files():
         lang = f["language"]
         for mk in markers(f["text"], lang):
-            facts.append({"measure": "oxplow.todo", "value": 1, "subject": "file:" + f["path"], "path": f["path"], "line": mk["line"], "dims": {"language": lang}})
+            facts.append({"measure": "oxplow.todo", "value": 1, "subject": "file:" + f["path"], "path": f["path"], "line": mk["line"], "dims": {"oxplow.language": lang}})
     return {"facts": facts}

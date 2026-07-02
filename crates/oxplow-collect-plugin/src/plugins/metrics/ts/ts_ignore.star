@@ -21,6 +21,6 @@ def transform(input):
             c += len(regex_find(r"@ts-(ignore|expect-error)", cm["text"]))
         total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"language": "typescript"}})
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "ts_ignore", "subject": "file:" + tri[0], "path": tri[0], "dims": {"language": "typescript"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "typescript"}}] + per_file, "facts": facts}
+            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "ts_ignore", "subject": "file:" + tri[0], "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "typescript"}}] + per_file, "facts": facts}

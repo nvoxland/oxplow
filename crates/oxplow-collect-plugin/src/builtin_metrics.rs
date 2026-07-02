@@ -356,10 +356,12 @@ mod tests {
             .facts
             .iter()
             .map(|fc| {
+                // The conformed dimension key (V43) — the scripts emit it
+                // namespaced so `oxplow.language` group_by/dim_eq matches.
                 let lang = fc
                     .dims
                     .as_ref()
-                    .and_then(|d| d.get("language"))
+                    .and_then(|d| d.get("oxplow.language"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 (fc.measure.clone(), fc.value, lang)

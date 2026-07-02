@@ -2149,6 +2149,56 @@ def transform(input):
     }
 
     #[tokio::test]
+    async fn gauge_facts_slice_by_the_conformed_language_dimension() {
+        // The conformed catalog declares `oxplow.language` (V43) and
+        // list_dimensions advertises it — the bundled gauges' facts must be
+        // sliceable by it (group_by / dim_eq), with bare `language` kept as a
+        // legacy alias for pre-rename facts and the Explorer's declared dims.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let mut corpus = HashMap::new();
+        corpus.insert(
+            "src/lib.rs".to_string(),
+            "pub fn f() {\n    unsafe { std::ptr::read(std::ptr::null::<u8>()); }\n}\n".to_string(),
+        );
+        let files = Arc::new(corpus);
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(1),
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: Some("main".into()),
+            effort_id: None,
+        };
+        svc.metrics
+            .run_one_gauge(
+                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
+                &ctx,
+                files.clone(),
+            )
+            .await;
+
+        let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .unwrap();
+        let rollup = engine
+            .rollup_for_spec(&spec, "oxplow.language")
+            .await
+            .unwrap();
+        assert_eq!(rollup.len(), 1, "one language group, got {rollup:?}");
+        assert_eq!(rollup[0].key, "rust");
+        // The bare key still slices identically.
+        let bare = engine.rollup_for_spec(&spec, "language").await.unwrap();
+        assert_eq!(bare, rollup);
+    }
+
+    #[tokio::test]
     async fn seed_catalog_seeds_producer_specs() {
         // T-B: the always-on producer metrics are seeded as `metric_spec`s beside
         // the built-in gauge specs, over the V43/V46 measures.

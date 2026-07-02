@@ -21,6 +21,6 @@ def transform(input):
                 c += 1
         total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"language": "csharp"}})
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "blocking_async", "subject": "file:" + f["path"], "path": f["path"], "dims": {"language": "csharp"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "csharp"}}] + per_file, "facts": facts}
+            per_file.append({"value": c, "subject": "file:" + f["path"], "dims": {"oxplow.language": "csharp"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "blocking_async", "subject": "file:" + f["path"], "path": f["path"], "dims": {"oxplow.language": "csharp"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "csharp"}}] + per_file, "facts": facts}

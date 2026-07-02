@@ -24,6 +24,6 @@ def transform(input):
                 c += 1
         total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + pair[0], "dims": {"language": "clojure"}})
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "defn", "subject": "file:" + pair[0], "path": pair[0], "dims": {"language": "clojure"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "clojure"}}] + per_file, "facts": facts}
+            per_file.append({"value": c, "subject": "file:" + pair[0], "dims": {"oxplow.language": "clojure"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "defn", "subject": "file:" + pair[0], "path": pair[0], "dims": {"oxplow.language": "clojure"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "clojure"}}] + per_file, "facts": facts}

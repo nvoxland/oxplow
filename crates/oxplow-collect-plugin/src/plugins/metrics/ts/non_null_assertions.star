@@ -19,6 +19,6 @@ def transform(input):
         c = len(ast_query(tri[1], tri[2], "(non_null_expression) @n"))
         total += c
         if c > 0:
-            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"language": "typescript"}})
-            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "non_null_assertion", "subject": "file:" + tri[0], "path": tri[0], "dims": {"language": "typescript"}})
-    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"language": "typescript"}}] + per_file, "facts": facts}
+            per_file.append({"value": c, "subject": "file:" + tri[0], "dims": {"oxplow.language": "typescript"}})
+            facts.append({"measure": "oxplow.ast_hit", "value": c, "rule": "non_null_assertion", "subject": "file:" + tri[0], "path": tri[0], "dims": {"oxplow.language": "typescript"}})
+    return {"samples": [{"value": total, "subject": "tree:.", "dims": {"oxplow.language": "typescript"}}] + per_file, "facts": facts}

@@ -247,6 +247,13 @@ fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
         // the model (a `model:<id>` subject → the bare id, else the dims_json
         // `oxplow.model`).
         "oxplow.branch" | "branch" => f.branch.clone(),
+        // The conformed key is `oxplow.language` (V43), but the Explorer's
+        // declared sliceable_dims request the bare form and facts recorded
+        // before the gauge scripts namespaced their dims carry bare
+        // `language` — both request forms read both fact vintages.
+        "oxplow.language" | "language" => {
+            dim_from_json(f, "oxplow.language").or_else(|| dim_from_json(f, "language"))
+        }
         "subject" => f.subject_ref.clone(),
         "oxplow.model" | "model" => match &f.subject_ref {
             Some(s) if f.subject_kind.as_deref() == Some("model") => {
@@ -1601,6 +1608,33 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), None);
+    }
+
+    #[test]
+    fn language_dim_reads_both_conformed_and_legacy_bare_keys() {
+        // The conformed catalog (V43) declares `oxplow.language`; the bundled
+        // gauge scripts emit it namespaced, but facts recorded before the
+        // rename carry bare `language` — and the Explorer's declared
+        // sliceable_dims still request the bare form. Both request forms must
+        // read both fact vintages.
+        let namespaced = FactRow {
+            dims_json: Some("{\"oxplow.language\":\"rust\"}".into()),
+            ..fact(1, "2026-06-30T10:00:00Z", 1.0)
+        };
+        let legacy = FactRow {
+            dims_json: Some("{\"language\":\"rust\"}".into()),
+            ..fact(1, "2026-06-30T10:00:00Z", 1.0)
+        };
+        for f in [&namespaced, &legacy] {
+            for key in ["oxplow.language", "language"] {
+                assert_eq!(
+                    dim_value(f, key).as_deref(),
+                    Some("rust"),
+                    "dims {:?} requested as {key}",
+                    f.dims_json
+                );
+            }
+        }
     }
 
     #[test]

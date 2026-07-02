@@ -132,7 +132,10 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   running total, not the last turn); non-additive → current captures, latest per
   subject, per-group Σnumerator/Σdenominator, never a naive sum/average of
   percentages. `dim_value` reads the `severity`/`rule` columns and
-  `package`-from-path directly, else `dims_json[key]`. `FactRow` carries the
+  `package`-from-path directly, else `dims_json[key]`; `oxplow.language` /
+  bare `language` alias each other (the gauge scripts emit the conformed
+  namespaced key; pre-rename facts and the Explorer's declared sliceable_dims
+  use the bare form). `FactRow` carries the
   capture's `producer` for exactly this scan-currency logic.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
   `rollup(measure_key, dimension)` fetch a measure's facts and aggregate
@@ -193,7 +196,7 @@ Landed:
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
 | duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref`. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
 | code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
-| per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
+| per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 
 **Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The
 read-side effort attribution (T-D) resolves an effort's facts from *its captures*
