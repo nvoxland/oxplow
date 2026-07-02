@@ -155,7 +155,12 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   into one timeline and a semi-additive headline flips to whichever worktree
   scanned last; the zero-fill only splices the scoped stream's empty captures.
   `headline_from_series` collapses an already-computed series so a summary read
-  pays the fact load once. A formula metric (no `source_measure`) yields empty/None;
+  pays the fact load once. **Percent presentation:** a `ratio` spec with unit
+  `%` reads ×100 (`spec_value_scale`) — the facts carry raw components
+  (covered/instrumented lines) and the engine derives 0..1, but the spec's
+  unit/thresholds and the per-fact `value` column are 0..100; series/rollup/
+  headline agree with them (the raw num/den stay on the point). Measure-level
+  reads return the raw fraction. A formula metric (no `source_measure`) yields empty/None;
   an aggregation the engine can't yet compute (`count_distinct`/`p95`) or a
   malformed `filter_json` is a surfaced `DomainError::Invalid`, never a silent
   wrong number. This is the bridge the read flip (tsk26) and UI (tsk18) consume.
@@ -186,7 +191,7 @@ Landed:
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
-| duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref` |
+| duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref`. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
 | code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
 | per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
 

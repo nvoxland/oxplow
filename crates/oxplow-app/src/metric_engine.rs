@@ -746,8 +746,18 @@ impl MetricEngine {
         };
         let agg = spec_aggregation(spec)?;
         let filter = spec_filter(spec)?;
-        self.series_in_stream(measure_key, agg, &filter, group_by, stream)
-            .await
+        let mut series = self
+            .series_in_stream(measure_key, agg, &filter, group_by, stream)
+            .await?;
+        let scale = spec_value_scale(spec);
+        if scale != 1.0 {
+            for p in &mut series {
+                // Present on the spec's scale; the raw components stay for
+                // downstream re-aggregation.
+                p.value *= scale;
+            }
+        }
+        Ok(series)
     }
 
     /// The by-dimension rollup for a spec — the source measure's facts filtered by
@@ -786,7 +796,14 @@ impl MetricEngine {
             .filter(|f| stream.map_or(true, |s| f.stream_id == s))
             .collect();
         let current = self.current_captures(&kept).await?;
-        Ok(compute_rollup(&kept, dimension, temporal, &current))
+        let mut rollup = compute_rollup(&kept, dimension, temporal, &current);
+        let scale = spec_value_scale(spec);
+        if scale != 1.0 {
+            for r in &mut rollup {
+                r.value *= scale;
+            }
+        }
+        Ok(rollup)
     }
 
     /// The single headline number for a spec: its series collapsed across TIME per
@@ -824,7 +841,9 @@ impl MetricEngine {
             return Ok(None);
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        Ok(range_value(series, temporal))
+        // A non-additive collapse re-derives Σn/Σd from the RAW components, so
+        // the spec's presentation scale applies here too.
+        Ok(range_value(series, temporal).map(|v| v * spec_value_scale(spec)))
     }
 
     /// The located items behind a spec — its filtered facts projected as
@@ -923,6 +942,21 @@ fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
             spec.aggregation
         ))
     })
+}
+
+/// The presentation scale for a spec's aggregated values: a `ratio` spec with
+/// unit `%` reads ×100. The facts carry raw components (covered/instrumented
+/// lines) and the engine derives a 0..1 fraction, but the spec's unit,
+/// target/warn/fail thresholds, and the per-fact `value` column are all on the
+/// 0..100 scale — the spec-driven reads must agree with them, or 85% coverage
+/// renders as an always-failing "0.85%" (tsk3). Applies only where the spec is
+/// in scope; measure-level reads return the raw fraction.
+fn spec_value_scale(spec: &MetricSpec) -> f64 {
+    if spec.aggregation == "ratio" && spec.unit.as_deref() == Some("%") {
+        100.0
+    } else {
+        1.0
+    }
 }
 
 /// A spec's `filter_json` as a [`FactFilter`] (the empty filter when absent).
@@ -1708,6 +1742,66 @@ mod tests {
             scoped.iter().map(|p| p.value).collect::<Vec<_>>(),
             vec![1.0]
         );
+    }
+
+    #[tokio::test]
+    async fn percent_ratio_spec_reads_on_the_percent_scale() {
+        // oxplow.coverage.abs_pct's shape: a `ratio` spec with unit `%` whose
+        // facts carry raw line counts (num/den) and a percent value column. The
+        // spec-driven reads must come out on the SAME 0..100 scale as the
+        // spec's unit + thresholds + per-fact values — not the raw 0..1
+        // fraction (a 100× mismatch that rendered 85% coverage as an
+        // always-failing "0.85%").
+        let (engine, facts, _c) = engine_fixture().await;
+        let cov = facts
+            .get_measure("oxplow.coverage")
+            .await
+            .unwrap()
+            .expect("migration seeds oxplow.coverage")
+            .id;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact {
+                        numerator: Some(17.0),
+                        denominator: Some(20.0),
+                        path: Some("src/a.rs".into()),
+                        subject_ref: Some("file:src/a.rs".into()),
+                        ..NewFact::new(cov, 85.0)
+                    },
+                    NewFact {
+                        numerator: Some(3.0),
+                        denominator: Some(5.0),
+                        path: Some("src/b.rs".into()),
+                        subject_ref: Some("file:src/b.rs".into()),
+                        ..NewFact::new(cov, 60.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let mut spec = NewMetricSpec::base("acme.cov", "Coverage", "oxplow.coverage", "ratio");
+        spec.unit = Some("%".into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.cov").await.unwrap().unwrap();
+
+        // (17+3)/(20+5) = 0.8 → presented as 80.0 (%); the raw components stay
+        // on the point for downstream re-aggregation.
+        let series = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(series.len(), 1);
+        assert_eq!(series[0].value, 80.0);
+        assert_eq!(series[0].numerator, Some(20.0));
+        assert_eq!(series[0].denominator, Some(25.0));
+        assert_eq!(
+            engine.headline_for_spec(&spec).await.unwrap(),
+            Some(80.0),
+            "headline on the percent scale, comparable to target/warn/fail"
+        );
+        let rollup = engine.rollup_for_spec(&spec, "package").await.unwrap();
+        assert_eq!(rollup.len(), 1);
+        assert_eq!(rollup[0].key, "src");
+        assert_eq!(rollup[0].value, 80.0, "per-group Σn/Σd, percent scale");
     }
 
     #[tokio::test]

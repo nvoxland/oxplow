@@ -195,7 +195,11 @@ pub async fn run_duplication_scan_at(
                 .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
                 .await?;
 
-            if !dup_facts.is_empty() {
+            // Always write the capture when the measure exists — an EMPTY one
+            // is the "scanned, found nothing" record the currency/zero-fill
+            // logic needs (tsk44), or the last non-empty scan's blocks stay
+            // "current" forever after a refactor removes every duplicate.
+            if dup_measure_id.is_some() {
                 if let Err(e) =
                     write_duplication_facts(svc, dup_facts, &kind_tag, value_str.as_deref()).await
                 {
@@ -818,6 +822,67 @@ mod tests {
             .unwrap();
         assert_eq!(cap.producer, "duplication");
         assert!(cap.basis_ref.is_some());
+    }
+
+    #[tokio::test]
+    async fn duplication_rescan_with_zero_hits_records_the_zero() {
+        // tsk44 semantics: "scanned, found nothing" writes an EMPTY capture so
+        // the currency logic drops the stale blocks — otherwise the metric
+        // reports the pre-refactor duplication forever while the Code quality
+        // panel shows clean.
+        let (svc, dir) = crate::test_support::services();
+        svc.streams.ensure_primary().await.unwrap();
+        let body = "pub fn compute(input: &[i64]) -> i64 {\n\
+        \x20   let mut total = 0;\n\
+        \x20   for value in input {\n\
+        \x20       if *value > 0 {\n\
+        \x20           total += *value;\n\
+        \x20       } else {\n\
+        \x20           total -= *value;\n\
+        \x20       }\n\
+        \x20   }\n\
+        \x20   total * 2 + 1\n\
+        }\n";
+        std::fs::write(dir.path().join("a.rs"), body).unwrap();
+        std::fs::write(dir.path().join("b.rs"), body).unwrap();
+        run_duplication_scan_at(
+            &svc,
+            TreeVersion::Disk,
+            FileFilterSpec::All,
+            "project".into(),
+        )
+        .await
+        .unwrap();
+        let rollup = svc
+            .metric_engine
+            .rollup("oxplow.duplicate_lines", "oxplow.package")
+            .await
+            .unwrap();
+        assert!(
+            !rollup.is_empty(),
+            "duplicates present after the first scan"
+        );
+
+        // The refactor removes every duplicate; the rescan must clear the
+        // metric's current state.
+        std::fs::remove_file(dir.path().join("b.rs")).unwrap();
+        run_duplication_scan_at(
+            &svc,
+            TreeVersion::Disk,
+            FileFilterSpec::All,
+            "project".into(),
+        )
+        .await
+        .unwrap();
+        let rollup = svc
+            .metric_engine
+            .rollup("oxplow.duplicate_lines", "oxplow.package")
+            .await
+            .unwrap();
+        assert!(
+            rollup.is_empty(),
+            "a zero-hit rescan clears the current state, got {rollup:?}"
+        );
     }
 
     #[tokio::test]
