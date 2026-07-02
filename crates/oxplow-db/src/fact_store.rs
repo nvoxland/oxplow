@@ -355,6 +355,12 @@ pub struct NewMetricCapture {
     pub ended_at: Option<Timestamp>,
     /// See [`MetricCapture::detail_json`].
     pub detail_json: Option<String>,
+    /// Optional CONTENT IDENTITY for idempotent ingestion (tsk14): a hash of
+    /// producer + basis + verbatim payload. When set and a capture with the
+    /// same key already exists, [`SqliteFactStore::record_facts`] skips the
+    /// whole write (no duplicate capture, no double-counted facts) and returns
+    /// the existing id. `None` (the default) always inserts a fresh row.
+    pub idempotency_key: Option<String>,
 }
 
 impl NewMetricCapture {
@@ -379,6 +385,7 @@ impl NewMetricCapture {
             captured_at: None,
             ended_at: None,
             detail_json: None,
+            idempotency_key: None,
         }
     }
 }
@@ -426,8 +433,8 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_git_version, git_version_exact, branch,
-            captured_at, ended_at, detail_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            captured_at, ended_at, detail_json, idempotency_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             c.stream_id,
             c.thread_id,
@@ -447,6 +454,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             captured,
             ended,
             c.detail_json,
+            c.idempotency_key,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -838,6 +846,25 @@ impl SqliteFactStore {
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
+                // Idempotent ingestion (tsk14): if this capture carries a
+                // content identity that's already been recorded, skip the whole
+                // write (no duplicate capture, no double-counted facts) and
+                // return the existing id. The partial unique index is the true
+                // guard; this SELECT is the fast, race-free path on the single
+                // serialized write connection.
+                if let Some(key) = capture.idempotency_key.as_deref() {
+                    let existing: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM metric_capture WHERE idempotency_key = ?1",
+                            params![key],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(map_sql_err)?;
+                    if let Some(id) = existing {
+                        return Ok(id);
+                    }
+                }
                 let capture_id = insert_capture(&tx, capture).map_err(map_sql_err)?;
                 for mut f in facts {
                     f.capture_id = Some(capture_id);
@@ -1229,6 +1256,64 @@ mod tests {
         assert_eq!(rows[0].subject_ref.as_deref(), Some("src/a.rs::foo"));
         assert_eq!(rows[0].value, 14.0);
         assert_eq!(rows[1].value, 3.0);
+    }
+
+    #[tokio::test]
+    async fn record_facts_is_idempotent_on_key() {
+        // tsk14: a keyed capture re-recorded (a replayed report) is a no-op —
+        // the existing id comes back and no facts double-insert.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.complexity").await;
+        let build = || {
+            (
+                NewMetricCapture {
+                    idempotency_key: Some("coverage|abc1234||payload".into()),
+                    ..NewMetricCapture::done(1, "coverage", "coverage-report")
+                },
+                vec![NewFact::new(m, 1.0), NewFact::new(m, 2.0)],
+            )
+        };
+
+        let (c1, f1) = build();
+        let id1 = store.record_facts(c1, f1).await.unwrap();
+        let (c2, f2) = build();
+        let id2 = store.record_facts(c2, f2).await.unwrap();
+        assert_eq!(id1, id2, "same key returns the existing capture");
+        assert_eq!(
+            store.facts_for_measure(m).await.unwrap().len(),
+            2,
+            "replay must not double-insert facts"
+        );
+
+        // A different key inserts a fresh capture + facts.
+        let (mut c3, f3) = build();
+        c3.idempotency_key = Some("coverage|def5678||payload".into());
+        let id3 = store.record_facts(c3, f3).await.unwrap();
+        assert_ne!(id3, id1, "a new key is a new capture");
+        assert_eq!(store.facts_for_measure(m).await.unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn record_facts_without_key_always_inserts_fresh() {
+        // Keyless captures (gauges, tokens) never dedupe — every run is a row.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.complexity").await;
+        let id1 = store
+            .record_facts(
+                NewMetricCapture::done(1, "metrics", "builtin"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        let id2 = store
+            .record_facts(
+                NewMetricCapture::done(1, "metrics", "builtin"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        assert_ne!(id1, id2);
+        assert_eq!(store.facts_for_measure(m).await.unwrap().len(), 2);
     }
 
     #[tokio::test]

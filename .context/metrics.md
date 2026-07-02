@@ -111,7 +111,13 @@ welded to collection.
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
 `upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
 `record_capture`, `record_facts(capture, facts)` (atomic — inserts the capture,
-backfills `capture_id` into every fact, commits together), `get_capture`,
+backfills `capture_id` into every fact, commits together; **idempotent** when
+the capture carries an `idempotency_key` — a second write with the same key is a
+no-op that returns the existing id, so a replayed report never double-counts,
+tsk14/V51. `metric_capture.idempotency_key` is nullable with a partial unique
+index; the report ingests set it via `CollectionService::ingest_idempotency_key`
+= hash(producer + git version + snapshot + verbatim payload). Keyless captures —
+gauges, tokens, lifecycle — always insert fresh), `get_capture`,
 `facts_for_measure` (joined to the capture for the time/version/effort spine),
 `facts_for_captures` (the attribution-by-claim read), `aggregate_ratio`.
 

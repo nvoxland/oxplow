@@ -855,6 +855,27 @@ impl CollectionService {
         serde_json::to_string(&json!({ "kind": kind, "payload": payload })).ok()
     }
 
+    /// Content identity for an idempotent report ingest (tsk14): a hash over the
+    /// producer, the basis it was measured against (git version + snapshot), and
+    /// the verbatim payload envelope, so a REPLAYED report (a hook that fired
+    /// twice, `ingest_coverage`/`ingest_analysis` called again) dedupes to the
+    /// same capture instead of double-counting additive facts. `None` when
+    /// there's no payload to identify by — such a capture always inserts fresh.
+    fn ingest_idempotency_key(
+        producer: &str,
+        git_version: Option<&str>,
+        snapshot_id: Option<i64>,
+        detail_json: Option<&str>,
+    ) -> Option<String> {
+        let detail = detail_json?;
+        let identity = format!(
+            "{producer}|{}|{}|{detail}",
+            git_version.unwrap_or(""),
+            snapshot_id.map(|s| s.to_string()).unwrap_or_default(),
+        );
+        Some(crate::blob_store::BlobStore::hash(identity.as_bytes()))
+    }
+
     /// Mirror a static-analysis result into the metric substrate (best-effort):
     /// an analyzer run + `oxplow.analysis.{errors,warnings}` gauge samples + one
     /// `metric_finding` per lint finding (located detail).
@@ -926,6 +947,12 @@ impl CollectionService {
             capture.branch = branch.clone();
             capture.effort_id = owning_val;
             capture.detail_json = capture_detail_json;
+            capture.idempotency_key = Self::ingest_idempotency_key(
+                &analyzer,
+                git_version.as_deref(),
+                snapshot_id,
+                capture.detail_json.as_deref(),
+            );
             let id = self.facts.record_facts(capture, facts).await?;
             Ok(Some(id))
         }
@@ -1029,6 +1056,12 @@ impl CollectionService {
                 capture.branch = branch;
                 capture.effort_id = owning_val;
                 capture.detail_json = Self::capture_detail("coverage-detail", &payload);
+                capture.idempotency_key = Self::ingest_idempotency_key(
+                    "coverage",
+                    version.closest_git_version.as_deref(),
+                    snapshot_id,
+                    capture.detail_json.as_deref(),
+                );
                 let id = self.facts.record_facts(capture, facts).await?;
                 Ok(Some(id))
             }
