@@ -523,6 +523,50 @@ fn otlp_claude_body(model: &str, input: i64, output: i64) -> Vec<u8> {
     .encode_to_vec()
 }
 
+/// Build an encoded (protobuf) Codex-shaped OTLP metrics export: a
+/// `codex.turn.token_usage` histogram with input/output/reasoning_output points.
+fn otlp_codex_body(model: &str, input: f64, output: f64, reasoning: f64) -> Vec<u8> {
+    use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+    use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
+    use opentelemetry_proto::tonic::metrics::v1::{
+        metric, Histogram, HistogramDataPoint, Metric, ResourceMetrics, ScopeMetrics,
+    };
+    use prost::Message;
+    let kv = |k: &str, v: &str| KeyValue {
+        key: k.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(v.into())),
+        }),
+        ..Default::default()
+    };
+    let hp = |tt: &str, sum: f64| HistogramDataPoint {
+        attributes: vec![kv("token_type", tt), kv("model", model)],
+        sum: Some(sum),
+        ..Default::default()
+    };
+    ExportMetricsServiceRequest {
+        resource_metrics: vec![ResourceMetrics {
+            scope_metrics: vec![ScopeMetrics {
+                metrics: vec![Metric {
+                    name: "codex.turn.token_usage".into(),
+                    data: Some(metric::Data::Histogram(Histogram {
+                        data_points: vec![
+                            hp("input", input),
+                            hp("output", output),
+                            hp("reasoning_output", reasoning),
+                        ],
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
 async fn post_otlp(
     cp: &ControlPlane,
     thread: Option<ThreadId>,
@@ -579,6 +623,33 @@ async fn otlp_metrics_ingests_token_facts_attributed_by_headers() {
     assert_eq!(facts.len(), 2, "input + output token facts landed");
     assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 120.0);
     assert!(facts.iter().all(|f| f.thread_id == Some(tid.value())));
+}
+
+#[tokio::test]
+async fn otlp_metrics_ingests_codex_histogram_facts() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    // input=100, output=20, reasoning_output=30 → output folds to 50, total 150.
+    let resp = post_otlp(
+        &cp,
+        Some(tid),
+        Some(StreamId::new(1)),
+        otlp_codex_body("gpt-5-codex", 100.0, 20.0, 30.0),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let measure = svc
+        .fact_store
+        .get_measure("oxplow.tokens")
+        .await
+        .unwrap()
+        .unwrap();
+    let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+    assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 150.0);
+    assert!(facts
+        .iter()
+        .all(|f| f.subject_ref.as_deref() == Some("model:gpt-5-codex")));
 }
 
 #[tokio::test]

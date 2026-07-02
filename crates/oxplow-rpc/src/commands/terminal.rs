@@ -90,6 +90,41 @@ fn claude_otel_env(
     ]
 }
 
+/// Codex OTEL config (`--config otel.*`) pointing its OTLP metrics exporter at
+/// oxplow's receiver (tsk24). Codex has NO OTEL env vars — config only. The
+/// http exporter is protobuf ("binary"); the endpoint is the FULL signal URL
+/// (`<base>/v1/metrics` — Codex uses it as-is, unlike Claude which appends the
+/// signal path). Attribution + auth ride the same `X-Oxplow-*` + bearer headers
+/// the receiver reads. The tagged-union `otel.exporter.otlp-http.*` keys select
+/// the http exporter (default is `none`).
+fn codex_otel_overrides(
+    otlp_base_url: &str,
+    hook_token: &str,
+    thread_id: &str,
+    stream_id: &str,
+) -> Vec<String> {
+    let endpoint = format!("{otlp_base_url}/v1/metrics");
+    vec![
+        format!(
+            "otel.exporter.otlp-http.endpoint={}",
+            toml_cli_string(&endpoint)
+        ),
+        "otel.exporter.otlp-http.protocol=\"binary\"".to_string(),
+        format!(
+            "otel.exporter.otlp-http.headers.authorization={}",
+            toml_cli_string(&format!("Bearer {hook_token}"))
+        ),
+        format!(
+            "otel.exporter.otlp-http.headers.x-oxplow-thread={}",
+            toml_cli_string(thread_id)
+        ),
+        format!(
+            "otel.exporter.otlp-http.headers.x-oxplow-stream={}",
+            toml_cli_string(stream_id)
+        ),
+    ]
+}
+
 fn codex_hook_command(oxplow_executable: &std::path::Path, event: &str) -> String {
     format!(
         "{} hook {}",
@@ -348,6 +383,15 @@ pub async fn open_terminal_session(
         oxplow_plugin::AgentRuntimePaths::Codex(paths) => {
             opts.codex_config_overrides =
                 codex_config_overrides(paths, &plugin_runtime.mcp_endpoint_url);
+            // Codex exports token-usage metrics via OTEL to the same OTLP
+            // receiver as Claude (tsk24); Codex has NO OTEL env vars, so this
+            // rides `--config otel.*`. Attribution + auth via the same headers.
+            opts.codex_config_overrides.extend(codex_otel_overrides(
+                &plugin_runtime.otlp_base_url,
+                &plugin_runtime.hook_token,
+                thread_id_str.as_deref().unwrap_or_default(),
+                &stream.id.to_string(),
+            ));
         }
         oxplow_plugin::AgentRuntimePaths::Opencode(paths) => {
             // opencode has no --append-system-prompt; the assembled
@@ -583,8 +627,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        agent_session_key, claude_otel_env, codex_hook_command, opencode_config_content,
-        shell_session_key,
+        agent_session_key, claude_otel_env, codex_hook_command, codex_otel_overrides,
+        opencode_config_content, shell_session_key,
     };
     use crate::test_support::services;
     use oxplow_domain::AgentKind;
@@ -612,6 +656,27 @@ mod tests {
             "Authorization=Bearer tok123,X-Oxplow-Thread=thr1,X-Oxplow-Stream=str1"
         );
         assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
+    }
+
+    #[test]
+    fn codex_otel_overrides_configure_the_http_exporter_with_headers() {
+        // tsk24: Codex OTEL is config-only (`--config`). Pin the keys — the
+        // endpoint is the full /v1/metrics signal URL, protobuf ("binary"),
+        // and the bearer + attribution headers ride the exporter's headers map.
+        let ov = codex_otel_overrides("http://127.0.0.1:9", "tok123", "thr1", "str1");
+        assert!(ov.contains(
+            &"otel.exporter.otlp-http.endpoint=\"http://127.0.0.1:9/v1/metrics\"".to_string()
+        ));
+        assert!(ov.contains(&"otel.exporter.otlp-http.protocol=\"binary\"".to_string()));
+        assert!(ov.contains(
+            &"otel.exporter.otlp-http.headers.authorization=\"Bearer tok123\"".to_string()
+        ));
+        assert!(
+            ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-thread=\"thr1\"".to_string())
+        );
+        assert!(
+            ov.contains(&"otel.exporter.otlp-http.headers.x-oxplow-stream=\"str1\"".to_string())
+        );
     }
 
     #[test]

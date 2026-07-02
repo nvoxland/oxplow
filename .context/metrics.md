@@ -233,18 +233,34 @@ summed every assistant line) and was Claude-only + format-fragile.
   answers a 200 OTLP ack (best-effort side-band; a non-2xx would make the
   exporter retry-storm).
 - **Decode + map:** `oxplow-app/src/otlp_tokens.rs` decodes the OTLP protobuf
-  (`opentelemetry-proto` crate) and `otlp_metrics_to_token_facts` projects
-  Claude's `claude_code.token.usage` **counter** (delta temporality → each
-  export is the increment) into `TokenFact`s, keeping `type ∈ {input,output}`
-  (cache/reasoning dropped in phase 1). Pure + unit-tested.
-- **Launch wiring:** `terminal.rs::claude_otel_env` injects the OTEL env
-  (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
-  `http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` = the control-plane
-  `otlp_base_url` threaded via `PluginRuntime`, and the bearer + `X-Oxplow-*`
-  headers) — **Claude only** in phase 1. Codex (`--config otel.*`, histogram
-  metric) is the phase-2 follow (tsk24); opencode is not auto-instrumented (a
-  user's own OTEL plugin pointed at the receiver still works). See
-  `.context/agent-model.md`.
+  (`opentelemetry-proto` crate) and `otlp_metrics_to_token_facts` projects both
+  agents' token metrics into `TokenFact`s (pure + unit-tested):
+  - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
+    export is the increment), `type ∈ {input,output}` (cacheRead/cacheCreation
+    dropped);
+  - **Codex** — `codex.turn.token_usage` **histogram** (per turn; value = the
+    data point `sum`), `token_type` mapped input→input, output+reasoning_output
+    →output, `cached_input`+`total` dropped (dropping `total` avoids double
+    count). `model` reads from the data point, falling back to the resource
+    attributes.
+- **Launch wiring:** per-agent, injected at spawn (`terminal.rs`):
+  - **Claude** (`claude_otel_env`, env — Claude has OTEL env support):
+    `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
+    `http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` = the control-plane
+    `otlp_base_url` (base; SDK appends `/v1/metrics`) threaded via
+    `PluginRuntime`, + bearer + `X-Oxplow-*` headers.
+  - **Codex** (`codex_otel_overrides`, `--config otel.*` — Codex has NO OTEL env
+    vars): `otel.exporter.otlp-http.endpoint` = the **full** `<base>/v1/metrics`
+    URL, `protocol="binary"` (protobuf), same bearer + `X-Oxplow-*` in the
+    exporter's `headers` map.
+  - **opencode** is not auto-instrumented (a user's own OTEL plugin pointed at
+    the receiver still works).
+  > **Live-verification caveat (Codex):** the exact Codex OTEL wire format
+  > (metric name / histogram shape / `token_type` values / where `model` rides /
+  > whether the `--config otel.exporter.otlp-http.*` tagged-union keys select the
+  > http exporter) is from docs, not yet confirmed against a running Codex. The
+  > mapper is defensive, but a live Codex session may need small adjustments.
+  See `.context/agent-model.md`.
 
 **Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The
 read-side effort attribution (T-D) resolves an effort's facts from *its captures*
