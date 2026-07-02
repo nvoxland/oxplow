@@ -385,15 +385,27 @@ pub fn aggregate_series(
 
 /// Collapse a time series to a single in-range number, respecting additivity OVER
 /// TIME: a semi-additive snapshot takes the LAST capture (summing snapshots across
-/// time double-counts); an additive event SUMs the captures; a non-additive ratio
-/// re-derives Σnumerator / Σdenominator across the points (never averages ratios).
-/// `None` for an empty series.
+/// time double-counts) — re-deriving Σn/Σd from that capture's raw components for a
+/// level ratio like coverage (tsk13); an additive event SUMs the captures; a
+/// non-additive ratio re-derives Σnumerator / Σdenominator across ALL points (the
+/// accumulating mean-across-closes case). `None` for an empty series.
 pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
     if series.is_empty() {
         return None;
     }
     Some(match temporal {
-        Temporal::SemiAdditive => series.last().map(|p| p.value).unwrap_or(0.0),
+        // Level snapshot → the latest capture. For a level RATIO (coverage,
+        // tsk13) re-derive from the latest point's RAW Σn/Σd, not its `.value`
+        // (which a percent spec has already scaled ×100) — so the spec's
+        // presentation scale is applied exactly once downstream, matching the
+        // non-additive branch.
+        Temporal::SemiAdditive => series
+            .last()
+            .map(|p| match (p.numerator, p.denominator) {
+                (Some(n), Some(d)) if d != 0.0 => n / d,
+                _ => p.value,
+            })
+            .unwrap_or(0.0),
         Temporal::Additive => series.iter().map(|p| p.value).sum(),
         Temporal::NonAdditive => {
             let num: f64 = series.iter().filter_map(|p| p.numerator).sum();
@@ -478,12 +490,19 @@ pub fn compute_rollup(
     let mut out: Vec<RollupRow> = by_key
         .into_iter()
         .map(|(key, acc)| {
-            let value = match temporal {
-                Temporal::NonAdditive if acc.den != 0.0 => acc.num / acc.den,
-                // A ratio measure whose facts lack num/den: mean of the latest
-                // per-subject values (defensive — never sum percentages).
-                Temporal::NonAdditive => acc.value_sum / acc.fact_count as f64,
-                _ => acc.value_sum,
+            let value = if acc.den != 0.0 {
+                // Ratio components present (coverage, pass-rate): re-derive
+                // Σnumerator/Σdenominator — never sum or average percentages.
+                // Applies to BOTH non-additive accumulating ratios AND
+                // semi-additive level ratios like coverage (tsk13).
+                acc.num / acc.den
+            } else {
+                match temporal {
+                    // A ratio measure whose facts lack num/den: mean of the
+                    // latest per-subject values (defensive — never sum %).
+                    Temporal::NonAdditive => acc.value_sum / acc.fact_count as f64,
+                    _ => acc.value_sum,
+                }
             };
             RollupRow {
                 key,
@@ -848,8 +867,10 @@ impl MetricEngine {
             return Ok(None);
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        // A non-additive collapse re-derives Σn/Σd from the RAW components, so
-        // the spec's presentation scale applies here too.
+        // A ratio collapse (semi- or non-additive) re-derives from the RAW
+        // components, so the spec's presentation scale applies exactly once
+        // here — `range_value` never reads an already-scaled `.value` for a
+        // measure carrying num/den.
         Ok(range_value(series, temporal).map(|v| v * spec_value_scale(spec)))
     }
 
@@ -1084,6 +1105,34 @@ mod tests {
     }
 
     #[test]
+    fn range_value_semi_additive_ratio_reads_the_latest_capture_not_a_blend() {
+        // tsk13: coverage is a semi-additive LEVEL ratio. Capture 1 = 50%
+        // (1/2), capture 2 = 85% (17/20). The in-range headline is the
+        // latest capture (0.85), NOT the Σn/Σd blend across both (18/22 ≈
+        // 0.818) that non-additive accumulation gives.
+        let facts = vec![
+            FactRow {
+                numerator: Some(1.0),
+                denominator: Some(2.0),
+                subject_ref: Some("a.rs".into()),
+                ..fact(1, "2026-06-30T10:00:00Z", 0.5)
+            },
+            FactRow {
+                numerator: Some(17.0),
+                denominator: Some(20.0),
+                subject_ref: Some("a.rs".into()),
+                ..fact(2, "2026-06-30T11:00:00Z", 0.85)
+            },
+        ];
+        let series = aggregate_series(&facts, Aggregation::Ratio, &FactFilter::default(), None);
+        assert_eq!(series.len(), 2);
+        assert_eq!(range_value(&series, Temporal::SemiAdditive), Some(0.85));
+        // Contrast: non-additive accumulation blends across all captures.
+        let blend = range_value(&series, Temporal::NonAdditive).unwrap();
+        assert!((blend - 18.0 / 22.0).abs() < 1e-9, "got {blend}");
+    }
+
+    #[test]
     fn additive_series_sums_across_time_in_range() {
         let facts = vec![
             fact(1, "2026-06-30T10:00:00Z", 100.0),
@@ -1276,6 +1325,38 @@ mod tests {
         assert_eq!(rows[1].0, "src/app");
         assert!((rows[1].1 - 85.0 / 110.0).abs() < 1e-9);
         assert_eq!(rows[1].2, 2);
+    }
+
+    #[test]
+    fn rollup_rederives_ratio_for_a_semi_additive_ratio_measure() {
+        // Coverage is a semi-additive LEVEL ratio (tsk13): the per-package
+        // breakdown must re-derive Σn/Σd over the current capture, never sum
+        // the per-file percentages (which would exceed 1.0 for two files).
+        let cov = |cap: i64, at: &str, p: &str, num: f64, den: f64| FactRow {
+            subject_ref: Some(p.to_string()),
+            path: Some(p.to_string()),
+            numerator: Some(num),
+            denominator: Some(den),
+            ..fact(cap, at, if den != 0.0 { num / den } else { 0.0 })
+        };
+        let facts = vec![
+            cov(1, "2026-06-30T11:00:00Z", "src/app/a.rs", 80.0, 100.0),
+            cov(1, "2026-06-30T11:00:00Z", "src/app/b.rs", 5.0, 10.0),
+        ];
+        let rollup = compute_rollup(
+            &facts,
+            "package",
+            Temporal::SemiAdditive,
+            &current_capture_ids(&facts, &[]),
+        );
+        assert_eq!(rollup.len(), 1);
+        assert_eq!(rollup[0].key, "src/app");
+        // (80+5)/(100+10) ≈ 0.7727 — NOT 0.8 + 0.5 = 1.3.
+        assert!(
+            (rollup[0].value - 85.0 / 110.0).abs() < 1e-9,
+            "got {}",
+            rollup[0].value
+        );
     }
 
     fn roll(key: &str, value: f64, subject_count: i64) -> RollupRow {

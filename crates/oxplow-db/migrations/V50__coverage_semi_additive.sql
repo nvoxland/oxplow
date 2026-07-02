@@ -1,0 +1,14 @@
+-- tsk13: coverage is a semi-additive LEVEL ratio, not a non-additive
+-- accumulating one. `oxplow.coverage` was seeded `non-additive` (V43), so
+-- `range_value` re-derived Σn/Σd across EVERY capture in the series — a
+-- history-weighted blend, not the current coverage (a project that improved
+-- 50%→85% showed ~an all-time average). Each coverage capture fully RESTATES
+-- the value (a run replaces the last), which is exactly `semi-additive`: the
+-- headline takes the latest capture, and the per-package rollup re-derives
+-- Σn/Σd over the current capture (the engine now prefers ratio components in
+-- the semi-additive branch too, so it never sums per-file percentages).
+--
+-- The accumulating non-additive ratios (cycle_time, task_effort — one
+-- observation per close, Σ across captures = mean-across-closes) are correct
+-- as-is and stay `non-additive`.
+UPDATE measure SET temporal_semantics = 'semi-additive' WHERE key = 'oxplow.coverage';

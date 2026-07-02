@@ -1076,6 +1076,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn coverage_measure_is_semi_additive() {
+        // tsk13 (V50): coverage is a level snapshot — a run replaces the last,
+        // so it collapses to the latest capture, not a history-blended Σn/Σd.
+        let store = fixture().await;
+        let cov = store
+            .get_measure("oxplow.coverage")
+            .await
+            .unwrap()
+            .expect("coverage measure seeded");
+        assert_eq!(cov.temporal_semantics, "semi-additive");
+    }
+
+    #[tokio::test]
     async fn dimensions_seeded_and_upsertable() {
         let store = fixture().await;
         // The migrations seed 10 built-in conformed dims (8 in V43 + oxplow.rule

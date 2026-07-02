@@ -45,8 +45,12 @@ welded to collection.
   (`additive` | `semi-additive` | `non-additive` — additivity **over time**:
   tokens additive; complexity + test/lint SNAPSHOTS semi-additive (a run
   replaces the last — V47/tsk42 fixed test_case/lint_hit from V43's wrong
-  `additive`); ratios + mean-across-closes measures (cycle_time, task_effort)
-  non-additive),
+  `additive`); a **level ratio** whose every capture restates the value
+  (coverage) is *also* semi-additive — the headline is the latest capture's
+  Σn/Σd, not a history blend (V50/tsk13 fixed coverage from V43's wrong
+  `non-additive`); only the **accumulating** mean-across-closes ratios
+  (cycle_time, task_effort — one observation per close, Σ over all captures =
+  the mean) are `non-additive`),
   `component_role` (`numerator`|`denominator`|`none`), `scope`, `description`.
   Seeded built-ins: `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
@@ -128,10 +132,13 @@ backfills `capture_id` into every fact, commits together), `get_capture`,
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
   file's stale last fact haunts the breakdown forever), latest-per-subject,
-  summed per dim value; additive → EVERY fact counts (tokens by model is a
-  running total, not the last turn); non-additive → current captures, latest per
-  subject, per-group Σnumerator/Σdenominator, never a naive sum/average of
-  percentages. `dim_value` reads the `severity`/`rule` columns and
+  summed per dim value — **unless** the facts carry ratio components (a level
+  ratio like coverage, tsk13), in which case the per-group value is Σn/Σd, never
+  a sum of per-file percentages; additive → EVERY fact counts (tokens by model
+  is a running total, not the last turn); non-additive → current captures,
+  latest per subject, per-group Σnumerator/Σdenominator, never a naive
+  sum/average of percentages. The rule is uniform: **any** group whose facts
+  have Σden≠0 collapses to Σn/Σd regardless of temporal class. `dim_value` reads the `severity`/`rule` columns and
   `package`-from-path directly, else `dims_json[key]`; `oxplow.language` /
   bare `language` alias each other (the gauge scripts emit the conformed
   namespaced key; pre-rename facts and the Explorer's declared sliceable_dims
