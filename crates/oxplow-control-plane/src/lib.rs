@@ -77,6 +77,15 @@ impl ControlPlane {
     pub fn mcp_endpoint_url(&self) -> String {
         format!("http://{}/mcp", self.bind_addr)
     }
+
+    /// Base URL for the OTLP metrics receiver (epic tsk22). This is the
+    /// **base** the agent's OTEL exporter is pointed at via
+    /// `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends the signal path
+    /// `/v1/metrics` (which [`handle_otlp_metrics`] serves). Codex, whose
+    /// config wants the full signal URL, appends `/v1/metrics` itself.
+    pub fn otlp_base_url(&self) -> String {
+        format!("http://{}", self.bind_addr)
+    }
 }
 
 /// In-memory state the Stop pipeline needs across hook events. Lives
@@ -180,6 +189,9 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
+        // OTLP metrics receiver (epic tsk22). Agent CLIs export token-usage
+        // metrics here; attribution rides the same X-Oxplow-* headers as hooks.
+        .route("/v1/metrics", post(handle_otlp_metrics))
         .with_state(ctx);
 
     let app = Router::new()
@@ -241,6 +253,62 @@ async fn handle_dev_ping() -> Response {
             "ok": true,
             "service": "oxplow-control-plane",
         })),
+    )
+        .into_response()
+}
+
+/// OTLP/HTTP metrics receiver (epic tsk22). Agent CLIs (Claude Code, Codex)
+/// export token-usage metrics here. Attribution reuses the hook spine: the
+/// owning thread/stream ride the `X-Oxplow-Thread`/`X-Oxplow-Stream` headers the
+/// spawn path injects into the exporter (one agent process per thread, so the
+/// headers are constant for its lifetime). The protobuf body is decoded +
+/// projected onto `oxplow.tokens` facts by the token-usage service.
+///
+/// Always answers 200 (an empty OTLP success ack): token capture is a
+/// best-effort side-band, and a non-2xx would make the exporter retry-storm a
+/// payload we can't use. Missing attribution headers → accept + drop.
+async fn handle_otlp_metrics(
+    State(ctx): State<AppCtx>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !check_bearer(&headers, &ctx.hook_token) {
+        return (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
+    }
+    let stream_id = headers
+        .get("x-oxplow-stream")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .and_then(StreamId::try_from_str);
+    let thread_id = headers
+        .get("x-oxplow-thread")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .and_then(ThreadId::try_from_str);
+    let (Some(stream_id), Some(thread_id)) = (stream_id, thread_id) else {
+        warn!("OTLP metrics export missing X-Oxplow-Thread/Stream headers; dropping");
+        return otlp_ok();
+    };
+    match ctx
+        .services
+        .token_usage
+        .ingest_otlp_tokens(&thread_id, &stream_id, &body)
+        .await
+    {
+        Ok(n) => tracing::debug!(facts = n, "ingested OTLP token export"),
+        Err(err) => warn!(?err, "failed to ingest OTLP token export"),
+    }
+    otlp_ok()
+}
+
+/// Empty OTLP success ack: a 200 with a protobuf content type and an empty
+/// body, which deserializes to an empty `ExportMetricsServiceResponse` — what
+/// OTLP exporters expect for a successful export.
+fn otlp_ok() -> Response {
+    (
+        StatusCode::OK,
+        [(http::header::CONTENT_TYPE, "application/x-protobuf")],
+        axum::body::Bytes::new(),
     )
         .into_response()
 }

@@ -207,7 +207,8 @@ Landed:
 
 | producer | where | facts |
 |---|---|---|
-| tokens (T-B) | `token_usage.rs` | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim) + a turn fact on `oxplow.turn`, capture per Stop. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind` |
+| tokens — OTEL (tsk22) | `token_usage.rs::ingest_otlp_tokens`, fed by the control-plane `POST /v1/metrics` OTLP receiver | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per OTLP export with an `idempotency_key` over the raw body (SDK-retry-safe). Attribution rides the `X-Oxplow-Thread`/`X-Oxplow-Stream` OTLP headers the spawn path injects; effort via `find_single_open_for_thread`. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
+| turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The `parse_claude_turns`/`parse_claude_usage` dedupe-by-`message.id` fix (tsk22) removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
@@ -216,6 +217,34 @@ Landed:
 | duplication | `oxplow-rpc/…/code_quality.rs::run_duplication_scan_at` | one `oxplow.duplicate_lines` fact per duplicate block (value=line count, subject=`path:start-end`, peer side in `detail`); capture stamped with the **primary stream** (a scan has no natural stream) + tree `basis_ref`. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
 | code gauges | `metrics_service.rs::run_one_gauge` → `record_gauge_facts` (tsk23) | the bundled code gauges emit a `facts` channel: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders the baked count reports |
 | per-language idiom gauges | same path (tsk30) | the ~10 idiom gauges (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (`builtin_ast_specs`) |
+
+#### OTEL token tracking (tsk22)
+
+Token facts come from **OpenTelemetry**, not transcript parsing. The old
+Stop-hook transcript parse overcounted ~2–3× (Claude writes one JSONL line per
+content block and repeats the message's cumulative `usage` on each; the parser
+summed every assistant line) and was Claude-only + format-fragile.
+
+- **Receiver:** the control plane hosts `POST /v1/metrics`
+  (`oxplow-control-plane/src/lib.rs::handle_otlp_metrics`), behind the same
+  bearer auth as `/hook`. It reads the `X-Oxplow-Thread`/`X-Oxplow-Stream`
+  headers (attribution spine — one agent process per thread, so the headers are
+  constant) and hands the raw protobuf body to `ingest_otlp_tokens`. Always
+  answers a 200 OTLP ack (best-effort side-band; a non-2xx would make the
+  exporter retry-storm).
+- **Decode + map:** `oxplow-app/src/otlp_tokens.rs` decodes the OTLP protobuf
+  (`opentelemetry-proto` crate) and `otlp_metrics_to_token_facts` projects
+  Claude's `claude_code.token.usage` **counter** (delta temporality → each
+  export is the increment) into `TokenFact`s, keeping `type ∈ {input,output}`
+  (cache/reasoning dropped in phase 1). Pure + unit-tested.
+- **Launch wiring:** `terminal.rs::claude_otel_env` injects the OTEL env
+  (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
+  `http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` = the control-plane
+  `otlp_base_url` threaded via `PluginRuntime`, and the bearer + `X-Oxplow-*`
+  headers) — **Claude only** in phase 1. Codex (`--config otel.*`, histogram
+  metric) is the phase-2 follow (tsk24); opencode is not auto-instrumented (a
+  user's own OTEL plugin pointed at the receiver still works). See
+  `.context/agent-model.md`.
 
 **Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The
 read-side effort attribution (T-D) resolves an effort's facts from *its captures*
@@ -569,7 +598,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | producer | where | emits |
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
-| token-parse | `crates/oxplow-app/src/token_usage.rs` (`project_token_metrics`, called from `on_stop`) | per-model `agent.tokens.{input,output,total}`, `agent.turns`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none) |
+| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (`ingest_otlp_tokens`, fed by the control-plane OTLP receiver — tsk22) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |

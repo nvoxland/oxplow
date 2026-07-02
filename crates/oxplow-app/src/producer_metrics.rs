@@ -48,7 +48,9 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
     const BRANCH_DIMS: &[&str] = &["branch"];
     const TREE_DIMS: &[&str] = &["branch", "git_version"];
     &[
-        // token-parse (token_usage.rs)
+        // otel-tokens (token_usage.rs::ingest_otlp_tokens, via the OTLP
+        // receiver — tsk22). The `producer` field is descriptor metadata; the
+        // token facts arrive under the `otel-tokens` capture producer.
         ProducerMetric {
             key: "agent.tokens.input",
             title: "Input tokens",
@@ -58,7 +60,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             default_agg: "sum",
             grain: Some("entity"),
             category: "operational",
-            producer: "token-parse",
+            producer: "otel-tokens",
             dimensions: TOKEN_DIMS,
             description: Some("Input tokens consumed by the agent."),
         },
@@ -71,7 +73,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             default_agg: "sum",
             grain: Some("entity"),
             category: "operational",
-            producer: "token-parse",
+            producer: "otel-tokens",
             dimensions: TOKEN_DIMS,
             description: Some("Output tokens produced by the agent."),
         },
@@ -84,10 +86,11 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             default_agg: "sum",
             grain: Some("entity"),
             category: "operational",
-            producer: "token-parse",
+            producer: "otel-tokens",
             dimensions: TOKEN_DIMS,
             description: Some("Total tokens (input + output) used by the agent."),
         },
+        // token-parse (token_usage.rs::on_stop) — turns stay transcript-derived.
         ProducerMetric {
             key: "agent.turns",
             title: "Agent turns",

@@ -1,14 +1,23 @@
 //! Agent token-usage capture (tsk104).
 //!
-//! The PTY is opaque, but the hook payload oxplow receives on Stop carries
-//! `transcript_path` (the agent session JSONL). For Claude, each
-//! `type=="assistant"` line carries a `message.usage` block
-//! (input / output / cache-creation / cache-read tokens) plus
-//! `message.model`. On Stop we sum the NEW usage records since the last
-//! Stop (offset-tracked via a persisted per-session cursor, so we never
-//! re-sum the whole file or double-count across restarts) and persist one
-//! row attributed to the open effort + thread. Provenance is always
-//! `observed` — oxplow read the transcript directly.
+//! **Two sources, split by tsk22.** The durable `oxplow.tokens` **facts** now
+//! come from **OpenTelemetry** — [`TokenUsageService::ingest_otlp_tokens`],
+//! fed by the control-plane `POST /v1/metrics` receiver (decode + map in
+//! [`crate::otlp_tokens`]). OTEL is accurate (the agent's own billed counts),
+//! multi-agent, and format-stable; the old transcript parse overcounted ~2–3×
+//! because Claude repeats a message's cumulative `usage` on every content-block
+//! JSONL line and [`parse_claude_usage`] summed every line (the dedupe-by
+//! `message.id` fix here removed that).
+//!
+//! The **transcript path** ([`TokenUsageService::on_stop`]) survives for what
+//! OTEL lacks: the per-turn `agent_token_usage` rows (with the human prompt
+//! text) and the `oxplow.turn` facts. The hook payload oxplow receives on Stop
+//! carries `transcript_path` (the agent session JSONL); for Claude each
+//! `type=="assistant"` line carries a `message.usage` block + `message.model`.
+//! On Stop we read the NEW records since the last Stop (offset-tracked via a
+//! persisted per-session cursor, so we never re-sum the whole file or
+//! double-count across restarts) and persist one row per turn attributed to the
+//! open effort + thread. Provenance is `observed`.
 //!
 //! Pluggable per agent kind: Claude is implemented; Codex/Opencode return
 //! `None` (their session formats differ — and are wired later). We track
@@ -17,8 +26,8 @@
 //! stored so usage can be sliced by model.
 //!
 //! Mirrors the collection side-band (`collection.rs`): find open effort →
-//! record → emit, best-effort. See `.context/agent-model.md` +
-//! `.context/data-model.md`.
+//! record → emit, best-effort. See `.context/agent-model.md`,
+//! `.context/metrics.md`, + `.context/data-model.md`.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -57,6 +66,7 @@ impl UsageDelta {
 /// partially-written tail line never poisons the sum.
 pub fn parse_claude_usage(content: &str) -> UsageDelta {
     let mut d = UsageDelta::default();
+    let mut seen = std::collections::HashSet::new();
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -74,6 +84,16 @@ pub fn parse_claude_usage(content: &str) -> UsageDelta {
         let Some(usage) = msg.get("usage") else {
             continue;
         };
+        // Claude writes one JSONL line per content block (thinking/text/
+        // tool_use) and repeats the message's cumulative `usage` on each, so
+        // count each `message.id` once — else a message inflates ~2-3× by its
+        // block count (tsk23). Lines without an id (synthetic/legacy) fall
+        // through and are counted as before.
+        if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
+            if !seen.insert(id.to_string()) {
+                continue;
+            }
+        }
         let get = |k: &str| usage.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
         d.input_tokens += get("input_tokens");
         d.output_tokens += get("output_tokens");
@@ -156,6 +176,7 @@ fn extract_user_prompt(msg: &serde_json::Value) -> Option<String> {
 /// the chunk form a leading prompt-less turn.
 pub fn parse_claude_turns(content: &str) -> Vec<Turn> {
     let mut turns: Vec<Turn> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -182,6 +203,13 @@ pub fn parse_claude_turns(content: &str) -> Vec<Turn> {
                 let Some(usage) = msg.get("usage") else {
                     continue;
                 };
+                // Count each message id once — Claude repeats a message's
+                // cumulative usage on every content-block line (tsk23).
+                if let Some(id) = msg.get("id").and_then(|i| i.as_str()) {
+                    if !seen.insert(id.to_string()) {
+                        continue;
+                    }
+                }
                 if turns.is_empty() {
                     turns.push(Turn::default());
                 }
@@ -273,12 +301,14 @@ fn complete_offset(path: &Path) -> u64 {
     }
 }
 
-/// Per-(stop, model) token totals, accumulated across the turns in one Stop so
-/// the metric substrate gets one sample per model rather than one per turn.
+/// Per-(stop, model) turn count, accumulated across the turns in one Stop so
+/// the substrate gets one `oxplow.turn` fact per model rather than one per turn.
+/// Token totals are no longer projected here — OTEL owns the `oxplow.tokens`
+/// facts (epic tsk22); this path keeps only the turn count (which the parser
+/// gets right per genuine user prompt) plus the per-turn `agent_token_usage`
+/// rows (with prompt text OTEL lacks).
 #[derive(Default)]
 struct TokenAgg {
-    input: i64,
-    output: i64,
     turns: i64,
 }
 
@@ -407,10 +437,7 @@ impl TokenUsageService {
                 })
                 .await?;
             last_id = Some(id);
-            let agg = by_model.entry(model_key).or_default();
-            agg.input += input;
-            agg.output += output;
-            agg.turns += 1;
+            by_model.entry(model_key).or_default().turns += 1;
         }
         self.usage.set_cursor(&session_key, new_offset).await?;
         self.events.emit(OxplowEvent::AgentTokenUsageChanged {
@@ -458,51 +485,26 @@ impl TokenUsageService {
         by_model: &std::collections::HashMap<String, TokenAgg>,
         effort_val: Option<i64>,
     ) -> Result<(), DomainError> {
-        // The durable facts (epic tsk12; the legacy run/sample writes are gone,
-        // T-E2): PER-KIND token facts on the `oxplow.tokens` measure — one
-        // input + one output fact per model, sliced by the `oxplow.token_kind`
-        // conformed dimension — plus a turn fact on `oxplow.turn`, under one
-        // capture carrying the spine. The `agent.tokens.total` spec sums both
-        // kinds; the input/output specs filter by `token_kind`. Tokens/turns
-        // are additive event measures; model is a conformed dimension.
-        let tokens_measure = self.facts.get_measure("oxplow.tokens").await?;
+        // Turn facts only (epic tsk22): the `oxplow.tokens` facts now come from
+        // the OTEL producer (`ingest_otlp_tokens`) — accurate + multi-agent —
+        // so the transcript path projects just the `oxplow.turn` count (one
+        // fact per model; additive event measure, model a conformed dimension).
+        // The per-turn `agent_token_usage` rows (with prompt text) are recorded
+        // above; those are what this path still uniquely provides.
         let turn_measure = self.facts.get_measure("oxplow.turn").await?;
-        if tokens_measure.is_some() || turn_measure.is_some() {
+        if let Some(tm) = turn_measure {
             let mut facts = Vec::new();
             for (model, agg) in by_model {
-                if let Some(m) = &tokens_measure {
-                    for (kind, value) in [("input", agg.input), ("output", agg.output)] {
-                        if value == 0 {
-                            continue;
-                        }
-                        facts.push(NewFact {
-                            subject_kind: Some("model".into()),
-                            subject_ref: Some(format!("model:{model}")),
-                            // json! (not format!) — the model id comes verbatim
-                            // from external session JSONL; a quote/backslash in
-                            // it must not poison the dims JSON (tsk46).
-                            dims_json: Some(
-                                serde_json::json!({
-                                    "oxplow.model": model,
-                                    "oxplow.token_kind": kind,
-                                })
-                                .to_string(),
-                            ),
-                            ..NewFact::new(m.id, value as f64)
-                        });
-                    }
-                }
-                if let Some(tm) = &turn_measure {
-                    if agg.turns > 0 {
-                        facts.push(NewFact {
-                            subject_kind: Some("model".into()),
-                            subject_ref: Some(format!("model:{model}")),
-                            dims_json: Some(
-                                serde_json::json!({ "oxplow.model": model }).to_string(),
-                            ),
-                            ..NewFact::new(tm.id, agg.turns as f64)
-                        });
-                    }
+                if agg.turns > 0 {
+                    facts.push(NewFact {
+                        subject_kind: Some("model".into()),
+                        subject_ref: Some(format!("model:{model}")),
+                        // json! (not format!) — the model id comes verbatim from
+                        // external session JSONL; a quote/backslash in it must
+                        // not poison the dims JSON (tsk46).
+                        dims_json: Some(serde_json::json!({ "oxplow.model": model }).to_string()),
+                        ..NewFact::new(tm.id, agg.turns as f64)
+                    });
                 }
             }
             if !facts.is_empty() {
@@ -515,6 +517,81 @@ impl TokenUsageService {
         }
         Ok(())
     }
+
+    /// Ingest an OTLP metrics export (epic tsk22) — the OpenTelemetry successor
+    /// to the transcript-parse token facts. Decode the protobuf `body`, project
+    /// its token data points onto the `oxplow.tokens` measure (per-model, sliced
+    /// by `oxplow.token_kind`), and record them under one capture attributed to
+    /// `thread`/`stream` plus the thread's single open effort when unambiguous
+    /// (same resolution as [`Self::on_stop`]). The capture carries an
+    /// idempotency key over the raw body, so an SDK **retry** of the same export
+    /// is a no-op while a genuinely new interval (different delta data-point
+    /// timestamps → different bytes) records fresh. Returns the number of token
+    /// facts the export mapped to. Caller treats errors as non-fatal.
+    pub async fn ingest_otlp_tokens(
+        &self,
+        thread: &ThreadId,
+        stream: &StreamId,
+        body: &[u8],
+    ) -> Result<usize, DomainError> {
+        let req = crate::otlp_tokens::decode_metrics_request(body)
+            .map_err(|e| DomainError::Invalid(format!("OTLP metrics decode: {e}")))?;
+        let token_facts = crate::otlp_tokens::otlp_metrics_to_token_facts(&req);
+        if token_facts.is_empty() {
+            return Ok(0);
+        }
+        let Some(measure) = self.facts.get_measure("oxplow.tokens").await? else {
+            return Ok(0);
+        };
+        let effort_val = self
+            .efforts
+            .find_single_open_for_thread(thread)
+            .await?
+            .map(|e| e.id.value());
+        let facts: Vec<NewFact> = token_facts
+            .iter()
+            .map(|tf| NewFact {
+                subject_kind: Some("model".into()),
+                subject_ref: Some(format!("model:{}", tf.model)),
+                // json! (not format!) — the model id is verbatim from the OTLP
+                // export; a quote/backslash must not poison the dims JSON.
+                dims_json: Some(
+                    serde_json::json!({
+                        "oxplow.model": tf.model,
+                        "oxplow.token_kind": tf.kind.as_str(),
+                    })
+                    .to_string(),
+                ),
+                ..NewFact::new(measure.id, tf.value as f64)
+            })
+            .collect();
+        let count = facts.len();
+        let mut capture = NewMetricCapture::done(stream.value(), "otel-tokens", "otel");
+        capture.thread_id = Some(thread.value());
+        capture.trigger = Some("continuous".into());
+        capture.effort_id = effort_val;
+        capture.idempotency_key = Some(otlp_idempotency_key(thread, body));
+        self.facts.record_facts(capture, facts).await?;
+        self.events
+            .emit(OxplowEvent::MetricSamplesChanged { stream_id: *stream });
+        Ok(count)
+    }
+}
+
+/// Idempotency key for an OTLP token-export capture. The raw request body
+/// carries each delta data point's window timestamps, so two distinct export
+/// intervals hash differently while an SDK retransmit of the same export hashes
+/// identically — `record_facts` no-ops the repeat via the `metric_capture`
+/// partial-unique index (V51).
+fn otlp_idempotency_key(thread: &ThreadId, body: &[u8]) -> String {
+    let mut buf = Vec::with_capacity(8 + body.len());
+    buf.extend_from_slice(&thread.value().to_le_bytes());
+    buf.extend_from_slice(body);
+    format!(
+        "otel-tokens:{}:{:032x}",
+        thread.value(),
+        xxhash_rust::xxh3::xxh3_128(&buf)
+    )
 }
 
 #[cfg(test)]
@@ -544,6 +621,44 @@ mod tests {
     // A genuine user prompt line (string content).
     fn user_line(text: &str) -> String {
         serde_json::json!({"type": "user", "message": {"content": text}}).to_string()
+    }
+
+    // An assistant line for message `id` carrying the given cumulative usage.
+    // Claude writes one such line per content block (thinking/text/tool_use),
+    // each repeating the SAME id + usage.
+    fn assistant_id_line(id: &str, input: i64, output: i64) -> String {
+        serde_json::json!({
+            "type": "assistant",
+            "message": {
+                "id": id,
+                "model": "claude-opus-4-8",
+                "usage": {"input_tokens": input, "output_tokens": output},
+            },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn parse_claude_usage_counts_each_message_id_once() {
+        // One assistant message split across 3 content-block lines, each
+        // stamped with the same cumulative usage — must count ONCE, not 3×.
+        let line = assistant_id_line("msg_a", 10, 583);
+        let content = format!("{line}\n{line}\n{line}\n");
+        let d = parse_claude_usage(&content);
+        assert_eq!(d.message_count, 1, "3 block-lines → one message");
+        assert_eq!(d.output_tokens, 583, "not 1749");
+        assert_eq!(d.input_tokens, 10);
+    }
+
+    #[test]
+    fn parse_claude_turns_counts_each_message_id_once() {
+        let line = assistant_id_line("msg_a", 10, 583);
+        let content = format!("{}\n{line}\n{line}\n{line}\n", user_line("prompt"));
+        let turns = parse_claude_turns(&content);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].usage.output_tokens, 583, "counted once");
+        assert_eq!(turns[0].usage.input_tokens, 10);
+        assert_eq!(turns[0].usage.message_count, 1);
     }
 
     #[test]
@@ -903,7 +1018,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_stop_projects_token_metrics() {
+    async fn ingest_otlp_tokens_records_facts_and_is_idempotent() {
+        // tsk22: an OTLP metrics export lands per-kind token facts on
+        // `oxplow.tokens`, and a retransmit of the identical export is a no-op.
+        let (svc, _dir, thread) = service_fixture().await;
+        let stream = svc.streams.ensure_primary().await.unwrap().id;
+        let body = crate::otlp_tokens::encoded_claude_export("claude-opus-4-8", 100, 20);
+
+        let n = svc
+            .token_usage
+            .ingest_otlp_tokens(&thread, &stream, &body)
+            .await
+            .unwrap();
+        assert_eq!(n, 2, "one input + one output fact");
+
+        let measure = svc
+            .fact_store
+            .get_measure("oxplow.tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 120.0);
+        let input = facts
+            .iter()
+            .find(|f| {
+                f.dims_json.as_deref()
+                    == Some(
+                        "{\"oxplow.model\":\"claude-opus-4-8\",\"oxplow.token_kind\":\"input\"}",
+                    )
+            })
+            .expect("input-kind fact");
+        assert_eq!(input.value, 100.0);
+        assert_eq!(input.subject_ref.as_deref(), Some("model:claude-opus-4-8"));
+
+        // Re-ingesting the identical export must not double-count (idempotency).
+        svc.token_usage
+            .ingest_otlp_tokens(&thread, &stream, &body)
+            .await
+            .unwrap();
+        let facts_after = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+        assert_eq!(facts_after.len(), 2, "retransmit is a no-op");
+
+        // The producer specs re-aggregate the OTEL facts to the expected totals.
+        svc.metrics.seed_catalog().await;
+        let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
+        for (key, expected) in [
+            ("agent.tokens.total", 120.0),
+            ("agent.tokens.input", 100.0),
+            ("agent.tokens.output", 20.0),
+        ] {
+            let spec = svc.fact_store.get_spec(key).await.unwrap().unwrap();
+            assert_eq!(
+                engine.headline_for_spec(&spec).await.unwrap(),
+                Some(expected),
+                "{key}: spec headline over OTEL facts",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn on_stop_projects_turn_facts_not_token_facts() {
+        // tsk22 (transcript split): the Stop-hook transcript path now projects
+        // only `oxplow.turn` facts — the `oxplow.tokens` facts come from the
+        // OTEL producer (see `ingest_otlp_tokens_records_facts_and_is_idempotent`).
         let (svc, _dir, thread) = service_fixture().await;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");
@@ -917,7 +1096,7 @@ mod tests {
             .on_stop(&thread, Some("sess-m"), &payload)
             .await
             .unwrap();
-        // Append one watched turn (input 100, output 20, model opus).
+        // Append one watched turn.
         {
             let mut f = std::fs::OpenOptions::new()
                 .append(true)
@@ -931,10 +1110,7 @@ mod tests {
             .await
             .unwrap();
 
-        // The durable fact layer (epic tsk12; the legacy samples are gone,
-        // T-E2): PER-KIND facts on the `oxplow.tokens` measure — input +
-        // output, sliced by oxplow.token_kind — so the total spec sums both
-        // and input/output specs filter by kind.
+        // NO token facts from the transcript path (OTEL owns them now).
         let tokens_measure = svc
             .fact_store
             .get_measure("oxplow.tokens")
@@ -946,26 +1122,12 @@ mod tests {
             .facts_for_measure(tokens_measure.id)
             .await
             .unwrap();
-        assert_eq!(token_facts.len(), 2, "one input + one output fact");
-        let sum: f64 = token_facts.iter().map(|f| f.value).sum();
-        assert_eq!(sum, 120.0, "input 100 + output 20 = total");
-        let input_fact = token_facts
-            .iter()
-            .find(|f| {
-                f.dims_json.as_deref()
-                    == Some(
-                        "{\"oxplow.model\":\"claude-opus-4-8\",\"oxplow.token_kind\":\"input\"}",
-                    )
-            })
-            .expect("input-kind fact");
-        assert_eq!(input_fact.value, 100.0);
-        assert_eq!(
-            input_fact.subject_ref.as_deref(),
-            Some("model:claude-opus-4-8")
+        assert!(
+            token_facts.is_empty(),
+            "transcript path no longer projects oxplow.tokens facts"
         );
-        assert_eq!(input_fact.thread_id, Some(thread.value()));
 
-        // …and a turn fact on the `oxplow.turn` measure.
+        // …but a turn fact IS recorded, attributed to the thread.
         let turn_measure = svc
             .fact_store
             .get_measure("oxplow.turn")
@@ -979,24 +1141,26 @@ mod tests {
             .unwrap();
         assert_eq!(turn_facts.len(), 1);
         assert_eq!(turn_facts[0].value, 1.0, "one turn");
+        assert_eq!(turn_facts[0].thread_id, Some(thread.value()));
+        assert_eq!(
+            turn_facts[0].subject_ref.as_deref(),
+            Some("model:claude-opus-4-8")
+        );
 
-        // Keystone: the producer specs re-aggregate the facts to the baked totals
-        // through the engine (the read-flip, tsk26, can then serve them).
+        // The `agent.turns` spec re-aggregates the turn fact.
         svc.metrics.seed_catalog().await;
         let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
-        for (key, expected) in [
-            ("agent.tokens.total", 120.0),
-            ("agent.tokens.input", 100.0),
-            ("agent.tokens.output", 20.0),
-            ("agent.turns", 1.0),
-        ] {
-            let spec = svc.fact_store.get_spec(key).await.unwrap().unwrap();
-            assert_eq!(
-                engine.headline_for_spec(&spec).await.unwrap(),
-                Some(expected),
-                "{key}: spec headline over facts == baked total",
-            );
-        }
+        let spec = svc
+            .fact_store
+            .get_spec("agent.turns")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            engine.headline_for_spec(&spec).await.unwrap(),
+            Some(1.0),
+            "agent.turns headline over the turn fact",
+        );
     }
 
     #[tokio::test]
@@ -1062,7 +1226,8 @@ mod tests {
             .await
             .unwrap();
 
-        // The token capture is attributed to the open effort.
+        // The turn capture is attributed to the open effort (tsk22: the
+        // transcript path projects turn facts; token facts ride the OTEL path).
         let caps = svc
             .fact_store
             .captures_for_effort(effort.id.value())
@@ -1070,26 +1235,22 @@ mod tests {
             .unwrap();
         assert!(
             !caps.is_empty(),
-            "the token capture is attributed to the open effort"
+            "the turn capture is attributed to the open effort"
         );
         assert!(caps.iter().all(|c| c.effort_id == Some(effort.id.value())));
         // …and its facts are reachable through the fact-attribution read.
-        let tokens_measure = svc
+        let turn_measure = svc
             .fact_store
-            .get_measure("oxplow.tokens")
+            .get_measure("oxplow.turn")
             .await
             .unwrap()
             .unwrap();
         let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
         let facts = svc
             .fact_store
-            .facts_for_captures(tokens_measure.id, cap_ids)
+            .facts_for_captures(turn_measure.id, cap_ids)
             .await
             .unwrap();
-        assert_eq!(
-            facts.len(),
-            2,
-            "input + output token facts under the effort's capture"
-        );
+        assert_eq!(facts.len(), 1, "one turn fact under the effort's capture");
     }
 }

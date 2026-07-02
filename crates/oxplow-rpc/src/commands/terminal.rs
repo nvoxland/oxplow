@@ -51,6 +51,45 @@ fn codex_config_overrides(
     out
 }
 
+/// OTEL env that points Claude Code's OTLP metrics exporter at oxplow's
+/// control-plane receiver (epic tsk22). Only metrics are exported (no logs/
+/// traces). The owning thread/stream ride custom OTLP headers so the receiver
+/// attributes token facts without a session→thread lookup — one agent process
+/// per thread, so the headers are constant for its lifetime. Temporality is
+/// left at the SDK default (delta): each export is the per-interval increment,
+/// which maps straight onto the additive `oxplow.tokens` facts.
+fn claude_otel_env(
+    plugin_runtime: &crate::PluginRuntime,
+    stream_id: &str,
+    thread_id: &str,
+) -> Vec<(String, String)> {
+    vec![
+        ("CLAUDE_CODE_ENABLE_TELEMETRY".to_string(), "1".to_string()),
+        ("OTEL_METRICS_EXPORTER".to_string(), "otlp".to_string()),
+        (
+            "OTEL_EXPORTER_OTLP_PROTOCOL".to_string(),
+            "http/protobuf".to_string(),
+        ),
+        (
+            // Base URL; the SDK appends the `/v1/metrics` signal path.
+            "OTEL_EXPORTER_OTLP_ENDPOINT".to_string(),
+            plugin_runtime.otlp_base_url.clone(),
+        ),
+        (
+            "OTEL_EXPORTER_OTLP_HEADERS".to_string(),
+            format!(
+                "Authorization=Bearer {},X-Oxplow-Thread={},X-Oxplow-Stream={}",
+                plugin_runtime.hook_token, thread_id, stream_id
+            ),
+        ),
+        // 10s (default is 60s) — snappier token updates in the UI.
+        (
+            "OTEL_METRIC_EXPORT_INTERVAL".to_string(),
+            "10000".to_string(),
+        ),
+    ]
+}
+
 fn codex_hook_command(oxplow_executable: &std::path::Path, event: &str) -> String {
     format!(
         "{} hook {}",
@@ -258,7 +297,7 @@ pub async fn open_terminal_session(
     )
     .map_err(|e| IpcError::internal(format!("plugin write failed: {e}")))?;
 
-    let plugin_env = vec![
+    let mut plugin_env = vec![
         (
             "OXPLOW_HOOK_TOKEN".to_string(),
             plugin_runtime.hook_token.clone(),
@@ -277,6 +316,18 @@ pub async fn open_terminal_session(
         ),
         ("OXPLOW_PANE".to_string(), pane_target.clone()),
     ];
+    // Claude Code exports token-usage metrics via OTEL to the control-plane
+    // OTLP receiver (epic tsk22); the owning thread/stream ride custom OTLP
+    // headers so the receiver attributes the facts without a session→thread
+    // lookup. Codex is wired via `--config` (phase 2, tsk24); opencode is not
+    // auto-instrumented (a user's own OTEL plugin still reaches the receiver).
+    if agent == AgentKind::Claude {
+        plugin_env.extend(claude_otel_env(
+            plugin_runtime,
+            &stream.id.to_string(),
+            thread_id_str.as_deref().unwrap_or_default(),
+        ));
+    }
 
     let prompt = assemble_system_prompt(&ctx.layout.project_dir, &config, &stream, thread.as_ref());
     let mut opts = AgentCommandOptions {
@@ -532,10 +583,36 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        agent_session_key, codex_hook_command, opencode_config_content, shell_session_key,
+        agent_session_key, claude_otel_env, codex_hook_command, opencode_config_content,
+        shell_session_key,
     };
     use crate::test_support::services;
     use oxplow_domain::AgentKind;
+
+    #[test]
+    fn claude_otel_env_points_exporter_at_receiver_with_attribution_headers() {
+        // tsk22: these exact env-var names/values are the contract with Claude
+        // Code's OTEL exporter — a typo silently breaks token capture, so pin
+        // them. The endpoint is the base (SDK appends /v1/metrics); the headers
+        // carry the bearer + attribution spine the receiver reads.
+        let pr = crate::PluginRuntime {
+            hook_base_url: "http://127.0.0.1:9/hook".into(),
+            mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            otlp_base_url: "http://127.0.0.1:9".into(),
+            hook_token: "tok123".into(),
+        };
+        let env: std::collections::HashMap<String, String> =
+            claude_otel_env(&pr, "str1", "thr1").into_iter().collect();
+        assert_eq!(env["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+        assert_eq!(env["OTEL_METRICS_EXPORTER"], "otlp");
+        assert_eq!(env["OTEL_EXPORTER_OTLP_PROTOCOL"], "http/protobuf");
+        assert_eq!(env["OTEL_EXPORTER_OTLP_ENDPOINT"], "http://127.0.0.1:9");
+        assert_eq!(
+            env["OTEL_EXPORTER_OTLP_HEADERS"],
+            "Authorization=Bearer tok123,X-Oxplow-Thread=thr1,X-Oxplow-Stream=str1"
+        );
+        assert_eq!(env["OTEL_METRIC_EXPORT_INTERVAL"], "10000");
+    }
 
     #[test]
     fn agent_key_ignores_transport_mode() {
@@ -684,6 +761,7 @@ mod tests {
         ctx.plugin_runtime = Some(crate::PluginRuntime {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            otlp_base_url: "http://127.0.0.1:9".into(),
             hook_token: "test-token".into(),
         });
 
@@ -821,6 +899,7 @@ mod tests {
         ctx.plugin_runtime = Some(crate::PluginRuntime {
             hook_base_url: "http://127.0.0.1:9/hook".into(),
             mcp_endpoint_url: "http://127.0.0.1:9/mcp".into(),
+            otlp_base_url: "http://127.0.0.1:9".into(),
             hook_token: "test-token".into(),
         });
         let opened = crate::dispatch(

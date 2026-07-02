@@ -157,6 +157,7 @@ async fn main() {
             plugin_runtime: Some(oxplow_rpc::PluginRuntime {
                 hook_base_url: control_plane.hook_base_url(),
                 mcp_endpoint_url: control_plane.mcp_endpoint_url(),
+                otlp_base_url: control_plane.otlp_base_url(),
                 hook_token: control_plane.hook_token.clone(),
             }),
         },

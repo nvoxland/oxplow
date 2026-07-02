@@ -41,6 +41,8 @@ base64 = "0.22"
 [dev-dependencies]
 tempfile = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+opentelemetry-proto = { version = "0.32.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
+prost = "0.14"
 
 [lints]
 workspace = true

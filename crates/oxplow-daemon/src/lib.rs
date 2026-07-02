@@ -250,6 +250,7 @@ mod tests {
                 plugin_runtime: Some(oxplow_rpc::PluginRuntime {
                     hook_base_url: "http://127.0.0.1:0/hook".into(),
                     mcp_endpoint_url: "http://127.0.0.1:0/mcp".into(),
+                    otlp_base_url: "http://127.0.0.1:0".into(),
                     hook_token: "test-token".into(),
                 }),
             },

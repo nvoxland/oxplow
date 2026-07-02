@@ -33,6 +33,7 @@ pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod metric_engine;
 pub mod metrics_service;
+pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod producer_metrics;

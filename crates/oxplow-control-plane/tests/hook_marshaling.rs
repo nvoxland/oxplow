@@ -480,3 +480,119 @@ async fn ingest_failure_still_acks_200() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!({}));
 }
+
+// ── OTLP metrics receiver (epic tsk22) ──────────────────────────────────────
+
+/// Build an encoded (protobuf) Claude-shaped OTLP metrics export body with one
+/// `input` + one `output` `claude_code.token.usage` data point.
+fn otlp_claude_body(model: &str, input: i64, output: i64) -> Vec<u8> {
+    use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+    use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
+    use opentelemetry_proto::tonic::metrics::v1::{
+        metric, number_data_point, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+    };
+    use prost::Message;
+    let kv = |k: &str, v: &str| KeyValue {
+        key: k.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(v.into())),
+        }),
+        ..Default::default()
+    };
+    let point = |ty: &str, val: i64| NumberDataPoint {
+        attributes: vec![kv("type", ty), kv("model", model)],
+        value: Some(number_data_point::Value::AsInt(val)),
+        ..Default::default()
+    };
+    ExportMetricsServiceRequest {
+        resource_metrics: vec![ResourceMetrics {
+            scope_metrics: vec![ScopeMetrics {
+                metrics: vec![Metric {
+                    name: "claude_code.token.usage".into(),
+                    data: Some(metric::Data::Sum(Sum {
+                        data_points: vec![point("input", input), point("output", output)],
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
+async fn post_otlp(
+    cp: &ControlPlane,
+    thread: Option<ThreadId>,
+    stream: Option<StreamId>,
+    body: Vec<u8>,
+) -> reqwest::Response {
+    let mut req = reqwest::Client::new()
+        .post(format!("{}/v1/metrics", cp.otlp_base_url()))
+        .header("authorization", format!("Bearer {}", cp.hook_token))
+        .header("content-type", "application/x-protobuf")
+        .body(body);
+    if let Some(t) = thread {
+        req = req.header("x-oxplow-thread", t.to_string());
+    }
+    if let Some(s) = stream {
+        req = req.header("x-oxplow-stream", s.to_string());
+    }
+    req.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn otlp_metrics_without_bearer_is_unauthorized() {
+    let (cp, _svc, _root, _dir) = boot().await;
+    let resp = reqwest::Client::new()
+        .post(format!("{}/v1/metrics", cp.otlp_base_url()))
+        .body(otlp_claude_body("claude-opus-4-8", 100, 20))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test]
+async fn otlp_metrics_ingests_token_facts_attributed_by_headers() {
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let resp = post_otlp(
+        &cp,
+        Some(tid),
+        Some(StreamId::new(1)),
+        otlp_claude_body("claude-opus-4-8", 100, 20),
+    )
+    .await;
+    // OTLP success ack is always a 200 (best-effort side-band).
+    assert_eq!(resp.status(), 200);
+
+    let measure = svc
+        .fact_store
+        .get_measure("oxplow.tokens")
+        .await
+        .unwrap()
+        .unwrap();
+    let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+    assert_eq!(facts.len(), 2, "input + output token facts landed");
+    assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 120.0);
+    assert!(facts.iter().all(|f| f.thread_id == Some(tid.value())));
+}
+
+#[tokio::test]
+async fn otlp_metrics_without_attribution_headers_is_dropped_but_acked() {
+    let (cp, svc, _root, _dir) = boot().await;
+    // No X-Oxplow-Thread/Stream → nothing to attribute to; accept + drop.
+    let resp = post_otlp(&cp, None, None, otlp_claude_body("m", 100, 20)).await;
+    assert_eq!(resp.status(), 200);
+    let measure = svc
+        .fact_store
+        .get_measure("oxplow.tokens")
+        .await
+        .unwrap()
+        .unwrap();
+    let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+    assert!(facts.is_empty(), "no facts without attribution headers");
+}

@@ -443,6 +443,7 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
     let plugin_runtime: PluginRuntimeState = Arc::new(PluginRuntime {
         hook_base_url: control_plane.hook_base_url(),
         mcp_endpoint_url: control_plane.mcp_endpoint_url(),
+        otlp_base_url: control_plane.otlp_base_url(),
         hook_token: control_plane.hook_token.clone(),
     });
 

@@ -233,6 +233,18 @@ handy when the agent suspects the "current stream" has drifted from
 where it actually writes (the same phenomenon that motivated the
 streamId-derivation in other MCP tools).
 
+**Token usage — OTEL, not the Stop hook (tsk22).** The control plane hosts a
+sibling `POST /v1/metrics` OTLP receiver beside `/hook` and `/mcp`
+(`handle_otlp_metrics`, same bearer auth). Claude Code's launch env
+(`terminal.rs::claude_otel_env`) points its OTEL metrics exporter at it and
+attaches `X-Oxplow-Thread`/`X-Oxplow-Stream` as OTLP headers (one process per
+thread → constant), so the receiver attributes the `claude_code.token.usage`
+counter onto `oxplow.tokens` facts without a session→thread lookup. This
+replaced the transcript-parse token capture, which overcounted ~2–3× (Claude
+repeats a message's cumulative `usage` on every content-block line). The Stop
+hook's `on_stop` still records the per-turn `agent_token_usage` prompt rows +
+`oxplow.turn` facts. Details: `.context/metrics.md` → "OTEL token tracking".
+
 Each hook POSTs to the runtime's MCP server with bearer-token auth via the
 env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
 `X-Oxplow-Thread`, `X-Oxplow-Pane`. The MCP server's `onHook` callback dispatches

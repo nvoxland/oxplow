@@ -44,6 +44,8 @@ rayon = "1"
 uuid = { workspace = true }
 tempfile = { workspace = true }
 walkdir = "2.5"
+opentelemetry-proto = { version = "0.32.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
+prost = "0.14"
 
 [dev-dependencies]
 git2 = { workspace = true }
