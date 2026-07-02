@@ -140,6 +140,10 @@ pub struct NewDimension {
     pub subject_kind: Option<String>,
     pub vocabulary_json: Option<String>,
     pub scope: String,
+    /// Request a generated column + expression index on `fact` for this
+    /// dim (the config `promote: true`). Recorded on the row; the index
+    /// teeth are a follow-up — reads still filter in-app.
+    pub promoted: bool,
 }
 
 impl NewDimension {
@@ -152,6 +156,7 @@ impl NewDimension {
             subject_kind: None,
             vocabulary_json: None,
             scope: "built-in".into(),
+            promoted: false,
         }
     }
 }
@@ -715,13 +720,14 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                      ON CONFLICT(key) DO UPDATE SET
                         label=excluded.label, value_type=excluded.value_type,
                         subject_kind=excluded.subject_kind,
-                        vocabulary_json=excluded.vocabulary_json, scope=excluded.scope",
-                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope],
+                        vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
+                        promoted=excluded.promoted",
+                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope, d.promoted],
                 )?;
                 Ok(())
             })

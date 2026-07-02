@@ -374,9 +374,12 @@ dimensions:                        # custom conformed slice axes
   one-call "create a custom measure/dimension" (append config entry or write a
   shareable `<global>/…/<slug>.yaml`, reseed, return the key). The IPC/UI "New
   measure/dimension" buttons that surface these land with the UI task.
-- **`promote`** is threaded through but currently **inert** (see tsk28): the
-  engine loads all facts and filters in-app, so an index bites nothing until
-  reads go DB-side. Carried, not acted on.
+- **`promote`** now persists onto the row: `seed_catalog` threads the resolved
+  dimension's `promote` into `NewDimension.promoted`, so `dimension.promoted`
+  reflects the config (it was previously parsed but dropped at seed). Still
+  **inert** downstream (see tsk28): the engine loads all facts and filters
+  in-app, so the requested generated column + index bites nothing until reads
+  go DB-side. Recorded, not yet acted on.
 
 **Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth
 (tsk28); unbaking the per-language idiom scripts (still emit dead `tree:.`/

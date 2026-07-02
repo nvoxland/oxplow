@@ -274,6 +274,7 @@ impl MetricsService {
                 subject_kind: rd.subject_kind,
                 vocabulary_json,
                 scope: rd.scope,
+                promoted: rd.promote,
             };
             match facts.upsert_dimension(nd).await {
                 Ok(()) => d += 1,
@@ -2311,6 +2312,31 @@ def transform(input):
             .expect("dimension seeded");
         assert_eq!(ep.scope, "project");
         assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
+    }
+
+    #[tokio::test]
+    async fn seed_catalog_threads_promote_flag_to_dimension_row() {
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "dimensions:\n  - key: acme.hot\n    label: Hot\n    promote: true\n  \
+             - key: acme.cold\n    label: Cold\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+
+        let dims = svc.fact_store.list_dimensions().await.unwrap();
+        let hot = dims
+            .iter()
+            .find(|d| d.key == "acme.hot")
+            .expect("hot seeded");
+        let cold = dims
+            .iter()
+            .find(|d| d.key == "acme.cold")
+            .expect("cold seeded");
+        assert!(hot.promoted, "promote: true must reach the dimension row");
+        assert!(!cold.promoted, "unset promote defaults to false");
     }
 
     #[tokio::test]
