@@ -238,11 +238,16 @@ summed every assistant line) and was Claude-only + format-fragile.
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
     export is the increment), `type ∈ {input,output}` (cacheRead/cacheCreation
     dropped);
-  - **Codex** — `codex.turn.token_usage` **histogram** (per turn; value = the
-    data point `sum`), `token_type` mapped input→input, output+reasoning_output
-    →output, `cached_input`+`total` dropped (dropping `total` avoids double
-    count). `model` reads from the data point, falling back to the resource
-    attributes.
+  - **Codex** — its `codex.sse_event` **log event** with
+    `event.kind=response.completed` (tsk27, confirmed against Codex 0.142.0 via
+    the tsk25 diagnostic — Codex points its single OTLP endpoint at us and sends
+    token counts as **logs**, not a metric). Counts are per-request, so new
+    input = `input_token_count − cached_token_count`, output =
+    `output_token_count + reasoning_token_count`; `model` reads the record then
+    the resource. `ingest_otlp_tokens` tries metrics-decode then logs-decode, so
+    one endpoint accepts both agents. (A speculative `codex.turn.token_usage`
+    *metric* mapper also exists, unemitted by 0.142.0 — kept as a defensive
+    path.)
 - **Launch wiring:** per-agent, injected at spawn (`terminal.rs`):
   - **Claude** (`claude_otel_env`, env — Claude has OTEL env support):
     `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_METRICS_EXPORTER=otlp`,
@@ -255,15 +260,17 @@ summed every assistant line) and was Claude-only + format-fragile.
     exporter's `headers` map.
   - **opencode** is not auto-instrumented (a user's own OTEL plugin pointed at
     the receiver still works).
-  > **Live-verification caveat (Codex):** the exact Codex OTEL wire format
-  > (metric name / histogram shape / `token_type` values / where `model` rides /
-  > whether the `--config otel.exporter.otlp-http.*` tagged-union keys select the
-  > http exporter) is from docs, not yet confirmed against a running Codex. The
-  > mapper is defensive, but a live Codex session may need small adjustments.
-  > **Diagnostic (tsk25):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
-  > oxplow — the receiver appends a decoded dump of every OTLP export (metric
-  > names + attributes) to that file (`otlp_tokens::summarize_metrics_request`),
-  > so one live Codex turn reveals the real shape. Off by default.
+  > **Codex confirmed live (tsk27):** a real Codex 0.142.0 run (via the tsk25
+  > diagnostic) showed the `--config otel.exporter.otlp-http.*` injection works
+  > (its exports reach us with the `X-Oxplow-*` headers), and that Codex's token
+  > counts arrive as the `response.completed` **log event** — not the metric we
+  > first guessed. `input_token_count` is the full request context (mostly
+  > cache-read on later turns), hence the `input − cached` mapping. Claude's
+  > metric path was confirmed live in the same run.
+  > **Diagnostic (tsk25/26):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
+  > oxplow — the receiver appends a decoded dump of every OTLP export (metrics
+  > AND logs: names/event-kinds + attributes) to that file
+  > (`otlp_tokens::summarize_metrics_request`). Off by default.
   See `.context/agent-model.md`.
 
 **Fact-attribution spine — `metric_capture.effort_id` (T-D prep, tsk37).** The

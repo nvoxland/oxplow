@@ -189,9 +189,12 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
-        // OTLP metrics receiver (epic tsk22). Agent CLIs export token-usage
-        // metrics here; attribution rides the same X-Oxplow-* headers as hooks.
+        // OTLP receiver (epic tsk22). Agent CLIs export token usage here —
+        // Claude as metrics, Codex as logs (its `response.completed` event) —
+        // attribution rides the same X-Oxplow-* headers as hooks. Both signal
+        // paths hit one handler; the ingest path decodes metrics-or-logs.
         .route("/v1/metrics", post(handle_otlp_metrics))
+        .route("/v1/logs", post(handle_otlp_metrics))
         .with_state(ctx);
 
     let app = Router::new()

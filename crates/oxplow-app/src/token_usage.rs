@@ -519,24 +519,37 @@ impl TokenUsageService {
     }
 
     /// Ingest an OTLP metrics export (epic tsk22) — the OpenTelemetry successor
-    /// to the transcript-parse token facts. Decode the protobuf `body`, project
-    /// its token data points onto the `oxplow.tokens` measure (per-model, sliced
-    /// by `oxplow.token_kind`), and record them under one capture attributed to
+    /// to the transcript-parse token facts. Decode the protobuf `body` as OTLP
+    /// **metrics** (Claude's `claude_code.token.usage` counter) or, failing that,
+    /// as OTLP **logs** (Codex's `response.completed` event — its real token
+    /// source; Codex points its single OTLP endpoint here), project the token
+    /// counts onto the `oxplow.tokens` measure (per-model, sliced by
+    /// `oxplow.token_kind`), and record them under one capture attributed to
     /// `thread`/`stream` plus the thread's single open effort when unambiguous
-    /// (same resolution as [`Self::on_stop`]). The capture carries an
-    /// idempotency key over the raw body, so an SDK **retry** of the same export
-    /// is a no-op while a genuinely new interval (different delta data-point
-    /// timestamps → different bytes) records fresh. Returns the number of token
-    /// facts the export mapped to. Caller treats errors as non-fatal.
+    /// (same resolution as [`Self::on_stop`]). The capture carries an idempotency
+    /// key over the raw body, so a retransmit of the same export is a no-op.
+    /// Returns the number of token facts the export mapped to. A body that is
+    /// neither metrics nor logs (most Codex log events aren't token events) is a
+    /// quiet `Ok(0)`, not an error — so the receiver never warn-spams.
     pub async fn ingest_otlp_tokens(
         &self,
         thread: &ThreadId,
         stream: &StreamId,
         body: &[u8],
     ) -> Result<usize, DomainError> {
-        let req = crate::otlp_tokens::decode_metrics_request(body)
-            .map_err(|e| DomainError::Invalid(format!("OTLP metrics decode: {e}")))?;
-        let token_facts = crate::otlp_tokens::otlp_metrics_to_token_facts(&req);
+        // Claude sends metrics; Codex sends its token counts as logs (to the
+        // same endpoint). Try metrics; if that yields no token facts (decode
+        // failed, OR a non-token metrics body, OR a logs body that happened to
+        // decode as empty metrics), try logs. A body that is neither is a quiet
+        // no-op — so the receiver never warn-spams on Codex's non-token logs.
+        let mut token_facts = crate::otlp_tokens::decode_metrics_request(body)
+            .map(|req| crate::otlp_tokens::otlp_metrics_to_token_facts(&req))
+            .unwrap_or_default();
+        if token_facts.is_empty() {
+            token_facts = crate::otlp_tokens::decode_logs_request(body)
+                .map(|req| crate::otlp_tokens::otlp_logs_to_token_facts(&req))
+                .unwrap_or_default();
+        }
         if token_facts.is_empty() {
             return Ok(0);
         }

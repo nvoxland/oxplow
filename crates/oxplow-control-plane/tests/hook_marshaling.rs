@@ -567,6 +567,56 @@ fn otlp_codex_body(model: &str, input: f64, output: f64, reasoning: f64) -> Vec<
     .encode_to_vec()
 }
 
+/// Build an encoded (protobuf) Codex-shaped OTLP **logs** export: a
+/// `codex.sse_event` / `response.completed` record carrying token counts.
+fn otlp_codex_logs_body(
+    model: &str,
+    input: i64,
+    cached: i64,
+    output: i64,
+    reasoning: i64,
+) -> Vec<u8> {
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
+    use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+    use prost::Message;
+    let kv = |k: &str, v: &str| KeyValue {
+        key: k.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(v.into())),
+        }),
+        ..Default::default()
+    };
+    let kvi = |k: &str, v: i64| KeyValue {
+        key: k.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::IntValue(v)),
+        }),
+        ..Default::default()
+    };
+    ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            scope_logs: vec![ScopeLogs {
+                log_records: vec![LogRecord {
+                    attributes: vec![
+                        kv("event.name", "codex.sse_event"),
+                        kv("event.kind", "response.completed"),
+                        kvi("input_token_count", input),
+                        kvi("cached_token_count", cached),
+                        kvi("output_token_count", output),
+                        kvi("reasoning_token_count", reasoning),
+                        kv("model", model),
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
 async fn post_otlp(
     cp: &ControlPlane,
     thread: Option<ThreadId>,
@@ -650,6 +700,35 @@ async fn otlp_metrics_ingests_codex_histogram_facts() {
     assert!(facts
         .iter()
         .all(|f| f.subject_ref.as_deref() == Some("model:gpt-5-codex")));
+}
+
+#[tokio::test]
+async fn otlp_logs_body_at_metrics_endpoint_ingests_codex_token_facts() {
+    // Codex sends its logs (its token source) to the single endpoint we set
+    // (/v1/metrics); the ingest path decodes logs when metrics-decode fails.
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    // input 5000 − cached 1000 = 4000 new input; output 200 + reasoning 50 = 250.
+    let resp = post_otlp(
+        &cp,
+        Some(tid),
+        Some(StreamId::new(1)),
+        otlp_codex_logs_body("gpt-5.5", 5000, 1000, 200, 50),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+
+    let measure = svc
+        .fact_store
+        .get_measure("oxplow.tokens")
+        .await
+        .unwrap()
+        .unwrap();
+    let facts = svc.fact_store.facts_for_measure(measure.id).await.unwrap();
+    assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 4250.0);
+    assert!(facts
+        .iter()
+        .all(|f| f.subject_ref.as_deref() == Some("model:gpt-5.5")));
 }
 
 #[tokio::test]

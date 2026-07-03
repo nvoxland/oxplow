@@ -8,12 +8,19 @@
 //! overcounted because Claude repeats a message's cumulative `usage` on every
 //! content-block line.
 //!
-//! Pure + no IO → fully unit-testable. Recognizes Claude Code's
-//! `claude_code.token.usage` counter (tsk23) and Codex's `codex.turn.token_usage`
-//! histogram (tsk24), keeping the `input`/`output` token kinds (cache dropped;
-//! Codex `reasoning_output` folds into `output`). [`summarize_metrics_request`]
-//! is the opt-in wire-format diagnostic (tsk25).
+//! Pure + no IO → fully unit-testable. Two agents, two shapes:
+//! - **Claude** — the `claude_code.token.usage` **metric** counter (tsk23).
+//! - **Codex** — its `response.completed` **log event** (tsk27), the confirmed
+//!   live source; Codex points its single OTLP endpoint at us and sends token
+//!   counts as logs. `input_token_count` is the full context, so new input =
+//!   `input − cached`; reasoning folds into output. (A `codex.turn.token_usage`
+//!   metric mapper also exists but is speculative — unemitted by Codex 0.142.0.)
+//!
+//! Both keep the `input`/`output` token kinds; cache is dropped.
+//! [`summarize_metrics_request`] is the opt-in wire-format diagnostic (tsk25),
+//! which also decodes logs.
 
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point, Metric};
@@ -23,10 +30,16 @@ use prost::Message;
 /// attribute carries the token kind; `model` the model id.
 const CLAUDE_TOKEN_METRIC: &str = "claude_code.token.usage";
 
-/// Codex's per-turn token histogram. Its `token_type` attribute carries the
-/// kind (`input`/`output`/`reasoning_output`/`cached_input`/`total`); the
-/// per-turn token count is the histogram data point's `sum`.
+/// Codex's per-turn token histogram — SPECULATIVE. Codex 0.142.0 does NOT emit
+/// this; its token counts ride the `response.completed` LOG event instead (see
+/// [`otlp_logs_to_token_facts`]). Kept as a defensive path in case a future
+/// Codex version adds the metric. `token_type` carries the kind; value is the
+/// histogram data point's `sum`.
 const CODEX_TOKEN_METRIC: &str = "codex.turn.token_usage";
+
+/// Codex emits token counts on its `codex.sse_event` log record whose
+/// `event.kind` attribute is `response.completed` (tsk27).
+const CODEX_TOKEN_EVENT_KIND: &str = "response.completed";
 
 /// The token kinds oxplow tracks. Cache tokens (Claude `cacheRead`/
 /// `cacheCreation`, Codex `cached_input`) and the Codex `total` rollup are
@@ -63,6 +76,12 @@ pub fn decode_metrics_request(
     body: &[u8],
 ) -> Result<ExportMetricsServiceRequest, prost::DecodeError> {
     ExportMetricsServiceRequest::decode(body)
+}
+
+/// Decode an OTLP/HTTP protobuf logs export body. Codex points its single OTLP
+/// endpoint at us and sends its log events (which carry its token counts) here.
+pub fn decode_logs_request(body: &[u8]) -> Result<ExportLogsServiceRequest, prost::DecodeError> {
+    ExportLogsServiceRequest::decode(body)
 }
 
 /// Project the token data points from a decoded OTLP metrics export into
@@ -137,6 +156,55 @@ fn collect_codex(m: &Metric, resource_attrs: &[KeyValue], out: &mut Vec<TokenFac
     }
 }
 
+/// Project token facts from a decoded OTLP **logs** export (tsk27) — Codex's
+/// real token source. Each `response.completed` log record carries per-request
+/// counts (`input_token_count` is the FULL context, so new input =
+/// `input_token_count − cached_token_count`; reasoning folds into output to
+/// match Claude). `model` reads the record, falling back to resource attributes.
+pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact> {
+    let mut out = Vec::new();
+    for rl in &req.resource_logs {
+        let resource_attrs = rl
+            .resource
+            .as_ref()
+            .map(|r| r.attributes.as_slice())
+            .unwrap_or(&[]);
+        for sl in &rl.scope_logs {
+            for lr in &sl.log_records {
+                if string_attr(&lr.attributes, "event.kind").as_deref()
+                    != Some(CODEX_TOKEN_EVENT_KIND)
+                {
+                    continue;
+                }
+                let a = &lr.attributes;
+                let input = int_attr(a, "input_token_count").unwrap_or(0);
+                let cached = int_attr(a, "cached_token_count").unwrap_or(0);
+                let output = int_attr(a, "output_token_count").unwrap_or(0);
+                let reasoning = int_attr(a, "reasoning_token_count").unwrap_or(0);
+                let model = model_attr(a, resource_attrs);
+                // new (uncached) input this request; reasoning folded into output.
+                let new_input = (input - cached).max(0);
+                let out_total = output + reasoning;
+                if new_input > 0 {
+                    out.push(TokenFact {
+                        model: model.clone(),
+                        kind: TokenKind::Input,
+                        value: new_input,
+                    });
+                }
+                if out_total > 0 {
+                    out.push(TokenFact {
+                        model,
+                        kind: TokenKind::Output,
+                        value: out_total,
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Read a string-valued OTLP attribute by key.
 fn string_attr(attrs: &[KeyValue], key: &str) -> Option<String> {
     attrs.iter().find(|kv| kv.key == key).and_then(|kv| {
@@ -145,6 +213,23 @@ fn string_attr(attrs: &[KeyValue], key: &str) -> Option<String> {
             _ => None,
         }
     })
+}
+
+/// Read an integer-valued OTLP attribute (int, double, or numeric string).
+fn int_attr(attrs: &[KeyValue], key: &str) -> Option<i64> {
+    match attrs
+        .iter()
+        .find(|kv| kv.key == key)?
+        .value
+        .as_ref()?
+        .value
+        .as_ref()?
+    {
+        any_value::Value::IntValue(i) => Some(*i),
+        any_value::Value::DoubleValue(d) => Some(*d as i64),
+        any_value::Value::StringValue(s) => s.parse().ok(),
+        _ => None,
+    }
 }
 
 /// The model id: from the data-point attributes, else the resource attributes,
@@ -488,6 +573,84 @@ mod tests {
         );
         // cached_input + total contributed nothing.
         assert_eq!(facts.iter().map(|f| f.value).sum::<i64>(), 150);
+    }
+
+    fn kv_int(k: &str, v: i64) -> KeyValue {
+        KeyValue {
+            key: k.into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::IntValue(v)),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn codex_response_completed_log_maps_new_input_and_folded_output() {
+        // tsk27: real Codex token source. input=full context, so new input =
+        // input − cached; reasoning folds into output. Mix int + string attrs
+        // to exercise int_attr's coercion.
+        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+        let rec = LogRecord {
+            attributes: vec![
+                kv("event.name", "codex.sse_event"),
+                kv("event.kind", "response.completed"),
+                kv_int("input_token_count", 113690),
+                kv_int("cached_token_count", 2432),
+                kv("output_token_count", "254"),
+                kv("reasoning_token_count", "42"),
+                kv("model", "gpt-5.5"),
+            ],
+            ..Default::default()
+        };
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![rec],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let facts = otlp_logs_to_token_facts(&req);
+        let input: i64 = facts
+            .iter()
+            .filter(|f| f.kind == TokenKind::Input)
+            .map(|f| f.value)
+            .sum();
+        let output: i64 = facts
+            .iter()
+            .filter(|f| f.kind == TokenKind::Output)
+            .map(|f| f.value)
+            .sum();
+        assert_eq!(input, 111258, "113690 input − 2432 cached");
+        assert_eq!(output, 296, "254 output + 42 reasoning");
+        assert!(facts.iter().all(|f| f.model == "gpt-5.5"));
+    }
+
+    #[test]
+    fn non_response_completed_logs_produce_no_token_facts() {
+        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+        // A codex.api_request event (no response.completed kind) → nothing.
+        let rec = LogRecord {
+            attributes: vec![
+                kv("event.name", "codex.api_request"),
+                kv("duration_ms", "427"),
+            ],
+            ..Default::default()
+        };
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![rec],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        assert!(otlp_logs_to_token_facts(&req).is_empty());
     }
 
     #[test]
