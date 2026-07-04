@@ -243,6 +243,21 @@ surface, the xterm analog of `MonacoCommentLayer`.
   on the line; a click reopens the thread. Placement is wrapped in
   try/catch so a coordinate edge case degrades to "no highlight" rather
   than disturbing the terminal.
+- **Repaint is throttled, and skips entirely with no comments.** Each
+  repaint re-serializes the *whole* scrollback (~5000 lines → ~1MB string)
+  and re-anchors every comment over it, which alone can blow a frame
+  budget. So `repaint()` (a) **early-returns before the serialize when
+  `threads.length === 0`** — the common agent-pane case, a streaming
+  terminal with no comments — and (b) bounds the write firehose to **one
+  repaint per `REPAINT_MIN_INTERVAL_MS` (250ms)** with a trailing run via
+  `planRepaint` (`components/Comments/terminalRepaintSchedule.ts`), not one
+  per animation frame. Per-frame repaints ran back-to-back while output
+  streamed and froze the renderer's main thread (`tsk34`; the UI stall
+  watchdog reported it as `main thread stalled` with `centerActive="agent"`).
+  Highlights lagging streamed output by ≤250ms is imperceptible. The serialize
+  itself is wrapped in `timed("terminal-repaint", …)` (from `logger.ts`) so a
+  regression self-reports as a `slow operation` WARN naming the buffer +
+  comment sizes — use `timed()` around any hot synchronous path.
 - **Orphaning is expected.** Scrollback wraps and evicts (5000-line cap),
   so terminal anchors orphan far more readily than editor anchors —
   acceptable; the comment still lists in the inbox and the agent still
@@ -274,3 +289,6 @@ each scans the same line. Examples for the future:
 - Changed terminal comment anchoring (buffer serialization, the
   `TerminalBufferSelector`, or the decoration painting) → update the
   commenting section.
+- Changed the repaint throttle / empty-threads skip (`REPAINT_MIN_INTERVAL_MS`,
+  `planRepaint`, the `timed("terminal-repaint")` wrap) → update the "Repaint
+  is throttled" bullet; this path is a known main-thread-stall hazard.

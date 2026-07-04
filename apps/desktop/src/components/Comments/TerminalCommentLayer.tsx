@@ -19,10 +19,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IDecoration, Terminal } from "@xterm/xterm";
 
 import { createComment } from "../../api.js";
+import { timed } from "../../logger.js";
 import type { CommentIntent } from "../../tauri-bridge/generated/bindings.js";
 import { CommentPopover } from "./CommentPopover.js";
 import { NewCommentPopover } from "./NewCommentPopover.js";
 import { SelectionCommentToolbar } from "./SelectionCommentToolbar.js";
+import { planRepaint, REPAINT_MIN_INTERVAL_MS } from "./terminalRepaintSchedule.js";
 import {
   buildTerminalSelectorsJson,
   coordToOffset,
@@ -31,6 +33,12 @@ import {
   type SerializedBuffer,
 } from "./terminalAnchor.js";
 import { useCommentsForTarget } from "./useCommentsForTarget.js";
+
+/// Monotonic-ish clock for repaint throttling; falls back to Date.now
+/// where performance.now is unavailable (e.g. non-browser test env).
+function nowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
 
 /// Flatten the terminal's active buffer (scrollback + viewport) into a
 /// [`SerializedBuffer`]. `getLine(i)` is absolute over the whole buffer,
@@ -130,65 +138,91 @@ export function TerminalCommentLayer({
     }
     paintedRef.current = [];
 
-    const sbuf = serializeTermBuffer(term);
+    // Nothing to anchor → skip the whole-buffer serialize + reanchor. This
+    // is the common case on the agent pane (a streaming terminal with no
+    // comments), and serializing a ~5000-line scrollback every frame is
+    // what stalls the main thread while output streams.
+    if (threads.length === 0) return;
+
     const active = term.buffer.active;
-    const cursorAbs = active.baseY + active.cursorY;
-    const painted: Painted[] = [];
-    for (const t of threads) {
-      const c = t.comment;
-      const anchor = reanchorInBuffer(sbuf, c.selectors_json, c.quote);
-      if (!anchor) continue;
-      try {
-        // registerMarker is relative to the cursor's absolute line.
-        const marker = term.registerMarker(anchor.startLine - cursorAbs);
-        if (!marker) continue;
-        const width = Math.max(
-          1,
-          (anchor.endLine > anchor.startLine ? term.cols : anchor.endCol) - anchor.startCol,
-        );
-        const decoration = term.registerDecoration({
-          marker,
-          x: anchor.startCol,
-          width,
-        });
-        if (!decoration) {
-          marker.dispose();
-          continue;
+    // Serialize + reanchor is the expensive part (whole-scrollback string +
+    // a scan per comment). Self-time it so a future regression, or a
+    // pathological buffer/comment count, self-reports as a `slow operation`
+    // WARN naming the buffer + comment sizes — the drift watchdog can only
+    // report that *something* froze, never what.
+    timed(
+      "terminal-repaint",
+      () => {
+        const sbuf = serializeTermBuffer(term);
+        const cursorAbs = active.baseY + active.cursorY;
+        const painted: Painted[] = [];
+        for (const t of threads) {
+          const c = t.comment;
+          const anchor = reanchorInBuffer(sbuf, c.selectors_json, c.quote);
+          if (!anchor) continue;
+          try {
+            // registerMarker is relative to the cursor's absolute line.
+            const marker = term.registerMarker(anchor.startLine - cursorAbs);
+            if (!marker) continue;
+            const width = Math.max(
+              1,
+              (anchor.endLine > anchor.startLine ? term.cols : anchor.endCol) - anchor.startCol,
+            );
+            const decoration = term.registerDecoration({
+              marker,
+              x: anchor.startCol,
+              width,
+            });
+            if (!decoration) {
+              marker.dispose();
+              continue;
+            }
+            const commentId = c.id;
+            const approx = anchor.confidence === "fuzzy";
+            decoration.onRender((el) => {
+              el.classList.add("oxplow-terminal-comment");
+              if (approx) el.classList.add("oxplow-terminal-comment--approx");
+              el.style.cursor = "pointer";
+              el.onclick = () => setOpenId({ id: commentId, rect: el.getBoundingClientRect() });
+            });
+            painted.push({ commentId, decoration });
+          } catch {
+            /* coordinate out of range — skip painting this one */
+          }
         }
-        const commentId = c.id;
-        const approx = anchor.confidence === "fuzzy";
-        decoration.onRender((el) => {
-          el.classList.add("oxplow-terminal-comment");
-          if (approx) el.classList.add("oxplow-terminal-comment--approx");
-          el.style.cursor = "pointer";
-          el.onclick = () => setOpenId({ id: commentId, rect: el.getBoundingClientRect() });
-        });
-        painted.push({ commentId, decoration });
-      } catch {
-        /* coordinate out of range — skip painting this one */
-      }
-    }
-    paintedRef.current = painted;
+        paintedRef.current = painted;
+      },
+      { context: () => ({ bufferLines: active.length, commentThreads: threads.length }) },
+    );
   }, [term, threads]);
 
   useEffect(() => {
     if (!term) return;
     repaint();
-    // Coalesce the write firehose (agent output streams a line at a time)
-    // into one repaint per frame so a busy terminal doesn't thrash
-    // re-serializing the buffer + rebuilding decorations on every write.
-    let frame = 0;
+    // Throttle the write firehose (agent output streams a line at a time) to
+    // at most one repaint per REPAINT_MIN_INTERVAL_MS. Coalescing to one
+    // repaint *per frame* still let a busy terminal thrash — each repaint
+    // re-serializes the full ~5000-line scrollback and re-anchors every
+    // comment, which alone can exceed a frame budget, so per-frame repaints
+    // ran back-to-back and stalled the main thread. A trailing repaint keeps
+    // the final state correct once the stream quiets.
+    let lastRun = 0;
+    let trailing: ReturnType<typeof setTimeout> | null = null;
+    const run = () => {
+      trailing = null;
+      lastRun = nowMs();
+      repaint();
+    };
     const schedule = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        repaint();
-      });
+      if (trailing) return; // a trailing repaint is already queued
+      const plan = planRepaint(lastRun, nowMs(), REPAINT_MIN_INTERVAL_MS);
+      if (plan.run === "now") run();
+      else trailing = setTimeout(run, plan.waitMs);
     };
     const onData = term.onWriteParsed(schedule);
     const onScroll = term.onScroll(schedule);
     return () => {
-      if (frame) window.cancelAnimationFrame(frame);
+      if (trailing) clearTimeout(trailing);
       onData.dispose();
       onScroll.dispose();
       for (const p of paintedRef.current) {

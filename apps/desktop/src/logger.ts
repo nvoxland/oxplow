@@ -51,6 +51,83 @@ export function evaluateStall(opts: {
   return { stalled: !opts.wasHidden && blockedMs >= opts.thresholdMs, blockedMs };
 }
 
+// --- Self-timed operations --------------------------------------------
+// The stall watchdog above fires only *after* a freeze ends, so the
+// blocking code is already off the stack — it can name a duration, never a
+// culprit. `timed()` closes that gap: wrap a synchronous operation and it
+// logs a `slow operation` warn naming the op + its inputs the moment it
+// runs long. Works everywhere (unlike PerformanceObserver longtask/LoAF,
+// which WKWebView doesn't support).
+
+/** A synchronous operation slower than this warrants a `slow operation` warn. */
+export const SLOW_OP_THRESHOLD_MS = 50;
+
+function nowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+/** Whether a completed operation of `durMs` is slow enough to warn about. */
+export function isSlowOperation(durMs: number, thresholdMs: number = SLOW_OP_THRESHOLD_MS): boolean {
+  return durMs >= thresholdMs;
+}
+
+/**
+ * Time a synchronous `fn`; emit a `slow operation` warn when it runs longer
+ * than `thresholdMs`. Returns `fn`'s result (and rethrows on throw, timing
+ * the partial run) so it wraps an expression transparently:
+ * `const x = timed("label", () => expensive())`. `context` is evaluated only
+ * on the slow path so attaching diagnostics (buffer size, item counts) costs
+ * nothing on the fast path. `now` is injectable for tests.
+ */
+export function timed<T>(
+  label: string,
+  fn: () => T,
+  opts?: { thresholdMs?: number; context?: () => Record<string, unknown>; now?: () => number },
+): T {
+  const clock = opts?.now ?? nowMs;
+  const start = clock();
+  try {
+    return fn();
+  } finally {
+    const durMs = Math.round(clock() - start);
+    if (isSlowOperation(durMs, opts?.thresholdMs ?? SLOW_OP_THRESHOLD_MS)) {
+      void sendUiLog("warn", "slow operation", {
+        label,
+        durMs,
+        ...(opts?.context?.() ?? {}),
+        ...uiLogContext,
+      });
+    }
+  }
+}
+
+interface LoafScript {
+  sourceURL?: string;
+  sourceFunctionName?: string;
+  duration?: number;
+  invoker?: string;
+}
+
+/**
+ * Flatten a `long-animation-frame` entry's script attribution into a compact
+ * loggable shape: absent fields become `undefined`, durations round to whole
+ * ms. LoAF `scripts[]` is what makes a long frame actionable — it names the
+ * source URL + function that ran long.
+ */
+export function describeLoafScripts(entry: { scripts?: LoafScript[] }): Array<{
+  src: string | undefined;
+  fn: string | undefined;
+  durMs: number;
+  invoker: string | undefined;
+}> {
+  return (entry.scripts ?? []).map((s) => ({
+    src: s.sourceURL || undefined,
+    fn: s.sourceFunctionName || undefined,
+    durMs: Math.round(s.duration ?? 0),
+    invoker: s.invoker || undefined,
+  }));
+}
+
 function getDoc(): Document | undefined {
   return (globalThis as { document?: Document }).document;
 }
@@ -60,10 +137,22 @@ function docHidden(): boolean {
   return !!d && d.visibilityState !== undefined && d.visibilityState !== "visible";
 }
 
+/** Total element count in the document — a cheap DOM-bloat signal attached
+ *  to stall warnings (a huge tree makes layout/paint the likely blocker). */
+function countDomNodes(): number | null {
+  const d = getDoc();
+  try {
+    return d?.getElementsByTagName?.("*").length ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Start the timer-drift watchdog. Returns a stop function. */
 function startStallWatchdog(): () => void {
   let lastTick = Date.now();
   let wasHidden = docHidden();
+  let consecutiveStalls = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const onVisibility = () => {
@@ -85,7 +174,17 @@ function startStallWatchdog(): () => void {
     lastTick = now;
     wasHidden = docHidden();
     if (stalled) {
-      void sendUiLog("warn", "main thread stalled", { blockedMs, ...uiLogContext });
+      consecutiveStalls += 1;
+      // consecutiveStalls separates a one-off hitch from sustained churn
+      // (e.g. a per-frame render looping); domNodes flags DOM bloat.
+      void sendUiLog("warn", "main thread stalled", {
+        blockedMs,
+        consecutiveStalls,
+        domNodes: countDomNodes(),
+        ...uiLogContext,
+      });
+    } else {
+      consecutiveStalls = 0;
     }
     timer = globalThis.setTimeout(tick, STALL_TICK_MS);
   };
@@ -95,6 +194,51 @@ function startStallWatchdog(): () => void {
     if (timer != null) globalThis.clearTimeout(timer);
     timer = null;
     doc?.removeEventListener?.("visibilitychange", onVisibility);
+  };
+}
+
+/**
+ * Attach `PerformanceObserver`s for long tasks and long animation frames
+ * (LoAF) when the platform supports them. WKWebView (the macOS Tauri
+ * target) supports neither, so this is a no-op there and the drift watchdog
+ * remains the only signal — but in a dev browser (or a future WebKit) LoAF
+ * `scripts[]` gives real per-script attribution for a long frame, the one
+ * thing the after-the-fact watchdog can't. Feature-detected + per-type
+ * try/catch so an unsupported type is silently skipped. Returns a teardown.
+ */
+function startPerfObservers(): () => void {
+  const PO = (globalThis as { PerformanceObserver?: typeof PerformanceObserver }).PerformanceObserver;
+  if (!PO) return () => {};
+  const observers: PerformanceObserver[] = [];
+  const observe = (type: string, handle: (entry: PerformanceEntry) => void) => {
+    try {
+      const po = new PO((list) => {
+        for (const entry of list.getEntries()) handle(entry);
+      });
+      po.observe({ type, buffered: false } as PerformanceObserverInit);
+      observers.push(po);
+    } catch {
+      /* entry type unsupported on this platform — skip */
+    }
+  };
+  observe("longtask", (entry) => {
+    void sendUiLog("warn", "long task", { durationMs: Math.round(entry.duration), ...uiLogContext });
+  });
+  observe("long-animation-frame", (entry) => {
+    void sendUiLog("warn", "long animation frame", {
+      durationMs: Math.round(entry.duration),
+      scripts: describeLoafScripts(entry as { scripts?: LoafScript[] }),
+      ...uiLogContext,
+    });
+  });
+  return () => {
+    for (const po of observers) {
+      try {
+        po.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
   };
 }
 
@@ -157,11 +301,13 @@ export function installUiLogging(): () => void {
   window.addEventListener("unhandledrejection", onRejection);
 
   const stopStallWatchdog = startStallWatchdog();
+  const stopPerfObservers = startPerfObservers();
 
   uninstall = () => {
     window.removeEventListener("error", onError);
     window.removeEventListener("unhandledrejection", onRejection);
     stopStallWatchdog();
+    stopPerfObservers();
     console.log = original.log;
     console.info = original.info;
     console.warn = original.warn;

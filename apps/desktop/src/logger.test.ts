@@ -1,9 +1,17 @@
 import { afterEach, expect, mock, test } from "bun:test";
 
 // logger.ts calls desktopBridge().logUi(...) inside sendUiLog. Stub the
-// bridge so install/uninstall don't depend on a real Tauri runtime.
+// bridge so install/uninstall don't depend on a real Tauri runtime, and
+// record the calls so tests can assert what got logged. logUi pushes
+// synchronously (no await before the push), so the record is populated by
+// the time the caller returns.
+const logged: Array<{ level: string; message: string; context?: Record<string, unknown> }> = [];
 mock.module("./api.js", () => ({
-  desktopBridge: () => ({ logUi: async () => {} }),
+  desktopBridge: () => ({
+    logUi: async (r: { level: string; message: string; context?: Record<string, unknown> }) => {
+      logged.push(r);
+    },
+  }),
 }));
 
 // The logger only touches window.add/removeEventListener and
@@ -31,7 +39,8 @@ function installFakeWindow(): Map<string, Set<Listener>> {
   return listeners;
 }
 
-const { installUiLogging, uninstallUiLogging, evaluateStall } = await import("./logger.js");
+const { installUiLogging, uninstallUiLogging, evaluateStall, isSlowOperation, timed, describeLoafScripts } =
+  await import("./logger.js");
 
 afterEach(() => {
   // Reset module singleton state, then restore the real globals.
@@ -95,4 +104,65 @@ test("evaluateStall: a hidden window never counts as a stall (timer throttling)"
   const r = evaluateStall({ actualElapsedMs: 60_000, expectedMs: 1000, thresholdMs: 1000, wasHidden: true });
   expect(r.stalled).toBe(false);
   expect(r.blockedMs).toBe(59_000);
+});
+
+test("isSlowOperation: at or above the threshold is slow, below is not", () => {
+  expect(isSlowOperation(49, 50)).toBe(false);
+  expect(isSlowOperation(50, 50)).toBe(true);
+  expect(isSlowOperation(1000, 50)).toBe(true);
+});
+
+test("timed: returns the fn result and logs a slow operation when it exceeds the threshold", () => {
+  logged.length = 0;
+  let i = 0;
+  const clock = [1000, 1080]; // 80ms elapsed
+  const result = timed("terminal-repaint", () => 42, {
+    thresholdMs: 50,
+    now: () => clock[i++]!,
+    context: () => ({ bufferLines: 5000 }),
+  });
+  expect(result).toBe(42);
+  const slow = logged.find((l) => l.message === "slow operation");
+  expect(slow).toBeDefined();
+  expect(slow!.level).toBe("warn");
+  expect(slow!.context).toMatchObject({ label: "terminal-repaint", durMs: 80, bufferLines: 5000 });
+});
+
+test("timed: a fast fn returns its result and logs nothing", () => {
+  logged.length = 0;
+  let i = 0;
+  const clock = [1000, 1005]; // 5ms elapsed, under threshold
+  const result = timed("fast", () => "ok", { thresholdMs: 50, now: () => clock[i++]! });
+  expect(result).toBe("ok");
+  expect(logged.find((l) => l.message === "slow operation")).toBeUndefined();
+});
+
+test("timed: still times (and returns) when fn throws, then rethrows", () => {
+  logged.length = 0;
+  let i = 0;
+  const clock = [1000, 1200]; // 200ms before it threw
+  expect(() =>
+    timed("boom", () => {
+      throw new Error("nope");
+    }, { thresholdMs: 50, now: () => clock[i++]! }),
+  ).toThrow("nope");
+  expect(logged.find((l) => l.message === "slow operation")?.context).toMatchObject({ label: "boom", durMs: 200 });
+});
+
+test("describeLoafScripts: no scripts field yields an empty attribution list", () => {
+  expect(describeLoafScripts({})).toEqual([]);
+  expect(describeLoafScripts({ scripts: [] })).toEqual([]);
+});
+
+test("describeLoafScripts: maps script fields and rounds durations", () => {
+  const out = describeLoafScripts({
+    scripts: [
+      { sourceURL: "app.js", sourceFunctionName: "repaint", duration: 912.7, invoker: "requestAnimationFrame" },
+      { duration: 40.2 },
+    ],
+  });
+  expect(out).toEqual([
+    { src: "app.js", fn: "repaint", durMs: 913, invoker: "requestAnimationFrame" },
+    { src: undefined, fn: undefined, durMs: 40, invoker: undefined },
+  ]);
 });
