@@ -190,6 +190,13 @@ pub struct MetricEntry {
     /// `key:` form — the new metric's namespaced key.
     #[serde(default)]
     pub key: Option<String>,
+    /// Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is
+    /// on); `Some(false)` = an explicit **disable marker** kept in config so a
+    /// default-ON metric (producer/plugin) or a config-defined metric can be
+    /// turned off without deleting its definition. Not a structural field, so a
+    /// `use:` entry may carry it (unlike measure/aggregation/filter/formula).
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default)]
     pub title: Option<String>,
     /// The measure whose facts this metric aggregates (required for a `key:`
@@ -262,6 +269,11 @@ pub struct ResolvedSpec {
     pub fail_at: Option<f64>,
     /// `built-in` | `global` | `project`.
     pub scope: String,
+    /// Whether this metric is active. Derived from the config entry's `enabled`
+    /// flag (default `true`). A disabled spec is still resolved (so the Catalog
+    /// can list it as an unchecked toggle), but `seed_catalog` prunes it from the
+    /// `metric_spec` table so all spec-driven reads + producer collection stop.
+    pub enabled: bool,
 }
 
 /// One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
@@ -1065,6 +1077,10 @@ fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
     put_str("category", &e.category);
     put_str("language", &e.language);
     put_str("description", &e.description);
+    // Only the disable marker is written; a bare/enabled entry stays minimal.
+    if let Some(b) = e.enabled {
+        m.insert("enabled".into(), b.into());
+    }
     if !e.sliceable_dims.is_empty() {
         m.insert(
             "sliceableDims".into(),
@@ -1508,6 +1524,7 @@ fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, C
         out.push(MetricEntry {
             use_key,
             key,
+            enabled: e.enabled,
             title: opt(e.title),
             source_measure,
             aggregation,
@@ -1716,6 +1733,12 @@ pub fn resolve_metrics(
         } else if let Some(uk) = e.use_key.as_deref() {
             match catalog.get(uk) {
                 Some((scope, def)) => out.push(resolve_one(uk, scope, def, Some(e))),
+                // A `use:` of a key not in the resolve catalog is normally a typo.
+                // The exception is a **disable marker** (`enabled: false`) for a
+                // producer/plugin metric — those keys aren't config definitions,
+                // so `seed_catalog` handles their pruning directly from config
+                // state; skip it here silently rather than warn.
+                None if e.enabled == Some(false) => {}
                 None => tracing::warn!(
                     key = uk,
                     "metrics: `use:` references an unknown catalog key; skipping"
@@ -1757,6 +1780,9 @@ fn resolve_one(
         warn_at: pick_f64(|e| e.warn_at),
         fail_at: pick_f64(|e| e.fail_at),
         scope: scope.to_string(),
+        // The `enabled` flag lives on the acting (project) entry — the `use:`
+        // override for a use'd metric, else the `key:` definition. Default on.
+        enabled: over.and_then(|o| o.enabled).or(def.enabled).unwrap_or(true),
     }
 }
 
@@ -3004,6 +3030,69 @@ metrics:
             ..Default::default()
         }];
         assert!(resolve_metrics(&[], &[], &project).is_empty());
+    }
+
+    #[test]
+    fn resolve_defaults_enabled_true() {
+        let project = vec![define("acme.loc", None)];
+        let resolved = resolve_metrics(&[], &[], &project);
+        assert!(resolved[0].enabled, "a bare definition is active");
+    }
+
+    #[test]
+    fn resolve_marks_disabled_use_entry() {
+        // A project `use:` disable marker over a known catalog def resolves with
+        // `enabled: false` (NOT dropped — the Catalog still lists it, and
+        // seed_catalog needs it to know to prune).
+        let builtin = vec![define("oxplow.unsafe", Some(0.0))];
+        let project = vec![MetricEntry {
+            use_key: Some("oxplow.unsafe".into()),
+            enabled: Some(false),
+            ..Default::default()
+        }];
+        let resolved = resolve_metrics(&builtin, &[], &project);
+        assert_eq!(resolved.len(), 1);
+        assert!(!resolved[0].enabled);
+    }
+
+    #[test]
+    fn resolve_marks_disabled_key_definition() {
+        // Disabling a config-DEFINED metric keeps its definition but flags it off.
+        let mut def = define("acme.loc", None);
+        def.enabled = Some(false);
+        let resolved = resolve_metrics(&[], &[], &[def]);
+        assert_eq!(resolved.len(), 1);
+        assert!(!resolved[0].enabled);
+    }
+
+    #[test]
+    fn resolve_disable_marker_for_unknown_key_is_skipped_quietly() {
+        // A disable marker for a producer/plugin key (not a resolve-catalog def)
+        // is skipped without a warning — seed_catalog prunes it from config state.
+        let project = vec![MetricEntry {
+            use_key: Some("agent.tokens.total".into()),
+            enabled: Some(false),
+            ..Default::default()
+        }];
+        assert!(resolve_metrics(&[], &[], &project).is_empty());
+    }
+
+    #[test]
+    fn disabled_marker_round_trips_through_write() {
+        let dir = tempdir().unwrap();
+        let cfg = OxplowConfig {
+            metrics: vec![MetricEntry {
+                use_key: Some("agent.tokens.total".into()),
+                enabled: Some(false),
+                ..Default::default()
+            }],
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        assert!(raw.contains("enabled: false"), "got:\n{raw}");
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.metrics, cfg.metrics);
     }
 
     #[test]

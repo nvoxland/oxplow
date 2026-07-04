@@ -1759,6 +1759,12 @@ export async function setMetricEnabled(key: string, enabled: boolean): Promise<v
   unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
+/** Enable/disable MANY metrics in one write — the per-section Enable/Disable-all
+ *  action (tsk32). One config write + one reseed for the whole set. */
+export async function setMetricsEnabled(keys: string[], enabled: boolean): Promise<void> {
+  unwrap(await commands.setMetricsEnabled(keys, enabled));
+}
+
 /** Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
  *  tsk233). `null` clears that override. `trigger` is inherent to the
  *  definition and not overridable (tsk290). */

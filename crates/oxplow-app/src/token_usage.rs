@@ -491,6 +491,16 @@ impl TokenUsageService {
         // fact per model; additive event measure, model a conformed dimension).
         // The per-turn `agent_token_usage` rows (with prompt text) are recorded
         // above; those are what this path still uniquely provides.
+        // Stop-collecting gate (tsk31): skip the turn facts when `agent.turns` is
+        // disabled (nothing consumes `oxplow.turn`).
+        if !self
+            .facts
+            .measure_has_active_spec("oxplow.turn")
+            .await
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
         let turn_measure = self.facts.get_measure("oxplow.turn").await?;
         if let Some(tm) = turn_measure {
             let mut facts = Vec::new();
@@ -551,6 +561,17 @@ impl TokenUsageService {
                 .unwrap_or_default();
         }
         if token_facts.is_empty() {
+            return Ok(0);
+        }
+        // Stop-collecting gate (tsk31): drop the export when every token metric
+        // (`agent.tokens.input/output/total`) is disabled — nothing consumes
+        // `oxplow.tokens`. Still a 200 ack to the exporter (the caller answers).
+        if !self
+            .facts
+            .measure_has_active_spec("oxplow.tokens")
+            .await
+            .unwrap_or(true)
+        {
             return Ok(0);
         }
         let Some(measure) = self.facts.get_measure("oxplow.tokens").await? else {
@@ -795,6 +816,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_git_repo(dir.path());
         let svc = std::sync::Arc::new(crate::Services::in_memory(dir.path()).unwrap());
+        // Seed the catalog as boot does — the token/turn producers gate collection
+        // on `measure_has_active_spec` (tsk31), so the specs must exist.
+        svc.metrics.seed_catalog().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = svc
             .threads

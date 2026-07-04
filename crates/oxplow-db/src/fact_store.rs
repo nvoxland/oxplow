@@ -826,6 +826,37 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Remove a spec by key (idempotent — a missing key is a no-op). The prune
+    /// primitive `seed_catalog` uses to reconcile the `metric_spec` table down to
+    /// exactly the enabled set (a disabled metric's row is deleted so all
+    /// spec-driven reads go empty).
+    pub async fn delete_spec(&self, key: &str) -> Result<(), DomainError> {
+        let key = key.to_string();
+        self.db
+            .call(move |conn| {
+                conn.execute("DELETE FROM metric_spec WHERE key = ?1", params![key])?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Whether any spec currently sources this measure. Because `seed_catalog`
+    /// prunes disabled specs, the `metric_spec` table equals the *enabled* set —
+    /// so this is the producer collection gate: no active metric consumes the
+    /// measure ⇒ the producer skips writing its facts (stop-collecting).
+    pub async fn measure_has_active_spec(&self, measure_key: &str) -> Result<bool, DomainError> {
+        let measure_key = measure_key.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM metric_spec WHERE source_measure = ?1)",
+                    params![measure_key],
+                    |r| r.get::<_, bool>(0),
+                )
+            })
+            .await
+    }
+
     // --- captures + facts -------------------------------------------------
 
     /// Insert one capture; returns its id. `captured_at` defaults to now.
@@ -1208,6 +1239,64 @@ mod tests {
             got.formula.as_deref(),
             Some("{\"op\":\"div\",\"left\":\"acme.bugs\",\"right\":\"acme.kloc\"}")
         );
+    }
+
+    #[tokio::test]
+    async fn delete_spec_removes_row_and_is_idempotent() {
+        let store = fixture().await;
+        store
+            .upsert_spec(NewMetricSpec::base(
+                "acme.hotspots",
+                "Hotspots",
+                "oxplow.complexity",
+                "count",
+            ))
+            .await
+            .unwrap();
+        assert!(store.get_spec("acme.hotspots").await.unwrap().is_some());
+
+        store.delete_spec("acme.hotspots").await.unwrap();
+        assert!(store.get_spec("acme.hotspots").await.unwrap().is_none());
+        // Deleting a missing key is a no-op, not an error.
+        store.delete_spec("acme.hotspots").await.unwrap();
+        store.delete_spec("never.existed").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn measure_has_active_spec_tracks_the_spec_table() {
+        let store = fixture().await;
+        // No spec sources the measure yet — the producer gate is closed.
+        assert!(!store
+            .measure_has_active_spec("oxplow.complexity")
+            .await
+            .unwrap());
+
+        let id = store
+            .upsert_spec(NewMetricSpec::base(
+                "acme.hotspots",
+                "Hotspots",
+                "oxplow.complexity",
+                "count",
+            ))
+            .await
+            .unwrap();
+        assert!(id > 0);
+        assert!(store
+            .measure_has_active_spec("oxplow.complexity")
+            .await
+            .unwrap());
+        // A different measure is still un-consumed.
+        assert!(!store
+            .measure_has_active_spec("oxplow.tokens")
+            .await
+            .unwrap());
+
+        // Pruning the last consumer re-closes the gate.
+        store.delete_spec("acme.hotspots").await.unwrap();
+        assert!(!store
+            .measure_has_active_spec("oxplow.complexity")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

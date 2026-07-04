@@ -115,6 +115,18 @@ pub async fn set_metric_enabled(
     oxplow_rpc::commands::metrics::set_metric_enabled(&state, key, enabled).await
 }
 
+/// Enable/disable many metrics in one write (the per-section Enable/Disable-all,
+/// tsk32).
+#[tauri::command]
+#[specta::specta]
+pub async fn set_metrics_enabled(
+    state: tauri::State<'_, AppState>,
+    keys: Vec<String>,
+    enabled: bool,
+) -> Result<(), IpcError> {
+    oxplow_rpc::commands::metrics::set_metrics_enabled(&state, keys, enabled).await
+}
+
 /// Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
 /// tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 #[tauri::command]

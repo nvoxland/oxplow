@@ -49,3 +49,56 @@ export function groupByCategory<T>(
     .map(([category, entries]) => ({ category, entries }))
     .sort((a, b) => categoryOrder(a.category) - categoryOrder(b.category));
 }
+
+// Display labels for language slugs (as carried on `MetricCatalogEntry.language`
+// — the built-in gauges use `""`/null for language-agnostic, else a lowercase
+// slug). Unknown slugs fall back to a Capitalized form.
+const LANGUAGE_LABEL: Record<string, string> = {
+  rust: "Rust",
+  typescript: "TypeScript",
+  javascript: "JavaScript",
+  python: "Python",
+  go: "Go",
+  csharp: "C#",
+  cpp: "C++",
+  c: "C",
+  java: "Java",
+  kotlin: "Kotlin",
+  ruby: "Ruby",
+  php: "PHP",
+  swift: "Swift",
+  clojure: "Clojure",
+};
+
+/** Human label for a language slug; the language-agnostic bucket (empty/null)
+ *  is "General". Unknown slugs are Capitalized. */
+export function languageLabel(lang: string | null): string {
+  if (!lang || lang.trim() === "") return "General";
+  return LANGUAGE_LABEL[lang] ?? lang.charAt(0).toUpperCase() + lang.slice(1);
+}
+
+/** Sub-group rows by language slug. Pure — entries keep their incoming order.
+ *  The language-agnostic bucket (null / `""`) collapses into one "General" group
+ *  that sorts first; named languages follow, ordered by display label. Used to
+ *  break the flat "Static analysis" category into per-language sections. */
+export function groupByLanguage<T>(
+  rows: T[],
+  getLanguage: (row: T) => string | null,
+): Array<{ language: string | null; label: string; entries: T[] }> {
+  const byLang = new Map<string | null, T[]>();
+  for (const r of rows) {
+    const raw = getLanguage(r);
+    const lang = raw && raw.trim() !== "" ? raw : null;
+    const list = byLang.get(lang);
+    if (list) list.push(r);
+    else byLang.set(lang, [r]);
+  }
+  return [...byLang.entries()]
+    .map(([language, entries]) => ({ language, label: languageLabel(language), entries }))
+    .sort((a, b) => {
+      // "General" (the language-agnostic bucket) always leads; the rest by label.
+      if (a.language === null) return b.language === null ? 0 : -1;
+      if (b.language === null) return 1;
+      return a.label.localeCompare(b.label);
+    });
+}

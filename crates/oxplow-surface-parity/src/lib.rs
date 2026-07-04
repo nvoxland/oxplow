@@ -133,6 +133,7 @@ pub const MANIFEST: &[Capability] = &[
     // the `metrics:` config / run_metric, not the catalog toggle).
     ui("list_metric_catalog"),
     ui("set_metric_enabled"),
+    ui("set_metrics_enabled"),
     ui("set_metric_override"),
     ui("scaffold_metric"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives

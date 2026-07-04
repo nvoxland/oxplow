@@ -24,7 +24,6 @@ collection:
   - clippy --message-format=json
   agentHint: 'Run EVERY test invocation via `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — including red-phase/failing runs and quick single-test runs, not just the final green one. Never use bare `cargo test`/`bun test`/`bun run test` (or background it): only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s Tests/coverage panel, so any other run won''t show there. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
 metrics:
-# Language-idiom metrics (per-language concepts).
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros
@@ -32,8 +31,9 @@ metrics:
 - use: oxplow.ts.non_null_assertions
 - use: oxplow.ts.console_calls
 - use: oxplow.ts.ts_ignore
-# Language-agnostic code metrics (one metric, all languages).
 - use: oxplow.todos
 - use: oxplow.fn_count
 - use: oxplow.high_complexity_fns
 - use: oxplow.long_functions
+- use: oxplow.tests.failed
+  target: 0.0

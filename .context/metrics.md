@@ -203,6 +203,21 @@ gauges, tokens, lifecycle — always insert fresh), `get_capture`,
 Each producer writes atomic facts through `record_facts` (a capture + the
 facts). The legacy V38 sample/finding/run/definition writes were removed in
 T-E2 (tsk49); producers emit `MetricSamplesChanged` after their capture write.
+
+**Collection gate (tsk31).** Before writing, each base-data producer checks
+`fact_store.measure_has_active_spec(<measure>)` and skips when no *enabled* metric
+consumes that measure (the spec table = the enabled set after `seed_catalog`'s
+reconcile). So disabling every metric over a measure stops its collection:
+`oxplow.tokens` (all `agent.tokens.*` off), `oxplow.test_case` (all
+`oxplow.tests.*` off), `oxplow.lint_hit` (both `oxplow.analysis.*` off),
+`oxplow.coverage`, `oxplow.turn`, `oxplow.nudge`, `oxplow.cycle_time` /
+`oxplow.task_effort`. **Tests keep their run record** even when the metric is off
+— a measured run whose `oxplow.tests.*` are all disabled records under the
+record-only `test-run` producer (no metric facts) so effort-review still sees the
+run. Code gauges need no gate — `resolved_gauges()` already elides a disabled
+gauge (it never runs). Test fixtures that exercise a producer must seed the
+producer specs (as boot does) or the gate stays closed.
+
 Landed:
 
 | producer | where | facts |
@@ -729,14 +744,19 @@ that **writes**.
   metrics →". Live-refreshes on `metricSamplesChanged`.
 - **Metric Detail** (`MetricDetailPage.tsx` wrapping `MetricDetail.tsx`,
   `PageKind` `"metric-detail"`, routed by `metricRef(key, effort)`) — its own
-  page (tsk283), navigated into from the Explorer, Recorded Metrics, and the
-  task-page EffortMetrics drill-in (so there's no inline overlay). Back goes
+  page (tsk283), navigated into from the Explorer, Recorded Metrics, the
+  **Catalog** (each metric name is a `RouteLink` to `metricRef(key)`, tsk33), and
+  the task-page EffortMetrics drill-in (so there's no inline overlay). Back goes
   through `PageNavigationContext` (`goBack`, falling back to Recorded Metrics).
   The metric name is the H1; the definition's **`description`** renders as intro
-  text under it (tsk309). Layout is the details layout: a right rail holds the
-  range/chart-mode/branch controls + the agg-aware in-range stat, the main column
-  the trend chart → paginated recordings table → kind drill-in. See the
-  `MetricDetail` component bullet below for what each kind renders.
+  text under it (tsk309). Layout is the details layout: a right rail ("Details")
+  holds the range/chart-mode/branch controls + the agg-aware in-range stat + the
+  full **definition metadata** (`MetricStatsRail`, tsk33: ID/key, Type
+  (display_kind), Aggregation, source Measure, Scope, Category, Language, Unit,
+  Direction, Target, Warn/Fail thresholds, Branch); the main column has the trend
+  chart → **paginated** recordings table (`RecordingsTable`, 25/page) → kind
+  drill-in. See the `MetricDetail` component bullet below for what each kind
+  renders.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
@@ -796,13 +816,44 @@ The **configure** page (tsk282):
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
   lifecycle, nudges — listed regardless of recorded data so the user sees they
   exist, tsk286); (4) every other seeded `metric_definition` — installed plugin
-  metrics and legacy rows. Each entry carries `toggleable` + `category`: **only toggleable
-  metrics** (the code gauges + config entries) show the enable/disable checkbox
-  and the target editor; always-on producers/plugins render an "Always
-  on" badge and read-only fields (they're free side-bands, not opt-in compute —
-  the old "built-in vs hardcoded" split was an artifact; both are `scope:
-  built-in` in the DB). Enable/disable via `set_metric_enabled` (→ writes a
-  `use:` into `.oxplow/project.yaml`); **inline-edit the target** (tsk233) via
+  metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
+  "always on" class is retired: producers/plugins can be enabled/disabled just
+  like code gauges. `catalog()` reads each row's `enabled` from config
+  (`config_state`): a built-in gauge is on only when a non-disabled `use:`
+  resolves it; producers/plugins are default-ON unless an `enabled: false` marker
+  disables them. **Layout (tsk29):** each category is a *section*
+  (`<h2>` title + a list of metric rows), NOT one flat table — a row shows only
+  the on/off **checkbox**, the metric **name** (a `RouteLink` to its Metric
+  Detail page, tsk33), and its **target** (no kind / scope / trigger / raw key
+  columns; the key rides as a hover `title`). Each
+  section header carries a **tri-state group checkbox** to the right of the title
+  (`GroupCheckbox` + pure `sectionCheckboxState`, tsk32): checked when every
+  metric is on, indeterminate when only some are; a click enables all (from
+  off/indeterminate) or disables all (from fully-on) in one batch write
+  (`set_metrics_enabled` — one config write + one reseed for the whole section).
+  **Static analysis
+  has no single section** — its real top-level division is by language, so each
+  language becomes its own top-level `<h2>` section (peer to Tests / Coverage /
+  Operational), ordered via `groupByLanguage` in `metricCategories.ts`: the
+  language-agnostic code gauges + analysis producers fall under **"General"**
+  (first), then Rust / TypeScript / C# / Clojure / … by display label. (The
+  `groupCatalog` category still positions the whole static-analysis block where
+  `static-quality` sits in `CATEGORY_ORDER`; the render expands that one group
+  into N per-language sections instead of an umbrella.)
+  Enable/disable via `set_metric_enabled` — its config shape is default-aware
+  (`apply_metric_enabled` + `is_default_on`): a default-OFF metric (built-in code
+  gauge / global def) toggles by the presence of a bare `use:` entry, while a
+  default-ON metric (producer/plugin) or a config `key:` definition toggles by an
+  `enabled: false` **marker** (so disabling never deletes a `key:` definition).
+  `seed_catalog` then **reconciles** the `metric_spec` table down to exactly the
+  enabled set — upsert the enabled, `delete_spec` the disabled — so all
+  spec-driven reads (Explorer/Recorded/Detail/effort-deltas/MCP) go empty for a
+  disabled metric, and its producer's collection stops via the
+  `measure_has_active_spec` gate (see the producer section: **base data is not
+  collected when no active metric consumes its measure** — shared-measure
+  families like `oxplow.tokens`/`oxplow.test_case` keep flowing until *all* their
+  metrics are off). Historical facts are never deleted, so re-enabling restores
+  the chart. **Inline-edit the target** (tsk233) via
   `set_metric_override` → `MetricsService::set_metric_override` writes the
   target override onto the `use:` entry. **Trigger is inherent to the
   definition** — *when* a metric is collected is a property of what it measures,

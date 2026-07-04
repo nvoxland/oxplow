@@ -154,6 +154,19 @@ pub async fn set_metric_enabled(
         .map_err(IpcError::internal)
 }
 
+/// Enable or disable MANY metrics in one config write + reseed — the per-section
+/// "Enable all / Disable all" action (tsk32).
+pub async fn set_metrics_enabled(
+    svc: &Services,
+    keys: Vec<String>,
+    enabled: bool,
+) -> Result<(), IpcError> {
+    svc.metrics
+        .set_metrics_enabled(&keys, enabled)
+        .await
+        .map_err(IpcError::internal)
+}
+
 /// Set a metric's `target` override in `.oxplow/project.yaml` (enabling it if needed;
 /// `None` clears that override), then reseed. The Catalog inline edit (tsk233).
 /// `trigger` is inherent to the definition and is not overridable (tsk290).

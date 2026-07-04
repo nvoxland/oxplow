@@ -245,11 +245,12 @@ impl MetricsService {
             .unwrap_or_default();
         let global = self.with_global_catalog(|g| g.gauges.clone());
         let mut out = resolve_gauges(&global, &project);
-        // Built-in gauges run only when their metric is enabled (`metrics: use:`).
+        // Built-in gauges run only when their metric is enabled (`metrics: use:`)
+        // AND not disabled by a marker — a disabled gauge must not compute.
         let enabled: std::collections::HashSet<String> = self
             .resolved_specs()
             .into_iter()
-            .filter(|s| s.scope == "built-in")
+            .filter(|s| s.scope == "built-in" && s.enabled)
             .map(|s| s.key)
             .collect();
         for m in builtin_metrics() {
@@ -325,30 +326,61 @@ impl MetricsService {
                 Err(e) => tracing::warn!(key = %rd.key, error = %e, "failed to seed dimension"),
             }
         }
-        // Built-in metric SPECS (epic tsk12): the bundled gauges are now
-        // aggregations over per-item facts, not baked sample streams — the
-        // language-agnostic code metrics (`builtin_metric_specs`) + the
-        // per-language idiom metrics (`builtin_ast_specs`, over `oxplow.ast_hit`).
-        // Seed beside the migration's built-in measures (idempotent).
+        // Metric SPECS — RECONCILE the `metric_spec` table down to exactly the
+        // *enabled* set (tsk31). Because reads treat a missing spec as empty and
+        // producers gate collection on `measure_has_active_spec`, pruning a
+        // disabled metric's row is the single lever that hides it AND stops its
+        // base-data collection. Per-metric enabled state comes from config:
+        let cfg_metrics = self
+            .config
+            .read()
+            .map(|c| c.metrics.clone())
+            .unwrap_or_default();
+        // `None` = no config entry; `Some(true/false)` = an explicit flag.
+        let config_state = |key: &str| -> Option<bool> {
+            cfg_metrics
+                .iter()
+                .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                .map(|e| e.enabled.unwrap_or(true))
+        };
+        // Built-in metric SPECS — the bundled code/idiom gauge specs
+        // (`builtin_metric_specs` + `builtin_ast_specs`) and the always-on producer
+        // specs. All are seeded UNLESS explicitly disabled by a `enabled: false`
+        // marker in config, in which case the row is pruned (so spec-driven reads
+        // go empty and, for producers, `measure_has_active_spec` closes the
+        // collection gate). Built-in gauges keep their spec seeded when merely
+        // un-`use:`d — the gauge simply doesn't RUN (gated in `resolved_gauges`) —
+        // so a disable is only ever an explicit marker.
         for spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
             .chain(crate::producer_metrics::builtin_producer_specs())
         {
-            if let Err(e) = facts.upsert_spec(spec.clone()).await {
-                tracing::warn!(key = %spec.key, error = %e, "failed to seed built-in metric spec");
+            let key = spec.key.clone();
+            let res = if config_state(&key) != Some(false) {
+                facts.upsert_spec(spec).await.map(|_| ())
+            } else {
+                facts.delete_spec(&key).await
+            };
+            if let Err(e) = res {
+                tracing::warn!(key = %key, error = %e, "failed to reconcile built-in metric spec");
             }
         }
-        // Config-declared metric SPECS (global ∪ project `metrics:` entries). A
-        // `key:` seeds a new spec; a `use:` of a BUILT-IN resolves to scope
-        // `built-in` carrying the catalog default target plus the project's
-        // threshold overrides (the Catalog inline target editor writes exactly
-        // such a `use:`), so it must re-seed AFTER the override-free built-ins
-        // above — dropping it left target/warn_at/fail_at NULL everywhere the
-        // engine reads the spec row.
+        // Config-declared SPECS (global ∪ project `metrics:`). A `key:` seeds a new
+        // spec; a `use:` of a BUILT-IN resolves to scope `built-in` carrying the
+        // catalog default target plus the project's threshold overrides (the
+        // Catalog inline target editor writes exactly such a `use:`), so it must
+        // re-seed AFTER the override-free built-ins above — dropping it left
+        // target/warn_at/fail_at NULL everywhere the engine reads the spec row. A
+        // disabled entry (`enabled: false`) is pruned instead of seeded.
         for s in self.resolved_specs() {
-            if let Err(e) = facts.upsert_spec(spec_to_new_spec(&s)).await {
-                tracing::warn!(key = %s.key, error = %e, "failed to seed config metric spec");
+            let res = if s.enabled {
+                facts.upsert_spec(spec_to_new_spec(&s)).await.map(|_| ())
+            } else {
+                facts.delete_spec(&s.key).await
+            };
+            if let Err(e) = res {
+                tracing::warn!(key = %s.key, error = %e, "failed to reconcile config metric spec");
             }
         }
         (m, d)
@@ -372,13 +404,28 @@ impl MetricsService {
         let resolved = self.resolved_specs();
         let by_key: std::collections::HashMap<&str, &_> =
             resolved.iter().map(|m| (m.key.as_str(), m)).collect();
+        // Per-key config enabled state (tsk31): `None` = no entry, `Some(_)` = an
+        // explicit flag. Producers/plugins are default-ON (a disable marker turns
+        // them off); built-in gauges are default-OFF (a `use:` turns them on).
+        let cfg_metrics = self
+            .config
+            .read()
+            .map(|c| c.metrics.clone())
+            .unwrap_or_default();
+        let config_state = |key: &str| -> Option<bool> {
+            cfg_metrics
+                .iter()
+                .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
+                .map(|e| e.enabled.unwrap_or(true))
+        };
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
         for b in builtin_metrics() {
             seen.insert(b.key.to_string());
             // When enabled, surface the *resolved* target (so a project override
             // shows through, tsk233); otherwise the built-in defaults. Trigger is a
-            // property of the built-in gauge, not overridable.
+            // property of the built-in gauge, not overridable. A built-in gauge is
+            // enabled only when a (non-disabled) `use:` resolves it.
             let r = by_key.get(b.key);
             out.push(MetricCatalogEntry {
                 key: b.key.to_string(),
@@ -386,7 +433,7 @@ impl MetricsService {
                 kind: b.kind.to_string(),
                 language: Some(b.language.to_string()),
                 scope: "built-in".to_string(),
-                enabled: r.is_some(),
+                enabled: r.is_some_and(|m| m.enabled),
                 target: r.map_or(b.target, |m| m.target),
                 trigger: b.trigger.to_string(),
                 toggleable: true,
@@ -408,7 +455,7 @@ impl MetricsService {
                     kind: m.display_kind.clone(),
                     language: m.language.clone(),
                     scope: m.scope.clone(),
-                    enabled: true,
+                    enabled: m.enabled,
                     target: m.target,
                     // A spec has no trigger of its own — its facts arrive on the
                     // producing gauge's cadence.
@@ -418,8 +465,9 @@ impl MetricsService {
                 });
             }
         }
-        // Built-in always-on producer metrics — listed even with zero recorded
-        // data, so the registry is complete the moment a project opens (tsk286).
+        // Built-in producer metrics — listed even with zero recorded data, so the
+        // registry is complete the moment a project opens (tsk286). Default-ON and
+        // now toggleable (tsk31): a disable marker in config turns one off.
         for p in builtin_producer_metrics() {
             if seen.insert(p.key.to_string()) {
                 out.push(MetricCatalogEntry {
@@ -428,10 +476,10 @@ impl MetricsService {
                     kind: p.kind.to_string(),
                     language: None,
                     scope: "built-in".to_string(),
-                    enabled: true,
+                    enabled: config_state(p.key) != Some(false),
                     target: None,
                     trigger: "auto".to_string(),
-                    toggleable: false,
+                    toggleable: true,
                     category: Some(p.category.to_string()),
                 });
             }
@@ -450,12 +498,12 @@ impl MetricsService {
                             kind: s.display_kind.clone(),
                             language: s.language.clone(),
                             scope: s.scope.clone(),
-                            enabled: true,
+                            enabled: config_state(&s.key) != Some(false),
                             target: s.target,
                             // No config trigger for a producer-seeded metric; it
                             // runs on its producer's own cadence.
                             trigger: "auto".to_string(),
-                            toggleable: false,
+                            toggleable: true,
                             category: s.category.clone(),
                         });
                     }
@@ -466,27 +514,112 @@ impl MetricsService {
         out
     }
 
-    /// Enable (add a `use:` entry) or disable (remove all entries for the key)
-    /// a metric in this project's `.oxplow/project.yaml`, then reseed. Persists the
-    /// config to disk + emits `ConfigChanged` (the Catalog toggle, tsk219).
+    /// Whether `key` is a default-ON metric (a producer or plugin-seeded spec) —
+    /// active unless a `enabled: false` marker disables it. Default-OFF metrics
+    /// (built-in code gauges + global `metrics:` definitions) instead activate by
+    /// the presence of a `use:` entry. Drives the config edit shape in
+    /// [`Self::apply_metric_enabled`].
+    fn is_default_on(&self, key: &str) -> bool {
+        let is_builtin_gauge = builtin_metrics().iter().any(|m| m.key == key);
+        let is_global =
+            self.with_global_catalog(|g| g.metrics.iter().any(|e| e.key.as_deref() == Some(key)));
+        !is_builtin_gauge && !is_global
+    }
+
+    /// Apply one enable/disable to a `metrics:` list in place (no I/O) — the
+    /// shared core of [`Self::set_metric_enabled`] and the batch variant so both
+    /// stay consistent (tsk31). Default-OFF metrics toggle by `use:` presence;
+    /// default-ON metrics and config `key:` definitions toggle by the `enabled`
+    /// marker (never deleting a `key:` definition on disable).
+    fn apply_metric_enabled(&self, metrics: &mut Vec<MetricEntry>, key: &str, enabled: bool) {
+        let pos = metrics
+            .iter()
+            .position(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
+        let is_key_def = pos.is_some_and(|i| metrics[i].key.as_deref() == Some(key));
+        let default_on = self.is_default_on(key);
+        if enabled {
+            match pos {
+                Some(i) => {
+                    metrics[i].enabled = None; // clear any disable marker
+                                               // A default-ON metric needs no config entry when active — drop
+                                               // a now-bare `use:` marker so config stays clean and
+                                               // `resolve_metrics` doesn't warn on the unknown key.
+                    let e = &metrics[i];
+                    let bare = e.key.is_none()
+                        && e.title.is_none()
+                        && e.target.is_none()
+                        && e.warn_at.is_none()
+                        && e.fail_at.is_none();
+                    if default_on && !is_key_def && bare {
+                        metrics.remove(i);
+                    }
+                }
+                None if !default_on => metrics.push(MetricEntry {
+                    use_key: Some(key.to_string()),
+                    ..Default::default()
+                }),
+                None => {} // default-ON with no entry: already active.
+            }
+        } else {
+            match pos {
+                // A config `key:` definition — keep it, just flag off (never delete
+                // the user's metric).
+                Some(i) if is_key_def => metrics[i].enabled = Some(false),
+                // Producer/plugin (default-ON): set a disable marker on the entry…
+                Some(i) if default_on => metrics[i].enabled = Some(false),
+                // …or write a fresh one when there's no entry yet.
+                None if default_on => metrics.push(MetricEntry {
+                    use_key: Some(key.to_string()),
+                    enabled: Some(false),
+                    ..Default::default()
+                }),
+                // Default-OFF (gauge/global): drop the `use:` entry (absence = off),
+                // keeping it as a marker only if it carries threshold overrides.
+                Some(i) => {
+                    let e = &metrics[i];
+                    if e.target.is_some() || e.warn_at.is_some() || e.fail_at.is_some() {
+                        metrics[i].enabled = Some(false);
+                    } else {
+                        metrics.remove(i);
+                    }
+                }
+                // Default-OFF with no entry → already off.
+                None => {}
+            }
+        }
+    }
+
+    /// Enable or disable a metric in this project's `.oxplow/project.yaml`, then
+    /// reseed (the Catalog toggle, tsk219/tsk31). Persists the config + emits
+    /// `ConfigChanged`; `seed_catalog` reconciles the `metric_spec` table so a
+    /// disabled metric is pruned (hidden + collection stops).
     pub async fn set_metric_enabled(&self, key: &str, enabled: bool) -> Result<(), String> {
         {
             let mut cfg = self
                 .config
                 .write()
                 .map_err(|_| "config lock poisoned".to_string())?;
-            let present = cfg
-                .metrics
-                .iter()
-                .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
-            if enabled && !present {
-                cfg.metrics.push(MetricEntry {
-                    use_key: Some(key.to_string()),
-                    ..Default::default()
-                });
-            } else if !enabled {
-                cfg.metrics
-                    .retain(|e| e.use_key.as_deref() != Some(key) && e.key.as_deref() != Some(key));
+            self.apply_metric_enabled(&mut cfg.metrics, key, enabled);
+            oxplow_config::write_project_config(&self.project_dir, &cfg)
+                .map_err(|e| e.to_string())?;
+        }
+        self.invalidate_global_catalog();
+        self.events.emit(OxplowEvent::ConfigChanged);
+        self.seed_catalog().await;
+        Ok(())
+    }
+
+    /// Enable or disable **many** metrics in one config write + one reseed — the
+    /// per-section "Enable all / Disable all" action (tsk32). Applies each key to
+    /// the same in-memory `metrics:` list under a single lock, then persists once.
+    pub async fn set_metrics_enabled(&self, keys: &[String], enabled: bool) -> Result<(), String> {
+        {
+            let mut cfg = self
+                .config
+                .write()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            for key in keys {
+                self.apply_metric_enabled(&mut cfg.metrics, key, enabled);
             }
             oxplow_config::write_project_config(&self.project_dir, &cfg)
                 .map_err(|e| e.to_string())?;
@@ -2585,7 +2718,10 @@ def transform(input):
                 .unwrap_or_else(|| panic!("{key} listed in catalog with no data"));
             assert_eq!(e.kind, kind, "{key} kind");
             assert_eq!(e.category.as_deref(), Some(category), "{key} category");
-            assert!(!e.toggleable, "{key} is always-on, not toggleable");
+            // tsk31: every metric is toggleable now (no "always on" class), and
+            // producers are enabled by default.
+            assert!(e.toggleable, "{key} is toggleable");
+            assert!(e.enabled, "{key} enabled by default");
         }
         // Toggleable code gauges still coexist.
         assert!(
@@ -2618,8 +2754,9 @@ def transform(input):
             .iter()
             .find(|e| e.key == "agent.tokens.total")
             .expect("producer-seeded metric is in the catalog");
-        assert!(!entry.toggleable, "always-on producers are not toggleable");
-        assert!(entry.enabled, "always-on producers read as enabled");
+        // tsk31: producers are toggleable now, enabled by default.
+        assert!(entry.toggleable, "producers are toggleable");
+        assert!(entry.enabled, "producers read as enabled by default");
         assert_eq!(entry.category.as_deref(), Some("operational"));
 
         // A toggleable code gauge still coexists in the same listing.
@@ -2627,6 +2764,138 @@ def transform(input):
             cat.iter()
                 .any(|e| e.key == "oxplow.rust.unsafe_blocks" && e.toggleable),
             "code gauges still present and toggleable"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_a_producer_prunes_its_spec_and_writes_a_marker() {
+        let (svc, dir) = fixture().await;
+        // Boot-seed the producer specs so there's a row to prune.
+        svc.metrics.seed_catalog().await;
+        assert!(
+            svc.fact_store
+                .get_spec("agent.tokens.total")
+                .await
+                .unwrap()
+                .is_some(),
+            "producer spec seeded by default"
+        );
+
+        // Disable the producer: catalog reads it off, config carries a marker, and
+        // the spec is pruned so all spec-driven reads go empty.
+        svc.metrics
+            .set_metric_enabled("agent.tokens.total", false)
+            .await
+            .unwrap();
+        let entry = svc
+            .metrics
+            .catalog()
+            .await
+            .into_iter()
+            .find(|e| e.key == "agent.tokens.total")
+            .expect("still listed");
+        assert!(entry.toggleable);
+        assert!(!entry.enabled, "reads as disabled");
+        assert!(
+            svc.fact_store
+                .get_spec("agent.tokens.total")
+                .await
+                .unwrap()
+                .is_none(),
+            "spec pruned on disable"
+        );
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert!(
+            yaml.contains("agent.tokens.total") && yaml.contains("enabled: false"),
+            "disable marker persisted; got:\n{yaml}"
+        );
+
+        // Re-enable removes the marker and re-seeds the spec from its definition.
+        svc.metrics
+            .set_metric_enabled("agent.tokens.total", true)
+            .await
+            .unwrap();
+        assert!(
+            svc.metrics
+                .catalog()
+                .await
+                .iter()
+                .find(|e| e.key == "agent.tokens.total")
+                .unwrap()
+                .enabled,
+            "re-enabled"
+        );
+        assert!(
+            svc.fact_store
+                .get_spec("agent.tokens.total")
+                .await
+                .unwrap()
+                .is_some(),
+            "spec re-seeded on enable"
+        );
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert!(
+            !yaml.contains("agent.tokens.total"),
+            "marker cleared on re-enable; got:\n{yaml}"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_metrics_enabled_batches_a_whole_section() {
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let keys = vec![
+            "agent.tokens.total".to_string(),
+            "agent.tokens.input".to_string(),
+            "agent.tokens.output".to_string(),
+        ];
+        svc.metrics.set_metrics_enabled(&keys, false).await.unwrap();
+
+        let cat = svc.metrics.catalog().await;
+        for k in &keys {
+            assert!(
+                !cat.iter().find(|e| &e.key == k).unwrap().enabled,
+                "{k} disabled by the batch"
+            );
+        }
+        // One config write carrying all three markers.
+        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
+        assert_eq!(
+            yaml.matches("enabled: false").count(),
+            3,
+            "one marker per key; got:\n{yaml}"
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_measure_closes_the_producer_collection_gate() {
+        // The keystone of "stop collecting": once every metric over a measure is
+        // disabled (its specs pruned), `measure_has_active_spec` is false so the
+        // producer skips the write.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        assert!(
+            svc.fact_store
+                .measure_has_active_spec("oxplow.tokens")
+                .await
+                .unwrap(),
+            "token specs active by default → gate open"
+        );
+
+        // Disable ALL three token metrics that source oxplow.tokens.
+        for k in [
+            "agent.tokens.total",
+            "agent.tokens.input",
+            "agent.tokens.output",
+        ] {
+            svc.metrics.set_metric_enabled(k, false).await.unwrap();
+        }
+        assert!(
+            !svc.fact_store
+                .measure_has_active_spec("oxplow.tokens")
+                .await
+                .unwrap(),
+            "all consumers disabled → gate closed → producer stops collecting"
         );
     }
 

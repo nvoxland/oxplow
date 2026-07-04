@@ -30,6 +30,7 @@ export function MetricsCatalogPage({
       >
         <MetricsCatalog
           onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
+          onOpenPage={onOpenPage}
         />
       </div>
     </Page>

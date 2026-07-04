@@ -547,23 +547,38 @@ impl TaskService {
                 // Both measures are NON-ADDITIVE with denominator 1 (V47): the
                 // cross-time collapse Σn/Σd is the MEAN across closes (average
                 // cycle time / efforts-per-task), never a lifetime sum.
-                if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
-                    rows.push(NewFact {
-                        subject_kind: Some("effort".into()),
-                        subject_ref: Some(effort_id.to_string()),
-                        numerator: Some(cycle_ms as f64),
-                        denominator: Some(1.0),
-                        ..NewFact::new(measure.id, cycle_ms as f64)
-                    });
+                // Stop-collecting gate (tsk31): only emit each lifecycle fact when
+                // an enabled metric consumes its measure (`effort.cycle_time_ms` /
+                // `task.efforts`).
+                if facts
+                    .measure_has_active_spec("oxplow.cycle_time")
+                    .await
+                    .unwrap_or(true)
+                {
+                    if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
+                        rows.push(NewFact {
+                            subject_kind: Some("effort".into()),
+                            subject_ref: Some(effort_id.to_string()),
+                            numerator: Some(cycle_ms as f64),
+                            denominator: Some(1.0),
+                            ..NewFact::new(measure.id, cycle_ms as f64)
+                        });
+                    }
                 }
-                if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
-                    rows.push(NewFact {
-                        subject_kind: Some("task".into()),
-                        subject_ref: Some(item.id.to_string()),
-                        numerator: Some(efforts_so_far as f64),
-                        denominator: Some(1.0),
-                        ..NewFact::new(measure.id, efforts_so_far as f64)
-                    });
+                if facts
+                    .measure_has_active_spec("oxplow.task_effort")
+                    .await
+                    .unwrap_or(true)
+                {
+                    if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
+                        rows.push(NewFact {
+                            subject_kind: Some("task".into()),
+                            subject_ref: Some(item.id.to_string()),
+                            numerator: Some(efforts_so_far as f64),
+                            denominator: Some(1.0),
+                            ..NewFact::new(measure.id, efforts_so_far as f64)
+                        });
+                    }
                 }
                 if rows.is_empty() {
                     return Ok::<(), DomainError>(());
@@ -1317,6 +1332,11 @@ mod tests {
         threads.upsert(&t).await.unwrap();
         let thread_store_for_svc = Arc::new(oxplow_db::SqliteThreadStore::new(db.clone()));
         let fact_store = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
+        // Seed the producer specs as boot does — the lifecycle producer gates on
+        // `measure_has_active_spec` (tsk31).
+        for spec in crate::producer_metrics::builtin_producer_specs() {
+            fact_store.upsert_spec(spec).await.unwrap();
+        }
         let svc = TaskService::new(task_store)
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())

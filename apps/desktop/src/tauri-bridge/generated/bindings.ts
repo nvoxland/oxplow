@@ -552,6 +552,11 @@ export const commands = {
 	// Enable/disable a metric in `.oxplow/project.yaml` (the Catalog toggle).
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
 	/**
+	 *  Enable/disable many metrics in one write (the per-section Enable/Disable-all,
+	 *  tsk32).
+	 */
+	setMetricsEnabled: (keys: string[], enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metrics_enabled", { keys, enabled })),
+	/**
 	 *  Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
 	 *  tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
 	 */
@@ -2114,6 +2119,14 @@ export type MetricEntry = {
 	use?: string | null,
 	// `key:` form — the new metric's namespaced key.
 	key?: string | null,
+	/**
+	 *  Active flag. `None`/`Some(true)` = active (a bare `use:`/`key:` entry is
+	 *  on); `Some(false)` = an explicit **disable marker** kept in config so a
+	 *  default-ON metric (producer/plugin) or a config-defined metric can be
+	 *  turned off without deleting its definition. Not a structural field, so a
+	 *  `use:` entry may carry it (unlike measure/aggregation/filter/formula).
+	 */
+	enabled?: boolean | null,
 	title?: string | null,
 	/**
 	 *  The measure whose facts this metric aggregates (required for a `key:`

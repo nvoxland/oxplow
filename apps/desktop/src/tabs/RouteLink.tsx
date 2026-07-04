@@ -79,7 +79,9 @@ export function useRouteDispatch(
 }
 
 export interface RouteLinkProps {
-  ref: TabRef;
+  // NOT `ref` — that's a reserved prop React 18 strips from function components
+  // (it never reaches this component), so the destination MUST use another name.
+  to: TabRef;
   children: ReactNode;
   /**
    * Fallback navigation — used only when no `PageNavigationContext`
@@ -116,7 +118,7 @@ export interface RouteLinkProps {
  * supplied — there's no current tab to navigate within.
  */
 export function RouteLink({
-  ref,
+  to,
   children,
   onNavigate,
   pinnedSlot = false,
@@ -127,7 +129,7 @@ export function RouteLink({
   draggable,
   onDragStart,
 }: RouteLinkProps) {
-  const { handlers } = useRouteDispatch(ref, { onNavigate, pinnedSlot });
+  const { handlers } = useRouteDispatch(to, { onNavigate, pinnedSlot });
   return (
     <button
       type="button"

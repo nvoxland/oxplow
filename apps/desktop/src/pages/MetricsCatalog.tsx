@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   type MetricCatalogEntry,
   listMetricCatalog,
   scaffoldMetric,
   setMetricEnabled,
+  setMetricsEnabled,
   setMetricOverride,
   subscribeOxplowEvents,
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { categoryLabel, groupByCategory } from "./metricCategories.js";
+import { metricRef } from "../tabs/pageRefs.js";
+import { RouteLink } from "../tabs/RouteLink.js";
+import type { TabRef } from "../tabs/tabState.js";
+import { categoryLabel, groupByCategory, groupByLanguage } from "./metricCategories.js";
 
 
 /** Group catalog entries by category in display order. Thin wrapper over the
@@ -20,6 +24,53 @@ export function groupCatalog(
   return groupByCategory(rows, (r) => r.category);
 }
 
+/** The tri-state group-checkbox state for a section: `checked` when every metric
+ *  is enabled, `indeterminate` when only some are, and `nextEnabled` = what a
+ *  click should apply (disable-all when fully on, else enable-all). Pure. */
+export function sectionCheckboxState(entries: { enabled: boolean }[]): {
+  checked: boolean;
+  indeterminate: boolean;
+  nextEnabled: boolean;
+} {
+  const allOn = entries.length > 0 && entries.every((e) => e.enabled);
+  const someOn = entries.some((e) => e.enabled);
+  return { checked: allOn, indeterminate: someOn && !allOn, nextEnabled: !allOn };
+}
+
+/** A checkbox that reflects/controls a whole section. HTML's `indeterminate` is a
+ *  DOM property (not an attribute), so it's set via a ref. A click applies
+ *  `nextEnabled` to the section. */
+function GroupCheckbox({
+  entries,
+  disabled,
+  onToggle,
+  testid,
+  label,
+}: {
+  entries: MetricCatalogEntry[];
+  disabled: boolean;
+  onToggle: (enabled: boolean) => void;
+  testid: string;
+  label: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const { checked, indeterminate, nextEnabled } = sectionCheckboxState(entries);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={() => onToggle(nextEnabled)}
+      aria-label={`${nextEnabled ? "Enable" : "Disable"} all in ${label}`}
+      data-testid={testid}
+    />
+  );
+}
+
 /**
  * Metric Catalog (epic tsk213, P4): browse the available catalog
  * (built-in ∪ global ∪ project) and enable/disable a metric in this project —
@@ -28,9 +79,13 @@ export function groupCatalog(
  */
 export function MetricsCatalog({
   onOpenScript,
+  onOpenPage,
 }: {
   /** Open the scaffolded script path in the editor (tsk234). */
   onOpenScript?: (path: string) => void;
+  /** Navigate to a page ref — used to open a metric's detail page from its name
+   *  (tsk33); the `onNavigate` fallback when there's no PageNavigationContext. */
+  onOpenPage?: (ref: TabRef) => void;
 } = {}) {
   const [rows, setRows] = useState<MetricCatalogEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -84,6 +139,26 @@ export function MetricsCatalog({
     } catch (e) {
       recordOpError({
         label: `Update ${entry.key}`,
+        message: e instanceof Error ? e.message : String(e),
+      });
+      refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Enable/disable a whole section in one config write + reseed (tsk32). Only the
+  // rows that would actually change are sent; a no-op set is skipped.
+  const setSection = async (entries: MetricCatalogEntry[], enabled: boolean) => {
+    const keys = entries.filter((e) => e.enabled !== enabled).map((e) => e.key);
+    if (keys.length === 0) return;
+    setBusy("__section__");
+    try {
+      await setMetricsEnabled(keys, enabled);
+      refresh();
+    } catch (e) {
+      recordOpError({
+        label: `${enabled ? "Enable" : "Disable"} ${keys.length} metrics`,
         message: e instanceof Error ? e.message : String(e),
       });
       refresh();
@@ -211,6 +286,111 @@ export function MetricsCatalog({
     </div>
   );
 
+  // One metric line: the on/off check, the metric name, and its target — nothing
+  // else (no kind/scope/trigger/id). Every metric is toggleable now (tsk31); the
+  // key rides as a hover title so it's still discoverable without cluttering the
+  // row.
+  const metricRow = (m: MetricCatalogEntry) => (
+    <div
+      key={m.key}
+      data-testid={`catalog-row-${m.key}`}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "20px minmax(0, 1fr) auto",
+        alignItems: "center",
+        gap: 10,
+        padding: "5px 4px",
+        borderTop: "1px solid var(--border, #2a2a2a)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <input
+          type="checkbox"
+          checked={m.enabled}
+          disabled={busy != null}
+          onChange={() => void toggle(m)}
+          aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.key}`}
+          data-testid={`catalog-toggle-${m.key}`}
+        />
+      </div>
+      <RouteLink
+        to={metricRef(m.key)}
+        onNavigate={onOpenPage}
+        title={m.key}
+        testId={`catalog-name-${m.key}`}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          margin: 0,
+          font: "inherit",
+          fontWeight: 500,
+          textAlign: "left",
+          cursor: "pointer",
+          color: "var(--accent, #58a6ff)",
+          opacity: m.enabled ? 1 : 0.55,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: "100%",
+        }}
+      >
+        {m.title}
+      </RouteLink>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+        {m.enabled ? (
+          <input
+            // Uncontrolled (so typing isn't clobbered mid-edit), but keyed on the
+            // resolved target so an external .oxplow/project.yaml edit arriving via
+            // `configChanged` remounts it with the new value instead of a stale one.
+            key={`target-${m.key}-${m.target ?? "none"}`}
+            type="number"
+            defaultValue={m.target ?? ""}
+            placeholder="target"
+            disabled={busy != null}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const next = raw === "" ? null : Number(raw);
+              if (next !== m.target && !(next != null && Number.isNaN(next))) {
+                void override(m, { target: next });
+              }
+            }}
+            data-testid={`catalog-target-${m.key}`}
+            style={{ width: 70, fontSize: 12, textAlign: "right" }}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+
+  // Section header: the title + a tri-state group checkbox to its right. The
+  // checkbox is checked when every metric is on, indeterminate when only some
+  // are; clicking enables all (from off/some) or disables all (from fully-on) in
+  // one batch write (tsk32).
+  const sectionHeader = (title: string, testid: string, entries: MetricCatalogEntry[]) => (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        paddingBottom: 6,
+        marginBottom: 4,
+        borderBottom: "1px solid var(--border, #2a2a2a)",
+      }}
+    >
+      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }} data-testid={testid}>
+        {title}
+      </h2>
+      <GroupCheckbox
+        entries={entries}
+        disabled={busy != null}
+        onToggle={(enabled) => void setSection(entries, enabled)}
+        testid={`${testid}-toggle-all`}
+        label={title}
+      />
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
       <div>
@@ -221,129 +401,36 @@ export function MetricsCatalog({
   }
 
   return (
-    <div>
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-      <thead>
-        <tr style={{ textAlign: "left", opacity: 0.6 }}>
-          <th style={{ padding: "4px 8px" }}>Enabled</th>
-          <th style={{ padding: "4px 8px" }}>Metric</th>
-          <th style={{ padding: "4px 8px" }}>Kind</th>
-          <th style={{ padding: "4px 8px" }}>Language</th>
-          <th style={{ padding: "4px 8px" }}>Scope</th>
-          <th style={{ padding: "4px 8px" }}>Trigger</th>
-          <th style={{ padding: "4px 8px", textAlign: "right" }}>Target</th>
-        </tr>
-      </thead>
-      {groupCatalog(rows).map((group) => (
-        <tbody key={group.category ?? "other"}>
-          <tr>
-            <td colSpan={7} style={{ padding: "22px 8px 6px" }} data-testid={`catalog-group-${group.category ?? "other"}`}>
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: 17,
-                  fontWeight: 700,
-                  paddingBottom: 6,
-                  borderBottom: "1px solid var(--border, #2a2a2a)",
-                }}
-              >
-                {categoryLabel(group.category)}
-              </h2>
-            </td>
-          </tr>
-          {group.entries.map((m) => {
-            // Only toggleable metrics expose enable/disable + target/trigger
-            // overrides; always-on producers/plugins are read-only.
-            const editable = m.toggleable && m.enabled;
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {groupCatalog(rows).map((group) => {
+        const cat = group.category ?? "other";
+        // Static analysis has no single section: its real top-level division is
+        // by language, so each language becomes its own top-level section (peer
+        // to Tests / Coverage / Operational). The language-agnostic code gauges +
+        // analysis producers fall under "General".
+        if (group.category === "static-quality") {
+          return groupByLanguage(group.entries, (e) => e.language).map((lang) => {
+            const langKey = lang.language ?? "general";
             return (
-              <tr key={m.key} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-                <td style={{ padding: "6px 8px" }}>
-                  {m.toggleable ? (
-                    <input
-                      type="checkbox"
-                      checked={m.enabled}
-                      disabled={busy === m.key}
-                      onChange={() => void toggle(m)}
-                      aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.key}`}
-                      data-testid={`catalog-toggle-${m.key}`}
-                    />
-                  ) : (
-                    <span
-                      title="Always on — recorded automatically by a producer; nothing to enable."
-                      style={{
-                        fontSize: 10,
-                        padding: "1px 6px",
-                        borderRadius: 4,
-                        background: "var(--surface-2, #1c1c1c)",
-                        opacity: 0.7,
-                        whiteSpace: "nowrap",
-                      }}
-                      data-testid={`catalog-alwayson-${m.key}`}
-                    >
-                      Always on
-                    </span>
-                  )}
-                </td>
-                <td style={{ padding: "6px 8px" }}>
-                  <div style={{ fontWeight: 600 }}>{m.title}</div>
-                  <div style={{ opacity: 0.5, fontFamily: "monospace", fontSize: 11 }}>{m.key}</div>
-                </td>
-                <td style={{ padding: "6px 8px" }}>{m.kind}</td>
-                <td style={{ padding: "6px 8px" }}>{m.language ?? "—"}</td>
-                <td style={{ padding: "6px 8px" }}>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      padding: "1px 6px",
-                      borderRadius: 4,
-                      background: "var(--surface-2, #1c1c1c)",
-                      opacity: 0.8,
-                    }}
-                  >
-                    {m.scope}
-                  </span>
-                </td>
-                <td style={{ padding: "6px 8px" }}>
-                  {/* Trigger is inherent to the definition — read-only, never
-                      user-picked (tsk290). */}
-                  <span style={{ opacity: 0.5 }} data-testid={`catalog-trigger-${m.key}`}>
-                    {m.trigger}
-                  </span>
-                </td>
-                <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                  {editable ? (
-                    <input
-                      // Uncontrolled (so typing isn't clobbered mid-edit), but keyed
-                      // on the resolved target so an external .oxplow/project.yaml edit
-                      // arriving via `configChanged` remounts it with the new value
-                      // instead of showing a stale one.
-                      key={`target-${m.key}-${m.target ?? "none"}`}
-                      type="number"
-                      defaultValue={m.target ?? ""}
-                      disabled={busy === m.key}
-                      onBlur={(e) => {
-                        const raw = e.target.value.trim();
-                        const next = raw === "" ? null : Number(raw);
-                        if (next !== m.target && !(next != null && Number.isNaN(next))) {
-                          void override(m, { target: next });
-                        }
-                      }}
-                      data-testid={`catalog-target-${m.key}`}
-                      style={{ width: 64, fontSize: 12, textAlign: "right" }}
-                    />
-                  ) : m.target == null ? (
-                    "—"
-                  ) : (
-                    m.target
-                  )}
-                </td>
-              </tr>
+              <section
+                key={`static-${langKey}`}
+                style={{ display: "flex", flexDirection: "column" }}
+              >
+                {sectionHeader(lang.label, `catalog-group-static-${langKey}`, lang.entries)}
+                {lang.entries.map(metricRow)}
+              </section>
             );
-          })}
-        </tbody>
-      ))}
-    </table>
-    {newMetricBar}
+          });
+        }
+
+        return (
+          <section key={cat} style={{ display: "flex", flexDirection: "column" }}>
+            {sectionHeader(categoryLabel(group.category), `catalog-group-${cat}`, group.entries)}
+            {group.entries.map(metricRow)}
+          </section>
+        );
+      })}
+      {newMetricBar}
     </div>
   );
 }

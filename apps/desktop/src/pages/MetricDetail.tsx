@@ -520,9 +520,25 @@ export function MetricStatsRail({
           <strong>{rangeText}</strong>
         </Stat>
       ) : null}
+      {/* Definition metadata — the full "what is this metric" block (tsk33). */}
+      <Stat label="ID">
+        <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.key}</code>
+      </Stat>
+      <Stat label="Type">{def.display_kind}</Stat>
+      <Stat label="Aggregation">{def.aggregation}</Stat>
+      {def.source_measure ? (
+        <Stat label="Measure">
+          <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.source_measure}</code>
+        </Stat>
+      ) : null}
+      <Stat label="Scope">{def.scope}</Stat>
+      {def.category ? <Stat label="Category">{def.category}</Stat> : null}
+      {def.language ? <Stat label="Language">{def.language}</Stat> : null}
       {def.unit ? <Stat label="Unit">{def.unit}</Stat> : null}
       <Stat label="Direction">{def.direction}</Stat>
       {def.target != null ? <Stat label="Target">{fmt(def.target)}</Stat> : null}
+      {def.warn_at != null ? <Stat label="Warn at">{fmt(def.warn_at)}</Stat> : null}
+      {def.fail_at != null ? <Stat label="Fail at">{fmt(def.fail_at)}</Stat> : null}
       {latest?.branch ? (
         <Stat label="Branch">
           <code style={{ fontSize: 11 }}>{latest.branch}</code>

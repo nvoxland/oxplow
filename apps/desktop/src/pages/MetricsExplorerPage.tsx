@@ -66,7 +66,7 @@ export function MetricsExplorerPage({
       actions={
         <div style={{ display: "flex", gap: 12 }}>
           <RouteLink
-            ref={recordedMetricsRef()}
+            to={recordedMetricsRef()}
             onNavigate={onOpenPage}
             style={cardLinkButton}
             testId="metrics-recorded-link"
@@ -74,7 +74,7 @@ export function MetricsExplorerPage({
             Recorded metrics →
           </RouteLink>
           <RouteLink
-            ref={metricsCatalogRef()}
+            to={metricsCatalogRef()}
             onNavigate={onOpenPage}
             style={cardLinkButton}
             testId="metrics-configure-link"

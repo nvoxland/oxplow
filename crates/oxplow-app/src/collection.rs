@@ -530,50 +530,65 @@ impl CollectionService {
         {
             let dual = async {
                 let mut facts = Vec::new();
-                if let Some(r) = report {
-                    let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
-                        return Ok::<Option<i64>, DomainError>(None);
-                    };
-                    use oxplow_coverage::TestStatus::*;
-                    for suite in &r.suites {
-                        for case in &suite.cases {
-                            let status = match case.status {
-                                Passed => "passed",
-                                Failed => "failed",
-                                Skipped => "skipped",
-                            };
-                            facts.push(NewFact {
-                                subject_kind: Some("test".into()),
-                                subject_ref: Some(format!(
-                                    "test:{}::{}",
-                                    case.classname, case.name
-                                )),
-                                dims_json: serde_json::to_string(&json!({
-                                    "oxplow.status": status,
-                                    "oxplow.test_suite": suite.name,
-                                }))
-                                .ok(),
-                                ..NewFact::new(measure.id, 1.0)
-                            });
+                // Stop-collecting gate (tsk31): only emit `oxplow.test_case` facts
+                // when an enabled metric consumes that measure. When every
+                // `oxplow.tests.*` metric is disabled the facts are skipped and the
+                // run falls through to the record-only `test-run` producer below —
+                // so the effort-review run record + detail survive, but no metric
+                // facts are written and the pruned metric stays empty.
+                let tests_active = self
+                    .facts
+                    .measure_has_active_spec("oxplow.test_case")
+                    .await
+                    .unwrap_or(true);
+                if tests_active {
+                    if let Some(r) = report {
+                        let Some(measure) = self.facts.get_measure("oxplow.test_case").await?
+                        else {
+                            return Ok::<Option<i64>, DomainError>(None);
+                        };
+                        use oxplow_coverage::TestStatus::*;
+                        for suite in &r.suites {
+                            for case in &suite.cases {
+                                let status = match case.status {
+                                    Passed => "passed",
+                                    Failed => "failed",
+                                    Skipped => "skipped",
+                                };
+                                facts.push(NewFact {
+                                    subject_kind: Some("test".into()),
+                                    subject_ref: Some(format!(
+                                        "test:{}::{}",
+                                        case.classname, case.name
+                                    )),
+                                    dims_json: serde_json::to_string(&json!({
+                                        "oxplow.status": status,
+                                        "oxplow.test_suite": suite.name,
+                                    }))
+                                    .ok(),
+                                    ..NewFact::new(measure.id, 1.0)
+                                });
+                            }
                         }
-                    }
-                } else if counted {
-                    let Some(measure) = self.facts.get_measure("oxplow.test_case").await? else {
-                        return Ok::<Option<i64>, DomainError>(None);
-                    };
-                    let p = passed.unwrap_or(0).max(0);
-                    let f = failed.unwrap_or(0).max(0);
-                    let s = total.map(|t| (t - p - f).max(0)).unwrap_or(0);
-                    for (status, n) in [("passed", p), ("failed", f), ("skipped", s)] {
-                        for _ in 0..n {
-                            facts.push(NewFact {
-                                subject_kind: Some("test".into()),
-                                dims_json: serde_json::to_string(&json!({
-                                    "oxplow.status": status,
-                                }))
-                                .ok(),
-                                ..NewFact::new(measure.id, 1.0)
-                            });
+                    } else if counted {
+                        let Some(measure) = self.facts.get_measure("oxplow.test_case").await?
+                        else {
+                            return Ok::<Option<i64>, DomainError>(None);
+                        };
+                        let p = passed.unwrap_or(0).max(0);
+                        let f = failed.unwrap_or(0).max(0);
+                        let s = total.map(|t| (t - p - f).max(0)).unwrap_or(0);
+                        for (status, n) in [("passed", p), ("failed", f), ("skipped", s)] {
+                            for _ in 0..n {
+                                facts.push(NewFact {
+                                    subject_kind: Some("test".into()),
+                                    dims_json: serde_json::to_string(&json!({
+                                        "oxplow.status": status,
+                                    }))
+                                    .ok(),
+                                    ..NewFact::new(measure.id, 1.0)
+                                });
+                            }
                         }
                     }
                 }
@@ -586,8 +601,11 @@ impl CollectionService {
                     .flatten();
                 // `tests` = a measurement (report or asserted counts — a zero
                 // here is a real "found 0"); `test-run` = a run record only,
-                // invisible to the tests metric timeline.
-                let producer = if report.is_some() || counted {
+                // invisible to the tests metric timeline. A measured run whose
+                // tests metrics are all disabled records as a run record too
+                // (tsk31) — the run is remembered, but nothing feeds a pruned
+                // metric.
+                let producer = if (report.is_some() || counted) && tests_active {
                     "tests"
                 } else {
                     "test-run"
@@ -904,6 +922,18 @@ impl CollectionService {
             .as_ref()
             .and_then(|d| Self::capture_detail("analysis-detail", d));
         let dual = async {
+            // Stop-collecting gate (tsk31): skip the analysis capture entirely when
+            // no enabled metric consumes `oxplow.lint_hit` (both `oxplow.analysis.*`
+            // disabled). The code-quality findings store is written elsewhere and
+            // is unaffected.
+            if !self
+                .facts
+                .measure_has_active_spec("oxplow.lint_hit")
+                .await
+                .unwrap_or(true)
+            {
+                return Ok::<Option<i64>, DomainError>(None);
+            }
             let Some(measure) = self.facts.get_measure("oxplow.lint_hit").await? else {
                 return Ok::<Option<i64>, DomainError>(None);
             };
@@ -984,6 +1014,17 @@ impl CollectionService {
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
     ) -> Result<CoverageIngest, DomainError> {
+        // Stop-collecting gate (tsk31): with the coverage metric disabled, no
+        // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
+        // diff-coverage). Reads/effort-review see it turned off.
+        if !self
+            .facts
+            .measure_has_active_spec("oxplow.coverage")
+            .await
+            .unwrap_or(true)
+        {
+            return Ok(CoverageIngest::NoChangedCoverage);
+        }
         let Some((abs_pct, total_cov, total_instr, payload)) = coverage_abs_payload(report) else {
             return Ok(CoverageIngest::NoChangedCoverage);
         };
@@ -1375,6 +1416,17 @@ impl CollectionService {
         };
         let branch = oxplow_git::detect_current_branch(&self.project_dir);
         let result = async {
+            // Stop-collecting gate (tsk31): skip when the `agent.nudges.fired`
+            // metric is disabled (nothing consumes `oxplow.nudge`). The nudge
+            // itself still fires + persists — only the analytics fact is skipped.
+            if !self
+                .facts
+                .measure_has_active_spec("oxplow.nudge")
+                .await
+                .unwrap_or(true)
+            {
+                return Ok::<(), DomainError>(());
+            }
             // One fact on the `oxplow.nudge` event measure (value 1), the nudge
             // kind as subject so Sum() reconstructs the fired count (epic tsk12;
             // the legacy sample write is gone, T-E2).
@@ -3434,8 +3486,15 @@ mod tests {
             }
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
+            // Seed the producer specs the way boot's `seed_catalog` does — the
+            // producers gate their collection on `measure_has_active_spec` (tsk31),
+            // so without an active spec over each measure the gate stays closed.
+            let facts = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
+            for spec in crate::producer_metrics::builtin_producer_specs() {
+                facts.upsert_spec(spec).await.unwrap();
+            }
             let service = CollectionService::new(
-                Arc::new(oxplow_db::SqliteFactStore::new(db.clone())),
+                facts,
                 nudges.clone(),
                 efforts.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
