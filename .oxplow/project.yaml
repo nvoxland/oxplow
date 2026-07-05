@@ -37,3 +37,8 @@ metrics:
 - use: oxplow.long_functions
 - use: oxplow.tests.failed
   target: 0.0
+- use: oxplow.tests.failed_at_close
+  target: 0.0
+- use: oxplow.tests.peak_failed
+- use: oxplow.tests.distinct_failed
+- use: oxplow.tests.red_runs

@@ -45,6 +45,7 @@ pub mod snapshot_capture_registry;
 pub mod snapshot_content;
 pub mod task_service;
 pub mod terminal_sessions;
+pub mod test_outcome;
 pub mod thread_runtime;
 pub mod token_usage;
 pub mod wiki_drift;

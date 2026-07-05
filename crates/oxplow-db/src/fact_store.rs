@@ -1127,9 +1127,10 @@ mod tests {
         assert_eq!(got.title, "API latency (p95)");
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
-        // The migrations seed 14 built-in measures (10 in V43 + oxplow.ast_hit in
-        // V45 + turn/task_effort/nudge in V46); this upsert added one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 15);
+        // The migrations seed 15 built-in measures (10 in V43 + oxplow.ast_hit in
+        // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in
+        // V53); this upsert added one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 16);
     }
 
     #[tokio::test]
@@ -1148,13 +1149,14 @@ mod tests {
     #[tokio::test]
     async fn dimensions_seeded_and_upsertable() {
         let store = fixture().await;
-        // The migrations seed 10 built-in conformed dims (8 in V43 + oxplow.rule
-        // in V45 + oxplow.token_kind in V46).
+        // The migrations seed 11 built-in conformed dims (8 in V43 + oxplow.rule
+        // in V45 + oxplow.token_kind in V46 + oxplow.tests_stat in V53).
         let seeded = store.list_dimensions().await.unwrap();
         assert!(seeded.iter().any(|d| d.key == "oxplow.language"));
         assert!(seeded.iter().any(|d| d.key == "oxplow.rule"));
         assert!(seeded.iter().any(|d| d.key == "oxplow.token_kind"));
-        assert_eq!(seeded.len(), 10);
+        assert!(seeded.iter().any(|d| d.key == "oxplow.tests_stat"));
+        assert_eq!(seeded.len(), 11);
 
         store
             .upsert_dimension(NewDimension {

@@ -185,6 +185,63 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: BRANCH_DIMS,
             description: Some("Total tests in the latest run."),
         },
+        // Per-effort test-outcome scalars (tsk38) — materialized at effort close
+        // by the lifecycle producer on `oxplow.effort_test_outcome`, sliced by
+        // `oxplow.tests_stat`. Split "tests failed" into a close-state gate vs
+        // three "went red during the effort" flavors the engine's cross-time
+        // collapse can't express as a plain spec.
+        ProducerMetric {
+            key: "oxplow.tests.failed_at_close",
+            title: "Tests failed at close",
+            kind: "gauge",
+            unit: "count",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Failing tests in the effort's final run — did it close green."),
+        },
+        ProducerMetric {
+            key: "oxplow.tests.peak_failed",
+            title: "Peak tests failed",
+            kind: "gauge",
+            unit: "count",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Most tests failing in any single run during the effort."),
+        },
+        ProducerMetric {
+            key: "oxplow.tests.distinct_failed",
+            title: "Distinct tests failed",
+            kind: "gauge",
+            unit: "count",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Distinct tests that went red at least once during the effort."),
+        },
+        ProducerMetric {
+            key: "oxplow.tests.red_runs",
+            title: "Red test runs",
+            kind: "gauge",
+            unit: "count",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Number of test runs with at least one failure during the effort."),
+        },
         // coverage (collection.rs) — whole-report absolute %, no per-sample grain.
         ProducerMetric {
             key: "oxplow.coverage.abs_pct",
@@ -295,6 +352,28 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
             Some(dim_eq("oxplow.status", "failed")),
         ),
         "oxplow.tests.total" => ("oxplow.test_case", "count", None),
+        // Per-effort test-outcome scalars: one fact per stat per closed effort,
+        // averaged across efforts (non-additive measure) for the headline.
+        "oxplow.tests.failed_at_close" => (
+            "oxplow.effort_test_outcome",
+            "avg",
+            Some(dim_eq("oxplow.tests_stat", "at_close")),
+        ),
+        "oxplow.tests.peak_failed" => (
+            "oxplow.effort_test_outcome",
+            "avg",
+            Some(dim_eq("oxplow.tests_stat", "peak")),
+        ),
+        "oxplow.tests.distinct_failed" => (
+            "oxplow.effort_test_outcome",
+            "avg",
+            Some(dim_eq("oxplow.tests_stat", "distinct_failed")),
+        ),
+        "oxplow.tests.red_runs" => (
+            "oxplow.effort_test_outcome",
+            "avg",
+            Some(dim_eq("oxplow.tests_stat", "red_runs")),
+        ),
         "oxplow.coverage.abs_pct" => ("oxplow.coverage", "ratio", None),
         "oxplow.analysis.errors" => ("oxplow.lint_hit", "count", Some(severity("error"))),
         "oxplow.analysis.warnings" => ("oxplow.lint_hit", "count", Some(severity("warning"))),

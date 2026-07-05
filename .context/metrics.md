@@ -61,13 +61,22 @@ welded to collection.
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens`,
   `oxplow.cycle_time` (V43), plus `oxplow.ast_hit` (V45 — a per-file AST idiom
   occurrence; the per-language gauges emit facts on it, distinguished by the
-  `oxplow.rule` dim; see the code-gauge section, tsk30).
+  `oxplow.rule` dim; see the code-gauge section, tsk30), plus
+  `oxplow.effort_test_outcome` (V53, tsk38 — a per-effort-close scalar the
+  lifecycle producer materializes; the four `oxplow.tests.{failed_at_close,
+  peak_failed,distinct_failed,red_runs}` specs slice it by `oxplow.tests_stat`.
+  Non-additive like `cycle_time` — Σn/Σd = mean per effort — because the
+  "within-effort" views (max/distinct/red-run count) can't be a plain spec over
+  the raw per-case facts; see the producer table row).
 - **`dimension`** — the namespaced slice-axis catalog: `key`, `label`,
   `value_type`, `subject_kind`, `vocabulary_json`, `scope`, `promoted` (whether a
   generated column + expression index exists). Seeded: `oxplow.language`,
   `oxplow.severity`, `oxplow.status`, `oxplow.branch`, `oxplow.model`,
   `oxplow.agent`, `oxplow.package`, `oxplow.test_suite` (V43), `oxplow.rule`
-  (V45 — the lint/idiom name; the engine reads it off the fact's `rule` column).
+  (V45 — the lint/idiom name; the engine reads it off the fact's `rule` column),
+  `oxplow.tests_stat` (V53 — which per-effort test-outcome scalar a
+  `oxplow.effort_test_outcome` fact is: `at_close`/`peak`/`distinct_failed`/
+  `red_runs`, tsk38).
   **Declare-to-collect**
   (planned, tsk17): a fact may only be emitted on defined measures/dimensions;
   historical facts carrying a now-undefined dim are kept but hidden as a slice
@@ -224,7 +233,7 @@ Landed:
 |---|---|---|
 | tokens — OTEL (tsk22) | `token_usage.rs::ingest_otlp_tokens`, fed by the control-plane `POST /v1/metrics` OTLP receiver | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per OTLP export with an `idempotency_key` over the raw body (SDK-retry-safe). Attribution rides the `X-Oxplow-Thread`/`X-Oxplow-Stream` OTLP headers the spawn path injects; effort via `find_single_open_for_thread`. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
 | turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The `parse_claude_turns`/`parse_claude_usage` dedupe-by-`message.id` fix (tsk22) removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
-| effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort) |
+| effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). **Also (tsk38)** emits four `oxplow.effort_test_outcome` facts per close, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run), `red_runs` (# runs with ≥1 failure). Computed by the pure `test_outcome::{runs_from_case_facts, compute_effort_test_outcome}` from the effort's `oxplow.test_case` facts (grouped per capture): these "within-effort" aggregates are **not expressible** as a spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so they're materialized here. Gated by `measure_has_active_spec("oxplow.effort_test_outcome")` |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr) |

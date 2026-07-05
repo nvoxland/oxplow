@@ -580,6 +580,67 @@ impl TaskService {
                         });
                     }
                 }
+                // Per-effort test-outcome scalars (tsk38): the peak / distinct /
+                // red-run views the engine's cross-time collapse can't express,
+                // materialized here at close from the effort's `oxplow.test_case`
+                // facts. One fact per stat on `oxplow.effort_test_outcome`, sliced
+                // by `oxplow.tests_stat`. Gated like the other lifecycle facts.
+                if facts
+                    .measure_has_active_spec("oxplow.effort_test_outcome")
+                    .await
+                    .unwrap_or(true)
+                {
+                    if let (Some(outcome_measure), Some(case_measure)) = (
+                        facts.get_measure("oxplow.effort_test_outcome").await?,
+                        facts.get_measure("oxplow.test_case").await?,
+                    ) {
+                        let caps = facts.captures_for_effort(effort_id.value()).await?;
+                        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
+                        let case_facts = facts.facts_for_captures(case_measure.id, cap_ids).await?;
+                        // (capture_id, is_failed, subject_ref) per case fact — the
+                        // grouping/ordering + scalar math live in `test_outcome`.
+                        let tuples: Vec<(i64, bool, Option<String>)> = case_facts
+                            .iter()
+                            .map(|f| {
+                                let failed = f
+                                    .dims_json
+                                    .as_deref()
+                                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                    .and_then(|v| {
+                                        v.get("oxplow.status")
+                                            .and_then(|x| x.as_str())
+                                            .map(str::to_string)
+                                    })
+                                    .as_deref()
+                                    == Some("failed");
+                                (f.capture_id, failed, f.subject_ref.clone())
+                            })
+                            .collect();
+                        let runs = crate::test_outcome::runs_from_case_facts(&tuples);
+                        if let Some(outcome) =
+                            crate::test_outcome::compute_effort_test_outcome(&runs)
+                        {
+                            for (stat, value) in [
+                                ("at_close", outcome.at_close),
+                                ("peak", outcome.peak),
+                                ("distinct_failed", outcome.distinct_failed),
+                                ("red_runs", outcome.red_runs),
+                            ] {
+                                rows.push(NewFact {
+                                    subject_kind: Some("effort".into()),
+                                    subject_ref: Some(effort_id.to_string()),
+                                    numerator: Some(value as f64),
+                                    denominator: Some(1.0),
+                                    dims_json: serde_json::to_string(
+                                        &serde_json::json!({ "oxplow.tests_stat": stat }),
+                                    )
+                                    .ok(),
+                                    ..NewFact::new(outcome_measure.id, value as f64)
+                                });
+                            }
+                        }
+                    }
+                }
                 if rows.is_empty() {
                     return Ok::<(), DomainError>(());
                 }
