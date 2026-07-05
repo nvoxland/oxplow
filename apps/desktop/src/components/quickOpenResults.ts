@@ -1,6 +1,8 @@
 import type { MenuGroup } from "../commands.js";
 import { fuzzyMatches } from "../fuzzy-match.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
+import type { TabRef } from "../tabs/tabState.js";
+import { refFromTabId } from "../tabs/pageRefs.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 
 /// A runnable menu command flattened for the launcher. Mirrors the
@@ -98,24 +100,63 @@ export function buildQuickOpenResults(input: {
   return [...matchedPages, ...matchedCommands, ...matchedFileResults, ...bodyHits];
 }
 
+/// The launcher's collapsible sections: the static page categories plus
+/// the synthetic "Recent" section (recently visited pages), which isn't a
+/// member of the static pages directory.
+export type LauncherSection = PageCategory | "Recent";
+
+/// A page-openable launcher row. `PageDirectoryEntry` is a superset (it
+/// also carries a static `category`); recent-visit rows supply just these
+/// fields, so the launcher tree accepts either.
+export interface LauncherPageEntry {
+  id: string;
+  label: string;
+  ref: TabRef;
+  badge?: number;
+}
+
 /// A row in the empty-query launcher's collapsible "start menu" tree:
-/// either a category header (toggles its section) or a page beneath an
-/// expanded category. Pure of React so the keyboard/render contract is
+/// either a section header (toggles its section) or a page beneath an
+/// expanded section. Pure of React so the keyboard/render contract is
 /// unit-testable.
 export type LauncherRow =
-  | { kind: "category"; category: PageCategory; expanded: boolean }
-  | { kind: "page"; entry: PageDirectoryEntry };
+  | { kind: "category"; category: LauncherSection; expanded: boolean }
+  | { kind: "page"; entry: LauncherPageEntry };
 
-/// Assemble the launcher tree from the (already category-grouped) page
-/// directory. Categories appear in first-seen order — which the curated
-/// directory keeps aligned with `PAGE_CATEGORY_ORDER`. A category's page
-/// rows are emitted only when it's in `expanded`; default-collapsed means
-/// an empty set, so the launcher opens to just the category headers.
+/// Map recent page-visit rows into launcher entries. Ids are `recent:`-
+/// prefixed so they never collide with a static directory page's id (both
+/// can be visible when Recent + a category are expanded). Visit rows don't
+/// persist the ref payload, so `refFromTabId` rebuilds an openable ref from
+/// the id (a bare `{id,kind}` would leave file/wiki/task pages unopenable).
+/// Label falls back to the ref id when the stored visit label is empty.
+export function buildRecentEntries(
+  visits: Array<{ refId: string; label: string }>,
+): LauncherPageEntry[] {
+  return visits.map((v) => ({
+    id: `recent:${v.refId}`,
+    label: v.label.trim() || v.refId,
+    ref: refFromTabId(v.refId),
+  }));
+}
+
+/// Assemble the launcher tree. The `recent` entries lead as a "Recent"
+/// section (only when non-empty), then the (already category-grouped) page
+/// directory: categories in first-seen order, aligned with
+/// `PAGE_CATEGORY_ORDER`. A section's page rows are emitted only when it's
+/// in `expanded`, so a section absent from the set renders just its header.
 export function buildLauncherTree(
+  recent: LauncherPageEntry[],
   pages: PageDirectoryEntry[],
-  expanded: ReadonlySet<PageCategory>,
+  expanded: ReadonlySet<LauncherSection>,
 ): LauncherRow[] {
   const rows: LauncherRow[] = [];
+  if (recent.length > 0) {
+    const isExpanded = expanded.has("Recent");
+    rows.push({ kind: "category", category: "Recent", expanded: isExpanded });
+    if (isExpanded) {
+      for (const entry of recent) rows.push({ kind: "page", entry });
+    }
+  }
   let current: PageCategory | null = null;
   for (const entry of pages) {
     if (entry.category !== current) {

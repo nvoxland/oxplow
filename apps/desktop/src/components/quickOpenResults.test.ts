@@ -4,7 +4,14 @@ import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { MenuGroup } from "../commands.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
-import { buildLauncherTree, buildQuickOpenResults, dedupeSiteHits, flattenCommands } from "./quickOpenResults.js";
+import {
+  buildLauncherTree,
+  buildQuickOpenResults,
+  buildRecentEntries,
+  dedupeSiteHits,
+  flattenCommands,
+  type LauncherSection,
+} from "./quickOpenResults.js";
 
 function hit(kind: string, refId: string): SearchHit {
   return {
@@ -113,9 +120,10 @@ describe("buildLauncherTree", () => {
     page("files", "Files", "Code"),
     page("git", "Git", "Git"),
   ];
+  const recentEntry = (id: string) => ({ id, label: id, ref: { id, kind: "file", payload: null } as PageDirectoryEntry["ref"] });
 
   test("collapsed by default — only category headers, in first-seen order", () => {
-    const rows = buildLauncherTree(treePages, new Set());
+    const rows = buildLauncherTree([], treePages, new Set());
     expect(rows.map((r) => (r.kind === "category" ? r.category : `page:${r.entry.id}`))).toEqual([
       "Work",
       "Code",
@@ -125,7 +133,7 @@ describe("buildLauncherTree", () => {
   });
 
   test("expanding a category reveals its pages beneath its header", () => {
-    const rows = buildLauncherTree(treePages, new Set<PageCategory>(["Work"]));
+    const rows = buildLauncherTree([], treePages, new Set<LauncherSection>(["Work"]));
     expect(rows.map((r) => (r.kind === "category" ? `${r.category}${r.expanded ? "▾" : "▸"}` : `· ${r.entry.id}`))).toEqual([
       "Work▾",
       "· tasks",
@@ -133,5 +141,44 @@ describe("buildLauncherTree", () => {
       "Code▸",
       "Git▸",
     ]);
+  });
+
+  test("Recent leads the tree when there are recent visits, expanded by default set", () => {
+    const recent = [recentEntry("recent:a"), recentEntry("recent:b")];
+    const rows = buildLauncherTree(recent, treePages, new Set<LauncherSection>(["Recent"]));
+    expect(rows.map((r) => (r.kind === "category" ? `${r.category}${r.expanded ? "▾" : "▸"}` : `· ${r.entry.id}`))).toEqual([
+      "Recent▾",
+      "· recent:a",
+      "· recent:b",
+      "Work▸",
+      "Code▸",
+      "Git▸",
+    ]);
+  });
+
+  test("Recent header still shows (collapsed) when not in the expanded set, hiding its rows", () => {
+    const rows = buildLauncherTree([recentEntry("recent:a")], treePages, new Set());
+    expect(rows[0]).toEqual({ kind: "category", category: "Recent", expanded: false });
+    expect(rows.some((r) => r.kind === "page" && r.entry.id === "recent:a")).toBe(false);
+  });
+
+  test("no Recent header at all when there are no recent visits", () => {
+    const rows = buildLauncherTree([], treePages, new Set<LauncherSection>(["Recent"]));
+    expect(rows.some((r) => r.kind === "category" && r.category === "Recent")).toBe(false);
+  });
+});
+
+describe("buildRecentEntries", () => {
+  test("prefixes ids to avoid directory collisions, falls back label→refId, rebuilds the ref", () => {
+    const entries = buildRecentEntries([
+      { refKind: "file", refId: "file:src/main.rs", label: "main.rs" },
+      { refKind: "wiki", refId: "wiki:architecture", label: "" },
+    ]);
+    expect(entries[0]!.id).toBe("recent:file:src/main.rs");
+    expect(entries[0]!.label).toBe("main.rs");
+    expect(entries[0]!.ref.kind).toBe("file");
+    // Empty stored label falls back to the ref id.
+    expect(entries[1]!.label).toBe("wiki:architecture");
+    expect(entries[1]!.ref.kind).toBe("wiki");
   });
 });

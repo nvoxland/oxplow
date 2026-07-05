@@ -1,22 +1,37 @@
 import type { CSSProperties } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  listRecentPageVisits,
   listWorkspaceFiles,
   searchSite,
+  subscribePageVisitEvents,
   subscribeWorkspaceEvents,
   type SearchHit,
   type Stream,
   type WorkspaceIndexedFile,
 } from "../api.js";
 import type { MenuGroup } from "../commands.js";
-import { buildLauncherTree, buildQuickOpenResults, flattenCommands, type QuickOpenResult } from "./quickOpenResults.js";
+import {
+  buildLauncherTree,
+  buildQuickOpenResults,
+  buildRecentEntries,
+  flattenCommands,
+  type LauncherPageEntry,
+  type LauncherRow,
+  type LauncherSection,
+  type QuickOpenResult,
+} from "./quickOpenResults.js";
 import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
+import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
 
 interface Props {
   open: boolean;
   stream: Stream | null;
+  /** Active thread — scopes the "Recent" section to this thread's visits,
+   *  matching the rail History block. */
+  threadId: string | null;
   selectedFilePath: string | null;
   /** Top-level pages/apps surfaced as launcher entries when the input
    *  is empty, and mixed into search results when the user types. */
@@ -33,12 +48,18 @@ interface Props {
 
 type Result = QuickOpenResult;
 
-/** A navigable row: the launcher's collapsible category headers plus the
- *  page/command/file/hit results. Category rows only appear in the
- *  empty-query "start menu". */
-type Row = { kind: "category"; category: PageCategory; expanded: boolean } | Result;
+/** A navigable row: the launcher's collapsible section headers + page
+ *  rows (`LauncherRow`, empty-query "start menu") or the ranked
+ *  page/command/file/hit results (`Result`, while searching). */
+type Row = LauncherRow | Result;
 
 const EXPANDED_CATEGORIES_KEY = "oxplow.launcher.expandedCategories";
+// "Recent" is expanded by default (the section exists to *show* recent
+// pages), tracked by a dedicated collapsed-flag so existing users' static
+// category prefs in EXPANDED_CATEGORIES_KEY are untouched.
+const RECENT_COLLAPSED_KEY = "oxplow.launcher.recentCollapsed";
+// Recent visits to load for the "Recent" section (10 most recent pages).
+const RECENT_LIMIT = 10;
 
 function loadExpandedCategories(): Set<PageCategory> {
   try {
@@ -60,14 +81,32 @@ function persistExpandedCategories(set: ReadonlySet<PageCategory>): void {
   }
 }
 
-export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGroups, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
+function loadRecentCollapsed(): boolean {
+  try {
+    return localStorage.getItem(RECENT_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistRecentCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(RECENT_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // localStorage unavailable — collapse state just won't persist.
+  }
+}
+
+export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pages, menuGroups, onClose, onOpenFile, onOpenPage, onOpenSearchHit }: Props) {
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<WorkspaceIndexedFile[]>([]);
   const [siteHits, setSiteHits] = useState<SearchHit[]>([]);
+  const [recentEntries, setRecentEntries] = useState<LauncherPageEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedCategories, setExpandedCategories] = useState<Set<PageCategory>>(loadExpandedCategories);
+  const [recentCollapsed, setRecentCollapsed] = useState<boolean>(loadRecentCollapsed);
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -114,6 +153,20 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
       persistExpandedCategories(next);
       return next;
     });
+  }
+
+  /** Toggle any launcher section header — the static categories via the
+   *  expanded-set, "Recent" via its own default-expanded collapse flag. */
+  function toggleSection(section: LauncherSection) {
+    if (section === "Recent") {
+      setRecentCollapsed((collapsed) => {
+        const next = !collapsed;
+        persistRecentCollapsed(next);
+        return next;
+      });
+      return;
+    }
+    toggleCategory(section);
   }
 
   useEffect(() => {
@@ -184,6 +237,34 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
     };
   }, [open, stream?.id, query]);
 
+  // Recent pages for the "Recent" start-menu section: the 10 most recent
+  // visits (deduped by ref), reusing the rail History source + exclude set.
+  // Kept live via page-visit events so opening a page reorders it here.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const refresh = () => {
+      void listRecentPageVisits({
+        threadId,
+        limit: RECENT_LIMIT,
+        dedupeByRef: true,
+        excludeKinds: RAIL_HISTORY_EXCLUDE_KINDS,
+      })
+        .then((rows) => {
+          if (!cancelled) setRecentEntries(buildRecentEntries(rows));
+        })
+        .catch(() => {
+          if (!cancelled) setRecentEntries([]);
+        });
+    };
+    refresh();
+    const off = subscribePageVisitEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [open, threadId]);
+
   // The launcher's commands — the retired CommandPalette's entries now
   // live here so this overlay is the single discovery surface.
   const commands = useMemo(() => flattenCommands(menuGroups), [menuGroups]);
@@ -197,12 +278,20 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
   );
   const launcherMode = query.trim() === "";
 
-  // Navigable rows: the collapsible category tree in launcher mode,
-  // the flat ranked list while searching. One array drives both the
-  // keyboard cursor and the render so they can't drift apart.
+  // Effective expanded sections: the persisted static categories, plus
+  // "Recent" unless the user has explicitly collapsed it (default open).
+  const expandedSections = useMemo<Set<LauncherSection>>(() => {
+    const set = new Set<LauncherSection>(expandedCategories);
+    if (!recentCollapsed) set.add("Recent");
+    return set;
+  }, [expandedCategories, recentCollapsed]);
+
+  // Navigable rows: the collapsible section tree in launcher mode, the
+  // flat ranked list while searching. One array drives both the keyboard
+  // cursor and the render so they can't drift apart.
   const rows = useMemo<Row[]>(
-    () => (launcherMode ? buildLauncherTree(pages, expandedCategories) : results),
-    [launcherMode, pages, expandedCategories, results],
+    () => (launcherMode ? buildLauncherTree(recentEntries, pages, expandedSections) : results),
+    [launcherMode, recentEntries, pages, expandedSections, results],
   );
 
   useEffect(() => {
@@ -216,7 +305,7 @@ export function QuickOpenOverlay({ open, stream, selectedFilePath, pages, menuGr
 
   function confirm(result: Row) {
     if (result.kind === "category") {
-      toggleCategory(result.category);
+      toggleSection(result.category);
       return;
     }
     if (result.kind === "page") onOpenPage(result.entry.ref);

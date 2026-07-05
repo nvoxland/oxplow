@@ -3451,6 +3451,7 @@ export function App() {
       <QuickOpenOverlay
         open={quickOpenVisible}
         stream={stream}
+        threadId={selectedThreadId}
         selectedFilePath={selectedFilePath}
         pages={computePagesDirectory({
           backlogReadyCount: backlogState?.items.filter((i) => i.status === "ready").length ?? 0,

@@ -307,15 +307,32 @@ useful — there is no separate command palette or search overlay anymore
 (`CommandPalette.tsx` and `SearchPalette.tsx` were deleted).
 
 The launcher does everything in one box:
-- **Empty input** → start-menu: a **collapsible tree** of the page
-  `category` headers (Work / Code / Git / Activity / Knowledge / System),
-  **collapsed by default** so the empty launcher is a short list of
-  sections rather than all ~21 pages. Expanding a category reveals its
-  pages (indented). Expansion state persists per user in `localStorage`
-  (`oxplow.launcher.expandedCategories`). The tree assembly is the pure
-  helper `buildLauncherTree(pages, expanded)` in `quickOpenResults.ts`;
-  category rows and page rows share one navigable `Row[]` so the keyboard
-  cursor and render can't drift (Enter toggles a category, opens a page).
+- **Empty input** → start-menu: a **collapsible tree** led by a **"Recent"**
+  section, then the page `category` headers (Work / Code / Git / Activity /
+  Knowledge / System). Categories are **collapsed by default** so the empty
+  launcher is a short list of sections rather than all ~21 pages; **Recent
+  is expanded by default** (it exists to *show* the recent pages). Expanding
+  a section reveals its pages (indented). The tree assembly is the pure
+  helper `buildLauncherTree(recent, pages, expanded)` in
+  `quickOpenResults.ts`; section rows and page rows share one navigable
+  `Row[]` so the keyboard cursor and render can't drift (Enter toggles a
+  section, opens a page).
+  - **Recent** = the 10 most recently visited pages for the active thread
+    (`listRecentPageVisits({ dedupeByRef, excludeKinds:
+    RAIL_HISTORY_EXCLUDE_KINDS })`, the same source as the rail History
+    block), kept live via `subscribePageVisitEvents`. Visit rows don't
+    persist the ref payload, so `buildRecentEntries` rebuilds each openable
+    ref with `refFromTabId` and `recent:`-prefixes the id to avoid colliding
+    with a static directory page. `LauncherSection = PageCategory |
+    "Recent"`; recent rows are the lighter `LauncherPageEntry` (no static
+    category). The section only renders when there are visits, and self-hides
+    while searching (recent entries never enter `buildQuickOpenResults`).
+  - **Persistence:** static category expansion persists in `localStorage`
+    (`oxplow.launcher.expandedCategories`); Recent's collapse persists
+    separately (`oxplow.launcher.recentCollapsed`, default un-collapsed) so
+    its default-open state doesn't disturb existing category prefs. The
+    effective expanded set is `expandedCategories ∪ {Recent unless
+    collapsed}`.
 - **Typing** → ranked results, pages → **commands** → files → body hits.
   Commands come from `buildMenuGroups` (passed in as `menuGroups`) and are
   flattened by `flattenCommands`; the same registry still feeds the native
