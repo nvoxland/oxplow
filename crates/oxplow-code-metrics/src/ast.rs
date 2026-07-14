@@ -112,6 +112,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ast_query_matches_both_outer_and_inner_allow_attributes() {
+        // `#[allow(...)]` is an `attribute_item`; `#![allow(...)]` is an
+        // `inner_attribute_item`. A query naming only the former silently
+        // undercounts crate/module-level suppressions — which are the ones that
+        // matter MOST (an inner attribute mutes a lint for a whole file). Pin both
+        // node names so the undercount can't come back (tsk44).
+        let src = r#"
+#![allow(clippy::unwrap_used)]
+
+#[allow(dead_code)]
+fn a() {}
+
+#[derive(Debug)]
+struct S;
+"#;
+        let q = "(attribute_item (attribute (identifier) @a)) \
+                 (inner_attribute_item (attribute (identifier) @a))";
+        let matches = ast_query(src, "rust", q).expect("query runs");
+        let allows = matches.iter().filter(|m| m.text == "allow").count();
+        assert_eq!(allows, 2, "one outer + one inner; `derive` is not an allow");
+    }
+
+    #[test]
     fn ast_query_counts_unsafe_blocks_in_rust() {
         let src = r#"
 fn a() { unsafe { let x = 1; } }
