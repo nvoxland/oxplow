@@ -1008,7 +1008,13 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync" | "snapshot";
+export type BackgroundTaskKind = "git" | "code-quality" | "lsp" | "notes-resync" | "snapshot" | 
+/**
+ *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
+ *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
+ *  has no answer.
+ */
+"metrics";
 
 export type BackgroundTaskStatus = "running" | "done" | "failed";
 

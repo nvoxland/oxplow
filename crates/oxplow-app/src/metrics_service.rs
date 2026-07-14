@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use oxplow_collect_plugin::{builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost};
+use oxplow_collect_plugin::{
+    builtin_metrics, Collector, CollectorInput, CollectorKind, GaugeHost, SandboxBudget,
+};
 use oxplow_config::{
     global_config_dir, load_global_dimension_entries, load_global_gauge_entries,
     load_global_measure_entries, load_global_metric_entries, resolve_dimensions, resolve_gauges,
@@ -39,6 +41,24 @@ use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::read_snapshot_content;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Wall-clock ceiling for ONE gauge run (tsk47).
+///
+/// The `SandboxBudget` default is 5s, which suits a report parser reading a single
+/// file. A tree gauge is a different animal: it tree-sitter-parses the WHOLE tree
+/// (873 files here) on a full-tree baseline, and 5s was nowhere near enough — the
+/// broad-query gauges silently timed out on every full run, so `oxplow.ts.console_calls`
+/// and `oxplow.ts.ts_ignore` had produced ZERO facts since the project was indexed.
+///
+/// Gauges run detached on a blocking thread, so a generous ceiling costs nothing in
+/// latency; it exists only to catch a genuinely runaway script.
+const GAUGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A gauge sweep over at least this many files is a WHOLE-TREE sweep (the baseline)
+/// rather than an ordinary per-commit delta, so it gets tracked as a visible
+/// background task (tsk48). A delta is a handful of files and finishes in
+/// milliseconds; tracking those would just be noise.
+const TREE_SWEEP_FILE_THRESHOLD: usize = 100;
 
 /// Runs config-declared metrics into the substrate. Cheap to clone (a handle of
 /// leaf `Arc`s) — deliberately NOT holding `Arc<Services>`, to avoid a cycle.
@@ -72,6 +92,9 @@ pub struct MetricsService {
     /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
     /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
     fact_store: Option<Arc<SqliteFactStore>>,
+    /// Background-task store, so a whole-tree gauge sweep is VISIBLE while it runs
+    /// (tsk48). `None` in tests. Wired at boot via [`Self::with_background_tasks`].
+    background_tasks: Option<crate::background_task::BackgroundTaskStore>,
     /// Lazily-loaded cache of the global-scope catalog files (tsk17). Cleared on
     /// every in-app `ConfigChanged` emit, so an in-app scaffold/toggle reflects
     /// immediately; an *external* edit to a global YAML needs any in-app config
@@ -147,6 +170,7 @@ impl MetricsService {
             events,
             global_dir: None,
             fact_store: None,
+            background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -162,6 +186,15 @@ impl MetricsService {
 
     /// Wire the fact substrate so `run()` seeds config-declared measures +
     /// dimensions into the catalog beside the migration-seeded built-ins.
+    /// Wire the background-task store so full-tree gauge sweeps report progress.
+    pub fn with_background_tasks(
+        mut self,
+        tasks: crate::background_task::BackgroundTaskStore,
+    ) -> Self {
+        self.background_tasks = Some(tasks);
+        self
+    }
+
     pub fn with_fact_store(mut self, fact_store: Arc<SqliteFactStore>) -> Self {
         self.fact_store = Some(fact_store);
         self
@@ -1109,9 +1142,99 @@ impl MetricsService {
         let ctx = self
             .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
             .await;
-        for g in &gauges {
-            self.run_one_gauge(g, &ctx, files.clone()).await;
+        self.run_gauge_sweep(&gauges, &ctx, files, stream_id.value())
+            .await;
+    }
+
+    /// Run `gauges` over one file map, reporting progress when it's a whole-tree
+    /// sweep. Split out from [`Self::run_snapshot_gauges`] so the tracking is
+    /// exercisable without standing up real snapshot blobs.
+    async fn run_gauge_sweep(
+        &self,
+        gauges: &[ResolvedGauge],
+        ctx: &GaugeRunContext,
+        files: Arc<HashMap<String, String>>,
+        stream_val: i64,
+    ) {
+        // A WHOLE-TREE sweep (the baseline) tree-sitter-parses every file for every
+        // gauge — minutes of CPU. Track it as a background task so the user can see
+        // what oxplow is doing and why a core is pinned (tsk48). An ordinary delta
+        // (a handful of changed files) finishes in milliseconds and would only be
+        // noise, so it stays untracked. `run()` processes snapshot events serially,
+        // so two sweeps can never overlap.
+        let tracked = (files.len() >= TREE_SWEEP_FILE_THRESHOLD)
+            .then_some(self.background_tasks.as_ref())
+            .flatten();
+        let task = tracked.map(|bts| {
+            bts.start(crate::background_task::StartInput {
+                kind: crate::background_task::BackgroundTaskKind::Metrics,
+                label: format!("Computing code metrics ({} files)", files.len()),
+                progress: Some(0.0),
+                ..Default::default()
+            })
+        });
+
+        let mut failed: Vec<String> = Vec::new();
+        for (i, g) in gauges.iter().enumerate() {
+            if let (Some(bts), Some(t)) = (tracked, task.as_ref()) {
+                bts.update(
+                    &t.id,
+                    crate::background_task::UpdateInput {
+                        label: Some(format!(
+                            "Computing code metrics ({}/{}) — {}",
+                            i + 1,
+                            gauges.len(),
+                            g.key
+                        )),
+                        progress: Some(Some(i as f64 / gauges.len() as f64)),
+                        ..Default::default()
+                    },
+                );
+            }
+            // `run_one_gauge` returns 0 both for "found nothing" and "failed", so ask
+            // the substrate which it was rather than guessing.
+            self.run_one_gauge(g, ctx, files.clone()).await;
+            if self.last_run_failed(&g.key, stream_val).await {
+                failed.push(g.key.clone());
+            }
         }
+
+        if let (Some(bts), Some(t)) = (tracked, task.as_ref()) {
+            if failed.is_empty() {
+                bts.complete(
+                    &t.id,
+                    Some(serde_json::json!({ "gauges": gauges.len(), "files": files.len() })),
+                );
+            } else {
+                // Do NOT silently succeed. A failed gauge leaves its metric reading
+                // stale or empty, and that going unnoticed is exactly the bug (tsk47).
+                bts.fail(
+                    &t.id,
+                    format!(
+                        "{} of {} gauges failed: {}",
+                        failed.len(),
+                        gauges.len(),
+                        failed.join(", ")
+                    ),
+                    None,
+                );
+            }
+        }
+    }
+
+    /// Whether this producer's LATEST capture is a failure — i.e. the gauge we just
+    /// ran errored. `run_one_gauge` can't tell us directly (it returns 0 for both
+    /// "found nothing" and "blew up"), but the failure capture (tsk47) can.
+    async fn last_run_failed(&self, producer: &str, stream_id: i64) -> bool {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return false;
+        };
+        facts
+            .latest_capture_status(producer, stream_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|s| s == "failed")
     }
 
     /// Run every enabled `on-effort-complete` gauge when an effort closes. The
@@ -1298,19 +1421,44 @@ impl MetricsService {
             }
             None => String::new(),
         };
+        // A tree gauge scans the WHOLE tree (hundreds of files, tree-sitter each) —
+        // the 5s default was sized for report parsers over a single small file and is
+        // nowhere near enough. Under it, the broad-query gauges silently timed out on
+        // every full-tree run: `oxplow.ts.console_calls` and `oxplow.ts.ts_ignore` had
+        // produced ZERO facts since the project was indexed, while the repo held 137
+        // console calls (tsk47). Gauges run detached under `spawn_blocking`, so a
+        // generous ceiling costs nothing and still catches a runaway script.
+        let collector = collector.with_budget(SandboxBudget::with_timeout(GAUGE_TIMEOUT));
         let host = GaugeHost::from_shared(files);
+        let started = std::time::Instant::now();
         let report =
             match tokio::task::spawn_blocking(move || collector.run_gauge(&content, host)).await {
                 Ok(Ok(out)) => out,
                 Ok(Err(e)) => {
-                    tracing::warn!(key = %gauge.key, error = %e, "gauge: compute failed");
+                    // NOT a silent warn. A gauge that fails leaves its metric reading
+                    // stale-or-empty forever, and that is exactly how two built-in
+                    // metrics went unnoticed for weeks. Record the failure durably so
+                    // it can be seen and reasoned about.
+                    self.record_gauge_failure(gauge, ctx, &source, &e.to_string())
+                        .await;
+                    tracing::error!(
+                        key = %gauge.key,
+                        error = %e,
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        "gauge: compute FAILED — its metric will read stale or empty",
+                    );
                     return 0;
                 }
                 Err(e) => {
-                    tracing::warn!(key = %gauge.key, error = %e, "gauge: join failed");
+                    tracing::error!(key = %gauge.key, error = %e, "gauge: join failed");
                     return 0;
                 }
             };
+        tracing::debug!(
+            key = %gauge.key,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "gauge: complete",
+        );
         let gauge_facts = match report {
             oxplow_collect_plugin::CollectorOutput::Gauge(r) => r.facts,
             _ => return 0,
@@ -1322,6 +1470,51 @@ impl MetricsService {
         // still returns are ignored. Best-effort; never fails the gauge run.
         self.record_gauge_facts(gauge, ctx, &source, &gauge_facts)
             .await
+    }
+
+    /// Record a FAILED gauge run as a `status = 'failed'` capture (tsk47).
+    ///
+    /// Two reasons this must be durable rather than a log line:
+    /// 1. **Visibility.** A gauge that fails leaves its metric reading stale or empty
+    ///    *forever*, and nothing said so — `oxplow.ts.console_calls` read empty for
+    ///    weeks against a repo with 137 console calls. A metric that is obviously
+    ///    broken is far better than one that is quietly wrong.
+    /// 2. **It stops the boot loop.** The capture carries the gauge's fingerprint, so
+    ///    `gauge_is_stale` sees the current logic *was* attempted and doesn't demand a
+    ///    fresh full-tree baseline on every single boot.
+    ///
+    /// It carries NO facts, and the read folds skip non-`done` captures — critical,
+    /// because an empty capture over a *full-tree* snapshot restates every path, and
+    /// would otherwise supersede everything and zero the metric.
+    async fn record_gauge_failure(
+        &self,
+        gauge: &ResolvedGauge,
+        ctx: &GaugeRunContext,
+        source: &str,
+        error: &str,
+    ) {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return;
+        };
+        let mut capture = oxplow_db::NewMetricCapture::done(
+            ctx.stream_val,
+            gauge.key.clone(),
+            source.to_string(),
+        );
+        capture.status = "failed".into();
+        capture.error = Some(error.to_string());
+        capture.thread_id = ctx.thread_id;
+        capture.effort_id = ctx.effort_id;
+        capture.scope = Some(gauge.scope.clone());
+        capture.trigger = Some(ctx.trigger.into());
+        capture.snapshot_id = ctx.snapshot_id;
+        capture.closest_git_version = ctx.closest_git_version.clone();
+        capture.git_version_exact = ctx.git_version_exact;
+        capture.branch = ctx.branch.clone();
+        capture.producer_version = gauge_fingerprint(gauge, &self.script_base_dir(gauge));
+        if let Err(e) = facts.record_facts(capture, Vec::new()).await {
+            tracing::warn!(key = %gauge.key, error = %e, "gauge: failure record write failed");
+        }
     }
 
     /// Persist a gauge's per-item `facts` (epic tsk12) as `fact` rows under one
@@ -2028,6 +2221,116 @@ def transform(input):
             svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
             Some(0.0),
             "rescanning the file supersedes its stale fact — the fix shows"
+        );
+    }
+
+    /// A file map big enough to count as a whole-tree sweep.
+    fn big_corpus(n: usize) -> Arc<HashMap<String, String>> {
+        Arc::new(
+            (0..n)
+                .map(|i| (format!("src/f{i}.rs"), "fn a() {}".to_string()))
+                .collect(),
+        )
+    }
+
+    fn sweep_ctx() -> GaugeRunContext {
+        GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: None,
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_whole_tree_sweep_is_visible_as_a_background_task() {
+        // tsk48. The baseline pegs a core for minutes and used to report NOTHING —
+        // "why is oxplow eating CPU?" had no answer, and when it went wrong I could
+        // only find out by reading SQL by hand.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+
+        svc.metrics
+            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(120), 1)
+            .await;
+
+        let task = svc
+            .background_tasks
+            .list_running()
+            .into_iter()
+            .find(|t| t.kind == crate::background_task::BackgroundTaskKind::Metrics)
+            .expect("a whole-tree sweep must surface as a Metrics background task");
+        assert_eq!(
+            task.status,
+            crate::background_task::BackgroundTaskStatus::Done
+        );
+        assert!(task.label.contains("metrics"), "got {:?}", task.label);
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_delta_sweep_is_not_tracked() {
+        // A per-commit delta finishes in milliseconds — tracking it would be noise.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+
+        svc.metrics
+            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(3), 1)
+            .await;
+
+        assert!(
+            !svc.background_tasks
+                .list_running()
+                .iter()
+                .any(|t| t.kind == crate::background_task::BackgroundTaskKind::Metrics),
+            "a 3-file delta must not raise a background task"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sweep_with_a_failing_gauge_fails_the_task_rather_than_quietly_succeeding() {
+        // The whole point of tsk47/tsk48: a gauge that blows up leaves its metric
+        // reading stale or empty. Reporting the sweep as "done" would hide exactly the
+        // failure that let two built-in metrics read empty for weeks.
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+
+        let script = dir.path().join("oxplow/metrics/boom.star");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "def transform(input):\n    fail(\"boom\")\n").unwrap();
+        let gauge = starlark_gauge_emits(
+            "acme.boom",
+            "oxplow/metrics/boom.star",
+            vec!["oxplow.todo".to_string()],
+        );
+
+        svc.metrics
+            .run_gauge_sweep(&[gauge], &sweep_ctx(), big_corpus(120), 1)
+            .await;
+
+        let task = svc
+            .background_tasks
+            .list_running()
+            .into_iter()
+            .find(|t| t.kind == crate::background_task::BackgroundTaskKind::Metrics)
+            .expect("tracked sweep");
+        assert_eq!(
+            task.status,
+            crate::background_task::BackgroundTaskStatus::Failed,
+            "a failing gauge must fail the sweep, not vanish into a log line"
+        );
+        assert!(
+            task.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("acme.boom"),
+            "the failure must name the gauge; got {:?}",
+            task.error
         );
     }
 

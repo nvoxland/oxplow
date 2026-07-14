@@ -618,6 +618,11 @@ impl Services {
         // orphaned efforts left open by a crash (death/restart case).
         let recovery_svc =
             recovery_svc.with_snapshot_reconcile(thread_store.clone(), snapshot_captures.clone());
+        // Built before the metric runner, which reports whole-tree gauge sweeps
+        // through it (tsk48).
+        let background_tasks = BackgroundTaskStore::new();
+        bridge_background_task_events(&background_tasks, &event_bus);
+
         // The metric runner (config-declared gauges → substrate). Holds leaf
         // Arcs only (never `Arc<Services>`); injected into TaskService for the
         // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
@@ -630,7 +635,8 @@ impl Services {
             layout.project_dir.clone(),
             event_bus.clone(),
         )
-        .with_fact_store(fact_store.clone());
+        .with_fact_store(fact_store.clone())
+        .with_background_tasks(background_tasks.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -658,9 +664,6 @@ impl Services {
             fact_store.clone(),
             event_bus.clone(),
         );
-
-        let background_tasks = BackgroundTaskStore::new();
-        bridge_background_task_events(&background_tasks, &event_bus);
 
         Ok(Self {
             config: config_arc,

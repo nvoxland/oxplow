@@ -94,6 +94,25 @@ welded to collection.
 > dirty, and the delta rescans exactly those paths (identical content across branches
 > keeps valid facts).
 >
+> **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
+> The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
+> gauge tree-sitter-parses the *whole tree* per run, so gauge runs get their own
+> ceiling (`GAUGE_TIMEOUT`, 120s). Under the old 5s budget the broad-query gauges
+> timed out on every full-tree run and wrote **nothing** — `oxplow.ts.console_calls`
+> and `oxplow.ts.ts_ignore` had produced **zero facts since the project was indexed**,
+> against a repo with 137 console calls, and the only trace was a `tracing::warn`
+> (tsk47). A failing gauge now records a **`status='failed'` capture** (with the
+> error and the fingerprint), and a whole-tree sweep is a tracked
+> `BackgroundTaskKind::Metrics` task with per-gauge progress that **fails** if any
+> gauge failed (tsk48) — so "why is oxplow pegging a core" and "is this metric
+> trustworthy" both have answers.
+>
+> ⚠️ **Non-`done` captures are invisible to every fold** (`c.status = 'done'` in
+> `latest_tree_facts` / `latest_subject_facts` / `scanned_paths_for_captures`). This is
+> load-bearing: a failure capture carries **no facts**, and on a full-tree snapshot it
+> restates *every path* — so if the fold counted it, one timeout would supersede
+> everything and silently zero the metric. Worse than the bug it reports.
+>
 > `needs_tree_baseline` fires on two conditions:
 > 1. a `per-path` measure whose fold is **empty** (fresh project, or a newly enabled
 >    gauge — it has no facts for files no commit has touched);

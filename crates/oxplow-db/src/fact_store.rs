@@ -1121,7 +1121,7 @@ impl SqliteFactStore {
                          JOIN file_snapshot fs
                            ON fs.snapshot_id = c.snapshot_id
                           AND fs.stream_id = c.stream_id
-                        WHERE c.snapshot_id IS NOT NULL
+                        WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
                        UNION
                        -- A capture with NO snapshot isn't a tree scan (an agent-asserted
                        -- `record_metric`, or a synthetic write): it has no scanned set, so
@@ -1132,6 +1132,7 @@ impl SqliteFactStore {
                          FROM metric_capture c
                          JOIN fact f ON f.capture_id = c.id
                         WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                          AND c.status = 'done'
                      ),
                      ranked AS (
                        SELECT capture_id, path, storage,
@@ -1153,6 +1154,30 @@ impl SqliteFactStore {
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The `status` of a producer's LATEST capture (`done` | `failed` | `running`),
+    /// or `None` when it has never captured. Lets the runner tell "the gauge found
+    /// nothing" apart from "the gauge blew up" (tsk47/tsk48).
+    pub async fn latest_capture_status(
+        &self,
+        producer: &str,
+        stream_id: i64,
+    ) -> Result<Option<String>, DomainError> {
+        let producer = producer.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT status FROM metric_capture
+                      WHERE producer = ?1 AND stream_id = ?2
+                      ORDER BY captured_at DESC, id DESC
+                      LIMIT 1",
+                    params![producer, stream_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
             })
             .await
     }
@@ -1219,6 +1244,7 @@ impl SqliteFactStore {
                          JOIN metric_capture c ON c.id = f.capture_id
                         WHERE f.measure_id = ?1
                           AND f.subject_ref IS NOT NULL
+                          AND c.status = 'done'
                           AND (?2 IS NULL OR c.stream_id = ?2)
                      )
                      SELECT {FACT_ROW_COLS} FROM fact f
@@ -1262,12 +1288,14 @@ impl SqliteFactStore {
                        JOIN file_snapshot fs
                          ON fs.snapshot_id = c.snapshot_id
                         AND fs.stream_id = c.stream_id
-                      WHERE c.snapshot_id IS NOT NULL AND c.id IN ({placeholders})
+                      WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
+                        AND c.id IN ({placeholders})
                      UNION
                      SELECT c.id, f.path
                        FROM metric_capture c
                        JOIN fact f ON f.capture_id = c.id
                       WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                        AND c.status = 'done'
                         AND c.id IN ({placeholders})"
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -1661,6 +1689,49 @@ mod tests {
         assert_eq!(
             failed, 0,
             "b's latest status supersedes its earlier failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_capture_never_supersedes_good_facts() {
+        // tsk47's footgun. Recording a gauge FAILURE durably (so it stops being an
+        // invisible warn) means writing a capture with NO facts. On a FULL-TREE
+        // snapshot that capture restates every path — so if the fold counted it, a
+        // single timeout would supersede every fact and silently zero the metric,
+        // which is far worse than the bug we're fixing. Non-`done` captures must be
+        // invisible to the fold.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            5.0
+        );
+
+        // The gauge times out on the next full-tree scan: a failed, fact-less capture
+        // whose snapshot covers BOTH files.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        let mut failed = NewMetricCapture::done(1, "g", "metric:g");
+        failed.status = "failed".into();
+        failed.error = Some("sandbox budget exceeded".into());
+        failed.snapshot_id = Some(2);
+        failed.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
+        store.record_facts(failed, Vec::new()).await.unwrap();
+
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            5.0,
+            "a failed run must not supersede anything — the metric keeps its last good value"
         );
     }
 
