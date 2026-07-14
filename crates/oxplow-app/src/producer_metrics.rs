@@ -185,6 +185,35 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: BRANCH_DIMS,
             description: Some("Total tests in the latest run."),
         },
+        // Per-test duration (tsk46). `oxplow.test_duration` is `per-subject`, so each
+        // test's LATEST timing wins — a partial run refreshes only what it ran and the
+        // suite total stays a real total.
+        ProducerMetric {
+            key: "oxplow.tests.duration_ms",
+            title: "Test suite duration",
+            kind: "gauge",
+            unit: "ms",
+            direction: "lower-better",
+            default_agg: "sum",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Total wall-clock time of the known test suite."),
+        },
+        ProducerMetric {
+            key: "oxplow.tests.slowest_ms",
+            title: "Slowest test",
+            kind: "gauge",
+            unit: "ms",
+            direction: "lower-better",
+            default_agg: "max",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "tests",
+            dimensions: BRANCH_DIMS,
+            description: Some("Wall-clock time of the slowest single test."),
+        },
         // Per-effort test-outcome scalars (tsk38) — materialized at effort close
         // by the lifecycle producer on `oxplow.effort_test_outcome`, sliced by
         // `oxplow.tests_stat`. Split "tests failed" into a close-state gate vs
@@ -352,6 +381,10 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
             Some(dim_eq("oxplow.status", "failed")),
         ),
         "oxplow.tests.total" => ("oxplow.test_case", "count", None),
+        // One duration fact per test; the per-subject fold keeps the latest per test,
+        // so `sum` is the suite's wall-clock and `max` is the slowest single test.
+        "oxplow.tests.duration_ms" => ("oxplow.test_duration", "sum", None),
+        "oxplow.tests.slowest_ms" => ("oxplow.test_duration", "max", None),
         // Per-effort test-outcome scalars: one fact per stat per closed effort,
         // averaged across efforts (non-additive measure) for the headline.
         "oxplow.tests.failed_at_close" => (

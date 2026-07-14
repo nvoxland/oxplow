@@ -125,6 +125,8 @@ metrics:
 - use: oxplow.long_functions
 - use: oxplow.tests.failed
   target: 0.0
+- use: oxplow.tests.duration_ms
+- use: oxplow.tests.slowest_ms
 - use: oxplow.tests.failed_at_close
   target: 0.0
 - use: oxplow.tests.peak_failed

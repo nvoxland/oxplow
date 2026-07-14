@@ -547,6 +547,21 @@ impl CollectionService {
                         else {
                             return Ok::<Option<i64>, DomainError>(None);
                         };
+                        // Per-test DURATION (tsk46) — the JUnit parser already gives us
+                        // `time_ms` per case; nothing was recording it. Same subject as
+                        // the status fact, on a `per-subject` measure, so a partial run
+                        // refreshes only the timings it measured and the suite total
+                        // stays a real total. Gated like every other producer.
+                        let duration = if self
+                            .facts
+                            .measure_has_active_spec("oxplow.test_duration")
+                            .await
+                            .unwrap_or(false)
+                        {
+                            self.facts.get_measure("oxplow.test_duration").await?
+                        } else {
+                            None
+                        };
                         use oxplow_coverage::TestStatus::*;
                         for suite in &r.suites {
                             for case in &suite.cases {
@@ -555,19 +570,26 @@ impl CollectionService {
                                     Failed => "failed",
                                     Skipped => "skipped",
                                 };
+                                let subject = format!("test:{}::{}", case.classname, case.name);
+                                let dims = serde_json::to_string(&json!({
+                                    "oxplow.status": status,
+                                    "oxplow.test_suite": suite.name,
+                                }))
+                                .ok();
                                 facts.push(NewFact {
                                     subject_kind: Some("test".into()),
-                                    subject_ref: Some(format!(
-                                        "test:{}::{}",
-                                        case.classname, case.name
-                                    )),
-                                    dims_json: serde_json::to_string(&json!({
-                                        "oxplow.status": status,
-                                        "oxplow.test_suite": suite.name,
-                                    }))
-                                    .ok(),
+                                    subject_ref: Some(subject.clone()),
+                                    dims_json: dims.clone(),
                                     ..NewFact::new(measure.id, 1.0)
                                 });
+                                if let (Some(d), Some(ms)) = (duration.as_ref(), case.time_ms) {
+                                    facts.push(NewFact {
+                                        subject_kind: Some("test".into()),
+                                        subject_ref: Some(subject),
+                                        dims_json: dims,
+                                        ..NewFact::new(d.id, ms as f64)
+                                    });
+                                }
                             }
                         }
                     } else if counted {

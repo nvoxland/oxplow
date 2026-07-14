@@ -1665,6 +1665,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn per_subject_test_durations_sum_to_a_real_suite_total() {
+        // tsk46. Durations are `per-subject` for the same reason statuses are: a
+        // partial run must refresh only the timings it measured. Suite = a(100) +
+        // b(200) + c(50) = 350ms. Re-run just `b`, now 20ms → the total must be
+        // 100 + 20 + 50 = 170, NOT 20 ("the one test I just ran"), and the slowest
+        // must fall to a's 100.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.test_duration").await;
+        let run = |ms: &[(&str, f64)], at_s: &str| {
+            let rows: Vec<NewFact> = ms
+                .iter()
+                .map(|(name, v)| NewFact {
+                    subject_kind: Some("test".into()),
+                    subject_ref: Some(format!("test:{name}")),
+                    ..NewFact::new(m, *v)
+                })
+                .collect();
+            let mut c = NewMetricCapture::done(1, "tests", "tests");
+            c.captured_at = Some(at(at_s));
+            (c, rows)
+        };
+
+        let (c1, r1) = run(
+            &[("a", 100.0), ("b", 200.0), ("c", 50.0)],
+            "2026-06-30T10:00:00.000000Z",
+        );
+        store.record_facts(c1, r1).await.unwrap();
+        assert_eq!(
+            total(&store.latest_subject_facts(m, Some(1)).await.unwrap()),
+            350.0
+        );
+
+        let (c2, r2) = run(&[("b", 20.0)], "2026-06-30T11:00:00.000000Z");
+        store.record_facts(c2, r2).await.unwrap();
+
+        let facts = store.latest_subject_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 170.0, "a + c carry forward; b is refreshed");
+        let slowest = facts.iter().map(|f| f.value).fold(f64::MIN, f64::max);
+        assert_eq!(slowest, 100.0, "b is no longer the slowest");
+    }
+
+    #[tokio::test]
     async fn upsert_measure_inserts_then_updates_in_place() {
         let store = fixture().await;
         // A non-seeded key so the insert adds a new row (the migration already
@@ -1686,10 +1728,10 @@ mod tests {
         assert_eq!(got.title, "API latency (p95)");
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
-        // The migrations seed 15 built-in measures (10 in V43 + oxplow.ast_hit in
-        // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in
-        // V53); this upsert added one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 16);
+        // The migrations seed 16 built-in measures (10 in V43 + oxplow.ast_hit in
+        // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
+        // oxplow.test_duration in V57); this upsert added one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 17);
     }
 
     #[tokio::test]
