@@ -340,6 +340,12 @@ pub struct MetricCapture {
     /// coverage per-file line-sets, analysis findings) — the capture-spine home
     /// of the legacy `metric_finding` `*-detail` rows (T-E1, tsk48).
     pub detail_json: Option<String>,
+    /// Fingerprint of the LOGIC that produced this capture (V56, tsk45) — for a
+    /// gauge, a hash of its script + compute knobs + `emits`. When a gauge's current
+    /// fingerprint no longer matches its latest capture's, its facts were computed by
+    /// different logic and are stale, so a re-baseline is due. `None` = unversioned
+    /// (pre-V56 rows, and producers whose logic isn't script-defined).
+    pub producer_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +376,8 @@ pub struct NewMetricCapture {
     /// whole write (no duplicate capture, no double-counted facts) and returns
     /// the existing id. `None` (the default) always inserts a fresh row.
     pub idempotency_key: Option<String>,
+    /// See [`MetricCapture::producer_version`].
+    pub producer_version: Option<String>,
 }
 
 impl NewMetricCapture {
@@ -395,13 +403,14 @@ impl NewMetricCapture {
             ended_at: None,
             detail_json: None,
             idempotency_key: None,
+            producer_version: None,
         }
     }
 }
 
 const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_git_version, git_version_exact, \
-     branch, captured_at, ended_at, detail_json";
+     branch, captured_at, ended_at, detail_json, producer_version";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     let captured_at: String = row.get(16)?;
@@ -429,6 +438,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
             None => None,
         },
         detail_json: row.get(18)?,
+        producer_version: row.get(19)?,
     })
 }
 
@@ -442,8 +452,8 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_git_version, git_version_exact, branch,
-            captured_at, ended_at, detail_json, idempotency_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            captured_at, ended_at, detail_json, idempotency_key, producer_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             c.stream_id,
             c.thread_id,
@@ -464,6 +474,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             ended,
             c.detail_json,
             c.idempotency_key,
+            c.producer_version,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1142,6 +1153,35 @@ impl SqliteFactStore {
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The `producer_version` on a producer's LATEST capture (V56, tsk45), and
+    /// whether it has ever captured at all.
+    ///
+    /// `Ok(None)` — the producer has no captures in this stream (never run).
+    /// `Ok(Some(v))` — its latest capture recorded logic version `v` (`None` inside
+    /// = an unversioned/pre-V56 capture). Compare against the gauge's current
+    /// fingerprint: a mismatch means its facts were computed by different logic and
+    /// a re-baseline is due.
+    pub async fn latest_producer_version(
+        &self,
+        producer: &str,
+        stream_id: i64,
+    ) -> Result<Option<Option<String>>, DomainError> {
+        let producer = producer.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT producer_version FROM metric_capture
+                      WHERE producer = ?1 AND stream_id = ?2
+                      ORDER BY captured_at DESC, id DESC
+                      LIMIT 1",
+                    params![producer, stream_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()
             })
             .await
     }

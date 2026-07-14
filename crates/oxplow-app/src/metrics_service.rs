@@ -873,7 +873,54 @@ impl MetricsService {
                 return true;
             }
         }
-        false
+        // A gauge whose SCRIPT CHANGED has facts computed by different logic — stale,
+        // but not empty, so the check above never sees them. Without this a metric fix
+        // silently no-ops: you correct the query, the number doesn't move, and nothing
+        // says why (tsk44/tsk45). A re-baseline restates every path, so the per-path
+        // fold supersedes the old facts — no deletes, history preserved.
+        !self.stale_gauges(stream_id).await.is_empty()
+    }
+
+    /// Enabled gauges whose current logic fingerprint differs from the one recorded on
+    /// their latest capture — i.e. whose facts are stale because the script changed.
+    /// Skips gauges that have never run (the empty-fold check already covers those) and
+    /// ones whose script can't be fingerprinted (better to skip than to re-baseline the
+    /// whole tree on every boot).
+    pub async fn stale_gauges(&self, stream_id: i64) -> Vec<String> {
+        let mut out = Vec::new();
+        for gauge in self.resolved_gauges() {
+            if self.gauge_is_stale(&gauge, stream_id).await {
+                out.push(gauge.key.clone());
+            }
+        }
+        out
+    }
+
+    /// Whether ONE gauge's facts were computed by logic that has since changed — its
+    /// current fingerprint vs the one recorded on its latest capture.
+    ///
+    /// `false` when it has never run (the empty-fold check covers that) or when its
+    /// script can't be fingerprinted (better to skip than to re-baseline the whole
+    /// tree on every boot over an unreadable file).
+    pub async fn gauge_is_stale(&self, gauge: &ResolvedGauge, stream_id: i64) -> bool {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return false;
+        };
+        let Some(current) = gauge_fingerprint(gauge, &self.script_base_dir(gauge)) else {
+            return false;
+        };
+        let recorded = match facts.latest_producer_version(&gauge.key, stream_id).await {
+            Ok(None) | Err(_) => return false, // never captured
+            Ok(Some(v)) => v,
+        };
+        let stale = recorded.as_deref() != Some(current.as_str());
+        if stale {
+            tracing::info!(
+                gauge = %gauge.key,
+                "gauge logic changed since its last capture — re-baseline due",
+            );
+        }
+        stale
     }
 
     /// Scaffold a custom **measure** (a new fact TYPE) — epic tsk12, E. Appends a
@@ -1366,6 +1413,9 @@ impl MetricsService {
             closest_git_version: ctx.closest_git_version.clone(),
             git_version_exact: ctx.git_version_exact,
             branch: ctx.branch.clone(),
+            // Record WHICH LOGIC produced these facts, so a later script change is
+            // detectable and can re-baseline instead of silently no-opping (tsk45).
+            producer_version: gauge_fingerprint(gauge, &self.script_base_dir(gauge)),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 gauge.key.clone(),
@@ -1715,6 +1765,49 @@ fn compute_to_collector(gauge: &ResolvedGauge, project_dir: &Path) -> Result<Col
     })
 }
 
+/// The script a gauge runs — the embedded text for a built-in, the `entryFile`'s
+/// contents for a global/project one. `None` when it can't be read (an `exec` gauge
+/// with no readable script, or a missing file).
+fn gauge_script_text(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
+    if gauge.scope == "built-in" {
+        return builtin_metrics()
+            .iter()
+            .find(|m| m.key == gauge.key)
+            .map(|m| m.script.to_string());
+    }
+    let entry = gauge.compute.entry_file.as_deref()?;
+    std::fs::read_to_string(base.join(entry)).ok()
+}
+
+/// A fingerprint of the LOGIC that produces a gauge's facts (tsk45): its script
+/// text plus the compute knobs and the `emits` allow-list.
+///
+/// This is what makes a gauge fix actually land. A gauge's facts are only as good as
+/// the code that computed them, so when the script changes they are stale — but
+/// nothing recomputes them, because the baseline only fires on an EMPTY fold. The
+/// result is that you fix a query, the number doesn't move, and nothing tells you
+/// why (tsk44: adding inner `#![allow]` to `repo_allow.star` silently no-opped).
+/// Stamping this on every capture lets boot spot the drift and re-baseline.
+///
+/// `None` when the script can't be read — better to skip the check than to
+/// re-baseline the whole tree on every boot over an unreadable file.
+fn gauge_fingerprint(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
+    let script = gauge_script_text(gauge, base)?;
+    let c = &gauge.compute;
+    // Everything that can change what the gauge produces. `emits` matters because a
+    // measure dropped from the allow-list silently stops being recorded.
+    let material = format!(
+        "v1\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
+        c.runtime,
+        c.input.as_deref().unwrap_or("text"),
+        c.args.join(","),
+        c.report.as_deref().unwrap_or(""),
+        gauge.emits.join(","),
+        script,
+    );
+    Some(crate::blob_store::BlobStore::hash(material.as_bytes()))
+}
+
 /// Trust label: in-process tiers are `observed` under a `metric:<key>` source;
 /// the `exec` escape hatch is flagged `plugin-exec:<name>` (lower-trust).
 fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
@@ -1935,6 +2028,61 @@ def transform(input):
             svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
             Some(0.0),
             "rescanning the file supersedes its stale fact — the fix shows"
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_a_gauge_script_marks_it_stale_so_the_fix_actually_lands() {
+        // tsk45. The trap this closes: you fix a gauge's query, the metric doesn't
+        // move, and nothing tells you why — because its old facts aren't EMPTY, just
+        // WRONG, and the baseline only fires on an empty fold. (Real case, tsk44:
+        // teaching repo_allow.star to also match inner `#![allow]` silently no-opped.)
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+
+        let script = dir.path().join("oxplow/metrics/g.star");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        let write = |body: &str| std::fs::write(&script, body).unwrap();
+        write(
+            "def transform(input):\n    \
+             return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 1.0, \
+             \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
+        );
+        let gauge = starlark_gauge_emits(
+            "acme.g",
+            "oxplow/metrics/g.star",
+            vec!["oxplow.todo".to_string()],
+        );
+
+        let snap = snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let ctx = GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(snap),
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        };
+        let files = Arc::new(HashMap::from([("a.rs".to_string(), "x".to_string())]));
+        svc.metrics.run_one_gauge(&gauge, &ctx, files.clone()).await;
+
+        // Same script → the recorded fingerprint still matches → nothing to redo.
+        assert!(
+            !svc.metrics.gauge_is_stale(&gauge, 1).await,
+            "an unchanged gauge must not force a re-baseline on every boot"
+        );
+
+        // Now the author fixes the gauge's logic (a different value).
+        write(
+            "def transform(input):\n    \
+             return {\"facts\": [{\"measure\": \"oxplow.todo\", \"value\": 5.0, \
+             \"subject\": \"file:a.rs\", \"path\": \"a.rs\"}]}\n",
+        );
+        assert!(
+            svc.metrics.gauge_is_stale(&gauge, 1).await,
+            "a changed script must be detected as stale — otherwise the fix no-ops"
         );
     }
 

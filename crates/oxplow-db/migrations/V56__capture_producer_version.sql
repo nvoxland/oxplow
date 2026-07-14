@@ -1,0 +1,24 @@
+-- tsk45 — a capture records the VERSION OF THE LOGIC that produced it.
+--
+-- THE GAP. When a gauge's script changes, its existing facts were computed by
+-- DIFFERENT LOGIC and are stale — but nothing recomputes them. `needs_tree_baseline`
+-- only fires when a `per-path` measure's fold is EMPTY, so the old values persist:
+-- the gauge only revisits a file when some commit happens to touch it.
+--
+-- Concretely (tsk44): fixing `repo_allow.star` to also match inner `#![allow(...)]`
+-- had ZERO effect on the metric — the fix silently no-opped, and the only way to
+-- apply it was to hand-delete the gauge's captures. That is a nasty trap for anyone
+-- authoring a metric: you fix the query, the number doesn't move, and nothing tells
+-- you why.
+--
+-- THE FIX. Stamp each gauge capture with a fingerprint of the logic that produced it
+-- (xxh3 of the script text + runtime/input/args + the `emits` list). At boot, compare
+-- each enabled gauge's CURRENT fingerprint against its latest capture's; a mismatch
+-- means the facts are stale, so trigger the full-tree baseline. The per-path fold
+-- then supersedes the old facts naturally — no deletes, and history is preserved.
+--
+-- Deliberately generic (`producer_version`, not `script_hash`): any producer whose
+-- output depends on versioned logic can stamp it, and a NULL simply means
+-- "unversioned" (every pre-V56 capture, and the non-gauge producers).
+
+ALTER TABLE metric_capture ADD COLUMN producer_version TEXT;
