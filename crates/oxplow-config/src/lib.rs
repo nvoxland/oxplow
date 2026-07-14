@@ -1410,7 +1410,7 @@ const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-
 /// `temporal_semantics`' CHECK is exactly why adding a value there needs a
 /// `measure` table rebuild (which would cascade-wipe every fact), so
 /// `capture_scope` is validated here and in `CaptureScope::parse` instead.
-const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path"];
+const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path", "per-subject"];
 /// Ratio-base role a `measures:` entry may declare.
 const MEASURE_COMPONENT_ROLES: &[&str] = &["none", "numerator", "denominator"];
 /// Value types a `dimensions:` entry may declare (mirrors the `dimension`

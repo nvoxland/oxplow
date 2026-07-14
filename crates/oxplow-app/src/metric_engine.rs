@@ -110,6 +110,14 @@ pub enum CaptureScope {
     /// `(producer, path)` — see `SqliteFactStore::latest_tree_facts` and
     /// [`tree_state_series`].
     PerPath,
+    /// A capture restates only **the subjects it emitted facts for** — for
+    /// `oxplow.test_case`, the cases the run actually executed (V55, tsk43). The
+    /// value is the latest fact per `(producer, subject_ref)`, so a PARTIAL test run
+    /// updates just the tests it ran instead of making the metric report a 4-test
+    /// repo. Unlike `PerPath` there's no external scanned set (a run has no snapshot
+    /// file rows) — the restated set IS the capture's own facts, which is why a
+    /// deleted/renamed test lingers. See `SqliteFactStore::latest_subject_facts`.
+    PerSubject,
 }
 
 impl CaptureScope {
@@ -117,8 +125,15 @@ impl CaptureScope {
         Some(match s {
             "complete" => Self::Complete,
             "per-path" => Self::PerPath,
+            "per-subject" => Self::PerSubject,
             _ => return None,
         })
+    }
+
+    /// True when a capture speaks only for part of the population, so the value must
+    /// be folded across captures before it's aggregated.
+    fn is_partial(self) -> bool {
+        matches!(self, Self::PerPath | Self::PerSubject)
     }
 }
 
@@ -829,12 +844,18 @@ impl MetricEngine {
             .map(|f| f.producer.clone())
             .collect();
 
-        // A `per-path` measure's captures are DELTAS — one point per capture would
-        // plot "the files in that commit", not the repo. Replay them into a running
-        // tree state instead (tsk41). Zero-fill is deliberately NOT applied: an
-        // empty delta capture restated no paths, so it means "nothing changed", not
-        // "the repo is zero" — zero-filling it would yank the headline to 0.
-        if parse_capture_scope(measure_key, &measure.capture_scope)? == CaptureScope::PerPath {
+        // A PARTIAL-capture measure's captures each speak for only part of the
+        // population — a `per-path` tree gauge's snapshot delta, or a `per-subject`
+        // test run's executed cases. One point per capture would plot "the files in
+        // that commit" / "the tests in that run", not the repo. Replay them into a
+        // running state instead (tsk41/tsk43). The two differ only in WHAT a capture
+        // restates: the snapshot's file rows, or the capture's own subjects.
+        //
+        // Zero-fill is deliberately NOT applied: an empty capture restated nothing, so
+        // it means "nothing changed", not "the repo is zero" — zero-filling would yank
+        // the headline to 0.
+        let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
+        if scope.is_partial() {
             let captures = self
                 .facts
                 .captures_for_producers(producers.into_iter().collect())
@@ -842,9 +863,21 @@ impl MetricEngine {
                 .into_iter()
                 .filter(|c| stream.map_or(true, |s| c.stream_id == s))
                 .collect::<Vec<_>>();
-            let scanned = self.scanned_paths(&captures).await?;
+            let restated = match scope {
+                CaptureScope::PerPath => self.scanned_paths(&captures).await?,
+                // A test run restates exactly the cases it executed.
+                _ => {
+                    let mut m: HashMap<i64, Vec<String>> = HashMap::new();
+                    for f in &facts {
+                        if let Some(s) = f.subject_ref.as_deref() {
+                            m.entry(f.capture_id).or_default().push(s.to_string());
+                        }
+                    }
+                    m
+                }
+            };
             return Ok(tree_state_series(
-                &captures, &facts, &scanned, agg, filter, group_by,
+                &captures, &facts, &restated, agg, filter, group_by,
             ));
         }
 
@@ -946,7 +979,13 @@ impl MetricEngine {
         measure: &oxplow_db::Measure,
         stream: Option<i64>,
     ) -> Result<Vec<FactRow>, DomainError> {
-        if parse_capture_scope(&measure.key, &measure.capture_scope)? == CaptureScope::PerPath {
+        let scope = parse_capture_scope(&measure.key, &measure.capture_scope)?;
+        if scope == CaptureScope::PerSubject {
+            // The restated set is the capture's own facts, so the fold is simply the
+            // latest fact per subject — a partial test run updates only the tests it ran.
+            return self.facts.latest_subject_facts(measure.id, stream).await;
+        }
+        if scope == CaptureScope::PerPath {
             let mut folded = self.facts.latest_tree_facts(measure.id, stream).await?;
             // The SQL fold joins on `path`, so PATH-LESS facts — an agent-asserted repo
             // scalar (`record_metric` with no subject) — are not in it. They aren't tree
@@ -993,7 +1032,7 @@ impl MetricEngine {
         measure: &oxplow_db::Measure,
         kept: &[FactRow],
     ) -> Result<std::collections::HashSet<i64>, DomainError> {
-        if parse_capture_scope(&measure.key, &measure.capture_scope)? == CaptureScope::PerPath {
+        if parse_capture_scope(&measure.key, &measure.capture_scope)?.is_partial() {
             return Ok(kept.iter().map(|f| f.capture_id).collect());
         }
         self.current_captures(kept).await

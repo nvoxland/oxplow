@@ -45,20 +45,32 @@ measures:
   temporalSemantics: semi-additive
   captureScope: per-path
 gauges:
-# One gauge per language so the tree-sitter scan stays within the Starlark
-# sandbox's wall-clock budget (a single mega-gauge over rust+ts+regex-per-file
-# truncated). ast_query (native tree-sitter) not whole-file regex — regex only
-# on small comment nodes, mirroring the bundled idiom gauges.
-- key: repo.scan_rust
-  title: Rust code-health scan
+# ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
+# bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
+# Starlark SandboxBudget; two broad queries in one gauge does not (tsk42), and a
+# gauge that times out writes no capture, so its metric silently freezes.
+# ast_query (native tree-sitter) rather than whole-file regex — regex only on
+# small comment nodes.
+- key: repo.scan_clone
+  title: Rust .clone() scan
   trigger: on-snapshot
-  emits: [repo.rust_clone, repo.rust_allow]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_scan_rust.star }
-- key: repo.scan_ts
-  title: TypeScript code-health scan
+  emits: [repo.rust_clone]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_clone.star }
+- key: repo.scan_allow
+  title: Rust #[allow] scan
   trigger: on-snapshot
-  emits: [repo.eslint_disable, repo.react_use_effect]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_scan_ts.star }
+  emits: [repo.rust_allow]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_allow.star }
+- key: repo.scan_use_effect
+  title: React useEffect scan
+  trigger: on-snapshot
+  emits: [repo.react_use_effect]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_use_effect.star }
+- key: repo.scan_eslint
+  title: ESLint suppression scan
+  trigger: on-snapshot
+  emits: [repo.eslint_disable]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eslint.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls

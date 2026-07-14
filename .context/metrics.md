@@ -47,11 +47,19 @@ welded to collection.
 > They are orthogonal, and conflating them was a real bug.
 >
 > - `capture_scope = complete` (default) — every capture restates the whole
->   population (a coverage report, a clippy run, a test run, the whole-tree
->   duplication scan). The temporal fold applies directly.
+>   population (a coverage report, a clippy run, the whole-tree duplication scan).
+>   The temporal fold applies directly.
 > - `capture_scope = per-path` — a capture restates **only the paths in its
 >   snapshot**. This is what a **tree gauge** does: after the initial full index,
 >   every snapshot is a per-commit **delta** (5–19 files).
+> - `capture_scope = per-subject` (V55, tsk43) — a capture restates **only the
+>   subjects it emitted facts for**. `oxplow.test_case`: a **partial** run
+>   (`bun test src/foo.test.ts`) holds just those cases, so read as `complete` the
+>   metric would report *"the repo has 4 tests"* and lose every failure elsewhere.
+>   Folded to the **latest fact per `(producer, subject_ref)`**, a partial run updates
+>   only the tests it ran and the rest keep their last-known status
+>   (`latest_subject_facts`). Trade-off: a **deleted/renamed test lingers** — a run
+>   can't say "this subject is gone" the way a `storage='deleted'` file row can.
 >
 > **The bug this fixes.** The tree measures were `semi-additive` ("take the last
 > capture") — correct only if captures are complete. Against delta captures that

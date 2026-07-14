@@ -1146,6 +1146,54 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The CURRENT facts of a `capture_scope = 'per-subject'` measure (V55, tsk43).
+    ///
+    /// A capture restates only the **subjects it emitted facts for** — for
+    /// `oxplow.test_case`, the test cases the run actually executed. So the value is
+    /// the latest fact per `(producer, subject_ref)`: a PARTIAL test run updates just
+    /// the tests it ran, and every other test keeps its last-known status. Read as
+    /// `complete` ("the last capture restates every test") a partial run would make
+    /// the metric report a 4-test repo.
+    ///
+    /// Unlike `per-path` there is no external scanned set to anchor on (a test run has
+    /// no snapshot file rows), so the restated set IS the capture's own facts. The
+    /// consequence is that a **deleted/renamed test lingers** — nothing can say "this
+    /// subject no longer exists" the way a `storage='deleted'` file row can.
+    ///
+    /// Oldest-first, like the other fact reads.
+    pub async fn latest_subject_facts(
+        &self,
+        measure_id: i64,
+        stream_id: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "WITH ranked AS (
+                       SELECT f.id AS fact_id,
+                              ROW_NUMBER() OVER (
+                                PARTITION BY c.stream_id, c.producer, f.subject_ref
+                                ORDER BY c.captured_at DESC, c.id DESC, f.id DESC
+                              ) AS rn
+                         FROM fact f
+                         JOIN metric_capture c ON c.id = f.capture_id
+                        WHERE f.measure_id = ?1
+                          AND f.subject_ref IS NOT NULL
+                          AND (?2 IS NULL OR c.stream_id = ?2)
+                     )
+                     SELECT {FACT_ROW_COLS} FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                       JOIN ranked r ON r.fact_id = f.id
+                      WHERE r.rn = 1
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// The paths each capture SCANNED — i.e. the paths in its snapshot, including
     /// `deleted` tombstones (a deletion is a scan result: "this path is gone").
     /// Used by the engine's running fold to build a per-path trend line: at each
@@ -1508,6 +1556,71 @@ mod tests {
             total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
             3.0,
             "scanning nothing supersedes nothing"
+        );
+    }
+
+    /// A test-run capture: one fact per case, `subject_ref = test:<name>`, value 1,
+    /// status on the dims (what `record_test_run` writes).
+    async fn test_run(
+        store: &SqliteFactStore,
+        captured_at: &str,
+        measure_id: i64,
+        cases: &[(&str, &str)],
+    ) -> i64 {
+        let mut capture = NewMetricCapture::done(1, "tests", "tests");
+        capture.captured_at = Some(at(captured_at));
+        let rows: Vec<NewFact> = cases
+            .iter()
+            .map(|(name, status)| NewFact {
+                subject_kind: Some("test".into()),
+                subject_ref: Some(format!("test:{name}")),
+                dims_json: Some(format!("{{\"oxplow.status\":\"{status}\"}}")),
+                ..NewFact::new(measure_id, 1.0)
+            })
+            .collect();
+        store.record_facts(capture, rows).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn per_subject_fold_survives_a_partial_test_run() {
+        // tsk43. A FULL run knows 3 tests (one failing). Then someone runs a SINGLE
+        // test file — a capture holding just that case. Read as `complete` ("the last
+        // capture restates every test") the suite would shrink to 1 test and the
+        // failure would vanish. Per-subject, the partial run updates only the test it
+        // ran; the other two keep their last-known status.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.test_case").await;
+
+        test_run(
+            &store,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a", "passed"), ("b", "failed"), ("c", "passed")],
+        )
+        .await;
+        let all = store.latest_subject_facts(m, Some(1)).await.unwrap();
+        assert_eq!(all.len(), 3, "the full run knows 3 tests");
+
+        // A partial run: only test `b`, now fixed.
+        test_run(&store, "2026-06-30T11:00:00.000000Z", m, &[("b", "passed")]).await;
+
+        let facts = store.latest_subject_facts(m, Some(1)).await.unwrap();
+        assert_eq!(
+            facts.len(),
+            3,
+            "the suite is still 3 tests — a partial run must not shrink it"
+        );
+        let failed = facts
+            .iter()
+            .filter(|f| {
+                f.dims_json
+                    .as_deref()
+                    .is_some_and(|d| d.contains("\"failed\""))
+            })
+            .count();
+        assert_eq!(
+            failed, 0,
+            "b's latest status supersedes its earlier failure"
         );
     }
 

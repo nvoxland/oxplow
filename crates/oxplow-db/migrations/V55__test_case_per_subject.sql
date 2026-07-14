@@ -1,0 +1,30 @@
+-- tsk43 — `oxplow.test_case` is `per-subject`, not `complete`.
+--
+-- THE BUG (the same class V54 fixed for tree gauges). `test_case` is
+-- `semi-additive` + `complete`: "the last capture restates every test". That is
+-- only true of a FULL test run. A PARTIAL run (`bun test src/foo.test.ts`) writes
+-- a capture holding just those cases, so `oxplow.tests.total` reads "the repo has
+-- 4 tests" and `oxplow.tests.failed` reads 0 — exactly how `unsafe_blocks` came to
+-- report 0 against a repo with real unsafe blocks.
+--
+-- THE FIX. `capture_scope = per-subject`: a capture restates only the SUBJECTS it
+-- emitted facts for, and the value is the latest fact per `(producer,
+-- subject_ref)`. A partial run then updates only the tests it actually ran; every
+-- other test keeps its last-known status. `tests.total` = distinct known tests;
+-- `tests.failed` = tests whose LATEST status is failed.
+--
+-- Not `per-path`: test facts carry `subject_ref` (`test:<classname>::<name>`) but
+-- no `path`, and their restated set isn't a snapshot's file rows — it's the cases
+-- the run executed. The eviction key is the subject, not the path.
+--
+-- Trade-off: a DELETED or RENAMED test lingers, because a run has no way to say
+-- "this test no longer exists" (there is no tombstone for a subject the way a
+-- `storage='deleted'` file row is one for a path). Strictly better than reporting a
+-- 4-test repo; a full run still refreshes every surviving test.
+--
+-- Note this is a plain UPDATE: V54 deliberately added `capture_scope` WITHOUT a
+-- CHECK constraint precisely so that adding a value later couldn't force a
+-- `measure` table rebuild (which fires `fact.measure_id ON DELETE CASCADE` and
+-- wipes every fact). Validation lives in oxplow-config + `CaptureScope::parse`.
+
+UPDATE measure SET capture_scope = 'per-subject' WHERE key = 'oxplow.test_case';
