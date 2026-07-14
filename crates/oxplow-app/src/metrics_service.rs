@@ -299,6 +299,7 @@ impl MetricsService {
                 unit: rm.unit,
                 subject_kind: rm.subject_kind,
                 temporal_semantics: rm.temporal_semantics,
+                capture_scope: rm.capture_scope,
                 scope: rm.scope,
                 description: rm.description,
             };
@@ -703,13 +704,18 @@ impl MetricsService {
         let title = title.filter(|t| !t.is_empty());
         let script = starter_gauge_script(key, &measure_key, &glob, language.as_deref());
 
-        // The `<key>.count` measure the gauge emits (per-file counts).
+        // The `<key>.count` measure the gauge emits (per-file counts). A scaffolded
+        // gauge is snapshot-triggered and emits per-FILE facts over a delta, so it
+        // is `per-path` by construction (tsk41) — otherwise its metric would read as
+        // "only the files in the last commit". Scaffolding it correctly by default
+        // is what stops the original bug from being re-introduced by every new gauge.
         let measure = MeasureEntry {
             key: Some(measure_key.clone()),
             title: Some(format!("{key} (per-file count)")),
             unit: Some("count".to_string()),
             subject_kind: Some("file".to_string()),
             temporal_semantics: Some("semi-additive".to_string()),
+            capture_scope: Some("per-path".to_string()),
             component_role: None,
             description: None,
         };
@@ -835,36 +841,75 @@ impl MetricsService {
         Ok(returned_path)
     }
 
+    /// True when a `per-path` measure has nothing to fold in this stream — the tree
+    /// gauges have never run over a full tree here (a fresh project, or after the
+    /// V54 wipe).
+    ///
+    /// A `per-path` measure's fold anchors on each capture's *snapshot file rows*
+    /// (tsk41), so it needs ONE snapshot that lists the whole tree. Delta snapshots
+    /// alone would never get there: a file only enters the fold once some commit
+    /// happens to touch it, so the metric would creep up from 0 over months instead
+    /// of reporting the repo. The fix is a one-off full-tree snapshot — see
+    /// `SnapshotCapture::enqueue_full_tree`.
+    pub async fn needs_tree_baseline(&self, stream_id: i64) -> bool {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return false;
+        };
+        for m in facts.list_measures().await.unwrap_or_default() {
+            if m.capture_scope != "per-path" {
+                continue;
+            }
+            // Only measures an ENABLED metric consumes — a disabled gauge never runs,
+            // so its empty fold is not a reason to rescan the tree.
+            if !facts.measure_has_active_spec(&m.key).await.unwrap_or(false) {
+                continue;
+            }
+            let empty = facts
+                .latest_tree_facts(m.id, Some(stream_id))
+                .await
+                .map(|f| f.is_empty())
+                .unwrap_or(false);
+            if empty {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Scaffold a custom **measure** (a new fact TYPE) — epic tsk12, E. Appends a
     /// `measures:` entry to `.oxplow/project.yaml` (project scope, default) or
     /// writes a shareable `<global>/measures/<slug>.yaml` (global scope), then
     /// reseeds the catalog. Returns the created measure key. A global measure is
     /// active in every project automatically (`seed_catalog` loads global +
     /// project), so — unlike a metric — no project `use:` opt-in is written.
+    ///
+    /// The measure's fields ride in a [`MeasureEntry`] — including
+    /// `captureScope` (`complete` (default) | `per-path`), which a
+    /// snapshot-triggered tree gauge's measure must set to `per-path` so its metric
+    /// reads the whole repo rather than just the last commit's files (tsk41).
     pub async fn scaffold_measure(
         &self,
-        key: &str,
-        title: Option<String>,
-        unit: Option<String>,
-        subject_kind: Option<String>,
-        temporal_semantics: Option<String>,
+        entry: MeasureEntry,
         scope: Option<String>,
     ) -> Result<String, String> {
-        let key = key.trim();
+        let key_owned = entry.key.as_deref().unwrap_or_default().trim().to_string();
+        let key: &str = &key_owned;
         if key.is_empty() || !key.contains('.') {
             return Err("key must be namespaced, e.g. acme.api_latency".to_string());
         }
         if key.starts_with("oxplow.") {
             return Err("`oxplow.` is reserved for built-in measures".to_string());
         }
+        let blank = |v: Option<String>| v.filter(|s| !s.is_empty());
         let entry = MeasureEntry {
             key: Some(key.to_string()),
-            title: title.filter(|t| !t.is_empty()),
-            unit: unit.filter(|u| !u.is_empty()),
-            subject_kind: subject_kind.filter(|s| !s.is_empty()),
-            temporal_semantics: temporal_semantics.filter(|s| !s.is_empty()),
+            title: blank(entry.title),
+            unit: blank(entry.unit),
+            subject_kind: blank(entry.subject_kind),
+            temporal_semantics: blank(entry.temporal_semantics),
+            capture_scope: blank(entry.capture_scope),
             component_role: None,
-            description: None,
+            description: blank(entry.description),
         };
         if matches!(scope.as_deref(), Some("global")) {
             let gdir = self
@@ -1707,6 +1752,45 @@ mod tests {
         (svc, dir)
     }
 
+    /// A snapshot on stream 1 carrying `files` as its file rows — the gauge's
+    /// SCANNED SET.
+    ///
+    /// In production `build_file_map` derives the gauge's file map FROM these rows,
+    /// so the two are the same set by construction. A `per-path` measure's fold
+    /// (tsk41) anchors on them to know which paths a capture restated, so a test
+    /// that hands `run_one_gauge` a map must create the matching snapshot — otherwise
+    /// the capture restates nothing and its facts never surface.
+    async fn snapshot_with_files(
+        svc: &Arc<crate::Services>,
+        files: &[(&str, oxplow_db::SnapshotStorage)],
+    ) -> i64 {
+        let snap = svc
+            .snapshot_store
+            .create_snapshot(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        let rows: Vec<oxplow_db::FileSnapshot> = files
+            .iter()
+            .map(|(path, storage)| oxplow_db::FileSnapshot {
+                id: 0,
+                stream_id: oxplow_domain::StreamId::new(1),
+                path: (*path).to_string(),
+                blob_hash: matches!(storage, oxplow_db::SnapshotStorage::Deleted)
+                    .then(|| None)
+                    .unwrap_or(Some("h".into())),
+                size_bytes: 1,
+                captured_at: oxplow_domain::Timestamp::now(),
+                storage: *storage,
+                snapshot_id: Some(snap),
+                mtime_ms: None,
+            })
+            .collect();
+        if !rows.is_empty() {
+            svc.snapshot_store.capture_batch(rows).await.unwrap();
+        }
+        snap
+    }
+
     fn starlark_gauge(key: &str, entry_file: &str) -> ResolvedGauge {
         starlark_gauge_emits(key, entry_file, Vec::new())
     }
@@ -1795,42 +1879,37 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn zero_hit_gauge_run_drops_the_series_to_zero() {
-        // tsk44: fixing the last offender must show. The zero-hit scan records
-        // an EMPTY capture, and the engine zero-fills the series from it — the
-        // count/sum metric reads 0, not the previous scan's value forever.
+    async fn rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero() {
+        // tsk44's promise ("fixing the last offender must show") under per-path
+        // capture scope (tsk41). "Fixed" is expressed by RESCANNING the file with
+        // clean content: the path is in the new snapshot, so the new capture
+        // restates it, and — emitting no fact — supersedes the stale count with 0.
+        // Note the gauge still skips the zero (`if c > 0:`); the scanned set comes
+        // from the SNAPSHOT, which is exactly why no zero-emission convention is
+        // needed.
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
-        let ctx = GaugeRunContext {
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+        let ctx = |snapshot_id: i64| GaugeRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            snapshot_id: None,
+            snapshot_id: Some(snapshot_id),
             closest_git_version: None,
             git_version_exact: false,
             branch: None,
             effort_id: None,
         };
-        // Scan 1: one unsafe block.
-        let mut files = HashMap::new();
-        files.insert(
+
+        // Scan 1: src/a.rs has one unsafe block.
+        let s1 =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let dirty = HashMap::from([(
             "src/a.rs".to_string(),
             "fn a() { unsafe { x(); } }".to_string(),
-        );
+        )]);
         svc.metrics
-            .run_one_gauge(
-                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
-                &ctx,
-                Arc::new(files),
-            )
-            .await;
-        // Scan 2: the unsafe block is gone — zero facts, but the scan records.
-        svc.metrics
-            .run_one_gauge(
-                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
-                &ctx,
-                Arc::new(HashMap::new()),
-            )
+            .run_one_gauge(&gauge, &ctx(s1), Arc::new(dirty))
             .await;
 
         let spec = svc
@@ -1839,18 +1918,149 @@ def transform(input):
             .await
             .unwrap()
             .expect("ast spec seeded");
-        let series = svc
-            .metric_engine
-            .series_for_spec(&spec, None)
-            .await
-            .unwrap();
-        assert_eq!(series.len(), 2, "the zero-hit scan is an explicit point");
-        assert_eq!(series[0].value, 1.0);
-        assert_eq!(series[1].value, 0.0, "the metric drops back to zero");
+        assert_eq!(
+            svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
+            Some(1.0)
+        );
+
+        // Scan 2: src/a.rs is rescanned, now clean → the gauge emits nothing.
+        let s2 =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let clean = HashMap::from([("src/a.rs".to_string(), "fn a() { x(); }".to_string())]);
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx(s2), Arc::new(clean))
+            .await;
+
         assert_eq!(
             svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
             Some(0.0),
-            "the headline (semi-additive → last capture) reads the zero scan"
+            "rescanning the file supersedes its stale fact — the fix shows"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_delta_rescan_updates_the_repo_wide_total_incrementally() {
+        // THE bug, end to end (tsk41). Baseline the whole tree, then rescan only the
+        // ONE file a commit changed. The metric must report the REPO-WIDE total — not
+        // the delta — with the untouched files' facts carried forward from the
+        // baseline, and the rescanned file's stale facts superseded.
+        //
+        // This is what read 0-instead-of-15: the old semi-additive fold took "the last
+        // capture", which after the baseline is only ever a handful of changed files.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+        let ctx = |snapshot_id: i64| GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(snapshot_id),
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        };
+        let unsafe_n = |n: usize| {
+            let body = "unsafe { x(); } ".repeat(n);
+            format!("fn f() {{ {body} }}")
+        };
+
+        // BASELINE: a full-tree snapshot — a.rs has 2 unsafe blocks, b.rs 1, c.rs 0.
+        let base = snapshot_with_files(
+            &svc,
+            &[
+                ("a.rs", oxplow_db::SnapshotStorage::Oxplow),
+                ("b.rs", oxplow_db::SnapshotStorage::Oxplow),
+                ("c.rs", oxplow_db::SnapshotStorage::Oxplow),
+            ],
+        )
+        .await;
+        let full_tree = HashMap::from([
+            ("a.rs".to_string(), unsafe_n(2)),
+            ("b.rs".to_string(), unsafe_n(1)),
+            ("c.rs".to_string(), unsafe_n(0)),
+        ]);
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx(base), Arc::new(full_tree))
+            .await;
+
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .expect("ast spec seeded");
+        assert_eq!(
+            svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
+            Some(3.0),
+            "the baseline reads the whole repo: 2 + 1 + 0"
+        );
+
+        // DELTA: a commit touched ONLY a.rs, fixing one of its two unsafe blocks. The
+        // snapshot — and therefore the gauge's file map — lists just that file.
+        let delta =
+            snapshot_with_files(&svc, &[("a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let changed = HashMap::from([("a.rs".to_string(), unsafe_n(1))]);
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx(delta), Arc::new(changed))
+            .await;
+
+        assert_eq!(
+            svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
+            Some(2.0),
+            "repo-wide total moved by exactly a.rs's delta (2→1); b.rs's 1 carried \
+             forward from the baseline even though it was never rescanned"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_gauge_run_that_scanned_nothing_supersedes_nothing() {
+        // The other half of per-path (tsk41), and the exact bug we fixed: a delta
+        // capture that restated NO paths must leave the metric alone. Under the old
+        // semi-additive reading, this empty capture zero-filled the series and the
+        // headline read 0 — which is how `oxplow.rust.unsafe_blocks` reported 0 while
+        // the repo had 15 unsafe blocks.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+        let ctx = |snapshot_id: i64| GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(snapshot_id),
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        };
+
+        let s1 =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let dirty = HashMap::from([(
+            "src/a.rs".to_string(),
+            "fn a() { unsafe { x(); } }".to_string(),
+        )]);
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx(s1), Arc::new(dirty))
+            .await;
+
+        // A later commit touched nothing this gauge scans: an empty snapshot + an
+        // empty file map.
+        let s2 = snapshot_with_files(&svc, &[]).await;
+        svc.metrics
+            .run_one_gauge(&gauge, &ctx(s2), Arc::new(HashMap::new()))
+            .await;
+
+        let spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .expect("ast spec seeded");
+        assert_eq!(
+            svc.metric_engine.headline_for_spec(&spec).await.unwrap(),
+            Some(1.0),
+            "scanning nothing must NOT zero the repo"
         );
     }
 
@@ -2345,11 +2555,14 @@ def transform(input):
             "pub fn f() {\n    unsafe { std::ptr::read(std::ptr::null::<u8>()); }\n}\n".to_string(),
         );
         let files = Arc::new(corpus);
+        // The snapshot IS the gauge's scanned set (tsk41) — create it to match the map.
+        let snap =
+            snapshot_with_files(&svc, &[("src/lib.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = GaugeRunContext {
             stream_val: 1,
             thread_id: None,
             trigger: "on-snapshot",
-            snapshot_id: Some(1),
+            snapshot_id: Some(snap),
             closest_git_version: None,
             git_version_exact: false,
             branch: Some("main".into()),
@@ -2527,11 +2740,14 @@ def transform(input):
         let key = svc
             .metrics
             .scaffold_measure(
-                "acme.api_latency",
-                Some("API latency".into()),
-                Some("ms".into()),
-                Some("endpoint".into()),
-                Some("non-additive".into()),
+                MeasureEntry {
+                    key: Some("acme.api_latency".into()),
+                    title: Some("API latency".into()),
+                    unit: Some("ms".into()),
+                    subject_kind: Some("endpoint".into()),
+                    temporal_semantics: Some("non-additive".into()),
+                    ..Default::default()
+                },
                 None,
             )
             .await
@@ -2551,12 +2767,24 @@ def transform(input):
         // Reserved namespace + duplicate both rejected.
         assert!(svc
             .metrics
-            .scaffold_measure("oxplow.x", None, None, None, None, None)
+            .scaffold_measure(
+                MeasureEntry {
+                    key: Some("oxplow.x".into()),
+                    ..Default::default()
+                },
+                None
+            )
             .await
             .is_err());
         assert!(svc
             .metrics
-            .scaffold_measure("acme.api_latency", None, None, None, None, None)
+            .scaffold_measure(
+                MeasureEntry {
+                    key: Some("acme.api_latency".into()),
+                    ..Default::default()
+                },
+                None
+            )
             .await
             .is_err());
     }

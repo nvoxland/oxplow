@@ -2020,6 +2020,18 @@ export type MeasureEntry = {
 	 */
 	temporalSemantics?: string | null,
 	/**
+	 *  `complete` | `per-path` — what ONE capture restates (default `complete`).
+	 *  A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
+	 *  restates the whole population (a coverage report, a test run), so the
+	 *  temporal fold applies directly. `per-path` means a capture restates only the
+	 *  paths in its snapshot — which is what a **tree gauge over a per-commit delta**
+	 *  does. Such a measure is folded to the latest capture per (producer, path)
+	 *  before aggregating, so a repo-wide total stays correct while only changed
+	 *  files are rescanned. Set this on any measure a snapshot-triggered gauge
+	 *  emits per-file facts on (tsk41).
+	 */
+	captureScope?: string | null,
+	/**
 	 *  `none` | `numerator` | `denominator` — ratio-base role (default `none`).
 	 *  **Reserved / currently inert** (tsk15): still parsed + validated for
 	 *  back-compat (`deny_unknown_fields`), but no longer persisted — the

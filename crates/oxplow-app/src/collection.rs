@@ -2346,16 +2346,58 @@ impl CollectionService {
             })
             .unwrap_or(0.0)
         };
-        // Repo total in a capture = every kept fact in it, same aggregation (the
-        // crossing badge reflects the repo total, not the claimed-file slice).
+        // Repo total AS OF a capture.
+        //
+        // For a `complete` measure a capture restates the whole population, so the
+        // repo total in it is just its own kept facts. For a **per-path** measure a
+        // capture is a DELTA — summing its own facts would call "the 8 files this
+        // commit touched" the repo, which is the bug tsk41 fixes in the large. The
+        // repo total as of a capture is the folded tree state at that point, which is
+        // exactly what `tree_state_series` yields per capture, so we index it by
+        // capture id.
+        let per_path = measure.capture_scope == "per-path";
+        let tree_totals: std::collections::HashMap<i64, f64> = if per_path {
+            let cap_list = self
+                .facts
+                .captures_for_producers(
+                    kept.iter()
+                        .map(|f| f.producer.clone())
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
+                )
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+                .collect::<Vec<_>>();
+            let mut scanned: std::collections::HashMap<i64, Vec<String>> = Default::default();
+            if let Ok(rows) = self
+                .facts
+                .scanned_paths_for_captures(cap_list.iter().map(|c| c.id).collect())
+                .await
+            {
+                for (cid, path) in rows {
+                    scanned.entry(cid).or_default().push(path);
+                }
+            }
+            crate::metric_engine::tree_state_series(&cap_list, &facts, &scanned, agg, &filter, None)
+                .into_iter()
+                .map(|p| (p.capture_id, p.value))
+                .collect()
+        } else {
+            Default::default()
+        };
         let repo_total = |cap: Option<i64>| -> f64 {
-            cap.map(|c| {
-                kept.iter()
+            match cap {
+                Some(c) if per_path => tree_totals.get(&c).copied().unwrap_or(0.0),
+                Some(c) => kept
+                    .iter()
                     .filter(|f| f.capture_id == c)
                     .map(contribution)
-                    .sum()
-            })
-            .unwrap_or(0.0)
+                    .sum(),
+                None => 0.0,
+            }
         };
         let crossing = threshold_state(
             &spec.direction,

@@ -55,6 +55,13 @@ pub struct Measure {
     pub subject_kind: Option<String>,
     /// `additive` | `semi-additive` | `non-additive` — additivity OVER TIME.
     pub temporal_semantics: String,
+    /// `complete` | `per-path` (V54, tsk41) — what ONE capture restates. This is a
+    /// SEPARATE AXIS from `temporal_semantics`: `complete` means a capture restates
+    /// the whole population (a coverage report, a test run), so the temporal fold
+    /// applies as-is; `per-path` means a capture restates only the paths in its
+    /// snapshot (a tree gauge over a delta), so the value must first be folded to
+    /// the latest capture per (producer, path) — see `latest_tree_facts`.
+    pub capture_scope: String,
     /// `built-in` | `global` | `project`.
     pub scope: String,
     pub description: Option<String>,
@@ -70,13 +77,15 @@ pub struct NewMeasure {
     pub unit: Option<String>,
     pub subject_kind: Option<String>,
     pub temporal_semantics: String,
+    /// `complete` | `per-path` — see [`Measure::capture_scope`].
+    pub capture_scope: String,
     pub scope: String,
     pub description: Option<String>,
 }
 
 impl NewMeasure {
-    /// A `semi-additive`, `built-in` measure (snapshot-measure defaults — the
-    /// common case for code metrics).
+    /// A `semi-additive`, `complete`, `built-in` measure (snapshot-measure defaults
+    /// — the common case for code metrics).
     pub fn new(key: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
             key: key.into(),
@@ -84,6 +93,7 @@ impl NewMeasure {
             unit: None,
             subject_kind: None,
             temporal_semantics: "semi-additive".into(),
+            capture_scope: "complete".into(),
             scope: "built-in".into(),
             description: None,
         }
@@ -94,11 +104,11 @@ impl NewMeasure {
 // from the read cols + upsert: it's never read, can't be safely `DROP COLUMN`d
 // (a CHECK + the fact→measure CASCADE), and defaults to 'none' on insert.
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
-     scope, description, created_at, updated_at";
+     capture_scope, scope, description, created_at, updated_at";
 
 fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
-    let created_at: String = row.get(8)?;
-    let updated_at: String = row.get(9)?;
+    let created_at: String = row.get(9)?;
+    let updated_at: String = row.get(10)?;
     Ok(Measure {
         id: row.get(0)?,
         key: row.get(1)?,
@@ -106,8 +116,9 @@ fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
         unit: row.get(3)?,
         subject_kind: row.get(4)?,
         temporal_semantics: row.get(5)?,
-        scope: row.get(6)?,
-        description: row.get(7)?,
+        capture_scope: row.get(6)?,
+        scope: row.get(7)?,
+        description: row.get(8)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
     })
@@ -671,13 +682,14 @@ impl SqliteFactStore {
                 // never read (dead V43 column, tsk15).
                 conn.execute(
                     "INSERT INTO measure
-                       (key, title, unit, subject_kind, temporal_semantics, scope,
-                        description, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                       (key, title, unit, subject_kind, temporal_semantics, capture_scope,
+                        scope, description, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
                      ON CONFLICT(key) DO UPDATE SET
                         title=excluded.title, unit=excluded.unit,
                         subject_kind=excluded.subject_kind,
                         temporal_semantics=excluded.temporal_semantics,
+                        capture_scope=excluded.capture_scope,
                         scope=excluded.scope,
                         description=excluded.description, updated_at=excluded.updated_at",
                     params![
@@ -686,6 +698,7 @@ impl SqliteFactStore {
                         m.unit,
                         m.subject_kind,
                         m.temporal_semantics,
+                        m.capture_scope,
                         m.scope,
                         m.description,
                         now,
@@ -1050,6 +1063,135 @@ impl SqliteFactStore {
             })
             .await
     }
+
+    /// The CURRENT facts of a `capture_scope = 'per-path'` measure (V54, tsk41):
+    /// the incremental-tree fold.
+    ///
+    /// A tree gauge's capture restates only **the paths in its snapshot** (a
+    /// per-commit delta), so "the last capture" is NOT the repo — it's the last
+    /// few files. The repo state is instead: for each `(producer, path)`, the facts
+    /// from the **latest capture of that producer whose snapshot contained that
+    /// path**. Older captures' facts for that path are superseded.
+    ///
+    /// The scanned set is taken from the capture's snapshot's `file_snapshot` rows,
+    /// NOT from the facts it emitted — which is what makes the whole thing work
+    /// without any write-side convention:
+    /// - a file whose count drops to **0** emits no fact, but its path is in the new
+    ///   snapshot, so the new capture supersedes the stale value (contributes 0);
+    /// - a **deleted** file's latest row is a `storage='deleted'` tombstone → dropped
+    ///   (the same rule `SqliteSnapshotStore::tree_at` applies);
+    /// - **symbol**-grained facts and **many-facts-per-path** (TODO markers) are
+    ///   superseded *wholesale per file*, so a removed function/marker disappears.
+    ///
+    /// Partitioning by `producer` matters: the 10 idiom gauges all share
+    /// `oxplow.ast_hit` (sliced by `rule`), so without it a later gauge's capture
+    /// would supersede an earlier gauge's facts for the same path.
+    ///
+    /// Oldest-first, like the other fact reads.
+    pub async fn latest_tree_facts(
+        &self,
+        measure_id: i64,
+        stream_id: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                // Partition by stream too: a stream is a worktree, and two worktrees
+                // are two independent trees — one's scan must never supersede the
+                // other's facts for the same path.
+                let sql = format!(
+                    "WITH restated AS (
+                       -- A snapshot-backed capture (a tree gauge) restates every path in
+                       -- its snapshot — including deletion tombstones, which is how a
+                       -- removed file drops out.
+                       SELECT c.id AS capture_id, c.stream_id AS stream_id,
+                              c.producer AS producer, c.captured_at AS captured_at,
+                              fs.path AS path, fs.storage AS storage
+                         FROM metric_capture c
+                         JOIN file_snapshot fs
+                           ON fs.snapshot_id = c.snapshot_id
+                          AND fs.stream_id = c.stream_id
+                        WHERE c.snapshot_id IS NOT NULL
+                       UNION
+                       -- A capture with NO snapshot isn't a tree scan (an agent-asserted
+                       -- `record_metric`, or a synthetic write): it has no scanned set, so
+                       -- it restates exactly the paths it emitted facts for. Without this
+                       -- its facts would have nothing to anchor to and silently vanish.
+                       SELECT c.id, c.stream_id, c.producer, c.captured_at,
+                              f.path, 'oxplow'
+                         FROM metric_capture c
+                         JOIN fact f ON f.capture_id = c.id
+                        WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                     ),
+                     ranked AS (
+                       SELECT capture_id, path, storage,
+                              ROW_NUMBER() OVER (
+                                PARTITION BY stream_id, producer, path
+                                ORDER BY captured_at DESC, capture_id DESC
+                              ) AS rn
+                         FROM restated
+                        WHERE (?2 IS NULL OR stream_id = ?2)
+                     )
+                     SELECT {FACT_ROW_COLS} FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                       JOIN ranked s ON s.capture_id = f.capture_id AND s.path = f.path
+                      WHERE f.measure_id = ?1
+                        AND s.rn = 1
+                        AND s.storage <> 'deleted'
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The paths each capture SCANNED — i.e. the paths in its snapshot, including
+    /// `deleted` tombstones (a deletion is a scan result: "this path is gone").
+    /// Used by the engine's running fold to build a per-path trend line: at each
+    /// capture, the paths it scanned are evicted from the running state and
+    /// replaced by whatever facts it emitted for them. Empty when `capture_ids` is
+    /// empty.
+    pub async fn scanned_paths_for_captures(
+        &self,
+        capture_ids: Vec<i64>,
+    ) -> Result<Vec<(i64, String)>, DomainError> {
+        if capture_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.db
+            .call(move |conn| {
+                let placeholders = std::iter::repeat("?")
+                    .take(capture_ids.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Mirrors `latest_tree_facts`: a snapshot-backed capture restates its
+                // snapshot's paths; a snapshot-less one restates exactly the paths it
+                // emitted facts for.
+                let sql = format!(
+                    "SELECT c.id, fs.path
+                       FROM metric_capture c
+                       JOIN file_snapshot fs
+                         ON fs.snapshot_id = c.snapshot_id
+                        AND fs.stream_id = c.stream_id
+                      WHERE c.snapshot_id IS NOT NULL AND c.id IN ({placeholders})
+                     UNION
+                     SELECT c.id, f.path
+                       FROM metric_capture c
+                       JOIN fact f ON f.capture_id = c.id
+                      WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                        AND c.id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                // The id list appears in BOTH arms of the UNION, so bind it twice.
+                let binds = capture_ids.iter().chain(capture_ids.iter());
+                let rows = stmt.query_map(rusqlite::params_from_iter(binds), |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -1103,6 +1245,270 @@ mod tests {
 
     fn at(ts: &str) -> Timestamp {
         string_to_ts(ts).unwrap()
+    }
+
+    // --- per-path fold (V54, tsk41) helpers -------------------------------
+
+    /// A snapshot on stream 1 carrying `files` as `(path, storage)` rows —
+    /// `storage` is `"oxplow"` (present) or `"deleted"` (a tombstone). This is the
+    /// gauge's SCANNED SET: the fold reads it to know which paths a capture
+    /// restated.
+    async fn snapshot_with(store: &SqliteFactStore, snap_id: i64, files: &[(&str, &str)]) {
+        let files: Vec<(String, String)> = files
+            .iter()
+            .map(|(p, s)| ((*p).to_string(), (*s).to_string()))
+            .collect();
+        let db = store.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                let now = "2026-06-30T00:00:00Z";
+                conn.execute(
+                    "INSERT INTO snapshot (id, stream_id, created_at) VALUES (?1, 1, ?2)",
+                    params![snap_id, now],
+                )?;
+                for (path, storage) in &files {
+                    conn.execute(
+                        "INSERT INTO file_snapshot
+                           (stream_id, path, blob_hash, size_bytes, captured_at, snapshot_id, storage)
+                         VALUES (1, ?1, 'h', 1, ?2, ?3, ?4)",
+                        params![path, now, snap_id, storage],
+                    )?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    /// A gauge capture by `producer` over `snap_id`, emitting one fact per
+    /// `(path, value)`. Mirrors what `record_gauge_facts` writes.
+    async fn gauge_capture(
+        store: &SqliteFactStore,
+        producer: &str,
+        snap_id: i64,
+        captured_at: &str,
+        measure_id: i64,
+        facts: &[(&str, f64)],
+    ) -> i64 {
+        let mut capture = NewMetricCapture::done(1, producer, format!("metric:{producer}"));
+        capture.snapshot_id = Some(snap_id);
+        capture.captured_at = Some(at(captured_at));
+        let rows: Vec<NewFact> = facts
+            .iter()
+            .map(|(path, value)| NewFact {
+                subject_kind: Some("file".into()),
+                subject_ref: Some((*path).to_string()),
+                path: Some((*path).to_string()),
+                ..NewFact::new(measure_id, *value)
+            })
+            .collect();
+        store.record_facts(capture, rows).await.unwrap()
+    }
+
+    fn total(facts: &[FactRow]) -> f64 {
+        facts.iter().map(|f| f.value).sum()
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_supersedes_a_rescanned_file_that_dropped_to_zero() {
+        // THE core bug. Baseline: a.rs has 3, b.rs has 2 (total 5). Then a.rs is
+        // edited to 0 — the gauge emits NO fact for it (the `if c > 0:` guard), but
+        // a.rs IS in the new snapshot, so the new capture supersedes it → 2.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            5.0
+        );
+
+        // Only a.rs changed; it now has zero hits, so the gauge emits nothing.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        gauge_capture(&store, "g", 2, "2026-06-30T11:00:00.000000Z", m, &[]).await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 2.0, "a.rs superseded to 0; b.rs unchanged");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_drops_a_deleted_file() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+
+        // a.rs is deleted: its latest row is a tombstone. No gauge fact for it.
+        snapshot_with(&store, 2, &[("a.rs", "deleted")]).await;
+        gauge_capture(&store, "g", 2, "2026-06-30T11:00:00.000000Z", m, &[]).await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 2.0, "the deleted file's 3 is gone");
+        assert_eq!(facts[0].path.as_deref(), Some("b.rs"));
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_keeps_unchanged_files_from_the_baseline() {
+        // The incrementality guarantee: a file never rescanned since the baseline
+        // keeps contributing. This is what makes delta captures correct.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+
+        // Only a.rs is rescanned, now 10. b.rs (untouched) keeps its 2.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("a.rs", 10.0)],
+        )
+        .await;
+
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            12.0
+        );
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_partitions_by_producer_so_gauges_dont_supersede_each_other() {
+        // The 10 idiom gauges all emit on `oxplow.ast_hit`, sliced by `rule`. If the
+        // fold didn't partition by producer, gauge `g2`'s capture on the same
+        // snapshot would supersede gauge `g1`'s facts for the same path.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.ast_hit").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g1",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0)],
+        )
+        .await;
+        gauge_capture(
+            &store,
+            "g2",
+            1,
+            "2026-06-30T10:00:01.000000Z",
+            m,
+            &[("a.rs", 4.0)],
+        )
+        .await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 7.0, "both gauges' facts survive");
+        assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_supersedes_many_facts_per_path_wholesale() {
+        // `todos.star` emits one fact PER MARKER (many facts share a path), and the
+        // code gauges emit one fact per SYMBOL. Rescanning the file must replace the
+        // whole set — so a removed marker/function disappears rather than lingering.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.todo").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 1.0), ("a.rs", 1.0), ("a.rs", 1.0)],
+        )
+        .await;
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            3.0
+        );
+
+        // Two of the three TODOs are fixed.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("a.rs", 1.0)],
+        )
+        .await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(
+            total(&facts),
+            1.0,
+            "the old 3 facts are replaced, not added to"
+        );
+        assert_eq!(facts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn per_path_fold_ignores_a_capture_that_scanned_nothing() {
+        // An empty delta capture (nothing changed) restates NO paths, so it must
+        // supersede nothing. Under the old semi-additive reading this was "the repo
+        // is zero" — the bug in miniature.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0)],
+        )
+        .await;
+
+        snapshot_with(&store, 2, &[]).await; // a snapshot with no files
+        gauge_capture(&store, "g", 2, "2026-06-30T11:00:00.000000Z", m, &[]).await;
+
+        assert_eq!(
+            total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
+            3.0,
+            "scanning nothing supersedes nothing"
+        );
     }
 
     #[tokio::test]

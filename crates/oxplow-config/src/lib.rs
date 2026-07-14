@@ -341,6 +341,17 @@ pub struct MeasureEntry {
     /// (default `semi-additive`).
     #[serde(rename = "temporalSemantics", default)]
     pub temporal_semantics: Option<String>,
+    /// `complete` | `per-path` — what ONE capture restates (default `complete`).
+    /// A SEPARATE AXIS from `temporalSemantics`: `complete` means every capture
+    /// restates the whole population (a coverage report, a test run), so the
+    /// temporal fold applies directly. `per-path` means a capture restates only the
+    /// paths in its snapshot — which is what a **tree gauge over a per-commit delta**
+    /// does. Such a measure is folded to the latest capture per (producer, path)
+    /// before aggregating, so a repo-wide total stays correct while only changed
+    /// files are rescanned. Set this on any measure a snapshot-triggered gauge
+    /// emits per-file facts on (tsk41).
+    #[serde(rename = "captureScope", default)]
+    pub capture_scope: Option<String>,
     /// `none` | `numerator` | `denominator` — ratio-base role (default `none`).
     /// **Reserved / currently inert** (tsk15): still parsed + validated for
     /// back-compat (`deny_unknown_fields`), but no longer persisted — the
@@ -362,6 +373,8 @@ pub struct ResolvedMeasure {
     pub unit: Option<String>,
     pub subject_kind: Option<String>,
     pub temporal_semantics: String,
+    /// `complete` | `per-path` — see [`MeasureEntry::capture_scope`].
+    pub capture_scope: String,
     pub component_role: String,
     /// `global` | `project` (built-ins are the migration seed, not config).
     pub scope: String,
@@ -1393,6 +1406,11 @@ const METRIC_TRIGGERS: &[&str] = &[
 /// Additivity-over-time a `measures:` entry may declare (mirrors the `measure`
 /// table's CHECK).
 const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
+/// What ONE capture restates (tsk41). Deliberately NOT mirrored as a DB CHECK —
+/// `temporal_semantics`' CHECK is exactly why adding a value there needs a
+/// `measure` table rebuild (which would cascade-wipe every fact), so
+/// `capture_scope` is validated here and in `CaptureScope::parse` instead.
+const MEASURE_CAPTURE_SCOPES: &[&str] = &["complete", "per-path"];
 /// Ratio-base role a `measures:` entry may declare.
 const MEASURE_COMPONENT_ROLES: &[&str] = &["none", "numerator", "denominator"];
 /// Value types a `dimensions:` entry may declare (mirrors the `dimension`
@@ -1961,6 +1979,18 @@ fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>
             }
             None => None,
         };
+        let capture_scope = match opt(e.capture_scope) {
+            Some(s) => {
+                if !MEASURE_CAPTURE_SCOPES.contains(&s.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "measures[{i}] captureScope must be one of \
+                         {MEASURE_CAPTURE_SCOPES:?} (got \"{s}\")"
+                    )));
+                }
+                Some(s)
+            }
+            None => None,
+        };
         let component_role = match opt(e.component_role) {
             Some(s) => {
                 if !MEASURE_COMPONENT_ROLES.contains(&s.as_str()) {
@@ -1979,6 +2009,7 @@ fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>
             unit: opt(e.unit),
             subject_kind: opt(e.subject_kind),
             temporal_semantics,
+            capture_scope,
             component_role,
             description: opt(e.description),
         });
@@ -2049,6 +2080,7 @@ pub fn resolve_measures(global: &[MeasureEntry], project: &[MeasureEntry]) -> Ve
                     .temporal_semantics
                     .clone()
                     .unwrap_or_else(|| "semi-additive".into()),
+                capture_scope: e.capture_scope.clone().unwrap_or_else(|| "complete".into()),
                 component_role: e.component_role.clone().unwrap_or_else(|| "none".into()),
                 scope: scope.to_string(),
                 description: e.description.clone(),
@@ -3297,6 +3329,22 @@ dimensions:
         );
         // Bad componentRole.
         assert!(load_from_yaml("measures:\n  - key: acme.x\n    componentRole: pivot\n").is_err());
+        // Bad captureScope (tsk41).
+        assert!(
+            load_from_yaml("measures:\n  - key: acme.x\n    captureScope: sometimes\n").is_err()
+        );
+        // `per-path` is the tree-gauge scope and must be accepted.
+        let cfg =
+            load_from_yaml("measures:\n  - key: acme.x\n    captureScope: per-path\n").unwrap();
+        assert_eq!(cfg.measures[0].capture_scope.as_deref(), Some("per-path"));
+        // Default is `complete` — a capture restates the whole population.
+        let resolved = resolve_measures(&[], &cfg.measures);
+        assert_eq!(resolved[0].capture_scope, "per-path");
+        let plain = load_from_yaml("measures:\n  - key: acme.y\n").unwrap();
+        assert_eq!(
+            resolve_measures(&[], &plain.measures)[0].capture_scope,
+            "complete"
+        );
         // Duplicate key.
         assert!(load_from_yaml("measures:\n  - key: acme.x\n  - key: acme.x\n").is_err());
         // A minimal valid measure parses.

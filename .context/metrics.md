@@ -40,8 +40,63 @@ welded to collection.
 
 ### Schema — `crates/oxplow-db/migrations/V43__metric_facts.sql`, store `crates/oxplow-db/src/fact_store.rs` (`SqliteFactStore`)
 
+> ### ⚠️ Two axes, not one: `temporal_semantics` × `capture_scope` (V54, tsk41)
+>
+> **`temporal_semantics`** says how values combine OVER TIME.
+> **`capture_scope`** says how much of the population ONE capture speaks for.
+> They are orthogonal, and conflating them was a real bug.
+>
+> - `capture_scope = complete` (default) — every capture restates the whole
+>   population (a coverage report, a clippy run, a test run, the whole-tree
+>   duplication scan). The temporal fold applies directly.
+> - `capture_scope = per-path` — a capture restates **only the paths in its
+>   snapshot**. This is what a **tree gauge** does: after the initial full index,
+>   every snapshot is a per-commit **delta** (5–19 files).
+>
+> **The bug this fixes.** The tree measures were `semi-additive` ("take the last
+> capture") — correct only if captures are complete. Against delta captures that
+> reads as *"the repo is only the 8 files I just touched"*:
+> `oxplow.rust.unsafe_blocks` reported **0** while the repo had **15**.
+>
+> **The fold.** A `per-path` measure's value = for each `(producer, path)`, the
+> facts from the **latest capture of that producer whose snapshot contained that
+> path** (`SqliteFactStore::latest_tree_facts`, mirroring `tree_at`'s window fold;
+> per-capture trend via `metric_engine::tree_state_series`). The scanned set comes
+> from the capture's **`file_snapshot` rows, not from the facts it emitted** —
+> which is why the whole thing needs *no* write-side convention:
+> - a file whose count drops to **0** emits no fact (`if c > 0:`), but its path is
+>   in the new snapshot ⇒ the new capture supersedes the stale value. **No
+>   zero-emission convention; the bundled gauge scripts are untouched.**
+> - a **deleted** file's latest row is a `storage='deleted'` tombstone ⇒ dropped.
+>   **No tombstone facts.**
+> - **symbol**-grained facts and **many-facts-per-path** (TODO markers) are
+>   superseded *wholesale per file*, so a removed function/marker disappears.
+> - partitioning by **producer** matters: the 10 idiom gauges share
+>   `oxplow.ast_hit` (sliced by `rule`), so without it a later gauge's capture would
+>   supersede an earlier gauge's facts for the same path.
+>
+> `zero_fill` is **suppressed** for `per-path`: an empty delta capture restated no
+> paths, so it means "nothing changed", not "the repo is zero".
+>
+> **Baseline.** The fold anchors on snapshot file rows, so a repo-wide total needs
+> ONE snapshot listing the whole tree. `SnapshotCapture::enqueue_full_tree()` (the
+> startup sweep with no prior state to short-circuit against) provides it; boot runs
+> it once when `MetricsService::needs_tree_baseline` sees a `per-path` measure with
+> an empty fold. **Not** needed on a branch switch — checkout rewrites the differing
+> files, the watcher marks them dirty, and the delta rescans exactly those paths
+> (identical content across branches keeps valid facts).
+>
+> `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
+> `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot gauge
+> emits per-file facts on — `scaffold_metric` sets it automatically). Validated in
+> config + `CaptureScope::parse`, deliberately **NOT** a DB CHECK: the
+> `temporal_semantics` CHECK is exactly why adding a value *there* would need a
+> `measure` table rebuild, which fires `fact.measure_id ON DELETE CASCADE` and wipes
+> every fact (see V52).
+
 - **`measure`** — the namespaced catalog of *fact types*: `key` (`oxplow.*`
-  reserved), `title`, `unit`, `subject_kind` (the grain), `temporal_semantics`
+  reserved), `title`, `unit`, `subject_kind` (the grain), `capture_scope`
+  (`complete` | `per-path`, V54 — see the box above), `temporal_semantics`
   (`additive` | `semi-additive` | `non-additive` — additivity **over time**:
   tokens additive; complexity + test/lint SNAPSHOTS semi-additive (a run
   replaces the last — V47/tsk42 fixed test_case/lint_hit from V43's wrong

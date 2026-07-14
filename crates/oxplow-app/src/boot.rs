@@ -332,4 +332,36 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
             metrics.run(rx).await;
         });
     }
+
+    // Tree-metric BASELINE (tsk41). A `per-path` measure folds over each capture's
+    // snapshot file rows, so a repo-wide total needs ONE snapshot listing the whole
+    // tree. On a fresh project — or after the V54 wipe — there isn't one, and delta
+    // snapshots alone never get there (a file only enters the fold once some commit
+    // touches it). Capture a full tree once; the on-snapshot gauges then run over
+    // every path via the normal event path. No-op once the fold has facts, so this
+    // costs nothing on a warm boot.
+    {
+        let metrics = state.metrics.clone();
+        let snapshot_svc = snapshot_svc.clone();
+        let stream_val = snapshot_svc.stream_id().value();
+        tokio::spawn(async move {
+            if !metrics.needs_tree_baseline(stream_val).await {
+                return;
+            }
+            tracing::info!("metric tree baseline: capturing a full-tree snapshot");
+            match snapshot_svc.enqueue_full_tree().await {
+                Ok(n) => {
+                    if let Err(e) = snapshot_svc
+                        .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "metric tree baseline: snapshot failed");
+                    } else {
+                        tracing::info!(files = n, "metric tree baseline: captured");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "metric tree baseline: sweep failed"),
+            }
+        });
+    }
 }

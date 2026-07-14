@@ -23,7 +23,83 @@ collection:
   analysisRunPatterns:
   - clippy --message-format=json
   agentHint: 'Run EVERY test invocation via `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — including red-phase/failing runs and quick single-test runs, not just the final green one. Never use bare `cargo test`/`bun test`/`bun run test` (or background it): only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s Tests/coverage panel, so any other run won''t show there. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
+measures:
+- key: repo.rust_clone
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.rust_allow
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.eslint_disable
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.react_use_effect
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+gauges:
+# One gauge per language so the tree-sitter scan stays within the Starlark
+# sandbox's wall-clock budget (a single mega-gauge over rust+ts+regex-per-file
+# truncated). ast_query (native tree-sitter) not whole-file regex — regex only
+# on small comment nodes, mirroring the bundled idiom gauges.
+- key: repo.scan_rust
+  title: Rust code-health scan
+  trigger: on-snapshot
+  emits: [repo.rust_clone, repo.rust_allow]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_scan_rust.star }
+- key: repo.scan_ts
+  title: TypeScript code-health scan
+  trigger: on-snapshot
+  emits: [repo.eslint_disable, repo.react_use_effect]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_scan_ts.star }
 metrics:
+- key: repo.rust_clone
+  title: .clone() calls
+  sourceMeasure: repo.rust_clone
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: rust
+  description: ".clone() call sites — allocation/perf awareness."
+- key: repo.rust_allow
+  title: Rust lint suppressions
+  sourceMeasure: repo.rust_allow
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: rust
+  description: "#[allow(...)] attributes — Rust lints being hidden."
+- key: repo.eslint_disable
+  title: ESLint suppressions
+  sourceMeasure: repo.eslint_disable
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "eslint-disable directives — TS/JS lints being hidden."
+- key: repo.react_use_effect
+  title: useEffect calls
+  sourceMeasure: repo.react_use_effect
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "useEffect call sites — a re-render/complexity signal."
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros

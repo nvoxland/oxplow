@@ -17,7 +17,7 @@
 //! read surface (tsk16) exposes these results. Materialisation into a series cache
 //! + derived-metric formulas are follow-ups under tsk15.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -86,6 +86,50 @@ fn parse_temporal(measure_key: &str, temporal_semantics: &str) -> Result<Tempora
     Temporal::parse(temporal_semantics).ok_or_else(|| {
         DomainError::Invalid(format!(
             "measure `{measure_key}` has unknown temporal_semantics `{temporal_semantics}`"
+        ))
+    })
+}
+
+/// `complete` | `per-path` — what ONE capture RESTATES (V54, tsk41). A **separate
+/// axis** from [`Temporal`]: additivity says how values combine over time,
+/// completeness says how much of the population a single capture speaks for.
+///
+/// The two compose. A tree gauge measure is `semi-additive` (last value per file
+/// wins) AND `per-path` (a capture only speaks for the files in its snapshot).
+/// Reading it as `semi-additive` alone — "take the last capture" — is what made
+/// `oxplow.rust.unsafe_blocks` report 0 while the repo had 15: the last capture
+/// was a per-commit delta of 8 files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CaptureScope {
+    /// Every capture restates the whole population — a coverage report, a clippy
+    /// run, a test run, a whole-tree duplication scan. The temporal fold applies
+    /// directly to the per-capture series.
+    Complete,
+    /// A capture restates only **the paths in its snapshot** (a tree gauge over a
+    /// per-commit delta). The value must first be folded to the latest capture per
+    /// `(producer, path)` — see `SqliteFactStore::latest_tree_facts` and
+    /// [`tree_state_series`].
+    PerPath,
+}
+
+impl CaptureScope {
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "complete" => Self::Complete,
+            "per-path" => Self::PerPath,
+            _ => return None,
+        })
+    }
+}
+
+/// Parse a measure's `capture_scope`, naming the measure in the error.
+fn parse_capture_scope(
+    measure_key: &str,
+    capture_scope: &str,
+) -> Result<CaptureScope, DomainError> {
+    CaptureScope::parse(capture_scope).ok_or_else(|| {
+        DomainError::Invalid(format!(
+            "measure `{measure_key}` has unknown capture_scope `{capture_scope}`"
         ))
     })
 }
@@ -395,12 +439,130 @@ pub fn aggregate_series(
         .collect()
 }
 
+/// The trend for a **`per-path`** measure: the repo-wide value **as of each
+/// capture** (V54, tsk41).
+///
+/// A per-path capture restates only the paths it scanned, so [`aggregate_series`]
+/// (one point per capture, over that capture's own facts) would plot *delta-sized*
+/// values — "8 files' worth of unsafe blocks" — not the repo. Instead we replay the
+/// captures oldest-first, keeping the folded state: at each capture, **evict every
+/// path it restated** (scoped to that capture's producer) and **insert whatever
+/// facts it emitted** for them, then aggregate the whole live state into the point.
+///
+/// This is the same fold `latest_tree_facts` does in SQL, run incrementally so each
+/// capture yields a point. It falls out of it that:
+/// - a file whose count dropped to 0 emits no fact ⇒ evicted, nothing re-inserted;
+/// - a **deleted** path is in `scanned` (a deletion IS a scan result) ⇒ evicted;
+/// - symbol-grained / many-facts-per-path measures are replaced *wholesale per file*.
+///
+/// `captures` must be oldest-first and **include empty captures** (a scan that found
+/// nothing still restates its paths). `scanned` maps capture_id → the paths it
+/// restated.
+///
+/// Cost is O(captures × live facts) — the aggregate is recomputed per point. That's
+/// fine for a chart read; the HEADLINE never comes through here (it's the last point
+/// of this series, or the single-shot SQL fold), so the hot path stays cheap.
+/// The state key for a fact with no path/subject — an agent-asserted repo scalar
+/// (`record_metric` with no subject). Not a real path, so it can never collide with
+/// one (paths are never empty and never contain a NUL).
+const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
+
+/// The path a fact is folded under, or `None` when it carries no location at all
+/// (a repo-scalar assertion).
+fn repo_scalar_key(f: &FactRow) -> Option<&str> {
+    f.path.as_deref().or(f.subject_ref.as_deref())
+}
+
+pub fn tree_state_series(
+    captures: &[MetricCapture],
+    facts: &[FactRow],
+    scanned: &HashMap<i64, Vec<String>>,
+    agg: Aggregation,
+    filter: &FactFilter,
+    group_by: Option<&str>,
+) -> Vec<SeriesPoint> {
+    let mut by_capture: HashMap<i64, Vec<&FactRow>> = HashMap::new();
+    for f in facts {
+        if !filter.matches(f) {
+            continue;
+        }
+        by_capture.entry(f.capture_id).or_default().push(f);
+    }
+
+    // The live tree: (producer, path) → the facts that path currently contributes.
+    let mut state: HashMap<(String, String), Vec<&FactRow>> = HashMap::new();
+    let mut out: Vec<SeriesPoint> = Vec::new();
+
+    for c in captures {
+        for path in scanned.get(&c.id).into_iter().flatten() {
+            state.remove(&(c.producer.clone(), path.clone()));
+        }
+        let own: Vec<&&FactRow> = by_capture.get(&c.id).into_iter().flatten().collect();
+        // A capture may also carry PATH-LESS facts — an agent-asserted repo scalar
+        // (`record_metric` with no subject). Those aren't tree facts: no path means the
+        // per-path fold can't place or supersede them, so they keep the plain
+        // "latest assertion per producer wins" rule. Emitting one restates it.
+        if own.iter().any(|f| repo_scalar_key(f).is_none()) {
+            state.remove(&(c.producer.clone(), SCALAR_SUBJECT.to_string()));
+        }
+        for f in own {
+            let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
+            state.entry((c.producer.clone(), key)).or_default().push(f);
+        }
+
+        let live: Vec<&FactRow> = state.values().flatten().copied().collect();
+        let point = |value: f64, numerator, denominator, group| SeriesPoint {
+            capture_id: c.id,
+            captured_at: c.captured_at,
+            value,
+            numerator,
+            denominator,
+            group,
+            branch: c.branch.clone(),
+            provenance: Some(c.provenance.clone()),
+            git_version: c.closest_git_version.clone(),
+            source: Some(c.source.clone()),
+        };
+
+        match group_by {
+            None => {
+                let (value, numerator, denominator) = if live.is_empty() {
+                    (0.0, None, None)
+                } else {
+                    aggregate_facts(&live, agg)
+                };
+                out.push(point(value, numerator, denominator, None));
+            }
+            Some(dim) => {
+                // Group the LIVE tree (not the capture's own facts) so each group's
+                // point is its repo-wide value at this moment.
+                let mut buckets: BTreeMap<String, Vec<&FactRow>> = BTreeMap::new();
+                for f in &live {
+                    let Some(key) = dim_value(f, dim) else {
+                        continue;
+                    };
+                    buckets.entry(key).or_default().push(f);
+                }
+                for (key, fs) in buckets {
+                    let (value, numerator, denominator) = aggregate_facts(&fs, agg);
+                    out.push(point(value, numerator, denominator, Some(key)));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Collapse a time series to a single in-range number, respecting additivity OVER
 /// TIME: a semi-additive snapshot takes the LAST capture (summing snapshots across
 /// time double-counts) — re-deriving Σn/Σd from that capture's raw components for a
 /// level ratio like coverage (tsk13); an additive event SUMs the captures; a
 /// non-additive ratio re-derives Σnumerator / Σdenominator across ALL points (the
 /// accumulating mean-across-closes case). `None` for an empty series.
+///
+/// A `per-path` measure needs no new arm here: [`tree_state_series`] already makes
+/// every point the repo-wide value as of that capture, so `SemiAdditive`'s
+/// "take the last point" IS the current repo total.
 pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
     if series.is_empty() {
         return None;
@@ -657,7 +819,7 @@ impl MetricEngine {
             .into_iter()
             .filter(|f| stream.map_or(true, |s| f.stream_id == s))
             .collect();
-        let points = aggregate_series(&facts, agg, filter, group_by);
+
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
         // captures never inject zero points.
@@ -666,8 +828,43 @@ impl MetricEngine {
             .filter(|f| filter.matches(f))
             .map(|f| f.producer.clone())
             .collect();
+
+        // A `per-path` measure's captures are DELTAS — one point per capture would
+        // plot "the files in that commit", not the repo. Replay them into a running
+        // tree state instead (tsk41). Zero-fill is deliberately NOT applied: an
+        // empty delta capture restated no paths, so it means "nothing changed", not
+        // "the repo is zero" — zero-filling it would yank the headline to 0.
+        if parse_capture_scope(measure_key, &measure.capture_scope)? == CaptureScope::PerPath {
+            let captures = self
+                .facts
+                .captures_for_producers(producers.into_iter().collect())
+                .await?
+                .into_iter()
+                .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+                .collect::<Vec<_>>();
+            let scanned = self.scanned_paths(&captures).await?;
+            return Ok(tree_state_series(
+                &captures, &facts, &scanned, agg, filter, group_by,
+            ));
+        }
+
+        let points = aggregate_series(&facts, agg, filter, group_by);
         self.zero_fill(points, producers, agg, group_by, stream)
             .await
+    }
+
+    /// `capture_id → the paths that capture restated` (its snapshot's file rows,
+    /// deletion tombstones included). The scanned set for the per-path fold.
+    async fn scanned_paths(
+        &self,
+        captures: &[MetricCapture],
+    ) -> Result<HashMap<i64, Vec<String>>, DomainError> {
+        let ids: Vec<i64> = captures.iter().map(|c| c.id).collect();
+        let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+        for (capture_id, path) in self.facts.scanned_paths_for_captures(ids).await? {
+            out.entry(capture_id).or_default().push(path);
+        }
+        Ok(out)
     }
 
     /// Splice value-0 points into `points` for every capture of `producers`
@@ -735,9 +932,71 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
-        let facts = self.facts.facts_for_measure(measure.id).await?;
-        let current = self.current_captures(&facts).await?;
+        let facts = self.scoped_facts(&measure, None).await?;
+        let current = self.currency(&measure, &facts).await?;
         Ok(compute_rollup(&facts, dimension, temporal, &current))
+    }
+
+    /// The facts a point-in-time read (rollup / findings) should consider, per the
+    /// measure's `capture_scope`. For `per-path` this is the SQL tree fold — the
+    /// latest capture per (producer, path) — so the read sees the whole repo, not
+    /// the last commit's files. For `complete` it's the measure's facts as before.
+    async fn scoped_facts(
+        &self,
+        measure: &oxplow_db::Measure,
+        stream: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        if parse_capture_scope(&measure.key, &measure.capture_scope)? == CaptureScope::PerPath {
+            let mut folded = self.facts.latest_tree_facts(measure.id, stream).await?;
+            // The SQL fold joins on `path`, so PATH-LESS facts — an agent-asserted repo
+            // scalar (`record_metric` with no subject) — are not in it. They aren't tree
+            // facts: with no path there is nothing to supersede them per-path, so they
+            // keep the plain per-producer currency rule (latest assertion wins). Without
+            // this an asserted number would silently vanish from every read.
+            let scalars: Vec<FactRow> = self
+                .facts
+                .facts_for_measure(measure.id)
+                .await?
+                .into_iter()
+                .filter(|f| f.path.is_none() && f.subject_ref.is_none())
+                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+                .collect();
+            if !scalars.is_empty() {
+                let current = self.current_captures(&scalars).await?;
+                folded.extend(
+                    scalars
+                        .into_iter()
+                        .filter(|f| current.contains(&f.capture_id)),
+                );
+            }
+            return Ok(folded);
+        }
+        Ok(self
+            .facts
+            .facts_for_measure(measure.id)
+            .await?
+            .into_iter()
+            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+            .collect())
+    }
+
+    /// The currency gate [`compute_rollup`] should apply, per `capture_scope`.
+    ///
+    /// - `complete`: every capture restates the whole population, so "current" is
+    ///   the latest capture per (stream, producer) — the existing gate (tsk44).
+    /// - `per-path`: currency is *per path*, not per capture, and the fold has
+    ///   already applied it — every fact it returned IS current. So the gate must
+    ///   be a no-op; applying the capture-level gate here would (wrongly) keep only
+    ///   the newest delta's facts and re-introduce the bug.
+    async fn currency(
+        &self,
+        measure: &oxplow_db::Measure,
+        kept: &[FactRow],
+    ) -> Result<std::collections::HashSet<i64>, DomainError> {
+        if parse_capture_scope(&measure.key, &measure.capture_scope)? == CaptureScope::PerPath {
+            return Ok(kept.iter().map(|f| f.capture_id).collect());
+        }
+        self.current_captures(kept).await
     }
 
     /// The current-capture set for a fact slice: the latest capture per
@@ -827,13 +1086,12 @@ impl MetricEngine {
         };
         let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
         let filter = spec_filter(spec)?;
-        let facts = self.facts.facts_for_measure(measure.id).await?;
-        let kept: Vec<FactRow> = facts
-            .into_iter()
-            .filter(|f| filter.matches(f))
-            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
-            .collect();
-        let current = self.current_captures(&kept).await?;
+        // `scoped_facts` resolves the capture_scope axis: for a per-path measure it
+        // returns the tree-folded facts (latest capture per (producer, path)), so a
+        // breakdown reads the whole repo rather than the last commit's files.
+        let facts = self.scoped_facts(&measure, stream).await?;
+        let kept: Vec<FactRow> = facts.into_iter().filter(|f| filter.matches(f)).collect();
+        let current = self.currency(&measure, &kept).await?;
         let mut rollup = compute_rollup(&kept, dimension, temporal, &current);
         let scale = spec_value_scale(spec);
         if scale != 1.0 {
@@ -904,7 +1162,14 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let filter = spec_filter(spec)?;
-        let facts = self.facts.facts_for_measure(measure.id).await?;
+        // Scope to the CURRENT tree for a per-path measure. Without this the
+        // drill-in lists every historical fact for a file — including the ones a
+        // later rescan superseded — so a fixed `unsafe` block would keep showing up
+        // forever. (Pinning an explicit `capture_id` still reads that one capture.)
+        let facts = match capture_id {
+            Some(_) => self.facts.facts_for_measure(measure.id).await?,
+            None => self.scoped_facts(&measure, None).await?,
+        };
         Ok(facts
             .into_iter()
             .filter(|f| filter.matches(f))
@@ -1494,12 +1759,15 @@ mod tests {
                 .unwrap();
         }
         let facts = SqliteFactStore::new(db);
+        // A `complete` measure (the NewMeasure default): these tests exercise the
+        // COMPLETE-capture engine path — count-over-threshold, headline-is-the-last-
+        // capture, zero-fill, stream scoping — where every capture restates the whole
+        // population. The real `oxplow.complexity` is `per-path` (V54, tsk41) and is
+        // covered by the tree-fold tests below, which set up snapshots.
         let complexity = facts
-            .get_measure("oxplow.complexity")
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.complexity", "Complexity"))
             .await
-            .unwrap()
-            .expect("migration seeds oxplow.complexity")
-            .id;
+            .unwrap();
         (MetricEngine::new(facts.clone()), facts, complexity)
     }
 
@@ -1540,8 +1808,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut spec =
-            NewMetricSpec::base("acme.hotspots", "Hotspots", "oxplow.complexity", "count");
+        let mut spec = NewMetricSpec::base("acme.hotspots", "Hotspots", "acme.complexity", "count");
         spec.filter_json = Some("{\"min_value\":10.0}".into());
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.hotspots").await.unwrap().unwrap();
@@ -1579,7 +1846,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut spec = NewMetricSpec::base("acme.hot", "Hot", "oxplow.complexity", "count");
+        let mut spec = NewMetricSpec::base("acme.hot", "Hot", "acme.complexity", "count");
         spec.filter_json = Some("{\"min_value\":10.0}".into());
         spec.direction = "lower-better".into();
         spec.warn_at = Some(15.0);
@@ -1616,7 +1883,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let spec = NewMetricSpec::base("acme.c", "C", "oxplow.complexity", "sum");
+        let spec = NewMetricSpec::base("acme.c", "C", "acme.complexity", "sum");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.c").await.unwrap().unwrap();
 
@@ -1664,7 +1931,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut spec = NewMetricSpec::base("acme.h", "H", "oxplow.complexity", "sum");
+        let mut spec = NewMetricSpec::base("acme.h", "H", "acme.complexity", "sum");
         spec.filter_json = Some("{\"min_value\":10.0}".into());
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.h").await.unwrap().unwrap();
@@ -1810,7 +2077,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let spec = NewMetricSpec::base("acme.total", "Total", "oxplow.complexity", "sum");
+        let spec = NewMetricSpec::base("acme.total", "Total", "acme.complexity", "sum");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.total").await.unwrap().unwrap();
 
@@ -1851,7 +2118,7 @@ mod tests {
             .record_facts(cap_in(2, "2026-06-30T11:00:00Z"), vec![])
             .await
             .unwrap();
-        let spec = NewMetricSpec::base("acme.count", "Count", "oxplow.complexity", "count");
+        let spec = NewMetricSpec::base("acme.count", "Count", "acme.complexity", "count");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.count").await.unwrap().unwrap();
 
@@ -1950,7 +2217,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let spec = NewMetricSpec::base("acme.sum", "Sum", "oxplow.complexity", "sum");
+        let spec = NewMetricSpec::base("acme.sum", "Sum", "acme.complexity", "sum");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.sum").await.unwrap().unwrap();
 
@@ -1964,7 +2231,7 @@ mod tests {
     async fn spec_wrapper_errors_on_aggregation_the_engine_cannot_compute() {
         let (engine, facts, _c) = engine_fixture().await;
         // `p95` is a valid schema aggregation but not yet implemented by the engine.
-        let spec = NewMetricSpec::base("acme.p", "P", "oxplow.complexity", "p95");
+        let spec = NewMetricSpec::base("acme.p", "P", "acme.complexity", "p95");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.p").await.unwrap().unwrap();
 
