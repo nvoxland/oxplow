@@ -22,15 +22,34 @@ export type QuickOpenResult =
   | { kind: "file"; file: WorkspaceIndexedFile }
   | { kind: "hit"; hit: SearchHit };
 
+/// Menu commands that merely NAVIGATE to a page already in
+/// `computePagesDirectory`. They exist in `commands.ts` so the **native
+/// menu bar** has File/View/Git/Tasks entries — but in the launcher they
+/// would duplicate the canonical "page" row for the same destination (and
+/// mislabel it as "command"). `flattenCommands` is the launcher's only
+/// consumer, so it drops them here; the native menu is unaffected. Add a
+/// new page-navigation command id to this set when one is introduced.
+const PAGE_NAV_COMMAND_IDS: ReadonlySet<string> = new Set([
+  "tasks.dashboard",
+  "git.dashboard",
+  "view.files",
+  "view.uncommitted",
+  "view.comments",
+  "view.wiki",
+  "history.open",
+]);
+
 /// Flatten enabled, runnable menu commands into searchable entries.
 /// Disabled commands (and the native responder-chain placeholders with
 /// no `run`) are skipped so the launcher never advertises an action the
-/// user can't take right now.
+/// user can't take right now. Page-navigation commands
+/// (`PAGE_NAV_COMMAND_IDS`) are also skipped — the pages directory
+/// already surfaces those destinations as `page` rows.
 export function flattenCommands(menuGroups: MenuGroup[]): CommandEntry[] {
   const out: CommandEntry[] = [];
   for (const group of menuGroups) {
     for (const item of group.items) {
-      if (!item.enabled || !item.run) continue;
+      if (!item.enabled || !item.run || PAGE_NAV_COMMAND_IDS.has(item.id)) continue;
       out.push({
         id: item.id,
         group: group.label,

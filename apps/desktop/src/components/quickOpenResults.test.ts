@@ -83,6 +83,24 @@ describe("flattenCommands", () => {
     ]);
     expect(out).toHaveLength(0);
   });
+
+  test("drops page-navigation commands that duplicate the pages directory", () => {
+    const out = flattenCommands([
+      group([
+        { id: "tasks.dashboard", label: "Dashboard", enabled: true },
+        { id: "git.dashboard", label: "Dashboard", enabled: true },
+        { id: "view.files", label: "Files", enabled: true },
+        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: true },
+        { id: "view.comments", label: "Comments Dashboard", enabled: true },
+        { id: "view.wiki", label: "Wiki", enabled: true },
+        { id: "history.open", label: "History", enabled: true },
+        { id: "git.commit", label: "Commit Changes…", enabled: true },
+      ]),
+    ]);
+    // Only the genuine action survives; the 7 page-nav rows are dropped
+    // (the launcher shows their canonical "page" entry instead).
+    expect(out.map((c) => c.id)).toEqual(["git.commit"]);
+  });
 });
 
 describe("buildQuickOpenResults", () => {
