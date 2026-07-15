@@ -885,44 +885,38 @@ impl MetricsService {
     /// of reporting the repo. The fix is a one-off full-tree snapshot — see
     /// `SnapshotCapture::enqueue_full_tree`.
     pub async fn needs_tree_baseline(&self, stream_id: i64) -> bool {
-        let Some(facts) = self.fact_store.as_ref() else {
-            return false;
-        };
-        for m in facts.list_measures().await.unwrap_or_default() {
-            if m.capture_scope != "per-path" {
-                continue;
-            }
-            // Only measures an ENABLED metric consumes — a disabled gauge never runs,
-            // so its empty fold is not a reason to rescan the tree.
-            if !facts.measure_has_active_spec(&m.key).await.unwrap_or(false) {
-                continue;
-            }
-            let empty = facts
-                .latest_tree_facts(m.id, Some(stream_id))
-                .await
-                .map(|f| f.is_empty())
-                .unwrap_or(false);
-            if empty {
-                return true;
-            }
-        }
-        // A gauge whose SCRIPT CHANGED has facts computed by different logic — stale,
-        // but not empty, so the check above never sees them. Without this a metric fix
-        // silently no-ops: you correct the query, the number doesn't move, and nothing
-        // says why (tsk44/tsk45). A re-baseline restates every path, so the per-path
-        // fold supersedes the old facts — no deletes, history preserved.
-        !self.stale_gauges(stream_id).await.is_empty()
+        !self.gauges_needing_baseline(stream_id).await.is_empty()
     }
 
-    /// Enabled gauges whose current logic fingerprint differs from the one recorded on
-    /// their latest capture — i.e. whose facts are stale because the script changed.
-    /// Skips gauges that have never run (the empty-fold check already covers those) and
-    /// ones whose script can't be fingerprinted (better to skip than to re-baseline the
-    /// whole tree on every boot).
-    pub async fn stale_gauges(&self, stream_id: i64) -> Vec<String> {
+    /// Enabled on-snapshot gauges that have not been baselined at their CURRENT logic —
+    /// i.e. that need a full-tree run before their metric is trustworthy.
+    ///
+    /// The question is per GAUGE, not per measure (tsk49): `oxplow.ast_hit` is one
+    /// measure shared by 10 idiom gauges, so "does the measure have facts" tells you
+    /// nothing about one gauge — a delta-only gauge looks done because a sibling filled
+    /// the measure. A gauge is un-baselined when EITHER:
+    /// - it has never scanned the whole tree (its biggest completed scan is below the
+    ///   whole-tree threshold — a fresh gauge, or one that only ever saw small deltas
+    ///   because its full-tree scan used to time out, tsk47); OR
+    /// - it is `gauge_is_stale` — its script changed since its last capture (tsk45),
+    ///   so the facts were computed by different logic.
+    ///
+    /// This one notion subsumes the old empty-fold + stale checks, and correctly.
+    pub async fn gauges_needing_baseline(&self, stream_id: i64) -> Vec<String> {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         for gauge in self.resolved_gauges() {
-            if self.gauge_is_stale(&gauge, stream_id).await {
+            if gauge.trigger != "on-snapshot" {
+                continue;
+            }
+            let never_full_scanned = facts
+                .max_scanned_file_count(&gauge.key, stream_id)
+                .await
+                .map(|n| n < TREE_SWEEP_FILE_THRESHOLD as i64)
+                .unwrap_or(false);
+            if never_full_scanned || self.gauge_is_stale(&gauge, stream_id).await {
                 out.push(gauge.key.clone());
             }
         }
@@ -2244,6 +2238,82 @@ def transform(input):
             branch: None,
             effort_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn a_delta_only_gauge_needs_a_baseline_even_if_a_sibling_filled_the_shared_measure() {
+        // tsk49, the exact live bug. `oxplow.ast_hit` is ONE measure shared by 10 idiom
+        // gauges. `unsafe_blocks` (cheap) completed its full-tree scan, so the measure
+        // has facts — but `console_calls` (heavy, timed out under the old budget) only
+        // ever ran on small deltas. A measure-level "is it empty" check says "done" and
+        // console_calls reads empty forever. The baseline question must be per-gauge.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        // A gauge is only in `resolved_gauges` when its metric is enabled — enable the
+        // two built-ins this test drives.
+        svc.metrics
+            .set_metrics_enabled(
+                &[
+                    "oxplow.rust.unsafe_blocks".into(),
+                    "oxplow.ts.console_calls".into(),
+                ],
+                true,
+            )
+            .await
+            .unwrap();
+        let ctx = |snapshot_id: i64| GaugeRunContext {
+            stream_val: 1,
+            thread_id: None,
+            trigger: "on-snapshot",
+            snapshot_id: Some(snapshot_id),
+            closest_git_version: None,
+            git_version_exact: false,
+            branch: None,
+            effort_id: None,
+        };
+        let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
+
+        // A full-tree snapshot: unsafe_blocks scans it (completes → done capture on a
+        // big snapshot). It shares oxplow.ast_hit with console_calls.
+        let big = snapshot_with_files(
+            &svc,
+            &(0..150)
+                .map(|i| (format!("f{i}.rs"), oxplow_db::SnapshotStorage::Oxplow))
+                .collect::<Vec<_>>()
+                .iter()
+                .map(|(p, s)| (p.as_str(), *s))
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        let files = Arc::new(HashMap::from([("f0.rs".to_string(), src)]));
+        svc.metrics
+            .run_one_gauge(
+                &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
+                &ctx(big),
+                files,
+            )
+            .await;
+
+        // console_calls has only ever run on a tiny delta.
+        let small =
+            snapshot_with_files(&svc, &[("f0.tsx", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        svc.metrics
+            .run_one_gauge(
+                &builtin_gauge_fixture("oxplow.ts.console_calls"),
+                &ctx(small),
+                Arc::new(HashMap::from([("f0.tsx".to_string(), "ok".to_string())])),
+            )
+            .await;
+
+        let needing = svc.metrics.gauges_needing_baseline(1).await;
+        assert!(
+            needing.contains(&"oxplow.ts.console_calls".to_string()),
+            "the delta-only gauge must still need a baseline; got {needing:?}"
+        );
+        assert!(
+            !needing.contains(&"oxplow.rust.unsafe_blocks".to_string()),
+            "the gauge that scanned the full tree must NOT need one; got {needing:?}"
+        );
     }
 
     #[tokio::test]

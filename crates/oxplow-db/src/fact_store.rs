@@ -1158,6 +1158,39 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The largest tree a producer has actually **scanned to completion** — the max
+    /// `file_snapshot` count over the snapshots of its `done` captures in this stream.
+    /// 0 when it has never completed a snapshot-backed capture.
+    ///
+    /// This is how "has this gauge been baselined" is answered per GAUGE rather than
+    /// per measure (tsk49). `oxplow.ast_hit` is one measure shared by 10 idiom gauges,
+    /// so "does the measure have facts" is meaningless for a single gauge — a delta-only
+    /// gauge whose full-tree scan never ran looks done because a *sibling* gauge filled
+    /// the measure. Comparing this against the whole-tree threshold catches it: a gauge
+    /// that has only ever scanned 6-file deltas has never seen the repo.
+    pub async fn max_scanned_file_count(
+        &self,
+        producer: &str,
+        stream_id: i64,
+    ) -> Result<i64, DomainError> {
+        let producer = producer.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT COALESCE(MAX(fc), 0) FROM (
+                       SELECT (SELECT COUNT(*) FROM file_snapshot fs
+                                WHERE fs.snapshot_id = c.snapshot_id) AS fc
+                         FROM metric_capture c
+                        WHERE c.producer = ?1 AND c.stream_id = ?2
+                          AND c.status = 'done' AND c.snapshot_id IS NOT NULL
+                     )",
+                    params![producer, stream_id],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .await
+    }
+
     /// The `status` of a producer's LATEST capture (`done` | `failed` | `running`),
     /// or `None` when it has never captured. Lets the runner tell "the gauge found
     /// nothing" apart from "the gauge blew up" (tsk47/tsk48).

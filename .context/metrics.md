@@ -113,21 +113,33 @@ welded to collection.
 > restates *every path* — so if the fold counted it, one timeout would supersede
 > everything and silently zero the metric. Worse than the bug it reports.
 >
-> `needs_tree_baseline` fires on two conditions:
-> 1. a `per-path` measure whose fold is **empty** (fresh project, or a newly enabled
->    gauge — it has no facts for files no commit has touched);
-> 2. an enabled gauge that is **stale**: its current logic fingerprint
->    (`gauge_fingerprint` — xxh3 of script text + runtime/input/args + `emits`,
->    stamped on every capture as `metric_capture.producer_version`, V56) differs from
->    the one on its latest capture.
+> `needs_tree_baseline` asks ONE question **per gauge** (`gauges_needing_baseline`):
+> *has this gauge scanned the whole tree at its current logic?* A gauge is
+> un-baselined when EITHER:
+> 1. it has **never scanned the full tree** — its biggest completed scan
+>    (`max_scanned_file_count`: max `file_snapshot` count over its `done` captures) is
+>    below the whole-tree threshold. Covers a fresh gauge, and one stuck on small
+>    deltas because its full-tree scan used to time out (tsk47/tsk49); OR
+> 2. it is **stale** — its current logic fingerprint (`gauge_fingerprint` — xxh3 of
+>    script text + runtime/input/args + `emits`, stamped on every capture as
+>    `metric_capture.producer_version`, V56) differs from the one on its latest
+>    capture, i.e. the script changed (tsk45).
 >
-> **(2) is not optional.** A gauge's facts are only as good as the code that computed
-> them, so a script change makes them stale — but *not empty*, so (1) never sees them.
-> Without the fingerprint a metric fix **silently no-ops**: you correct the query, the
-> number doesn't move, and nothing tells you why. That really happened (tsk44 →
-> tsk45): teaching `repo_allow.star` to also match inner `#![allow(...)]` changed
-> nothing until the gauge's captures were hand-deleted. Re-baselining restates every
-> path, so the fold supersedes the stale facts — no deletes, history preserved.
+> **Per-GAUGE, not per-measure, is load-bearing (tsk49).** `oxplow.ast_hit` is one
+> measure shared by 10 idiom gauges (sliced by `rule`), so "does the measure have
+> facts" says nothing about one gauge — a delta-only gauge looks done because a
+> *sibling* filled the measure. That is exactly how `oxplow.ts.console_calls` read
+> empty for weeks (137 real calls): `unsafe_blocks` completed its full-tree scan, so
+> `ast_hit` wasn't empty, so the old measure-level check never re-baselined the heavier
+> TS gauges that had only ever run on deltas.
+>
+> **(2) is not optional either.** A gauge's facts are only as good as the code that
+> computed them, so a script change makes them stale but *not* empty. Without the
+> fingerprint a metric fix **silently no-ops** — you correct the query, the number
+> doesn't move, nothing says why (tsk44→tsk45: teaching `repo_allow.star` to match
+> inner `#![allow(...)]` changed nothing until the captures were hand-deleted).
+> Re-baselining restates every path, so the fold supersedes the stale facts — no
+> deletes, history preserved.
 >
 > `per-path` today: `oxplow.ast_hit`, `oxplow.complexity`, `oxplow.fn_length`,
 > `oxplow.parameter_count`, `oxplow.todo` (+ any project measure a snapshot gauge
