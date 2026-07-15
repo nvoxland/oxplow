@@ -3313,11 +3313,17 @@ impl OxplowMcp {
         let p = params.0;
         expect_id_kind("await_user", "thread_id", &p.thread_id, ID_THREAD)?;
         let tid = parse_thread_id(&p.thread_id)?;
+        let question = p.question.trim().to_string();
         let payload = serde_json::json!({
             "await_user": true,
-            "question": p.question,
+            "question": question,
         })
         .to_string();
+        // Detail carries the question text (not a bare marker) so the
+        // rail agent-status dot can show it in a tooltip. Empty questions
+        // fall back to None — the dot still flips to "awaiting you",
+        // just without tooltip text.
+        let detail = (!question.is_empty()).then(|| question.clone());
         let event = oxplow_domain::HookEvent {
             id: oxplow_domain::HookEventId::new(next_synthetic_hook_id()),
             thread_id: Some(tid),
@@ -3340,7 +3346,7 @@ impl OxplowMcp {
                 &tid,
                 "working",
                 oxplow_domain::AgentStatusState::AwaitingUser,
-                Some("await_user".into()),
+                detail,
             )
             .await
             .map_err(internal)?;

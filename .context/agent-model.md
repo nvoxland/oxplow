@@ -365,6 +365,21 @@ top branch returns "allow stop" and **suppresses every directive**
 (in-progress audit, filing-enforcement). The flag is cleared on the
 next UserPromptSubmit.
 
+The same `await_user` call also drives the **rail agent-status dot**
+(tsk30). The MCP handler flips `agent_status` to `AwaitingUser` with the
+*question text* on `detail` (not a bare `"await_user"` marker), and
+`HookIngestService`'s `Stop` branch **preserves** an in-turn
+`AwaitingUser` instead of clobbering it back to `Idle`: the real Claude
+`Stop` payload carries no sentinel, so without that guard the dot would
+vanish the instant the turn ends (`current_status` check in
+`crates/oxplow-app/src/hook_ingest.rs`). The question rides
+`AgentStatusChanged { detail }` to the renderer, which collapses
+`awaiting_user → "awaiting"` (`collapseAgentStatusState` in
+`apps/desktop/src/api.ts`) and shows a distinct blue pulsing dot whose
+tooltip is the question — so a *different* thread parked on your answer
+is visible from the rail without switching to it. Live-session only:
+`agent_status` is in-memory, reset on restart.
+
 **Filing enforcement (writer thread, PreToolUse).** Enforcement runs
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
 `crates/oxplow-runtime/src/filing.rs`), not the Stop hook. When the agent invokes

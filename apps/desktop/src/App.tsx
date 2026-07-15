@@ -199,7 +199,7 @@ function resolveSiblings(
 /// Prompt for a folder and open it as a project. `newWindow=false`
 /// replaces the current window (this process exits once the new one
 /// spawns); `true` opens an additional independent window. Shared by
-/// the File ▸ Open Project commands and Cmd+K palette.
+/// the File ▸ Open Project commands and the launcher.
 async function pickAndOpenProject(newWindow: boolean) {
   const selected = await pickFolder(newWindow ? "Open Project in New Window" : "Open Project");
   if (selected === null) return;
@@ -249,6 +249,10 @@ export function App() {
   const [threadWorkStates, setThreadWorkStates] = useState<Record<string, ThreadWorkState>>({});
   const [backlogState, setBacklogState] = useState<BacklogState | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
+  // Parallel to agentStatuses: the await_user question per thread, set
+  // only while that thread's status is "awaiting". Feeds the rail dot's
+  // tooltip so a thread parked on your answer says WHAT it's asking.
+  const [agentQuestions, setAgentQuestions] = useState<Record<string, string | undefined>>({});
   const [stream, setStream] = useState<Stream | null>(null);
   // Per-thread active center tab. The map is the source of truth; `centerActive`
   // and `setCenterActive` below are derived helpers so existing handler code
@@ -1015,7 +1019,11 @@ export function App() {
     for (const s of streams) {
       const threads = threadStates[s.id]?.threads ?? [];
       const anyWorking = threads.some((t) => agentStatuses[t.id] === "working");
-      out[s.id] = anyWorking ? "working" : "waiting";
+      // Working (busy) outranks awaiting (needs you) outranks waiting so
+      // a stream whose thread parked on your answer shows the blue dot
+      // even from a collapsed rail.
+      const anyAwaiting = threads.some((t) => agentStatuses[t.id] === "awaiting");
+      out[s.id] = anyWorking ? "working" : anyAwaiting ? "awaiting" : "waiting";
     }
     return out;
   }, [streams, threadStates, agentStatuses]);
@@ -1184,6 +1192,7 @@ export function App() {
     setStreams,
     setStream,
     setAgentStatuses,
+    setAgentQuestions,
     setGeneratedState,
     setEnabledAgents,
   });
@@ -1410,31 +1419,13 @@ export function App() {
     [menuGroups],
   );
 
-  useEffect(() => {
-    // The launcher (QuickOpen) is the single discovery surface — pages,
-    // files, commands, and body search in one box. Cmd+P is its menu
-    // command; Cmd+K and Cmd+Shift+F are kept as aliases so the old
-    // command-palette / find-in-files reflexes land on the one search
-    // instead of doing nothing. These two live OUTSIDE the menu system
-    // (no CommandId) so they behave identically in Electron and browser.
-    function handleLauncherShortcut(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-      const key = event.key.toLowerCase();
-      // Cmd+K (no shift) or Cmd+Shift+F.
-      const isCmdK = key === "k" && !event.shiftKey;
-      const isCmdShiftF = key === "f" && event.shiftKey;
-      if (!isCmdK && !isCmdShiftF) return;
-      event.preventDefault();
-      // stopImmediatePropagation so Monaco's own keydown handlers (command
-      // palette / find-in-files) don't also fire and eat the event.
-      event.stopImmediatePropagation();
-      setQuickOpenVisible((prev) => !prev);
-    }
-    // capture:true so the shortcut fires BEFORE any focused descendant
-    // (Monaco, a textarea, a <select>) can stop or preempt it.
-    window.addEventListener("keydown", handleLauncherShortcut, { capture: true });
-    return () => window.removeEventListener("keydown", handleLauncherShortcut, { capture: true } as EventListenerOptions);
-  }, []);
+  // The launcher (QuickOpen) is the single discovery surface — pages,
+  // files, commands, and body search in one box — and has exactly one
+  // shortcut: Cmd/Ctrl+P (its `file.quickOpen` menu command). The old
+  // Cmd+K / Cmd+Shift+F aliases were removed (tsk59): one door is
+  // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
+  // doesn't bind Cmd+P, so no capture-phase interception is needed — the
+  // menu accelerator opens the launcher even when the editor is focused.
 
   useEffect(() => {
     // Runs in both Electron and browser modes. In Electron the native
@@ -3305,6 +3296,7 @@ export function App() {
           threadStates={threadStates}
           streamStatuses={streamStatuses}
           agentStatuses={agentStatuses}
+          agentQuestions={agentQuestions}
           enabledAgents={enabledAgents}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}

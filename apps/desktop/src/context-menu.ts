@@ -61,8 +61,8 @@ export function describeChain(target: EventTarget | null): ElementDescriptor[] {
 }
 
 /// Install the global suppressor. Uses the capture phase so it runs
-/// before app-level handlers that might `stopPropagation` (the same
-/// reasoning as the Cmd+K palette listener). Returns a cleanup fn.
+/// before app-level handlers that might `stopPropagation` (so a focused
+/// editor / input can't preempt it). Returns a cleanup fn.
 export function installContextMenuSuppressor(target: Window = window): () => void {
   const handler = (event: Event) => {
     if (shouldSuppressContextMenu(describeChain(event.target))) {

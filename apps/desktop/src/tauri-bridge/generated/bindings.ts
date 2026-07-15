@@ -2366,7 +2366,14 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-{ kind: "agentStatusChanged"; threadId: ThreadId; paneTarget: string; state: AgentStatusState } | 
+{ kind: "agentStatusChanged"; threadId: ThreadId; paneTarget: string; state: AgentStatusState; 
+/**
+ *  The status detail, when meaningful to the renderer. Carries
+ *  the `await_user` question text when `state` is
+ *  `AwaitingUser` so the rail dot's tooltip can show what the
+ *  agent is asking — `None` for every other transition.
+ */
+detail: string | null } | 
 // agent_turn opened or closed.
 { kind: "agentTurnsChanged"; threadId: ThreadId } | 
 /**

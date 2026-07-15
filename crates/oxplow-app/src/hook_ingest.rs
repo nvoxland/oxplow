@@ -33,8 +33,8 @@ static NEXT_HOOK_EVENT_ID: AtomicI64 = AtomicI64::new(1);
 
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
 use oxplow_domain::{
-    AgentStatusState, AgentTurn, AgentTurnId, DomainError, HookEvent, HookEventId, HookKind,
-    StreamId, ThreadId, Timestamp,
+    AgentStatus, AgentStatusState, AgentTurn, AgentTurnId, DomainError, HookEvent, HookEventId,
+    HookKind, StreamId, ThreadId, Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
@@ -133,16 +133,33 @@ impl HookIngestService {
             }
             HookKind::Stop => {
                 self.close_open_turns(&thread, None).await?;
-                let detail = if payload_signals_await_user(&env.payload_json) {
-                    Some("await_user".to_string())
-                } else {
-                    None
-                };
-                let state = if detail.is_some() {
-                    AgentStatusState::AwaitingUser
-                } else {
-                    AgentStatusState::Idle
-                };
+                // Did the agent park on the user this turn? Two signals:
+                //  - a sentinel in THIS Stop payload (kept for the
+                //    synthetic-event path and tests), or
+                //  - an AwaitingUser status the `await_user` MCP tool
+                //    already set earlier in the turn. The real Claude
+                //    Stop payload carries no sentinel, so without the
+                //    second check it would clobber the MCP-set
+                //    AwaitingUser (and its question) back to Idle within
+                //    the same turn — the rail "awaiting you" dot would
+                //    never persist. A fresh UserPromptSubmit clears
+                //    AwaitingUser first, so a stale flag from a prior
+                //    turn can't leak in here.
+                let current = self.current_status(&thread).await;
+                let currently_awaiting = current
+                    .as_ref()
+                    .is_some_and(|s| s.state == AgentStatusState::AwaitingUser);
+                let (state, detail) =
+                    if payload_signals_await_user(&env.payload_json) || currently_awaiting {
+                        // Prefer a question carried on this payload; else
+                        // keep whatever the MCP tool stored as detail (the
+                        // question text).
+                        let question = await_user_question(&env.payload_json)
+                            .or_else(|| current.and_then(|s| s.detail));
+                        (AgentStatusState::AwaitingUser, question)
+                    } else {
+                        (AgentStatusState::Idle, None)
+                    };
                 self.set_status(&thread, state, detail).await?;
             }
             HookKind::SubagentStop => {
@@ -180,6 +197,7 @@ impl HookIngestService {
                     thread_id: thread,
                     pane_target: self.thread_pane(&thread).await,
                     state: derived,
+                    detail: None,
                 });
             }
         }
@@ -219,8 +237,16 @@ impl HookIngestService {
             thread_id: status.thread_id,
             pane_target: status.pane_target,
             state: status.state,
+            detail: status.detail,
         });
         Ok(())
+    }
+
+    /// Read the current agent status for a thread's working pane, if any.
+    /// Used by the Stop path to avoid clobbering an in-turn AwaitingUser.
+    async fn current_status(&self, thread: &ThreadId) -> Option<AgentStatus> {
+        let pane = self.thread_pane(thread).await;
+        self.statuses.get(thread, &pane).await.ok().flatten()
     }
 
     /// Resolve the pane target for the thread. Default to "working" if
@@ -244,6 +270,19 @@ fn payload_signals_await_user(payload: &str) -> bool {
     // overkill since we control the sentinel writer.
     let lower = payload.to_ascii_lowercase();
     lower.contains("\"await_user\":true") || lower.contains("await_user_called")
+}
+
+/// Extract the question text from an await_user sentinel payload. Returns
+/// None when the payload isn't an await_user signal or carries no
+/// (non-empty) `question` field — callers then fall back to any question
+/// already stored on `agent_status.detail`.
+fn await_user_question(payload: &str) -> Option<String> {
+    if !payload_signals_await_user(payload) {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let q = v.get("question")?.as_str()?.trim();
+    (!q.is_empty()).then(|| q.to_string())
 }
 
 #[cfg(test)]
@@ -577,11 +616,92 @@ mod tests {
         assert_eq!(status.detail.as_deref(), Some("boot"));
     }
 
+    #[tokio::test]
+    async fn real_stop_preserves_awaiting_user_set_by_mcp() {
+        // The `await_user` MCP tool flips agent_status to AwaitingUser
+        // (question as detail) mid-turn. The real Claude Stop that
+        // follows carries no await_user sentinel — it must NOT clobber
+        // that state back to Idle, or the rail "awaiting you" dot would
+        // vanish the instant the turn ends.
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("do".into()),
+        })
+        .await
+        .unwrap();
+        // Simulate the MCP await_user call landing on the shared store.
+        svc.statuses
+            .upsert(
+                &tid,
+                "working",
+                AgentStatusState::AwaitingUser,
+                Some("Ship A or B?".into()),
+            )
+            .await
+            .unwrap();
+        svc.ingest(HookEnvelope {
+            kind: HookKind::Stop,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        assert_eq!(status.state, AgentStatusState::AwaitingUser);
+        assert_eq!(status.detail.as_deref(), Some("Ship A or B?"));
+    }
+
+    #[tokio::test]
+    async fn stop_await_user_signal_carries_question() {
+        // A Stop payload carrying the sentinel + a question lands the
+        // question on detail so the renderer can show it in the tooltip.
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::Stop,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: r#"{"await_user":true,"question":"Pick A or B"}"#.into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        assert_eq!(status.state, AgentStatusState::AwaitingUser);
+        assert_eq!(status.detail.as_deref(), Some("Pick A or B"));
+    }
+
     #[test]
     fn await_user_payload_detection() {
         assert!(payload_signals_await_user(r#"{"await_user":true}"#));
         assert!(payload_signals_await_user(r#"{"x":"await_user_called"}"#));
         assert!(!payload_signals_await_user(r#"{}"#));
         assert!(!payload_signals_await_user(r#"{"await_user":false}"#));
+    }
+
+    #[test]
+    fn await_user_question_extraction() {
+        assert_eq!(
+            await_user_question(r#"{"await_user":true,"question":"Pick A or B"}"#).as_deref(),
+            Some("Pick A or B")
+        );
+        // Sentinel present but no question → None (caller falls back to
+        // whatever detail the MCP tool already stored).
+        assert_eq!(await_user_question(r#"{"await_user":true}"#), None);
+        // Blank question → None.
+        assert_eq!(
+            await_user_question(r#"{"await_user":true,"question":"  "}"#),
+            None
+        );
+        // Not an await_user payload → None.
+        assert_eq!(await_user_question(r#"{"question":"x"}"#), None);
     }
 }

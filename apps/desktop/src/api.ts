@@ -2403,23 +2403,30 @@ export interface tasksChangeEvent {
   itemId: number | null;
 }
 
-export type AgentStatus = "working" | "waiting" | "stalled";
+export type AgentStatus = "working" | "waiting" | "stalled" | "awaiting";
 
 export interface AgentStatusEntry {
   streamId: string;
   threadId: string;
   status: AgentStatus;
+  /// The `await_user` question text, present only when `status` is
+  /// "awaiting". Surfaced as the rail dot's tooltip so you can see what
+  /// a (possibly different) thread is asking without switching to it.
+  question?: string;
 }
 
 /// Collapse the backend `AgentStatusState` enum to the dot's alphabet.
 /// "running" → working; "stalled" (derived when a Running hook log
 /// goes silent past the stall threshold — the agent died without ever
 /// emitting a Stop hook) stays distinct so the dot can render it as a
-/// failure rather than ordinary waiting; everything else (idle /
-/// awaiting_user / stopped / error) → waiting.
+/// failure rather than ordinary waiting; "awaiting_user" (the agent
+/// called `mcp__oxplow__await_user`) stays distinct so the dot can
+/// render "waiting on you"; everything else (idle / stopped / error) →
+/// waiting.
 export function collapseAgentStatusState(raw: string | undefined): AgentStatus {
   if (raw === "running") return "working";
   if (raw === "stalled") return "stalled";
+  if (raw === "awaiting_user") return "awaiting";
   return "waiting";
 }
 
@@ -2451,11 +2458,18 @@ export async function listAgentStatuses(_streamId?: string): Promise<AgentStatus
   // `entry.status` off raw rows that have neither field, so the dot
   // never leaves its waiting fallback.
   const rows = unwrap(await commands.listAgentStatuses());
-  return rows.map((row) => ({
-    streamId: "",
-    threadId: row.thread_id,
-    status: collapseAgentStatusState(row.state),
-  }));
+  return rows.map((row) => {
+    const status = collapseAgentStatusState(row.state);
+    return {
+      streamId: "",
+      threadId: row.thread_id,
+      // detail is the await_user question only while awaiting; other
+      // states reuse detail for markers ("boot"/"interrupt") the dot
+      // shouldn't surface, so scope the tooltip to the awaiting state.
+      status,
+      question: status === "awaiting" ? (row.detail ?? undefined) : undefined,
+    };
+  });
 }
 
 export type FinishedEntry =
@@ -2634,10 +2648,16 @@ export function subscribeAgentStatus(
     const rawState = event.state as string | undefined;
     if (!threadId || !rawState) return;
     const status = collapseAgentStatusState(rawState);
+    const detail = event.detail as string | null | undefined;
     // streamId filter is a no-op — the event doesn't carry stream
     // attribution. The single caller in App.tsx subscribes with "all".
     void streamId;
-    onEvent({ streamId: "", threadId, status });
+    onEvent({
+      streamId: "",
+      threadId,
+      status,
+      question: status === "awaiting" ? (detail ?? undefined) : undefined,
+    });
   });
 }
 

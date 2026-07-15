@@ -117,6 +117,7 @@ impl AgentStallWatch {
                 thread_id,
                 pane_target: status.pane_target.clone(),
                 state: derived,
+                detail: None,
             });
         }
 

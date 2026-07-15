@@ -16,8 +16,9 @@ import {
   buildQuickOpenResults,
   buildRecentEntries,
   flattenCommands,
+  nextSectionIndex,
+  type LauncherNavRow,
   type LauncherPageEntry,
-  type LauncherRow,
   type LauncherSection,
   type QuickOpenResult,
 } from "./quickOpenResults.js";
@@ -49,9 +50,15 @@ interface Props {
 type Result = QuickOpenResult;
 
 /** A navigable row: the launcher's collapsible section headers + page
- *  rows (`LauncherRow`, empty-query "start menu") or the ranked
- *  page/command/file/hit results (`Result`, while searching). */
-type Row = LauncherRow | Result;
+ *  rows (empty-query "start menu") or the ranked page/command/file/hit
+ *  results (while searching). */
+type Row = LauncherNavRow;
+
+// Below this query length the launcher filters only the in-memory
+// pages/commands/files (fast, client-side) and skips the backend BM25
+// round-trip — a single character isn't a meaningful content search and
+// firing one per keystroke is pure noise.
+const MIN_BODY_QUERY_LEN = 2;
 
 const EXPANDED_CATEGORIES_KEY = "oxplow.launcher.expandedCategories";
 // "Recent" is expanded by default (the section exists to *show* recent
@@ -109,6 +116,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const [recentCollapsed, setRecentCollapsed] = useState<boolean>(loadRecentCollapsed);
   const [panelCoords, setPanelCoords] = useState<CSSProperties>(centeredFallbackCoords);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // Anchor the panel *over* the rail "Search…" box so it reads as that
   // bar expanding in place — across (wider than the rail) and down (the
@@ -217,13 +225,19 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   useEffect(() => {
     if (!open || !stream) return;
     const q = query.trim();
-    if (!q) {
+    // Skip the backend round-trip on a too-short query (a single char is
+    // noise); the in-memory pages/commands/files still filter live.
+    if (q.length < MIN_BODY_QUERY_LEN) {
       setSiteHits([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      searchSite(q, stream.id)
+      // Project-wide (null): the launcher is the single discovery surface,
+      // so cross-stream tasks/wiki/notes/comments are findable. File hits
+      // are re-scoped to the current stream client-side in
+      // buildQuickOpenResults (another worktree's files aren't openable here).
+      searchSite(q, null)
         .then((rows) => {
           if (!cancelled) setSiteHits(rows);
         })
@@ -270,12 +284,15 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
   const commands = useMemo(() => flattenCommands(menuGroups), [menuGroups]);
 
   // Empty input = launcher mode (pages only, grouped by category in the
-  // render below). With a query, rank pages → commands → files → body
-  // hits. The ordering lives in a pure helper so it's unit-testable.
-  const results = useMemo<Result[]>(
-    () => buildQuickOpenResults({ query, pages, commands, files, siteHits }),
-    [pages, commands, files, siteHits, query],
+  // render below). With a query: exact matches first, then pages →
+  // commands → files → body hits. The ordering + stream scoping + cap
+  // accounting live in a pure helper so they're unit-testable.
+  const build = useMemo(
+    () => buildQuickOpenResults({ query, pages, commands, files, siteHits, currentStreamId: stream?.id ?? null }),
+    [pages, commands, files, siteHits, query, stream?.id],
   );
+  const results: Result[] = build.results;
+  const truncated = build.truncated;
   const launcherMode = query.trim() === "";
 
   // Effective expanded sections: the persisted static categories, plus
@@ -298,6 +315,15 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     if (selectedIndex < rows.length) return;
     setSelectedIndex(rows.length === 0 ? 0 : rows.length - 1);
   }, [rows, selectedIndex]);
+
+  // Keep the keyboard cursor visible: scroll the active row into the
+  // results viewport when it moves (it can otherwise sit off-screen in
+  // the maxHeight:50vh scroll area).
+  useEffect(() => {
+    resultsRef.current
+      ?.querySelector<HTMLElement>(`[data-row-index="${selectedIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex, rows]);
 
   if (!open || !stream) {
     return null;
@@ -346,6 +372,23 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               setSelectedIndex((current) => Math.max(current - 1, 0));
               return;
             }
+            if (event.key === "Tab") {
+              // Section jump: launcher mode hops header-to-header, search
+              // mode hops between result groups (page→command→file→hit).
+              event.preventDefault();
+              setSelectedIndex((current) => nextSectionIndex(rows, current, event.shiftKey ? -1 : 1));
+              return;
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
+              setSelectedIndex(0);
+              return;
+            }
+            if (event.key === "End") {
+              event.preventDefault();
+              setSelectedIndex(Math.max(rows.length - 1, 0));
+              return;
+            }
             if (event.key === "Enter") {
               event.preventDefault();
               const selected = rows[selectedIndex];
@@ -360,7 +403,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
           <span>{loading ? "Indexing files…" : `${pages.length} pages · ${files.length} files`}</span>
         </div>
         {error ? <div style={errorStyle}>{error}</div> : null}
-        <div style={resultsStyle}>
+        <div ref={resultsRef} style={resultsStyle}>
           {rows.length === 0 && !loading ? (
             <div style={emptyStyle}>No matches.</div>
           ) : (
@@ -374,6 +417,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                   <button type="button"
                     key={`category:${result.category}`}
                     data-testid={`launcher-category-${result.category}`}
+                    data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
                       ...categoryRowStyle,
@@ -394,6 +438,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`page:${result.entry.id}`}
+                    data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -418,6 +463,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`command:${result.entry.id}`}
+                    data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -443,6 +489,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
                 return (
                   <button type="button"
                     key={`hit:${result.hit.kind}:${result.hit.ref_id}:${result.hit.stream_id ?? ""}`}
+                    data-row-index={index}
                     onClick={() => confirm(result)}
                     style={{
                       ...resultStyle,
@@ -465,6 +512,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               return (
                 <button type="button"
                   key={`file:${result.file.path}`}
+                  data-row-index={index}
                   onClick={() => confirm(result)}
                   style={{
                     ...resultStyle,
@@ -481,6 +529,11 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
               );
             })
           )}
+          {truncated > 0 ? (
+            <div style={moreStyle} data-testid="launcher-more">
+              +{truncated} more — refine your search
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -583,6 +636,15 @@ const emptyStyle: CSSProperties = {
   color: "var(--muted)",
   padding: "8px 10px",
   fontSize: "var(--text-xs)",
+};
+
+// Non-selectable footer shown when a section hit its row cap — a missing
+// result then reads as "narrow the query," not "not found."
+const moreStyle: CSSProperties = {
+  color: "var(--muted)",
+  padding: "6px 10px",
+  fontSize: 11,
+  fontStyle: "italic",
 };
 
 const categoryRowStyle: CSSProperties = {

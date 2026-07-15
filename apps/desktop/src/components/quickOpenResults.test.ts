@@ -10,6 +10,8 @@ import {
   buildRecentEntries,
   dedupeSiteHits,
   flattenCommands,
+  nextSectionIndex,
+  type LauncherNavRow,
   type LauncherSection,
 } from "./quickOpenResults.js";
 
@@ -90,8 +92,9 @@ describe("buildQuickOpenResults", () => {
 
   test("empty query is launcher mode — pages only, in given order", () => {
     const out = buildQuickOpenResults({ query: "", pages, commands, files, siteHits: [] });
-    expect(out.map((r) => r.kind)).toEqual(["page", "page"]);
-    expect(out.map((r) => (r.kind === "page" ? r.entry.id : ""))).toEqual(["git-dashboard", "files"]);
+    expect(out.results.map((r) => r.kind)).toEqual(["page", "page"]);
+    expect(out.results.map((r) => (r.kind === "page" ? r.entry.id : ""))).toEqual(["git-dashboard", "files"]);
+    expect(out.truncated).toBe(0);
   });
 
   test("query ranks pages → commands → files → body hits", () => {
@@ -104,12 +107,67 @@ describe("buildQuickOpenResults", () => {
     });
     // "git" matches the Git page (label/id), the Git ▸ Commit command,
     // the src/git.rs file path, and the wiki body hit — in that order.
-    expect(out.map((r) => r.kind)).toEqual(["page", "command", "file", "hit"]);
+    // (The "Git" page label also equals the query, so the exact-match
+    // hoist keeps it first — where it already was.)
+    expect(out.results.map((r) => r.kind)).toEqual(["page", "command", "file", "hit"]);
   });
 
   test("multi-token query matches group+label of a command in any order", () => {
     const out = buildQuickOpenResults({ query: "commit git", pages, commands, files, siteHits: [] });
-    expect(out.some((r) => r.kind === "command" && r.entry.id === "git.commit")).toBe(true);
+    expect(out.results.some((r) => r.kind === "command" && r.entry.id === "git.commit")).toBe(true);
+  });
+
+  test("an exact task-id match is hoisted to the very top (tsk51)", () => {
+    const out = buildQuickOpenResults({
+      query: "tsk30",
+      pages,
+      commands,
+      files,
+      siteHits: [hit("wiki", "w"), hit("task", "tsk30")],
+    });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { kind: "task", ref_id: "tsk30" } });
+  });
+
+  test("an exact content match floats above a fuzzy page/file match", () => {
+    // "gt" fuzzy-matches the "Git" page and src/git.rs, but exactly
+    // matches the wiki hit titled "gt" — the exact hit wins.
+    const out = buildQuickOpenResults({
+      query: "gt",
+      pages,
+      commands,
+      files,
+      siteHits: [hit("wiki", "gt")],
+    });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref_id: "gt" } });
+    expect(out.results.some((r) => r.kind === "page")).toBe(true);
+  });
+
+  test("file hits from other streams are dropped; current-stream + global kept", () => {
+    const fileHit = (refId: string, streamId: string | null): SearchHit => ({ ...hit("file", refId), stream_id: streamId });
+    const out = buildQuickOpenResults({
+      query: "rs",
+      pages,
+      commands,
+      files: [],
+      siteHits: [fileHit("a.rs", "str1"), fileHit("b.rs", "str2"), fileHit("c.rs", null)],
+      currentStreamId: "str1",
+    });
+    const hitIds = out.results.flatMap((r) => (r.kind === "hit" ? [r.hit.ref_id] : []));
+    expect(hitIds).toEqual(["a.rs", "c.rs"]); // b.rs (str2) dropped, global c.rs kept
+  });
+
+  test("truncated reports matches dropped by the file/hit caps", () => {
+    const manyFiles = Array.from({ length: 85 }, (_, i) => file(`src/f${i}.ts`));
+    const manyHits = Array.from({ length: 35 }, (_, i) => hit("wiki", `w${i}`));
+    const out = buildQuickOpenResults({
+      query: "ts",
+      pages,
+      commands,
+      files: manyFiles,
+      siteHits: manyHits,
+    });
+    // 85 files → 80 shown (5 dropped); 35 hits → 30 shown (5 dropped).
+    expect(out.truncated).toBe(10);
   });
 });
 
@@ -165,6 +223,33 @@ describe("buildLauncherTree", () => {
   test("no Recent header at all when there are no recent visits", () => {
     const rows = buildLauncherTree([], treePages, new Set<LauncherSection>(["Recent"]));
     expect(rows.some((r) => r.kind === "category" && r.category === "Recent")).toBe(false);
+  });
+});
+
+describe("nextSectionIndex", () => {
+  const cmd = flattenCommands([group([{ id: "g.c", label: "C", enabled: true }])])[0]!;
+  const R = {
+    cat: (c: string): LauncherNavRow => ({ kind: "category", category: c as PageCategory, expanded: false }),
+    page: (id: string): LauncherNavRow => ({ kind: "page", entry: page(id, id) }),
+    command: (): LauncherNavRow => ({ kind: "command", entry: cmd }),
+    file: (p: string): LauncherNavRow => ({ kind: "file", file: file(p) }),
+    hit: (id: string): LauncherNavRow => ({ kind: "hit", hit: hit("wiki", id) }),
+  };
+
+  test("search mode: Tab jumps to the first row of the next kind-run", () => {
+    const rows = [R.page("a"), R.page("b"), R.command(), R.file("x"), R.hit("h1"), R.hit("h2")];
+    expect(nextSectionIndex(rows, 0, 1)).toBe(2); // page-run → command
+    expect(nextSectionIndex(rows, 2, 1)).toBe(3); // command → file
+    expect(nextSectionIndex(rows, 3, 1)).toBe(4); // file → hit-run
+    expect(nextSectionIndex(rows, 4, 1)).toBe(5); // no further boundary → clamp to last
+    expect(nextSectionIndex(rows, 4, -1)).toBe(3); // back to the file run
+  });
+
+  test("launcher mode: Tab hops category header to category header", () => {
+    const rows = [R.cat("Work"), R.page("a"), R.page("b"), R.cat("Code"), R.page("c")];
+    expect(nextSectionIndex(rows, 0, 1)).toBe(3); // Work header → Code header
+    expect(nextSectionIndex(rows, 3, 1)).toBe(4); // no further category → clamp to last
+    expect(nextSectionIndex(rows, 3, -1)).toBe(0); // back to Work header
   });
 });
 

@@ -296,18 +296,33 @@ declaring *what it is* and mounting the generic layer.
   detail pane; `s`/`p` opens the status/priority pickers.
 - **One launcher is the single discovery surface.** There is exactly
   one way to find pages, commands, files, and content: the launcher
-  (`QuickOpenOverlay`), opened by **Cmd+P** and the rail **Search…**
-  button. There is no separate command palette or find-in-files overlay
-  — Cmd+K and Cmd+Shift+F are only aliases that open the same launcher
-  (kept so old reflexes land somewhere useful). Do **not** add a new
-  modal/overlay for discovery; extend the launcher. See
+  (`QuickOpenOverlay`), opened by **Cmd+P** (its `file.quickOpen` menu
+  command) and the rail **Search…** button. That is its **only**
+  shortcut — the old Cmd+K / Cmd+Shift+F aliases were removed (tsk59):
+  one door is clearer, and Cmd+P is the established dev quick-open
+  reflex. There is no separate command palette or find-in-files overlay.
+  Do **not** add a new modal/overlay for discovery, and don't re-add
+  alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
-- **Launcher shortcut listener uses `capture: true`.** Monaco and other
-  focused inputs run their own keydown handlers in the bubble phase;
-  capture lets the launcher fire before any of them (so Monaco's command
-  palette / find-in-files don't eat Cmd+K / Cmd+Shift+F). If you add
-  another global shortcut that needs to beat an editor, copy that
-  pattern.
+- **Launcher search behavior (the tsk52 pass).** The launcher searches
+  the **whole project** for tasks/wiki/notes/comments (cross-stream), but
+  scopes file-body hits to the current stream — another worktree's files
+  aren't openable here. Implemented as `searchSite(q, null)` +
+  a client-side file-hit stream filter in `buildQuickOpenResults`
+  (`quickOpenResults.ts`); filename matches already come from the
+  current stream's `listWorkspaceFiles`. An **exact-identity match** — a
+  task id like `tsk30`, or a page/file/wiki name equal to the query —
+  floats to the very top, above the fuzzy pages/commands sections
+  (`isExactMatch`). Task ids are searchable because `index_task`
+  (`crates/oxplow-app/src/indexer.rs`) folds the id into the FTS body
+  (the id is otherwise a non-searchable routing key). The backend body
+  search fires only at **≥2 chars** (`MIN_BODY_QUERY_LEN`); a 1-char
+  query filters the in-memory pages/commands/files without a round-trip.
+  Keyboard: ↑/↓ move the cursor (scrolled into view), **Tab/Shift+Tab
+  jump between sections** (`nextSectionIndex` — category headers in the
+  start menu, result groups while searching), Home/End → first/last row.
+  A section that hit its row cap shows a muted "+N more" footer
+  (`QuickOpenBuild.truncated`).
 - **The launcher is the main keyboard lever — keep it populated.** Every
   enabled menu command in `commands.ts` flows into the launcher's typed
   results automatically (it flattens the same `buildMenuGroups` registry

@@ -11,8 +11,12 @@ describe("collapseAgentStatusState", () => {
     expect(collapseAgentStatusState("stalled")).toBe("stalled");
   });
 
+  test("awaiting_user stays distinct so the dot can render 'waiting on you'", () => {
+    expect(collapseAgentStatusState("awaiting_user")).toBe("awaiting");
+  });
+
   test("everything else collapses to waiting", () => {
-    for (const raw of ["idle", "awaiting_user", "stopped", "error", undefined]) {
+    for (const raw of ["idle", "stopped", "error", undefined]) {
       expect(collapseAgentStatusState(raw)).toBe("waiting");
     }
   });

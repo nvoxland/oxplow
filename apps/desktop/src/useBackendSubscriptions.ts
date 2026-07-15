@@ -48,6 +48,7 @@ export interface BackendSubscriptionHandlers {
   setStreams: Dispatch<SetStateAction<Stream[]>>;
   setStream: Dispatch<SetStateAction<Stream | null>>;
   setAgentStatuses: Dispatch<SetStateAction<Record<string, AgentStatus>>>;
+  setAgentQuestions: Dispatch<SetStateAction<Record<string, string | undefined>>>;
   setGeneratedState: (next: { exclude: string[]; include: string[] }) => void;
   setEnabledAgents: (next: AgentKind[]) => void;
 }
@@ -103,6 +104,7 @@ export function useBackendSubscriptions(
     setStreams,
     setStream,
     setAgentStatuses,
+    setAgentQuestions,
     setGeneratedState,
     setEnabledAgents,
   } = handlers;
@@ -289,8 +291,13 @@ export function useBackendSubscriptions(
         .then((entries) => {
           if (cancelled) return;
           const next: Record<string, AgentStatus> = {};
-          for (const entry of entries) next[entry.threadId] = entry.status;
+          const nextQ: Record<string, string | undefined> = {};
+          for (const entry of entries) {
+            next[entry.threadId] = entry.status;
+            nextQ[entry.threadId] = entry.question;
+          }
           setAgentStatuses(next);
+          setAgentQuestions(nextQ);
         })
         .catch((error) => {
           logUi("warn", "failed to seed agent statuses", { error: String(error) });
@@ -298,6 +305,7 @@ export function useBackendSubscriptions(
     void seed();
     const unsubscribe = subscribeAgentStatus("all", (entry) => {
       setAgentStatuses((prev) => ({ ...prev, [entry.threadId]: entry.status }));
+      setAgentQuestions((prev) => ({ ...prev, [entry.threadId]: entry.question }));
     });
     const unsubReconnect = onRemoteReconnect(() => void seed());
     return () => {
@@ -305,7 +313,7 @@ export function useBackendSubscriptions(
       unsubscribe();
       unsubReconnect();
     };
-  }, [setAgentStatuses]);
+  }, [setAgentStatuses, setAgentQuestions]);
 
   useEffect(() => {
     // Stall watchdog nudge: the backend fires this once per stall

@@ -141,6 +141,11 @@ pub enum OxplowEvent {
         thread_id: ThreadId,
         pane_target: String,
         state: AgentStatusState,
+        /// The status detail, when meaningful to the renderer. Carries
+        /// the `await_user` question text when `state` is
+        /// `AwaitingUser` so the rail dot's tooltip can show what the
+        /// agent is asking — `None` for every other transition.
+        detail: Option<String>,
     },
     /// agent_turn opened or closed.
     AgentTurnsChanged { thread_id: ThreadId },

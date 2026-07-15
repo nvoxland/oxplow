@@ -15,6 +15,10 @@ interface NavigatorProps {
   threadStates: Record<string, ThreadState>;
   streamStatuses: Record<string, AgentStatusDotState>;
   agentStatuses: Record<string, AgentStatusDotState>;
+  /// Per-thread await_user question, shown as the rail dot's tooltip
+  /// while that thread's status is "awaiting". Absent for every other
+  /// state. Keyed by thread id, parallel to agentStatuses.
+  agentQuestions?: Record<string, string | undefined>;
   enabledAgents: AgentKind[];
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
@@ -68,6 +72,7 @@ export function Navigator({
   threadStates,
   streamStatuses,
   agentStatuses,
+  agentQuestions,
   enabledAgents,
   onSwitchStream,
   onSelectThread,
@@ -271,6 +276,7 @@ export function Navigator({
                     isWriter={isWriter}
                     selected={isSelected}
                     status={agentStatuses[thread.id]}
+                    question={agentQuestions?.[thread.id]}
                     onClick={() => handleSelectThread(g.stream.id, thread.id)}
                   />
                 );
@@ -410,6 +416,7 @@ export function Navigator({
                         isWriter={isWriter}
                         selected={isSelected}
                         status={agentStatuses[thread.id]}
+                        question={agentQuestions?.[thread.id]}
                         onClick={() => handleSelectThread(g.stream.id, thread.id)}
                         renaming={renaming?.kind === "thread" && renaming.id === thread.id}
                         onCommitRename={async (next) => {
@@ -525,14 +532,16 @@ export function Navigator({
 }
 
 /** Single row inside the strip — letter + status, fixed height.
- *  No tooltip: hovering the strip pops the overlay open, which shows
- *  the full title in-line, so a hover label here would be redundant. */
+ *  No title tooltip on the row itself: hovering the strip pops the
+ *  overlay open, which shows the full title in-line. The status dot
+ *  still carries its own `awaiting` question tooltip via `question`. */
 function StripRow({
   letter,
   isStream,
   isWriter,
   selected,
   status,
+  question,
   onClick,
 }: {
   letter: string;
@@ -540,6 +549,7 @@ function StripRow({
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
+  question?: string;
   onClick?(): void;
 }) {
   const interactive = !!onClick;
@@ -581,7 +591,7 @@ function StripRow({
         transition: "background 120ms ease",
       }}
     >
-      <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} />
+      <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
     </div>
   );
 }
@@ -595,6 +605,7 @@ function OverlayRow({
   isWriter,
   selected,
   status,
+  question,
   onClick,
   renaming = false,
   onCommitRename,
@@ -608,6 +619,7 @@ function OverlayRow({
   isWriter: boolean;
   selected: boolean;
   status: AgentStatusDotState | undefined;
+  question?: string;
   onClick?(): void;
   renaming?: boolean;
   onCommitRename?(next: string): void | Promise<void>;
@@ -652,7 +664,7 @@ function OverlayRow({
       }}
     >
       <div style={{ width: STRIP_WIDTH - 3 /* keep the icon column the same width as the strip */, display: "flex", justifyContent: "center" }}>
-        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} />
+        <IconCell letter={letter} isStream={isStream} isWriter={isWriter} status={status} question={question} />
       </div>
       {renaming ? (
         <RenameInput
@@ -745,11 +757,13 @@ function IconCell({
   isStream,
   isWriter,
   status,
+  question,
 }: {
   letter: string;
   isStream: boolean;
   isWriter: boolean;
   status: AgentStatusDotState | undefined;
+  question?: string;
 }) {
   // Writer pill: a soft, dim accent wash + translucent ring instead
   // of the full --accent-soft-bg + --accent treatment, so "writer"
@@ -794,7 +808,7 @@ function IconCell({
             right: -2,
           }}
         >
-          <AgentStatusDot status={status ?? "waiting"} size={8} />
+          <AgentStatusDot status={status ?? "waiting"} size={8} question={question} />
         </span>
       ) : null}
     </span>

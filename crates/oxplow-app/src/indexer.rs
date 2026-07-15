@@ -178,6 +178,12 @@ impl Indexer {
 
     async fn index_task(&self, t: &Task, stream: Option<&StreamId>) {
         let stream = stream.map(|s| s.to_string());
+        // Fold the id (e.g. "tsk30") into the searchable body so typing a
+        // task id in the launcher surfaces that task directly — the id is
+        // otherwise only a non-FTS routing key. Body (not title) so the
+        // displayed hit title stays clean; the launcher floats an exact
+        // id match to the top regardless of BM25 weight.
+        let body = format!("{}\n{}", t.id, t.description);
         let _ = self
             .services
             .search_store
@@ -186,7 +192,7 @@ impl Indexer {
                 &t.id.to_string(),
                 stream.as_deref(),
                 &t.title,
-                &t.description,
+                &body,
             )
             .await;
     }
@@ -440,6 +446,45 @@ mod tests {
             .await
             .iter()
             .any(|h| h.kind == KIND_COMMENT));
+    }
+
+    #[tokio::test]
+    async fn finds_a_task_by_its_id_string() {
+        // Typing a task id (e.g. "tsk3") in the launcher must surface that
+        // task directly — the id is folded into the task's searchable body
+        // even when neither the title nor the description mentions it.
+        let (svc, _dir) = services().await;
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let task = svc
+            .tasks
+            .create(
+                Some(thread.id),
+                crate::CreateTaskInput {
+                    title: "Totally unrelated title".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        Indexer::new(svc.clone()).backfill().await;
+
+        let id = task.id.to_string(); // e.g. "tsk3"
+        let sid = stream.id.to_string();
+        let hits = svc
+            .search_store
+            .search(&id, Some(&sid), &[], 10)
+            .await
+            .unwrap();
+        assert!(
+            hits.iter().any(|h| h.kind == KIND_TASK && h.ref_id == id),
+            "searching the task id {id:?} should surface the task; got {hits:?}"
+        );
     }
 
     /// Capture a `file_snapshot` row for `path` with optional content, under a

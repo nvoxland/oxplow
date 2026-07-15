@@ -63,24 +63,61 @@ function matchesAllTokens(haystack: string, tokens: string[]): boolean {
   return tokens.every((tok) => fuzzyMatches(haystack, tok));
 }
 
+/// Does a result's displayed identity exactly equal the query (case-
+/// insensitive)? Such a result is floated above every fuzzy section — the
+/// "type the thing, jump to it" affordance. tsk51's task-id case falls
+/// out for free: query `tsk30` === the task hit's `ref_id`.
+function isExactMatch(r: QuickOpenResult, q: string): boolean {
+  switch (r.kind) {
+    case "page":
+      return r.entry.label.toLowerCase() === q || r.entry.id.toLowerCase() === q;
+    case "command":
+      return r.entry.label.toLowerCase() === q;
+    case "file": {
+      const base = r.file.path.split("/").pop() ?? r.file.path;
+      return base.toLowerCase() === q || r.file.path.toLowerCase() === q;
+    }
+    case "hit":
+      return r.hit.title.toLowerCase() === q || r.hit.ref_id.toLowerCase() === q;
+  }
+}
+
+/// Per-section row caps: the launcher shows at most this many file-path
+/// and body-hit rows so a broad query can't flood the list. Overflow is
+/// reported via `QuickOpenBuild.truncated`.
+const MAX_FILE_ROWS = 80;
+const MAX_HIT_ROWS = 30;
+
+export interface QuickOpenBuild {
+  results: QuickOpenResult[];
+  /// Count of matches dropped by the per-section caps — drives the
+  /// "+N more — refine your search" footer so a missing result reads as
+  /// "narrow the query," not "not found."
+  truncated: number;
+}
+
 /// Build the ordered launcher result list — the single source of truth
 /// for what the one search shows. Empty query = launcher mode (pages
-/// only, in their fixed category-grouped order). With a query: pages,
-/// then commands, then files, then body hits. Pages and commands are
-/// small curated lists, so they rank above file-path/body noise; a
-/// "git" / "files" search shouldn't scroll past matching file paths to
-/// reach the page. Body hits come last (already BM25-ranked), minus
-/// file hits whose path matched by name above.
+/// only, in their fixed category-grouped order). With a query: exact
+/// matches first (see `isExactMatch`), then pages, commands, files, and
+/// body hits. Pages and commands are small curated lists, so they rank
+/// above file-path/body noise; a "git" / "files" search shouldn't scroll
+/// past matching file paths to reach the page. Body hits come last
+/// (already BM25-ranked), minus file hits whose path matched by name
+/// above, and minus file hits from other streams (project-wide search
+/// returns every stream's files, but another worktree's aren't openable
+/// here — tasks/wiki/notes/comments stay project-wide).
 export function buildQuickOpenResults(input: {
   query: string;
   pages: PageDirectoryEntry[];
   commands: CommandEntry[];
   files: WorkspaceIndexedFile[];
   siteHits: SearchHit[];
-}): QuickOpenResult[] {
+  currentStreamId?: string | null;
+}): QuickOpenBuild {
   const q = input.query.trim().toLowerCase();
   if (!q) {
-    return input.pages.map((entry) => ({ kind: "page" as const, entry }));
+    return { results: input.pages.map((entry) => ({ kind: "page" as const, entry })), truncated: 0 };
   }
   const tokens = q.split(/\s+/).filter(Boolean);
   const matchedPages: QuickOpenResult[] = input.pages
@@ -89,15 +126,29 @@ export function buildQuickOpenResults(input: {
   const matchedCommands: QuickOpenResult[] = input.commands
     .filter((entry) => matchesAllTokens(entry.searchKey, tokens))
     .map((entry) => ({ kind: "command", entry }));
-  const matchedFiles = input.files
-    .filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens))
-    .slice(0, 80);
+  const matchedFilesAll = input.files.filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens));
+  const matchedFiles = matchedFilesAll.slice(0, MAX_FILE_ROWS);
   const matchedFileResults: QuickOpenResult[] = matchedFiles.map((file) => ({ kind: "file", file }));
   const matchedPaths = new Set(matchedFiles.map((f) => f.path));
-  const bodyHits: QuickOpenResult[] = dedupeSiteHits(input.siteHits, matchedPaths)
-    .slice(0, 30)
-    .map((hit) => ({ kind: "hit", hit }));
-  return [...matchedPages, ...matchedCommands, ...matchedFileResults, ...bodyHits];
+  // Keep file hits only from the current stream (+ global); tasks/wiki/
+  // notes/comments are project-wide. A null/undefined stream disables
+  // the filter (keep everything).
+  const streamScopedHits =
+    input.currentStreamId == null
+      ? input.siteHits
+      : input.siteHits.filter(
+          (h) => h.kind !== "file" || h.stream_id == null || h.stream_id === input.currentStreamId,
+        );
+  const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPaths);
+  const bodyHits: QuickOpenResult[] = dedupedHits.slice(0, MAX_HIT_ROWS).map((hit) => ({ kind: "hit", hit }));
+  const all = [...matchedPages, ...matchedCommands, ...matchedFileResults, ...bodyHits];
+  // Float exact-identity matches to the very top, preserving relative
+  // order among them and among the rest.
+  const exact = all.filter((r) => isExactMatch(r, q));
+  const rest = all.filter((r) => !isExactMatch(r, q));
+  const truncated =
+    Math.max(0, matchedFilesAll.length - MAX_FILE_ROWS) + Math.max(0, dedupedHits.length - MAX_HIT_ROWS);
+  return { results: [...exact, ...rest], truncated };
 }
 
 /// The launcher's collapsible sections: the static page categories plus
@@ -168,4 +219,26 @@ export function buildLauncherTree(
     }
   }
   return rows;
+}
+
+/// A navigable launcher row: the collapsible section tree (launcher mode)
+/// or the ranked results (search mode). One array drives both the
+/// keyboard cursor and the render.
+export type LauncherNavRow = LauncherRow | QuickOpenResult;
+
+/// Index of the next/previous "section boundary" for Tab / Shift+Tab
+/// traversal. In launcher mode (any `category` rows present) a boundary
+/// is a category header, so Tab hops header-to-header. In search mode a
+/// boundary is the first row of a new *kind* run (page→command→file→hit),
+/// so Tab hops between result groups. Clamps to the last/first row when
+/// there's no further section. Pure so it's unit-testable.
+export function nextSectionIndex(rows: LauncherNavRow[], current: number, dir: 1 | -1): number {
+  if (rows.length === 0) return 0;
+  const hasCategories = rows.some((r) => r.kind === "category");
+  const isBoundary = (i: number): boolean =>
+    hasCategories ? rows[i]!.kind === "category" : i === 0 || rows[i]!.kind !== rows[i - 1]!.kind;
+  for (let i = current + dir; i >= 0 && i < rows.length; i += dir) {
+    if (isBoundary(i)) return i;
+  }
+  return dir > 0 ? rows.length - 1 : 0;
 }

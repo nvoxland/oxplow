@@ -559,7 +559,7 @@ function HoverCard({
  * the thread chip strip when the user clicks "+ New thread"; Enter
  * submits, Escape cancels. Existing `data-testid="thread-rail-create-input"`
  * and `thread-rail-create-submit` testids stay so e2e probes (and the
- * Cmd+K palette workflow) keep working.
+ * launcher workflow) keep working.
  */
 /**
  * `nextThreadTitle` — pure helper for picking the default placeholder
