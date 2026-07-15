@@ -48,6 +48,9 @@ export interface MenuCommandSnapshot {
   enabled: boolean;
   separator?: boolean;
   checked?: boolean;
+  /** Navigates to a pages-directory page → kept in the native menu but
+   *  excluded from the launcher (see `MenuItem.opensPage`). */
+  opensPage?: boolean;
 }
 
 export interface MenuGroup extends SharedMenuGroup {
@@ -132,11 +135,11 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         // active thread's tab set. Agent is no longer here (the agent
         // tab is the pinned center tab); the Git and Tasks dashboards
         // moved to the Git and Tasks menus respectively.
-        { id: "view.files", label: "Files", enabled: state.hasStream },
-        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: state.hasStream },
-        { id: "view.comments", label: "Comments Dashboard", enabled: state.hasStream },
-        { id: "view.wiki", label: "Wiki", enabled: state.hasStream },
-        { id: "history.open", label: "History", enabled: state.hasStream },
+        { id: "view.files", label: "Files", enabled: state.hasStream, opensPage: true },
+        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: state.hasStream, opensPage: true },
+        { id: "view.comments", label: "Comments Dashboard", enabled: state.hasStream, opensPage: true },
+        { id: "view.wiki", label: "Wiki", enabled: state.hasStream, opensPage: true },
+        { id: "history.open", label: "History", enabled: state.hasStream, opensPage: true },
       ],
     },
     {
@@ -145,7 +148,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       items: [
         // Dashboard navigates (gated on a stream); commit/pull/push are
         // mutations gated on git actually being available (`canCommit`).
-        { id: "git.dashboard", label: "Dashboard", enabled: state.hasStream },
+        { id: "git.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
         { id: "git.commit", label: "Commit Changes…", enabled: !!state.canCommit },
         { id: "git.pull", label: "Pull Changes", enabled: !!state.canCommit },
         { id: "git.push", label: "Push Changes", enabled: !!state.canCommit },
@@ -156,7 +159,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "plan",
       label: "Tasks",
       items: [
-        { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream },
+        { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
         { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },

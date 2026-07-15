@@ -186,18 +186,35 @@ impl HookIngestService {
                 // hook event log and emit AgentStatusChanged with
                 // the new state so the renderer can update without
                 // a refetch round-trip.
-                let recent = self
-                    .hooks
-                    .list_recent(Some(&thread), 200)
-                    .await
-                    .unwrap_or_default();
-                let derived =
-                    crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now());
+                //
+                // Exception: if `await_user` parked the thread on the
+                // user this turn (store = AwaitingUser), preserve it —
+                // the derive can't see the synthetic marker and would
+                // return Running, flickering the rail dot off "awaiting
+                // you" on the very PostToolUse of the await_user call.
+                // Cleared by the next UserPromptSubmit, same as Stop.
+                let (state, detail) = match self.current_status(&thread).await {
+                    Some(s) if s.state == AgentStatusState::AwaitingUser => {
+                        (AgentStatusState::AwaitingUser, s.detail)
+                    }
+                    _ => {
+                        let recent = self
+                            .hooks
+                            .list_recent(Some(&thread), 200)
+                            .await
+                            .unwrap_or_default();
+                        let derived = crate::agent_status_derive::derive_thread_status(
+                            &recent,
+                            Timestamp::now(),
+                        );
+                        (derived, None)
+                    }
+                };
                 self.events.emit(OxplowEvent::AgentStatusChanged {
                     thread_id: thread,
                     pane_target: self.thread_pane(&thread).await,
-                    state: derived,
-                    detail: None,
+                    state,
+                    detail,
                 });
             }
         }
@@ -657,6 +674,54 @@ mod tests {
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::AwaitingUser);
         assert_eq!(status.detail.as_deref(), Some("Ship A or B?"));
+    }
+
+    #[tokio::test]
+    async fn post_tool_use_does_not_clobber_awaiting_user() {
+        // await_user set AwaitingUser (with a question). A PostToolUse
+        // that follows — e.g. the await_user tool call's own PostToolUse
+        // — must NOT flicker the rail dot off "awaiting you": the derive
+        // can't see the synthetic marker and would return Running.
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: Some("do".into()),
+        })
+        .await
+        .unwrap();
+        svc.statuses
+            .upsert(
+                &tid,
+                "working",
+                AgentStatusState::AwaitingUser,
+                Some("Pick A or B?".into()),
+            )
+            .await
+            .unwrap();
+        let mut rx = svc.events.subscribe();
+        svc.ingest(HookEnvelope {
+            kind: HookKind::PostToolUse,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: None,
+        })
+        .await
+        .unwrap();
+        let mut emitted = None;
+        while let Ok(ev) = rx.try_recv() {
+            if let OxplowEvent::AgentStatusChanged { state, detail, .. } = ev {
+                emitted = Some((state, detail));
+            }
+        }
+        let (state, detail) = emitted.expect("PostToolUse should emit AgentStatusChanged");
+        assert_eq!(state, AgentStatusState::AwaitingUser);
+        assert_eq!(detail.as_deref(), Some("Pick A or B?"));
     }
 
     #[tokio::test]

@@ -42,6 +42,14 @@ const URL_PREFIX_RE = /[a-zA-Z][\w+.-]*:\/?\/?$/;
  * rejects is dropped, so dotted words in prose that aren't real workspace
  * targets (e.g. a plugin name like `oxplow.junit`) don't become links. It's
  * given the bare path (no `:line:col` suffix).
+ *
+ * NOTE: the memoized link provider deliberately calls this **without**
+ * `validatePath` — it caches the shape-only matches (which are a pure function
+ * of the text) and applies the live `validatePath` gate itself on the cached
+ * result (see `installFilePathLinkProvider` / `createMemoizedScanner`). Do NOT
+ * wire `validatePath` into the memoized scanner: the gate depends on the
+ * workspace index, which changes, so baking it into the cache would serve stale
+ * link decisions. The parameter stays for direct/one-shot callers and tests.
  */
 export function findFilePathMatches(
   line: string,
@@ -130,6 +138,51 @@ function looksLikePath(s: string): boolean {
   return true;
 }
 
+/** Max distinct line-texts kept in the per-provider scan memo. xterm only
+ *  asks `provideLinks` about visible/hovered rows, so the working set is
+ *  tiny (a viewport plus whatever's been hovered); this cap just bounds a
+ *  long streaming session's growth. */
+const MATCH_CACHE_MAX = 512;
+
+/**
+ * Wrap a line scanner in a bounded, text-keyed memo. xterm re-invokes
+ * `provideLinks` for every visible/hovered row on each scroll and hover,
+ * so re-scanning unchanged rows is pure per-render waste. Keying the
+ * cache by the row's text makes a re-hover / re-scroll over unchanged
+ * content a hit, and auto-invalidates when a row's content changes (new
+ * text ⇒ new key). Bounded, true **LRU**: a hit refreshes recency (Map
+ * insertion order = access order), so a frequently re-hovered stable row
+ * isn't evicted just for being inserted early; eviction drops the
+ * least-recently-used key.
+ *
+ * The scanner passed here must be the *shape-only* pass (no
+ * `validatePath` gate): that gate can change as the workspace index
+ * updates, so it's applied fresh by the caller on the cached shape
+ * matches, never baked into the cache.
+ */
+export function createMemoizedScanner(
+  scan: (text: string) => FilePathMatch[],
+  max = MATCH_CACHE_MAX,
+): (text: string) => FilePathMatch[] {
+  const cache = new Map<string, FilePathMatch[]>();
+  return (text: string): FilePathMatch[] => {
+    const cached = cache.get(text);
+    if (cached) {
+      // Refresh recency: re-insert so this key moves to the newest slot.
+      cache.delete(text);
+      cache.set(text, cached);
+      return cached;
+    }
+    const matches = scan(text);
+    cache.set(text, matches);
+    if (cache.size > max) {
+      const oldest = cache.keys().next().value; // least-recently-used
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    return matches;
+  };
+}
+
 export interface FilePathLinkActivation {
   /** Path text as it appeared in the terminal (no line/col suffix). */
   text: string;
@@ -156,6 +209,11 @@ export function installFilePathLinkProvider(
     validatePath?: (path: string) => boolean;
   },
 ): IDisposable {
+  // Cache the shape-only scan per row text so scroll/hover over unchanged
+  // rows doesn't re-run the regex. `validatePath` is a live gate (the
+  // index can change), so it's applied fresh below on the cached matches,
+  // never cached.
+  const scanLine = createMemoizedScanner((text) => findFilePathMatches(text));
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
       const text = readWrappedLine(term, bufferLineNumber);
@@ -163,7 +221,10 @@ export function installFilePathLinkProvider(
         callback(undefined);
         return;
       }
-      const matches = findFilePathMatches(text, opts.validatePath);
+      const shapeMatches = scanLine(text);
+      const matches = opts.validatePath
+        ? shapeMatches.filter((m) => opts.validatePath!(m.text))
+        : shapeMatches;
       if (matches.length === 0) {
         callback(undefined);
         return;

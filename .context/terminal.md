@@ -180,7 +180,15 @@ an inline `InlineConfirm` `×` anymore — it matches the stream/thread nav.
   `findFilePathMatches`, and yields ILink ranges. Wrapped lines are
   coalesced (only the wrap-start row is scanned; continuation rows
   return `undefined`). On click, `onActivate(match)` fires with the
-  raw path text plus optional line/column.
+  raw path text plus optional line/column. **The shape scan is memoized
+  per row text** (`createMemoizedScanner`, a bounded LRU — a hit refreshes
+  recency)
+  so xterm's per-visible/hovered-row `provideLinks` calls don't re-run
+  the regex over unchanged rows on every scroll/hover (tsk39) — the key
+  is the row text, so a content change auto-invalidates. The
+  `validatePath` gate is **not** cached (the workspace index can change);
+  it's applied fresh on each call over the cached shape matches. `TOKEN_RE`
+  is module-level (compiled once).
 
 TerminalPane wires `onActivate` to its `onOpenFile` prop, resolving
 relative paths against the prop `worktreePath` first (`/`-prefixed

@@ -60,6 +60,13 @@ type Row = LauncherNavRow;
 // firing one per keystroke is pure noise.
 const MIN_BODY_QUERY_LEN = 2;
 
+// Over-fetch the project-wide body search. The search is project-wide
+// (searchSite(q, null)) but buildQuickOpenResults discards other streams'
+// FILE hits client-side; at the default limit of 50 those discarded hits
+// could eat the budget and starve current-stream results that rank below
+// 50. A larger ceiling leaves headroom after the client-side filter.
+const BODY_SEARCH_LIMIT = 200;
+
 const EXPANDED_CATEGORIES_KEY = "oxplow.launcher.expandedCategories";
 // "Recent" is expanded by default (the section exists to *show* recent
 // pages), tracked by a dedicated collapsed-flag so existing users' static
@@ -237,7 +244,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
       // so cross-stream tasks/wiki/notes/comments are findable. File hits
       // are re-scoped to the current stream client-side in
       // buildQuickOpenResults (another worktree's files aren't openable here).
-      searchSite(q, null)
+      searchSite(q, null, null, BODY_SEARCH_LIMIT)
         .then((rows) => {
           if (!cancelled) setSiteHits(rows);
         })

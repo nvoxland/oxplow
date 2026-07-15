@@ -34,6 +34,10 @@ export interface PageDirectoryEntry {
   ref: TabRef;
   category: PageCategory;
   badge?: number;
+  /** Extra search terms the launcher fuzzy-matches beyond label/id — for
+   *  a page whose name doesn't contain a word users reach for (e.g. the
+   *  "Tasks" page found by typing "dashboard"). */
+  keywords?: string;
 }
 
 /**
@@ -50,7 +54,7 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
   return [
     // Labels are emoji-free — `PageKindIcon` resolves the leading
     // glyph from the entry's ref kind at render time.
-    { id: "tasks", label: "Tasks", ref: tasksRef(), category: "Work" },
+    { id: "tasks", label: "Tasks", ref: tasksRef(), category: "Work", keywords: "dashboard" },
     { id: "done-work", label: "Done Work", ref: doneWorkRef(), category: "Work" },
     {
       id: "backlog",

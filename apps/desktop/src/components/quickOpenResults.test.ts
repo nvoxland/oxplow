@@ -34,7 +34,9 @@ function file(path: string): WorkspaceIndexedFile {
   return { path, gitStatus: "clean" } as WorkspaceIndexedFile;
 }
 
-function group(items: { id: string; label: string; enabled: boolean; run?: () => void }[]): MenuGroup {
+function group(
+  items: { id: string; label: string; enabled: boolean; run?: () => void; opensPage?: boolean }[],
+): MenuGroup {
   return {
     id: "git",
     label: "Git",
@@ -84,20 +86,16 @@ describe("flattenCommands", () => {
     expect(out).toHaveLength(0);
   });
 
-  test("drops page-navigation commands that duplicate the pages directory", () => {
+  test("drops page-navigation commands (opensPage marker) that duplicate the pages directory", () => {
     const out = flattenCommands([
       group([
-        { id: "tasks.dashboard", label: "Dashboard", enabled: true },
-        { id: "git.dashboard", label: "Dashboard", enabled: true },
-        { id: "view.files", label: "Files", enabled: true },
-        { id: "view.uncommitted", label: "Uncommitted Changes", enabled: true },
-        { id: "view.comments", label: "Comments Dashboard", enabled: true },
-        { id: "view.wiki", label: "Wiki", enabled: true },
-        { id: "history.open", label: "History", enabled: true },
+        { id: "tasks.dashboard", label: "Dashboard", enabled: true, opensPage: true },
+        { id: "git.dashboard", label: "Dashboard", enabled: true, opensPage: true },
+        { id: "view.files", label: "Files", enabled: true, opensPage: true },
         { id: "git.commit", label: "Commit Changes…", enabled: true },
       ]),
     ]);
-    // Only the genuine action survives; the 7 page-nav rows are dropped
+    // Only the genuine action survives; the opensPage rows are dropped
     // (the launcher shows their canonical "page" entry instead).
     expect(out.map((c) => c.id)).toEqual(["git.commit"]);
   });
@@ -186,6 +184,21 @@ describe("buildQuickOpenResults", () => {
     });
     // 85 files → 80 shown (5 dropped); 35 hits → 30 shown (5 dropped).
     expect(out.truncated).toBe(10);
+  });
+
+  test("floats an exact match even when it ranks past the section cap", () => {
+    // 35 hits; the one titled exactly "meeting" sits past the 30-hit cap.
+    const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
+    const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
+    // Pre-fix this exact hit was sliced away before the float ran.
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { ref_id: "meeting" } });
+  });
+
+  test("a page is found by its keywords, not just label/id", () => {
+    const tasksPage: PageDirectoryEntry = { ...page("tasks", "Tasks"), keywords: "dashboard" };
+    const out = buildQuickOpenResults({ query: "dashboard", pages: [tasksPage], commands, files: [], siteHits: [] });
+    // "dashboard" matches neither label ("Tasks") nor id ("tasks") — only the keyword.
+    expect(out.results.some((r) => r.kind === "page" && r.entry.id === "tasks")).toBe(true);
   });
 });
 

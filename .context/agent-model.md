@@ -367,12 +367,18 @@ next UserPromptSubmit.
 
 The same `await_user` call also drives the **rail agent-status dot**
 (tsk30). The MCP handler flips `agent_status` to `AwaitingUser` with the
-*question text* on `detail` (not a bare `"await_user"` marker), and
-`HookIngestService`'s `Stop` branch **preserves** an in-turn
-`AwaitingUser` instead of clobbering it back to `Idle`: the real Claude
-`Stop` payload carries no sentinel, so without that guard the dot would
-vanish the instant the turn ends (`current_status` check in
-`crates/oxplow-app/src/hook_ingest.rs`). The question rides
+*question text* on `detail` (not a bare `"await_user"` marker) **and
+emits `AgentStatusChanged` itself**, so the dot turns "awaiting you"
+immediately rather than lagging until the turn's `Stop`. Both the
+`Stop` branch AND the `PreToolUse`/`PostToolUse` derived-emit branch in
+`HookIngestService` then **preserve** an in-turn `AwaitingUser` instead
+of overwriting it — the real `Stop` payload carries no sentinel and the
+`derive_thread_status` reducer can't see the synthetic marker, so
+without these guards the dot would either vanish when the turn ends or
+flicker off on the `await_user` call's own `PostToolUse`
+(`current_status` checks in `crates/oxplow-app/src/hook_ingest.rs`). The
+flag is cleared by the next `UserPromptSubmit`; a resume that skips that
+hook is the one path where the dot can stay stale (rare). The question rides
 `AgentStatusChanged { detail }` to the renderer, which collapses
 `awaiting_user → "awaiting"` (`collapseAgentStatusState` in
 `apps/desktop/src/api.ts`) and shows a distinct blue pulsing dot whose

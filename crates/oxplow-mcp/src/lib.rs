@@ -3340,7 +3340,8 @@ impl OxplowMcp {
             .map_err(internal)?;
         // Flip the agent_status to AwaitingUser directly so the
         // renderer reflects the state without needing a Stop hook.
-        self.services
+        let status = self
+            .services
             .agent_status_store
             .upsert(
                 &tid,
@@ -3350,6 +3351,16 @@ impl OxplowMcp {
             )
             .await
             .map_err(internal)?;
+        // Emit AgentStatusChanged so the rail dot turns "awaiting you"
+        // (with the question tooltip) immediately on the await_user call
+        // — the upsert alone is silent, leaving the live dot to lag until
+        // the turn's Stop hook re-emits from the store.
+        self.services.events.emit(OxplowEvent::AgentStatusChanged {
+            thread_id: status.thread_id,
+            pane_target: status.pane_target,
+            state: status.state,
+            detail: status.detail,
+        });
         Ok(CallToolResult::success(vec![Content::text("awaiting")]))
     }
 

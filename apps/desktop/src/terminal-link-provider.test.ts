@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { findFilePathMatches } from "./terminal-link-provider.js";
+import { createMemoizedScanner, findFilePathMatches } from "./terminal-link-provider.js";
 
 describe("findFilePathMatches", () => {
   it("finds a relative path with extension", () => {
@@ -120,5 +120,61 @@ describe("findFilePathMatches", () => {
   it("rejects email-shaped tokens", () => {
     const m = findFilePathMatches("contact nathan@voxland.net for info");
     expect(m).toEqual([]);
+  });
+});
+
+describe("createMemoizedScanner", () => {
+  it("scans a text once, then serves repeats from cache (same reference)", () => {
+    let calls = 0;
+    const scan = createMemoizedScanner((t) => {
+      calls++;
+      return findFilePathMatches(t);
+    });
+    const a = scan("open src/main.rs:10 now");
+    const b = scan("open src/main.rs:10 now");
+    expect(calls).toBe(1); // second call was a cache hit
+    expect(b).toBe(a); // same cached array, not a recompute
+    expect(a).toEqual([{ start: 5, end: 19, text: "src/main.rs", line: 10, column: undefined }]);
+  });
+
+  it("recomputes for different text", () => {
+    let calls = 0;
+    const scan = createMemoizedScanner((t) => {
+      calls++;
+      return findFilePathMatches(t);
+    });
+    scan("a.ts");
+    scan("b.ts");
+    expect(calls).toBe(2);
+  });
+
+  it("is bounded — evicts the oldest entry past the cap", () => {
+    let calls = 0;
+    const scan = createMemoizedScanner(() => {
+      calls++;
+      return [];
+    }, 2);
+    scan("1"); // miss (cache [1])
+    scan("2"); // miss (cache [1,2])
+    scan("3"); // miss → evicts "1" (cache [2,3])
+    scan("2"); // hit
+    expect(calls).toBe(3);
+    scan("1"); // "1" was evicted → recompute
+    expect(calls).toBe(4);
+  });
+
+  it("is a true LRU — a hit refreshes recency so it survives eviction", () => {
+    let calls = 0;
+    const scan = createMemoizedScanner(() => {
+      calls++;
+      return [];
+    }, 2);
+    scan("a"); // [a]
+    scan("b"); // [a,b]
+    scan("a"); // hit → refresh recency → [b,a]
+    scan("c"); // miss → evict LRU "b" (not "a") → [a,c]
+    scan("a"); // still cached because it was recently used
+    // Under FIFO "a" would have been evicted by "c" and recomputed here.
+    expect(calls).toBe(3); // only a, b, c ever computed
   });
 });

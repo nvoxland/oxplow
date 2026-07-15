@@ -22,34 +22,21 @@ export type QuickOpenResult =
   | { kind: "file"; file: WorkspaceIndexedFile }
   | { kind: "hit"; hit: SearchHit };
 
-/// Menu commands that merely NAVIGATE to a page already in
-/// `computePagesDirectory`. They exist in `commands.ts` so the **native
-/// menu bar** has File/View/Git/Tasks entries — but in the launcher they
-/// would duplicate the canonical "page" row for the same destination (and
-/// mislabel it as "command"). `flattenCommands` is the launcher's only
-/// consumer, so it drops them here; the native menu is unaffected. Add a
-/// new page-navigation command id to this set when one is introduced.
-const PAGE_NAV_COMMAND_IDS: ReadonlySet<string> = new Set([
-  "tasks.dashboard",
-  "git.dashboard",
-  "view.files",
-  "view.uncommitted",
-  "view.comments",
-  "view.wiki",
-  "history.open",
-]);
-
 /// Flatten enabled, runnable menu commands into searchable entries.
 /// Disabled commands (and the native responder-chain placeholders with
 /// no `run`) are skipped so the launcher never advertises an action the
-/// user can't take right now. Page-navigation commands
-/// (`PAGE_NAV_COMMAND_IDS`) are also skipped — the pages directory
-/// already surfaces those destinations as `page` rows.
+/// user can't take right now. **Page-navigation commands (`item.opensPage`)
+/// are also skipped** — they exist in `commands.ts` only so the native
+/// menu bar has File/View/Git/Tasks entries, but in the launcher they'd
+/// duplicate the canonical `page` row for the same destination (and
+/// mislabel it as "command"). The marker lives on the command definition
+/// (declarative, can't drift), so a new nav command is excluded
+/// automatically — no denylist to keep in sync.
 export function flattenCommands(menuGroups: MenuGroup[]): CommandEntry[] {
   const out: CommandEntry[] = [];
   for (const group of menuGroups) {
     for (const item of group.items) {
-      if (!item.enabled || !item.run || PAGE_NAV_COMMAND_IDS.has(item.id)) continue;
+      if (!item.enabled || !item.run || item.opensPage) continue;
       out.push({
         id: item.id,
         group: group.label,
@@ -101,6 +88,21 @@ function isExactMatch(r: QuickOpenResult, q: string): boolean {
   }
 }
 
+/// Stable identity of a result, so exact matches floated to the top
+/// aren't also shown again in their capped section below.
+function resultKey(r: QuickOpenResult): string {
+  switch (r.kind) {
+    case "page":
+      return `page:${r.entry.id}`;
+    case "command":
+      return `command:${r.entry.id}`;
+    case "file":
+      return `file:${r.file.path}`;
+    case "hit":
+      return `hit:${r.hit.kind}:${r.hit.ref_id}:${r.hit.stream_id ?? ""}`;
+  }
+}
+
 /// Per-section row caps: the launcher shows at most this many file-path
 /// and body-hit rows so a broad query can't flood the list. Overflow is
 /// reported via `QuickOpenBuild.truncated`.
@@ -139,16 +141,22 @@ export function buildQuickOpenResults(input: {
     return { results: input.pages.map((entry) => ({ kind: "page" as const, entry })), truncated: 0 };
   }
   const tokens = q.split(/\s+/).filter(Boolean);
+  // Full (uncapped) matched sets. Pages also match their optional
+  // `keywords` so e.g. the Tasks page (label "Tasks") is still found by
+  // typing "dashboard".
   const matchedPages: QuickOpenResult[] = input.pages
-    .filter((entry) => matchesAllTokens(entry.label.toLowerCase(), tokens) || matchesAllTokens(entry.id, tokens))
+    .filter(
+      (entry) =>
+        matchesAllTokens(entry.label.toLowerCase(), tokens) ||
+        matchesAllTokens(entry.id, tokens) ||
+        (entry.keywords ? matchesAllTokens(entry.keywords.toLowerCase(), tokens) : false),
+    )
     .map((entry) => ({ kind: "page", entry }));
   const matchedCommands: QuickOpenResult[] = input.commands
     .filter((entry) => matchesAllTokens(entry.searchKey, tokens))
     .map((entry) => ({ kind: "command", entry }));
   const matchedFilesAll = input.files.filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens));
-  const matchedFiles = matchedFilesAll.slice(0, MAX_FILE_ROWS);
-  const matchedFileResults: QuickOpenResult[] = matchedFiles.map((file) => ({ kind: "file", file }));
-  const matchedPaths = new Set(matchedFiles.map((f) => f.path));
+  const matchedPathsAll = new Set(matchedFilesAll.map((f) => f.path));
   // Keep file hits only from the current stream (+ global); tasks/wiki/
   // notes/comments are project-wide. A null/undefined stream disables
   // the filter (keep everything).
@@ -158,16 +166,32 @@ export function buildQuickOpenResults(input: {
       : input.siteHits.filter(
           (h) => h.kind !== "file" || h.stream_id == null || h.stream_id === input.currentStreamId,
         );
-  const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPaths);
-  const bodyHits: QuickOpenResult[] = dedupedHits.slice(0, MAX_HIT_ROWS).map((hit) => ({ kind: "hit", hit }));
-  const all = [...matchedPages, ...matchedCommands, ...matchedFileResults, ...bodyHits];
-  // Float exact-identity matches to the very top, preserving relative
-  // order among them and among the rest.
-  const exact = all.filter((r) => isExactMatch(r, q));
-  const rest = all.filter((r) => !isExactMatch(r, q));
+  const dedupedHits = dedupeSiteHits(streamScopedHits, matchedPathsAll);
+  const fileResultsAll: QuickOpenResult[] = matchedFilesAll.map((file) => ({ kind: "file", file }));
+  const hitResultsAll: QuickOpenResult[] = dedupedHits.map((hit) => ({ kind: "hit", hit }));
+
+  // Exact-identity matches float to the very top — computed over the FULL
+  // (uncapped) set so an exact filename/id match ranked past a section cap
+  // still surfaces ("type the thing, jump to it" must never lose to a cap).
+  const everything = [...matchedPages, ...matchedCommands, ...fileResultsAll, ...hitResultsAll];
+  const exact = everything.filter((r) => isExactMatch(r, q));
+  const floated = new Set(exact.map(resultKey));
+  const notFloated = (r: QuickOpenResult) => !floated.has(resultKey(r));
+
+  // The remaining sections; caps apply to what's left after floating, so a
+  // floated item never counts against (or hides behind) the cap.
+  const restFiles = fileResultsAll.filter(notFloated);
+  const restHits = hitResultsAll.filter(notFloated);
+  const results = [
+    ...exact,
+    ...matchedPages.filter(notFloated),
+    ...matchedCommands.filter(notFloated),
+    ...restFiles.slice(0, MAX_FILE_ROWS),
+    ...restHits.slice(0, MAX_HIT_ROWS),
+  ];
   const truncated =
-    Math.max(0, matchedFilesAll.length - MAX_FILE_ROWS) + Math.max(0, dedupedHits.length - MAX_HIT_ROWS);
-  return { results: [...exact, ...rest], truncated };
+    Math.max(0, restFiles.length - MAX_FILE_ROWS) + Math.max(0, restHits.length - MAX_HIT_ROWS);
+  return { results, truncated };
 }
 
 /// The launcher's collapsible sections: the static page categories plus
