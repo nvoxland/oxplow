@@ -758,6 +758,78 @@ impl Services {
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
     }
+
+    /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
+    ///
+    /// A `per-path` measure folds over each capture's snapshot file rows, so a
+    /// repo-wide total needs one snapshot listing the whole tree — delta snapshots
+    /// alone never get there. This captures that snapshot and runs the un-baselined
+    /// gauges over it, synchronously, returning what it did.
+    ///
+    /// This is deliberately callable, not buried in boot: it's the one entry point
+    /// boot, the `rebuild_metrics` MCP tool, and the end-to-end test all share, so
+    /// the boot baseline path is finally exercisable without a process restart —
+    /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
+    ///
+    /// `force` skips the "is a baseline needed?" check and rebuilds regardless
+    /// (the MCP escape hatch). The idempotency guard in the sweep means the event
+    /// loop reacting to the same snapshot won't double-scan.
+    pub async fn rebuild_metric_baseline(&self, force: bool) -> Result<BaselineReport, String> {
+        let stream_val = self
+            .snapshot_captures
+            .primary()
+            .map(|c| c.stream_id().value())
+            .unwrap_or(1);
+
+        if !force {
+            let pending = self.metrics.gauges_needing_baseline(stream_val).await;
+            if pending.is_empty() {
+                return Ok(BaselineReport {
+                    ran: false,
+                    ..Default::default()
+                });
+            }
+        }
+
+        let Some(capture) = self.snapshot_captures.primary() else {
+            return Err("no primary snapshot capture registered".into());
+        };
+        // Enqueue every path as dirty, then capture — the resulting snapshot lists the
+        // whole tree, which is what the fold anchors on.
+        capture
+            .enqueue_full_tree()
+            .await
+            .map_err(|e| e.to_string())?;
+        let snapshot_id = capture
+            .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "full-tree capture produced no snapshot".to_string())?;
+
+        let sweep = self
+            .metrics
+            .run_snapshot_gauges(oxplow_domain::StreamId::new(stream_val), snapshot_id)
+            .await;
+        Ok(BaselineReport {
+            ran: true,
+            snapshot_id: Some(snapshot_id),
+            gauges_run: sweep.ran,
+            failed: sweep.failed,
+        })
+    }
+}
+
+/// What [`Services::rebuild_metric_baseline`] did — observable so an MCP caller or a
+/// test can assert on it instead of reading tracing logs (tsk50).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct BaselineReport {
+    /// False when no gauge needed a baseline (a warm, up-to-date repo).
+    pub ran: bool,
+    pub snapshot_id: Option<i64>,
+    pub gauges_run: usize,
+    /// Gauges that failed during the sweep (empty on success). Non-empty means those
+    /// metrics will read stale/empty — a visible failure, not a silent one.
+    pub failed: Vec<String>,
 }
 
 /// Forward every BackgroundTaskStore broadcast event onto the typed

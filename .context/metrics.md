@@ -87,12 +87,23 @@ welded to collection.
 > paths, so it means "nothing changed", not "the repo is zero".
 >
 > **Baseline.** The fold anchors on snapshot file rows, so a repo-wide total needs
-> ONE snapshot listing the whole tree. `SnapshotCapture::enqueue_full_tree()` (the
-> startup sweep with no prior state to short-circuit against) provides it; boot runs
-> it once when `MetricsService::needs_tree_baseline` says so. **Not** needed on a
-> branch switch — checkout rewrites the differing files, the watcher marks them
-> dirty, and the delta rescans exactly those paths (identical content across branches
-> keeps valid facts).
+> ONE snapshot listing the whole tree. **`Services::rebuild_metric_baseline(force)`**
+> is the single entry point — it captures a full-tree snapshot
+> (`SnapshotCapture::enqueue_full_tree`) and runs the un-baselined gauges over it,
+> returning a `BaselineReport`. **Boot, the `rebuild_metrics` MCP tool, and the
+> end-to-end test all call it** (tsk50), so the boot path is finally exercisable
+> without a process restart — four metrics bugs in a row (tsk47–49) were caught only
+> by restarting, because this path was inline in a boot `tokio::spawn`. **Not** needed
+> on a branch switch — checkout rewrites the differing files, the watcher marks them
+> dirty, and the delta rescans exactly those paths.
+>
+> The sweep is **idempotent per (snapshot, gauge, fingerprint)** (`gauge_done_for_snapshot`):
+> the direct baseline run and the event loop reacting to the same snapshot won't
+> double-scan the tree (the manual `run_metric` path bypasses it — an explicit "run
+> now" always runs). And `baseline_bar` is the **current tree size capped at
+> `TREE_SWEEP_FILE_THRESHOLD`**, not a fixed 100 — a fixed bar would leave every gauge
+> in a sub-100-file repo re-baselining every boot, while the cap stops a large repo
+> re-baselining on every added file (deltas carry growth forward).
 >
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree

@@ -60,6 +60,16 @@ const GAUGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// milliseconds; tracking those would just be noise.
 const TREE_SWEEP_FILE_THRESHOLD: usize = 100;
 
+/// What a gauge sweep did — how many gauges actually ran (after the idempotency
+/// skip) and which failed. Returned so [`crate::Services::rebuild_metric_baseline`]
+/// can report the outcome to an MCP caller or a test instead of it vanishing into a
+/// background-task label (tsk50).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SweepReport {
+    pub ran: usize,
+    pub failed: Vec<String>,
+}
+
 /// Runs config-declared metrics into the substrate. Cheap to clone (a handle of
 /// leaf `Arc`s) — deliberately NOT holding `Arc<Services>`, to avoid a cycle.
 /// The four global-scope catalog blocks parsed from `<global_dir>/{metrics,
@@ -906,6 +916,11 @@ impl MetricsService {
         let Some(facts) = self.fact_store.as_ref() else {
             return Vec::new();
         };
+        let bar = self.baseline_bar(stream_id).await;
+        if bar == 0 {
+            // No tree captured yet — nothing to scan, so nothing to baseline.
+            return Vec::new();
+        }
         let mut out = Vec::new();
         for gauge in self.resolved_gauges() {
             if gauge.trigger != "on-snapshot" {
@@ -914,13 +929,41 @@ impl MetricsService {
             let never_full_scanned = facts
                 .max_scanned_file_count(&gauge.key, stream_id)
                 .await
-                .map(|n| n < TREE_SWEEP_FILE_THRESHOLD as i64)
+                .map(|n| n < bar)
                 .unwrap_or(false);
             if never_full_scanned || self.gauge_is_stale(&gauge, stream_id).await {
                 out.push(gauge.key.clone());
             }
         }
         out
+    }
+
+    /// How many files a gauge must have scanned in one capture to count as
+    /// baselined: the **current tree size, capped at `TREE_SWEEP_FILE_THRESHOLD`**.
+    ///
+    /// Relative to the tree, not absolute, for two reasons:
+    /// - a fixed bar (100) would leave every gauge in a **sub-100-file repo** forever
+    ///   "un-baselined" — re-scanning the whole tree on every boot;
+    /// - capping at the threshold stops a **large repo** re-baselining every time a
+    ///   file is added: once a gauge has scanned ≥ threshold files it has covered the
+    ///   tree, and subsequent growth is handled incrementally by delta captures
+    ///   (whose facts the per-path fold carries forward). `873 >= 100` stays true as
+    ///   the tree grows to 874, 875, …
+    async fn baseline_bar(&self, stream_id: i64) -> i64 {
+        let size = match self
+            .snapshot_store
+            .latest_snapshot_id_for_stream(StreamId::new(stream_id))
+            .await
+        {
+            Ok(Some(sid)) => self
+                .snapshot_store
+                .tree_at(sid)
+                .await
+                .map(|t| t.len() as i64)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        size.min(TREE_SWEEP_FILE_THRESHOLD as i64)
     }
 
     /// Whether ONE gauge's facts were computed by logic that has since changed — its
@@ -1121,14 +1164,20 @@ impl MetricsService {
     }
 
     /// Run every enabled `on-snapshot` gauge against the just-captured snapshot.
-    async fn run_snapshot_gauges(&self, stream_id: StreamId, snapshot_id: i64) {
+    /// `pub(crate)` so [`crate::Services::rebuild_metric_baseline`] can drive it
+    /// directly (and thus test the boot path end to end, tsk50).
+    pub(crate) async fn run_snapshot_gauges(
+        &self,
+        stream_id: StreamId,
+        snapshot_id: i64,
+    ) -> SweepReport {
         let gauges: Vec<ResolvedGauge> = self
             .resolved_gauges()
             .into_iter()
             .filter(|g| g.trigger == "on-snapshot")
             .collect();
         if gauges.is_empty() {
-            return;
+            return SweepReport::default();
         }
         // Build the snapshot file map once and share it across every gauge of
         // this run via an Arc (no per-gauge clone of the whole map).
@@ -1137,7 +1186,7 @@ impl MetricsService {
             .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
             .await;
         self.run_gauge_sweep(&gauges, &ctx, files, stream_id.value())
-            .await;
+            .await
     }
 
     /// Run `gauges` over one file map, reporting progress when it's a whole-tree
@@ -1149,7 +1198,33 @@ impl MetricsService {
         ctx: &GaugeRunContext,
         files: Arc<HashMap<String, String>>,
         stream_val: i64,
-    ) {
+    ) -> SweepReport {
+        // Idempotency: skip a gauge that already has a `done` capture for THIS
+        // snapshot at its current fingerprint (tsk50). Otherwise a re-delivered
+        // snapshot event — or the direct baseline run PLUS the event loop reacting to
+        // the same snapshot — would tree-sitter-parse the whole tree twice (minutes of
+        // CPU). The manual `run_metric` path doesn't come through here, so an explicit
+        // "run now" still runs.
+        let mut to_run: Vec<&ResolvedGauge> = Vec::new();
+        for g in gauges {
+            let already = match (ctx.snapshot_id, self.fact_store.as_ref()) {
+                (Some(snap), Some(facts)) => {
+                    let fp = gauge_fingerprint(g, &self.script_base_dir(g));
+                    facts
+                        .gauge_done_for_snapshot(&g.key, snap, fp.as_deref())
+                        .await
+                        .unwrap_or(false)
+                }
+                _ => false,
+            };
+            if !already {
+                to_run.push(g);
+            }
+        }
+        if to_run.is_empty() {
+            return SweepReport::default();
+        }
+
         // A WHOLE-TREE sweep (the baseline) tree-sitter-parses every file for every
         // gauge — minutes of CPU. Track it as a background task so the user can see
         // what oxplow is doing and why a core is pinned (tsk48). An ordinary delta
@@ -1169,7 +1244,7 @@ impl MetricsService {
         });
 
         let mut failed: Vec<String> = Vec::new();
-        for (i, g) in gauges.iter().enumerate() {
+        for (i, g) in to_run.iter().enumerate() {
             if let (Some(bts), Some(t)) = (tracked, task.as_ref()) {
                 bts.update(
                     &t.id,
@@ -1177,10 +1252,10 @@ impl MetricsService {
                         label: Some(format!(
                             "Computing code metrics ({}/{}) — {}",
                             i + 1,
-                            gauges.len(),
+                            to_run.len(),
                             g.key
                         )),
-                        progress: Some(Some(i as f64 / gauges.len() as f64)),
+                        progress: Some(Some(i as f64 / to_run.len() as f64)),
                         ..Default::default()
                     },
                 );
@@ -1197,7 +1272,7 @@ impl MetricsService {
             if failed.is_empty() {
                 bts.complete(
                     &t.id,
-                    Some(serde_json::json!({ "gauges": gauges.len(), "files": files.len() })),
+                    Some(serde_json::json!({ "gauges": to_run.len(), "files": files.len() })),
                 );
             } else {
                 // Do NOT silently succeed. A failed gauge leaves its metric reading
@@ -1207,12 +1282,16 @@ impl MetricsService {
                     format!(
                         "{} of {} gauges failed: {}",
                         failed.len(),
-                        gauges.len(),
+                        to_run.len(),
                         failed.join(", ")
                     ),
                     None,
                 );
             }
+        }
+        SweepReport {
+            ran: to_run.len(),
+            failed,
         }
     }
 
@@ -2238,6 +2317,92 @@ def transform(input):
             branch: None,
             effort_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn rebuild_metric_baseline_reads_the_whole_repo_end_to_end() {
+        // THE test that would have caught all four metrics bugs (tsk47/48/49) without a
+        // restart: real files on disk → full-tree snapshot → every gauge → fold →
+        // repo-wide headline, driven through the same `rebuild_metric_baseline` boot
+        // uses. It runs TWO gauges sharing `oxplow.ast_hit` — the exact shape tsk49
+        // hid in — so a single-gauge unit test could not have found it.
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        svc.metrics
+            .set_metrics_enabled(
+                &[
+                    "oxplow.rust.unsafe_blocks".into(),
+                    "oxplow.ts.console_calls".into(),
+                ],
+                true,
+            )
+            .await
+            .unwrap();
+
+        let write = |rel: &str, body: &str| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        write(
+            "src/a.rs",
+            "fn a() { unsafe { x(); } }\nfn b() { unsafe { y(); } }\n",
+        );
+        write("src/b.rs", "fn c() { let _z = 1; }\n");
+        write("web/app.ts", "console.log(1);\nconsole.error(2);\n");
+        write("web/other.ts", "export const x = 1;\n");
+
+        let report = svc.rebuild_metric_baseline(true).await.unwrap();
+        assert!(report.ran, "a forced rebuild must run");
+        assert!(
+            report.failed.is_empty(),
+            "no gauge should fail: {:?}",
+            report.failed
+        );
+
+        // Both read the WHOLE repo from a single baseline — the numbers that read 0
+        // (unsafe under semi-additive) / empty (console under the shared-measure bug).
+        let unsafe_spec = svc
+            .fact_store
+            .get_spec("oxplow.rust.unsafe_blocks")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            svc.metric_engine
+                .headline_for_spec(&unsafe_spec)
+                .await
+                .unwrap(),
+            Some(2.0),
+            "2 unsafe blocks across the tree"
+        );
+        let console_spec = svc
+            .fact_store
+            .get_spec("oxplow.ts.console_calls")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            svc.metric_engine
+                .headline_for_spec(&console_spec)
+                .await
+                .unwrap(),
+            Some(2.0),
+            "console_calls reads the whole repo — the bug that took four restarts"
+        );
+
+        // A NON-forced rebuild on the now-warm repo is a no-op: every gauge has
+        // scanned the whole tree at its current fingerprint, so nothing needs redoing.
+        // This is the guard against the every-boot baseline loop.
+        let warm = svc.rebuild_metric_baseline(false).await.unwrap();
+        assert!(!warm.ran, "a warm, up-to-date repo must not re-baseline");
+        assert_eq!(
+            svc.metric_engine
+                .headline_for_spec(&console_spec)
+                .await
+                .unwrap(),
+            Some(2.0)
+        );
     }
 
     #[tokio::test]

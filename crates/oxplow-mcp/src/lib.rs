@@ -221,6 +221,14 @@ pub struct RunMetricParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RebuildMetricsParams {
+    /// Rebuild even when no gauge looks out of date (skips the "is a baseline
+    /// needed?" check). Defaults to false.
+    #[serde(default)]
+    pub force: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RecordMetricParams {
     /// Metric definition key (must already exist — see list_metric_definitions).
     pub key: String,
@@ -2107,6 +2115,26 @@ impl OxplowMcp {
             .await
             .map_err(|e| McpError::invalid_params(e, None))?;
         json_result(&serde_json::json!({ "key": params.0.key, "facts_recorded": count }))
+    }
+
+    #[tool(
+        description = "Rebuild code metrics over the WHOLE tree. Captures a full-tree snapshot \
+            and runs every un-baselined gauge over it — the same baseline boot runs, but on \
+            demand, so you can refresh tree metrics (unsafe blocks, complexity, TODOs, custom \
+            gauges) without restarting oxplow. Returns whether it ran, how many gauges ran, and \
+            any that FAILED (a failed gauge leaves its metric stale/empty). Pass `force: true` to \
+            rebuild even when nothing looks out of date."
+    )]
+    async fn rebuild_metrics(
+        &self,
+        params: Parameters<RebuildMetricsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let report = self
+            .services
+            .rebuild_metric_baseline(params.0.force)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        json_result(&report)
     }
 
     #[tool(

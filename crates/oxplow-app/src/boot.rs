@@ -341,26 +341,16 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // every path via the normal event path. No-op once the fold has facts, so this
     // costs nothing on a warm boot.
     {
-        let metrics = state.metrics.clone();
-        let snapshot_svc = snapshot_svc.clone();
-        let stream_val = snapshot_svc.stream_id().value();
+        let state = state.clone();
         tokio::spawn(async move {
-            if !metrics.needs_tree_baseline(stream_val).await {
-                return;
-            }
-            tracing::info!("metric tree baseline: capturing a full-tree snapshot");
-            match snapshot_svc.enqueue_full_tree().await {
-                Ok(n) => {
-                    if let Err(e) = snapshot_svc
-                        .request_snapshot(crate::events::SnapshotSourceKind::Startup)
-                        .await
-                    {
-                        tracing::warn!(error = %e, "metric tree baseline: snapshot failed");
-                    } else {
-                        tracing::info!(files = n, "metric tree baseline: captured");
-                    }
-                }
-                Err(e) => tracing::warn!(error = %e, "metric tree baseline: sweep failed"),
+            match state.rebuild_metric_baseline(false).await {
+                Ok(r) if r.ran => tracing::info!(
+                    gauges = r.gauges_run,
+                    failed = ?r.failed,
+                    "metric tree baseline: complete",
+                ),
+                Ok(_) => tracing::debug!("metric tree baseline: nothing to do"),
+                Err(e) => tracing::warn!(error = %e, "metric tree baseline failed"),
             }
         });
     }

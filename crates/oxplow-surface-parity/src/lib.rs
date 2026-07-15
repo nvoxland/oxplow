@@ -139,6 +139,7 @@ pub const MANIFEST: &[Capability] = &[
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
     // compute via config + the runner, not ad-hoc IPC.
     agent("run_metric"),
+    agent("rebuild_metrics"),
     agent("record_metric"),
     agent("get_metric_summary"),
     agent("metric_breakdown"),

@@ -1158,6 +1158,39 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Whether a producer already has a `done` capture for `snapshot_id` at exactly
+    /// `version` (its current fingerprint). The idempotency guard for a whole-tree
+    /// sweep (tsk50): a re-delivered snapshot event — or a direct baseline run *plus*
+    /// the event loop reacting to the same snapshot — must not re-scan the tree.
+    /// `version = None` always returns `false` (can't confirm the logic matches, so
+    /// don't skip).
+    pub async fn gauge_done_for_snapshot(
+        &self,
+        producer: &str,
+        snapshot_id: i64,
+        version: Option<&str>,
+    ) -> Result<bool, DomainError> {
+        let Some(version) = version else {
+            return Ok(false);
+        };
+        let producer = producer.to_string();
+        let version = version.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM metric_capture
+                        WHERE producer = ?1 AND snapshot_id = ?2
+                          AND status = 'done' AND producer_version = ?3
+                     )",
+                    params![producer, snapshot_id, version],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|n| n != 0)
+            })
+            .await
+    }
+
     /// The largest tree a producer has actually **scanned to completion** — the max
     /// `file_snapshot` count over the snapshots of its `done` captures in this stream.
     /// 0 when it has never completed a snapshot-backed capture.
