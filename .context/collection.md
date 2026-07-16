@@ -403,15 +403,25 @@ a hang.
 >    the junit ingest on EVERY run, naming "a multi-MB lcov parse" as the cause.
 >    Fixed by detaching the recording from the hook response…
 > 3. **tsk88** — …at which point the same multi-MB lcov parse died at the 5s
->    *sandbox* budget instead. Same symptom (`oxplow.coverage` never got a fact),
->    one layer down. The lcov plugin was also quadratic per file (`+= [$n]` in a
->    `reduce` copies the growing array — one 4783-line file cost ~11M element
->    copies); it's `map`-based and linear now, pinned by
->    `lcov_plugin_cost_stays_linear_in_lines_per_file`.
+>    *sandbox* budget instead: one layer down, and **intermittent** rather than
+>    total. The real parse takes ~2.8s against a 5s budget, so it failed only
+>    under load — `metric_capture` showed **11 `done` (196 facts each) against 7
+>    `failed`**, i.e. ~39% of runs silently lost their coverage. The lcov plugin
+>    was also quadratic per file (`+= [$n]` in a `reduce` copies the growing array
+>    — one 4783-line file cost ~11M element copies); it's `map`-based and linear
+>    now, pinned by `lcov_plugin_cost_stays_linear_in_lines_per_file`.
 >
 > The lesson for any new budget: **size it against a whole-workspace report in a
 > DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
 > actually run), and remember that a timeout here is a diagnostic, not a limit.
+>
+> **And a lesson about reading the evidence:** tsk88 was first written up as
+> "coverage never got a fact", borrowing tsk62's wording. One `GROUP BY status`
+> over `metric_capture` disproved it. *Intermittent* was the stronger clue anyway
+> — a marginal budget fails under load, which is exactly what a 60/40 split looks
+> like, whereas "never" would have pointed somewhere else entirely. When a
+> producer looks broken, **query `metric_capture` for its `status` mix before
+> describing the failure**; "always" and "sometimes" have different causes.
 
 **Container `input` kinds** — how the host pre-parses the report before the
 transform (all yield a JSON value): `text` (raw string), `json`, `xml`
