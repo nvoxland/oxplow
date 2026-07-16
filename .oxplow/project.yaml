@@ -89,6 +89,31 @@ measures:
   unit: count
   temporalSemantics: semi-additive
   captureScope: per-path
+- key: repo.rust_dyn
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.file_imports
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.innerhtml_assign
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.ts_hooks
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.hardcoded_secrets
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
 gauges:
 # ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
 # bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
@@ -161,6 +186,31 @@ gauges:
   trigger: on-snapshot
   emits: [repo.eval_usage]
   compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eval.star }
+- key: repo.scan_dyn
+  title: Rust dyn dispatch scan
+  trigger: on-snapshot
+  emits: [repo.rust_dyn]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_dyn.star }
+- key: repo.scan_imports
+  title: TS import scan
+  trigger: on-snapshot
+  emits: [repo.file_imports]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_imports.star }
+- key: repo.scan_innerhtml
+  title: innerHTML assignment scan
+  trigger: on-snapshot
+  emits: [repo.innerhtml_assign]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_innerhtml.star }
+- key: repo.scan_hooks
+  title: React hook scan
+  trigger: on-snapshot
+  emits: [repo.ts_hooks]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_hooks.star }
+- key: repo.scan_secrets
+  title: Hardcoded-secret scan
+  trigger: on-snapshot
+  emits: [repo.hardcoded_secrets]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_secrets.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
@@ -334,6 +384,65 @@ metrics:
   displayKind: gauge
   category: static-quality
   description: "Largest parameter list of any function in the tree."
+- key: repo.rust_dyn
+  title: dyn dispatch usages
+  sourceMeasure: repo.rust_dyn
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: rust
+  description: "`dyn Trait` dynamic-dispatch usages — runtime-dispatch / indirection signal."
+- key: repo.total_imports
+  title: Total imports
+  sourceMeasure: repo.file_imports
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "Total `import` statements across TS files — module-coupling trend."
+- key: repo.max_file_imports
+  title: Most imports in a file
+  sourceMeasure: repo.file_imports
+  aggregation: max
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "Import count of the most-coupled TS file (fan-out hotspot)."
+- key: repo.innerhtml_assign
+  title: innerHTML assignments
+  sourceMeasure: repo.innerhtml_assign
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "`x.innerHTML = …` assignments — XSS-injection surface."
+- key: repo.ts_hooks
+  title: React hook calls
+  sourceMeasure: repo.ts_hooks
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "React hook call sites (useState/useEffect/useMemo/…) — re-render/complexity density."
+- key: repo.hardcoded_secrets
+  title: Hardcoded secrets
+  sourceMeasure: repo.hardcoded_secrets
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  description: "String literals matching AWS/GitHub/Slack/PEM/Google secret shapes — should be 0."
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros
