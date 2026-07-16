@@ -115,6 +115,21 @@ measures:
   unit: count
   temporalSemantics: semi-additive
   captureScope: per-path
+- key: repo.hardcoded_colors
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.css_important
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.inline_styles
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
 gauges:
 # ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
 # bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
@@ -212,6 +227,21 @@ gauges:
   trigger: on-snapshot
   emits: [repo.hardcoded_secrets]
   compute: { runtime: starlark, entryFile: oxplow/gauges/repo_secrets.star }
+- key: repo.scan_hardcoded_colors
+  title: Hardcoded-color scan
+  trigger: on-snapshot
+  emits: [repo.hardcoded_colors]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_hardcoded_colors.star }
+- key: repo.scan_css_important
+  title: css !important scan
+  trigger: on-snapshot
+  emits: [repo.css_important]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_css_important.star }
+- key: repo.scan_inline_styles
+  title: Inline style-object scan
+  trigger: on-snapshot
+  emits: [repo.inline_styles]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_inline_styles.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
@@ -444,6 +474,35 @@ metrics:
   displayKind: gauge
   category: static-quality
   description: "String literals matching AWS/GitHub/Slack/PEM/Google secret shapes — should be 0."
+- key: repo.hardcoded_colors
+  title: Hardcoded colors
+  sourceMeasure: repo.hardcoded_colors
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "Hex/rgb color literals in TS/TSX — should be a var(--…), see theming.md."
+- key: repo.css_important
+  title: "!important uses"
+  sourceMeasure: repo.css_important
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  description: "!important declarations — the specificity escape hatch (theming.md)."
+- key: repo.inline_styles
+  title: Inline style objects
+  sourceMeasure: repo.inline_styles
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "style={…} JSX attributes — inline-style density / migration pressure (theming.md)."
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros

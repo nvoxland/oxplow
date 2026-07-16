@@ -422,15 +422,45 @@ impl MetricsService {
         // re-seed AFTER the override-free built-ins above — dropping it left
         // target/warn_at/fail_at NULL everywhere the engine reads the spec row. A
         // disabled entry (`enabled: false`) is pruned instead of seeded.
-        for s in self.resolved_specs() {
+        let resolved = self.resolved_specs();
+        for s in &resolved {
             let res = if s.enabled {
-                facts.upsert_spec(spec_to_new_spec(&s)).await.map(|_| ())
+                facts.upsert_spec(spec_to_new_spec(s)).await.map(|_| ())
             } else {
                 facts.delete_spec(&s.key).await
             };
             if let Err(e) = res {
                 tracing::warn!(key = %s.key, error = %e, "failed to reconcile config metric spec");
             }
+        }
+        // RECONCILE REMOVALS (tsk61): a project metric/measure deleted from
+        // `.oxplow/project.yaml` entirely (not merely `enabled: false`) used to
+        // leave zombie catalog rows behind — four forever-blank gauges sat in
+        // the catalog for a week after their gauges were replaced. Project
+        // scope only: the declared config is the truth for exactly its scope.
+        let keep_specs: Vec<String> = resolved
+            .iter()
+            .filter(|s| s.scope == "project")
+            .map(|s| s.key.clone())
+            .collect();
+        match facts.delete_project_specs_not_in(keep_specs).await {
+            Ok(n) if n > 0 => {
+                tracing::info!(pruned = n, "seed: dropped undeclared project metric specs");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "seed: project spec reconciliation failed"),
+        }
+        let keep_measures: Vec<String> = resolve_measures(&global_measures, &project_measures)
+            .into_iter()
+            .filter(|rm| rm.scope == "project")
+            .map(|rm| rm.key)
+            .collect();
+        match facts.delete_project_measures_not_in(keep_measures).await {
+            Ok(n) if n > 0 => {
+                tracing::info!(pruned = n, "seed: dropped undeclared project measures");
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "seed: project measure reconciliation failed"),
         }
         (m, d)
     }
@@ -3538,6 +3568,77 @@ def transform(input):
             .expect("dimension seeded");
         assert_eq!(ep.scope, "project");
         assert_eq!(ep.vocabulary_json.as_deref(), Some("[\"list\",\"get\"]"));
+    }
+
+    #[tokio::test]
+    async fn seed_catalog_prunes_project_rows_removed_from_config() {
+        // tsk61: a project metric/measure deleted from project.yaml entirely
+        // (not merely `enabled: false`) must not linger as a zombie catalog
+        // row — four forever-blank gauges did exactly that for a week.
+        let (svc, dir) = fixture().await;
+        // Zombies: a project measure + spec that no config declares.
+        svc.fact_store
+            .upsert_measure(oxplow_db::NewMeasure {
+                scope: "project".into(),
+                ..oxplow_db::NewMeasure::new("repo.zombie", "Zombie")
+            })
+            .await
+            .unwrap();
+        let mut spec =
+            oxplow_db::NewMetricSpec::base("repo.zombie", "Zombie", "repo.zombie", "sum");
+        spec.scope = "project".into();
+        svc.fact_store.upsert_spec(spec).await.unwrap();
+        // A DECLARED project measure+metric that must survive.
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "measures:\n  - key: repo.kept\n    unit: count\n    \
+             temporalSemantics: semi-additive\nmetrics:\n  - key: repo.kept\n    \
+             title: Kept\n    sourceMeasure: repo.kept\n    aggregation: sum\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+
+        svc.metrics.seed_catalog().await;
+
+        assert!(
+            svc.fact_store
+                .get_measure("repo.zombie")
+                .await
+                .unwrap()
+                .is_none(),
+            "undeclared project measure pruned"
+        );
+        assert!(
+            svc.fact_store
+                .get_spec("repo.zombie")
+                .await
+                .unwrap()
+                .is_none(),
+            "undeclared project spec pruned"
+        );
+        assert!(
+            svc.fact_store
+                .get_measure("repo.kept")
+                .await
+                .unwrap()
+                .is_some(),
+            "declared project measure survives"
+        );
+        assert!(
+            svc.fact_store
+                .get_spec("repo.kept")
+                .await
+                .unwrap()
+                .is_some(),
+            "declared project spec survives"
+        );
+        // Built-ins are never touched by project reconciliation.
+        assert!(svc
+            .fact_store
+            .get_measure("oxplow.complexity")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

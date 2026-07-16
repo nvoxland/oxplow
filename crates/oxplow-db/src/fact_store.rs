@@ -1114,6 +1114,62 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Delete PROJECT-scope metric specs whose key is not in `keep` (tsk61).
+    /// A metric removed from `.oxplow/project.yaml` entirely (not merely
+    /// `enabled: false`) used to leave a zombie spec row that rendered as a
+    /// forever-blank gauge in the catalog. Built-in/global rows are never
+    /// touched — the declared config is only the truth for its own scope.
+    pub async fn delete_project_specs_not_in(&self, keep: Vec<String>) -> Result<u64, DomainError> {
+        self.db
+            .call(move |conn| {
+                // `NOT IN ()` isn't valid SQL — an empty keep-set means "no
+                // project metrics are declared", i.e. delete them all.
+                if keep.is_empty() {
+                    let n = conn.execute("DELETE FROM metric_spec WHERE scope = 'project'", [])?;
+                    return Ok(n as u64);
+                }
+                let placeholders = std::iter::repeat("?")
+                    .take(keep.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "DELETE FROM metric_spec
+                      WHERE scope = 'project' AND key NOT IN ({placeholders})"
+                );
+                let n = conn.execute(&sql, rusqlite::params_from_iter(keep.iter()))?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
+    /// Delete PROJECT-scope measures whose key is not in `keep` (tsk61) — the
+    /// measure-side of the same reconciliation. Facts CASCADE via
+    /// `fact.measure_id`: a measure the user removed from config is retired,
+    /// history included (the same declared-config-is-truth stance as specs).
+    pub async fn delete_project_measures_not_in(
+        &self,
+        keep: Vec<String>,
+    ) -> Result<u64, DomainError> {
+        self.db
+            .call(move |conn| {
+                if keep.is_empty() {
+                    let n = conn.execute("DELETE FROM measure WHERE scope = 'project'", [])?;
+                    return Ok(n as u64);
+                }
+                let placeholders = std::iter::repeat("?")
+                    .take(keep.len())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "DELETE FROM measure
+                      WHERE scope = 'project' AND key NOT IN ({placeholders})"
+                );
+                let n = conn.execute(&sql, rusqlite::params_from_iter(keep.iter()))?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
     /// Distinct producers of `done` captures recorded under `source` (tsk62).
     /// Seeds the zero-fill for measures whose producers are only discoverable
     /// from facts: an analyzer that has been CLEAN since day one has zero
