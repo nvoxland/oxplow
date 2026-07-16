@@ -379,6 +379,40 @@ I/O, so it's tagged lower-trust). In-process tiers run under a `SandboxBudget`
 (wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
 a hang.
 
+> ### ⚠️ The sandbox timeout bounds the CALLER'S WAIT, not the WORK (tsk88)
+>
+> `run_sandboxed` runs the script on a worker thread and `recv_timeout`s. Rust
+> can't kill a thread, so on overrun the worker is **detached and keeps burning a
+> core** until it finishes on its own. Two consequences:
+>
+> - **Tightening the budget costs CPU instead of saving it.** The caller gives up
+>   and is free to retry — and the coverage ride-along *does* retry (tsk79) — so a
+>   marginal parse means *two* workers on the same input, not one.
+> - **It is not containment.** A hostile/infinite script detaches and spins
+>   forever; the budget only hides it from the caller. Real containment needs a
+>   step-limited interpreter or a killable child process. Until then the number is
+>   a **diagnostic ceiling for honest-but-slow scripts** (120s, matching
+>   `GAUGE_TIMEOUT`) and must be set generously enough that honest ones never trip.
+>
+> **This same shape of bug has now bitten three times** — a fixed timeout sized
+> for a small input silently killing whole-workspace work, and reporting it as
+> nothing rather than as a failure:
+> 1. **tsk47** — gauges timed out at 5s on every full-tree scan and wrote nothing
+>    (`oxplow.ts.console_calls` read 0 against 137 real calls).
+> 2. **tsk62** — the 5s *hook response* budget cancelled the coverage step after
+>    the junit ingest on EVERY run, naming "a multi-MB lcov parse" as the cause.
+>    Fixed by detaching the recording from the hook response…
+> 3. **tsk88** — …at which point the same multi-MB lcov parse died at the 5s
+>    *sandbox* budget instead. Same symptom (`oxplow.coverage` never got a fact),
+>    one layer down. The lcov plugin was also quadratic per file (`+= [$n]` in a
+>    `reduce` copies the growing array — one 4783-line file cost ~11M element
+>    copies); it's `map`-based and linear now, pinned by
+>    `lcov_plugin_cost_stays_linear_in_lines_per_file`.
+>
+> The lesson for any new budget: **size it against a whole-workspace report in a
+> DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
+> actually run), and remember that a timeout here is a diagnostic, not a limit.
+
 **Container `input` kinds** — how the host pre-parses the report before the
 transform (all yield a JSON value): `text` (raw string), `json`, `xml`
 (explicit ordered tree `{tag, attrs, text?, children}`), `lcov` (array of

@@ -1156,6 +1156,90 @@ def transform(input):
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
+    /// Per-file DA counts mirroring this repo's real whole-workspace `cargo cov`
+    /// report: 196 SF records / ~64k DA lines, **heavily skewed** — the five
+    /// biggest carry 4783 / 3866 / 2981 / 2165 / 2064 entries.
+    ///
+    /// The skew is the whole point. The cost being fixed was quadratic **per
+    /// file**, so a uniform many-small-files report parses fine and hides the
+    /// bug; one 4.8k-line file is what detonates it.
+    fn workspace_lcov_sizes() -> Vec<usize> {
+        let mut sizes = vec![4783, 3866, 2981, 2165, 2064];
+        sizes.extend(std::iter::repeat_n(250, 191));
+        sizes
+    }
+
+    fn lcov_with_sizes(sizes: &[usize]) -> String {
+        let mut s = String::new();
+        for (f, &lines) in sizes.iter().enumerate() {
+            s.push_str(&format!("SF:src/generated/mod_{f}.rs\n"));
+            for l in 1..=lines {
+                s.push_str(&format!("DA:{l},{}\n", l % 3));
+            }
+            s.push_str("end_of_record\n");
+        }
+        s
+    }
+
+    #[test]
+    fn lcov_plugin_parses_a_whole_workspace_report_without_timing_out() {
+        // tsk88: the real report here is 5.1MB / 196 files / 64k DA lines, and the
+        // lcov parse landed right at the 5s SandboxBudget — so it timed out
+        // intermittently under load and coverage was silently NEVER ingested for
+        // this project. Every overrun also detached a jq worker that kept burning
+        // a core (Rust can't kill a thread), and the ride-along's retry spawned a
+        // second: the budget bounded the wait, not the work.
+        //
+        // Deliberately asserts *completion under the real default budget* rather
+        // than a wall-clock number — the failure mode was a timeout, and a
+        // wall-clock assertion on a shared CI box is a flake generator.
+        let sizes = workspace_lcov_sizes();
+        let out = CollectorRegistry::with_builtins()
+            .run("lcov", &lcov_with_sizes(&sizes))
+            .expect("a whole-workspace report parses under the default budget");
+
+        let parsed = out.as_coverage().unwrap();
+        assert_eq!(parsed.files.len(), sizes.len(), "every record parsed");
+        let biggest = parsed
+            .files
+            .get("src/generated/mod_0.rs")
+            .expect("the 4783-line file present");
+        assert_eq!(biggest.instrumented.len(), 4783);
+        // Covered = hits > 0, i.e. every line except the multiples of 3.
+        assert_eq!(biggest.covered.len(), 4783 - 4783 / 3);
+    }
+
+    #[test]
+    fn lcov_plugin_cost_stays_linear_in_lines_per_file() {
+        // The original built each file's line lists with `.instrumented += [$n]`
+        // inside a reduce — quadratic PER FILE. Doubling the lines in ONE file
+        // quadrupled the work, so a single big generated file could blow any
+        // budget on its own. Ratio-based rather than absolute: it's the SHAPE of
+        // the curve that regressed, and a ratio survives a slow machine.
+        let time_one_file = |lines: usize| {
+            let content = lcov_with_sizes(&[lines]);
+            let reg = CollectorRegistry::with_builtins();
+            let started = std::time::Instant::now();
+            reg.run("lcov", &content).expect("parses");
+            started.elapsed()
+        };
+        // Warm the compile path so it isn't charged to the first sample.
+        let _ = time_one_file(1_000);
+
+        // 4x the lines rather than 2x, to keep the two hypotheses far apart:
+        // linear lands near 4x, quadratic near 16x, so the 8x line has ~2x
+        // margin either side. (At 2x the measured gap was 2.0 vs 3.2 against a
+        // 3.0 threshold — real, but too tight to trust on a loaded box.)
+        let base = time_one_file(5_000).max(std::time::Duration::from_millis(1));
+        let quadrupled = time_one_file(20_000);
+        let ratio = quadrupled.as_secs_f64() / base.as_secs_f64();
+        assert!(
+            ratio < 8.0,
+            "4x-ing one file's lines took {ratio:.1}x ({base:?} → {quadrupled:?}); \
+             linear is ~4x and quadratic is ~16x — an accumulator copy is back",
+        );
+    }
+
     #[test]
     fn builtin_jacoco_plugin_produces_expected_coverage() {
         let reg = CollectorRegistry::with_builtins();

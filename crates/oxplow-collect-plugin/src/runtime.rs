@@ -34,6 +34,11 @@ use crate::{CollectError, CollectorKind, CollectorOutput, MetricReport};
 /// Resource limits for an in-process script run. Currently a wall-clock
 /// timeout enforced by running the engine on a worker thread; the caller
 /// returns promptly on overrun even if the worker is still unwinding.
+///
+/// ⚠️ **The timeout bounds the CALLER's wait, not the WORK** — see
+/// [`run_sandboxed`]. A too-tight budget therefore doesn't save CPU; it burns
+/// more of it, by returning "failed" while the worker plays on and letting the
+/// caller start another.
 #[derive(Debug, Clone, Copy)]
 pub struct SandboxBudget {
     pub timeout: Duration,
@@ -42,7 +47,22 @@ pub struct SandboxBudget {
 impl Default for SandboxBudget {
     fn default() -> Self {
         SandboxBudget {
-            timeout: Duration::from_secs(5),
+            // A **runaway catch**, not a latency SLO (tsk88). The old 5s was
+            // sized for "a report parser over one file" and was wrong the same
+            // way the gauge budget was wrong in tsk47: a real whole-workspace
+            // report is ~5MB / 100k lines, and the interpreter runs ~6x slower
+            // in the debug build the app actually ships to developers. That put
+            // the real lcov parse right at the 5s line, so it timed out
+            // *intermittently under load* — coverage was silently never ingested
+            // here, and each overrun detached a jq thread that kept burning a
+            // core (142 threads / ~58% CPU by the time it was caught).
+            //
+            // Nothing waits on this: the collection ride-along is a background
+            // PostToolUse hook, and the control plane already caps its own hook
+            // handling so the agent is never stalled. So the only job left for
+            // this number is to stop a genuinely infinite script — 120s, same
+            // ceiling gauges got.
+            timeout: Duration::from_secs(120),
         }
     }
 }
@@ -58,6 +78,21 @@ impl SandboxBudget {
 /// if it does not finish within `budget.timeout`. On timeout the worker is
 /// detached (it finishes on its own); the caller is never blocked past the
 /// deadline.
+///
+/// ⚠️ **A timeout does not stop the work** (tsk88). Rust can't kill a thread, so
+/// the detached worker keeps running — and keeps burning a core — until it
+/// finishes on its own. This has two consequences worth remembering before
+/// tuning `budget`:
+///
+/// 1. **Tightening the timeout costs CPU rather than saving it.** The caller
+///    gives up, reports a failure, and is free to try again — so a retry (the
+///    coverage ride-along has one) means *two* workers on the same input, not
+///    one. That's how a 5s budget on a 4-ish-second parse produced 142 threads.
+/// 2. **It is not a defence against a hostile plugin.** An infinite script
+///    detaches and spins forever; the budget only hides it from the caller. Real
+///    containment needs a step-limited interpreter or a child process we can
+///    kill. Until then this is a *diagnostic* ceiling for honest-but-slow
+///    scripts, and should be set generously enough that honest ones never hit it.
 pub fn run_sandboxed<F>(budget: &SandboxBudget, f: F) -> Result<Value, CollectError>
 where
     F: FnOnce() -> Result<Value, CollectError> + Send + 'static,
