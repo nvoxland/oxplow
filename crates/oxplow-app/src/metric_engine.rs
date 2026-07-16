@@ -842,11 +842,26 @@ impl MetricEngine {
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
         // captures never inject zero points.
-        let producers: std::collections::BTreeSet<String> = facts
+        let mut producers: std::collections::BTreeSet<String> = facts
             .iter()
             .filter(|f| filter.matches(f))
             .map(|f| f.producer.clone())
             .collect();
+        // Chicken-and-egg for the analysis measure (tsk62): an analyzer that
+        // has been CLEAN since day one has zero lint_hit facts, so the
+        // fact-derived set is empty and its "ran, found nothing" captures
+        // could never zero-fill — `oxplow.analysis.*` read blank forever
+        // instead of 0. Analyzer names are dynamic (clippy/eslint/…), but
+        // their report-tier captures all carry `source = 'analysis-report'`,
+        // so seed from those. Measure-keyed on purpose — no other built-in
+        // measure has a "clean forever" empty-capture semantics to surface.
+        if producers.is_empty() && measure_key == "oxplow.lint_hit" {
+            producers.extend(
+                self.facts
+                    .producers_for_capture_source("analysis-report")
+                    .await?,
+            );
+        }
 
         // A PARTIAL-capture measure's captures each speak for only part of the
         // population — a `per-path` tree gauge's snapshot delta, or a `per-subject`
@@ -1821,6 +1836,29 @@ mod tests {
             captured_at: Some(ts(captured_at)),
             ..NewMetricCapture::done(stream, "metrics", "builtin")
         }
+    }
+
+    #[tokio::test]
+    async fn clean_analyzer_reads_zero_not_blank() {
+        // tsk62: an analyzer that has been clean since day one has ZERO
+        // `oxplow.lint_hit` facts, so fact-derived producer discovery finds
+        // nothing and its "ran, found nothing" captures could never zero-fill
+        // — `oxplow.analysis.*` read blank forever instead of 0. The seed from
+        // `source = 'analysis-report'` captures fixes exactly this.
+        let (engine, facts, _complexity) = engine_fixture().await;
+        let mut cap = NewMetricCapture::done(1, "clippy", "analysis-report");
+        cap.captured_at = Some(ts("2026-06-30T10:00:00Z"));
+        facts.record_facts(cap, Vec::new()).await.unwrap();
+
+        let mut spec = NewMetricSpec::base("acme.warnings", "Warnings", "oxplow.lint_hit", "count");
+        spec.filter_json = Some(r#"{"severity":"warning"}"#.into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.warnings").await.unwrap().unwrap();
+        assert_eq!(
+            engine.headline_for_spec(&spec).await.unwrap(),
+            Some(0.0),
+            "a clean analyzer run must read 0, not blank"
+        );
     }
 
     #[tokio::test]

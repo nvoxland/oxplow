@@ -116,6 +116,19 @@ hook + MCP wiring):
   exec. **Background caveat:** the PostToolUse hook fires when the Bash call
   *returns*; a **backgrounded** `test:collect` returns at launch (before its
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
+  **The recording runs DETACHED from the hook response (tsk62):**
+  `bounded_hook_response` drops the handler future at its 5s budget, and a
+  test-run's recording can legitimately outlive it (a debug-build junit ingest
+  + a multi-MB lcov parse) — run inline, the coverage step after the junit was
+  silently cancelled on EVERY run, so `oxplow.coverage` never got a fact. The
+  control plane now spawns `on_post_tool_use` on its own task (always
+  completes) and waits ≤2.5s for the nudge message; a slow run's nudge is
+  still persisted (`persist_nudge`), only the immediate injection is skipped.
+  **Clippy needs `bun run lint:collect`:** nothing else writes
+  `target/clippy.json` (plain `cargo clippy` prints human output), so the
+  `oxplow.analysis.*` metrics only populate when clippy runs via the
+  `lint:collect` script (JSON to the configured report path; also in
+  `analysisRunPatterns` so the `bun run` command string is detected).
   **Staleness is the router:** a run only regenerates its own stack's/tool's
   report(s), so the mtime guard (`report_is_stale`, floor = effort start)
   naturally excludes the other stacks' stale reports — a `bun test` run

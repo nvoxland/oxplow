@@ -1114,6 +1114,29 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Distinct producers of `done` captures recorded under `source` (tsk62).
+    /// Seeds the zero-fill for measures whose producers are only discoverable
+    /// from facts: an analyzer that has been CLEAN since day one has zero
+    /// `oxplow.lint_hit` facts, so fact-derived producer discovery finds
+    /// nothing and its "ran, found nothing" captures could never zero-fill —
+    /// the metric read blank forever instead of 0.
+    pub async fn producers_for_capture_source(
+        &self,
+        source: &str,
+    ) -> Result<Vec<String>, DomainError> {
+        let source = source.to_string();
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT producer FROM metric_capture
+                      WHERE source = ?1 AND status = 'done'",
+                )?;
+                let rows = stmt.query_map(params![source], |r| r.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// One representative fact per distinct `(producer, rule, severity,
     /// dims_json)` slice of a measure (tsk75). The zero-splice fallback in the
     /// effort delta reads only needs to learn WHICH producers emit a metric's

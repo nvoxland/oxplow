@@ -13,6 +13,7 @@
     "test:rust": "cargo test --workspace",
     "test:ts": "bun run --cwd apps/desktop test",
     "test:collect": "cargo cov && bun run --cwd apps/desktop test:junit",
+    "lint:collect": "cargo clippy --workspace --all-targets --message-format=json -- -D warnings > target/clippy.json",
     "tauri:dev": "OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
     "e2e": "bunx playwright test"

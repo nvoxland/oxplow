@@ -571,19 +571,45 @@ async fn handle_hook_inner(
             attribute_effort_file_edit(&ctx, thread_id, body).await;
 
             // Collection: detect a test-run Bash command, record it
-            // (observed), and ride along to coverage if configured.
+            // (observed), and ride along to coverage/analysis if configured.
             // Best-effort — never fail the hook on a collection error.
-            let collection_nudge = match ctx
-                .services
-                .collection
-                .on_post_tool_use(thread_id, &envelope_for_resume.payload_json)
-                .await
+            //
+            // DETACHED (tsk62): `bounded_hook_response` DROPS the handler
+            // future at the 5s budget, and a test-run's recording can
+            // legitimately outlive it (a debug-build junit ingest plus a
+            // multi-MB lcov parse). Run inline, the coverage step after the
+            // junit landed was silently cancelled on EVERY run — the 80%-target
+            // coverage gauge never got a single fact. The work now runs on its
+            // own task that always completes; the response waits briefly for
+            // the nudge message so the fast path still steers the agent
+            // inline. On timeout the nudge is still persisted by the task
+            // (`persist_nudge`) — only the immediate injection is skipped.
+            let services = ctx.services.clone();
+            let collection_thread = *thread_id;
+            let payload = envelope_for_resume.payload_json.clone();
+            let (nudge_tx, nudge_rx) = tokio::sync::oneshot::channel();
+            tokio::spawn(async move {
+                let nudge = match services
+                    .collection
+                    .on_post_tool_use(&collection_thread, &payload)
+                    .await
+                {
+                    Ok(nudge) => nudge,
+                    Err(err) => {
+                        warn!(?err, "collection post-tool-use failed");
+                        None
+                    }
+                };
+                let _ = nudge_tx.send(nudge);
+            });
+            let collection_nudge = match tokio::time::timeout(
+                std::time::Duration::from_millis(2500),
+                nudge_rx,
+            )
+            .await
             {
-                Ok(nudge) => nudge,
-                Err(err) => {
-                    warn!(?err, "collection post-tool-use failed");
-                    None
-                }
+                Ok(Ok(nudge)) => nudge,
+                _ => None,
             };
 
             // ExitPlanMode just settled — if the thread was promoted

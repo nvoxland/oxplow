@@ -44,9 +44,12 @@ or exact mechanics.
   `bun test`): it's the only run that emits the JUnit + lcov reports
   oxplow parses into the effort's coverage panel. See
   `.context/collection.md`.
-- **After editing any `.rs`** run `cargo fmt --all` then `cargo clippy
-  --workspace --all-targets -- -D warnings` before ending the turn — CI
-  treats warnings as errors. Don't `#[allow(...)]` a real lint.
+- **After editing any `.rs`** run `cargo fmt --all` then `bun run
+  lint:collect` before ending the turn — CI treats warnings as errors,
+  and `lint:collect` (clippy with `-D warnings`, JSON to
+  `target/clippy.json`) is what feeds the `oxplow.analysis.*` metrics.
+  On failure re-run plain `cargo clippy --workspace --all-targets -- -D
+  warnings` for readable diagnostics. Don't `#[allow(...)]` a real lint.
 - **Task-filing discipline.** File a durable `in_progress` task before
   editing; one user-visible concern per row; multiple independent asks
   in one prompt → multiple tasks; every new (non-correction) ask gets
