@@ -1132,7 +1132,41 @@ impl SqliteFactStore {
                 // are two independent trees — one's scan must never supersede the
                 // other's facts for the same path.
                 let sql = format!(
-                    "WITH restated AS (
+                    "WITH rel AS (
+                       -- Producers whose captures can possibly matter to THIS measure.
+                       -- The fold partitions by producer and a fact only survives via
+                       -- its OWN capture, so captures of unrelated producers can never
+                       -- change the result — enumerating them just made every read pay
+                       -- for every gauge's history (0.7s/read; ~20 reads blew the 5s
+                       -- UserPromptSubmit hook budget).
+                       SELECT DISTINCT c2.producer AS producer
+                         FROM fact f2 JOIN metric_capture c2 ON c2.id = f2.capture_id
+                        WHERE f2.measure_id = ?1
+                     ),
+                     anchor_tree AS (
+                       -- The reconstructed tree per DISTINCT full-capture anchor
+                       -- (`tree_at` semantics: latest row per path <= the anchor,
+                       -- tombstones included). Reconstructed once per anchor, not per
+                       -- capture — a boot baseline anchors ~30 gauges to one snapshot.
+                       SELECT stream_id, anchor, path, storage FROM (
+                         SELECT a.stream_id AS stream_id, a.snapshot_id AS anchor,
+                                fs.path AS path, fs.storage AS storage,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY a.stream_id, a.snapshot_id, fs.path
+                                  ORDER BY fs.snapshot_id DESC, fs.id DESC
+                                ) AS rn
+                           FROM (SELECT DISTINCT stream_id, snapshot_id
+                                   FROM metric_capture
+                                  WHERE scan_kind = 'full' AND status = 'done'
+                                    AND snapshot_id IS NOT NULL
+                                    AND producer IN (SELECT producer FROM rel)) a
+                           JOIN file_snapshot fs
+                             ON fs.stream_id = a.stream_id
+                            AND fs.snapshot_id IS NOT NULL
+                            AND fs.snapshot_id <= a.snapshot_id
+                       ) WHERE rn = 1
+                     ),
+                     restated AS (
                        -- A DELTA capture (the incremental rescan) restates every path in
                        -- its own snapshot — including deletion tombstones, which is how a
                        -- removed file drops out.
@@ -1145,30 +1179,30 @@ impl SqliteFactStore {
                           AND fs.stream_id = c.stream_id
                         WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
                           AND c.scan_kind = 'delta'
+                          AND c.producer IN (SELECT producer FROM rel)
                        UNION
                        -- A FULL capture (a baseline, tsk71) restates the RECONSTRUCTED
-                       -- tree as-of its snapshot: the latest file_snapshot row per path
-                       -- <= the anchor (`tree_at` semantics, tombstones included so the
-                       -- deleted-path filter below applies). This is what lets a baseline
-                       -- anchor to an ordinary delta snapshot instead of requiring a
-                       -- fabricated full-tree one.
-                       SELECT capture_id, stream_id, producer, captured_at, path, storage
-                         FROM (
-                           SELECT c.id AS capture_id, c.stream_id AS stream_id,
-                                  c.producer AS producer, c.captured_at AS captured_at,
-                                  fs.path AS path, fs.storage AS storage,
-                                  ROW_NUMBER() OVER (
-                                    PARTITION BY c.id, fs.path
-                                    ORDER BY fs.snapshot_id DESC, fs.id DESC
-                                  ) AS tree_rn
-                             FROM metric_capture c
-                             JOIN file_snapshot fs
-                               ON fs.stream_id = c.stream_id
-                              AND fs.snapshot_id IS NOT NULL
-                              AND fs.snapshot_id <= c.snapshot_id
-                            WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
-                              AND c.scan_kind = 'full'
-                         ) WHERE tree_rn = 1
+                       -- tree as-of its snapshot — which lets a baseline anchor to an
+                       -- ordinary delta snapshot instead of a fabricated full-tree one.
+                       -- Only the LATEST full capture per (stream, producer): an older
+                       -- full capture covers a subset of a newer one's paths at an older
+                       -- captured_at, so it can never win the rank — skipping it keeps
+                       -- reads flat as forced rebuilds accumulate.
+                       SELECT c.id, c.stream_id, c.producer, c.captured_at,
+                              t.path, t.storage
+                         FROM metric_capture c
+                         JOIN anchor_tree t
+                           ON t.stream_id = c.stream_id AND t.anchor = c.snapshot_id
+                        WHERE c.scan_kind = 'full' AND c.status = 'done'
+                          AND c.producer IN (SELECT producer FROM rel)
+                          AND NOT EXISTS (
+                            SELECT 1 FROM metric_capture c3
+                             WHERE c3.stream_id = c.stream_id
+                               AND c3.producer = c.producer
+                               AND c3.scan_kind = 'full' AND c3.status = 'done'
+                               AND (c3.captured_at > c.captured_at
+                                    OR (c3.captured_at = c.captured_at AND c3.id > c.id))
+                          )
                        UNION
                        -- An ASSERTED capture (agent `record_metric`, synthetic writes)
                        -- restates exactly the paths it emitted facts for; its snapshot,
@@ -1179,6 +1213,7 @@ impl SqliteFactStore {
                          JOIN fact f ON f.capture_id = c.id
                         WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
                           AND c.status = 'done'
+                          AND c.producer IN (SELECT producer FROM rel)
                      ),
                      ranked AS (
                        SELECT capture_id, path, storage,
