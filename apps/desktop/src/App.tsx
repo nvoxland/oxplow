@@ -2813,7 +2813,7 @@ export function App() {
       } else if (ref.kind === "metrics-catalog") {
         tabs.push({
           id: ref.id,
-          label: "Metrics Catalog",
+          label: "Metric Settings",
           closable: true,
           render: () => <MetricsCatalogPage onOpenPage={navOpen} />,
         });

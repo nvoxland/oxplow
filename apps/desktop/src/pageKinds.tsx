@@ -236,7 +236,7 @@ export function pageKindLabel(kind: string): string {
     case "metric-recording":
       return "recording";
     case "metrics-catalog":
-      return "metrics catalog";
+      return "metric settings";
     case "page-analytics":
       return "page analytics";
     case "token-analytics":

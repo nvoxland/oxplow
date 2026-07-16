@@ -11,7 +11,7 @@ import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { categoryLabel, groupByCategory } from "./metricCategories.js";
+import { buildMetricSections } from "./metricCategories.js";
 import {
   DEFAULT_RANGE_KEY,
   RANGE_PRESETS,
@@ -84,9 +84,6 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
       style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
     >
       <td style={{ padding: "6px 8px", fontWeight: 600 }}>{def.title}</td>
-      <td style={{ padding: "6px 8px", fontWeight: 600, color }}>
-        {latest ? `${formatValue(latest.value)}${def.unit ? ` ${def.unit}` : ""}` : "—"}
-      </td>
       <td style={{ padding: "6px 8px" }}>
         <Sparkline
           values={samples
@@ -96,6 +93,12 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
           color={color}
         />
       </td>
+      {/* The latest value sits AFTER the sparkline because it *is* the
+          sparkline's last point — same filtered `samples`, newest first — so the
+          chart reads left-to-right into the number that terminates it (tsk82). */}
+      <td style={{ padding: "6px 8px", fontWeight: 600, color }}>
+        {latest ? `${formatValue(latest.value)}${def.unit ? ` ${def.unit}` : ""}` : "—"}
+      </td>
     </tr>
   );
 }
@@ -103,12 +106,14 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
 const sel = { fontSize: 12, width: "100%" } as const;
 
 /**
- * Recorded Metrics — the seeded definitions with latest value + trend
- * sparkline, organized as **one table per category** (Code gauges / Tests /
- * Coverage / Static analysis / Operational, via the shared `groupByCategory`)
- * under section headings, like the Catalog. A right-side panel scopes the
- * latest/trend by a preset time range (default 7 days) and branch. Rows open
- * the per-metric detail page (`metricRef`). Live on `metricSamplesChanged`.
+ * Recorded Metrics — the seeded definitions as `title · trend sparkline ·
+ * latest value` rows, organized as **one table per section** under headings, via
+ * the shared `buildMetricSections` (Code gauges / Tests / Coverage / then one
+ * top-level section **per language** for static analysis / Operational) — the
+ * same sectioning Metric Settings renders, so the two pages can't disagree
+ * (tsk81). A right-side panel scopes the latest/trend by a preset time range
+ * (default 7 days) and branch. Rows open the per-metric detail page
+ * (`metricRef`). Live on `metricSamplesChanged`.
  */
 export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
@@ -228,14 +233,19 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
             can be declared in <code>.oxplow/project.yaml</code>.
           </div>
         ) : (
-          groupByCategory(viewRows, (r) => r.def.category).map((group) => (
-            <section key={group.category ?? "other"} data-testid={`recorded-group-${group.category ?? "other"}`}>
-              <h2 style={headingStyle}>{categoryLabel(group.category)}</h2>
+          buildMetricSections(
+            viewRows,
+            (r) => r.def.category,
+            (r) => r.def.language,
+          ).map((group) => (
+            <section key={group.key} data-testid={`recorded-group-${group.key}`}>
+              <h2 style={headingStyle}>{group.label}</h2>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
                 <colgroup>
                   <col />
-                  <col style={{ width: 140 }} />
+                  {/* sparkline, then the value that terminates it */}
                   <col style={{ width: 120 }} />
+                  <col style={{ width: 140 }} />
                 </colgroup>
                 <tbody>
                   {group.entries.map((row) => (

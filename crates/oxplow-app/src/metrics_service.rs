@@ -1999,15 +1999,28 @@ fn builtin_metric_specs() -> Vec<NewMetricSpec> {
 /// `tree:.` headline — pinned by the equivalence test. The `<slug>` MUST match
 /// the `rule` the gauge script emits.
 fn builtin_ast_specs() -> Vec<NewMetricSpec> {
-    fn ast_spec(key: &str, title: &str, rule: &str, direction: &str) -> NewMetricSpec {
+    let gauges = builtin_metrics();
+    let ast_spec = |key: &str, title: &str, rule: &str, direction: &str| {
         let mut s = NewMetricSpec::base(key, title, "oxplow.ast_hit", "sum");
         s.unit = Some("count".into());
         s.filter_json = Some(format!("{{\"dim_eq\":[\"oxplow.rule\",\"{rule}\"]}}"));
         s.direction = direction.into();
         s.display_kind = "findings".into();
         s.category = Some("static-quality".into());
+        // Read the language off the GAUGE rather than restating it here: both
+        // metric surfaces section by language (Metric Settings off the gauge's,
+        // Recorded Metrics off the spec's), so a duplicated slug is a silent
+        // drift into two different groupings of the same metric. `language: ""`
+        // (the language-agnostic code gauges) stays `None` — "" is not a
+        // language, and `groupByLanguage` reads null/"" as its "General" bucket.
+        s.language = gauges
+            .iter()
+            .find(|m| m.key == key)
+            .map(|m| m.language)
+            .filter(|l| !l.is_empty())
+            .map(Into::into);
         s
-    }
+    };
     vec![
         ast_spec(
             "oxplow.rust.unsafe_blocks",
@@ -3475,6 +3488,52 @@ def transform(input):
                 svc.fact_store.get_measure(key).await.unwrap().is_some(),
                 "{key} measure seeded by V46"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn builtin_ast_specs_carry_the_language_their_gauge_declares() {
+        // tsk81: the idiom specs are seeded with the SAME language slug their
+        // built-in gauge declares, so the two metric surfaces can't disagree
+        // about what language a metric is — Metric Settings sections by the
+        // gauge's `language`, Recorded Metrics by the spec's. A spec left at the
+        // `NewMetricSpec::base` default (`None`) silently collapses every idiom
+        // metric into the "General" bucket and the per-language split no-ops.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        for (key, want) in [
+            ("oxplow.rust.unsafe_blocks", "rust"),
+            ("oxplow.rust.panic_macros", "rust"),
+            // The key segment is `ts`, but the language slug is `typescript` —
+            // the gauge is the authority, not the key.
+            ("oxplow.ts.any_usage", "typescript"),
+            ("oxplow.ts.console_calls", "typescript"),
+            ("oxplow.clojure.defn_count", "clojure"),
+            ("oxplow.csharp.empty_catch", "csharp"),
+        ] {
+            let spec = svc
+                .fact_store
+                .get_spec(key)
+                .await
+                .unwrap()
+                .unwrap_or_else(|| panic!("{key} spec seeded"));
+            assert_eq!(spec.language.as_deref(), Some(want), "{key} language");
+            assert_eq!(
+                spec.language.as_deref(),
+                builtin_metrics()
+                    .iter()
+                    .find(|m| m.key == key)
+                    .map(|m| m.language),
+                "{key} spec language must match its gauge's",
+            );
+        }
+        // The language-agnostic code gauges declare `language: ""` and must stay
+        // language-less (they sweep every source file) — "" is not a language.
+        for key in ["oxplow.high_complexity_fns", "oxplow.todos"] {
+            let spec = svc.fact_store.get_spec(key).await.unwrap();
+            if let Some(spec) = spec {
+                assert_eq!(spec.language, None, "{key} is language-agnostic");
+            }
         }
     }
 

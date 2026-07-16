@@ -920,12 +920,40 @@ that **writes**.
   metrics →". A measure's title navigates to the metric's **detail page** (via
   `onOpenDetail` → `metricRef`).
 - **Recorded Metrics** (`RecordedMetricsPage.tsx`, `PageKind`
-  `"metrics-recorded"` / `recordedMetricsRef()`) — the seeded definitions with
-  latest value, trend sparkline, capture branch, sample count; colored by
-  `statusColor` (target/`fail_at`/direction). Each `<tr>` adopts browser-style
+  `"metrics-recorded"` / `recordedMetricsRef()`) — the seeded definitions as
+  `title · trend sparkline · latest value` rows, colored by `statusColor`
+  (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
+  because it *is* that sparkline's last point — both read the same
+  range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
+  "latest value" is the latest **within the selected filters**, not all-time. Each `<tr>` adopts browser-style
   click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
   modifier/middle/right → new tab). Header links: "Explorer →", "Configure
   metrics →". Live-refreshes on `metricSamplesChanged`.
+
+> ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
+>
+> Recorded Metrics and Metric Settings render the **same section list**, built by
+> the shared pure `buildMetricSections(rows, getCategory, getLanguage)` in
+> `metricCategories.ts`: categories in `CATEGORY_ORDER`, **except
+> `static-quality`**, which gets no section of its own — its real top-level
+> division is by language, so each language is promoted to a top-level section
+> (a peer of Tests / Coverage / Operational) and the language-agnostic analysers
+> (`oxplow.analysis.*`) fall under **"General"**. Both pages call the one helper;
+> the rule is deliberately **not** restated per page, because two copies drift
+> into two different groupings of the same metrics.
+>
+> **The two pages read `language` off different objects** — Metric Settings off
+> `MetricCatalogEntry.language` (sourced from the *gauge*, `builtin_metrics()`),
+> Recorded Metrics off `MetricSpec.language`. So the two must agree, and
+> `builtin_ast_specs` therefore **reads each spec's language off its gauge by key**
+> rather than restating the slug (`builtin_ast_specs_carry_the_language_their_gauge_declares`
+> pins it). Before tsk81 the specs never set `language` at all
+> (`NewMetricSpec::base` defaults it to `None`), so every idiom metric would have
+> collapsed into "General" and the per-language split would have silently no-oped.
+> Note the key segment is **not** the slug: `oxplow.ts.*` is language
+> `typescript`. A gauge's `language: ""` (the language-agnostic code gauges) maps
+> to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
+> as its "General" bucket.
 - **Metric Detail** (`MetricDetailPage.tsx` wrapping `MetricDetail.tsx`,
   `PageKind` `"metric-detail"`, routed by `metricRef(key, effort)`) — its own
   page (tsk283), navigated into from the Explorer, Recorded Metrics, the
@@ -986,10 +1014,14 @@ its drill-in from the latest run's findings (`list_metric_findings`):
 
 The **configure** page (tsk282):
 
-- **Metrics Catalog** (`MetricsCatalogPage.tsx` wrapping `MetricsCatalog.tsx`,
+- **Metric Settings** (`MetricsCatalogPage.tsx` wrapping `MetricsCatalog.tsx`,
   P4) — a dedicated top-level page (`PageKind` `"metrics-catalog"`,
   `metricsCatalogRef()`, launcher Activity category), the only metrics surface
-  that **writes**.
+  that **writes**. **Titled "Metric Settings" since tsk80** — "Catalog" read as a
+  browsable index, which is the *Recorded Metrics* job; this page is where you
+  configure. The `metrics-catalog` **slug is deliberately unchanged** (page kind,
+  tab id, `metricsCatalogRef()`, `page-metrics-catalog` testid) so existing refs,
+  bookmarks, and probes keep resolving — only the user-visible label moved.
   It's a **registry of everything available**, NOT a list of metrics with
   recorded data — every metric the system can produce is listed via
   `list_metric_catalog`, **grouped by category** (Code gauges / Tests / Coverage

@@ -13,16 +13,7 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { metricRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { categoryLabel, groupByCategory, groupByLanguage } from "./metricCategories.js";
-
-
-/** Group catalog entries by category in display order. Thin wrapper over the
- *  shared `groupByCategory` (used by the Recorded Metrics page too). */
-export function groupCatalog(
-  rows: MetricCatalogEntry[],
-): Array<{ category: string | null; entries: MetricCatalogEntry[] }> {
-  return groupByCategory(rows, (r) => r.category);
-}
+import { buildMetricSections } from "./metricCategories.js";
 
 /** The tri-state group-checkbox state for a section: `checked` when every metric
  *  is enabled, `indeterminate` when only some are, and `nextEnabled` = what a
@@ -402,34 +393,16 @@ export function MetricsCatalog({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {groupCatalog(rows).map((group) => {
-        const cat = group.category ?? "other";
-        // Static analysis has no single section: its real top-level division is
-        // by language, so each language becomes its own top-level section (peer
-        // to Tests / Coverage / Operational). The language-agnostic code gauges +
-        // analysis producers fall under "General".
-        if (group.category === "static-quality") {
-          return groupByLanguage(group.entries, (e) => e.language).map((lang) => {
-            const langKey = lang.language ?? "general";
-            return (
-              <section
-                key={`static-${langKey}`}
-                style={{ display: "flex", flexDirection: "column" }}
-              >
-                {sectionHeader(lang.label, `catalog-group-static-${langKey}`, lang.entries)}
-                {lang.entries.map(metricRow)}
-              </section>
-            );
-          });
-        }
-
-        return (
-          <section key={cat} style={{ display: "flex", flexDirection: "column" }}>
-            {sectionHeader(categoryLabel(group.category), `catalog-group-${cat}`, group.entries)}
-            {group.entries.map(metricRow)}
-          </section>
-        );
-      })}
+      {buildMetricSections(
+        rows,
+        (r) => r.category,
+        (r) => r.language,
+      ).map((group) => (
+        <section key={group.key} style={{ display: "flex", flexDirection: "column" }}>
+          {sectionHeader(group.label, `catalog-group-${group.key}`, group.entries)}
+          {group.entries.map(metricRow)}
+        </section>
+      ))}
       {newMetricBar}
     </div>
   );

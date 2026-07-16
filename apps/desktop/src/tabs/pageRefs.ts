@@ -144,9 +144,10 @@ export function recordedMetricsRef(): TabRef {
   return indexRef("metrics-recorded");
 }
 
-/** The Metrics Catalog page — browse the available catalog (built-in ∪ global
+/** The Metric Settings page — browse the available catalog (built-in ∪ global
  *  ∪ project), enable/disable, edit target/trigger, and scaffold new metrics.
- *  The *configure* surface, split off from the *observe* Metrics page. */
+ *  The *configure* surface, split off from the *observe* Metrics page. The
+ *  `metrics-catalog` slug outlives the "Metrics Catalog" title (tsk80). */
 export function metricsCatalogRef(): TabRef {
   return indexRef("metrics-catalog");
 }

@@ -77,6 +77,55 @@ export function languageLabel(lang: string | null): string {
   return LANGUAGE_LABEL[lang] ?? lang.charAt(0).toUpperCase() + lang.slice(1);
 }
 
+/** One rendered section on a metric page: a stable `key` (React key + testid
+ *  suffix) and the display `label` above its rows. */
+export type MetricSection<T> = {
+  key: string;
+  label: string;
+  entries: T[];
+};
+
+/**
+ * The section list both metric surfaces render — Metric Settings (the catalog
+ * rows) and Recorded Metrics (the latest-value table). Categories in display
+ * order, **except `static-quality`**, which gets no section of its own: its real
+ * top-level division is by language, so each language is promoted to a top-level
+ * section (a peer of Tests / Coverage / Operational) and the language-agnostic
+ * analysers fall under "General".
+ *
+ * Shared rather than duplicated per page (tsk81) for the same reason the Rust
+ * specs read their language off the gauge: two copies of this rule drift, and
+ * the pages then group the same metrics differently. Pure — entries keep their
+ * incoming order within a section.
+ */
+export function buildMetricSections<T>(
+  rows: T[],
+  getCategory: (row: T) => string | null,
+  getLanguage: (row: T) => string | null,
+): Array<MetricSection<T>> {
+  const out: Array<MetricSection<T>> = [];
+  for (const group of groupByCategory(rows, getCategory)) {
+    if (group.category === "static-quality") {
+      for (const lang of groupByLanguage(group.entries, getLanguage)) {
+        out.push({
+          // `static-` prefixed so a language section can't collide with a
+          // category key.
+          key: `static-${lang.language ?? "general"}`,
+          label: lang.label,
+          entries: lang.entries,
+        });
+      }
+    } else {
+      out.push({
+        key: group.category ?? "other",
+        label: categoryLabel(group.category),
+        entries: group.entries,
+      });
+    }
+  }
+  return out;
+}
+
 /** Sub-group rows by language slug. Pure — entries keep their incoming order.
  *  The language-agnostic bucket (null / `""`) collapses into one "General" group
  *  that sorts first; named languages follow, ordered by display label. Used to
