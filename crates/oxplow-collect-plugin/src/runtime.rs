@@ -285,6 +285,13 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                     .files
                     .iter()
                     .filter(|(path, _)| oxplow_code_metrics::is_supported_path(path.as_str()))
+                    // Codegen output (generated/ path, do-not-edit header) is
+                    // not hand-written code — keep it out of the code-shape
+                    // corpus so a 3k-line bindings file can't dominate the
+                    // fn_length/complexity tails (tsk68).
+                    .filter(|(path, text)| {
+                        !oxplow_code_metrics::is_generated_source(path.as_str(), text)
+                    })
                     .collect();
                 entries.sort_by(|a, b| a.0.cmp(b.0));
                 entries
