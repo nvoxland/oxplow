@@ -216,7 +216,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Tests that passed in the latest run."),
+            description: Some("Known tests currently passing — each test's latest recorded status, unioned across runners."),
         },
         ProducerMetric {
             key: "oxplow.tests.failed",
@@ -229,7 +229,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Tests that failed in the latest run."),
+            description: Some("Known tests currently failing — each test's latest recorded status, unioned across runners."),
         },
         ProducerMetric {
             key: "oxplow.tests.total",
@@ -242,7 +242,7 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Total tests in the latest run."),
+            description: Some("All known tests — union across runners, each counted at its latest recorded status."),
         },
         // Per-test duration (tsk46). `oxplow.test_duration` is `per-subject`, so each
         // test's LATEST timing wins — a partial run refreshes only what it ran and the
@@ -277,58 +277,60 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
         // by the lifecycle producer on `oxplow.effort_test_outcome`, sliced by
         // `oxplow.tests_stat`. Split "tests failed" into a close-state gate vs
         // three "went red during the effort" flavors the engine's cross-time
-        // collapse can't express as a plain spec.
+        // collapse can't express as a plain spec. The headline is the MEAN
+        // across closed efforts (agg `avg`), so it's legitimately fractional —
+        // unit is "per effort", not "count" (tsk63).
         ProducerMetric {
             key: "oxplow.tests.failed_at_close",
             title: "Tests failed at close",
             kind: "gauge",
-            unit: "count",
+            unit: "per effort",
             direction: "lower-better",
             default_agg: "avg",
             grain: Some("effort"),
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Failing tests in the effort's final run — did it close green."),
+            description: Some("Failing tests in the effort's final run, averaged across closed efforts — did work close green."),
         },
         ProducerMetric {
             key: "oxplow.tests.peak_failed",
             title: "Peak tests failed",
             kind: "gauge",
-            unit: "count",
+            unit: "per effort",
             direction: "lower-better",
             default_agg: "avg",
             grain: Some("effort"),
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Most tests failing in any single run during the effort."),
+            description: Some("Most tests failing in any single run during an effort, averaged across closed efforts."),
         },
         ProducerMetric {
             key: "oxplow.tests.distinct_failed",
             title: "Distinct tests failed",
             kind: "gauge",
-            unit: "count",
+            unit: "per effort",
             direction: "lower-better",
             default_agg: "avg",
             grain: Some("effort"),
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Distinct tests that went red at least once during the effort."),
+            description: Some("Distinct tests that went red at least once during an effort, averaged across closed efforts."),
         },
         ProducerMetric {
             key: "oxplow.tests.red_runs",
             title: "Red test runs",
             kind: "gauge",
-            unit: "count",
+            unit: "per effort",
             direction: "lower-better",
             default_agg: "avg",
             grain: Some("effort"),
             category: "testing",
             producer: "tests",
             dimensions: BRANCH_DIMS,
-            description: Some("Number of test runs with at least one failure during the effort."),
+            description: Some("Test runs with at least one failure during an effort, averaged across closed efforts."),
         },
         // coverage (collection.rs) — whole-report absolute %, no per-sample grain.
         ProducerMetric {
@@ -556,5 +558,24 @@ mod tests {
         );
         // Surface fields carry over from the producer descriptor.
         assert_eq!(by_key["oxplow.coverage.abs_pct"].display_kind, "coverage");
+    }
+
+    #[test]
+    fn effort_outcome_averages_are_labelled_per_effort() {
+        // tsk63: the effort-outcome family's headline is a MEAN across closed
+        // efforts (agg `avg`), so it's legitimately fractional. A "count" unit
+        // made 0.08 read like a bug — the unit must say what the number is.
+        let metrics = builtin_producer_metrics();
+        let by_key: std::collections::HashMap<&str, &ProducerMetric> =
+            metrics.iter().map(|m| (m.key, m)).collect();
+        for key in [
+            "oxplow.tests.failed_at_close",
+            "oxplow.tests.peak_failed",
+            "oxplow.tests.distinct_failed",
+            "oxplow.tests.red_runs",
+        ] {
+            assert_eq!(by_key[key].default_agg, "avg", "{key}");
+            assert_eq!(by_key[key].unit, "per effort", "{key}");
+        }
     }
 }
