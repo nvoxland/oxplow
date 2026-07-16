@@ -148,6 +148,22 @@ welded to collection.
 > listening entirely; the OTLP token tick fires `MetricSamplesChanged` every
 > ~10s while an agent runs).
 >
+> **Every `metricSamplesChanged` listener needs that debounce — it bit twice
+> (tsk91).** `RecordedMetricsPage` + `MetricsExplorerPage` reloaded un-debounced,
+> so oxplow burned **~20 CPU-seconds per agent tool call** (bursting to ~500% /
+> ~200 threads, profiled straight to `row_to_fact_row`): a reload is one
+> `listMetricSamples` per catalogued metric, fired as ~40 concurrent blocking
+> reads, and **each walks its measure's whole history** — `oxplow.test_case` is
+> ~235k facts (+~5k per `test:collect`) and yields ~118 points, one per capture.
+> Both pages now carry the same 2.5s trailing debounce.
+>
+> ⚠️ **The debounce is mitigation, not the fix.** Ticks are ~10s apart, so it
+> only coalesces a turn's burst; one full reload per tick remains. The defect is
+> the read: **a series wants the newest N captures' facts, not the measure's
+> whole history** (`facts_for_captures` exists), and the range/branch filters are
+> applied **client-side in JS** after fetching — the same "load everything, filter
+> after" sin one layer out. `list_metric_samples` takes no range arg.
+>
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
 > gauge tree-sitter-parses the *whole tree* per run, so gauge runs get their own

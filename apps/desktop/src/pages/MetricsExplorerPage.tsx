@@ -44,12 +44,20 @@ export function MetricsExplorerPage({
       });
     };
     refresh();
+    // Trailing-debounce the reload: the OTLP token ingest emits
+    // metricSamplesChanged on every agent turn, and the Explorer's own
+    // `MetricsExplorer` refetches each selected measure's series off these defs
+    // (tsk91 — see RecordedMetricsPage / the tsk75 EffortMetricsBlock fix).
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
+      if (e.kind !== "metricSamplesChanged") return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(refresh, 2_500);
     });
     return () => {
       cancelled = true;
       off();
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

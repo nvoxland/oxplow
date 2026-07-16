@@ -184,12 +184,23 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
       );
     };
     refresh();
+    // A refresh is one `listMetricSamples` per catalogued metric, and each of
+    // those walks its measure's whole fact history (`oxplow.test_case` alone is
+    // ~235k facts) — ~20 CPU-seconds a go. The OTLP token ingest emits
+    // metricSamplesChanged on every agent turn, so an un-debounced reload made
+    // oxplow's CPU proportional to how hard the agent was working (tsk91). Same
+    // bug tsk75 fixed for `EffortMetricsBlock`, same trailing-debounce fix:
+    // coalesce a turn's burst of exports into one reload.
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
+      if (e.kind !== "metricSamplesChanged") return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(refresh, 2_500);
     });
     return () => {
       cancelled = true;
       off();
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
