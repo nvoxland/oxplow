@@ -169,20 +169,31 @@ Things I keep forgetting. Read this before adding any UI.
 ## Collapsible page sections
 
 - **A page with stacked sections gets them from the shared primitive**, not
-  hand-rolled state: `CollapsibleSections` (provider + toolbar) wrapping
-  `CollapsibleSection` (chevron header + hideable body) in
-  `apps/desktop/src/components/CollapsibleSections.tsx`. Pure state +
+  hand-rolled state — three parts in
+  `apps/desktop/src/components/CollapsibleSections.tsx`: `CollapsibleSections`
+  (state provider), `CollapsibleSection` (chevron header + hideable body), and
+  `SectionCollapseControls` (the Expand all / Collapse all pair). Pure state +
   persistence live in the sibling `sectionCollapse.ts` (unit-tested).
   Adopters: `RecordedMetricsPage`.
-- **This is body-level, NOT a `Page` prop — deliberately (tsk84).** `Page` is
-  chrome: it renders `children` opaquely and has no idea what sections exist, so
-  a page-layout flag couldn't render an Expand-all without the sections
-  registering themselves anyway — the flag would only say "the thing I'm already
-  doing is allowed". And `Page` relocates `actions` into the right rail's panel
-  header under `layout="details"` + `rightRail`, which would strand the
-  Expand/Collapse-all pair inside a **"Filters"** panel on exactly the page that
-  wanted it. Composing in the body gets the same reuse and the same per-page
-  opt-in (use it or don't) with no redundant config.
+- **The page places the controls; they are not pinned above the sections
+  (tsk86).** `SectionCollapseControls` reads state off context, so it can render
+  anywhere under the provider. Recorded Metrics puts it in the **details rail**
+  beside the filters — the rail is the page's control panel. It **self-hides**
+  when no sections are registered (loading / empty), rather than showing two dead
+  buttons.
+- **The provider renders `children` bare — no wrapper element — on purpose.** It
+  wraps the whole `<Page>` so context reaches *both* the rail and the body
+  (`rightRail` is created by the page but rendered inside `Page`'s subtree, and
+  context follows the render tree, not the creation site). Any wrapper here would
+  sit between the tab body and the page chrome's `height: 100%` column and break
+  it.
+- **Still NOT a `Page` prop (tsk84).** `Page` is chrome: it renders `children`
+  opaquely and has no idea what sections exist, so a page-layout flag couldn't
+  draw the controls without the sections registering themselves anyway — the flag
+  would only say "the thing I'm already doing is allowed". The page composing
+  `<SectionCollapseControls />` where it wants is simpler and more flexible.
+  (Note this is *not* the `Page` `actions` slot either, which would land the pair
+  in the rail's **panel header** rather than in the rail body.)
 - **Sections default to expanded**; only the *collapsed* set is stored
   (`oxplow.page.sectionsCollapsed.v1`, keyed by `pageKey`), so a newly added
   section appears open with no migration.

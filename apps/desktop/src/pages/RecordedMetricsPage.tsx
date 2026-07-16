@@ -7,7 +7,11 @@ import {
   listMetricSamples,
   subscribeOxplowEvents,
 } from "../api.js";
-import { CollapsibleSection, CollapsibleSections } from "../components/CollapsibleSections.js";
+import {
+  CollapsibleSection,
+  CollapsibleSections,
+  SectionCollapseControls,
+} from "../components/CollapsibleSections.js";
 import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
@@ -164,6 +168,11 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   }, [rows, rangeKey, branch, query]);
 
   return (
+    // The provider wraps the whole Page so its context reaches BOTH the details
+    // rail (which holds the Expand/Collapse-all controls) and the body (which
+    // holds the sections) — `rightRail` is created here but rendered inside
+    // Page's subtree, and context follows the render tree.
+    <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
     <Page
       testId="page-metrics-recorded"
       title="Recorded Metrics"
@@ -213,6 +222,11 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               ))}
             </select>
           </div>
+          {/* Not a filter, but this rail is the page's control panel — the
+              controls self-hide while there are no sections to act on. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <SectionCollapseControls />
+          </div>
         </div>
       }
     >
@@ -226,7 +240,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
             can be declared in <code>.oxplow/project.yaml</code>.
           </div>
         ) : (
-          <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
+          <>
             {buildMetricSections(
               viewRows,
               (r) => r.def.category,
@@ -253,9 +267,10 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                 </table>
               </CollapsibleSection>
             ))}
-          </CollapsibleSections>
+          </>
         )}
       </div>
     </Page>
+    </CollapsibleSections>
   );
 }

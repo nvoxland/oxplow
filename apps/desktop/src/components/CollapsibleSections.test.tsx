@@ -1,17 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 
-import { CollapsibleSection, CollapsibleSections } from "./CollapsibleSections.js";
+import {
+  CollapsibleSection,
+  CollapsibleSections,
+  SectionCollapseControls,
+} from "./CollapsibleSections.js";
 import { SECTIONS_COLLAPSED_KEY } from "./sectionCollapse.js";
 
+// Mirrors the real adoption: the controls render OUTSIDE the section stack
+// (on Recorded Metrics, in the details rail), reaching state through context.
 function view(sections: Array<{ id: string; label: string }> = SECTIONS, pageKey = "p") {
   return render(
     <CollapsibleSections pageKey={pageKey} testIdPrefix="t">
-      {sections.map((s) => (
-        <CollapsibleSection key={s.id} id={s.id} title={s.label} count={2}>
-          <div data-testid={`body-${s.id}`}>rows for {s.label}</div>
-        </CollapsibleSection>
-      ))}
+      <aside>
+        <SectionCollapseControls />
+      </aside>
+      <main>
+        {sections.map((s) => (
+          <CollapsibleSection key={s.id} id={s.id} title={s.label} count={2}>
+            <div data-testid={`body-${s.id}`}>rows for {s.label}</div>
+          </CollapsibleSection>
+        ))}
+      </main>
     </CollapsibleSections>,
   );
 }
@@ -120,6 +131,34 @@ describe("CollapsibleSections", () => {
     const restored = view();
     expect(restored.queryByTestId("body-testing")).toBeTruthy();
     expect(restored.queryByTestId("body-static-rust")).toBeNull();
+  });
+
+  it("drives sections from a sibling subtree, not an ancestor of them", () => {
+    // The real page renders the controls in Page's details RAIL and the sections
+    // in Page's body — two different subtrees under one provider. If the
+    // controls only worked when wrapping the sections, that placement would
+    // silently no-op.
+    const { getByTestId, queryByTestId } = view();
+    fireEvent.click(getByTestId("t-collapse-all"));
+    expect(queryByTestId("body-testing")).toBeNull();
+    expect(queryByTestId("body-static-rust")).toBeNull();
+  });
+
+  it("hides the controls entirely when there are no sections to act on", () => {
+    // Loading / empty state: two permanently-disabled buttons would be noise.
+    const { queryByTestId } = render(
+      <CollapsibleSections pageKey="p" testIdPrefix="t">
+        <SectionCollapseControls />
+        <div>Loading…</div>
+      </CollapsibleSections>,
+    );
+    expect(queryByTestId("t-expand-all")).toBeNull();
+    expect(queryByTestId("t-collapse-all")).toBeNull();
+  });
+
+  it("renders nothing for controls used outside a provider", () => {
+    const { queryByTestId } = render(<SectionCollapseControls />);
+    expect(queryByTestId("t-expand-all")).toBeNull();
   });
 
   it("renders sections read-only-open outside a provider", () => {

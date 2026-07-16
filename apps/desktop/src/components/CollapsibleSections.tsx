@@ -14,27 +14,33 @@ import {
 /**
  * Collapsible page sections (tsk84) — a `<CollapsibleSections>` provider wrapping
  * any number of `<CollapsibleSection>`s. Each section header carries an
- * expand/collapse chevron; the provider renders an "Expand all" / "Collapse all"
- * toolbar above them and persists the collapsed set per page.
+ * expand/collapse chevron; `<SectionCollapseControls>` renders the "Expand all" /
+ * "Collapse all" pair. The collapsed set persists per page.
  *
- * **Why this is a body-level primitive and not a `Page` prop.** `Page` is chrome:
- * it renders `children` opaquely and has no idea what sections exist, so a
- * page-layout flag couldn't render an Expand-all without the sections
- * registering themselves anyway — leaving the flag saying only "the thing I'm
- * already doing is allowed". And `Page` relocates its `actions` slot into the
- * right rail's panel header under `layout="details"` + `rightRail`, which would
- * strand the pair inside a "Filters" panel on exactly the page that wants it.
- * Composing this in the body gets the same reuse and the same per-page opt-in —
- * use it or don't — with no redundant config and no fight with the rail rule.
+ * **Three parts, because the page owns placement (tsk86).** The provider holds
+ * state only and renders `children` bare — no wrapper element — so it can wrap a
+ * whole `<Page>` without disturbing the page chrome's `height: 100%` flex column.
+ * That's what lets the controls live in the details **right rail** while the
+ * sections live in the body: `rightRail` is *created* in the page but *rendered*
+ * inside `Page`'s subtree, and React context follows the render tree, not the
+ * creation site.
  *
- * Usage:
+ * **Still not a `Page` prop.** `Page` renders `children` opaquely and has no idea
+ * what sections exist, so a page-layout flag couldn't draw the controls without
+ * the sections registering themselves anyway — the flag would say only "the thing
+ * I'm already doing is allowed". The page placing `<SectionCollapseControls />`
+ * itself is both simpler and more flexible.
+ *
+ * Usage — controls in the details rail, sections in the body:
  * ```tsx
  * <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
- *   {groups.map((g) => (
- *     <CollapsibleSection key={g.key} id={g.key} title={g.label} count={g.entries.length}>
- *       …
- *     </CollapsibleSection>
- *   ))}
+ *   <Page layout="details" rightRail={<>…filters… <SectionCollapseControls /></>}>
+ *     {groups.map((g) => (
+ *       <CollapsibleSection key={g.key} id={g.key} title={g.label} count={g.entries.length}>
+ *         …
+ *       </CollapsibleSection>
+ *     ))}
+ *   </Page>
  * </CollapsibleSections>
  * ```
  */
@@ -42,10 +48,15 @@ import {
 interface SectionsContextValue {
   isExpanded(id: string): boolean;
   toggle(id: string): void;
-  /** Sections announce themselves on mount so the toolbar knows what
+  /** Sections announce themselves on mount so the controls know what
    *  "all" means — only what's rendered right now counts. */
   register(id: string): void;
   unregister(id: string): void;
+  /** The rendered section ids — what Expand/Collapse-all may act on. */
+  rendered: readonly string[];
+  collapsed: ReadonlySet<string>;
+  expandAll(): void;
+  collapseAll(): void;
   testIdPrefix: string;
 }
 
@@ -112,45 +123,57 @@ export function CollapsibleSections({
       toggle: (id) => persist(toggleCollapsed(collapsed, id)),
       register,
       unregister,
+      rendered: [...ids],
+      collapsed,
+      // Both act ONLY on what's on screen: a section remembered as collapsed but
+      // currently filtered out keeps its state untouched.
+      expandAll: () => persist(new Set([...collapsed].filter((id) => !ids.has(id)))),
+      collapseAll: () => persist(new Set([...collapsed, ...ids])),
       testIdPrefix,
     }),
-    [collapsed, persist, register, unregister, testIdPrefix],
+    [collapsed, ids, persist, register, unregister, testIdPrefix],
   );
 
-  const rendered = useMemo(() => [...ids], [ids]);
-  // Collapse all only touches what's on screen; a section remembered as
-  // collapsed but currently filtered out keeps its state untouched.
-  const expandAll = () => persist(new Set([...collapsed].filter((id) => !ids.has(id))));
-  const collapseAll = () => persist(new Set([...collapsed, ...ids]));
+  // Rendered bare — no wrapper element. This provider wraps a whole `<Page>` so
+  // that context reaches both the details rail and the body, and any wrapper
+  // here would sit between the tab body and the page chrome's `height: 100%`
+  // column and break it.
+  return <SectionsContext.Provider value={ctx}>{children}</SectionsContext.Provider>;
+}
 
+/**
+ * The "Expand all" / "Collapse all" pair. Rendered wherever the page wants it —
+ * on Recorded Metrics that's the details rail beside the filters (tsk86) — and
+ * self-hides when no sections are registered (loading / empty state), rather
+ * than showing two dead buttons.
+ */
+export function SectionCollapseControls() {
+  const ctx = useContext(SectionsContext);
+  if (!ctx || ctx.rendered.length === 0) return null;
+  const { rendered, collapsed, testIdPrefix } = ctx;
   return (
-    <SectionsContext.Provider value={ctx}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={toolbarRow}>
-          <button
-            type="button"
-            data-testid={`${testIdPrefix}-expand-all`}
-            onClick={expandAll}
-            disabled={allExpanded(rendered, collapsed) || rendered.length === 0}
-            title="Expand all sections"
-            style={smallButton}
-          >
-            Expand all
-          </button>
-          <button
-            type="button"
-            data-testid={`${testIdPrefix}-collapse-all`}
-            onClick={collapseAll}
-            disabled={allCollapsed(rendered, collapsed) || rendered.length === 0}
-            title="Collapse all sections"
-            style={smallButton}
-          >
-            Collapse all
-          </button>
-        </div>
-        {children}
-      </div>
-    </SectionsContext.Provider>
+    <div style={toolbarRow}>
+      <button
+        type="button"
+        data-testid={`${testIdPrefix}-expand-all`}
+        onClick={ctx.expandAll}
+        disabled={allExpanded(rendered, collapsed)}
+        title="Expand all sections"
+        style={smallButton}
+      >
+        Expand all
+      </button>
+      <button
+        type="button"
+        data-testid={`${testIdPrefix}-collapse-all`}
+        onClick={ctx.collapseAll}
+        disabled={allCollapsed(rendered, collapsed)}
+        title="Collapse all sections"
+        style={smallButton}
+      >
+        Collapse all
+      </button>
+    </div>
   );
 }
 
