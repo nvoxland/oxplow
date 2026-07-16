@@ -346,6 +346,12 @@ pub struct MetricCapture {
     /// different logic and are stale, so a re-baseline is due. `None` = unversioned
     /// (pre-V56 rows, and producers whose logic isn't script-defined).
     pub producer_version: Option<String>,
+    /// How this capture's SCANNED SET is determined (V58, tsk71):
+    /// `delta` — the snapshot's own file rows (incremental rescan);
+    /// `full` — the reconstructed tree as-of the snapshot (a baseline);
+    /// `asserted` — exactly the paths it emitted facts for (a snapshot, when
+    /// present, is provenance only). See the V58 migration header.
+    pub scan_kind: String,
 }
 
 #[derive(Debug, Clone)]
@@ -378,6 +384,10 @@ pub struct NewMetricCapture {
     pub idempotency_key: Option<String>,
     /// See [`MetricCapture::producer_version`].
     pub producer_version: Option<String>,
+    /// See [`MetricCapture::scan_kind`]. Defaults to `delta`; the insert
+    /// coerces a snapshot-less `delta` to `asserted` (delta/full semantics
+    /// REQUIRE a snapshot to anchor their scanned set on).
+    pub scan_kind: String,
 }
 
 impl NewMetricCapture {
@@ -404,13 +414,14 @@ impl NewMetricCapture {
             detail_json: None,
             idempotency_key: None,
             producer_version: None,
+            scan_kind: "delta".into(),
         }
     }
 }
 
 const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_git_version, git_version_exact, \
-     branch, captured_at, ended_at, detail_json, producer_version";
+     branch, captured_at, ended_at, detail_json, producer_version, scan_kind";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
     let captured_at: String = row.get(16)?;
@@ -439,6 +450,7 @@ fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
         },
         detail_json: row.get(18)?,
         producer_version: row.get(19)?,
+        scan_kind: row.get(20)?,
     })
 }
 
@@ -448,12 +460,21 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
         .map(ts_to_string)
         .unwrap_or_else(|| ts_to_string(Timestamp::now()));
     let ended = c.ended_at.map(ts_to_string);
+    // `delta`/`full` scan semantics anchor on a snapshot's file rows; without a
+    // snapshot there is nothing to anchor on, so the capture can only restate
+    // the paths it emits — i.e. it IS an assertion. Coerce rather than trust
+    // every caller to remember (the invariant the fold depends on).
+    let scan_kind = if c.snapshot_id.is_none() && c.scan_kind != "asserted" {
+        "asserted".to_string()
+    } else {
+        c.scan_kind.clone()
+    };
     conn.execute(
         "INSERT INTO metric_capture
            (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_git_version, git_version_exact, branch,
-            captured_at, ended_at, detail_json, idempotency_key, producer_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             c.stream_id,
             c.thread_id,
@@ -475,6 +496,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: NewMetricCapture) -> rusqlite:
             c.detail_json,
             c.idempotency_key,
             c.producer_version,
+            scan_kind,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1111,8 +1133,8 @@ impl SqliteFactStore {
                 // other's facts for the same path.
                 let sql = format!(
                     "WITH restated AS (
-                       -- A snapshot-backed capture (a tree gauge) restates every path in
-                       -- its snapshot — including deletion tombstones, which is how a
+                       -- A DELTA capture (the incremental rescan) restates every path in
+                       -- its own snapshot — including deletion tombstones, which is how a
                        -- removed file drops out.
                        SELECT c.id AS capture_id, c.stream_id AS stream_id,
                               c.producer AS producer, c.captured_at AS captured_at,
@@ -1122,16 +1144,40 @@ impl SqliteFactStore {
                            ON fs.snapshot_id = c.snapshot_id
                           AND fs.stream_id = c.stream_id
                         WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
+                          AND c.scan_kind = 'delta'
                        UNION
-                       -- A capture with NO snapshot isn't a tree scan (an agent-asserted
-                       -- `record_metric`, or a synthetic write): it has no scanned set, so
-                       -- it restates exactly the paths it emitted facts for. Without this
-                       -- its facts would have nothing to anchor to and silently vanish.
+                       -- A FULL capture (a baseline, tsk71) restates the RECONSTRUCTED
+                       -- tree as-of its snapshot: the latest file_snapshot row per path
+                       -- <= the anchor (`tree_at` semantics, tombstones included so the
+                       -- deleted-path filter below applies). This is what lets a baseline
+                       -- anchor to an ordinary delta snapshot instead of requiring a
+                       -- fabricated full-tree one.
+                       SELECT capture_id, stream_id, producer, captured_at, path, storage
+                         FROM (
+                           SELECT c.id AS capture_id, c.stream_id AS stream_id,
+                                  c.producer AS producer, c.captured_at AS captured_at,
+                                  fs.path AS path, fs.storage AS storage,
+                                  ROW_NUMBER() OVER (
+                                    PARTITION BY c.id, fs.path
+                                    ORDER BY fs.snapshot_id DESC, fs.id DESC
+                                  ) AS tree_rn
+                             FROM metric_capture c
+                             JOIN file_snapshot fs
+                               ON fs.stream_id = c.stream_id
+                              AND fs.snapshot_id IS NOT NULL
+                              AND fs.snapshot_id <= c.snapshot_id
+                            WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
+                              AND c.scan_kind = 'full'
+                         ) WHERE tree_rn = 1
+                       UNION
+                       -- An ASSERTED capture (agent `record_metric`, synthetic writes)
+                       -- restates exactly the paths it emitted facts for; its snapshot,
+                       -- when present, is provenance only — never a scanned set.
                        SELECT c.id, c.stream_id, c.producer, c.captured_at,
                               f.path, 'oxplow'
                          FROM metric_capture c
                          JOIN fact f ON f.capture_id = c.id
-                        WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                        WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
                           AND c.status = 'done'
                      ),
                      ranked AS (
@@ -1169,21 +1215,27 @@ impl SqliteFactStore {
         producer: &str,
         snapshot_id: i64,
         version: Option<&str>,
+        scan_kind: &str,
     ) -> Result<bool, DomainError> {
         let Some(version) = version else {
             return Ok(false);
         };
         let producer = producer.to_string();
         let version = version.to_string();
+        let scan_kind = scan_kind.to_string();
         self.db
             .call(move |conn| {
                 conn.query_row(
+                    // Kind-scoped: a delta capture for this snapshot must not
+                    // satisfy a pending FULL baseline run over it (tsk71) — the
+                    // two scans cover different sets.
                     "SELECT EXISTS(
                        SELECT 1 FROM metric_capture
                         WHERE producer = ?1 AND snapshot_id = ?2
                           AND status = 'done' AND producer_version = ?3
+                          AND scan_kind = ?4
                      )",
-                    params![producer, snapshot_id, version],
+                    params![producer, snapshot_id, version, scan_kind],
                     |r| r.get::<_, i64>(0),
                 )
                 .map(|n| n != 0)
@@ -1191,35 +1243,32 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The largest tree a producer has actually **scanned to completion** — the max
-    /// `file_snapshot` count over the snapshots of its `done` captures in this stream.
-    /// 0 when it has never completed a snapshot-backed capture.
-    ///
-    /// This is how "has this gauge been baselined" is answered per GAUGE rather than
-    /// per measure (tsk49). `oxplow.ast_hit` is one measure shared by 10 idiom gauges,
-    /// so "does the measure have facts" is meaningless for a single gauge — a delta-only
-    /// gauge whose full-tree scan never ran looks done because a *sibling* gauge filled
-    /// the measure. Comparing this against the whole-tree threshold catches it: a gauge
-    /// that has only ever scanned 6-file deltas has never seen the repo.
-    pub async fn max_scanned_file_count(
+    /// Whether a producer has EVER completed a `scan_kind = 'full'` baseline
+    /// capture in this stream — at `version` when given, at any version when
+    /// `None`. This is the "has this gauge been baselined" question (tsk71):
+    /// a gauge with no full capture at its current fingerprint needs a
+    /// full-tree run before its per-path metric is trustworthy.
+    pub async fn has_full_capture(
         &self,
         producer: &str,
         stream_id: i64,
-    ) -> Result<i64, DomainError> {
+        version: Option<&str>,
+    ) -> Result<bool, DomainError> {
         let producer = producer.to_string();
+        let version = version.map(|v| v.to_string());
         self.db
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT COALESCE(MAX(fc), 0) FROM (
-                       SELECT (SELECT COUNT(*) FROM file_snapshot fs
-                                WHERE fs.snapshot_id = c.snapshot_id) AS fc
-                         FROM metric_capture c
-                        WHERE c.producer = ?1 AND c.stream_id = ?2
-                          AND c.status = 'done' AND c.snapshot_id IS NOT NULL
+                    "SELECT EXISTS(
+                       SELECT 1 FROM metric_capture
+                        WHERE producer = ?1 AND stream_id = ?2
+                          AND status = 'done' AND scan_kind = 'full'
+                          AND (?3 IS NULL OR producer_version = ?3)
                      )",
-                    params![producer, stream_id],
+                    params![producer, stream_id, version],
                     |r| r.get::<_, i64>(0),
                 )
+                .map(|n| n != 0)
             })
             .await
     }
@@ -1345,9 +1394,9 @@ impl SqliteFactStore {
                     .take(capture_ids.len())
                     .collect::<Vec<_>>()
                     .join(", ");
-                // Mirrors `latest_tree_facts`: a snapshot-backed capture restates its
-                // snapshot's paths; a snapshot-less one restates exactly the paths it
-                // emitted facts for.
+                // Mirrors `latest_tree_facts`' three scan kinds: delta = the
+                // snapshot's own paths; full = the reconstructed tree as-of the
+                // snapshot; asserted = exactly the paths it emitted facts for.
                 let sql = format!(
                     "SELECT c.id, fs.path
                        FROM metric_capture c
@@ -1355,18 +1404,39 @@ impl SqliteFactStore {
                          ON fs.snapshot_id = c.snapshot_id
                         AND fs.stream_id = c.stream_id
                       WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
+                        AND c.scan_kind = 'delta'
                         AND c.id IN ({placeholders})
+                     UNION
+                     SELECT capture_id, path FROM (
+                       SELECT c.id AS capture_id, fs.path AS path,
+                              ROW_NUMBER() OVER (
+                                PARTITION BY c.id, fs.path
+                                ORDER BY fs.snapshot_id DESC, fs.id DESC
+                              ) AS tree_rn
+                         FROM metric_capture c
+                         JOIN file_snapshot fs
+                           ON fs.stream_id = c.stream_id
+                          AND fs.snapshot_id IS NOT NULL
+                          AND fs.snapshot_id <= c.snapshot_id
+                        WHERE c.snapshot_id IS NOT NULL AND c.status = 'done'
+                          AND c.scan_kind = 'full'
+                          AND c.id IN ({placeholders})
+                     ) WHERE tree_rn = 1
                      UNION
                      SELECT c.id, f.path
                        FROM metric_capture c
                        JOIN fact f ON f.capture_id = c.id
-                      WHERE c.snapshot_id IS NULL AND f.path IS NOT NULL
+                      WHERE c.scan_kind = 'asserted' AND f.path IS NOT NULL
                         AND c.status = 'done'
                         AND c.id IN ({placeholders})"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                // The id list appears in BOTH arms of the UNION, so bind it twice.
-                let binds = capture_ids.iter().chain(capture_ids.iter());
+                // The id list appears in all THREE arms of the UNION, so bind it
+                // three times.
+                let binds = capture_ids
+                    .iter()
+                    .chain(capture_ids.iter())
+                    .chain(capture_ids.iter());
                 let rows = stmt.query_map(rusqlite::params_from_iter(binds), |r| {
                     Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
                 })?;
@@ -1585,6 +1655,210 @@ mod tests {
             total(&store.latest_tree_facts(m, Some(1)).await.unwrap()),
             12.0
         );
+    }
+
+    /// A `scan_kind = 'full'` capture by `producer` anchored to `snap_id` —
+    /// what the baseline sweep records (tsk71): its scanned set is the
+    /// RECONSTRUCTED tree as-of that snapshot, not the snapshot's own rows.
+    async fn full_capture(
+        store: &SqliteFactStore,
+        producer: &str,
+        snap_id: i64,
+        captured_at: &str,
+        measure_id: i64,
+        facts: &[(&str, f64)],
+    ) -> i64 {
+        let mut capture = NewMetricCapture::done(1, producer, format!("metric:{producer}"));
+        capture.snapshot_id = Some(snap_id);
+        capture.captured_at = Some(at(captured_at));
+        capture.scan_kind = "full".into();
+        let rows: Vec<NewFact> = facts
+            .iter()
+            .map(|(path, value)| NewFact {
+                subject_kind: Some("file".into()),
+                subject_ref: Some((*path).to_string()),
+                path: Some((*path).to_string()),
+                ..NewFact::new(measure_id, *value)
+            })
+            .collect();
+        store.record_facts(capture, rows).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn full_scan_capture_supersedes_the_whole_reconstructed_tree() {
+        // The tsk71 baseline: a full scan anchored to a DELTA snapshot must
+        // supersede every path in the reconstructed tree at that snapshot —
+        // not just the delta's own rows. b.rs dropped to 0 (no fact emitted);
+        // it is NOT in snapshot 2's rows, but it IS in the reconstructed tree,
+        // so the full capture supersedes it.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+
+        // A delta snapshot listing ONLY a.rs; the baseline runs over it.
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        full_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("a.rs", 1.0)],
+        )
+        .await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(
+            total(&facts),
+            1.0,
+            "the full scan restates the whole tree: b.rs's stale 2 must be gone"
+        );
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
+    }
+
+    #[tokio::test]
+    async fn full_scan_capture_excludes_deleted_paths_from_the_reconstruction() {
+        // Reconstruction semantics match `tree_at`: a path whose latest row
+        // (<= the anchor snapshot) is a tombstone is out of the tree, so the
+        // full capture supersedes-to-nothing rather than resurrecting it.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+
+        // b.rs deleted; the baseline then runs anchored to snapshot 2.
+        snapshot_with(&store, 2, &[("b.rs", "deleted")]).await;
+        full_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("a.rs", 1.0)],
+        )
+        .await;
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 1.0, "a rescanned to 1; deleted b gone");
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].path.as_deref(), Some("a.rs"));
+    }
+
+    #[tokio::test]
+    async fn asserted_capture_with_snapshot_restates_only_its_emitted_paths() {
+        // tsk72 direction: `record_metric` captures now carry a snapshot for
+        // PROVENANCE — but their scanned set stays "exactly what I emitted".
+        // If the snapshot were treated as a delta scanned set, this assertion
+        // over snapshot 1 (which lists b.rs) would wipe b.rs's gauge fact.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+
+        let mut capture = NewMetricCapture::done(1, "g", "agent");
+        capture.snapshot_id = Some(1);
+        capture.captured_at = Some(at("2026-06-30T11:00:00.000000Z"));
+        capture.scan_kind = "asserted".into();
+        let rows = vec![NewFact {
+            subject_kind: Some("file".into()),
+            subject_ref: Some("a.rs".into()),
+            path: Some("a.rs".into()),
+            ..NewFact::new(m, 7.0)
+        }];
+        store.record_facts(capture, rows).await.unwrap();
+
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 9.0, "a.rs updated to 7, b.rs's 2 untouched");
+    }
+
+    #[tokio::test]
+    async fn snapshotless_capture_is_coerced_to_asserted() {
+        // delta/full semantics need a snapshot to anchor on; a snapshot-less
+        // capture can only be an assertion. The insert coerces so no caller
+        // can accidentally record an unanchorable scan.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+        let capture = NewMetricCapture::done(1, "g", "agent"); // scan_kind: delta, no snapshot
+        let rows = vec![NewFact {
+            path: Some("a.rs".into()),
+            ..NewFact::new(m, 4.0)
+        }];
+        store.record_facts(capture, rows).await.unwrap();
+        // Behaves as an assertion: its emitted path is its scanned set.
+        let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
+        assert_eq!(total(&facts), 4.0);
+    }
+
+    #[tokio::test]
+    async fn has_full_capture_tracks_baseline_state_per_producer_and_version() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+
+        // Delta capture alone doesn't count as a baseline.
+        gauge_capture(&store, "g", 1, "2026-06-30T10:00:00.000000Z", m, &[]).await;
+        assert!(!store.has_full_capture("g", 1, Some("v1")).await.unwrap());
+
+        // A full capture at v1 counts — for v1 (and for "any version").
+        let mut capture = NewMetricCapture::done(1, "g", "metric:g");
+        capture.snapshot_id = Some(1);
+        capture.scan_kind = "full".into();
+        capture.producer_version = Some("v1".into());
+        store.record_facts(capture, Vec::new()).await.unwrap();
+        assert!(store.has_full_capture("g", 1, Some("v1")).await.unwrap());
+        assert!(store.has_full_capture("g", 1, None).await.unwrap());
+        // …but not for a different fingerprint (script changed → re-baseline).
+        assert!(!store.has_full_capture("g", 1, Some("v2")).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn scanned_paths_for_full_capture_cover_the_reconstructed_tree() {
+        // The series fold's eviction set: a full capture scans the whole
+        // reconstructed tree (incl. tombstones — a deletion is a scan result).
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        snapshot_with(&store, 2, &[("b.rs", "deleted")]).await;
+        let cid = full_capture(&store, "g", 2, "2026-06-30T11:00:00.000000Z", m, &[]).await;
+
+        let mut paths: Vec<String> = store
+            .scanned_paths_for_captures(vec![cid])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        paths.sort();
+        assert_eq!(paths, vec!["a.rs".to_string(), "b.rs".to_string()]);
     }
 
     #[tokio::test]

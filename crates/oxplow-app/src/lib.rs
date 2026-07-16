@@ -761,19 +761,23 @@ impl Services {
 
     /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
     ///
-    /// A `per-path` measure folds over each capture's snapshot file rows, so a
-    /// repo-wide total needs one snapshot listing the whole tree — delta snapshots
-    /// alone never get there. This captures that snapshot and runs the un-baselined
-    /// gauges over it, synchronously, returning what it did.
+    /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
+    /// snapshot polluted effort file-attribution). Instead it drains any
+    /// pending edits into an ORDINARY snapshot (authored work, correctly
+    /// attributed), anchors on the latest snapshot, and runs the un-baselined
+    /// gauges `scan_kind = 'full'` over the RECONSTRUCTED tree as-of it — the
+    /// per-path fold reads a full capture's scanned set via `tree_at`
+    /// semantics, so provenance stays on a real snapshot and no snapshot is
+    /// invented.
     ///
     /// This is deliberately callable, not buried in boot: it's the one entry point
     /// boot, the `rebuild_metrics` MCP tool, and the end-to-end test all share, so
     /// the boot baseline path is finally exercisable without a process restart —
     /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
     ///
-    /// `force` skips the "is a baseline needed?" check and rebuilds regardless
-    /// (the MCP escape hatch). The idempotency guard in the sweep means the event
-    /// loop reacting to the same snapshot won't double-scan.
+    /// `force` treats every gauge as needing a baseline (the MCP escape hatch).
+    /// The kind-scoped idempotency guard in the sweep means a repeat over the
+    /// same unchanged snapshot won't re-scan.
     pub async fn rebuild_metric_baseline(&self, force: bool) -> Result<BaselineReport, String> {
         let stream_val = self
             .snapshot_captures
@@ -794,21 +798,42 @@ impl Services {
         let Some(capture) = self.snapshot_captures.primary() else {
             return Err("no primary snapshot capture registered".into());
         };
-        // Enqueue every path as dirty, then capture — the resulting snapshot lists the
-        // whole tree, which is what the fold anchors on.
+        // Make sure the tree we anchor on is current: wait for the startup
+        // sweep, run the ordinary stat-diff (which marks only files whose
+        // content actually changed since their last capture — NOT the old
+        // pretend-everything-is-dirty full-tree enqueue), and drain the dirty
+        // set into a normal snapshot. Those rows are real authored edits the
+        // fs-watch would capture anyway — attribution is correct-by-
+        // construction. `None` = nothing changed; fall back to the latest
+        // existing snapshot.
+        capture.await_initial_ready().await;
         capture
-            .enqueue_full_tree()
+            .enqueue_startup_diff()
             .await
             .map_err(|e| e.to_string())?;
-        let snapshot_id = capture
-            .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+        let drained = capture
+            .request_snapshot(crate::events::SnapshotSourceKind::Manual)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "full-tree capture produced no snapshot".to_string())?;
+            .map_err(|e| e.to_string())?;
+        let snapshot_id = match drained {
+            Some(id) => Some(id),
+            None => self
+                .snapshot_store
+                .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(stream_val))
+                .await
+                .map_err(|e| e.to_string())?,
+        };
+        let Some(snapshot_id) = snapshot_id else {
+            // Fresh project with no snapshot at all — nothing to baseline on.
+            return Ok(BaselineReport {
+                ran: false,
+                ..Default::default()
+            });
+        };
 
         let sweep = self
             .metrics
-            .run_snapshot_gauges(oxplow_domain::StreamId::new(stream_val), snapshot_id)
+            .run_snapshot_gauges_with(oxplow_domain::StreamId::new(stream_val), snapshot_id, force)
             .await;
         Ok(BaselineReport {
             ran: true,

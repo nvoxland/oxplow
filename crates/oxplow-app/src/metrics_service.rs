@@ -157,6 +157,11 @@ struct GaugeRunContext {
     /// effort-attribution read (`captures_for_effort`) sees the run (tsk43).
     /// Snapshot/manual scans are effort-less (`None`).
     effort_id: Option<i64>,
+    /// The capture's scanned-set semantics (tsk71): `delta` for the ordinary
+    /// incremental rescan over the snapshot's own rows; `full` for a baseline
+    /// over the RECONSTRUCTED tree as-of the snapshot. Stamped verbatim onto
+    /// the capture — the per-path fold branches on it.
+    scan_kind: &'static str,
 }
 
 impl MetricsService {
@@ -884,16 +889,16 @@ impl MetricsService {
         Ok(returned_path)
     }
 
-    /// True when a `per-path` measure has nothing to fold in this stream — the tree
-    /// gauges have never run over a full tree here (a fresh project, or after the
-    /// V54 wipe).
+    /// True when at least one on-snapshot gauge still needs a full-tree
+    /// baseline in this stream — a fresh project, a newly added gauge, or a
+    /// gauge whose script changed since its last baseline.
     ///
-    /// A `per-path` measure's fold anchors on each capture's *snapshot file rows*
-    /// (tsk41), so it needs ONE snapshot that lists the whole tree. Delta snapshots
-    /// alone would never get there: a file only enters the fold once some commit
-    /// happens to touch it, so the metric would creep up from 0 over months instead
-    /// of reporting the repo. The fix is a one-off full-tree snapshot — see
-    /// `SnapshotCapture::enqueue_full_tree`.
+    /// A `per-path` measure's fold needs each gauge to have restated the whole
+    /// tree at least once; delta captures alone would let the metric creep up
+    /// from 0 over months instead of reporting the repo (tsk41). The baseline
+    /// is a `scan_kind = 'full'` capture over the RECONSTRUCTED tree of an
+    /// ordinary snapshot (tsk71) — the on-snapshot sweep drains
+    /// [`Self::gauges_needing_baseline`] on the next snapshot that lands.
     pub async fn needs_tree_baseline(&self, stream_id: i64) -> bool {
         !self.gauges_needing_baseline(stream_id).await.is_empty()
     }
@@ -904,21 +909,28 @@ impl MetricsService {
     /// The question is per GAUGE, not per measure (tsk49): `oxplow.ast_hit` is one
     /// measure shared by 10 idiom gauges, so "does the measure have facts" tells you
     /// nothing about one gauge — a delta-only gauge looks done because a sibling filled
-    /// the measure. A gauge is un-baselined when EITHER:
-    /// - it has never scanned the whole tree (its biggest completed scan is below the
-    ///   whole-tree threshold — a fresh gauge, or one that only ever saw small deltas
-    ///   because its full-tree scan used to time out, tsk47); OR
-    /// - it is `gauge_is_stale` — its script changed since its last capture (tsk45),
-    ///   so the facts were computed by different logic.
+    /// the measure. A gauge is un-baselined when it has no completed
+    /// `scan_kind = 'full'` capture at its current fingerprint (tsk71): that one
+    /// check covers both "never scanned the whole tree" and "script changed since
+    /// the last baseline" (the old `gauge_is_stale` criterion — a full capture at
+    /// stale logic carries the old fingerprint and doesn't match).
     ///
-    /// This one notion subsumes the old empty-fold + stale checks, and correctly.
+    /// This set is the pending-baseline QUEUE: the on-snapshot sweep drains it by
+    /// running these gauges `full` over the next snapshot that lands, so a newly
+    /// added or edited gauge baselines on the next ordinary snapshot — no
+    /// fabricated full-tree snapshot (which used to pollute effort attribution).
     pub async fn gauges_needing_baseline(&self, stream_id: i64) -> Vec<String> {
         let Some(facts) = self.fact_store.as_ref() else {
             return Vec::new();
         };
-        let bar = self.baseline_bar(stream_id).await;
-        if bar == 0 {
-            // No tree captured yet — nothing to scan, so nothing to baseline.
+        // No snapshot yet (fresh project) — nothing to anchor a baseline on.
+        let has_snapshot = matches!(
+            self.snapshot_store
+                .latest_snapshot_id_for_stream(StreamId::new(stream_id))
+                .await,
+            Ok(Some(_))
+        );
+        if !has_snapshot {
             return Vec::new();
         }
         let mut out = Vec::new();
@@ -926,44 +938,19 @@ impl MetricsService {
             if gauge.trigger != "on-snapshot" {
                 continue;
             }
-            let never_full_scanned = facts
-                .max_scanned_file_count(&gauge.key, stream_id)
+            // Fingerprint-scoped when the script is hashable; any-version
+            // otherwise (an unfingerprintable gauge can't detect staleness,
+            // so one full capture ever is the best we can require).
+            let fp = gauge_fingerprint(&gauge, &self.script_base_dir(&gauge));
+            let baselined = facts
+                .has_full_capture(&gauge.key, stream_id, fp.as_deref())
                 .await
-                .map(|n| n < bar)
-                .unwrap_or(false);
-            if never_full_scanned || self.gauge_is_stale(&gauge, stream_id).await {
+                .unwrap_or(true); // read failure: don't stampede a re-baseline
+            if !baselined {
                 out.push(gauge.key.clone());
             }
         }
         out
-    }
-
-    /// How many files a gauge must have scanned in one capture to count as
-    /// baselined: the **current tree size, capped at `TREE_SWEEP_FILE_THRESHOLD`**.
-    ///
-    /// Relative to the tree, not absolute, for two reasons:
-    /// - a fixed bar (100) would leave every gauge in a **sub-100-file repo** forever
-    ///   "un-baselined" — re-scanning the whole tree on every boot;
-    /// - capping at the threshold stops a **large repo** re-baselining every time a
-    ///   file is added: once a gauge has scanned ≥ threshold files it has covered the
-    ///   tree, and subsequent growth is handled incrementally by delta captures
-    ///   (whose facts the per-path fold carries forward). `873 >= 100` stays true as
-    ///   the tree grows to 874, 875, …
-    async fn baseline_bar(&self, stream_id: i64) -> i64 {
-        let size = match self
-            .snapshot_store
-            .latest_snapshot_id_for_stream(StreamId::new(stream_id))
-            .await
-        {
-            Ok(Some(sid)) => self
-                .snapshot_store
-                .tree_at(sid)
-                .await
-                .map(|t| t.len() as i64)
-                .unwrap_or(0),
-            _ => 0,
-        };
-        size.min(TREE_SWEEP_FILE_THRESHOLD as i64)
     }
 
     /// Whether ONE gauge's facts were computed by logic that has since changed — its
@@ -1166,10 +1153,32 @@ impl MetricsService {
     /// Run every enabled `on-snapshot` gauge against the just-captured snapshot.
     /// `pub(crate)` so [`crate::Services::rebuild_metric_baseline`] can drive it
     /// directly (and thus test the boot path end to end, tsk50).
+    ///
+    /// Two-phase (tsk71): gauges already baselined run a `delta` scan over the
+    /// snapshot's own file rows (the cheap incremental rescan); gauges in the
+    /// pending-baseline queue ([`Self::gauges_needing_baseline`]) run a `full`
+    /// scan over the RECONSTRUCTED tree as-of this snapshot and record
+    /// `scan_kind = 'full'` captures anchored to it. So a baseline needs no
+    /// fabricated full-tree snapshot — it piggybacks on whatever ordinary
+    /// snapshot lands next.
     pub(crate) async fn run_snapshot_gauges(
         &self,
         stream_id: StreamId,
         snapshot_id: i64,
+    ) -> SweepReport {
+        self.run_snapshot_gauges_with(stream_id, snapshot_id, false)
+            .await
+    }
+
+    /// [`Self::run_snapshot_gauges`] with a `force_full` override: treat EVERY
+    /// on-snapshot gauge as needing a baseline (the `rebuild_metrics(force)`
+    /// escape hatch). The per-snapshot idempotency guard still applies, so a
+    /// repeated force over the same unchanged snapshot doesn't re-scan.
+    pub(crate) async fn run_snapshot_gauges_with(
+        &self,
+        stream_id: StreamId,
+        snapshot_id: i64,
+        force_full: bool,
     ) -> SweepReport {
         let gauges: Vec<ResolvedGauge> = self
             .resolved_gauges()
@@ -1179,14 +1188,45 @@ impl MetricsService {
         if gauges.is_empty() {
             return SweepReport::default();
         }
-        // Build the snapshot file map once and share it across every gauge of
-        // this run via an Arc (no per-gauge clone of the whole map).
-        let files = Arc::new(self.build_file_map(snapshot_id).await);
-        let ctx = self
-            .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
-            .await;
-        self.run_gauge_sweep(&gauges, &ctx, files, stream_id.value())
-            .await
+        let needing: std::collections::HashSet<String> = if force_full {
+            gauges.iter().map(|g| g.key.clone()).collect()
+        } else {
+            self.gauges_needing_baseline(stream_id.value())
+                .await
+                .into_iter()
+                .collect()
+        };
+        let (full_gauges, delta_gauges): (Vec<ResolvedGauge>, Vec<ResolvedGauge>) =
+            gauges.into_iter().partition(|g| needing.contains(&g.key));
+
+        let mut report = SweepReport::default();
+        if !delta_gauges.is_empty() {
+            // The snapshot's own rows — the incremental rescan corpus.
+            let files = Arc::new(self.build_file_map(snapshot_id).await);
+            let ctx = self
+                .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
+                .await;
+            let r = self
+                .run_gauge_sweep(&delta_gauges, &ctx, files, stream_id.value())
+                .await;
+            report.ran += r.ran;
+            report.failed.extend(r.failed);
+        }
+        if !full_gauges.is_empty() {
+            // The reconstructed whole tree as-of this snapshot — the baseline
+            // corpus. Built only when something actually needs baselining.
+            let files = Arc::new(self.build_full_file_map(snapshot_id).await);
+            let mut ctx = self
+                .snapshot_context(stream_id.value(), None, "on-snapshot", snapshot_id)
+                .await;
+            ctx.scan_kind = "full";
+            let r = self
+                .run_gauge_sweep(&full_gauges, &ctx, files, stream_id.value())
+                .await;
+            report.ran += r.ran;
+            report.failed.extend(r.failed);
+        }
+        report
     }
 
     /// Run `gauges` over one file map, reporting progress when it's a whole-tree
@@ -1211,7 +1251,7 @@ impl MetricsService {
                 (Some(snap), Some(facts)) => {
                     let fp = gauge_fingerprint(g, &self.script_base_dir(g));
                     facts
-                        .gauge_done_for_snapshot(&g.key, snap, fp.as_deref())
+                        .gauge_done_for_snapshot(&g.key, snap, fp.as_deref(), ctx.scan_kind)
                         .await
                         .unwrap_or(false)
                 }
@@ -1393,6 +1433,28 @@ impl MetricsService {
             .list_files_for_snapshot(snapshot_id)
             .await
             .unwrap_or_default();
+        self.file_map_from_rows(files).await
+    }
+
+    /// Build the RECONSTRUCTED whole-tree file map as-of `snapshot_id` (the
+    /// latest row per path ≤ the snapshot, tombstones excluded) — the baseline
+    /// corpus (tsk71). Same content pipeline as [`Self::build_file_map`]; only
+    /// the listing differs.
+    async fn build_full_file_map(&self, snapshot_id: i64) -> HashMap<String, String> {
+        let files = self
+            .snapshot_store
+            .list_tree_files_at(snapshot_id)
+            .await
+            .unwrap_or_default();
+        self.file_map_from_rows(files).await
+    }
+
+    /// Read each row's content (blob store or git odb) into a path→text map,
+    /// skipping deleted/oversize/binary/over-large files.
+    async fn file_map_from_rows(
+        &self,
+        files: Vec<oxplow_db::FileSnapshot>,
+    ) -> HashMap<String, String> {
         let project_dir = self.project_dir.clone();
         let blobs = self.blobs.clone();
         let max_bytes = self.max_file_bytes();
@@ -1452,6 +1514,7 @@ impl MetricsService {
                 .unwrap_or(false),
             branch: oxplow_git::detect_current_branch(&self.project_dir),
             effort_id: None,
+            scan_kind: "delta",
         }
     }
 
@@ -1585,6 +1648,7 @@ impl MetricsService {
         capture.git_version_exact = ctx.git_version_exact;
         capture.branch = ctx.branch.clone();
         capture.producer_version = gauge_fingerprint(gauge, &self.script_base_dir(gauge));
+        capture.scan_kind = ctx.scan_kind.into();
         if let Err(e) = facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(key = %gauge.key, error = %e, "gauge: failure record write failed");
         }
@@ -1682,6 +1746,7 @@ impl MetricsService {
             // Record WHICH LOGIC produced these facts, so a later script change is
             // detectable and can re-baseline instead of silently no-opping (tsk45).
             producer_version: gauge_fingerprint(gauge, &self.script_base_dir(gauge)),
+            scan_kind: ctx.scan_kind.into(),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 gauge.key.clone(),
@@ -2206,6 +2271,7 @@ def transform(input):
             git_version_exact: true,
             branch: Some("metrics-substrate".into()),
             effort_id: None,
+            scan_kind: "delta",
         };
         // Only src/a.rs has unsafe blocks → one fact recorded.
         let count = svc
@@ -2258,6 +2324,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
 
         // Scan 1: src/a.rs has one unsafe block.
@@ -2316,6 +2383,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         }
     }
 
@@ -2406,6 +2474,48 @@ def transform(input):
     }
 
     #[tokio::test]
+    async fn rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree() {
+        // tsk71: the old rebuild enqueued EVERY path as dirty and captured a
+        // full-tree snapshot, which polluted effort file-attribution (edits
+        // from other efforts first landed in a snapshot inside whatever effort
+        // window was open). The baseline now anchors to the latest existing
+        // snapshot and scans the RECONSTRUCTED tree — so a rebuild over an
+        // unchanged tree must not create any snapshot at all.
+        let (svc, dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        svc.metrics
+            .set_metrics_enabled(&["oxplow.rust.unsafe_blocks".into()], true)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
+
+        let first = svc.rebuild_metric_baseline(true).await.unwrap();
+        assert!(first.ran);
+        assert!(first.failed.is_empty(), "{:?}", first.failed);
+        let latest_after_first = svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+
+        // Second forced rebuild: nothing on disk changed → no new snapshot,
+        // and the kind-scoped idempotency guard skips the re-scan.
+        let second = svc.rebuild_metric_baseline(true).await.unwrap();
+        assert!(second.ran);
+        let latest_after_second = svc
+            .snapshot_store
+            .latest_snapshot_id_for_stream(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            latest_after_first, latest_after_second,
+            "a rebuild over an unchanged tree must not fabricate a snapshot"
+        );
+        assert_eq!(second.snapshot_id, latest_after_first);
+    }
+
+    #[tokio::test]
     async fn a_delta_only_gauge_needs_a_baseline_even_if_a_sibling_filled_the_shared_measure() {
         // tsk49, the exact live bug. `oxplow.ast_hit` is ONE measure shared by 10 idiom
         // gauges. `unsafe_blocks` (cheap) completed its full-tree scan, so the measure
@@ -2435,11 +2545,12 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
 
-        // A full-tree snapshot: unsafe_blocks scans it (completes → done capture on a
-        // big snapshot). It shares oxplow.ast_hit with console_calls.
+        // unsafe_blocks completes its BASELINE (a `scan_kind = 'full'` capture,
+        // tsk71). It shares oxplow.ast_hit with console_calls.
         let big = snapshot_with_files(
             &svc,
             &(0..150)
@@ -2451,10 +2562,12 @@ def transform(input):
         )
         .await;
         let files = Arc::new(HashMap::from([("f0.rs".to_string(), src)]));
+        let mut full_ctx = ctx(big);
+        full_ctx.scan_kind = "full";
         svc.metrics
             .run_one_gauge(
                 &builtin_gauge_fixture("oxplow.rust.unsafe_blocks"),
-                &ctx(big),
+                &full_ctx,
                 files,
             )
             .await;
@@ -2602,6 +2715,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         let files = Arc::new(HashMap::from([("a.rs".to_string(), "x".to_string())]));
         svc.metrics.run_one_gauge(&gauge, &ctx, files.clone()).await;
@@ -2645,6 +2759,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         let unsafe_n = |n: usize| {
             let body = "unsafe { x(); } ".repeat(n);
@@ -2718,6 +2833,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
 
         let s1 =
@@ -2804,6 +2920,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: Some(effort.id.value()),
+            scan_kind: "delta",
         };
         let count = svc
             .metrics
@@ -2853,6 +2970,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         let count = svc
             .metrics
@@ -2927,6 +3045,7 @@ def transform(input):
             git_version_exact: true,
             branch: Some("main".into()),
             effort_id: None,
+            scan_kind: "delta",
         };
         for key in [
             "oxplow.fn_count",
@@ -2989,6 +3108,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         svc.metrics
             .run_one_gauge(&metric, &ctx, Arc::new(HashMap::new()))
@@ -3052,6 +3172,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -3121,6 +3242,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         svc.metrics
             .run_one_gauge(&gauge, &ctx, Arc::new(HashMap::new()))
@@ -3186,6 +3308,7 @@ def transform(input):
             git_version_exact: true,
             branch: Some("main".into()),
             effort_id: None,
+            scan_kind: "delta",
         };
 
         let keys = [
@@ -3253,6 +3376,7 @@ def transform(input):
             git_version_exact: false,
             branch: Some("main".into()),
             effort_id: None,
+            scan_kind: "delta",
         };
         svc.metrics
             .run_one_gauge(
@@ -4050,6 +4174,7 @@ def transform(input):
             git_version_exact: false,
             branch: None,
             effort_id: None,
+            scan_kind: "delta",
         };
         let count = m.run_one_gauge(&metric, &ctx, Arc::new(files)).await;
         assert_eq!(count, 1, "global-scope script resolved + ran");

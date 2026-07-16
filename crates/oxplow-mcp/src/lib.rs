@@ -2234,6 +2234,19 @@ impl OxplowMcp {
         let mut capture =
             oxplow_db::NewMetricCapture::done(stream.value(), p.key.clone(), "agent-reported");
         capture.provenance = "asserted".into();
+        // Scanned-set semantics: an assertion restates exactly the paths it
+        // emits — but it still gets PROVENANCE (tsk71/tsk72): anchor it to the
+        // stream's latest snapshot so the value is connected to a tree state
+        // (which code it described) instead of floating free. `scan_kind`
+        // keeps the snapshot from being read as a scanned set.
+        capture.scan_kind = "asserted".into();
+        capture.snapshot_id = self
+            .services
+            .snapshot_store
+            .latest_snapshot_id_for_stream(stream)
+            .await
+            .ok()
+            .flatten();
         let fact = oxplow_db::NewFact {
             subject_kind,
             subject_ref,

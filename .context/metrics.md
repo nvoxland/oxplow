@@ -67,11 +67,24 @@ welded to collection.
 > `oxplow.rust.unsafe_blocks` reported **0** while the repo had **15**.
 >
 > **The fold.** A `per-path` measure's value = for each `(producer, path)`, the
-> facts from the **latest capture of that producer whose snapshot contained that
-> path** (`SqliteFactStore::latest_tree_facts`, mirroring `tree_at`'s window fold;
-> per-capture trend via `metric_engine::tree_state_series`). The scanned set comes
-> from the capture's **`file_snapshot` rows, not from the facts it emitted** —
-> which is why the whole thing needs *no* write-side convention:
+> facts from the **latest capture of that producer that scanned that path**
+> (`SqliteFactStore::latest_tree_facts`; per-capture trend via
+> `metric_engine::tree_state_series`). What a capture "scanned" is its
+> **`metric_capture.scan_kind`** (V58, tsk71):
+> - **`delta`** (default) — the capture's own snapshot `file_snapshot` rows: the
+>   ordinary incremental rescan of just-changed files.
+> - **`full`** — the **reconstructed tree as-of its snapshot** (`tree_at`'s
+>   window: latest row per path ≤ the anchor, tombstones included so deletions
+>   still drop out). This is what a **baseline** records — it restates the whole
+>   tree while anchored to an ordinary delta snapshot, so no full-tree snapshot
+>   is ever fabricated.
+> - **`asserted`** — exactly the paths it emitted facts for (agent
+>   `record_metric`, synthetic writes). Its snapshot is **provenance only**,
+>   never a scanned set; the insert coerces any snapshot-less capture to
+>   `asserted` (delta/full require an anchor).
+>
+> The scanned set never comes **from the facts a scan emitted** — which is why
+> the whole thing needs *no* write-side convention:
 > - a file whose count drops to **0** emits no fact (`if c > 0:`), but its path is
 >   in the new snapshot ⇒ the new capture supersedes the stale value. **No
 >   zero-emission convention; the bundled gauge scripts are untouched.**
@@ -86,24 +99,35 @@ welded to collection.
 > `zero_fill` is **suppressed** for `per-path`: an empty delta capture restated no
 > paths, so it means "nothing changed", not "the repo is zero".
 >
-> **Baseline.** The fold anchors on snapshot file rows, so a repo-wide total needs
-> ONE snapshot listing the whole tree. **`Services::rebuild_metric_baseline(force)`**
-> is the single entry point — it captures a full-tree snapshot
-> (`SnapshotCapture::enqueue_full_tree`) and runs the un-baselined gauges over it,
-> returning a `BaselineReport`. **Boot, the `rebuild_metrics` MCP tool, and the
-> end-to-end test all call it** (tsk50), so the boot path is finally exercisable
-> without a process restart — four metrics bugs in a row (tsk47–49) were caught only
-> by restarting, because this path was inline in a boot `tokio::spawn`. **Not** needed
-> on a branch switch — checkout rewrites the differing files, the watcher marks them
+> **Baseline (tsk71 — no fabricated snapshot).** A gauge's repo-wide total needs it
+> to have restated the whole tree once — that's a **`scan_kind='full'` capture over
+> the reconstructed tree of an ordinary snapshot** (corpus via
+> `SqliteSnapshotStore::list_tree_files_at` → `build_full_file_map`), NOT a
+> fabricated full-tree snapshot. The old `enqueue_full_tree` (mark every path dirty,
+> capture a snapshot listing the whole tree) is **gone**: that snapshot polluted
+> effort file-attribution — an edit from effort A that hadn't been snapshotted yet
+> first landed in a snapshot inside whatever effort window was open when a rebuild
+> ran, producing false "changed but not claimed" EFFORT REVIEW flags.
+>
+> `gauges_needing_baseline` is the **pending-baseline queue**: the on-snapshot sweep
+> (`run_snapshot_gauges`) partitions gauges every time a snapshot lands — already-
+> baselined gauges run `delta` over the snapshot's own rows; queued ones run `full`
+> over the reconstruction. So a newly added/edited gauge baselines on the next
+> ordinary snapshot automatically. **`Services::rebuild_metric_baseline(force)`** is
+> the on-demand entry point — it waits for the startup sweep, drains genuinely
+> pending edits into a NORMAL snapshot (real authored work, correctly attributed;
+> none dirty ⇒ **no snapshot is created**, it anchors to the latest existing one),
+> then runs the sweep. **Boot, the `rebuild_metrics` MCP tool, and the end-to-end
+> tests all call it** (tsk50) — see
+> `rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree`. **Not** needed on a
+> branch switch — checkout rewrites the differing files, the watcher marks them
 > dirty, and the delta rescans exactly those paths.
 >
-> The sweep is **idempotent per (snapshot, gauge, fingerprint)** (`gauge_done_for_snapshot`):
-> the direct baseline run and the event loop reacting to the same snapshot won't
-> double-scan the tree (the manual `run_metric` path bypasses it — an explicit "run
-> now" always runs). And `baseline_bar` is the **current tree size capped at
-> `TREE_SWEEP_FILE_THRESHOLD`**, not a fixed 100 — a fixed bar would leave every gauge
-> in a sub-100-file repo re-baselining every boot, while the cap stops a large repo
-> re-baselining on every added file (deltas carry growth forward).
+> The sweep is **idempotent per (snapshot, gauge, fingerprint, scan_kind)**
+> (`gauge_done_for_snapshot` — kind-scoped so a delta capture can't satisfy a
+> pending full baseline over the same snapshot): a repeat rebuild or the event loop
+> reacting to the same snapshot won't double-scan the tree (the manual `run_metric`
+> path bypasses it — an explicit "run now" always runs).
 >
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
@@ -125,16 +149,14 @@ welded to collection.
 > everything and silently zero the metric. Worse than the bug it reports.
 >
 > `needs_tree_baseline` asks ONE question **per gauge** (`gauges_needing_baseline`):
-> *has this gauge scanned the whole tree at its current logic?* A gauge is
-> un-baselined when EITHER:
-> 1. it has **never scanned the full tree** — its biggest completed scan
->    (`max_scanned_file_count`: max `file_snapshot` count over its `done` captures) is
->    below the whole-tree threshold. Covers a fresh gauge, and one stuck on small
->    deltas because its full-tree scan used to time out (tsk47/tsk49); OR
-> 2. it is **stale** — its current logic fingerprint (`gauge_fingerprint` — xxh3 of
->    script text + runtime/input/args + `emits`, stamped on every capture as
->    `metric_capture.producer_version`, V56) differs from the one on its latest
->    capture, i.e. the script changed (tsk45).
+> *does this gauge have a completed `scan_kind='full'` capture at its current logic
+> fingerprint?* (`SqliteFactStore::has_full_capture`; fingerprint =
+> `gauge_fingerprint` — xxh3 of script text + runtime/input/args + `emits`, stamped
+> on every capture as `metric_capture.producer_version`, V56). That single check
+> covers BOTH a fresh/never-baselined gauge (incl. one stuck on deltas because its
+> full scan used to time out, tsk47/tsk49) AND a script change since the last
+> baseline (a full capture at stale logic carries the old fingerprint, tsk45). An
+> unfingerprintable script matches any-version — one full capture ever.
 >
 > **Per-GAUGE, not per-measure, is load-bearing (tsk49).** `oxplow.ast_hit` is one
 > measure shared by 10 idiom gauges (sliced by `rule`), so "does the measure have
@@ -828,7 +850,10 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`;
   returns `facts_recorded`) and `record_metric` (an **asserted FACT** on the
   metric's source measure, under a `provenance: asserted` / `source:
-  agent-reported` capture — flipped off the legacy sample write in tsk41 so the
+  agent-reported` / `scan_kind: asserted` capture **anchored to the stream's
+  latest snapshot for provenance** (tsk71/tsk72 — the snapshot says which tree
+  state the value described; the `asserted` scan kind keeps it from being read
+  as a scanned set) — flipped off the legacy sample write in tsk41 so the
   fact-based reads actually see it; a formula spec is rejected, and so is a
   `count` spec — one asserted fact would read as 1 whatever its value. The fact
   is stamped to match the spec's own filter (severity / dim_eq → the `rule`

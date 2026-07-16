@@ -630,43 +630,18 @@ impl SnapshotCaptureService {
     pub async fn enqueue_startup_diff(
         &self,
     ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        self.enqueue_tree_diff(false).await
+        // The old `enqueue_full_tree` variant (enqueue EVERY path so the next
+        // snapshot lists the whole tree) is gone (tsk71): metric baselines now
+        // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
+        // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
+        // any more — and fabricating one polluted effort file-attribution.
+        self.enqueue_tree_diff().await
     }
 
-    /// Enqueue **every** file on disk as dirty — the same sweep, but with no prior
-    /// state to short-circuit against — so the next `request_snapshot` writes a
-    /// snapshot listing the WHOLE TREE.
-    ///
-    /// This is the metric **baseline** primitive (tsk41). A `per-path` measure's
-    /// fold anchors on the *snapshot's file rows* to know which paths a capture
-    /// restated, so repopulating a gauge across the whole repo needs a snapshot that
-    /// lists every path — a delta snapshot would only ever credit it for the files in
-    /// the last commit. Needed after the V54 wipe, when a gauge is newly enabled, and
-    /// when a gauge's script changes (its old facts were computed by different logic).
-    /// NOT needed on a branch switch: checkout rewrites the differing files, the
-    /// watcher marks them dirty, and the resulting delta rescans exactly those paths
-    /// — files whose content is identical across branches keep valid facts.
-    pub async fn enqueue_full_tree(
-        &self,
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        self.enqueue_tree_diff(true).await
-    }
-
-    async fn enqueue_tree_diff(
-        &self,
-        full: bool,
-    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    async fn enqueue_tree_diff(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
-        // `full`: pretend we've never seen any path, so every file falls through the
-        // (size, mtime) short-circuit and is captured. The leftover-paths sweep that
-        // records deletions is then a no-op, which is right — a full baseline captures
-        // what IS on disk; paths already tombstoned stay tombstoned.
-        let mut latest = if full {
-            Default::default()
-        } else {
-            self.inner.store.latest_stat_per_path().await?
-        };
+        let mut latest = self.inner.store.latest_stat_per_path().await?;
         let prior_rows = latest.len();
         let db_load_ms = db_started.elapsed().as_millis() as u64;
         info!(

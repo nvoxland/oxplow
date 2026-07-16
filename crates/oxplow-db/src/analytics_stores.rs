@@ -1463,6 +1463,51 @@ impl SqliteSnapshotStore {
             .await
     }
 
+    /// The RECONSTRUCTED tree as-of `snapshot_id`: the latest `file_snapshot`
+    /// row per path with `snapshot_id <= ?` (same window as [`Self::tree_at`]),
+    /// excluding paths whose latest row is a deletion tombstone. This is the
+    /// whole tree's file rows — content-addressable via `blob_hash`/`storage` —
+    /// even though the anchor snapshot itself only lists a delta. The baseline
+    /// gauge sweep (tsk71) builds its full-tree corpus from this instead of
+    /// requiring a fabricated full-tree snapshot.
+    pub async fn list_tree_files_at(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<Vec<FileSnapshot>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let stream_id: Option<i64> = conn
+                    .query_row(
+                        "SELECT stream_id FROM snapshot WHERE id = ?1",
+                        params![snapshot_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let Some(stream_id) = stream_id else {
+                    return Ok(Vec::new());
+                };
+                let mut stmt = conn.prepare(
+                    "SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
+                            snapshot_id
+                     FROM (
+                        SELECT id, stream_id, path, blob_hash, size_bytes, captured_at, storage,
+                               snapshot_id,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY path ORDER BY snapshot_id DESC, id DESC
+                               ) AS rn
+                        FROM file_snapshot
+                        WHERE stream_id = ?1
+                          AND snapshot_id IS NOT NULL
+                          AND snapshot_id <= ?2
+                     ) WHERE rn = 1 AND storage <> 'deleted'
+                     ORDER BY id ASC",
+                )?;
+                let rows = stmt.query_map(params![stream_id, snapshot_id], row_to_snapshot)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     pub async fn get(&self, id: i64) -> Result<Option<FileSnapshot>, DomainError> {
         self.db
             .call(move |conn| {
