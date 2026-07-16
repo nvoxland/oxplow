@@ -1226,6 +1226,66 @@ impl CollectionService {
         )))
     }
 
+    /// One coverage ride-along attempt: resolve the thread's stream and record
+    /// the absolute report. `Ok` when the thread has no stream — nothing to do.
+    async fn try_observe_coverage(
+        &self,
+        thread: &ThreadId,
+        report: &oxplow_coverage::CoverageReport,
+    ) -> Result<(), DomainError> {
+        if let Some(stream_id) = self.stream_id_for(thread).await? {
+            self.observe_coverage(thread, &stream_id, report).await?;
+        }
+        Ok(())
+    }
+
+    /// The coverage leg with one retry (tsk79). The detached collection task
+    /// runs right after a test command — DB contention or a snapshot-lookup
+    /// hiccup is transient, and without a retry one swallowed error means the
+    /// run's coverage simply never exists (fatal when it was the effort's LAST
+    /// run before close). When both attempts lose, the miss is made durable
+    /// via [`Self::record_coverage_failure`].
+    async fn coverage_ride_along_with_retry(
+        &self,
+        thread: &ThreadId,
+        report: &oxplow_coverage::CoverageReport,
+    ) {
+        let first = match self.try_observe_coverage(thread, report).await {
+            Ok(()) => return,
+            Err(e) => e,
+        };
+        tracing::warn!(error = %first, "coverage ride-along failed; retrying once");
+        tokio::time::sleep(COVERAGE_RETRY_DELAY).await;
+        if let Err(e) = self.try_observe_coverage(thread, report).await {
+            tracing::warn!(error = %e, "coverage ride-along failed after retry");
+            self.record_coverage_failure(thread, &format!("{first}; retry: {e}"))
+                .await;
+        }
+    }
+
+    /// Durable visibility for a dropped coverage leg (tsk79): a facts-empty
+    /// `status = failed` coverage capture carrying the error — the same
+    /// convention as gauge failures — so the miss is queryable in the
+    /// substrate instead of living only in a tty warn. Best-effort.
+    async fn record_coverage_failure(&self, thread: &ThreadId, error: &str) {
+        let stream_val = match self.stream_id_for(thread).await {
+            Ok(Some(sid)) => match oxplow_domain::StreamId::try_from_str(&sid) {
+                Some(s) => s.value(),
+                None => return,
+            },
+            // Can't resolve even the stream — the warn above is all we have.
+            _ => return,
+        };
+        let mut capture = NewMetricCapture::done(stream_val, "coverage", "coverage-report");
+        capture.status = "failed".into();
+        capture.error = Some(error.to_string());
+        capture.thread_id = Some(thread.value());
+        capture.trigger = Some("on-report".into());
+        if let Err(e) = self.facts.record_facts(capture, Vec::new()).await {
+            tracing::warn!(error = %e, "coverage failure record write failed");
+        }
+    }
+
     /// PostToolUse entry point: detect a test and/or static-analysis run,
     /// record it, and ride along to coverage / findings. Best-effort — never
     /// fails the hook.
@@ -1280,14 +1340,15 @@ impl CollectionService {
                     Some((r, source, analyzers)) => (Some(r), source, analyzers),
                     None => (None, "analysis-report".to_string(), Vec::new()),
                 };
-            self.record_static_analysis(
-                thread,
-                &bash.command,
-                report.as_ref(),
-                &analyzers,
-                &source,
-            )
-            .await?;
+            // Leg isolation (tsk79): one leg's transient error must not kill
+            // the legs after it — the test-run + coverage recording below is
+            // independent of whether this analysis write landed.
+            if let Err(e) = self
+                .record_static_analysis(thread, &bash.command, report.as_ref(), &analyzers, &source)
+                .await
+            {
+                tracing::warn!(error = %e, "analysis ride-along failed");
+            }
         }
 
         // A pure analysis run (no test patterns matched) is done — the
@@ -1306,32 +1367,42 @@ impl CollectionService {
             Some((r, source)) => (Some(r), source),
             None => (None, "post-tool-bash".to_string()),
         };
-        self.record_test_run(
-            thread,
-            &bash.command,
-            bash.exit_code,
-            None,
-            None,
-            None,
-            None,
-            "observed",
-            &source,
-            report.as_ref(),
-            // Exact attribution when the agent prefixed `OXPLOW_TASK=<id>`
-            // (find_open_for_task — survives concurrent efforts); otherwise the
-            // single-open auto rule attributes it (tsk265/tsk271).
-            parse_task_token(&bash.command),
-        )
-        .await?;
+        // Leg isolation (tsk79): a failed test-run write still lets the
+        // coverage below record — the report on disk is real either way.
+        if let Err(e) = self
+            .record_test_run(
+                thread,
+                &bash.command,
+                bash.exit_code,
+                None,
+                None,
+                None,
+                None,
+                "observed",
+                &source,
+                report.as_ref(),
+                // Exact attribution when the agent prefixed `OXPLOW_TASK=<id>`
+                // (find_open_for_task — survives concurrent efforts); otherwise the
+                // single-open auto rule attributes it (tsk265/tsk271).
+                parse_task_token(&bash.command),
+            )
+            .await
+        {
+            tracing::warn!(error = %e, "test-run ride-along failed");
+        }
         // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
         // report regardless of effort; the effort-relative diff is derived later
         // at read. Keep the merged report so the coverage-target nudge can derive
         // this effort's diff-coverage when a single effort is open.
-        let coverage = self.merge_fresh_coverage(floor, &cfg, &registry);
+        // A transient error here used to silently drop the run's coverage
+        // (tsk79) — now it retries once and, when both attempts (or the parse
+        // of a fresh report) lose, records a durable `failed` capture.
+        let (coverage, coverage_errors) = self.merge_fresh_coverage(floor, &cfg, &registry);
         if let Some((merged, _source)) = &coverage {
-            if let Some(stream_id) = self.stream_id_for(thread).await? {
-                let _ = self.observe_coverage(thread, &stream_id, merged).await?;
-            }
+            self.coverage_ride_along_with_retry(thread, merged).await;
+        } else if !coverage_errors.is_empty() {
+            self.record_coverage_failure(thread, &coverage_errors.join("; "))
+                .await;
         }
         // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
         // run with a single open effort. The runs above are already recorded.
@@ -1798,14 +1869,22 @@ impl CollectionService {
     /// collector. Returns the merged report plus a `source` label (lower-trust
     /// `plugin-exec:*` when any contributing collector was an external
     /// process). `None` when none contributed.
+    /// Returns the merged report (when any fresh report parsed) plus the parse
+    /// errors of fresh reports that did NOT parse — so the caller can make a
+    /// "fresh report existed but its coverage was lost" durable (tsk79)
+    /// instead of the miss living only in a tty warn.
     fn merge_fresh_coverage(
         &self,
         floor: oxplow_domain::Timestamp,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
-    ) -> Option<(oxplow_coverage::CoverageReport, String)> {
+    ) -> (
+        Option<(oxplow_coverage::CoverageReport, String)>,
+        Vec<String>,
+    ) {
         let mut merged = oxplow_coverage::CoverageReport::default();
         let mut exec_names: Vec<String> = Vec::new();
+        let mut errors: Vec<String> = Vec::new();
         let mut any = false;
         for r in &cfg.reports {
             let Some(collector) = registry.resolve(&r.format) else {
@@ -1836,19 +1915,20 @@ impl CollectionService {
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    tracing::warn!(format = %r.format, error = %e, "coverage report parse failed")
+                    tracing::warn!(format = %r.format, error = %e, "coverage report parse failed");
+                    errors.push(format!("{} ({}): {e}", r.path, r.format));
                 }
             }
         }
         if !any {
-            return None;
+            return (None, errors);
         }
         let source = if exec_names.is_empty() {
             "coverage-report".to_string()
         } else {
             format!("plugin-exec:{}", exec_names.join(","))
         };
-        Some((merged, source))
+        (Some((merged, source)), errors)
     }
 
     /// Merge every configured analysis report that exists and is fresher than
@@ -2894,6 +2974,11 @@ fn commit_hygiene_message(short_sha: &str, out_of_effort: &[String]) -> String {
 /// for a slow suite that finishes writing well after its command started.
 const REPORT_FRESH_WINDOW_MS: i64 = 10 * 60 * 1000;
 
+/// Pause before the coverage leg's single retry (tsk79) — long enough for a
+/// DB-contention blip to clear, short enough that the detached task still
+/// finishes well within a test run's shadow.
+const COVERAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Build the ABSOLUTE coverage payload from a report (tsk270): whole-report %
 /// plus per-file instrumented/covered line-sets, stored verbatim so the
 /// effort-relative diff can be derived later at read. Returns
@@ -3755,6 +3840,41 @@ mod tests {
             assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
             assert_eq!(cov[0].provenance, "observed");
             assert_eq!(cov[0].source, "coverage-report");
+        }
+
+        #[tokio::test]
+        async fn coverage_parse_failure_records_a_failed_capture() {
+            // tsk79: a FRESH but malformed coverage report used to vanish with
+            // only a tty warn — the run's coverage just never existed. Now the
+            // miss is durable: a facts-empty `status=failed` coverage capture
+            // (the gauge-failure convention) lands in the substrate.
+            let h = build(Some("<coverage this is not xml")).await;
+            let out = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("bun test --watch false", 0))
+                .await
+                .unwrap();
+            // The failure is recorded, not returned — the hook never fails.
+            // (A nudge may still fire for the report-less run; either is fine.)
+            let _ = out;
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            let failed: Vec<_> = caps
+                .iter()
+                .filter(|c| c.producer == "coverage" && c.status == "failed")
+                .collect();
+            assert_eq!(failed.len(), 1, "one failed coverage capture: {caps:?}");
+            assert!(
+                !failed[0].error.as_deref().unwrap_or_default().is_empty(),
+                "carries the parse error"
+            );
         }
 
         #[derive(serde::Deserialize)]

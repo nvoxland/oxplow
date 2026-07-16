@@ -124,6 +124,16 @@ hook + MCP wiring):
   control plane now spawns `on_post_tool_use` on its own task (always
   completes) and waits ≤2.5s for the nudge message; a slow run's nudge is
   still persisted (`persist_nudge`), only the immediate injection is skipped.
+  **The legs are isolated and coverage retries (tsk79):** the analysis,
+  test-run, and coverage legs each catch their own error (one leg's transient
+  failure can't kill the legs after it), and the coverage leg retries once
+  after `COVERAGE_RETRY_DELAY` — right after a test run, DB contention or a
+  snapshot-lookup hiccup is transient, and without the retry a single
+  swallowed error meant that run's coverage never existed. When both attempts
+  lose — or a FRESH report exists but fails to parse — the miss is durable: a
+  facts-empty `status = failed` coverage capture carrying the error (the
+  gauge-failure convention), queryable in the substrate instead of living
+  only in a tty warn.
   **Clippy needs `bun run lint:collect`:** nothing else writes
   `target/clippy.json` (plain `cargo clippy` prints human output), so the
   `oxplow.analysis.*` metrics only populate when clippy runs via the
