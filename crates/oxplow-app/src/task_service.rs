@@ -759,6 +759,32 @@ impl TaskService {
                                 denominator: Some(1.0),
                                 ..NewFact::new(effort_tokens_measure.id, total)
                             });
+                            // Wasted-token ratio, denominator side (tsk77):
+                            // the metered close enters the ratio as num 0 /
+                            // den = spend, value 0 (SUM reads stay untouched
+                            // by closes). The revert leg in collection.rs
+                            // later adds (num = spend, den = 0) if this
+                            // effort's commits get reverted — Σn/Σd across
+                            // the measure is then wasted ÷ all metered spend.
+                            // Rides inside the effort_tokens gate: the
+                            // denominator IS this spend computation.
+                            if facts
+                                .measure_has_active_spec("oxplow.token_waste")
+                                .await
+                                .unwrap_or(true)
+                            {
+                                if let Some(waste_measure) =
+                                    facts.get_measure("oxplow.token_waste").await?
+                                {
+                                    rows.push(NewFact {
+                                        subject_kind: Some("effort".into()),
+                                        subject_ref: Some(effort_id.to_string()),
+                                        numerator: Some(0.0),
+                                        denominator: Some(total),
+                                        ..NewFact::new(waste_measure.id, 0.0)
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -1836,6 +1862,22 @@ mod tests {
         // Non-additive den=1: `task.tokens` collapses to MEAN per close.
         assert_eq!(spend[0].numerator, Some(820.0));
         assert_eq!(spend[0].denominator, Some(1.0));
+
+        // tsk77: the close also enters the wasted-token ratio's DENOMINATOR —
+        // one `oxplow.token_waste` row with num 0 / den = the spend, value 0
+        // (so `task.tokens.wasted`'s SUM stays untouched by closes). The
+        // numerator side comes later from the revert leg, if ever.
+        let waste = facts
+            .get_measure("oxplow.token_waste")
+            .await
+            .unwrap()
+            .expect("token_waste measure seeded by V61");
+        let waste_rows = facts.facts_for_measure(waste.id).await.unwrap();
+        assert_eq!(waste_rows.len(), 1, "one denominator row per metered close");
+        assert_eq!(waste_rows[0].value, 0.0);
+        assert_eq!(waste_rows[0].numerator, Some(0.0));
+        assert_eq!(waste_rows[0].denominator, Some(820.0));
+        assert_eq!(waste_rows[0].subject_kind.as_deref(), Some("effort"));
     }
 
     #[tokio::test]

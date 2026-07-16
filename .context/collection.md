@@ -124,6 +124,11 @@ hook + MCP wiring):
   control plane now spawns `on_post_tool_use` on its own task (always
   completes) and waits ≤2.5s for the nudge message; a slow run's nudge is
   still persisted (`persist_nudge`), only the immediate injection is skipped.
+  **Landed commits also feed the wasted-token leg (tsk77):** any detected
+  commit — including `git revert`, which needs its own `detect_git_revert`
+  since the command never says "commit" — has HEAD's `This reverts commit`
+  trailers read; a reverted commit attributable to exactly one CLOSED effort
+  emits that effort's spend onto `oxplow.token_waste` (see metrics.md).
   **The legs are isolated and coverage retries (tsk79):** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once

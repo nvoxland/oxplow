@@ -123,6 +123,58 @@ pub fn detect_git_commit(command: &str) -> bool {
     false
 }
 
+/// True when the command runs `git revert` AND lets it commit (tsk77) —
+/// `--no-commit`/`-n` stages the inverse without landing anything, so there
+/// is no revert commit to attribute waste from. Same global-option skipping
+/// as [`detect_git_commit`]; `git revert` never carries the word "commit",
+/// so the waste leg needs its own detector.
+pub fn detect_git_revert(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    if lower.contains("--no-commit") || lower.split_whitespace().any(|t| t == "-n") {
+        return false;
+    }
+    let toks: Vec<&str> = lower.split_whitespace().collect();
+    for (i, t) in toks.iter().enumerate() {
+        if *t != "git" && !t.ends_with("/git") {
+            continue;
+        }
+        let mut j = i + 1;
+        while let Some(tok) = toks.get(j) {
+            if *tok == "-c" || *tok == "--config" {
+                j += 2;
+                continue;
+            }
+            if tok.starts_with('-') {
+                j += 1;
+                continue;
+            }
+            if *tok == "revert" {
+                return true;
+            }
+            break;
+        }
+    }
+    false
+}
+
+/// Full-length shas from the stock `git revert` trailer lines
+/// (`This reverts commit <sha>.`), in body order. Prose that merely mentions
+/// reverting doesn't match — only the exact trailer shape counts, which is
+/// what both `git revert` and a hand-written faithful trailer produce.
+fn parse_reverted_shas(body: &str) -> Vec<String> {
+    let mut shas = Vec::new();
+    for line in body.lines() {
+        let Some(rest) = line.trim().strip_prefix("This reverts commit ") else {
+            continue;
+        };
+        let sha: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+        if sha.len() == 40 {
+            shas.push(sha);
+        }
+    }
+    shas
+}
+
 /// Executables that only READ. A sub-command leading with one of these can
 /// MENTION a test/analysis pattern (a grep needle, an `echo`d reminder, a path)
 /// without being an actual run — so the substring detector must skip it. Keeps
@@ -1286,6 +1338,125 @@ impl CollectionService {
         }
     }
 
+    /// The revert/waste signal (tsk77): read HEAD's `This reverts commit
+    /// <sha>` trailers; for each reverted commit that falls inside exactly ONE
+    /// closed effort of this thread's stream (the ambiguity stance — 0 or >1
+    /// candidates → no attribution), emit an `oxplow.token_waste` fact carrying
+    /// the effort's whole token spend as a numerator-only ratio row
+    /// (num = spend, den = 0; the close-side row carried num 0 / den = spend),
+    /// so Σn/Σd across the measure is the wasted share. Idempotent per effort:
+    /// a second revert touching the same effort is the same waste. V1
+    /// granularity is deliberately coarse — one reverted commit flags the
+    /// effort's FULL spend, over-counting multi-commit efforts where only part
+    /// was rolled back.
+    async fn record_token_waste_for_reverts(&self, thread: &ThreadId) -> Result<(), DomainError> {
+        if !self
+            .facts
+            .measure_has_active_spec("oxplow.token_waste")
+            .await
+            .unwrap_or(true)
+        {
+            return Ok(());
+        }
+        let Some(waste_measure) = self.facts.get_measure("oxplow.token_waste").await? else {
+            return Ok(());
+        };
+        let Some(effort_tokens_measure) = self.facts.get_measure("oxplow.effort_tokens").await?
+        else {
+            return Ok(());
+        };
+        // HEAD is the just-landed (revert) commit; its body carries the trailers.
+        let head_sha = match tokio::task::spawn_blocking({
+            let p = self.project_dir.clone();
+            move || oxplow_git::head_commit_sha(&p)
+        })
+        .await
+        {
+            Ok(Some(sha)) => sha,
+            _ => return Ok(()),
+        };
+        let head = match tokio::task::spawn_blocking({
+            let p = self.project_dir.clone();
+            let sha = head_sha.clone();
+            move || oxplow_git::get_commit_detail(&p, &sha)
+        })
+        .await
+        {
+            Ok(Some(d)) => d,
+            _ => return Ok(()),
+        };
+        let shas = parse_reverted_shas(&head.body);
+        if shas.is_empty() {
+            return Ok(());
+        }
+        let Some(thread_row) = self.threads.get(thread).await? else {
+            return Ok(());
+        };
+        let stream_val = thread_row.stream_id.value();
+        for sha in shas {
+            let Ok(Some(reverted)) = tokio::task::spawn_blocking({
+                let p = self.project_dir.clone();
+                let sha = sha.clone();
+                move || oxplow_git::get_commit_detail(&p, &sha)
+            })
+            .await
+            else {
+                continue;
+            };
+            // git timestamps are SECONDS-granular — the commit happened
+            // somewhere inside [secs, secs+1), so the containment window must
+            // span that whole second or a commit made in the same wall-second
+            // an effort started would truncate to before it.
+            let at_start = oxplow_domain::Timestamp::from_unix_ms(reverted.timestamp_secs * 1000);
+            let at_end =
+                oxplow_domain::Timestamp::from_unix_ms(reverted.timestamp_secs * 1000 + 999);
+            // Closed efforts whose window contains the reverted commit, scoped
+            // to this stream (commits are per-worktree = per-stream).
+            let mut owners = Vec::new();
+            for e in self.efforts.list_in_window(at_start, at_end).await? {
+                if e.ended_at.is_none() {
+                    continue; // still open — its spend isn't final (and it's us)
+                }
+                match self.threads.get(&e.thread_id).await {
+                    Ok(Some(t)) if t.stream_id.value() == stream_val => owners.push(e),
+                    _ => {}
+                }
+            }
+            let [owner] = owners.as_slice() else {
+                continue; // 0 or ambiguous → no attribution
+            };
+            let owner_ref = owner.id.to_string();
+            let spend: f64 = self
+                .facts
+                .facts_for_measure_in_stream(effort_tokens_measure.id, stream_val)
+                .await?
+                .iter()
+                .filter(|f| f.subject_ref.as_deref() == Some(owner_ref.as_str()))
+                .map(|f| f.value)
+                .sum();
+            if spend <= 0.0 {
+                continue; // unmetered effort — no waste to count
+            }
+            let mut capture = NewMetricCapture::done(stream_val, "revert-detect", "git");
+            capture.thread_id = Some(thread.value());
+            capture.trigger = Some("on-commit".into());
+            capture.basis_ref = Some(head_sha.clone());
+            capture.idempotency_key = Some(format!("token-waste:{}", owner.id.value()));
+            let fact = NewFact {
+                subject_kind: Some("effort".into()),
+                subject_ref: Some(owner_ref),
+                numerator: Some(spend),
+                denominator: Some(0.0),
+                ..NewFact::new(waste_measure.id, spend)
+            };
+            self.facts.record_facts(capture, vec![fact]).await?;
+            self.events.emit(OxplowEvent::MetricSamplesChanged {
+                stream_id: thread_row.stream_id,
+            });
+        }
+        Ok(())
+    }
+
     /// PostToolUse entry point: detect a test and/or static-analysis run,
     /// record it, and ride along to coverage / findings. Best-effort — never
     /// fails the hook.
@@ -1301,7 +1472,8 @@ impl CollectionService {
         let is_test = detect_test_run(&bash.command, &cfg.test_run_patterns);
         let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_run_patterns);
         let is_commit = detect_git_commit(&bash.command);
-        if !is_test && !is_analysis && !is_commit {
+        let is_revert = detect_git_revert(&bash.command);
+        if !is_test && !is_analysis && !is_commit && !is_revert {
             return Ok(None);
         }
         // OBSERVE-ALWAYS (tsk269): tests + analysis are recorded regardless of how
@@ -1311,6 +1483,15 @@ impl CollectionService {
         // nudges), which legitimately no-op when ambiguous.
         let effort_opt = self.efforts.find_single_open_for_thread(thread).await?;
 
+        // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
+        // which never says "commit" — may carry "This reverts commit <sha>"
+        // trailers pointing into a closed effort's window. Best-effort, before
+        // the pure-commit early return below.
+        if (is_commit || is_revert) && !matches!(bash.exit_code, Some(c) if c != 0) {
+            if let Err(e) = self.record_token_waste_for_reverts(thread).await {
+                tracing::warn!(error = %e, "token-waste leg failed");
+            }
+        }
         // Commit-hygiene nudge: a successful `git commit` that swept in files
         // outside the open effort's changed set. Effort-relative advisory — only
         // with a single open effort. Independent of the ride-alongs below.
@@ -1322,10 +1503,10 @@ impl CollectionService {
                     return Ok(Some(msg));
                 }
             }
-            // A pure commit (not also a test/analysis run) is done.
-            if !is_test && !is_analysis {
-                return Ok(None);
-            }
+        }
+        // A pure commit/revert (not also a test/analysis run) is done.
+        if (is_commit || is_revert) && !is_test && !is_analysis {
+            return Ok(None);
         }
         let registry = self.registry(&cfg);
         let floor = report_fresh_floor();
@@ -3371,6 +3552,38 @@ mod tests {
     }
 
     #[test]
+    fn detect_git_revert_matches_revert_commands() {
+        // tsk77: `git revert` creates its commit without the word "commit"
+        // in the command line, so the waste leg needs its own detector.
+        assert!(detect_git_revert("git revert abc1234"));
+        assert!(detect_git_revert("git -c user.email=t@t revert HEAD~1"));
+        // --no-commit stages the inverse without committing — nothing landed.
+        assert!(!detect_git_revert("git revert --no-commit abc1234"));
+        assert!(!detect_git_revert("git revert -n abc1234"));
+        assert!(!detect_git_revert("git commit -m \"revert the thing\""));
+        assert!(!detect_git_revert("git status"));
+    }
+
+    #[test]
+    fn parse_reverted_shas_reads_the_git_trailer() {
+        // The stock `git revert` body line. Multi-revert bodies carry one
+        // trailer per reverted commit.
+        let body = "This reverts commit 0123456789abcdef0123456789abcdef01234567.\n\
+                    \n\
+                    This reverts commit fedcba9876543210fedcba9876543210fedcba98.";
+        assert_eq!(
+            parse_reverted_shas(body),
+            vec![
+                "0123456789abcdef0123456789abcdef01234567".to_string(),
+                "fedcba9876543210fedcba9876543210fedcba98".to_string(),
+            ]
+        );
+        assert!(parse_reverted_shas("fix: ordinary commit body").is_empty());
+        // Prose mentioning a revert without the trailer shape doesn't count.
+        assert!(parse_reverted_shas("this reverts the earlier approach").is_empty());
+    }
+
+    #[test]
     fn commit_hygiene_message_lists_files_and_flags_docs() {
         // No docs/ file → no auto-deploy warning.
         let plain = commit_hygiene_message("abc1234", &["src/other.rs".into()]);
@@ -3840,6 +4053,107 @@ mod tests {
             assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
             assert_eq!(cov[0].provenance, "observed");
             assert_eq!(cov[0].source, "coverage-report");
+        }
+
+        #[tokio::test]
+        async fn reverting_a_closed_efforts_commit_records_token_waste() {
+            // tsk77: `git revert` of a commit made inside a CLOSED, token-
+            // metered effort → one `oxplow.token_waste` fact (value/num = the
+            // effort's spend, den = 0 — the numerator side of the wasted
+            // ratio), idempotent per effort.
+            let h = build_full(None, true, &[]).await;
+            let dir = h.tmp.path();
+
+            // A commit inside the (still open) effort's window.
+            std::fs::write(dir.join("work.txt"), "v1\n").unwrap();
+            git_in(dir, &["add", "work.txt"]);
+            git_commit(dir, "bad work");
+            let bad_sha = String::from_utf8(
+                std::process::Command::new("git")
+                    .current_dir(dir)
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim()
+            .to_string();
+
+            // Give the effort a token spend, then close it.
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let effort = h
+                .efforts
+                .find_open_for_thread(&h.thread)
+                .await
+                .unwrap()
+                .expect("open effort");
+            let etm = facts
+                .get_measure("oxplow.effort_tokens")
+                .await
+                .unwrap()
+                .unwrap();
+            let mut cap = oxplow_db::NewMetricCapture::done(1, "effort-lifecycle", "test");
+            cap.effort_id = Some(effort.id.value());
+            facts
+                .record_facts(
+                    cap,
+                    vec![oxplow_db::NewFact {
+                        subject_kind: Some("effort".into()),
+                        subject_ref: Some(effort.id.to_string()),
+                        ..oxplow_db::NewFact::new(etm.id, 5000.0)
+                    }],
+                )
+                .await
+                .unwrap();
+            h.efforts.finish(&effort.id, None, None).await.unwrap();
+
+            // The revert lands as a fresh commit with the trailer.
+            git_in(
+                dir,
+                &[
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "user.name=t",
+                    "revert",
+                    "--no-edit",
+                    &bad_sha,
+                ],
+            );
+            h.service
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload(&format!("git revert {bad_sha}"), 0),
+                )
+                .await
+                .unwrap();
+
+            let waste_measure = facts
+                .get_measure("oxplow.token_waste")
+                .await
+                .unwrap()
+                .expect("token_waste measure seeded by V61");
+            let waste = facts.facts_for_measure(waste_measure.id).await.unwrap();
+            assert_eq!(waste.len(), 1, "one waste fact for the reverted effort");
+            assert_eq!(waste[0].value, 5000.0, "the effort's full spend");
+            assert_eq!(waste[0].numerator, Some(5000.0));
+            assert_eq!(waste[0].denominator, Some(0.0), "numerator-only ratio row");
+            assert_eq!(
+                waste[0].subject_ref.as_deref(),
+                Some(effort.id.to_string().as_str())
+            );
+
+            // Re-firing (same revert seen again) is idempotent per effort.
+            h.service
+                .on_post_tool_use(
+                    &h.thread,
+                    &bash_payload(&format!("git revert {bad_sha}"), 0),
+                )
+                .await
+                .unwrap();
+            let again = facts.facts_for_measure(waste_measure.id).await.unwrap();
+            assert_eq!(again.len(), 1, "one waste fact per effort, ever");
         }
 
         #[tokio::test]

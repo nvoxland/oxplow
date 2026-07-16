@@ -190,6 +190,42 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: EFFORT_DIMS,
             description: Some("Number of efforts spent on a task (the redo-rate signal)."),
         },
+        // Wasted-token pair (tsk77) — both fold `oxplow.token_waste`, the
+        // append-only ratio measure: closes contribute (num 0 / den spend),
+        // a detected revert contributes (num spend / den 0, value spend). So
+        // SUM over values = wasted tokens, RATIO = wasted share. Token-
+        // denominated by decision — never dollars (tsk73).
+        ProducerMetric {
+            key: "task.tokens.wasted",
+            title: "Wasted tokens",
+            kind: "gauge",
+            unit: "tokens",
+            direction: "lower-better",
+            default_agg: "sum",
+            grain: Some("effort"),
+            category: "operational",
+            producer: "revert-detect",
+            dimensions: EFFORT_DIMS,
+            description: Some(
+                "Tokens spent in closed efforts whose commits were later reverted.",
+            ),
+        },
+        ProducerMetric {
+            key: "task.tokens.wasted_pct",
+            title: "Wasted-token ratio",
+            kind: "gauge",
+            unit: "%",
+            direction: "lower-better",
+            default_agg: "ratio",
+            grain: Some("effort"),
+            category: "operational",
+            producer: "revert-detect",
+            dimensions: EFFORT_DIMS,
+            description: Some(
+                "Share of effort token spend that was later reverted — wasted ÷ all metered \
+                 spend, across closed efforts.",
+            ),
+        },
         // Usage metrics phase 2 (tsk76) — the autonomy/velocity pair, both
         // per-close lifecycle means like task.tokens.
         ProducerMetric {
@@ -478,6 +514,8 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
         "agent.tokens.cache_hit_pct" => ("oxplow.cache_usage", "ratio", None),
         "task.tokens" => ("oxplow.effort_tokens", "avg", None),
         "task.steering" => ("oxplow.effort_steering", "avg", None),
+        "task.tokens.wasted" => ("oxplow.token_waste", "sum", None),
+        "task.tokens.wasted_pct" => ("oxplow.token_waste", "ratio", None),
         "effort.time_to_green_ms" => ("oxplow.effort_time_to_green", "avg", None),
         "agent.turns" => ("oxplow.turn", "sum", None),
         "effort.cycle_time_ms" => ("oxplow.cycle_time", "avg", None),
