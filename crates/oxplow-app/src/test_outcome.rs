@@ -114,6 +114,21 @@ pub fn runs_from_case_facts(facts: &[(i64, bool, Option<String>)]) -> Vec<TestRu
         .collect()
 }
 
+/// Wall-clock ms from the effort's FIRST red run to the first green run after
+/// it (tsk76) — how long the effort stayed broken before recovering. Input is
+/// `(captured_at_ms, is_red)` per run, ordered captured-at ASC. `None` when the
+/// effort never went red, or went red and never recovered — both are "no
+/// data", not a zero (a zero would read as "instant recovery" and drag the
+/// cross-effort mean). Later red cycles are deliberately ignored: the metric
+/// answers "once TDD went red, how fast was the first green", not "total time
+/// spent red".
+pub fn time_to_green_ms(runs: &[(i64, bool)]) -> Option<i64> {
+    let first_red = runs.iter().position(|(_, red)| *red)?;
+    let (red_at, _) = runs[first_red];
+    let (green_at, _) = runs[first_red + 1..].iter().find(|(_, red)| !*red)?;
+    Some((green_at - red_at).max(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +142,36 @@ mod tests {
     #[test]
     fn no_runs_yields_none() {
         assert_eq!(compute_effort_test_outcome(&[]), None);
+    }
+
+    #[test]
+    fn time_to_green_spans_first_red_to_first_green_after_it() {
+        // green @0 (pre-red runs don't matter), red @100, red @250, green @400.
+        let runs = [(0, false), (100, true), (250, true), (400, false)];
+        assert_eq!(time_to_green_ms(&runs), Some(300));
+    }
+
+    #[test]
+    fn time_to_green_ignores_later_red_cycles() {
+        // First cycle red@10 → green@60; a second red@90 never resolving
+        // doesn't change the answer — the metric is FIRST red to FIRST green.
+        let runs = [(10, true), (60, false), (90, true)];
+        assert_eq!(time_to_green_ms(&runs), Some(50));
+    }
+
+    #[test]
+    fn time_to_green_is_none_without_a_red_to_green_transition() {
+        assert_eq!(time_to_green_ms(&[]), None, "no runs");
+        assert_eq!(
+            time_to_green_ms(&[(5, false), (9, false)]),
+            None,
+            "never red"
+        );
+        assert_eq!(
+            time_to_green_ms(&[(5, true), (9, true)]),
+            None,
+            "never recovered"
+        );
     }
 
     #[test]

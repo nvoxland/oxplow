@@ -2547,11 +2547,12 @@ mod tests {
         assert_eq!(got.title, "API latency (p95)");
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
-        // The migrations seed 19 built-in measures (10 in V43 + oxplow.ast_hit in
+        // The migrations seed 21 built-in measures (10 in V43 + oxplow.ast_hit in
         // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
         // oxplow.test_duration in V57 + cache_tokens/cache_usage/effort_tokens in
-        // V59); this upsert added one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 20);
+        // V59 + effort_steering/effort_time_to_green in V60); this upsert added
+        // one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 22);
     }
 
     #[tokio::test]

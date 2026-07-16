@@ -643,7 +643,8 @@ impl Services {
             .with_thread_store(thread_store.clone())
             .with_metrics(fact_store.clone(), event_bus.clone())
             .with_attribution(attribution_store.clone())
-            .with_gauge_runner(metrics.clone());
+            .with_gauge_runner(metrics.clone())
+            .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         let collection = collection::CollectionService::new(
             fact_store.clone(),
             nudge_store.clone(),

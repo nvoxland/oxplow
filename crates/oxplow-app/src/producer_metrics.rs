@@ -190,6 +190,40 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: EFFORT_DIMS,
             description: Some("Number of efforts spent on a task (the redo-rate signal)."),
         },
+        // Usage metrics phase 2 (tsk76) — the autonomy/velocity pair, both
+        // per-close lifecycle means like task.tokens.
+        ProducerMetric {
+            key: "task.steering",
+            title: "Steering per effort",
+            kind: "gauge",
+            unit: "per effort",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "operational",
+            producer: "effort-lifecycle",
+            dimensions: EFFORT_DIMS,
+            description: Some(
+                "Avg steering events per closed effort (user prompts + Stop-hook nudges + \
+                 review comments) — the autonomy number; lower means more autonomous.",
+            ),
+        },
+        ProducerMetric {
+            key: "effort.time_to_green_ms",
+            title: "Time to green",
+            kind: "gauge",
+            unit: "ms",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "testing",
+            producer: "effort-lifecycle",
+            dimensions: EFFORT_DIMS,
+            description: Some(
+                "Avg wall-clock from an effort's first red test run to its first green — \
+                 only efforts that went red and recovered count.",
+            ),
+        },
         // nudges (collection.rs)
         ProducerMetric {
             key: "agent.nudges.fired",
@@ -443,6 +477,8 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
         ),
         "agent.tokens.cache_hit_pct" => ("oxplow.cache_usage", "ratio", None),
         "task.tokens" => ("oxplow.effort_tokens", "avg", None),
+        "task.steering" => ("oxplow.effort_steering", "avg", None),
+        "effort.time_to_green_ms" => ("oxplow.effort_time_to_green", "avg", None),
         "agent.turns" => ("oxplow.turn", "sum", None),
         "effort.cycle_time_ms" => ("oxplow.cycle_time", "avg", None),
         "task.efforts" => ("oxplow.task_effort", "avg", None),

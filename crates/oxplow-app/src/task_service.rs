@@ -130,12 +130,23 @@ pub struct TaskService {
     /// `effort_store`), closing an effort reconciles the run kinds too — the
     /// concurrent-effort runs left unattributed become the close residue.
     attribution: Option<Arc<SqliteAttributionStore>>,
+    /// Steering-signal sources (tsk76): agent turns (user prompt submissions)
+    /// and comment threads, counted into `oxplow.effort_steering` at close.
+    /// Optional so bare TaskService tests skip that fact.
+    agent_turn_store: Option<Arc<oxplow_db::SqliteAgentTurnStore>>,
+    comment_store: Option<Arc<oxplow_db::SqliteCommentStore>>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
 fn is_epic(item: &Task, items: &[Task]) -> bool {
     items.iter().any(|c| c.parent_id == Some(item.id))
 }
+
+/// How many recent agent turns the steering producer scans for a closing
+/// effort's window (tsk76). `list_for_thread` is newest-first, so an effort
+/// with more turns than this undercounts its oldest prompts — acceptable for
+/// a per-close mean; a thousand-prompt effort has bigger problems.
+const STEERING_TURN_SCAN: usize = 1000;
 
 impl TaskService {
     pub fn new(store: Arc<SqliteTaskStore>) -> Self {
@@ -148,6 +159,8 @@ impl TaskService {
             events: None,
             gauge_runner: None,
             attribution: None,
+            agent_turn_store: None,
+            comment_store: None,
         }
     }
 
@@ -198,6 +211,19 @@ impl TaskService {
     /// this enables per-stream lifecycle snapshots — `TaskService`
     /// loads the task's thread to learn which `stream_id` (and thus
     /// which `SnapshotCaptureService`) to drive.
+    /// Wire the steering-signal sources (tsk76): agent turns (user prompt
+    /// submissions) + comment threads. Optional so bare TaskService tests
+    /// skip the steering fact — the other lifecycle facts still project.
+    pub fn with_steering_sources(
+        mut self,
+        turns: Arc<oxplow_db::SqliteAgentTurnStore>,
+        comments: Arc<oxplow_db::SqliteCommentStore>,
+    ) -> Self {
+        self.agent_turn_store = Some(turns);
+        self.comment_store = Some(comments);
+        self
+    }
+
     pub fn with_thread_store(mut self, store: Arc<SqliteThreadStore>) -> Self {
         self.thread_store = Some(store);
         self
@@ -580,23 +606,26 @@ impl TaskService {
                         });
                     }
                 }
-                // Per-effort test-outcome scalars (tsk38): the peak / distinct /
-                // red-run views the engine's cross-time collapse can't express,
-                // materialized here at close from the effort's `oxplow.test_case`
-                // facts. One fact per stat on `oxplow.effort_test_outcome`, sliced
-                // by `oxplow.tests_stat`. Gated like the other lifecycle facts.
-                if facts
+                // The effort's captures back several per-close producers below
+                // (test outcome, time-to-green, tokens, steering) — fetch once.
+                let effort_caps = facts.captures_for_effort(effort_id.value()).await?;
+                let cap_ids: Vec<i64> = effort_caps.iter().map(|c| c.id).collect();
+                // Per-effort test-outcome scalars (tsk38) + time-to-green
+                // (tsk76): both read the effort's `oxplow.test_case` facts, so
+                // those are fetched once when either gate is open.
+                let outcome_gate = facts
                     .measure_has_active_spec("oxplow.effort_test_outcome")
                     .await
-                    .unwrap_or(true)
-                {
-                    if let (Some(outcome_measure), Some(case_measure)) = (
-                        facts.get_measure("oxplow.effort_test_outcome").await?,
-                        facts.get_measure("oxplow.test_case").await?,
-                    ) {
-                        let caps = facts.captures_for_effort(effort_id.value()).await?;
-                        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
-                        let case_facts = facts.facts_for_captures(case_measure.id, cap_ids).await?;
+                    .unwrap_or(true);
+                let ttg_gate = facts
+                    .measure_has_active_spec("oxplow.effort_time_to_green")
+                    .await
+                    .unwrap_or(true);
+                if outcome_gate || ttg_gate {
+                    if let Some(case_measure) = facts.get_measure("oxplow.test_case").await? {
+                        let case_facts = facts
+                            .facts_for_captures(case_measure.id, cap_ids.clone())
+                            .await?;
                         // (capture_id, is_failed, subject_ref) per case fact — the
                         // grouping/ordering + scalar math live in `test_outcome`.
                         let tuples: Vec<(i64, bool, Option<String>)> = case_facts
@@ -616,27 +645,73 @@ impl TaskService {
                                 (f.capture_id, failed, f.subject_ref.clone())
                             })
                             .collect();
-                        let runs = crate::test_outcome::runs_from_case_facts(&tuples);
-                        if let Some(outcome) =
-                            crate::test_outcome::compute_effort_test_outcome(&runs)
-                        {
-                            for (stat, value) in [
-                                ("at_close", outcome.at_close),
-                                ("peak", outcome.peak),
-                                ("distinct_failed", outcome.distinct_failed),
-                                ("red_runs", outcome.red_runs),
-                            ] {
-                                rows.push(NewFact {
-                                    subject_kind: Some("effort".into()),
-                                    subject_ref: Some(effort_id.to_string()),
-                                    numerator: Some(value as f64),
-                                    denominator: Some(1.0),
-                                    dims_json: serde_json::to_string(
-                                        &serde_json::json!({ "oxplow.tests_stat": stat }),
-                                    )
-                                    .ok(),
-                                    ..NewFact::new(outcome_measure.id, value as f64)
-                                });
+                        if outcome_gate {
+                            if let Some(outcome_measure) =
+                                facts.get_measure("oxplow.effort_test_outcome").await?
+                            {
+                                let runs = crate::test_outcome::runs_from_case_facts(&tuples);
+                                if let Some(outcome) =
+                                    crate::test_outcome::compute_effort_test_outcome(&runs)
+                                {
+                                    for (stat, value) in [
+                                        ("at_close", outcome.at_close),
+                                        ("peak", outcome.peak),
+                                        ("distinct_failed", outcome.distinct_failed),
+                                        ("red_runs", outcome.red_runs),
+                                    ] {
+                                        rows.push(NewFact {
+                                            subject_kind: Some("effort".into()),
+                                            subject_ref: Some(effort_id.to_string()),
+                                            numerator: Some(value as f64),
+                                            denominator: Some(1.0),
+                                            dims_json: serde_json::to_string(&serde_json::json!({
+                                                "oxplow.tests_stat": stat
+                                            }))
+                                            .ok(),
+                                            ..NewFact::new(outcome_measure.id, value as f64)
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        // Time-to-green (tsk76): wall-clock from the FIRST red
+                        // run to the first green after it. Emitted only when
+                        // that transition exists — always-green or never-green
+                        // is "no data", not a zero.
+                        if ttg_gate {
+                            if let Some(ttg_measure) =
+                                facts.get_measure("oxplow.effort_time_to_green").await?
+                            {
+                                let mut order: Vec<i64> = Vec::new();
+                                let mut red_by_cap: std::collections::HashMap<i64, bool> =
+                                    std::collections::HashMap::new();
+                                for (cap, failed, _) in &tuples {
+                                    if !red_by_cap.contains_key(cap) {
+                                        order.push(*cap);
+                                    }
+                                    let e = red_by_cap.entry(*cap).or_insert(false);
+                                    *e = *e || *failed;
+                                }
+                                let at_by_cap: std::collections::HashMap<i64, i64> = effort_caps
+                                    .iter()
+                                    .map(|c| (c.id, c.captured_at.unix_ms()))
+                                    .collect();
+                                let mut timed: Vec<(i64, bool)> = order
+                                    .iter()
+                                    .filter_map(|cap| {
+                                        at_by_cap.get(cap).map(|at| (*at, red_by_cap[cap]))
+                                    })
+                                    .collect();
+                                timed.sort_by_key(|(at, _)| *at);
+                                if let Some(ms) = crate::test_outcome::time_to_green_ms(&timed) {
+                                    rows.push(NewFact {
+                                        subject_kind: Some("effort".into()),
+                                        subject_ref: Some(effort_id.to_string()),
+                                        numerator: Some(ms as f64),
+                                        denominator: Some(1.0),
+                                        ..NewFact::new(ttg_measure.id, ms as f64)
+                                    });
+                                }
                             }
                         }
                     }
@@ -657,8 +732,6 @@ impl TaskService {
                         facts.get_measure("oxplow.effort_tokens").await?,
                         facts.get_measure("oxplow.tokens").await?,
                     ) {
-                        let caps = facts.captures_for_effort(effort_id.value()).await?;
-                        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
                         let mut total: f64 = facts
                             .facts_for_captures(tokens_measure.id, cap_ids.clone())
                             .await?
@@ -670,7 +743,7 @@ impl TaskService {
                             facts.get_measure("oxplow.cache_tokens").await?
                         {
                             let cache: f64 = facts
-                                .facts_for_captures(cache_measure.id, cap_ids)
+                                .facts_for_captures(cache_measure.id, cap_ids.clone())
                                 .await?
                                 .iter()
                                 .map(|f| f.value)
@@ -687,6 +760,75 @@ impl TaskService {
                                 ..NewFact::new(effort_tokens_measure.id, total)
                             });
                         }
+                    }
+                }
+                // Steering events (tsk76): how many times a human (or oxplow
+                // on their behalf) had to intervene — user prompt submissions
+                // (agent_turn rows opened in the effort window) + Stop-hook
+                // nudges (the effort's `oxplow.nudge` facts) + user-authored
+                // comments in the thread window. One fact per close on
+                // `oxplow.effort_steering` (non-additive, den=1 → MEAN per
+                // close, read by `task.steering`). ZERO is emitted — a fully
+                // autonomous effort is real data, unlike unmetered tokens.
+                // Interrupts are not counted: nothing records them yet.
+                if facts
+                    .measure_has_active_spec("oxplow.effort_steering")
+                    .await
+                    .unwrap_or(true)
+                {
+                    if let Some(steering_measure) =
+                        facts.get_measure("oxplow.effort_steering").await?
+                    {
+                        let start_ms = effort.started_at.unix_ms();
+                        let end_ms = ended_at.unix_ms();
+                        let in_window = |ms: i64| ms >= start_ms && ms <= end_ms;
+                        let mut total = 0.0_f64;
+                        if let Some(turns) = self.agent_turn_store.as_ref() {
+                            use oxplow_domain::stores::AgentTurnStore;
+                            match turns.list_for_thread(thread_id, STEERING_TURN_SCAN).await {
+                                Ok(rows) => {
+                                    total +=
+                                        rows.iter()
+                                            .filter(|t| in_window(t.started_at.unix_ms()))
+                                            .count() as f64;
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "steering: turn scan failed")
+                                }
+                            }
+                        }
+                        if let Some(nudge_measure) = facts.get_measure("oxplow.nudge").await? {
+                            total += facts
+                                .facts_for_captures(nudge_measure.id, cap_ids.clone())
+                                .await?
+                                .iter()
+                                .map(|f| f.value)
+                                .sum::<f64>();
+                        }
+                        if let Some(comments) = self.comment_store.as_ref() {
+                            use oxplow_domain::stores::CommentStore;
+                            match comments.list_for_thread(thread_id).await {
+                                Ok(rows) => {
+                                    total +=
+                                        rows.iter()
+                                            .filter(|c| {
+                                                c.comment.author != "agent"
+                                                    && in_window(c.comment.created_at.unix_ms())
+                                            })
+                                            .count() as f64;
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "steering: comment scan failed")
+                                }
+                            }
+                        }
+                        rows.push(NewFact {
+                            subject_kind: Some("effort".into()),
+                            subject_ref: Some(effort_id.to_string()),
+                            numerator: Some(total),
+                            denominator: Some(1.0),
+                            ..NewFact::new(steering_measure.id, total)
+                        });
                     }
                 }
                 if rows.is_empty() {
@@ -1450,7 +1592,11 @@ mod tests {
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
             .with_thread_store(thread_store_for_svc)
-            .with_metrics(fact_store, event_bus.clone());
+            .with_metrics(fact_store, event_bus.clone())
+            .with_steering_sources(
+                Arc::new(oxplow_db::SqliteAgentTurnStore::new(db.clone())),
+                Arc::new(oxplow_db::SqliteCommentStore::new(db.clone())),
+            );
         (svc, t.id, effort_store, project, snapshot_captures)
     }
 
@@ -1690,6 +1836,189 @@ mod tests {
         // Non-additive den=1: `task.tokens` collapses to MEAN per close.
         assert_eq!(spend[0].numerator, Some(820.0));
         assert_eq!(spend[0].denominator, Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn closing_an_effort_projects_steering_events() {
+        // tsk76: at close, steering = user prompt submissions (agent_turn rows
+        // opened in the effort window) + Stop-hook nudges (the effort's
+        // `oxplow.nudge` facts) + user-authored comments in the thread window,
+        // as ONE `oxplow.effort_steering` fact. `task.steering` averages it.
+        use oxplow_domain::stores::{AgentTurnStore, CommentStore};
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "steered".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let effort = effort_store
+            .find_single_open_for_thread(&tid)
+            .await
+            .unwrap()
+            .expect("open effort");
+
+        // Two prompts inside the window + one ancient one outside it.
+        let turns = svc.agent_turn_store.as_ref().expect("turn store attached");
+        let in_window = Timestamp::from_unix_ms(effort.started_at.unix_ms() + 1);
+        for started_at in [in_window, in_window, Timestamp::from_unix_ms(1)] {
+            turns
+                .open(&oxplow_domain::AgentTurn {
+                    id: oxplow_domain::AgentTurnId::placeholder(),
+                    thread_id: tid,
+                    task_id: None,
+                    prompt: "steer".into(),
+                    answer: None,
+                    session_id: None,
+                    started_at,
+                    ended_at: None,
+                })
+                .await
+                .unwrap();
+        }
+
+        // One nudge fact under an effort-stamped capture.
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let nudge = facts.get_measure("oxplow.nudge").await.unwrap().unwrap();
+        let mut cap = oxplow_db::NewMetricCapture::done(1, "nudges", "nudges");
+        cap.thread_id = Some(tid.value());
+        cap.effort_id = Some(effort.id.value());
+        facts
+            .record_facts(cap, vec![oxplow_db::NewFact::new(nudge.id, 1.0)])
+            .await
+            .unwrap();
+
+        // One user review comment in the thread + one agent-authored comment
+        // that must NOT count (the agent steering itself isn't steering).
+        let comments = svc.comment_store.as_ref().expect("comment store attached");
+        for author in ["user", "agent"] {
+            comments
+                .create(
+                    &StreamId::new(1),
+                    Some(&tid),
+                    &oxplow_domain::CommentTarget {
+                        kind: "task".into(),
+                        id: item.id.to_string(),
+                    },
+                    "",
+                    "[]",
+                    &[],
+                    &[],
+                    oxplow_domain::CommentIntent::Followup,
+                    author,
+                    "please adjust",
+                )
+                .await
+                .unwrap();
+        }
+
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let steering = facts
+            .get_measure("oxplow.effort_steering")
+            .await
+            .unwrap()
+            .expect("effort_steering measure seeded by V60");
+        let got = facts.facts_for_measure(steering.id).await.unwrap();
+        assert_eq!(got.len(), 1, "one steering fact per close");
+        assert_eq!(
+            got[0].value, 4.0,
+            "2 in-window prompts + 1 nudge + 1 user comment; ancient prompt and agent comment excluded"
+        );
+        assert_eq!(got[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(got[0].numerator, Some(4.0));
+        assert_eq!(got[0].denominator, Some(1.0));
+
+        // No test runs happened → no time-to-green fact (None path).
+        let ttg = facts
+            .get_measure("oxplow.effort_time_to_green")
+            .await
+            .unwrap()
+            .expect("effort_time_to_green measure seeded by V60");
+        assert!(facts.facts_for_measure(ttg.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn closing_an_effort_projects_time_to_green() {
+        // tsk76: red run @1s, green run @61s → one 60_000ms
+        // `oxplow.effort_time_to_green` fact at close.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "tdd".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let effort = effort_store
+            .find_single_open_for_thread(&tid)
+            .await
+            .unwrap()
+            .expect("open effort");
+
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let case = facts
+            .get_measure("oxplow.test_case")
+            .await
+            .unwrap()
+            .unwrap();
+        for (at_ms, status) in [(1_000, "failed"), (61_000, "passed")] {
+            let mut cap = oxplow_db::NewMetricCapture::done(1, "tests", "junit");
+            cap.thread_id = Some(tid.value());
+            cap.effort_id = Some(effort.id.value());
+            cap.captured_at = Some(Timestamp::from_unix_ms(at_ms));
+            facts
+                .record_facts(
+                    cap,
+                    vec![oxplow_db::NewFact {
+                        subject_kind: Some("test".into()),
+                        subject_ref: Some("test:mod::case".into()),
+                        dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
+                        ..oxplow_db::NewFact::new(case.id, 1.0)
+                    }],
+                )
+                .await
+                .unwrap();
+        }
+
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let ttg = facts
+            .get_measure("oxplow.effort_time_to_green")
+            .await
+            .unwrap()
+            .expect("effort_time_to_green measure seeded by V60");
+        let got = facts.facts_for_measure(ttg.id).await.unwrap();
+        assert_eq!(got.len(), 1, "one time-to-green fact per close");
+        assert_eq!(got[0].value, 60_000.0, "first red → first green wall-clock");
+        assert_eq!(got[0].subject_kind.as_deref(), Some("effort"));
+        assert_eq!(got[0].numerator, Some(60_000.0));
+        assert_eq!(got[0].denominator, Some(1.0));
     }
 
     #[tokio::test]
