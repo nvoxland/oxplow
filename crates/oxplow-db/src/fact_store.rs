@@ -1063,6 +1063,87 @@ impl SqliteFactStore {
             .await
     }
 
+    /// [`Self::facts_for_measure`] bounded to one stream, SQL-side (tsk75).
+    /// The effort delta reads are per-worktree by definition — loading every
+    /// stream's history just to drop it in Rust made each panel refetch pay
+    /// for the whole table.
+    pub async fn facts_for_measure_in_stream(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {FACT_ROW_COLS} FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.measure_id = ?1 AND c.stream_id = ?2
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// The PATH-LESS, SUBJECT-LESS facts of a measure — agent-asserted repo
+    /// scalars (`record_metric` with no subject). The per-path read supplements
+    /// its tree fold with these (they have no path, so nothing supersedes them
+    /// per-path); it used to load the measure's entire history to find the
+    /// usually-zero of them (tsk75).
+    pub async fn pathless_scalar_facts(
+        &self,
+        measure_id: i64,
+        stream_id: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {FACT_ROW_COLS} FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.measure_id = ?1
+                        AND f.path IS NULL AND f.subject_ref IS NULL
+                        AND (?2 IS NULL OR c.stream_id = ?2)
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// One representative fact per distinct `(producer, rule, severity,
+    /// dims_json)` slice of a measure (tsk75). The zero-splice fallback in the
+    /// effort delta reads only needs to learn WHICH producers emit a metric's
+    /// slice — it loaded the measure's entire history (191k rows) to extract a
+    /// handful of distinct producer names. Slice combos are bounded (rules ×
+    /// severities × dim payloads), never fact-count-shaped.
+    pub async fn representative_facts_by_slice(
+        &self,
+        measure_id: i64,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {FACT_ROW_COLS} FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.id IN (
+                        SELECT MIN(f2.id) FROM fact f2
+                          JOIN metric_capture c2 ON c2.id = f2.capture_id
+                         WHERE f2.measure_id = ?1
+                         GROUP BY c2.producer, f2.rule, f2.severity, f2.dims_json
+                      )
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// Facts of a measure belonging to the given captures (the attribution-by-claim
     /// read — an effort's facts are those of its claimed captures, not a time
     /// window). Oldest-first. Empty when `capture_ids` is empty.
@@ -1274,6 +1355,69 @@ impl SqliteFactStore {
                     |r| r.get::<_, i64>(0),
                 )
                 .map(|n| n != 0)
+            })
+            .await
+    }
+
+    /// Drop the tree captures a newer baseline has made dead weight (tsk75).
+    ///
+    /// By the tsk71 dominance argument, an **effort-less** `delta`/`full`
+    /// capture strictly OLDER than its (stream, producer)'s latest done `full`
+    /// capture can never win any per-path fold rank: the baseline restates
+    /// every path it ever scanned (live rows AND tombstones), newer. Their
+    /// facts are pure dead weight — the per-function code measures had
+    /// accumulated ~178k such rows EACH (~69% of the fact table), and every
+    /// full-history read paid for them. Facts cascade via
+    /// `fact.capture_id ON DELETE CASCADE`.
+    ///
+    /// Deliberately narrow:
+    /// - **effort-stamped captures survive** — they're attribution history
+    ///   (`captures_for_effort` reads them for closed-effort panels);
+    /// - captures carrying any fact on a **non-per-path measure** survive —
+    ///   complete/per-subject folds read past captures;
+    /// - producers with **no full capture** are untouched;
+    /// - `asserted`/`failed` captures are untouched (assertions are history,
+    ///   failure records are gauge-health evidence).
+    ///
+    /// Trade-off, accepted deliberately: a per-path measure's TREND loses its
+    /// pre-baseline points (the current fold and every effort window at/after
+    /// the baseline are unaffected). Runs after each successful full sweep.
+    pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
+        self.db
+            .call(move |conn| {
+                let n = conn.execute(
+                    "DELETE FROM metric_capture
+                      WHERE id IN (
+                        SELECT c.id
+                          FROM metric_capture c
+                          JOIN (
+                            SELECT stream_id, producer, captured_at, id
+                              FROM (
+                                SELECT stream_id, producer, captured_at, id,
+                                       ROW_NUMBER() OVER (
+                                         PARTITION BY stream_id, producer
+                                         ORDER BY captured_at DESC, id DESC
+                                       ) AS rn
+                                  FROM metric_capture
+                                 WHERE scan_kind = 'full' AND status = 'done'
+                              ) WHERE rn = 1
+                          ) lf ON lf.stream_id = c.stream_id AND lf.producer = c.producer
+                         WHERE c.stream_id = ?1
+                           AND c.effort_id IS NULL
+                           AND c.status = 'done'
+                           AND c.scan_kind IN ('delta', 'full')
+                           AND (c.captured_at < lf.captured_at
+                                OR (c.captured_at = lf.captured_at AND c.id < lf.id))
+                           AND NOT EXISTS (
+                             SELECT 1 FROM fact f
+                               JOIN measure m ON m.id = f.measure_id
+                              WHERE f.capture_id = c.id
+                                AND m.capture_scope <> 'per-path'
+                           )
+                      )",
+                    params![stream_id],
+                )?;
+                Ok(n as u64)
             })
             .await
     }
@@ -1894,6 +2038,156 @@ mod tests {
             .collect();
         paths.sort();
         assert_eq!(paths, vec!["a.rs".to_string(), "b.rs".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn prune_drops_tree_captures_dominated_by_the_latest_full() {
+        // tsk75: every effort-less tree capture strictly OLDER than the latest
+        // done `full` capture of its (stream, producer) is dead weight — the
+        // baseline restates every path it scanned, newer. Their facts were 69%
+        // of a 778k-row fact table. Pruning must keep: the latest full, deltas
+        // NEWER than it, effort-stamped captures (attribution history), other
+        // producers without a full capture, and any capture carrying facts of
+        // a non-per-path measure. The fold value must not move.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+
+        snapshot_with(&store, 1, &[("a.rs", "oxplow"), ("b.rs", "oxplow")]).await;
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        snapshot_with(&store, 3, &[("b.rs", "oxplow")]).await;
+
+        // Old delta + old full (both dominated), then the latest full, then a
+        // newer delta refreshing a.rs.
+        let old_delta = gauge_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T08:00:00.000000Z",
+            m,
+            &[("a.rs", 9.0), ("b.rs", 9.0)],
+        )
+        .await;
+        let old_full = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            m,
+            &[("a.rs", 8.0), ("b.rs", 8.0)],
+        )
+        .await;
+        let latest_full = full_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0), ("b.rs", 2.0)],
+        )
+        .await;
+        let new_delta = gauge_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T11:00:00.000000Z",
+            m,
+            &[("a.rs", 10.0)],
+        )
+        .await;
+        // An old effort-stamped capture — attribution history, never pruned.
+        let mut stamped = NewMetricCapture::done(1, "g", "metric:g");
+        stamped.snapshot_id = Some(1);
+        stamped.captured_at = Some(at("2026-06-30T08:30:00.000000Z"));
+        stamped.effort_id = Some(1);
+        let stamped_id = store.record_facts(stamped, Vec::new()).await.unwrap();
+        // A producer with no full capture — untouched.
+        let other = gauge_capture(
+            &store,
+            "h",
+            3,
+            "2026-06-30T08:00:00.000000Z",
+            m,
+            &[("b.rs", 4.0)],
+        )
+        .await;
+
+        let before = total(&store.latest_tree_facts(m, Some(1)).await.unwrap());
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(pruned, 2, "old delta + old full dropped");
+
+        let after = total(&store.latest_tree_facts(m, Some(1)).await.unwrap());
+        assert_eq!(before, after, "the fold must not move");
+
+        let alive: Vec<i64> = store
+            .captures_for_producers(vec!["g".into(), "h".into()])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(!alive.contains(&old_delta), "dominated delta pruned");
+        assert!(!alive.contains(&old_full), "dominated full pruned");
+        assert!(alive.contains(&latest_full));
+        assert!(alive.contains(&new_delta));
+        assert!(alive.contains(&stamped_id), "effort-stamped kept");
+        assert!(alive.contains(&other), "producer without a baseline kept");
+    }
+
+    #[tokio::test]
+    async fn prune_keeps_captures_carrying_non_per_path_facts() {
+        // A capture with any fact on a complete/per-subject measure holds real
+        // history (their folds read past captures) — never prune it, even when
+        // a same-producer full capture is newer.
+        let store = fixture().await;
+        let per_path = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        let complete = measure(&store, "acme.level").await; // default: complete
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+
+        let mut mixed = NewMetricCapture::done(1, "g", "metric:g");
+        mixed.snapshot_id = Some(1);
+        mixed.captured_at = Some(at("2026-06-30T08:00:00.000000Z"));
+        let mixed_id = store
+            .record_facts(
+                mixed,
+                vec![NewFact {
+                    path: Some("a.rs".into()),
+                    ..NewFact::new(complete, 5.0)
+                }],
+            )
+            .await
+            .unwrap();
+        full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T10:00:00.000000Z",
+            per_path,
+            &[("a.rs", 1.0)],
+        )
+        .await;
+
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(pruned, 0, "mixed-measure capture must survive");
+        let alive: Vec<i64> = store
+            .captures_for_producers(vec!["g".into()])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(alive.contains(&mixed_id));
     }
 
     #[tokio::test]

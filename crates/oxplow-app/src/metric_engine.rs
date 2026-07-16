@@ -827,13 +827,17 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
-        let facts: Vec<FactRow> = self
-            .facts
-            .facts_for_measure(measure.id)
-            .await?
-            .into_iter()
-            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
-            .collect();
+        // A trend legitimately reads the measure's history (one point per
+        // capture) — but stream-bounded SQL-side (tsk75), never loaded whole
+        // then filtered in Rust.
+        let facts: Vec<FactRow> = match stream {
+            Some(s) => {
+                self.facts
+                    .facts_for_measure_in_stream(measure.id, s)
+                    .await?
+            }
+            None => self.facts.facts_for_measure(measure.id).await?,
+        };
 
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
@@ -991,15 +995,11 @@ impl MetricEngine {
             // scalar (`record_metric` with no subject) — are not in it. They aren't tree
             // facts: with no path there is nothing to supersede them per-path, so they
             // keep the plain per-producer currency rule (latest assertion wins). Without
-            // this an asserted number would silently vanish from every read.
-            let scalars: Vec<FactRow> = self
-                .facts
-                .facts_for_measure(measure.id)
-                .await?
-                .into_iter()
-                .filter(|f| f.path.is_none() && f.subject_ref.is_none())
-                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
-                .collect();
+            // this an asserted number would silently vanish from every read. SQL-side
+            // (tsk75): this used to load the measure's ENTIRE history to find the
+            // usually-zero scalars.
+            let scalars: Vec<FactRow> =
+                self.facts.pathless_scalar_facts(measure.id, stream).await?;
             if !scalars.is_empty() {
                 let current = self.current_captures(&scalars).await?;
                 folded.extend(
@@ -1206,7 +1206,9 @@ impl MetricEngine {
         // later rescan superseded — so a fixed `unsafe` block would keep showing up
         // forever. (Pinning an explicit `capture_id` still reads that one capture.)
         let facts = match capture_id {
-            Some(_) => self.facts.facts_for_measure(measure.id).await?,
+            // Pinned drill-in: exactly that capture's facts — never the whole
+            // measure history filtered in Rust (tsk75).
+            Some(c) => self.facts.facts_for_captures(measure.id, vec![c]).await?,
             None => self.scoped_facts(&measure, None).await?,
         };
         Ok(facts

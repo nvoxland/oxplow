@@ -788,6 +788,27 @@ impl Services {
         if !force {
             let pending = self.metrics.gauges_needing_baseline(stream_val).await;
             if pending.is_empty() {
+                // Nothing to baseline — but still sweep out captures an
+                // EARLIER baseline made dead weight (tsk75): the post-sweep
+                // prune only fires when a full phase runs, so history from
+                // before the prune existed is collected here, once per boot.
+                // Idempotent and cheap when there's nothing to drop.
+                match self
+                    .fact_store
+                    .prune_dominated_tree_captures(stream_val)
+                    .await
+                {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(
+                            pruned = n,
+                            "metrics: dropped baseline-dominated tree captures at boot"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e, "metrics: boot prune failed");
+                    }
+                }
                 return Ok(BaselineReport {
                     ran: false,
                     ..Default::default()

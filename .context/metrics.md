@@ -129,6 +129,25 @@ welded to collection.
 > reacting to the same snapshot won't double-scan the tree (the manual `run_metric`
 > path bypasses it — an explicit "run now" always runs).
 >
+> **Dominated-capture GC (tsk75).** A fresh baseline makes every effort-less
+> `delta`/`full` tree capture strictly OLDER than it dead weight (the dominance
+> argument: the baseline restates every path, newer). Their facts had grown to
+> ~69% of a 778k-row fact table (~178k rows EACH on the per-function measures)
+> and every full-history read paid for them — the effort-panel refetch loop over
+> that history is what saturated the daemon. `prune_dominated_tree_captures`
+> deletes them (facts CASCADE) after each clean full sweep and once per boot.
+> Deliberately narrow: effort-stamped captures survive (attribution history),
+> captures carrying any non-per-path-measure fact survive, producers with no
+> baseline survive, asserted/failed captures survive. Accepted trade-off: a
+> per-path measure's TREND loses pre-baseline points; the current fold and every
+> effort window at/after the baseline are unaffected. Read paths are also
+> bounded SQL-side now (`facts_for_measure_in_stream`, `pathless_scalar_facts`,
+> `representative_facts_by_slice`, pinned findings via `facts_for_captures`) —
+> never "load the whole measure history and filter in Rust" on a hot path — and
+> the `EffortMetricsBlock` refetch is debounced (closed-long-ago efforts stop
+> listening entirely; the OTLP token tick fires `MetricSamplesChanged` every
+> ~10s while an agent runs).
+>
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
 > gauge tree-sitter-parses the *whole tree* per run, so gauge runs get their own

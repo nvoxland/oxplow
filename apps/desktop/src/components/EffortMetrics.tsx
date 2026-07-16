@@ -107,6 +107,7 @@ export function EffortMetricsBlock({
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const load = () => {
       void listEffortMetricDeltas(effortId)
         .then((rows) => {
@@ -119,14 +120,31 @@ export function EffortMetricsBlock({
         });
     };
     load();
+    // The delta computation is expensive backend work, and the OTLP token
+    // ingest emits metricSamplesChanged every ~10s while an agent runs
+    // (tsk75 — the un-debounced reload loop saturated the daemon). An effort
+    // closed a while ago is frozen: its window can only gain late captures
+    // right around the close (on-effort-complete gauges, amend), so stop
+    // listening entirely once it's cold. Open/recent efforts coalesce bursts
+    // with a trailing debounce.
+    const closedLongAgo =
+      endedAt !== null && Date.now() - new Date(endedAt).getTime() > 10 * 60_000;
+    if (closedLongAgo) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const unsub = subscribeOxplowEvents((event) => {
-      if (event.kind === "metricSamplesChanged") load();
+      if (event.kind !== "metricSamplesChanged") return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(load, 2_500);
     });
     return () => {
       cancelled = true;
       unsub();
+      if (timer) clearTimeout(timer);
     };
-  }, [effortId]);
+  }, [effortId, endedAt]);
 
   // Drop metrics that already have a dedicated panel above (tests, coverage,
   // analysis, tokens, nudges) — don't repeat them in the generic list.

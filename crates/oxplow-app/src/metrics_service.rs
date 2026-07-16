@@ -1223,8 +1223,29 @@ impl MetricsService {
             let r = self
                 .run_gauge_sweep(&full_gauges, &ctx, files, stream_id.value())
                 .await;
+            let full_ok = r.failed.is_empty();
             report.ran += r.ran;
             report.failed.extend(r.failed);
+            // A fresh baseline makes every older effort-less tree capture dead
+            // weight (tsk75 — their facts were ~69% of the table and every
+            // full-history read paid for them). Prune only on a clean sweep:
+            // a failed gauge wrote no baseline, so its history must survive.
+            if full_ok {
+                if let Some(facts) = self.fact_store.as_ref() {
+                    match facts.prune_dominated_tree_captures(stream_id.value()).await {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(
+                                pruned = n,
+                                "metrics: dropped baseline-dominated tree captures"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(error = %e, "metrics: dominated-capture prune failed");
+                        }
+                    }
+                }
+            }
         }
         report
     }

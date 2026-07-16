@@ -2286,13 +2286,21 @@ impl CollectionService {
                 _ => f.value,
             }
         };
-        // Load this measure's full history once per `effort_metric_deltas` call
-        // and reuse it across every spec sharing the measure (tsk17).
+        // Load this measure's history once per `effort_metric_deltas` call and
+        // reuse it across every spec sharing the measure (tsk17) — bounded to
+        // the effort's stream SQL-side when known (tsk75): the delta is
+        // per-worktree by definition, so other streams' rows are pure load.
         let facts = match fact_cache.get(&measure.id) {
             Some(cached) => cached.clone(),
             None => {
-                let loaded =
-                    std::sync::Arc::new(self.facts.facts_for_measure(measure.id).await.ok()?);
+                let loaded = std::sync::Arc::new(match stream {
+                    Some(s) => self
+                        .facts
+                        .facts_for_measure_in_stream(measure.id, s)
+                        .await
+                        .ok()?,
+                    None => self.facts.facts_for_measure(measure.id).await.ok()?,
+                });
                 fact_cache.insert(measure.id, loaded.clone());
                 loaded
             }
@@ -2532,8 +2540,11 @@ impl CollectionService {
                 .map(|f| f.producer.clone())
                 .collect();
             if producers.is_empty() {
-                if let Ok(all) = self.facts.facts_for_measure(measure.id).await {
-                    producers = all
+                // One representative fact per (producer, rule, severity, dims)
+                // slice — bounded — instead of the measure's entire history
+                // just to learn producer names (tsk75).
+                if let Ok(reps) = self.facts.representative_facts_by_slice(measure.id).await {
+                    producers = reps
                         .iter()
                         .filter(|f| filter.matches(f))
                         .map(|f| f.producer.clone())
