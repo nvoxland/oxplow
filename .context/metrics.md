@@ -919,9 +919,42 @@ that **writes**.
   `metricsExplorerRef()`). Header links: "Recorded metrics →", "Configure
   metrics →". A measure's title navigates to the metric's **detail page** (via
   `onOpenDetail` → `metricRef`).
+> ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
+>
+> `seed_catalog` seeds **every** built-in spec (`builtin_metric_specs` /
+> `builtin_ast_specs` / `builtin_producer_specs`) unless a config `enabled: false`
+> marker explicitly prunes it. A built-in gauge that is merely **un-`use:`d keeps
+> its spec** — it just never RUNS (`resolved_gauges` elides it). But `catalog()`
+> computes a built-in gauge's `enabled` as *"a non-disabled `use:` resolves it"*.
+>
+> So `metric_spec` ⊋ "the enabled set", and **only the catalog knows about
+> `use:`**. Reading `list_metric_definitions` alone and calling the result
+> "enabled metrics" is wrong: in this Rust/TS repo the bundled `oxplow.csharp.*`
+> and `oxplow.clojure.*` idiom specs are seeded, never run, and have no facts —
+> so Recorded Metrics listed them as permanent `—` rows while Metric Settings
+> showed the same rows *unchecked*. That's why the page's row set is the
+> **catalog**, with the spec joined in by key for presentation metadata.
+>
+> (The "spec table = the enabled set" phrasing under the collection gate above is
+> about the **producer** measures, where disabling does prune. Don't generalize it
+> to gauges.)
+>
+> Note enabling a C# gauge here still wouldn't show `0`: `oxplow.ast_hit` is
+> `capture_scope: per-path`, whose zero-fill is deliberately suppressed, so a scan
+> that matches no files yields no point at all. Nothing auto-detects a project's
+> languages.
+
 - **Recorded Metrics** (`RecordedMetricsPage.tsx`, `PageKind`
-  `"metrics-recorded"` / `recordedMetricsRef()`) — the seeded definitions as
-  `title · trend sparkline · latest value` rows, colored by `statusColor`
+  `"metrics-recorded"` / `recordedMetricsRef()`) — every **catalogued** metric as
+  a `title · trend sparkline · latest value` row (row set = `list_metric_catalog`,
+  the only source that knows `use:`; the seeded spec joins in by key for unit /
+  direction / thresholds and is null only for an explicitly-disabled metric whose
+  spec was pruned). The rail's **Show** dropdown picks `Enabled` (**default**) /
+  `All` — see the box above for why that distinction isn't free. Pure row
+  filtering (Show mode + search, composed so a search never resurfaces a disabled
+  metric) lives in `recordedMetricsRows.ts`. A section only renders when it has
+  rows, since `buildMetricSections` groups what it's given; a filtered-empty list
+  falls back to a "No metrics match" state. Rows are colored by `statusColor`
   (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
   because it *is* that sparkline's last point — both read the same
   range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
@@ -951,14 +984,20 @@ that **writes**.
 > the rule is deliberately **not** restated per page, because two copies drift
 > into two different groupings of the same metrics.
 >
-> **The two pages read `language` off different objects** — Metric Settings off
-> `MetricCatalogEntry.language` (sourced from the *gauge*, `builtin_metrics()`),
-> Recorded Metrics off `MetricSpec.language`. So the two must agree, and
-> `builtin_ast_specs` therefore **reads each spec's language off its gauge by key**
-> rather than restating the slug (`builtin_ast_specs_carry_the_language_their_gauge_declares`
-> pins it). Before tsk81 the specs never set `language` at all
-> (`NewMetricSpec::base` defaults it to `None`), so every idiom metric would have
-> collapsed into "General" and the per-language split would have silently no-oped.
+> **Both pages now group off `MetricCatalogEntry.language`** — Metric Settings
+> always did; Recorded Metrics joined it when its row set became the catalog
+> (tsk87). For a built-in gauge the catalog takes that slug straight from the
+> *gauge* (`builtin_metrics()`), so the two agree by construction.
+>
+> `builtin_ast_specs` nevertheless **reads each spec's language off its gauge by
+> key** rather than restating the slug
+> (`builtin_ast_specs_carry_the_language_their_gauge_declares` pins it). Before
+> tsk81 the specs set no `language` at all (`NewMetricSpec::base` defaults it to
+> `None`). That's no longer what sections the *page* — but `MetricSpec.language`
+> is still real read surface: `list_metric_definitions` takes a **language
+> filter** over it (IPC + MCP), which silently matches nothing when the column is
+> null. Keep it populated.
+>
 > Note the key segment is **not** the slug: `oxplow.ts.*` is language
 > `typescript`. A gauge's `language: ""` (the language-agnostic code gauges) maps
 > to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`

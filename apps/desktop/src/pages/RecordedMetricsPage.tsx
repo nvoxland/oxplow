@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type MetricSpec,
   type SeriesPoint,
+  listMetricCatalog,
   listMetricDefinitions,
   listMetricSamples,
   subscribeOxplowEvents,
@@ -25,9 +26,24 @@ import {
   filterByRange,
   rangeFromPreset,
 } from "./metricDetailData.js";
+import {
+  DEFAULT_SHOW_MODE,
+  SHOW_MODES,
+  type ShowMode,
+  filterMetricRows,
+} from "./recordedMetricsRows.js";
 
+/** One listed metric. Identity/enabled/grouping come from the **catalog** (the
+ *  only source that knows about `use:`); `def` is the seeded spec, which carries
+ *  the presentation metadata (unit, direction, thresholds) and is null when the
+ *  metric was explicitly disabled and its spec pruned. */
 type Row = {
-  def: MetricSpec;
+  key: string;
+  title: string;
+  category: string | null;
+  language: string | null;
+  enabled: boolean;
+  def: MetricSpec | null;
   latest: SeriesPoint | null;
   samples: SeriesPoint[];
 };
@@ -79,8 +95,8 @@ function statusColor(def: MetricSpec, value: number): string | undefined {
  *  modifier/middle/right → new tab). */
 function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef) => void }) {
   const { def, latest, samples } = row;
-  const color = latest ? statusColor(def, latest.value) : undefined;
-  const { handlers } = useRouteDispatch(metricRef(def.key), { onNavigate: onOpenPage });
+  const color = def && latest ? statusColor(def, latest.value) : undefined;
+  const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage });
   return (
     <tr
       onClick={handlers.onClick}
@@ -88,7 +104,7 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
       onContextMenu={handlers.onContextMenu}
       style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
     >
-      <td style={{ padding: "6px 8px", fontWeight: 600 }}>{def.title}</td>
+      <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.title}</td>
       <td style={{ padding: "6px 8px" }}>
         <Sparkline
           values={samples
@@ -102,7 +118,7 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
           sparkline's last point — same filtered `samples`, newest first — so the
           chart reads left-to-right into the number that terminates it (tsk82). */}
       <td style={{ padding: "6px 8px", fontWeight: 600, color }}>
-        {latest ? `${formatValue(latest.value)}${def.unit ? ` ${def.unit}` : ""}` : "—"}
+        {latest ? `${formatValue(latest.value)}${def?.unit ? ` ${def.unit}` : ""}` : "—"}
       </td>
     </tr>
   );
@@ -111,14 +127,23 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
 const sel = { fontSize: 12, width: "100%" } as const;
 
 /**
- * Recorded Metrics — the seeded definitions as `title · trend sparkline ·
- * latest value` rows, organized as **one table per section** under headings, via
+ * Recorded Metrics — every catalogued metric as a `title · trend sparkline ·
+ * latest value` row, organized as **one table per section** under headings, via
  * the shared `buildMetricSections` (Code gauges / Tests / Coverage / then one
  * top-level section **per language** for static analysis / Operational) — the
  * same sectioning Metric Settings renders, so the two pages can't disagree
  * (tsk81). A right-side panel scopes the latest/trend by a preset time range
- * (default 7 days) and branch. Rows open the per-metric detail page
+ * (default 7 days) and branch, picks Enabled (default) / All, and holds the
+ * Expand/Collapse-all controls. Rows open the per-metric detail page
  * (`metricRef`). Live on `metricSamplesChanged`.
+ *
+ * **The row set is the CATALOG, not the spec table (tsk87).** Only the catalog
+ * knows about `use:`: a built-in gauge keeps its seeded spec when merely
+ * un-`use:`d (it just never runs), so reading specs alone listed the bundled
+ * C#/Clojure idiom gauges in a Rust/TS repo as permanent `—` rows while Metric
+ * Settings showed the same rows unchecked. The spec joins in by key for the
+ * presentation metadata (unit / direction / thresholds) and is null only for an
+ * explicitly disabled metric, whose spec is pruned.
  */
 export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
@@ -126,22 +151,37 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   const [rangeKey, setRangeKey] = useState<string>(DEFAULT_RANGE_KEY);
   const [branch, setBranch] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
 
   useEffect(() => {
     let cancelled = false;
     const refresh = () => {
-      void listMetricDefinitions().then(async (defs) => {
-        const built = await Promise.all(
-          defs.map(async (def) => {
-            const samples = await listMetricSamples(def.key, SAMPLE_LIMIT);
-            return { def, latest: samples[0] ?? null, samples };
-          }),
-        );
-        if (!cancelled) {
-          setRows(built);
-          setLoading(false);
-        }
-      });
+      void Promise.all([listMetricCatalog(), listMetricDefinitions()]).then(
+        async ([catalog, defs]) => {
+          const specs = new Map(defs.map((d) => [d.key, d]));
+          const built = await Promise.all(
+            catalog.map(async (entry) => {
+              const def = specs.get(entry.key) ?? null;
+              // No spec ⇒ no spec-driven reads ⇒ don't pay for the IPC.
+              const samples = def ? await listMetricSamples(entry.key, SAMPLE_LIMIT) : [];
+              return {
+                key: entry.key,
+                title: entry.title,
+                category: entry.category,
+                language: entry.language,
+                enabled: entry.enabled,
+                def,
+                latest: samples[0] ?? null,
+                samples,
+              };
+            }),
+          );
+          if (!cancelled) {
+            setRows(built);
+            setLoading(false);
+          }
+        },
+      );
     };
     refresh();
     const off = subscribeOxplowEvents((e) => {
@@ -154,18 +194,26 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   }, []);
 
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
-  // Scope each metric's latest + trend to the selected range + branch. All
-  // metrics stay listed; an out-of-scope metric just shows "—".
+  // Which metrics are LISTED (Show mode + search), then each survivor's
+  // latest + trend scoped to the range + branch — an in-scope metric with no
+  // recording in the window stays listed and just shows "—".
   const viewRows = useMemo(() => {
     const range = rangeFromPreset(rangeKey, Date.now());
-    const q = query.trim().toLowerCase();
-    return rows
-      .filter((r) => !q || r.def.title.toLowerCase().includes(q) || r.def.key.toLowerCase().includes(q))
-      .map((r) => {
-        const samples = filterByBranch(filterByRange(r.samples, range), branch);
-        return { def: r.def, latest: samples[0] ?? null, samples };
-      });
-  }, [rows, rangeKey, branch, query]);
+    return filterMetricRows(rows, showMode, query).map((r) => {
+      const samples = filterByBranch(filterByRange(r.samples, range), branch);
+      return { ...r, latest: samples[0] ?? null, samples };
+    });
+  }, [rows, rangeKey, branch, query, showMode]);
+
+  const sections = useMemo(
+    () =>
+      buildMetricSections(
+        viewRows,
+        (r) => r.category,
+        (r) => r.language,
+      ),
+    [viewRows],
+  );
 
   return (
     // The provider wraps the whole Page so its context reaches BOTH the details
@@ -190,6 +238,22 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               data-testid="recorded-search"
               style={sel}
             />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Show</span>
+            <select
+              value={showMode}
+              onChange={(e) => setShowMode(e.target.value as ShowMode)}
+              data-testid="recorded-show-mode"
+              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't."
+              style={sel}
+            >
+              {SHOW_MODES.map((m) => (
+                <option key={m.key} value={m.key}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ opacity: 0.6, fontSize: 12 }}>Range</span>
@@ -239,13 +303,18 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
             oxplow records them into the substrate automatically. Custom metrics
             can be declared in <code>.oxplow/project.yaml</code>.
           </div>
+        ) : sections.length === 0 ? (
+          // The Show mode + search can empty the list even though metrics exist,
+          // which the "nothing recorded yet" state above doesn't cover.
+          <div data-testid="recorded-no-match" style={{ opacity: 0.6, lineHeight: 1.6 }}>
+            No metrics match.
+            {showMode === "enabled" ? " Try Show: All to include metrics this project hasn't enabled." : ""}
+          </div>
         ) : (
+          // A section only exists when it has rows — `buildMetricSections` groups
+          // what it's given, so filtering a category empty removes its heading too.
           <>
-            {buildMetricSections(
-              viewRows,
-              (r) => r.def.category,
-              (r) => r.def.language,
-            ).map((group) => (
+            {sections.map((group) => (
               <CollapsibleSection
                 key={group.key}
                 id={group.key}
@@ -261,7 +330,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                   </colgroup>
                   <tbody>
                     {group.entries.map((row) => (
-                      <RecordedRow key={row.def.key} row={row} onOpenPage={onOpenPage} />
+                      <RecordedRow key={row.key} row={row} onOpenPage={onOpenPage} />
                     ))}
                   </tbody>
                 </table>
