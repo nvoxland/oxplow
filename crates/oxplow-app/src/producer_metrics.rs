@@ -90,6 +90,65 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: TOKEN_DIMS,
             description: Some("Total tokens (input + output) used by the agent."),
         },
+        // Prompt-cache economics (tsk73) — token-denominated, never dollars.
+        // Cache facts ride `oxplow.cache_tokens`/`oxplow.cache_usage`, NOT
+        // `oxplow.tokens`, so `agent.tokens.total` keeps its meaning.
+        ProducerMetric {
+            key: "agent.tokens.cache_read",
+            title: "Cache-read tokens",
+            kind: "gauge",
+            unit: "tokens",
+            direction: "neutral",
+            default_agg: "sum",
+            grain: Some("entity"),
+            category: "operational",
+            producer: "otel-tokens",
+            dimensions: TOKEN_DIMS,
+            description: Some("Prompt tokens served from cache instead of re-processed."),
+        },
+        ProducerMetric {
+            key: "agent.tokens.cache_creation",
+            title: "Cache-write tokens",
+            kind: "gauge",
+            unit: "tokens",
+            direction: "neutral",
+            default_agg: "sum",
+            grain: Some("entity"),
+            category: "operational",
+            producer: "otel-tokens",
+            dimensions: TOKEN_DIMS,
+            description: Some("Prompt tokens written into the cache (the cache-warming cost)."),
+        },
+        ProducerMetric {
+            key: "agent.tokens.cache_hit_pct",
+            title: "Cache hit ratio",
+            kind: "gauge",
+            unit: "%",
+            direction: "higher-better",
+            default_agg: "ratio",
+            grain: Some("entity"),
+            category: "operational",
+            producer: "otel-tokens",
+            dimensions: TOKEN_DIMS,
+            description: Some(
+                "Prompt-side cache hit ratio: cache-read / (input + cache-read + cache-write).",
+            ),
+        },
+        ProducerMetric {
+            key: "task.tokens",
+            title: "Tokens per effort",
+            kind: "gauge",
+            unit: "tokens",
+            direction: "lower-better",
+            default_agg: "avg",
+            grain: Some("effort"),
+            category: "operational",
+            producer: "effort-lifecycle",
+            dimensions: EFFORT_DIMS,
+            description: Some(
+                "Avg tokens (all kinds) a closed effort spent — the cost of a unit of work, in tokens.",
+            ),
+        },
         // token-parse (token_usage.rs::on_stop) — turns stay transcript-derived.
         ProducerMetric {
             key: "agent.turns",
@@ -366,6 +425,22 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
             Some(dim_eq("oxplow.token_kind", "output")),
         ),
         "agent.tokens.total" => ("oxplow.tokens", "sum", None),
+        // Prompt-cache economics (tsk73). Cache facts ride their own measures
+        // — see the V59 migration header for why they can't share
+        // `oxplow.tokens` (the unfiltered `total`) or each other (per-measure
+        // cross-time collapse: additive sum vs non-additive Σn/Σd).
+        "agent.tokens.cache_read" => (
+            "oxplow.cache_tokens",
+            "sum",
+            Some(dim_eq("oxplow.token_kind", "cache_read")),
+        ),
+        "agent.tokens.cache_creation" => (
+            "oxplow.cache_tokens",
+            "sum",
+            Some(dim_eq("oxplow.token_kind", "cache_creation")),
+        ),
+        "agent.tokens.cache_hit_pct" => ("oxplow.cache_usage", "ratio", None),
+        "task.tokens" => ("oxplow.effort_tokens", "avg", None),
         "agent.turns" => ("oxplow.turn", "sum", None),
         "effort.cycle_time_ms" => ("oxplow.cycle_time", "avg", None),
         "task.efforts" => ("oxplow.task_effort", "avg", None),

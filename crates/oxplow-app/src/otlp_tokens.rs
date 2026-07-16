@@ -42,14 +42,21 @@ const CODEX_TOKEN_METRIC: &str = "codex.turn.token_usage";
 const CODEX_TOKEN_EVENT_KIND: &str = "response.completed";
 
 /// The token kinds oxplow tracks. Cache tokens (Claude `cacheRead`/
-/// `cacheCreation`, Codex `cached_input`) and the Codex `total` rollup are
-/// dropped; Codex `reasoning_output` folds into `output` (matching Claude,
-/// whose `output` already includes thinking). Cache kinds can be added later
-/// without touching the `agent.tokens.*` specs.
+/// `cacheCreation`, Codex `cached_input` → CacheRead) are tracked since tsk73;
+/// the Codex `total` rollup stays dropped (it would double-count) and Codex
+/// `reasoning_output` folds into `output` (matching Claude, whose `output`
+/// already includes thinking).
+///
+/// ⚠️ Ingest routes kinds to DIFFERENT measures: Input/Output →
+/// `oxplow.tokens`, cache kinds → `oxplow.cache_tokens`. They must never share
+/// a measure — `agent.tokens.total` is an UNFILTERED sum over `oxplow.tokens`,
+/// so cache facts there would silently change its meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Input,
     Output,
+    CacheRead,
+    CacheCreation,
 }
 
 impl TokenKind {
@@ -58,7 +65,15 @@ impl TokenKind {
         match self {
             TokenKind::Input => "input",
             TokenKind::Output => "output",
+            TokenKind::CacheRead => "cache_read",
+            TokenKind::CacheCreation => "cache_creation",
         }
+    }
+
+    /// Whether this kind rides `oxplow.cache_tokens` rather than
+    /// `oxplow.tokens` (see the enum docs for why they're separate).
+    pub fn is_cache(self) -> bool {
+        matches!(self, TokenKind::CacheRead | TokenKind::CacheCreation)
     }
 }
 
@@ -182,7 +197,8 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                 let output = int_attr(a, "output_token_count").unwrap_or(0);
                 let reasoning = int_attr(a, "reasoning_token_count").unwrap_or(0);
                 let model = model_attr(a, resource_attrs);
-                // new (uncached) input this request; reasoning folded into output.
+                // new (uncached) input this request; reasoning folded into
+                // output; the cached prefix is its own CacheRead fact (tsk73).
                 let new_input = (input - cached).max(0);
                 let out_total = output + reasoning;
                 if new_input > 0 {
@@ -190,6 +206,13 @@ pub fn otlp_logs_to_token_facts(req: &ExportLogsServiceRequest) -> Vec<TokenFact
                         model: model.clone(),
                         kind: TokenKind::Input,
                         value: new_input,
+                    });
+                }
+                if cached > 0 {
+                    out.push(TokenFact {
+                        model: model.clone(),
+                        kind: TokenKind::CacheRead,
+                        value: cached,
                     });
                 }
                 if out_total > 0 {
@@ -240,22 +263,25 @@ fn model_attr(dp_attrs: &[KeyValue], resource_attrs: &[KeyValue]) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Claude's `type` attribute → a tracked kind (drops cacheRead/cacheCreation).
+/// Claude's `type` attribute → a tracked kind (cache kinds tracked, tsk73).
 fn claude_token_kind(attrs: &[KeyValue]) -> Option<TokenKind> {
     match string_attr(attrs, "type")?.as_str() {
         "input" => Some(TokenKind::Input),
         "output" => Some(TokenKind::Output),
+        "cacheRead" => Some(TokenKind::CacheRead),
+        "cacheCreation" => Some(TokenKind::CacheCreation),
         _ => None,
     }
 }
 
 /// Codex's `token_type` attribute → a tracked kind. `reasoning_output` folds
-/// into `output`; `cached_input` and the `total` rollup are dropped (dropping
-/// `total` is what prevents double-counting).
+/// into `output`; `cached_input` → CacheRead; only the `total` rollup is
+/// dropped (dropping `total` is what prevents double-counting).
 fn codex_token_kind(attrs: &[KeyValue]) -> Option<TokenKind> {
     match string_attr(attrs, "token_type")?.as_str() {
         "input" => Some(TokenKind::Input),
         "output" | "reasoning_output" => Some(TokenKind::Output),
+        "cached_input" => Some(TokenKind::CacheRead),
         _ => None,
     }
 }
@@ -455,6 +481,55 @@ pub(crate) fn encoded_claude_export(model: &str, input: i64, output: i64) -> Vec
     .encode_to_vec()
 }
 
+/// [`encoded_claude_export`] with cache points — the tsk73 ingest tests' body.
+#[cfg(test)]
+pub(crate) fn encoded_claude_export_with_cache(
+    model: &str,
+    input: i64,
+    output: i64,
+    cache_read: i64,
+    cache_creation: i64,
+) -> Vec<u8> {
+    use opentelemetry_proto::tonic::common::v1::AnyValue;
+    use opentelemetry_proto::tonic::metrics::v1::{
+        Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
+    };
+    let kv = |k: &str, v: &str| KeyValue {
+        key: k.into(),
+        value: Some(AnyValue {
+            value: Some(any_value::Value::StringValue(v.into())),
+        }),
+        ..Default::default()
+    };
+    let point = |ty: &str, val: i64| NumberDataPoint {
+        attributes: vec![kv("type", ty), kv("model", model)],
+        value: Some(number_data_point::Value::AsInt(val)),
+        ..Default::default()
+    };
+    ExportMetricsServiceRequest {
+        resource_metrics: vec![ResourceMetrics {
+            scope_metrics: vec![ScopeMetrics {
+                metrics: vec![Metric {
+                    name: CLAUDE_TOKEN_METRIC.into(),
+                    data: Some(metric::Data::Sum(Sum {
+                        data_points: vec![
+                            point("input", input),
+                            point("output", output),
+                            point("cacheRead", cache_read),
+                            point("cacheCreation", cache_creation),
+                        ],
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+    .encode_to_vec()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,7 +557,8 @@ mod tests {
     }
 
     /// A Claude-shaped export: one `claude_code.token.usage` Sum with input,
-    /// output, and a cacheRead point (which must be dropped).
+    /// output, cacheRead, and cacheCreation points (all four kinds tracked
+    /// since tsk73).
     fn claude_request() -> ExportMetricsServiceRequest {
         ExportMetricsServiceRequest {
             resource_metrics: vec![ResourceMetrics {
@@ -494,6 +570,7 @@ mod tests {
                                 point("input", "claude-opus-4-8", 100),
                                 point("output", "claude-opus-4-8", 20),
                                 point("cacheRead", "claude-opus-4-8", 5000),
+                                point("cacheCreation", "claude-opus-4-8", 700),
                             ],
                             ..Default::default()
                         })),
@@ -507,9 +584,9 @@ mod tests {
     }
 
     #[test]
-    fn claude_counter_maps_to_input_output_facts_dropping_cache() {
+    fn claude_counter_maps_all_four_token_kinds() {
         let facts = otlp_metrics_to_token_facts(&claude_request());
-        assert_eq!(facts.len(), 2, "cacheRead dropped, input+output kept");
+        assert_eq!(facts.len(), 4, "input+output+cacheRead+cacheCreation");
         assert!(facts.contains(&TokenFact {
             model: "claude-opus-4-8".into(),
             kind: TokenKind::Input,
@@ -520,13 +597,24 @@ mod tests {
             kind: TokenKind::Output,
             value: 20,
         }));
+        assert!(facts.contains(&TokenFact {
+            model: "claude-opus-4-8".into(),
+            kind: TokenKind::CacheRead,
+            value: 5000,
+        }));
+        assert!(facts.contains(&TokenFact {
+            model: "claude-opus-4-8".into(),
+            kind: TokenKind::CacheCreation,
+            value: 700,
+        }));
     }
 
     #[test]
     fn codex_histogram_maps_token_types_folding_reasoning_into_output() {
         // tsk24: Codex emits a per-turn histogram with a `token_type` attribute;
         // the count is the data point's `sum`. reasoning_output folds into
-        // output; cached_input + the `total` rollup are dropped.
+        // output; cached_input → CacheRead (tsk73); only the `total` rollup is
+        // dropped (it would double-count).
         let hp = |token_type: &str, sum: f64| HistogramDataPoint {
             attributes: vec![kv("token_type", token_type), kv("model", "gpt-5-codex")],
             sum: Some(sum),
@@ -567,12 +655,18 @@ mod tests {
             .sum();
         assert_eq!(input, 100, "input kept");
         assert_eq!(output, 50, "output(20) + reasoning_output(30) folded");
+        let cache_read: i64 = facts
+            .iter()
+            .filter(|f| f.kind == TokenKind::CacheRead)
+            .map(|f| f.value)
+            .sum();
+        assert_eq!(cache_read, 5000, "cached_input kept as CacheRead (tsk73)");
         assert!(
             facts.iter().all(|f| f.model == "gpt-5-codex"),
             "model read from the data point"
         );
-        // cached_input + total contributed nothing.
-        assert_eq!(facts.iter().map(|f| f.value).sum::<i64>(), 150);
+        // Only the `total` rollup contributed nothing.
+        assert_eq!(facts.iter().map(|f| f.value).sum::<i64>(), 5150);
     }
 
     fn kv_int(k: &str, v: i64) -> KeyValue {
@@ -626,6 +720,12 @@ mod tests {
             .sum();
         assert_eq!(input, 111258, "113690 input − 2432 cached");
         assert_eq!(output, 296, "254 output + 42 reasoning");
+        let cache_read: i64 = facts
+            .iter()
+            .filter(|f| f.kind == TokenKind::CacheRead)
+            .map(|f| f.value)
+            .sum();
+        assert_eq!(cache_read, 2432, "the cached prefix is a CacheRead fact");
         assert!(facts.iter().all(|f| f.model == "gpt-5.5"));
     }
 
@@ -767,6 +867,6 @@ mod tests {
         let bytes = claude_request().encode_to_vec();
         let decoded = decode_metrics_request(&bytes).expect("decode");
         let facts = otlp_metrics_to_token_facts(&decoded);
-        assert_eq!(facts.len(), 2);
+        assert_eq!(facts.len(), 4, "all four token kinds round-trip (tsk73)");
     }
 }

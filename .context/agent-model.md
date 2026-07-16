@@ -239,7 +239,11 @@ sibling `POST /v1/metrics` OTLP receiver beside `/hook` and `/mcp`
 (`terminal.rs::claude_otel_env`) points its OTEL metrics exporter at it and
 attaches `X-Oxplow-Thread`/`X-Oxplow-Stream` as OTLP headers (one process per
 thread → constant), so the receiver attributes the `claude_code.token.usage`
-counter onto `oxplow.tokens` facts without a session→thread lookup. This
+counter onto `oxplow.tokens` facts without a session→thread lookup. Cache
+kinds (`cacheRead`/`cacheCreation`) are tracked too (tsk73) — on the separate
+`oxplow.cache_tokens`/`oxplow.cache_usage` measures, feeding
+`agent.tokens.cache_read`/`cache_creation`/`cache_hit_pct` and the per-close
+`task.tokens`; token-denominated only, never dollars. This
 replaced the transcript-parse token capture, which overcounted ~2–3× (Claude
 repeats a message's cumulative `usage` on every content-block line). The Stop
 hook's `on_stop` still records the per-turn `agent_token_usage` prompt rows +

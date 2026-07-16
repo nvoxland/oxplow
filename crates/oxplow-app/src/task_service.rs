@@ -641,6 +641,54 @@ impl TaskService {
                         }
                     }
                 }
+                // Tokens the effort spent (tsk73) — ALL kinds (input + output +
+                // cache read/write), summed from the effort-stamped otel token
+                // facts. One fact per closed effort on `oxplow.effort_tokens`
+                // (non-additive, den=1 → the collapse is MEAN tokens per close,
+                // read by `task.tokens`). Token-denominated by decision — never
+                // dollars. No fact when the effort has no token captures (an
+                // unmetered effort is "no data", not a zero).
+                if facts
+                    .measure_has_active_spec("oxplow.effort_tokens")
+                    .await
+                    .unwrap_or(true)
+                {
+                    if let (Some(effort_tokens_measure), Some(tokens_measure)) = (
+                        facts.get_measure("oxplow.effort_tokens").await?,
+                        facts.get_measure("oxplow.tokens").await?,
+                    ) {
+                        let caps = facts.captures_for_effort(effort_id.value()).await?;
+                        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
+                        let mut total: f64 = facts
+                            .facts_for_captures(tokens_measure.id, cap_ids.clone())
+                            .await?
+                            .iter()
+                            .map(|f| f.value)
+                            .sum();
+                        let mut any = total > 0.0;
+                        if let Some(cache_measure) =
+                            facts.get_measure("oxplow.cache_tokens").await?
+                        {
+                            let cache: f64 = facts
+                                .facts_for_captures(cache_measure.id, cap_ids)
+                                .await?
+                                .iter()
+                                .map(|f| f.value)
+                                .sum();
+                            any = any || cache > 0.0;
+                            total += cache;
+                        }
+                        if any {
+                            rows.push(NewFact {
+                                subject_kind: Some("effort".into()),
+                                subject_ref: Some(effort_id.to_string()),
+                                numerator: Some(total),
+                                denominator: Some(1.0),
+                                ..NewFact::new(effort_tokens_measure.id, total)
+                            });
+                        }
+                    }
+                }
                 if rows.is_empty() {
                     return Ok::<(), DomainError>(());
                 }
@@ -1570,6 +1618,78 @@ mod tests {
         // — the mean efforts-per-task, not the last-closed task's count.
         assert_eq!(effort_facts[0].numerator, Some(1.0));
         assert_eq!(effort_facts[0].denominator, Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn closing_an_effort_projects_its_token_spend() {
+        // tsk73: at close, the effort's token spend (ALL kinds, from its
+        // effort-stamped otel captures) lands as one `oxplow.effort_tokens`
+        // fact — token-denominated, never dollars. `task.tokens` averages it.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "token-metered".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let effort = effort_store
+            .find_single_open_for_thread(&tid)
+            .await
+            .unwrap()
+            .expect("open effort");
+
+        // Simulate the OTLP ingest: an effort-stamped otel-tokens capture with
+        // input/output on `oxplow.tokens` and a cache fact on
+        // `oxplow.cache_tokens`.
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let tokens = facts.get_measure("oxplow.tokens").await.unwrap().unwrap();
+        let cache = facts
+            .get_measure("oxplow.cache_tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut capture = oxplow_db::NewMetricCapture::done(1, "otel-tokens", "otel");
+        capture.thread_id = Some(tid.value());
+        capture.effort_id = Some(effort.id.value());
+        facts
+            .record_facts(
+                capture,
+                vec![
+                    oxplow_db::NewFact::new(tokens.id, 100.0),
+                    oxplow_db::NewFact::new(tokens.id, 20.0),
+                    oxplow_db::NewFact::new(cache.id, 700.0),
+                ],
+            )
+            .await
+            .unwrap();
+
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let effort_tokens = facts
+            .get_measure("oxplow.effort_tokens")
+            .await
+            .unwrap()
+            .expect("effort_tokens measure seeded by V59");
+        let spend = facts.facts_for_measure(effort_tokens.id).await.unwrap();
+        assert_eq!(spend.len(), 1, "one token-spend fact per close");
+        assert_eq!(spend[0].value, 820.0, "input + output + cache summed");
+        assert_eq!(spend[0].subject_kind.as_deref(), Some("effort"));
+        // Non-additive den=1: `task.tokens` collapses to MEAN per close.
+        assert_eq!(spend[0].numerator, Some(820.0));
+        assert_eq!(spend[0].denominator, Some(1.0));
     }
 
     #[tokio::test]

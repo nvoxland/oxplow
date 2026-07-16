@@ -533,10 +533,12 @@ impl TokenUsageService {
     /// **metrics** (Claude's `claude_code.token.usage` counter) or, failing that,
     /// as OTLP **logs** (Codex's `response.completed` event — its real token
     /// source; Codex points its single OTLP endpoint here), project the token
-    /// counts onto the `oxplow.tokens` measure (per-model, sliced by
-    /// `oxplow.token_kind`), and record them under one capture attributed to
-    /// `thread`/`stream` plus the thread's single open effort when unambiguous
-    /// (same resolution as [`Self::on_stop`]). The capture carries an idempotency
+    /// counts onto the token measures (per-model, sliced by
+    /// `oxplow.token_kind`): input/output → `oxplow.tokens`, cache kinds →
+    /// `oxplow.cache_tokens`, plus one per-model `oxplow.cache_usage` hit-ratio
+    /// fact (tsk73) — all under one capture attributed to `thread`/`stream`
+    /// plus the thread's single open effort when unambiguous (same resolution
+    /// as [`Self::on_stop`]). The capture carries an idempotency
     /// key over the raw body, so a retransmit of the same export is a no-op.
     /// Returns the number of token facts the export mapped to. A body that is
     /// neither metrics nor logs (most Codex log events aren't token events) is a
@@ -563,42 +565,111 @@ impl TokenUsageService {
         if token_facts.is_empty() {
             return Ok(0);
         }
-        // Stop-collecting gate (tsk31): drop the export when every token metric
-        // (`agent.tokens.input/output/total`) is disabled — nothing consumes
-        // `oxplow.tokens`. Still a 200 ack to the exporter (the caller answers).
-        if !self
+        // Stop-collecting gates (tsk31), one per measure this export can feed:
+        // input/output → `oxplow.tokens` (the agent.tokens.* specs), cache
+        // kinds → `oxplow.cache_tokens`, and the per-model hit-ratio fact →
+        // `oxplow.cache_usage` (tsk73). Cache rides SEPARATE measures because
+        // `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` —
+        // cache facts there would silently change its meaning. Still a 200 ack
+        // to the exporter either way (the caller answers).
+        let tokens_measure = if self
             .facts
             .measure_has_active_spec("oxplow.tokens")
             .await
             .unwrap_or(true)
         {
+            self.facts.get_measure("oxplow.tokens").await?
+        } else {
+            None
+        };
+        let cache_measure = if self
+            .facts
+            .measure_has_active_spec("oxplow.cache_tokens")
+            .await
+            .unwrap_or(true)
+        {
+            self.facts.get_measure("oxplow.cache_tokens").await?
+        } else {
+            None
+        };
+        let usage_measure = if self
+            .facts
+            .measure_has_active_spec("oxplow.cache_usage")
+            .await
+            .unwrap_or(true)
+        {
+            self.facts.get_measure("oxplow.cache_usage").await?
+        } else {
+            None
+        };
+        if tokens_measure.is_none() && cache_measure.is_none() && usage_measure.is_none() {
             return Ok(0);
         }
-        let Some(measure) = self.facts.get_measure("oxplow.tokens").await? else {
-            return Ok(0);
-        };
         let effort_val = self
             .efforts
             .find_single_open_for_thread(thread)
             .await?
             .map(|e| e.id.value());
-        let facts: Vec<NewFact> = token_facts
-            .iter()
-            .map(|tf| NewFact {
+        // json! (not format!) — the model id is verbatim from the OTLP export;
+        // a quote/backslash must not poison the dims JSON.
+        let kind_dims = |model: &str, kind: &str| {
+            serde_json::json!({
+                "oxplow.model": model,
+                "oxplow.token_kind": kind,
+            })
+            .to_string()
+        };
+        let mut facts: Vec<NewFact> = Vec::new();
+        for tf in &token_facts {
+            let measure = if tf.kind.is_cache() {
+                &cache_measure
+            } else {
+                &tokens_measure
+            };
+            let Some(m) = measure else { continue };
+            facts.push(NewFact {
                 subject_kind: Some("model".into()),
                 subject_ref: Some(format!("model:{}", tf.model)),
-                // json! (not format!) — the model id is verbatim from the OTLP
-                // export; a quote/backslash must not poison the dims JSON.
-                dims_json: Some(
-                    serde_json::json!({
-                        "oxplow.model": tf.model,
-                        "oxplow.token_kind": tf.kind.as_str(),
-                    })
-                    .to_string(),
-                ),
-                ..NewFact::new(measure.id, tf.value as f64)
-            })
-            .collect();
+                dims_json: Some(kind_dims(&tf.model, tf.kind.as_str())),
+                ..NewFact::new(m.id, tf.value as f64)
+            });
+        }
+        // Per-model prompt-cache hit ratio (tsk73): num = cache_read, den =
+        // input + cache_read + cache_creation (prompt-side; output can't be
+        // cached). Emitted only when the export carried cache telemetry at
+        // all — an agent that doesn't report cache kinds must read as "no
+        // data", not a string of 0% points dragging the cumulative Σn/Σd.
+        if let Some(um) = &usage_measure {
+            use crate::otlp_tokens::TokenKind;
+            let mut by_model: std::collections::BTreeMap<&str, (f64, f64, f64)> =
+                std::collections::BTreeMap::new();
+            for tf in &token_facts {
+                let e = by_model.entry(tf.model.as_str()).or_default();
+                match tf.kind {
+                    TokenKind::Input => e.0 += tf.value as f64,
+                    TokenKind::CacheRead => e.1 += tf.value as f64,
+                    TokenKind::CacheCreation => e.2 += tf.value as f64,
+                    TokenKind::Output => {}
+                }
+            }
+            for (model, (input, cache_read, cache_creation)) in by_model {
+                let den = input + cache_read + cache_creation;
+                if den <= 0.0 || (cache_read <= 0.0 && cache_creation <= 0.0) {
+                    continue;
+                }
+                facts.push(NewFact {
+                    subject_kind: Some("model".into()),
+                    subject_ref: Some(format!("model:{model}")),
+                    numerator: Some(cache_read),
+                    denominator: Some(den),
+                    dims_json: Some(serde_json::json!({ "oxplow.model": model }).to_string()),
+                    ..NewFact::new(um.id, cache_read / den * 100.0)
+                });
+            }
+        }
+        if facts.is_empty() {
+            return Ok(0);
+        }
         let count = facts.len();
         let mut capture = NewMetricCapture::done(stream.value(), "otel-tokens", "otel");
         capture.thread_id = Some(thread.value());
@@ -1113,6 +1184,106 @@ mod tests {
                 "{key}: spec headline over OTEL facts",
             );
         }
+    }
+
+    #[tokio::test]
+    async fn ingest_otlp_tokens_records_cache_facts_and_hit_ratio() {
+        // tsk73: cache kinds land on `oxplow.cache_tokens` (NOT `oxplow.tokens`
+        // — `agent.tokens.total` must keep meaning input+output), plus one
+        // per-model `oxplow.cache_usage` ratio fact: num = cache_read, den =
+        // prompt-side total (input + cache_read + cache_creation).
+        let (svc, _dir, thread) = service_fixture().await;
+        let stream = svc.streams.ensure_primary().await.unwrap().id;
+        let body = crate::otlp_tokens::encoded_claude_export_with_cache(
+            "claude-fable-5",
+            100, // input
+            20,  // output
+            700, // cacheRead
+            200, // cacheCreation
+        );
+
+        let n = svc
+            .token_usage
+            .ingest_otlp_tokens(&thread, &stream, &body)
+            .await
+            .unwrap();
+        assert_eq!(n, 5, "input + output + 2 cache facts + 1 ratio fact");
+
+        // input/output stay on oxplow.tokens — total is NOT cache-polluted.
+        let tokens = svc
+            .fact_store
+            .get_measure("oxplow.tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let token_facts = svc.fact_store.facts_for_measure(tokens.id).await.unwrap();
+        assert_eq!(token_facts.iter().map(|f| f.value).sum::<f64>(), 120.0);
+
+        // Cache kinds on their own measure, sliced by token_kind.
+        let cache = svc
+            .fact_store
+            .get_measure("oxplow.cache_tokens")
+            .await
+            .unwrap()
+            .unwrap();
+        let cache_facts = svc.fact_store.facts_for_measure(cache.id).await.unwrap();
+        assert_eq!(cache_facts.len(), 2);
+        assert_eq!(cache_facts.iter().map(|f| f.value).sum::<f64>(), 900.0);
+
+        // The hit-ratio fact: 700 / (100 + 700 + 200) = 70%.
+        let usage = svc
+            .fact_store
+            .get_measure("oxplow.cache_usage")
+            .await
+            .unwrap()
+            .unwrap();
+        let usage_facts = svc.fact_store.facts_for_measure(usage.id).await.unwrap();
+        assert_eq!(usage_facts.len(), 1);
+        assert_eq!(usage_facts[0].numerator, Some(700.0));
+        assert_eq!(usage_facts[0].denominator, Some(1000.0));
+        assert!((usage_facts[0].value - 70.0).abs() < 1e-9);
+
+        // The specs read back: sums by kind + the cumulative ratio headline.
+        svc.metrics.seed_catalog().await;
+        let engine = crate::metric_engine::MetricEngine::new((*svc.fact_store).clone());
+        for (key, expected) in [
+            ("agent.tokens.total", 120.0),
+            ("agent.tokens.cache_read", 700.0),
+            ("agent.tokens.cache_creation", 200.0),
+            ("agent.tokens.cache_hit_pct", 70.0),
+        ] {
+            let spec = svc.fact_store.get_spec(key).await.unwrap().unwrap();
+            assert_eq!(
+                engine.headline_for_spec(&spec).await.unwrap(),
+                Some(expected),
+                "{key}: spec headline",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_free_export_emits_no_ratio_fact() {
+        // An agent that reports no cache telemetry must read as "no data",
+        // not a 0% point dragging the cumulative hit ratio down.
+        let (svc, _dir, thread) = service_fixture().await;
+        let stream = svc.streams.ensure_primary().await.unwrap().id;
+        let body = crate::otlp_tokens::encoded_claude_export("claude-fable-5", 100, 20);
+        svc.token_usage
+            .ingest_otlp_tokens(&thread, &stream, &body)
+            .await
+            .unwrap();
+        let usage = svc
+            .fact_store
+            .get_measure("oxplow.cache_usage")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(svc
+            .fact_store
+            .facts_for_measure(usage.id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
