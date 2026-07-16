@@ -44,6 +44,31 @@ measures:
   unit: count
   temporalSemantics: semi-additive
   captureScope: per-path
+- key: repo.rust_shared_state
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.rust_async_fn
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.ts_as_cast
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.dangerous_html
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.skipped_tests
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
 gauges:
 # ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
 # bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
@@ -71,6 +96,31 @@ gauges:
   trigger: on-snapshot
   emits: [repo.eslint_disable]
   compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eslint.star }
+- key: repo.scan_shared_state
+  title: Rust Arc/Mutex/RwLock scan
+  trigger: on-snapshot
+  emits: [repo.rust_shared_state]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_shared_state.star }
+- key: repo.scan_async_fn
+  title: Rust async fn scan
+  trigger: on-snapshot
+  emits: [repo.rust_async_fn]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_async_fn.star }
+- key: repo.scan_as_cast
+  title: TS as-cast scan
+  trigger: on-snapshot
+  emits: [repo.ts_as_cast]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_as_cast.star }
+- key: repo.scan_dangerous_html
+  title: dangerouslySetInnerHTML scan
+  trigger: on-snapshot
+  emits: [repo.dangerous_html]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_dangerous_html.star }
+- key: repo.scan_skipped_tests
+  title: Skipped/ignored test scan
+  trigger: on-snapshot
+  emits: [repo.skipped_tests]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_skipped_tests.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
@@ -112,6 +162,82 @@ metrics:
   category: static-quality
   language: typescript
   description: "useEffect call sites — a re-render/complexity signal."
+- key: repo.rust_shared_state
+  title: Arc/Mutex/RwLock usages
+  sourceMeasure: repo.rust_shared_state
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: rust
+  description: "Arc/Mutex/RwLock type usages — shared-state / concurrency-complexity signal."
+- key: repo.rust_async_fn
+  title: async fn count
+  sourceMeasure: repo.rust_async_fn
+  aggregation: sum
+  direction: neutral
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: rust
+  description: "`async fn` definitions — async surface density."
+- key: repo.ts_as_cast
+  title: as-cast assertions
+  sourceMeasure: repo.ts_as_cast
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "`x as T` type-assertion casts — a type-safety escape hatch."
+- key: repo.dangerous_html
+  title: dangerouslySetInnerHTML
+  sourceMeasure: repo.dangerous_html
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "dangerouslySetInnerHTML usages — XSS-injection surface."
+- key: repo.skipped_tests
+  title: Skipped / ignored tests
+  sourceMeasure: repo.skipped_tests
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: testing
+  description: "`#[ignore]` (Rust) + `.skip`/`.todo` (TS test files) — hidden test debt."
+- key: repo.complexity_max
+  title: Max cyclomatic complexity
+  sourceMeasure: oxplow.complexity
+  aggregation: max
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  description: "The single most cyclomatically-complex function in the tree."
+- key: repo.complexity_avg
+  title: Avg cyclomatic complexity
+  sourceMeasure: oxplow.complexity
+  aggregation: avg
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  description: "Mean cyclomatic complexity across all functions."
+- key: repo.fn_length_max
+  title: Longest function
+  sourceMeasure: oxplow.fn_length
+  aggregation: max
+  direction: lower-better
+  unit: lines
+  displayKind: gauge
+  category: static-quality
+  description: "Length (lines) of the longest function in the tree."
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros

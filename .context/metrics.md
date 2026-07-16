@@ -231,6 +231,11 @@ welded to collection.
   `filter_json` (the conjunctive predicate that turns a raw measure into a
   count-over-threshold), `formula` (derived-metric spec referencing other metric
   keys; NULL for a base), `sliceable_dims_json`, presentation
+  - A project `key:`-defined metric may set `source_measure` to a **built-in**
+    measure to add a new aggregation over facts a bundled gauge already emits —
+    no new gauge, no collection. E.g. `repo.complexity_max` = `max` over
+    `oxplow.complexity`, `repo.fn_length_max` = `max` over `oxplow.fn_length`
+    (the project key just can't reuse the reserved `oxplow.` namespace).
   `direction`/`target`/`warn_at`/`fail_at`/`display_kind` (`gauge`|`findings`|
   `test`|`coverage`|`event` — read-time only; severity/threshold-state are DERIVED
   from `value` × these, never stored on a fact), `scope`/`category`/`language`.
