@@ -7,6 +7,7 @@ import {
   listMetricSamples,
   subscribeOxplowEvents,
 } from "../api.js";
+import { CollapsibleSection, CollapsibleSections } from "../components/CollapsibleSections.js";
 import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
@@ -162,14 +163,6 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
       });
   }, [rows, rangeKey, branch, query]);
 
-  const headingStyle = {
-    margin: "0 0 8px",
-    fontSize: 17,
-    fontWeight: 700,
-    paddingBottom: 6,
-    borderBottom: "1px solid var(--border, #2a2a2a)",
-  } as const;
-
   return (
     <Page
       testId="page-metrics-recorded"
@@ -233,28 +226,34 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
             can be declared in <code>.oxplow/project.yaml</code>.
           </div>
         ) : (
-          buildMetricSections(
-            viewRows,
-            (r) => r.def.category,
-            (r) => r.def.language,
-          ).map((group) => (
-            <section key={group.key} data-testid={`recorded-group-${group.key}`}>
-              <h2 style={headingStyle}>{group.label}</h2>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
-                <colgroup>
-                  <col />
-                  {/* sparkline, then the value that terminates it */}
-                  <col style={{ width: 120 }} />
-                  <col style={{ width: 140 }} />
-                </colgroup>
-                <tbody>
-                  {group.entries.map((row) => (
-                    <RecordedRow key={row.def.key} row={row} onOpenPage={onOpenPage} />
-                  ))}
-                </tbody>
-              </table>
-            </section>
-          ))
+          <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
+            {buildMetricSections(
+              viewRows,
+              (r) => r.def.category,
+              (r) => r.def.language,
+            ).map((group) => (
+              <CollapsibleSection
+                key={group.key}
+                id={group.key}
+                title={group.label}
+                count={group.entries.length}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col />
+                    {/* sparkline, then the value that terminates it */}
+                    <col style={{ width: 120 }} />
+                    <col style={{ width: 140 }} />
+                  </colgroup>
+                  <tbody>
+                    {group.entries.map((row) => (
+                      <RecordedRow key={row.def.key} row={row} onOpenPage={onOpenPage} />
+                    ))}
+                  </tbody>
+                </table>
+              </CollapsibleSection>
+            ))}
+          </CollapsibleSections>
         )}
       </div>
     </Page>

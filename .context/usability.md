@@ -166,6 +166,39 @@ Things I keep forgetting. Read this before adding any UI.
   ancestor-descriptor chain (unit-tested without a DOM); add new exempt
   surfaces there.
 
+## Collapsible page sections
+
+- **A page with stacked sections gets them from the shared primitive**, not
+  hand-rolled state: `CollapsibleSections` (provider + toolbar) wrapping
+  `CollapsibleSection` (chevron header + hideable body) in
+  `apps/desktop/src/components/CollapsibleSections.tsx`. Pure state +
+  persistence live in the sibling `sectionCollapse.ts` (unit-tested).
+  Adopters: `RecordedMetricsPage`.
+- **This is body-level, NOT a `Page` prop — deliberately (tsk84).** `Page` is
+  chrome: it renders `children` opaquely and has no idea what sections exist, so
+  a page-layout flag couldn't render an Expand-all without the sections
+  registering themselves anyway — the flag would only say "the thing I'm already
+  doing is allowed". And `Page` relocates `actions` into the right rail's panel
+  header under `layout="details"` + `rightRail`, which would strand the
+  Expand/Collapse-all pair inside a **"Filters"** panel on exactly the page that
+  wanted it. Composing in the body gets the same reuse and the same per-page
+  opt-in (use it or don't) with no redundant config.
+- **Sections default to expanded**; only the *collapsed* set is stored
+  (`oxplow.page.sectionsCollapsed.v1`, keyed by `pageKey`), so a newly added
+  section appears open with no migration.
+- **Don't reconcile stored ids against the rendered ones** — the opposite of what
+  the rail does for its section ORDER. A page's own filter (Recorded Metrics'
+  search) can drop a section entirely; it must come back still collapsed.
+  Equally, Expand-all / Collapse-all act **only on what's rendered**, so a
+  filtered-out section's state is never silently rewritten.
+- **The toggle lives inside the `<h2>`**, not instead of it — the heading stays a
+  heading for the document outline, and a real `<button>` gets keyboard
+  activation for free. `aria-expanded` reflects state.
+- Labels + testids match `HierarchyView`'s existing tree toolbar: sentence-case
+  "Expand all" / "Collapse all", `<prefix>-expand-all` / `-collapse-all`, plus
+  `<prefix>-section-toggle-<id>` / `-section-body-<id>` / `-group-<id>`. An
+  all-button is **disabled when it would do nothing**.
+
 ## Commenting on any surface
 
 Comments are not editor-only. Any page region can be commentable by

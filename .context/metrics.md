@@ -932,6 +932,13 @@ that **writes**.
 
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
 >
+> Recorded Metrics renders those sections through the shared
+> `CollapsibleSections` / `CollapsibleSection` primitive (tsk84) — a chevron on
+> each section header plus an Expand all / Collapse all pair, collapsed state
+> persisted under `pageKey: "metrics-recorded"`. See `.context/usability.md` →
+> "Collapsible page sections". Metric Settings has not adopted it (its headers
+> already carry the tri-state group checkbox).
+>
 > Recorded Metrics and Metric Settings render the **same section list**, built by
 > the shared pure `buildMetricSections(rows, getCategory, getLanguage)` in
 > `metricCategories.ts`: categories in `CATEGORY_ORDER`, **except
