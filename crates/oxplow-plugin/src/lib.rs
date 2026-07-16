@@ -386,7 +386,14 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
         let entry = json!({
             "type": "http",
             "url": format!("{}/{}", hook_base_url.trim_end_matches('/'), event),
-            "timeout": 3,
+            // MUST exceed the control plane's HOOK_HANDLING_TIMEOUT (5s): the
+            // server races handling against that budget and always answers by
+            // then, so the client never actually waits this long — but a
+            // client timeout BELOW it makes Claude Code discard output the
+            // server was about to deliver ("hook timed out after 3s", seen on
+            // the first prompt after a daemon restart while boot work holds
+            // the DB writer).
+            "timeout": 8,
             "headers": {
                 "Authorization": "Bearer $OXPLOW_HOOK_TOKEN",
                 "X-Oxplow-Stream": "$OXPLOW_STREAM_ID",
