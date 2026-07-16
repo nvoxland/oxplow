@@ -16,8 +16,9 @@ def transform(input):
             facts.append({"measure": "repo.skipped_tests", "value": c,
                           "subject": "file:" + f["path"], "path": f["path"],
                           "dims": {"oxplow.language": "rust"}})
-    # TS/JS: `.skip` / `.todo` markers, in test files only.
-    tq = "(property_identifier) @p"
+    # TS/JS: `.skip` / `.todo` markers (member access, not object keys like
+    # `{ skip: ... }` which are pairs), in test files only.
+    tq = "(member_expression property: (property_identifier) @p)"
     for pat in ["**/*.test.ts", "**/*.test.tsx"]:
         for f in files(pat):
             lang = "tsx" if f["path"].endswith(".tsx") else "typescript"

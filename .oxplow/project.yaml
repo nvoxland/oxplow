@@ -69,6 +69,26 @@ measures:
   unit: count
   temporalSemantics: semi-additive
   captureScope: per-path
+- key: repo.focused_tests
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.file_loc
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.ts_as_any
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
+- key: repo.eval_usage
+  subjectKind: file
+  unit: count
+  temporalSemantics: semi-additive
+  captureScope: per-path
 gauges:
 # ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
 # bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
@@ -121,6 +141,26 @@ gauges:
   trigger: on-snapshot
   emits: [repo.skipped_tests]
   compute: { runtime: starlark, entryFile: oxplow/gauges/repo_skipped_tests.star }
+- key: repo.scan_focused_tests
+  title: Focused (.only) test scan
+  trigger: on-snapshot
+  emits: [repo.focused_tests]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_focused_tests.star }
+- key: repo.scan_file_loc
+  title: File LOC scan
+  trigger: on-snapshot
+  emits: [repo.file_loc]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_file_loc.star }
+- key: repo.scan_as_any
+  title: TS as-any scan
+  trigger: on-snapshot
+  emits: [repo.ts_as_any]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_as_any.star }
+- key: repo.scan_eval
+  title: eval() scan
+  trigger: on-snapshot
+  emits: [repo.eval_usage]
+  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eval.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
@@ -238,6 +278,62 @@ metrics:
   displayKind: gauge
   category: static-quality
   description: "Length (lines) of the longest function in the tree."
+- key: repo.focused_tests
+  title: Focused (.only) tests
+  sourceMeasure: repo.focused_tests
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: testing
+  description: "`.only` focused tests — a committed one disables the rest of the suite."
+- key: repo.total_loc
+  title: Total lines of code
+  sourceMeasure: repo.file_loc
+  aggregation: sum
+  direction: neutral
+  unit: lines
+  displayKind: gauge
+  category: static-quality
+  description: "Total lines across .rs/.ts/.tsx source files — a size trend."
+- key: repo.max_file_loc
+  title: Largest file
+  sourceMeasure: repo.file_loc
+  aggregation: max
+  direction: lower-better
+  unit: lines
+  displayKind: gauge
+  category: static-quality
+  description: "Line count of the largest source file (god-file / generated-blob detector)."
+- key: repo.ts_as_any
+  title: as-any casts
+  sourceMeasure: repo.ts_as_any
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "`x as any` casts — silences all type-checking on the value."
+- key: repo.eval_usage
+  title: eval() usage
+  sourceMeasure: repo.eval_usage
+  aggregation: sum
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  language: typescript
+  description: "`eval(...)` calls — dynamic-code-execution / injection surface."
+- key: repo.parameter_count_max
+  title: Most parameters
+  sourceMeasure: oxplow.parameter_count
+  aggregation: max
+  direction: lower-better
+  unit: count
+  displayKind: gauge
+  category: static-quality
+  description: "Largest parameter list of any function in the tree."
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros
