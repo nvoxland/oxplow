@@ -1216,12 +1216,22 @@ def transform(input):
         // quadrupled the work, so a single big generated file could blow any
         // budget on its own. Ratio-based rather than absolute: it's the SHAPE of
         // the curve that regressed, and a ratio survives a slow machine.
+        // Min-of-3 per size: a parallel nextest run on a loaded box deschedules
+        // a sample for whole scheduler quanta, and one spiked sample corrupts a
+        // single-shot ratio (seen twice in real runs). Noise only ever ADDS
+        // time, so the minimum estimates the true cost; the hypothesis gap
+        // below (linear ~4x vs quadratic ~16x) is untouched.
         let time_one_file = |lines: usize| {
             let content = lcov_with_sizes(&[lines]);
             let reg = CollectorRegistry::with_builtins();
-            let started = std::time::Instant::now();
-            reg.run("lcov", &content).expect("parses");
-            started.elapsed()
+            (0..3)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    reg.run("lcov", &content).expect("parses");
+                    started.elapsed()
+                })
+                .min()
+                .expect("three samples")
         };
         // Warm the compile path so it isn't charged to the first sample.
         let _ = time_one_file(1_000);
