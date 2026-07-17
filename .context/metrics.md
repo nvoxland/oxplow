@@ -303,6 +303,81 @@ welded to collection.
   `subject_ref`/`path`/`line` (location-at-capture); reported finding metadata
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
+- **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
+  (`V62__metric_cube.sql`, tsk96) — the **aggregate cube**: the materialized fold.
+  See the box below.
+
+> ### ⚠️ The cube is an accelerator, NEVER a replacement for the facts (V62, tsk96)
+>
+> **Why it exists.** For a partial-scope measure the read is a stateful replay, so
+> one sparkline over `oxplow.test_case` decoded 240k facts to emit 125 points —
+> ~1M decodes per refresh across the 5 test specs, every ~10s. `metric_cube`
+> stores the fold's *output*: one row per `(measure, capture, promoted dims)`
+> holding the **decomposable** components `count/sum/min/max/numerator/
+> denominator`. A read becomes a GROUP BY over ~152 rows. *You cannot GROUP BY a
+> fold; you can GROUP BY a pre-folded cube.*
+>
+> **The decomposability contract.** `metric_engine::Cell::project` and
+> `aggregate_facts` are two sides of one identity — bucket, aggregate, merge must
+> equal aggregate-all — pinned by
+> `cube_cells_reaggregate_to_the_same_value_as_the_raw_facts`. **Edit them
+> together.** Every aggregation in the catalog is decomposable (sum/avg/count/max/
+> ratio); **`last` is not** (merging destroys the ordering it means) and
+> `project` returns `None` so the read falls back rather than guesses. Ratio
+> components accumulate **only from facts carrying BOTH** — Σn/Σd, never a mean of
+> percentages, and never a naive `SUM(numerator)`.
+>
+> **The cube is a LOSSY projection, and that lossiness IS the speedup.** It drops
+> the **subject axis** and nothing else. So these reads stay on the raw facts
+> *permanently and by design* — this is not a temporary fallback to be removed:
+> - **value-threshold specs** — `oxplow.high_complexity_fns` (`min_value: 11`),
+>   `oxplow.long_functions` (`min_value: 61`). The cube summed those values away;
+>   answering them would need a bucket per distinct value — the fact table again.
+> - **findings / drill-in** — "which test, which file, which line" *is* the
+>   subject axis.
+> - **`group_by` on an unpromoted dim** — caller-supplied at runtime;
+>   `group_by = subject` has zero reduction.
+>
+> This is ordinary **aggregate navigation** (Kimball): an aggregate fact table
+> never replaces the base fact table; the query layer picks the smallest table
+> that can answer. The fact path cannot rot from disuse — it serves everything
+> except the handful of cube-eligible sparklines, and it is the **oracle** the
+> equivalence test checks the cube against.
+>
+> **⇒ The cube is DISPOSABLE.** It is 100% derivable from facts; delete every row
+> and you lose only speed. **Never let a read depend on it for data**, and never
+> "fix" a wrong cube number by writing data the facts don't have.
+>
+> **Why a durable live-state table** (`metric_live_fact`) rather than delta
+> arithmetic on the previous row: `state[N] = state[N-1] − restated + facts`
+> decrements fine for count/sum/num/den, but **min/max are not decrementable** —
+> evict the subject holding the max and it is unrecoverable from the aggregate.
+> `oxplow.tests.slowest_ms` is a `max` over a per-subject measure, so a
+> delta-maintained cube would have been **silently wrong** for it. Re-aggregating
+> live state is correct for every aggregation by construction, and it is what
+> turns a replay into an increment.
+>
+> **The watermark** (`metric_cube_state`) exists because "no cube rows for capture
+> N" is otherwise ambiguous: state legitimately empty at N (a real value-0 point)
+> vs N not cubed yet (fall back). Conflating those is how a materialized read
+> reports 0 instead of admitting it doesn't know. It also makes the build
+> **crash-safe**: the cube is written outside the fact-insert transaction, so a
+> torn write just leaves the watermark un-advanced — reads fall back and the next
+> build re-runs whole captures, which is idempotent (evict+insert *replaces* a
+> subject's facts).
+>
+> **The grain's floor is the CAPTURE.** Never aggregate coarser (per-day,
+> per-commit): a capture *is* one scan/run, so `snapshot_id`/`effort_id`/
+> `thread_id`/`branch`/`closest_git_version`/`stream_id` stay reachable through
+> the JOIN and within-effort deltas keep working. Branch/thread/stream remain
+> **dimensions you can group by, never partitions that hide rows**.
+>
+> **`dimension.promoted` = the cube's grain** (tsk28's flag, inert until V62).
+> `oxplow.status` is promoted (cardinality 2; 125 → 152 rows, and it is what
+> `tests.passed`/`tests.failed` filter on). `oxplow.test_suite` is not
+> (cardinality 234 ⇒ 18,918 rows, for slicing no spec asks for). **Promoting a dim
+> later is a cube rebuild, not a schema change** — the raw facts always keep every
+> dim, so nothing is foreclosed.
 - **`metric_spec`** (`V44__metric_spec.sql`, tsk29) — the **metric-as-a-spec**
   catalog (the third catalog beside measure + dimension). A metric is NOT a stored
   sample stream (V38's `metric_definition` *owned* `metric_sample` rows); it is a

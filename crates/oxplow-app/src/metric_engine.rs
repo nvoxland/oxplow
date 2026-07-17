@@ -391,6 +391,102 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
     }
 }
 
+/// The decomposable aggregate of a BUCKET of facts — the cube's stored cell
+/// (tsk96). It exists so a read can re-derive an aggregation by **merging cells**
+/// instead of re-reading the facts: one `(capture × promoted dims)` cube answers
+/// several specs that slice it differently, because every aggregation we serve
+/// survives bucketing.
+///
+/// [`Self::project`] is the counterpart of [`aggregate_facts`] and **must agree
+/// with it exactly** — that equivalence is the cube's whole license to exist, and
+/// `cube_cells_reaggregate_to_the_same_value_as_the_raw_facts` pins it. Keep the
+/// two functions edited together.
+///
+/// Deliberately NOT stored: anything holding the subject axis. A cell that could
+/// answer `min_value >= 11` or `group_by = subject` would have to keep a bucket
+/// per distinct value / subject — i.e. be the fact table again. Those reads stay
+/// on the facts, by design (see `.context/metrics.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Cell {
+    pub count: i64,
+    pub sum: f64,
+    /// `None` for an empty cell; the cube never stores one.
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    /// Σnumerator / Σdenominator, accumulated ONLY from facts carrying BOTH.
+    pub num: f64,
+    pub den: f64,
+}
+
+impl Cell {
+    /// The cell for a bucket of facts.
+    pub fn of(facts: &[&FactRow]) -> Self {
+        let mut cell = Self::default();
+        for f in facts {
+            cell.count += 1;
+            cell.sum += f.value;
+            cell.min = Some(cell.min.map_or(f.value, |m: f64| m.min(f.value)));
+            cell.max = Some(cell.max.map_or(f.value, |m: f64| m.max(f.value)));
+            // BOTH components or neither — `aggregate_facts` skips a fact with a
+            // numerator but no denominator, so a naive Σnumerator would quietly
+            // inflate every ratio that has one.
+            if let (Some(n), Some(d)) = (f.numerator, f.denominator) {
+                cell.num += n;
+                cell.den += d;
+            }
+        }
+        cell
+    }
+
+    /// Fold another bucket's cell in. Associative and commutative, so the read may
+    /// merge the cube's buckets in any order.
+    pub fn merge(&mut self, other: &Self) {
+        self.count += other.count;
+        self.sum += other.sum;
+        self.min = match (self.min, other.min) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        self.max = match (self.max, other.max) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        self.num += other.num;
+        self.den += other.den;
+    }
+
+    /// The `(value, numerator, denominator)` triple for `agg` — exactly what
+    /// [`aggregate_facts`] returns for the same facts. `None` when `agg` is not
+    /// decomposable, which is the read's signal to fall back to the raw facts
+    /// rather than guess.
+    pub fn project(&self, agg: Aggregation) -> Option<(f64, Option<f64>, Option<f64>)> {
+        Some(match agg {
+            Aggregation::Count => (self.count as f64, None, None),
+            Aggregation::Sum => (self.sum, None, None),
+            Aggregation::Avg => {
+                let count = self.count as f64;
+                // Carry (Σvalues, count) so the cross-time Σn/Σd collapse means
+                // the mean across ALL facts — mirrors `aggregate_facts`.
+                (self.sum / count, Some(self.sum), Some(count))
+            }
+            // Empty-cell fallbacks mirror `aggregate_facts`' identity folds.
+            Aggregation::Min => (self.min.unwrap_or(f64::INFINITY), None, None),
+            Aggregation::Max => (self.max.unwrap_or(f64::NEG_INFINITY), None, None),
+            Aggregation::Ratio => {
+                let value = if self.den != 0.0 {
+                    self.num / self.den
+                } else {
+                    0.0
+                };
+                (value, Some(self.num), Some(self.den))
+            }
+            // "The last fact in the capture" depends on an ordering that merging
+            // destroys — there is no bucket-independent answer.
+            Aggregation::Last => return None,
+        })
+    }
+}
+
 /// Aggregate facts into a time series: one [`SeriesPoint`] per capture (optionally
 /// per capture × dimension value), aggregated across the subjects in that capture.
 /// Facts are expected oldest-first (as the store returns them), so the series is
@@ -1377,6 +1473,60 @@ mod tests {
             source: "test".into(),
             producer: "test.gauge".into(),
         }
+    }
+
+    #[test]
+    fn cube_cells_reaggregate_to_the_same_value_as_the_raw_facts() {
+        // tsk96: the cube can only exist if every aggregation it serves is
+        // DECOMPOSABLE — bucket the facts, aggregate each bucket, merge the
+        // buckets, and you must land on exactly what aggregating all the facts
+        // at once gives. This is the proof, and it is what lets one
+        // (capture × dims) cube answer several specs that slice it differently.
+        //
+        // Values are chosen to be exactly representable in binary so `==` on the
+        // f64s is a real assertion about the arithmetic and not a rounding race.
+        let ratio_fact = |value: f64, num: Option<f64>, den: Option<f64>| FactRow {
+            numerator: num,
+            denominator: den,
+            ..fact(1, "2026-06-30T10:00:00Z", value)
+        };
+        let facts = [
+            ratio_fact(2.0, Some(3.0), Some(4.0)),
+            ratio_fact(7.0, Some(1.0), Some(5.0)),
+            // A numerator with NO denominator: `aggregate_facts` skips it
+            // entirely, so a cell that naively accumulated Σnumerator would
+            // report 13/9 here instead of 4/9 — a wrong coverage %.
+            ratio_fact(5.0, Some(9.0), None),
+            ratio_fact(-1.0, None, None),
+        ];
+        let all: Vec<&FactRow> = facts.iter().collect();
+        // An arbitrary, uneven partition — the cube's buckets are whatever the
+        // promoted dims happen to carve out, so nothing may depend on the split.
+        let buckets: [Vec<&FactRow>; 3] =
+            [vec![&facts[0], &facts[2]], vec![&facts[1]], vec![&facts[3]]];
+
+        for agg in [
+            Aggregation::Count,
+            Aggregation::Sum,
+            Aggregation::Avg,
+            Aggregation::Min,
+            Aggregation::Max,
+            Aggregation::Ratio,
+        ] {
+            let mut merged = Cell::default();
+            for bucket in &buckets {
+                merged.merge(&Cell::of(bucket));
+            }
+            assert_eq!(
+                merged.project(agg),
+                Some(aggregate_facts(&all, agg)),
+                "{agg:?} must survive bucketing + merging"
+            );
+        }
+        // `Last` ("the last fact in the capture") has no bucket-independent
+        // answer — merging loses the ordering it depends on. It must refuse,
+        // not guess, so the read falls back to the raw facts.
+        assert_eq!(Cell::of(&all).project(Aggregation::Last), None);
     }
 
     #[test]

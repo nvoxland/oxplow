@@ -478,6 +478,11 @@ mod tests {
             "fact",
             // V44 — the metric SPEC layer.
             "metric_spec",
+            // V62 — the aggregate cube: the materialized fold (tsk96), its
+            // durable live state, and the per-(measure, stream) watermark.
+            "metric_cube",
+            "metric_live_fact",
+            "metric_cube_state",
         ];
         // `effort_observation` was dropped in V39 (tsk215); the V38
         // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
