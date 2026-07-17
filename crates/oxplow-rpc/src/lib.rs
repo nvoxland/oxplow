@@ -226,7 +226,6 @@ rpc_dispatch! {
     "set_metric_enabled" => commands::metrics::set_metric_enabled { key: String, enabled: bool },
     "set_metrics_enabled" => commands::metrics::set_metrics_enabled { keys: Vec<String>, enabled: bool },
     "set_metric_override" => commands::metrics::set_metric_override { key: String, target: Option<f64> },
-    "scaffold_metric" => commands::metrics::scaffold_metric { key: String, title: Option<String>, language: Option<String>, glob: Option<String>, scope: Option<String> },
     "get_effort_token_totals" => commands::effort::get_effort_token_totals { effort_id: oxplow_domain::EffortId },
     "get_thread_token_totals" => commands::effort::get_thread_token_totals { thread_id: oxplow_domain::ThreadId },
     "token_totals_overall" => commands::effort::token_totals_overall {},

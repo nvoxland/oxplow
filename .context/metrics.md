@@ -1232,10 +1232,11 @@ page (`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`
 `pageKinds.tsx`) and cross-links to the others in its header. (History: the
 configure surface was split off as a fourth "Metric Settings" page in
 tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
-lives on the Metric Detail page, and the scaffold bar on Recorded Metrics; see
-"The configure surface" below.) Explorer and Recorded observe; Detail both
-observes and **writes** (its Configure block), and Recorded's "+ New metric"
-bar writes (scaffold).
+lives on the Metric Detail page; see "The configure surface" below.) Explorer
+and Recorded observe; Detail both observes and **writes** (its Configure block).
+Authoring a *new* metric is **agent work** (the `scaffold_metric` MCP tool +
+the `/oxplow:new-metric` skill, tsk122) — no page writes one; Recorded Metrics
+just carries a Help blurb pointing there.
 
 - **Metrics Explorer** (`MetricsExplorerPage.tsx` wrapping `MetricsExplorer.tsx`)
   — the marquee page and the rail "Metrics" entry (`indexRef("metrics")` /
@@ -1302,11 +1303,13 @@ bar writes (scaffold).
   click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
   modifier/middle/right → new tab), passing the **sibling chain** (the sections
   flattened in visual order, `metricSiblings`) so the detail page gets up/down
-  nav (tsk119). The **"+ New metric" scaffold bar**
-  (`NewMetricBar.tsx`, moved here from the retired Settings page by tsk117)
-  rides at the foot of the body. Live-refreshes on `metricSamplesChanged`
+  nav (tsk119). Authoring a **new** custom metric is agent work now: the
+  **"+ New metric" scaffold form was retired (tsk122)** in favor of the
+  `scaffold_metric` MCP tool + the `/oxplow:new-metric` skill, and the details
+  rail carries a **Help blurb** (`recorded-new-metric-help`) pointing the user
+  there. Live-refreshes on `metricSamplesChanged`
   (debounced — see the OTLP-burst note) and `configChanged` (immediate: enable
-  toggles from a detail page and scaffold creates are user-action-rate).
+  toggles from a detail page are user-action-rate).
 
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
 >
@@ -1426,11 +1429,12 @@ folded it into the surfaces where you already look at a metric:
   body (`metric-detail-disabled`) with the Configure block still in the rail —
   that rail is exactly how the metric gets turned back on. The page refreshes
   on `configChanged` as well as `metricSamplesChanged`.
-- **"+ New metric" scaffolding lives on Recorded Metrics** (`NewMetricBar.tsx`
-  at the foot of the body): collapsed to a button, expanding to the inline
-  key/title/language/glob/scope form (Enter submits, Escape cancels, key
-  autofocuses; testids `new-metric-open`/`new-metric-key`/`new-metric-scope`/
-  `new-metric-create`).
+- **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
+  `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
+  gauge script edited anyway, which is agent work. The `scaffold_metric` backend
+  is now an **MCP tool** (see below), and Recorded Metrics' details rail carries
+  a Help blurb (`recorded-new-metric-help`) telling the user to ask their agent
+  (the `/oxplow:new-metric` skill).
 - **Retired with the page:** the per-section **tri-state bulk enable/disable**
   (`GroupCheckbox`/`sectionCheckboxState`, tsk32) — enable/disable is
   per-metric only now (`set_metrics_enabled` batch IPC still exists,
@@ -1479,8 +1483,8 @@ The mechanics behind those controls (unchanged by tsk117):
   it's never user-pickable; `resolve_one` reads it from the definition (like
   `compute`), a `use:` entry can't override it, and `set_metric_override` no
   longer accepts it (tsk290).
-- **"New metric"** scaffolds the **trio** (measure + gauge + metric) at
-  **project** or **global** scope: `scaffold_metric` →
+- **`scaffold_metric` (MCP tool, tsk122)** scaffolds the **trio** (measure +
+  gauge + metric) at **project** or **global** scope: the agent calls it →
   `MetricsService::scaffold_metric` writes a starter fact-emitting Starlark stub +
   a `measures:` entry (`<key>.count`) + a `gauges:` entry (`<key>`) + a `metrics:`
   spec (`<key>`, `sum` over the measure). *Project* writes the script under
@@ -1505,11 +1509,14 @@ live on `metricSamplesChanged`. A row drills into the metric's detail via
 before→after callout (+ per-file count) above the full trend.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
-`set_metric_override` + `scaffold_metric` (RPC cores in `commands/metrics.rs`,
-Tauri adapters, `ui`-scoped in surface-parity), backed by
-`MetricsService::{catalog, set_metric_enabled, set_metric_override,
-scaffold_metric}` and the `MetricCatalogEntry` type — consumed by the Metric
-Detail Configure block, the Recorded Metrics rows, and `NewMetricBar`.
+`set_metric_override` (RPC cores in `commands/metrics.rs`, Tauri adapters,
+`ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
+set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type —
+consumed by the Metric Detail Configure block and the Recorded Metrics rows.
+**`scaffold_metric` is no longer here** (tsk122): its UI button was retired, so
+it moved off the `ui` surface to an **agent-only MCP tool** (`agent(...)` in
+surface-parity; the handler in `oxplow-mcp` calls `MetricsService::scaffold_metric`
+directly), and the Tauri/RPC `scaffold_metric` command was deleted.
 **Token Analytics is retired** as a bespoke page (tsk233) — its `token-analytics`
 tab now renders the **Metrics Explorer** page with the "Tokens by model" preset.
 (Page/Usage
@@ -1628,8 +1635,10 @@ The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 + the **`/oxplow:new-metric`** command (assets in `crates/oxplow-plugin/`,
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 the measure+gauge+metric trio + script + verification, no oxplow-team involvement.
-`MetricsService::scaffold_metric` writes that trio (measure `<key>.count`, gauge
-`<key>`, metric `<key>`) + a starter fact-emitting gauge script.
+The skill's fast path is the **`scaffold_metric` MCP tool** (tsk122) →
+`MetricsService::scaffold_metric`, which writes that trio (measure `<key>.count`,
+gauge `<key>`, metric `<key>`) + a starter fact-emitting gauge script the agent
+then edits; or the agent hand-authors the four blocks.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 

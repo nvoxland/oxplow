@@ -221,6 +221,21 @@ pub struct RunMetricParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ScaffoldMetricParams {
+    /// Namespaced metric key, e.g. `acme.todo_density` (`oxplow.` is reserved
+    /// for built-ins). Must contain a `.`.
+    pub key: String,
+    /// Display title (defaults from the key).
+    pub title: Option<String>,
+    /// Language tag for the starter gauge / metric slice (optional).
+    pub language: Option<String>,
+    /// Snapshot glob the starter gauge sweeps (default `**/*`).
+    pub glob: Option<String>,
+    /// `project` (default — this repo) or `global` (shared across your projects).
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RebuildMetricsParams {
     /// Rebuild even when no gauge looks out of date (skips the "is a baseline
     /// needed?" check). Defaults to false.
@@ -2123,6 +2138,31 @@ impl OxplowMcp {
             .await
             .map_err(|e| McpError::invalid_params(e, None))?;
         json_result(&serde_json::json!({ "key": params.0.key, "facts_recorded": count }))
+    }
+
+    #[tool(
+        description = "Scaffold a NEW custom metric. Writes a measure + gauge + metric trio into \
+            .oxplow/project.yaml (project scope) or the global config dir (global scope), plus a \
+            starter Starlark gauge script, then reseeds — and returns the script path. The starter \
+            gauge counts TODO/FIXME per file; EDIT the returned script to compute what you actually \
+            want (it can call files(glob) / ast_query(text, language, sexpr) / code_metrics(text, \
+            language)), then call `run_metric { key }` (or `rebuild_metrics`) to compute it. `key` \
+            must be namespaced (contain a `.`) and NOT under the reserved `oxplow.` prefix. Prefer \
+            an existing built-in first — check `list_metric_definitions { scope: \"built-in\" }` \
+            and just `use:` it if one already measures this."
+    )]
+    async fn scaffold_metric(
+        &self,
+        params: Parameters<ScaffoldMetricParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let path = self
+            .services
+            .metrics
+            .scaffold_metric(&p.key, p.title, p.language, p.glob, p.scope)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        json_result(&serde_json::json!({ "key": p.key, "script_path": path }))
     }
 
     #[tool(
@@ -6523,5 +6563,63 @@ mod tests {
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].value, 42.0);
         assert_eq!(facts[0].provenance, "observed");
+    }
+
+    #[tokio::test]
+    async fn scaffold_metric_writes_the_trio_and_returns_the_script_path() {
+        let (project, services, server) = boot();
+        services.metrics.seed_catalog().await;
+
+        let out = server
+            .scaffold_metric(Parameters(ScaffoldMetricParams {
+                key: "acme.todo_density".into(),
+                title: Some("TODO density".into()),
+                language: None,
+                glob: None,
+                scope: None,
+            }))
+            .await
+            .unwrap();
+        // Returns the project-relative script path for the agent to edit.
+        let payload = text_payload(out);
+        assert!(
+            payload.contains("oxplow/gauges/acme_todo_density.star"),
+            "got:\n{payload}"
+        );
+
+        // The starter gauge script landed on disk...
+        assert!(
+            project
+                .path()
+                .join("oxplow/gauges/acme_todo_density.star")
+                .exists(),
+            "starter gauge script written"
+        );
+        // ...and the metric spec is seeded (the trio wired through seed_catalog),
+        // so the agent's follow-up run_metric / reads can find it.
+        assert!(
+            services
+                .fact_store
+                .get_spec("acme.todo_density")
+                .await
+                .unwrap()
+                .is_some(),
+            "scaffolded spec seeded"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_metric_rejects_the_reserved_namespace() {
+        let (_project, _services, server) = boot();
+        let result = server
+            .scaffold_metric(Parameters(ScaffoldMetricParams {
+                key: "oxplow.nope".into(),
+                title: None,
+                language: None,
+                glob: None,
+                scope: None,
+            }))
+            .await;
+        assert!(result.is_err(), "`oxplow.` is reserved for built-ins");
     }
 }

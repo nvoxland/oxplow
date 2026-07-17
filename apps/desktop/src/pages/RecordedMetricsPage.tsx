@@ -14,13 +14,12 @@ import {
   CollapsibleSections,
   SectionCollapseControls,
 } from "../components/CollapsibleSections.js";
-import { fileRef, metricRef } from "../tabs/pageRefs.js";
+import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { NavSiblings } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
-import { NewMetricBar } from "./NewMetricBar.js";
 import {
   DEFAULT_RANGE_KEY,
   RANGE_PRESETS,
@@ -183,7 +182,10 @@ const sel = { fontSize: 12, width: "100%" } as const;
  * (default 7 days) and branch, picks Enabled (default) / All, and holds the
  * Expand/Collapse-all controls. Rows open the per-metric detail page
  * (`metricRef`), which is also where a metric is enabled/disabled and its
- * target set (tsk117); the "+ New metric" scaffold bar rides at the foot.
+ * target set (tsk117). Authoring a NEW custom metric is agent work now (the
+ * "+ New metric" scaffold form was retired in tsk122 for agent-driven authoring
+ * via the `/oxplow:new-metric` skill + the `scaffold_metric` MCP tool); the rail
+ * carries a Help blurb pointing there.
  * Live on `metricSamplesChanged` (debounced) and `configChanged`.
  *
  * **The row set is the CATALOG, not the spec table (tsk87).** Only the catalog
@@ -202,7 +204,6 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
   const [lineStat, setLineStat] = useState<LineStat>(DEFAULT_LINE_STAT);
-  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -260,7 +261,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
       off();
       if (timer) clearTimeout(timer);
     };
-  }, [reloadTick]);
+  }, []);
 
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
   // Which metrics are LISTED (Show mode + search), each scoped to the range +
@@ -386,6 +387,29 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <SectionCollapseControls />
           </div>
+          {/* Authoring a custom metric is agent work now (the "+ New metric"
+              scaffold form was retired, tsk122): the agent wires up the trio +
+              gauge script correctly via the /oxplow:new-metric skill. This blurb
+              points the user there. */}
+          <div
+            data-testid="recorded-new-metric-help"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              marginTop: 4,
+              paddingTop: 10,
+              borderTop: "1px solid var(--border, #2a2a2a)",
+            }}
+          >
+            <span style={{ opacity: 0.6, fontSize: 12 }}>New metric</span>
+            <span style={{ fontSize: 12, lineHeight: 1.5, opacity: 0.85 }}>
+              Ask your agent to add one — e.g. “track our TODO count” or “chart
+              bundle size.” It wires up the measure, gauge, and metric in{" "}
+              <code>.oxplow/project.yaml</code> and verifies it charts here (the{" "}
+              <code>/oxplow:new-metric</code> skill).
+            </span>
+          </div>
         </div>
       }
     >
@@ -395,8 +419,8 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
         ) : rows.length === 0 ? (
           <div style={{ opacity: 0.6, lineHeight: 1.6 }}>
             No metrics recorded yet. Run tests, coverage, or static analysis —
-            oxplow records them into the substrate automatically. Custom metrics
-            can be declared in <code>.oxplow/project.yaml</code>.
+            oxplow records them into the substrate automatically. For a custom
+            metric, ask your agent (the <code>/oxplow:new-metric</code> skill).
           </div>
         ) : sections.length === 0 ? (
           // The Show mode + search can empty the list even though metrics exist,
@@ -446,12 +470,6 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               </CollapsibleSection>
             ))}
           </>
-        )}
-        {loading ? null : (
-          <NewMetricBar
-            onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
-            onCreated={() => setReloadTick((t) => t + 1)}
-          />
         )}
       </div>
     </Page>

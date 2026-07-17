@@ -135,12 +135,14 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_metric_enabled"),
     ui("set_metrics_enabled"),
     ui("set_metric_override"),
-    ui("scaffold_metric"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
-    // compute via config + the runner, not ad-hoc IPC.
+    // compute via config + the runner, not ad-hoc IPC. `scaffold_metric` joined
+    // them (tsk122) when its "+ New metric" UI button was retired in favor of
+    // agent-driven authoring (the `/oxplow:new-metric` skill).
     agent("run_metric"),
     agent("rebuild_metrics"),
     agent("record_metric"),
+    agent("scaffold_metric"),
     agent("get_metric_summary"),
     agent("metric_breakdown"),
     // Durable fact substrate reads (epic tsk12) — agent-only for now (the

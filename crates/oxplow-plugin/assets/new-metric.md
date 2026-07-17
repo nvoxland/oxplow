@@ -28,9 +28,22 @@ metrics:
 
 ## 3. Otherwise define the trio (measure + gauge + metric)
 
-The easiest path is the `scaffold_metric` MCP tool (writes all three + a starter
-gauge script). By hand, add the trio (namespaced — `oxplow.*` is reserved) + a
-gauge script under `oxplow/gauges/`:
+Fastest path — the **`scaffold_metric` MCP tool**: it writes the measure +
+gauge + metric trio into `.oxplow/project.yaml` (or the global config dir with
+`scope: "global"`) plus a starter gauge script, and returns the script path.
+
+```
+scaffold_metric { key: "repo.todo_count", title: "TODO comments", language: "rust" }
+→ { "script_path": "oxplow/gauges/repo_todo_count.star" }
+```
+
+The starter just counts TODO/FIXME per file — **open the returned script and
+edit it** to compute what the user actually asked for (it can call
+`files(glob)` / `ast_query(text, language, sexpr)` / `code_metrics(text,
+language)`). Then jump to **Verify**.
+
+By hand instead, add the trio (namespaced — `oxplow.*` is reserved) + a gauge
+script under `oxplow/gauges/`:
 
 ```yaml
 measures:
