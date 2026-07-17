@@ -378,6 +378,44 @@ welded to collection.
 > (cardinality 234 ⇒ 18,918 rows, for slicing no spec asks for). **Promoting a dim
 > later is a cube rebuild, not a schema change** — the raw facts always keep every
 > dim, so nothing is foreclosed.
+>
+> ### Where the code lives (`metric_cube.rs`)
+>
+> Both sides live in **oxplow-app**, not oxplow-db: bucketing needs `dim_value` +
+> `Cell`, and oxplow-db can't depend on oxplow-app. Doing it in SQL would mean a
+> **second dim-extraction implementation free to drift** from the read's. One
+> implementation, called from both sides, is the point — and it's why the build
+> runs outside `record_facts`' transaction (safe: see the watermark, above).
+>
+> - **`MetricCubeBuilder::build_measure`** — per `(measure, stream)`, folds each
+>   capture after the watermark: evict what it restates → insert its facts →
+>   re-aggregate the **whole live state** → `write_cube_rows` (which advances the
+>   watermark atomically). **Backfill is this same loop from an empty watermark** —
+>   never write a second SQL fold for it.
+> - **`cube_series`** — the read. Returns **`None` for anything it can't answer
+>   exactly**, and the caller falls through to the facts. Eligibility: partial
+>   scope, decomposable agg, no `min_value`, filter/`group_by` dims all promoted,
+>   and **every capture ≤ the watermark**. The capture list and the filter-narrowed
+>   producer set come off **captures and the cube, never facts** — deriving them by
+>   scanning facts is the decode being removed, so doing it there fixes nothing.
+> - **`run`** (spawned in `boot.rs`) — backfills, then keeps up off
+>   **`MetricSamplesChanged`**, the one signal every recording site emits
+>   (`collection`, `metrics_service`, `task_service`, `token_usage`, MCP). Hooking
+>   individual `record_facts` calls would mean five crates to keep in step. Bursts
+>   coalesce; failures are logged, never propagated.
+>
+> **Measured on the real DB (512k facts, 1,181 captures, 143 points/spec):** one
+> `RecordedMetricsPage` refresh across the 5 test specs went **9.26s → 70ms
+> (~131×)**, every series identical to the fact path point for point. Backfill is
+> ~21s once, in the background. *That 9.26s every ~10s was the CPU burn.*
+>
+> **The equivalence gate.** Tests take the fact-served oracle **before** the build
+> — after one, `series_for_spec` reads the cube, so a later oracle is just the cube
+> confirming itself. `assert_cube_answers` **expects `Some`**: without that, a
+> regression silently disabling the cube would leave every equality passing
+> vacuously. Both properties were verified by mutation (bucket the capture's own
+> facts instead of live state → reads 10 where the fold reads 11; force `None` →
+> three tests fail rather than pass green).
 - **`metric_spec`** (`V44__metric_spec.sql`, tsk29) — the **metric-as-a-spec**
   catalog (the third catalog beside measure + dimension). A metric is NOT a stored
   sample stream (V38's `metric_definition` *owned* `metric_sample` rows); it is a

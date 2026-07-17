@@ -1015,6 +1015,32 @@ capture id. See `.context/metrics.md`.
 > `database::canonical_ts`. Any new store that orders or range-compares on a
 > timestamp column should do the same.
 
+### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migration `V62__metric_cube.sql`, tsk96)
+
+**Derived tables — the only ones in the schema that hold no source of truth.**
+Every row is 100% reconstructible from `fact`; deleting all three costs speed and
+nothing else. They materialize the partial-scope fold so a sparkline is a GROUP BY
+over a few hundred pre-folded rows instead of a replay over every fact (measured:
+9.26s → 70ms per metrics-page refresh).
+
+- **`metric_cube`** — the aggregate fact table, grain `(measure, capture, producer,
+  promoted dims)`, holding the decomposable components
+  `count/sum/min/max/numerator/denominator`. Sits beside `fact` sharing the same
+  `metric_capture` dimension — ordinary star-schema aggregate navigation.
+- **`metric_live_fact`** — the fold's live state made durable, keyed by
+  `(measure, stream, producer, subject_key)`. Sized by live subjects, not history.
+- **`metric_cube_state`** — the per-`(measure, stream)` watermark. Distinguishes
+  "state was legitimately empty here" from "not cubed yet"; without it a
+  materialized read reports 0 instead of admitting it doesn't know.
+
+**Rules before touching these:** never let a read take *data* from the cube that
+the facts don't have; never aggregate coarser than a capture (it's the floor that
+keeps snapshot/effort tie-back working); `dimension.promoted` defines the grain, so
+promoting a dim is a **rebuild**, not a schema change. Written outside the
+fact-insert transaction, which is safe only because whole-capture replay is
+idempotent and the watermark advances atomically with the rows. Full rationale +
+the read's eligibility rules: **`.context/metrics.md`**.
+
 ### `agent_nudge` — `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`, migration `V33__agent_nudge.sql`)
 
 The persisted record of the informational **nudges** oxplow surfaces to the
