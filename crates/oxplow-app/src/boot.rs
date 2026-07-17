@@ -333,6 +333,21 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
+    // Metric aggregate cube (tsk96): fold each partial-scope measure's captures
+    // into `metric_cube` as facts land, so a sparkline is a GROUP BY over a few
+    // hundred pre-folded rows instead of a replay over every fact. Backfills once,
+    // then keeps up off `MetricSamplesChanged`.
+    //
+    // Purely an accelerator — if this task never ran, every read would take the
+    // fact path exactly as it did before the cube existed.
+    {
+        let builder = crate::metric_cube::MetricCubeBuilder::new((*state.fact_store).clone());
+        let rx = state.events.subscribe();
+        tokio::spawn(async move {
+            crate::metric_cube::run(builder, rx).await;
+        });
+    }
+
     // Tree-metric BASELINE (tsk41). A `per-path` measure folds over each capture's
     // snapshot file rows, so a repo-wide total needs ONE snapshot listing the whole
     // tree. On a fresh project — or after the V54 wipe — there isn't one, and delta

@@ -1148,13 +1148,17 @@ impl SqliteFactStore {
     /// narrower "producers matching THIS spec's filter" and derives that from the
     /// cube's own buckets rather than from the facts — deriving it from the facts
     /// is the 374k-row decode the cube exists to remove.
+    /// Driven from CAPTURES (thousands) probing `idx_fact_measure_capture`, not
+    /// from a DISTINCT over the measure's facts (hundreds of thousands). Same
+    /// answer, ~4× cheaper on real data (8ms vs 32ms for `oxplow.test_case`) —
+    /// and the builder runs this on every recording, so the constant matters.
     pub async fn producers_for_measure(&self, measure_id: i64) -> Result<Vec<String>, DomainError> {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT DISTINCT c.producer FROM fact f
-                       JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE f.measure_id = ?1",
+                    "SELECT DISTINCT c.producer FROM metric_capture c
+                      WHERE EXISTS (SELECT 1 FROM fact f
+                                     WHERE f.capture_id = c.id AND f.measure_id = ?1)",
                 )?;
                 let rows = stmt.query_map(params![measure_id], |r| r.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()

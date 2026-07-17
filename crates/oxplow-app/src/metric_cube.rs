@@ -29,7 +29,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use oxplow_db::{FactRow, Measure, MetricCapture, NewCubeRow, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
+use tokio::sync::broadcast;
 
+use crate::events::OxplowEvent;
 use crate::metric_engine::{
     dim_value, parse_capture_scope, repo_scalar_key, Aggregation, CaptureScope, Cell, FactFilter,
     SeriesPoint, SCALAR_SUBJECT,
@@ -107,6 +109,33 @@ impl MetricCubeBuilder {
                 .await?;
         }
         Ok(folded)
+    }
+
+    /// Build every partial-scope measure, returning the captures folded.
+    ///
+    /// **Failures are logged, never propagated.** An unbuilt cube is a slow read,
+    /// not a broken one — the watermark makes an un-advanced measure fall back to
+    /// the facts, which answer everything. One sick measure must never stop the
+    /// others, and must never take the app down.
+    pub async fn build_all(&self) -> usize {
+        let measures = match self.facts.list_measures().await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "metric cube: can't list measures; reads use facts");
+                return 0;
+            }
+        };
+        let mut folded = 0;
+        for m in measures {
+            match self.build_measure(&m.key).await {
+                Ok(n) => folded += n,
+                Err(e) => tracing::warn!(
+                    measure = %m.key, error = %e,
+                    "metric cube build failed; this measure's reads fall back to facts"
+                ),
+            }
+        }
+        folded
     }
 
     /// Fold one stream's un-cubed captures. `caps` is that stream's captures
@@ -209,6 +238,43 @@ impl MetricCubeBuilder {
             keys.push(SCALAR_SUBJECT.to_string());
         }
         Ok(keys)
+    }
+}
+
+/// Keep the cube fresh off the event bus: backfill once at startup, then fold
+/// each new capture as facts land.
+///
+/// `MetricSamplesChanged` is the right trigger because it is the ONE signal every
+/// recording site emits — `collection`, `metrics_service`, `task_service`,
+/// `token_usage`, and the MCP surface all go through it. Hooking the individual
+/// `record_facts` calls instead would mean five crates to keep in step and a
+/// silent cube lag the first time someone adds a sixth.
+///
+/// Nothing here is load-bearing for correctness: if this task never ran, every
+/// read would simply take the fact path, exactly as before the cube existed.
+pub async fn run(builder: MetricCubeBuilder, mut rx: broadcast::Receiver<OxplowEvent>) {
+    // The backfill IS the incremental loop from an empty watermark — deliberately
+    // not a second, SQL-side fold, which would be a second implementation free to
+    // drift from this one.
+    let n = builder.build_all().await;
+    tracing::info!(folded = n, "metric cube backfill done");
+    loop {
+        match rx.recv().await {
+            Ok(OxplowEvent::MetricSamplesChanged { .. }) => {
+                // Coalesce a burst: a sweep records many captures back to back,
+                // and the build is incremental, so one pass after the burst does
+                // the same work as one pass per event without the churn.
+                while rx.try_recv().is_ok() {}
+                builder.build_all().await;
+            }
+            Ok(_) => continue,
+            // A lagged subscriber only missed the NUDGE, not the work — the build
+            // folds everything after the watermark either way.
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                builder.build_all().await;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
     }
 }
 
