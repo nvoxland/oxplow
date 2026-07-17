@@ -1301,8 +1301,9 @@ bar writes (scaffold).
 > `.context/usability.md` → "Collapsible page sections".
 >
 > The section list is built by the pure
-> `buildMetricSections(rows, getCategory, getLanguage)` in
-> `metricCategories.ts`: sections sorted **alphabetically by label** (tsk116 —
+> `buildMetricSections(rows, getCategory, getLanguage, getLabel)` in
+> `metricCategories.ts`: sections sorted **alphabetically by label**, and rows
+> sorted alphabetically within each section (tsk116/tsk118 —
 > no hand-kept `CATEGORY_ORDER`, so plugged-in languages/categories slot in
 > automatically), **except `static-quality`**, which gets no section of its
 > own — its real top-level division is by language, so each language is

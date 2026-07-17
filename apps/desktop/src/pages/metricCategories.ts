@@ -78,13 +78,15 @@ export type MetricSection<T> = {
  *
  * Kept as the one sectioning rule (tsk81) for the same reason the Rust specs
  * read their language off the gauge: two copies of this rule drift, and two
- * surfaces then group the same metrics differently. Pure — entries keep their
- * incoming order within a section.
+ * surfaces then group the same metrics differently. Pure — rows sort
+ * alphabetically within each section (tsk118), same locale collation as the
+ * section labels.
  */
 export function buildMetricSections<T>(
   rows: T[],
   getCategory: (row: T) => string | null,
   getLanguage: (row: T) => string | null,
+  getLabel: (row: T) => string,
 ): Array<MetricSection<T>> {
   const out: Array<MetricSection<T>> = [];
   for (const group of groupByCategory(rows, getCategory)) {
@@ -110,7 +112,11 @@ export function buildMetricSections<T>(
   // interleave with category sections as equals, and a brand-new language or
   // category slots itself in with zero curation — there is no hand-maintained
   // order list to forget to update. Locale-aware compare, matching the
-  // locale-formatted values the rows show (tsk114).
+  // locale-formatted values the rows show (tsk114). Rows inside each section
+  // sort the same way (tsk118).
+  for (const section of out) {
+    section.entries.sort((a, b) => getLabel(a).localeCompare(getLabel(b)));
+  }
   return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 

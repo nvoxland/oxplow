@@ -48,11 +48,14 @@ describe("buildMetricSections", () => {
     category,
     language,
   });
-  const sections = <T extends { category: string | null; language: string | null }>(rows: T[]) =>
+  const sections = <T extends { key: string; category: string | null; language: string | null }>(
+    rows: T[],
+  ) =>
     buildMetricSections(
       rows,
       (r) => r.category,
       (r) => r.language,
+      (r) => r.key,
     );
 
   it("explodes static analysis into one top-level section per language", () => {
@@ -138,8 +141,10 @@ describe("buildMetricSections", () => {
     ]);
   });
 
-  it("keeps incoming order within a section", () => {
-    const built = sections([row("b", null), row("a", null)]);
-    expect(built[0]?.entries.map((e) => e.key)).toEqual(["b", "a"]);
+  it("sorts rows alphabetically within each section (tsk118)", () => {
+    // Same locale collation as the section labels — case-insensitive, so "C"
+    // sorts after "b", not before "a".
+    const built = sections([row("b", null), row("C", null), row("a", null)]);
+    expect(built[0]?.entries.map((e) => e.key)).toEqual(["a", "b", "C"]);
   });
 });

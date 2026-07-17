@@ -264,6 +264,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
         viewRows,
         (r) => r.category,
         (r) => r.language,
+        (r) => r.title,
       ),
     [viewRows],
   );
