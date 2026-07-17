@@ -33,6 +33,12 @@ import {
   type ShowMode,
   filterMetricRows,
 } from "./recordedMetricsRows.js";
+import {
+  DEFAULT_LINE_STAT,
+  LINE_STATS,
+  type LineStat,
+  lineStatValue,
+} from "./recordedMetricsStat.js";
 
 /** One listed metric. Identity/enabled/grouping come from the **catalog** (the
  *  only source that knows about `use:`); `def` is the seeded spec, which carries
@@ -89,13 +95,37 @@ function statusColor(def: MetricSpec, value: number): string | undefined {
   return undefined;
 }
 
-/** One metric row: title · latest value · trend sparkline. A `<tr>` that adopts
- *  browser-style click via `useRouteDispatch` (plain → detail in-tab,
- *  modifier/middle/right → new tab). */
-function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef) => void }) {
+/** The color for a rendered CHANGE: green when the move improved the metric
+ *  per its `direction`, red when it worsened it — the same semantics
+ *  `EffortMetrics`' delta chips use. Neutral direction / zero / unknown stay
+ *  uncolored: silence is the dominant path. */
+function changeColor(def: MetricSpec | null, delta: number | null): string | undefined {
+  if (!def || delta == null || delta === 0 || def.direction === "neutral") return undefined;
+  const improved = def.direction === "higher-better" ? delta > 0 : delta < 0;
+  return improved ? "var(--ok, #3fb950)" : "var(--err, #f85149)";
+}
+
+/** One metric row: title · trend sparkline · the rail-selected stat. A `<tr>`
+ *  that adopts browser-style click via `useRouteDispatch` (plain → detail
+ *  in-tab, modifier/middle/right → new tab). */
+function RecordedRow({
+  row,
+  stat,
+  onOpenPage,
+}: {
+  row: Row;
+  stat: LineStat;
+  onOpenPage?: (ref: TabRef) => void;
+}) {
   const { def, latest, samples } = row;
   const color = def && latest ? statusColor(def, latest.value) : undefined;
   const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage });
+  // The stat is computed over the SAME filtered samples the sparkline plots
+  // (tsk82's invariant, generalized by tsk115): the number that terminates the
+  // line always describes the line. `change` gets an explicit `+` and the
+  // improved/worsened color; the level stats keep the metric's status color.
+  const shown = lineStatValue(samples, stat);
+  const valueColor = stat === "change" ? changeColor(def, shown) : color;
   return (
     <tr
       onClick={handlers.onClick}
@@ -113,14 +143,13 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
           color={color}
         />
       </td>
-      {/* The latest value sits AFTER the sparkline because it *is* the
-          sparkline's last point — same filtered `samples`, newest first — so the
-          chart reads left-to-right into the number that terminates it (tsk82). */}
       <td
-        style={{ padding: "6px 8px", fontWeight: 600, color }}
-        title={latest ? formatMetricValueExact(latest.value, def?.unit) : undefined}
+        style={{ padding: "6px 8px", fontWeight: 600, color: valueColor }}
+        title={shown != null ? formatMetricValueExact(shown, def?.unit) : undefined}
       >
-        {latest ? formatMetricValue(latest.value, def?.unit) : "—"}
+        {shown != null
+          ? `${stat === "change" && shown > 0 ? "+" : ""}${formatMetricValue(shown, def?.unit)}`
+          : "—"}
       </td>
     </tr>
   );
@@ -154,6 +183,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   const [branch, setBranch] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
+  const [lineStat, setLineStat] = useState<LineStat>(DEFAULT_LINE_STAT);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,6 +329,22 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               ))}
             </select>
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ opacity: 0.6, fontSize: 12 }}>Line value</span>
+            <select
+              value={lineStat}
+              onChange={(e) => setLineStat(e.target.value as LineStat)}
+              data-testid="recorded-line-stat"
+              title="What the number at the end of each line shows — always computed over the plotted range/branch window."
+              style={sel}
+            >
+              {LINE_STATS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* Not a filter, but this rail is the page's control panel — the
               controls self-hide while there are no sections to act on. */}
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -343,7 +389,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                   </colgroup>
                   <tbody>
                     {group.entries.map((row) => (
-                      <RecordedRow key={row.key} row={row} onOpenPage={onOpenPage} />
+                      <RecordedRow key={row.key} row={row} stat={lineStat} onOpenPage={onOpenPage} />
                     ))}
                   </tbody>
                 </table>
