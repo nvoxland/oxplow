@@ -28,6 +28,10 @@ impl Database {
             c.pragma_update(None, "journal_mode", "WAL")?;
             c.pragma_update(None, "foreign_keys", "ON")?;
             c.pragma_update(None, "synchronous", "NORMAL")?;
+            // The hot metric store paths use `prepare_cached` (tsk112);
+            // rusqlite's default LRU is 16 statements, small enough that the
+            // build/read mix would thrash it and re-parse anyway.
+            c.set_prepared_statement_cache_capacity(128);
             Ok(())
         });
         let pool = Pool::builder()

@@ -834,7 +834,8 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!("SELECT {MEASURE_COLS} FROM measure WHERE key = ?1");
-                conn.query_row(&sql, params![key], row_to_measure)
+                conn.prepare_cached(&sql)?
+                    .query_row(params![key], row_to_measure)
                     .optional()
             })
             .await
@@ -844,7 +845,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!("SELECT {MEASURE_COLS} FROM measure ORDER BY key");
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let rows = stmt.query_map([], row_to_measure)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -910,7 +911,7 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let sql = format!("SELECT {DIM_COLS} FROM dimension ORDER BY key");
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let rows = stmt.query_map([], row_to_dimension)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -1162,7 +1163,7 @@ impl SqliteFactStore {
                       WHERE producer IN ({placeholders}) AND status = 'done'
                       ORDER BY captured_at ASC, id ASC"
                 );
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let rows =
                     stmt.query_map(rusqlite::params_from_iter(producers.iter()), row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1233,7 +1234,7 @@ impl SqliteFactStore {
     pub async fn producers_for_measure(&self, measure_id: i64) -> Result<Vec<String>, DomainError> {
         self.db
             .call(move |conn| {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     "SELECT DISTINCT c.producer FROM metric_capture c
                       WHERE EXISTS (SELECT 1 FROM fact f
                                      WHERE f.capture_id = c.id AND f.measure_id = ?1)",
@@ -1262,17 +1263,16 @@ impl SqliteFactStore {
     ) -> Result<Option<(Timestamp, i64)>, DomainError> {
         self.db
             .call(move |conn| {
-                conn.query_row(
+                conn.prepare_cached(
                     "SELECT last_captured_at, last_capture_id FROM metric_cube_state
                       WHERE measure_id = ?1 AND stream_id = ?2
                       ORDER BY last_captured_at DESC, last_capture_id DESC
                       LIMIT 1",
-                    params![measure_id, stream_id],
-                    |r| {
-                        let at: String = r.get(0)?;
-                        Ok((at, r.get::<_, i64>(1)?))
-                    },
-                )
+                )?
+                .query_row(params![measure_id, stream_id], |r| {
+                    let at: String = r.get(0)?;
+                    Ok((at, r.get::<_, i64>(1)?))
+                })
                 .optional()
             })
             .await?
@@ -1289,11 +1289,8 @@ impl SqliteFactStore {
     pub async fn cube_epoch(&self) -> Result<i64, DomainError> {
         self.db
             .call(move |conn| {
-                conn.query_row(
-                    "SELECT epoch FROM metric_cube_epoch WHERE id = 1",
-                    [],
-                    |r| r.get(0),
-                )
+                conn.prepare_cached("SELECT epoch FROM metric_cube_epoch WHERE id = 1")?
+                    .query_row([], |r| r.get(0))
             })
             .await
     }
@@ -1317,12 +1314,11 @@ impl SqliteFactStore {
         let branch = branch.unwrap_or_default();
         self.db
             .call(move |conn| {
-                conn.query_row(
+                conn.prepare_cached(
                     "SELECT 1 FROM metric_cube_state
                       WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3",
-                    params![measure_id, stream_id, branch],
-                    |_| Ok(()),
-                )
+                )?
+                .query_row(params![measure_id, stream_id, branch], |_| Ok(()))
                 .optional()
                 .map(|r| r.is_some())
             })
@@ -1349,7 +1345,7 @@ impl SqliteFactStore {
                       WHERE lf.measure_id = ?1 AND lf.stream_id = ?2 AND lf.branch = ?3
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let rows =
                     stmt.query_map(params![measure_id, stream_id, branch], row_to_fact_row)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1379,23 +1375,33 @@ impl SqliteFactStore {
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
-                for key in &restated {
-                    tx.execute(
-                        "DELETE FROM metric_live_fact
-                          WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3
-                            AND producer = ?4 AND subject_key = ?5",
-                        params![measure_id, stream_id, branch, producer, key],
-                    )
-                    .map_err(map_sql_err)?;
-                }
-                for (key, fact_id) in &facts {
-                    tx.execute(
-                        "INSERT OR IGNORE INTO metric_live_fact
-                           (measure_id, stream_id, branch, producer, subject_key, fact_id)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        params![measure_id, stream_id, branch, producer, key, fact_id],
-                    )
-                    .map_err(map_sql_err)?;
+                {
+                    let mut evict = tx
+                        .prepare_cached(
+                            "DELETE FROM metric_live_fact
+                              WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3
+                                AND producer = ?4 AND subject_key = ?5",
+                        )
+                        .map_err(map_sql_err)?;
+                    for key in &restated {
+                        evict
+                            .execute(params![measure_id, stream_id, branch, producer, key])
+                            .map_err(map_sql_err)?;
+                    }
+                    let mut insert = tx
+                        .prepare_cached(
+                            "INSERT OR IGNORE INTO metric_live_fact
+                               (measure_id, stream_id, branch, producer, subject_key, fact_id)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        )
+                        .map_err(map_sql_err)?;
+                    for (key, fact_id) in &facts {
+                        insert
+                            .execute(params![
+                                measure_id, stream_id, branch, producer, key, fact_id
+                            ])
+                            .map_err(map_sql_err)?;
+                    }
                 }
                 tx.commit().map_err(map_sql_err)?;
                 Ok(())
@@ -1426,14 +1432,21 @@ impl SqliteFactStore {
                     params![measure_id, stream_id, branch],
                 )
                 .map_err(map_sql_err)?;
-                for (producer, key, fact_id) in &facts {
-                    tx.execute(
-                        "INSERT OR IGNORE INTO metric_live_fact
-                           (measure_id, stream_id, branch, producer, subject_key, fact_id)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        params![measure_id, stream_id, branch, producer, key, fact_id],
-                    )
-                    .map_err(map_sql_err)?;
+                {
+                    let mut insert = tx
+                        .prepare_cached(
+                            "INSERT OR IGNORE INTO metric_live_fact
+                               (measure_id, stream_id, branch, producer, subject_key, fact_id)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        )
+                        .map_err(map_sql_err)?;
+                    for (producer, key, fact_id) in &facts {
+                        insert
+                            .execute(params![
+                                measure_id, stream_id, branch, producer, key, fact_id
+                            ])
+                            .map_err(map_sql_err)?;
+                    }
                 }
                 tx.commit().map_err(map_sql_err)?;
                 Ok(())
@@ -1470,50 +1483,61 @@ impl SqliteFactStore {
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
                 let epoch: i64 = tx
-                    .query_row(
-                        "SELECT epoch FROM metric_cube_epoch WHERE id = 1",
-                        [],
-                        |r| r.get(0),
-                    )
+                    .prepare_cached("SELECT epoch FROM metric_cube_epoch WHERE id = 1")
+                    .map_err(map_sql_err)?
+                    .query_row([], |r| r.get(0))
                     .map_err(map_sql_err)?;
                 if epoch != expected_epoch {
                     return Ok(false);
                 }
-                tx.execute(
+                tx.prepare_cached(
                     "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id = ?2",
-                    params![measure_id, capture_id],
                 )
+                .map_err(map_sql_err)?
+                .execute(params![measure_id, capture_id])
                 .map_err(map_sql_err)?;
-                for r in &rows {
-                    tx.execute(
-                        "INSERT INTO metric_cube
-                           (measure_id, capture_id, producer, dims_key, fact_count,
-                            value_sum, value_min, value_max, numerator, denominator)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                        params![
-                            measure_id,
-                            capture_id,
-                            r.producer,
-                            r.dims_key,
-                            r.fact_count,
-                            r.value_sum,
-                            r.value_min,
-                            r.value_max,
-                            r.numerator,
-                            r.denominator
-                        ],
-                    )
-                    .map_err(map_sql_err)?;
+                {
+                    let mut insert = tx
+                        .prepare_cached(
+                            "INSERT INTO metric_cube
+                               (measure_id, capture_id, producer, dims_key, fact_count,
+                                value_sum, value_min, value_max, numerator, denominator)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        )
+                        .map_err(map_sql_err)?;
+                    for r in &rows {
+                        insert
+                            .execute(params![
+                                measure_id,
+                                capture_id,
+                                r.producer,
+                                r.dims_key,
+                                r.fact_count,
+                                r.value_sum,
+                                r.value_min,
+                                r.value_max,
+                                r.numerator,
+                                r.denominator
+                            ])
+                            .map_err(map_sql_err)?;
+                    }
                 }
-                tx.execute(
+                tx.prepare_cached(
                     "INSERT INTO metric_cube_state
                        (measure_id, stream_id, branch, last_capture_id, last_captured_at)
                      VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT(measure_id, stream_id, branch) DO UPDATE SET
                        last_capture_id = excluded.last_capture_id,
                        last_captured_at = excluded.last_captured_at",
-                    params![measure_id, stream_id, branch, capture_id, captured_at],
                 )
+                .map_err(map_sql_err)?
+                .execute(params![
+                    measure_id,
+                    stream_id,
+                    branch,
+                    capture_id,
+                    captured_at
+                ])
                 .map_err(map_sql_err)?;
                 tx.commit().map_err(map_sql_err)?;
                 Ok(true)
@@ -1541,7 +1565,7 @@ impl SqliteFactStore {
                             WHERE mc.measure_id = ?1
                               AND (?2 IS NULL OR c.stream_id = ?2)
                             ORDER BY c.captured_at ASC, c.id ASC, mc.dims_key ASC";
-                let mut stmt = conn.prepare(sql)?;
+                let mut stmt = conn.prepare_cached(sql)?;
                 let rows = stmt.query_map(params![measure_id, stream], |r| {
                     let captured_at: String = r.get(9)?;
                     Ok(CubeReadRow {
@@ -1727,7 +1751,7 @@ impl SqliteFactStore {
                       WHERE f.measure_id = ? AND f.capture_id IN ({placeholders})
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&measure_id];
                 for id in &capture_ids {
                     binds.push(id);
@@ -2296,7 +2320,7 @@ impl SqliteFactStore {
                         AND c.status = 'done'
                         AND c.id IN ({placeholders})"
                 );
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 // The id list appears in all THREE arms of the UNION, so bind it
                 // three times.
                 let binds = capture_ids
