@@ -33,8 +33,8 @@ use tokio::sync::broadcast;
 
 use crate::events::OxplowEvent;
 use crate::metric_engine::{
-    dim_value, parse_capture_scope, repo_scalar_key, Aggregation, CaptureScope, Cell, FactFilter,
-    SeriesPoint, SCALAR_SUBJECT,
+    dim_value, parse_capture_scope, repo_scalar_key, splice_zero_points, Aggregation, CaptureScope,
+    Cell, FactFilter, SeriesPoint, SCALAR_SUBJECT,
 };
 
 /// Folds a measure's captures into `metric_cube`, incrementally from the
@@ -67,9 +67,16 @@ impl MetricCubeBuilder {
     /// Build (incrementally) the cube for one measure, across every stream.
     /// Returns the number of captures folded.
     ///
-    /// A `complete`-scope measure is a NO-OP: its series is a plain per-capture
-    /// aggregate, not a fold, so it needs a different build rule and does not
-    /// unify with this one (tsk99).
+    /// Two build rules, on purpose (tsk99):
+    /// - **partial** (`per-path`/`per-subject`) — replay the fold, cube the LIVE
+    ///   STATE at each capture ([`Self::build_stream`]);
+    /// - **complete** — every capture restates the whole population, so the row is
+    ///   a GROUP BY over the capture's OWN facts ([`Self::build_stream_complete`]).
+    ///
+    /// They look mergeable and are not: a state fold evicts per producer, which
+    /// would leave another producer's earlier facts standing and make
+    /// `agg(state) != agg(the capture's own facts)`. Merging them would silently
+    /// change every complete-scope number.
     ///
     /// The caller must treat a failure as non-fatal — an unbuilt cube is a slow
     /// read, not a broken one.
@@ -78,9 +85,6 @@ impl MetricCubeBuilder {
             return Ok(0);
         };
         let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
-        if !scope.is_partial() {
-            return Ok(0);
-        }
         let producers = self.facts.producers_for_measure(measure.id).await?;
         let captures = self.facts.captures_for_producers(producers).await?;
 
@@ -104,11 +108,72 @@ impl MetricCubeBuilder {
         }
         let mut folded = 0;
         for (stream, caps) in by_stream {
-            folded += self
-                .build_stream(&measure, scope, stream, &caps, &promoted)
-                .await?;
+            folded += match scope {
+                CaptureScope::Complete => {
+                    self.build_stream_complete(&measure, stream, &caps, &promoted)
+                        .await?
+                }
+                _ => {
+                    self.build_stream(&measure, scope, stream, &caps, &promoted)
+                        .await?
+                }
+            };
         }
         Ok(folded)
+    }
+
+    /// Cube one stream's un-cubed **complete-scope** captures: each row is a GROUP
+    /// BY over that capture's OWN facts.
+    ///
+    /// No `metric_live_fact`, no eviction, no reach-back — a complete capture
+    /// restates the whole population by definition, so `state[N] = facts(N)`. That
+    /// is the entire difference from [`Self::build_stream`], and it is why the two
+    /// are separate.
+    ///
+    /// An empty capture ("scanned, found nothing") legitimately writes ZERO rows.
+    /// It still advances the watermark, and the read splices its 0 point back via
+    /// `splice_zero_points` — the same rule the fact path uses (tsk44).
+    async fn build_stream_complete(
+        &self,
+        measure: &Measure,
+        stream: i64,
+        caps: &[MetricCapture],
+        promoted: &[String],
+    ) -> Result<usize, DomainError> {
+        let todo = self.uncubed(measure, stream, caps).await?;
+        for c in &todo {
+            let own = self
+                .facts
+                .facts_for_captures(measure.id, vec![c.id])
+                .await?;
+            let rows = cube_rows(&own, promoted);
+            self.facts
+                .write_cube_rows(measure.id, stream, c.id, c.captured_at, rows)
+                .await?;
+        }
+        Ok(todo.len())
+    }
+
+    /// The captures of `caps` this stream has not cubed yet — strictly after the
+    /// watermark, on the same `(captured_at, id)` key the capture list is ordered
+    /// by.
+    ///
+    /// Assumes captures arrive in time order within a (measure, stream) — true
+    /// because `captured_at` defaults to now() at record time and NO production
+    /// caller overrides it. A backwards clock jump would leave a capture un-folded
+    /// and silently absent from a cube-served series; the escape hatch is a
+    /// rebuild, and the cube is disposable by design.
+    async fn uncubed<'a>(
+        &self,
+        measure: &Measure,
+        stream: i64,
+        caps: &'a [MetricCapture],
+    ) -> Result<Vec<&'a MetricCapture>, DomainError> {
+        let watermark = self.facts.cube_watermark(measure.id, stream).await?;
+        Ok(caps
+            .iter()
+            .filter(|c| watermark.map_or(true, |w| (c.captured_at, c.id) > w))
+            .collect())
     }
 
     /// Build every partial-scope measure, returning the captures folded.
@@ -148,23 +213,7 @@ impl MetricCubeBuilder {
         caps: &[MetricCapture],
         promoted: &[String],
     ) -> Result<usize, DomainError> {
-        let watermark = self.facts.cube_watermark(measure.id, stream).await?;
-        // Strictly after the watermark, on the same `(captured_at, id)` key the
-        // capture list is ordered by.
-        //
-        // This assumes captures arrive in time order within a (measure, stream) —
-        // true because `captured_at` defaults to now() at record time and NO
-        // production caller overrides it. A backwards clock jump would leave a
-        // capture un-folded and silently absent from a cube-served series; the
-        // escape hatch is a rebuild, and the cube is disposable by design.
-        let todo: Vec<&MetricCapture> = caps
-            .iter()
-            .filter(|c| watermark.map_or(true, |w| (c.captured_at, c.id) > w))
-            .collect();
-        if todo.is_empty() {
-            return Ok(0);
-        }
-
+        let todo = self.uncubed(measure, stream, caps).await?;
         for c in &todo {
             let own = self
                 .facts
@@ -306,9 +355,7 @@ pub async fn cube_series(
     stream: Option<i64>,
 ) -> Result<Option<Vec<SeriesPoint>>, DomainError> {
     // --- eligibility: can the cube answer this EXACTLY? ---
-    // A complete-scope measure's series is a plain per-capture aggregate, not a
-    // fold — a different build rule that does not unify with this one (tsk99).
-    if !scope.is_partial() || !Cell::decomposes(agg) || filter.min_value.is_some() {
+    if !Cell::decomposes(agg) || filter.min_value.is_some() {
         return Ok(None);
     }
     let promoted: BTreeSet<String> = facts
@@ -428,11 +475,13 @@ pub async fn cube_series(
             });
     }
 
-    let mut out: Vec<SeriesPoint> = Vec::new();
-    for c in captures
+    // The captures this read plots — the narrowed producers', in capture order.
+    let used: Vec<&MetricCapture> = captures
         .iter()
         .filter(|c| narrowed.contains(c.producer.as_str()))
-    {
+        .collect();
+    let mut out: Vec<SeriesPoint> = Vec::new();
+    for c in &used {
         let point = |value: f64, numerator, denominator, group| SeriesPoint {
             capture_id: c.id,
             captured_at: c.captured_at,
@@ -452,17 +501,24 @@ pub async fn cube_series(
                     .and_then(|g| g.get(&None))
                     .copied()
                     .unwrap_or_default();
-                // Empty live state ⇒ the fold emits an explicit 0 point (NOT
-                // `project`, whose avg would be NaN and max −∞ on an empty cell).
-                let triple = if cell.count == 0 {
-                    (0.0, None, None)
-                } else {
-                    let Some(t) = cell.project(agg) else {
-                        return Ok(None);
-                    };
-                    t
-                };
-                out.push(point(triple.0, triple.1, triple.2, None));
+                match (cell.count, scope.is_partial()) {
+                    // PARTIAL: empty live state ⇒ the fold emits an explicit 0
+                    // point (NOT `project`, whose avg would be NaN and max −∞ on
+                    // an empty cell).
+                    (0, true) => out.push(point(0.0, None, None, None)),
+                    // COMPLETE: `aggregate_series` only emits a point for a
+                    // capture that HAS matching facts — emitting a 0 here would
+                    // invent points the fact path never had (and pre-empt the
+                    // zero-fill's own, differently-scoped 0). Leave it sparse;
+                    // `splice_zero_points` decides below.
+                    (0, false) => continue,
+                    _ => {
+                        let Some(t) = cell.project(agg) else {
+                            return Ok(None);
+                        };
+                        out.push(point(t.0, t.1, t.2, None));
+                    }
+                }
             }
             // Grouped: BTreeMap order, matching `tree_state_series`' sorted groups.
             Some(_) => {
@@ -474,6 +530,15 @@ pub async fn cube_series(
                 }
             }
         }
+    }
+    // COMPLETE only: splice back the zero-hit "scanned, found nothing" captures
+    // (tsk44) — the SAME function the fact path calls, never a reimplementation.
+    // The partial fold deliberately skips this: an empty partial capture restated
+    // nothing, so it means "nothing changed", not "the repo is zero", and filling
+    // it would yank the headline to 0.
+    if !scope.is_partial() {
+        let owned: Vec<MetricCapture> = used.into_iter().cloned().collect();
+        out = splice_zero_points(out, &owned, agg, group_by, stream);
     }
     Ok(Some(out))
 }
@@ -843,6 +908,103 @@ mod tests {
         );
         builder.build_measure("acme.test_duration").await.unwrap();
         assert_cube_answers(&engine, &facts, "acme.test_duration", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn the_cube_serves_a_complete_scope_series_including_its_zero_fill() {
+        // tsk99. A `complete` capture restates the WHOLE population, so its cube
+        // row is a GROUP BY over that capture's own facts — no live state, no
+        // replay. Deliberately a SECOND build rule, not a reuse of the partial
+        // one: a state fold would evict per producer and leave another producer's
+        // earlier facts standing, so `agg(state) != agg(the capture's own facts)`
+        // and complete-scope numbers would silently change.
+        //
+        // The zero-fill is the part that makes this more than a rename. An empty
+        // "scanned, found nothing" capture emits no facts and therefore no cube
+        // rows, and must still read as an explicit 0 — the same splice the fact
+        // path applies (tsk44). Getting this wrong drops the point entirely and
+        // the metric looks like it stopped rather than went to zero.
+        let (engine, facts, builder) = fixture().await;
+        // `NewMeasure::new` defaults to complete scope.
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.lint_hit", "Lint hits"))
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact::new(m, 1.0),
+                    NewFact::new(m, 1.0),
+                    NewFact::new(m, 1.0),
+                ],
+            )
+            .await
+            .unwrap();
+        // The zero-hit scan: ran, found nothing.
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![])
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T12:00:00Z"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.lints", "acme.lint_hit", "count").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![3.0, 0.0, 1.0],
+            "the fact path: three hits, then a zero-filled empty scan, then one"
+        );
+        builder.build_measure("acme.lint_hit").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.lint_hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_complete_scope_capture_never_inherits_an_earlier_captures_facts() {
+        // The distinction that kept complete scope OUT of tsk96's mechanism. Under
+        // the partial fold, capture 2 would reach back and keep capture 1's facts
+        // live (→ 4). Under complete-scope rules each capture restates everything,
+        // so capture 2 is exactly its own 1 fact. If the two build rules ever get
+        // merged, this reads 4 and every complete-scope metric is quietly wrong.
+        let (engine, facts, builder) = fixture().await;
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.lint_hit", "Lint hits"))
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact::new(m, 1.0),
+                    NewFact::new(m, 1.0),
+                    NewFact::new(m, 1.0),
+                ],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T11:00:00Z"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.lints", "acme.lint_hit", "count").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![3.0, 1.0],
+            "each complete capture speaks for the whole population — no reach-back"
+        );
+        builder.build_measure("acme.lint_hit").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.lint_hit", &spec, &oracle).await;
     }
 
     #[tokio::test]

@@ -400,27 +400,53 @@ welded to collection.
 > implementation, called from both sides, is the point — and it's why the build
 > runs outside `record_facts`' transaction (safe: see the watermark, above).
 >
-> - **`MetricCubeBuilder::build_measure`** — per `(measure, stream)`, folds each
->   capture after the watermark: evict what it restates → insert its facts →
->   re-aggregate the **whole live state** → `write_cube_rows` (which advances the
->   watermark atomically). **Backfill is this same loop from an empty watermark** —
->   never write a second SQL fold for it.
-> - **`cube_series`** — the read. Returns **`None` for anything it can't answer
->   exactly**, and the caller falls through to the facts. Eligibility: partial
->   scope, decomposable agg, no `min_value`, filter/`group_by` dims all promoted,
->   and **every capture ≤ the watermark**. The capture list and the filter-narrowed
->   producer set come off **captures and the cube, never facts** — deriving them by
->   scanning facts is the decode being removed, so doing it there fixes nothing.
+> - **`MetricCubeBuilder::build_measure`** — dispatches on scope to **two build
+>   rules, deliberately not merged** (tsk99):
+>   - **partial** (`build_stream`) — folds each capture after the watermark: evict
+>     what it restates → insert its facts → re-aggregate the **whole live state**.
+>   - **complete** (`build_stream_complete`) — a GROUP BY over the capture's **own**
+>     facts. No `metric_live_fact`, no eviction, no reach-back: every capture
+>     restates the whole population, so `state[N] = facts(N)`.
+>
+>   They look mergeable and are not. A state fold evicts **per producer**, which
+>   would leave another producer's earlier facts standing and make `agg(state) !=
+>   agg(the capture's own facts)` — merging them silently changes every
+>   complete-scope number. Both advance the watermark the same way, and **backfill
+>   is the same loop from an empty watermark** — never a second SQL fold.
+> - **`cube_series`** — the read, for **both** scopes. Returns **`None` for anything
+>   it can't answer exactly**, and the caller falls through to the facts.
+>   Eligibility: decomposable agg, no `min_value`, filter/`group_by` dims all
+>   promoted, and **every capture ≤ the watermark**. The capture list and the
+>   filter-narrowed producer set come off **captures and the cube, never facts** —
+>   deriving them by scanning facts is the decode being removed, so doing it there
+>   fixes nothing.
+>
+>   The scopes differ in exactly two places, both in the ungrouped branch: an
+>   **empty partial** capture emits an explicit **0** (empty live state is a real
+>   zero); an **empty complete** capture emits **nothing** and is left to
+>   `splice_zero_points`, because `aggregate_series` only ever emitted points for
+>   captures that had matching facts. Complete scope then applies
+>   `splice_zero_points` — the **same function** the fact path calls (tsk44), not a
+>   copy. Partial deliberately skips it: an empty partial capture restated nothing,
+>   so it means "nothing changed", not "the repo is zero".
 > - **`run`** (spawned in `boot.rs`) — backfills, then keeps up off
 >   **`MetricSamplesChanged`**, the one signal every recording site emits
 >   (`collection`, `metrics_service`, `task_service`, `token_usage`, MCP). Hooking
 >   individual `record_facts` calls would mean five crates to keep in step. Bursts
 >   coalesce; failures are logged, never propagated.
 >
-> **Measured on the real DB (512k facts, 1,181 captures, 143 points/spec):** one
-> `RecordedMetricsPage` refresh across the 5 test specs went **9.26s → 70ms
-> (~131×)**, every series identical to the fact path point for point. Backfill is
-> ~21s once, in the background. *That 9.26s every ~10s was the CPU burn.*
+> **Measured on the real DB (512k facts).** The 5 test specs: **9.26s → 70ms
+> (~131×)**. All **68** specs (both scopes, after tsk99): **11.53s → 1.03s**, with
+> **zero divergence** from the fact path on any of them. Backfill ~25s once, in the
+> background. *That 9.26s every ~10s was the CPU burn.*
+>
+> **42 of 68 specs are cube-served**; the other 26 decline, and every one is an
+> expected class — 18 filter `dim_eq` on an **unpromoted** dim (`oxplow.rule` ×10,
+> `oxplow.token_kind` ×4, `oxplow.tests_stat` ×4), 2 filter on `severity`
+> (unpromoted), 2 are `min_value` thresholds (permanent, by design), and 4 measures
+> have no facts at all. Those first 20 are a *grain* choice, not a limit — all four
+> dims are low-cardinality, so promoting them would cube those specs too (tsk101).
+> Verify a decline is one of these classes before assuming the cube is working.
 >
 > **The equivalence gate.** Tests take the fact-served oracle **before** the build
 > — after one, `series_for_spec` reads the cube, so a later oracle is just the cube

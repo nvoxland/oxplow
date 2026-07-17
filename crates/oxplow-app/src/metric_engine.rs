@@ -681,6 +681,54 @@ pub fn tree_state_series(
     out
 }
 
+/// Splice value-0 points into `points` for every capture in `caps` that produced
+/// none — the pure half of [`MetricEngine::zero_fill`], factored out so the CUBE
+/// path (tsk99) applies the identical rule instead of reimplementing it (a second
+/// copy is a second thing to drift).
+///
+/// Only count/sum have a meaningful zero (avg/min/max/last/ratio of nothing is
+/// undefined → left sparse), and only ungrouped series fill (an empty capture
+/// carries no group values). `caps` is the filter-narrowed producers' captures;
+/// a stream-scoped read only fills from THAT stream — another worktree's zero-hit
+/// scan is not this timeline's zero.
+pub(crate) fn splice_zero_points(
+    mut points: Vec<SeriesPoint>,
+    caps: &[MetricCapture],
+    agg: Aggregation,
+    group_by: Option<&str>,
+    stream: Option<i64>,
+) -> Vec<SeriesPoint> {
+    if group_by.is_some() || !matches!(agg, Aggregation::Count | Aggregation::Sum) {
+        return points;
+    }
+    let have: std::collections::HashSet<i64> = points.iter().map(|p| p.capture_id).collect();
+    for c in caps {
+        if stream.is_some_and(|s| c.stream_id != s) {
+            continue;
+        }
+        if !have.contains(&c.id) {
+            points.push(SeriesPoint {
+                capture_id: c.id,
+                captured_at: c.captured_at,
+                value: 0.0,
+                numerator: None,
+                denominator: None,
+                group: None,
+                branch: c.branch.clone(),
+                provenance: Some(c.provenance.clone()),
+                git_version: c.closest_git_version.clone(),
+                source: Some(c.source.clone()),
+            });
+        }
+    }
+    points.sort_by(|a, b| {
+        a.captured_at
+            .cmp(&b.captured_at)
+            .then(a.capture_id.cmp(&b.capture_id))
+    });
+    points
+}
+
 /// Collapse a time series to a single in-range number, respecting additivity OVER
 /// TIME: a semi-additive snapshot takes the LAST capture (summing snapshots across
 /// time double-counts) — re-deriving Σn/Σd from that capture's raw components for a
@@ -1062,7 +1110,7 @@ impl MetricEngine {
     /// zero-hit scan is not this timeline's zero.
     async fn zero_fill(
         &self,
-        mut points: Vec<SeriesPoint>,
+        points: Vec<SeriesPoint>,
         producers: std::collections::BTreeSet<String>,
         agg: Aggregation,
         group_by: Option<&str>,
@@ -1078,32 +1126,7 @@ impl MetricEngine {
             .facts
             .captures_for_producers(producers.into_iter().collect())
             .await?;
-        let have: std::collections::HashSet<i64> = points.iter().map(|p| p.capture_id).collect();
-        for c in caps {
-            if stream.is_some_and(|s| c.stream_id != s) {
-                continue;
-            }
-            if !have.contains(&c.id) {
-                points.push(SeriesPoint {
-                    capture_id: c.id,
-                    captured_at: c.captured_at,
-                    value: 0.0,
-                    numerator: None,
-                    denominator: None,
-                    group: None,
-                    branch: c.branch.clone(),
-                    provenance: Some(c.provenance.clone()),
-                    git_version: c.closest_git_version.clone(),
-                    source: Some(c.source.clone()),
-                });
-            }
-        }
-        points.sort_by(|a, b| {
-            a.captured_at
-                .cmp(&b.captured_at)
-                .then(a.capture_id.cmp(&b.capture_id))
-        });
-        Ok(points)
+        Ok(splice_zero_points(points, &caps, agg, group_by, stream))
     }
 
     /// The by-dimension rollup (breakdown) for a measure, additivity-aware per
