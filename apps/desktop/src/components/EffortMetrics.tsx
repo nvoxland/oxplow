@@ -6,6 +6,7 @@
 // numbers stay correct even when efforts overlap.
 
 import React, { useEffect, useState } from "react";
+import { formatMetricValue } from "./format";
 
 import { type EffortMetricDelta, listEffortMetricDeltas } from "../api.js";
 import { subscribeOxplowEvents } from "../tauri-bridge/index.js";
@@ -52,10 +53,10 @@ export function metricGroup(d: EffortMetricDelta): { order: number; label: strin
   }
 }
 
-/** Compact value: integers as-is, else one decimal; ≥10k → `k`. */
+/** Compact metric value — delegates to the shared locale-aware formatter
+ * (tsk114) so effort chips read like every other metric surface. */
 export function fmtMetricValue(v: number): string {
-  if (Math.abs(v) >= 10_000) return `${(v / 1000).toFixed(1)}k`;
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  return formatMetricValue(v);
 }
 
 /** A signed delta (`+3`, `-2`). */

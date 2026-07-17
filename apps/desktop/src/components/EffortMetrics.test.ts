@@ -45,7 +45,13 @@ test("deltaSummary shows before→after only when changed", () => {
     deltaSummary(d({ agg: "level", changed: false, baseline: 5, current: 5 })),
   ).toBe("5");
   // A flow (sum) metric shows the signed total, never before→after.
-  expect(deltaSummary(d({ agg: "sum", current: 48230 }))).toBe("+48.2k");
+  // Compact form comes from the shared locale-aware formatter (tsk114), so
+  // the expectation is computed through the same Intl config.
+  const compact = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
+  expect(deltaSummary(d({ agg: "sum", current: 48230 }))).toBe(`+${compact.format(48230)}`);
   // `%` unit glues to the number.
   expect(
     deltaSummary(d({ agg: "level", changed: true, baseline: 72, current: 81, unit: "%" })),
@@ -63,8 +69,12 @@ test("deltaColor reflects whether the move improved the metric", () => {
   expect(deltaColor(d({ direction: "lower-better", delta: null }))).toContain("muted");
 });
 
-test("fmtSigned signs and k-compresses", () => {
+test("fmtSigned signs and compacts via the shared formatter", () => {
   expect(fmtSigned(3)).toBe("+3");
   expect(fmtSigned(-2)).toBe("-2");
-  expect(fmtSigned(48230)).toBe("+48.2k");
+  const compact = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
+  expect(fmtSigned(48230)).toBe(`+${compact.format(48230)}`);
 });

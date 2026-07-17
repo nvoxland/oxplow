@@ -63,6 +63,69 @@ export function formatDateOnly(input: string): string {
   return d.toLocaleDateString();
 }
 
+// --- Metric value formatting (tsk114) --------------------------------------
+//
+// ONE formatter for every metric value the UI shows, built on
+// `Intl.NumberFormat` with the OS locale (`undefined` = system): grouping
+// separators, decimal comma vs point, and compact notation all follow the
+// user's locale for free. Deliberately NO user-facing locale setting yet —
+// this module is the single seam, so a future override is a one-line change
+// here instead of a call-site hunt. Per-metric presentation rides the spec's
+// existing `unit` (`%`, `ms`, `count`, `tokens`, `lines`, …), never a global
+// settings panel.
+
+const exactFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+const smallFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const oneDecimalFmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+const compactFmt = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+/**
+ * Above this, plain numbers render compact ("240.4K"). A surface showing a
+ * compacted value should pair it with [`formatMetricValueExact`] in a hover
+ * `title` so the precise number is one hover away.
+ */
+const COMPACT_AT = 10_000;
+
+/**
+ * A metric value for display, unit-aware:
+ * - `%` → one decimal + `%` (spec values are already ×100 scaled);
+ * - `ms` → humanized duration (`850 ms`, `1.2 s`, `3.4 m`);
+ * - everything else → locale-grouped, compact at ≥10k, with the unit
+ *   appended when present (`1,234 lines`, `240.4K count`… units that read
+ *   awkwardly appended are the spec author's naming choice, not ours).
+ */
+export function formatMetricValue(value: number, unit?: string | null): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (unit === "%") return `${oneDecimalFmt.format(value)}%`;
+  if (unit === "ms") return formatDurationMs(value);
+  const body =
+    Math.abs(value) >= COMPACT_AT ? compactFmt.format(value) : smallFmt.format(value);
+  return unit ? `${body} ${unit}` : body;
+}
+
+/** Humanize a millisecond quantity: `850 ms`, `1.2 s`, `3.4 m`, `1.1 h`. */
+export function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms)) return String(ms);
+  const abs = Math.abs(ms);
+  if (abs < 1_000) return `${oneDecimalFmt.format(ms)} ms`;
+  if (abs < 60_000) return `${oneDecimalFmt.format(ms / 1_000)} s`;
+  if (abs < 3_600_000) return `${oneDecimalFmt.format(ms / 60_000)} m`;
+  return `${oneDecimalFmt.format(ms / 3_600_000)} h`;
+}
+
+/**
+ * The exact (never compacted) locale-grouped form — the hover `title`
+ * companion for compacted displays.
+ */
+export function formatMetricValueExact(value: number, unit?: string | null): string {
+  if (!Number.isFinite(value)) return String(value);
+  const body = exactFmt.format(value);
+  return unit ? `${body} ${unit}` : body;
+}
+
 /**
  * True when two parseable timestamps fall on the same local calendar
  * day. False if either can't be parsed.

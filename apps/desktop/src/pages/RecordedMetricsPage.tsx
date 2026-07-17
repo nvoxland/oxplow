@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { formatMetricValue, formatMetricValueExact } from "../components/format";
 
 import {
   type MetricSpec,
@@ -50,9 +51,7 @@ type Row = {
 
 const SAMPLE_LIMIT = 200;
 
-function formatValue(v: number): string {
-  return Number.isInteger(v) ? String(v) : v.toFixed(2);
-}
+
 
 /** Inline-SVG sparkline of a metric's values over time (oldest → newest). */
 function Sparkline({ values, color }: { values: number[]; color?: string }) {
@@ -117,8 +116,11 @@ function RecordedRow({ row, onOpenPage }: { row: Row; onOpenPage?: (ref: TabRef)
       {/* The latest value sits AFTER the sparkline because it *is* the
           sparkline's last point — same filtered `samples`, newest first — so the
           chart reads left-to-right into the number that terminates it (tsk82). */}
-      <td style={{ padding: "6px 8px", fontWeight: 600, color }}>
-        {latest ? `${formatValue(latest.value)}${def?.unit ? ` ${def.unit}` : ""}` : "—"}
+      <td
+        style={{ padding: "6px 8px", fontWeight: 600, color }}
+        title={latest ? formatMetricValueExact(latest.value, def?.unit) : undefined}
+      >
+        {latest ? formatMetricValue(latest.value, def?.unit) : "—"}
       </td>
     </tr>
   );

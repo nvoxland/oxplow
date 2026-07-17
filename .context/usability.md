@@ -540,6 +540,17 @@ declaring *what it is* and mounting the generic layer.
   `deriveDefaultLabel` / `labelByKind` map entry so the renderer
   shows the same string everywhere.
 
+## Numbers
+
+- **Metric values format through `formatMetricValue(value, unit)`** in
+  `apps/desktop/src/components/format.ts` — never ad-hoc `toFixed`/hand-rolled
+  `k` compaction. It's `Intl.NumberFormat` on the **OS locale** (grouping,
+  decimal comma vs point, compact "240.4K" at ≥10k) and unit-aware via the
+  spec's `unit` (`%` → one decimal; `ms` → humanized duration). A compacted
+  display should carry `formatMetricValueExact(...)` in its hover `title`.
+  Deliberately no user-facing locale setting (tsk114): this module is the
+  single seam, so adding one later is a one-line change here.
+
 ## Empty and error states
 
 - **Every pane has an empty state message** (not just a blank panel).

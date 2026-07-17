@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { formatMetricValue } from "../components/format";
 
 import {
   type MetricSpec,
@@ -179,7 +180,7 @@ function MultiLineChart({
         return (
           <g key={f}>
             <text x={padL - 6} y={y(v) + 3} textAnchor="end" fontSize={9} fill="var(--text-muted, #888)">
-              {Number.isInteger(v) ? v : v.toFixed(1)}
+              {formatMetricValue(v)}
             </text>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="var(--border, #2a2a2a)" opacity={0.3} />
           </g>
