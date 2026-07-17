@@ -95,6 +95,20 @@ welded to collection.
 > - partitioning by **producer** matters: the 10 idiom gauges share
 >   `oxplow.ast_hit` (sliced by `rule`), so without it a later gauge's capture would
 >   supersede an earlier gauge's facts for the same path.
+> - partitioning by **stream** matters for the same reason (tsk98): a stream is a
+>   **worktree**, and the fold reconstructs *one worktree's tree*. Two worktrees
+>   running the same gauge share `(producer, path)` keys, so a stream-blind state
+>   lets one worktree's capture evict the other's paths — yielding a point that is
+>   whichever worktree wrote last, per path, and belongs to neither. The state is
+>   therefore keyed **`stream → (producer, path)`**, matching the scoping the fact
+>   fetch (tsk75) and the rollup (tsk46) already apply.
+>
+> **An unscoped (`stream = None`) read is a UNION, not a merge.** It replays every
+> stream's captures into one timeline, but each point is still exactly one
+> worktree's state, and carries its own `stream_id`/`branch`. Streams are a
+> **dimension you can group by, never a partition that hides rows** — so
+> cross-worktree comparison works, while no point ever blends two worktrees. There
+> is deliberately **no** "merged cross-stream tree": it would describe no worktree.
 >
 > `zero_fill` is **suppressed** for `per-path`: an empty delta capture restated no
 > paths, so it means "nothing changed", not "the repo is zero".

@@ -504,13 +504,20 @@ pub fn tree_state_series(
         by_capture.entry(f.capture_id).or_default().push(f);
     }
 
-    // The live tree: (producer, path) → the facts that path currently contributes.
-    let mut state: HashMap<(String, String), Vec<&FactRow>> = HashMap::new();
+    // The live tree, PER STREAM: stream → (producer, path) → the facts that path
+    // currently contributes. Stream keys the state because a stream is a WORKTREE
+    // and the fold reconstructs one worktree's tree (tsk98) — two worktrees running
+    // the same gauge share `(producer, path)` keys, so a stream-blind state lets one
+    // worktree's capture evict the other's paths and yields a point belonging to
+    // neither. This mirrors the scoping the fact fetch (tsk75) and the rollup
+    // (tsk46) already apply.
+    let mut state: HashMap<i64, HashMap<(String, String), Vec<&FactRow>>> = HashMap::new();
     let mut out: Vec<SeriesPoint> = Vec::new();
 
     for c in captures {
+        let tree = state.entry(c.stream_id).or_default();
         for path in scanned.get(&c.id).into_iter().flatten() {
-            state.remove(&(c.producer.clone(), path.clone()));
+            tree.remove(&(c.producer.clone(), path.clone()));
         }
         let own: Vec<&&FactRow> = by_capture.get(&c.id).into_iter().flatten().collect();
         // A capture may also carry PATH-LESS facts — an agent-asserted repo scalar
@@ -518,14 +525,17 @@ pub fn tree_state_series(
         // per-path fold can't place or supersede them, so they keep the plain
         // "latest assertion per producer wins" rule. Emitting one restates it.
         if own.iter().any(|f| repo_scalar_key(f).is_none()) {
-            state.remove(&(c.producer.clone(), SCALAR_SUBJECT.to_string()));
+            tree.remove(&(c.producer.clone(), SCALAR_SUBJECT.to_string()));
         }
         for f in own {
             let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
-            state.entry((c.producer.clone(), key)).or_default().push(f);
+            tree.entry((c.producer.clone(), key)).or_default().push(f);
         }
 
-        let live: Vec<&FactRow> = state.values().flatten().copied().collect();
+        // This capture's OWN stream's tree — an unscoped read replays every
+        // stream's captures into one timeline, but each point is still exactly
+        // one worktree's state.
+        let live: Vec<&FactRow> = tree.values().flatten().copied().collect();
         let point = |value: f64, numerator, denominator, group| SeriesPoint {
             capture_id: c.id,
             captured_at: c.captured_at,
@@ -2179,6 +2189,73 @@ mod tests {
                 .unwrap(),
             Some(40.0)
         );
+    }
+
+    #[tokio::test]
+    async fn the_partial_fold_keeps_each_streams_state_separate() {
+        // tsk98: the fold's live state is per WORKTREE. Two worktrees run the
+        // same gauge over the same subjects, so they share `(producer, subject)`
+        // keys — a state keyed on those alone lets worktree B's run EVICT
+        // worktree A's subjects, and the resulting point describes no repo state
+        // that ever existed (it's whichever stream wrote last, per subject).
+        //
+        // The unscoped read is the one that exposes it: it replays every stream's
+        // captures into one timeline, so it is where the two states collide.
+        let (engine, facts, _c) = engine_fixture().await;
+        let test_case = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..oxplow_db::NewMeasure::new("acme.test_case", "Test case")
+            })
+            .await
+            .unwrap();
+        let case = |subject: &str, value: f64| oxplow_db::NewFact {
+            subject_ref: Some(subject.into()),
+            ..oxplow_db::NewFact::new(test_case, value)
+        };
+        // Worktree 1 runs both cases; worktree 2 then re-runs only `t1`.
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![case("t1", 1.0), case("t2", 1.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(cap_in(2, "2026-06-30T11:00:00Z"), vec![case("t1", 10.0)])
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.cases", "Cases", "acme.test_case", "sum");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.cases").await.unwrap().unwrap();
+
+        // Point 2 is worktree 2's state — `t1` alone. Folding the streams
+        // together would yield 11 (worktree 2's t1=10 + worktree 1's stale t2=1),
+        // a number belonging to neither worktree.
+        assert_eq!(
+            engine
+                .series_for_spec(&spec, None)
+                .await
+                .unwrap()
+                .iter()
+                .map(|p| p.value)
+                .collect::<Vec<_>>(),
+            vec![2.0, 10.0]
+        );
+        // Each stream-scoped read sees only its own captures, unchanged.
+        for (stream, expected) in [(1, vec![2.0]), (2, vec![10.0])] {
+            assert_eq!(
+                engine
+                    .series_for_spec_in_stream(&spec, None, Some(stream))
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|p| p.value)
+                    .collect::<Vec<_>>(),
+                expected,
+                "stream {stream}"
+            );
+        }
     }
 
     #[tokio::test]
