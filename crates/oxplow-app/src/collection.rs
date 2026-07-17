@@ -684,12 +684,32 @@ impl CollectionService {
                 } else {
                     "test-run"
                 };
+                // A test result is about a CODE STATE, not a branch name (tsk95),
+                // so stamp the commit the run tested — the fold needs it to be
+                // ancestry-aware (tsk97), and it is NOT backfillable after the
+                // fact. A snapshot carrying its own commit reads exact; otherwise
+                // this falls back to HEAD with `git_version_exact = false`, which
+                // is the normal case: the agent edits, then runs tests, so the
+                // tree is dirty and the commit is only the CLOSEST one.
+                let version = crate::file_ref_version::resolve(
+                    &self.snapshots,
+                    &self.project_dir,
+                    snapshot_id.unwrap_or(0),
+                )
+                .await
+                .ok();
                 let mut capture = NewMetricCapture::done(stream_val, producer, source.to_string());
                 capture.provenance = provenance.to_string();
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("on-report".into());
                 capture.branch = branch;
                 capture.snapshot_id = snapshot_id;
+                capture.closest_git_version =
+                    version.as_ref().and_then(|v| v.closest_git_version.clone());
+                capture.git_version_exact = version
+                    .as_ref()
+                    .map(|v| v.git_version_exact)
+                    .unwrap_or(false);
                 capture.effort_id = owning_val;
                 capture.detail_json = Self::capture_detail(
                     "test-detail",
@@ -4417,6 +4437,51 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(failed.last().map(|p| p.value), Some(1.0));
+        }
+
+        #[tokio::test]
+        async fn test_run_capture_stamps_the_commit_it_tested() {
+            // tsk95: a test result is about a CODE STATE, not a branch name, so
+            // the run capture must record which commit it tested. Without it the
+            // per-subject fold can never be ancestry-aware (tsk97) — and it is
+            // NOT backfillable: which commit a past run tested is unrecoverable.
+            // Gauge captures got this for free via the snapshot-driven
+            // `GaugeRunContext`; test runs went unstamped for 125 captures.
+            let h = build_full(None, true, &[]).await;
+            h.service
+                .record_test_run(
+                    &h.thread,
+                    "cargo test --workspace",
+                    Some(0),
+                    None,
+                    Some(3),
+                    Some(0),
+                    Some(3),
+                    "observed",
+                    "post-tool-bash",
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
+                .captures_in_window_by_trigger(
+                    h.thread.value(),
+                    "on-report",
+                    Timestamp::from_unix_ms(0),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(caps.len(), 1, "one run capture");
+            assert!(
+                caps[0]
+                    .closest_git_version
+                    .as_deref()
+                    .is_some_and(|v| !v.is_empty()),
+                "the run capture must carry the commit it tested, got {:?}",
+                caps[0].closest_git_version
+            );
         }
 
         #[tokio::test]

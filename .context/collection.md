@@ -182,7 +182,12 @@ hook + MCP wiring):
   `oxplow.tests.*` specs read them, and it returns the capture id (the run
   identity `claim_runs` refs use). A report-less, count-less run records its
   capture under the `test-run` producer so it never reads as "found 0 tests"
-  (see [metrics.md](./metrics.md)).
+  (see [metrics.md](./metrics.md)). The run capture also stamps
+  **`closest_git_version`/`git_version_exact`** (tsk95) — the commit it tested,
+  resolved via `file_ref_version::resolve` off the stream's latest snapshot,
+  falling back to HEAD with `exact = false` when the tree is dirty (the normal
+  case). This is the fold's only ancestry material and is **not backfillable**;
+  see the stamping note in [metrics.md](./metrics.md).
 
 **Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
 **regardless of how many efforts are open** — attribution is deferred to the

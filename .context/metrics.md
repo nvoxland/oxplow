@@ -271,6 +271,18 @@ welded to collection.
   *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
   trust `provenance`/`source`. **Captures are durable** (they carry the facts'
   context — no independent sweep).
+  > **Stamp `closest_git_version` on every capture you add (tsk95).** A result is
+  > about a **code state, not a branch name**, and the version is the *only*
+  > ancestry material the fold can use (tsk97). It is **NOT backfillable** —
+  > which commit a past run tested is unrecoverable, so an unstamped capture is
+  > permanently ancestry-blind. This was missed for 125 `test_case` captures
+  > because version resolution rode on `GaugeRunContext`'s `snapshot_id` and test
+  > runs carry no snapshot. Use `file_ref_version::resolve(store, dir, snap)`: a
+  > snapshot with its own commit reads `git_version_exact = true`, otherwise it
+  > falls back to HEAD with `exact = false`. **Dirty is the normal case** (the
+  > agent edits, then runs tests), which is exactly what the
+  > `closest_git_version` + `git_version_exact` pair is for — don't add a third
+  > field.
 - **`fact`** — the durable atomic measurement (folds `metric_sample` +
   `metric_finding`): `capture_id` **NOT NULL** (→ all context via the capture),
   `measure_id`, `value`, `numerator`/`denominator`; subject `subject_kind`/
