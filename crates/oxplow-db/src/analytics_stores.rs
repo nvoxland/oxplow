@@ -1011,6 +1011,17 @@ pub struct FileSnapshot {
     pub mtime_ms: Option<i64>,
 }
 
+/// One commit-stamped snapshot row — a point where a stream's worktree WAS
+/// exactly a commit. The metric-ancestry resolver anchors dirty captures to
+/// these (tsk102).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StampedSnapshot {
+    pub stream_id: i64,
+    pub branch: Option<String>,
+    pub commit: String,
+    pub created_at: Timestamp,
+}
+
 #[derive(Clone)]
 pub struct SqliteSnapshotStore {
     db: Database,
@@ -1225,6 +1236,43 @@ impl SqliteSnapshotStore {
                         file_count,
                         git_commit,
                         git_branch,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Every commit-stamped snapshot, oldest first — the metric fold's ancestry
+    /// anchor points (tsk102). A stamped snapshot means "this snapshot IS
+    /// exactly that commit's tree" (stamped by the capture layer on a clean
+    /// worktree, or re-stamped by the git-refs listener when a commit lands on
+    /// an unchanged worktree), so the first same-stream, same-branch stamp
+    /// at-or-after a dirty capture names the commit that ABSORBED its work.
+    /// One row per commit the stream actually made — small by construction.
+    pub async fn commit_stamped_snapshots(&self) -> Result<Vec<StampedSnapshot>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT stream_id, git_branch, git_commit, created_at
+                       FROM snapshot
+                      WHERE git_commit IS NOT NULL
+                      ORDER BY created_at ASC, id ASC",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    let created_at: String = row.get(3)?;
+                    let map_err = |e: DomainError| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            0,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    };
+                    Ok(StampedSnapshot {
+                        stream_id: row.get(0)?,
+                        branch: row.get(1)?,
+                        commit: row.get(2)?,
+                        created_at: string_to_ts(&created_at).map_err(map_err)?,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()

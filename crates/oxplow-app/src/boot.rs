@@ -341,7 +341,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // Purely an accelerator — if this task never ran, every read would take the
     // fact path exactly as it did before the cube existed.
     {
-        let builder = crate::metric_cube::MetricCubeBuilder::new((*state.fact_store).clone());
+        let builder = crate::metric_cube::MetricCubeBuilder::new((*state.fact_store).clone())
+            .with_visibility(state.metric_visibility.clone());
         let rx = state.events.subscribe();
         tokio::spawn(async move {
             crate::metric_cube::run(builder, rx).await;

@@ -33,6 +33,7 @@ pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod metric_cube;
 pub mod metric_engine;
+pub mod metric_visibility;
 pub mod metrics_service;
 pub mod otlp_tokens;
 pub mod output_activity;
@@ -428,6 +429,10 @@ pub struct Services {
     pub fact_store: Arc<SqliteFactStore>,
     /// Aggregation engine over `fact_store` (metrics-as-specs; epic tsk12).
     pub metric_engine: metric_engine::MetricEngine,
+    /// The metric-ancestry resolver (tsk102) — ONE instance shared by the
+    /// engine's fact fold and the cube builder's seed, so the two can never
+    /// disagree on what a branch sees.
+    pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
     /// Kind-agnostic attribution ledger (tsk262/263) — run claim/acknowledge
     /// state; the agent claims/disclaims runs via `amend_effort`.
     pub attribution_store: Arc<oxplow_db::SqliteAttributionStore>,
@@ -518,7 +523,12 @@ impl Services {
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
-        let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()));
+        let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
+            SqliteSnapshotStore::new(db.clone()),
+            &layout.project_dir,
+        ));
+        let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
+            .with_visibility(metric_visibility.clone());
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -694,6 +704,7 @@ impl Services {
             effort_store,
             fact_store,
             metric_engine,
+            metric_visibility,
             attribution_store,
             metrics,
             nudge_store,

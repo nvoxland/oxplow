@@ -30,7 +30,7 @@ pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotStats,
     SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
-    SqliteUsageStore, UsageEvent, UsageRollup,
+    SqliteUsageStore, StampedSnapshot, UsageEvent, UsageRollup,
 };
 pub use attribution_store::{
     SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,

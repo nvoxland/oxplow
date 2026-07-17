@@ -6,13 +6,14 @@
 //! cannot pass vacuously as "equal because both sides were fact-served" —
 //! tsk99's trap, and the reason the oracle must be taken BEFORE the build.
 //!
-//! Run against a consistent copy, never the live file:
+//! Run against a consistent copy, never the live file (second arg = the repo
+//! the DB describes, for the ancestry resolver; defaults to the cwd):
 //!     sqlite3 .oxplow/local.sqlite "VACUUM INTO '/tmp/cube-eq.sqlite'"
 //!     cargo run -p oxplow-app --example cube_equivalence --release -- /tmp/cube-eq.sqlite
 //!
-//! Opening the copy migrates it — V63 clears the cube, so the oracle pass on a
-//! fresh copy is genuinely fact-served. The empty-cube assert below catches a
-//! re-used (already built) copy.
+//! Opening the copy migrates it — the migrations clear the cube, so the oracle
+//! pass on a fresh copy is genuinely fact-served. The empty-cube assert below
+//! catches a re-used (already built) copy.
 
 // Dev-only verification tool — `unwrap()` is fine here, so relax the
 // workspace `unwrap_used` guardrail for this example.
@@ -22,17 +23,29 @@ use std::time::Instant;
 
 use oxplow_app::metric_cube::{cube_series, MetricCubeBuilder};
 use oxplow_app::metric_engine::{parse_capture_scope, spec_aggregation, spec_filter, MetricEngine};
+use oxplow_app::metric_visibility::VisibilityResolver;
 use oxplow_db::{Database, SqliteFactStore};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let path = std::env::args()
         .nth(1)
-        .expect("usage: cube_equivalence <path to a DB COPY>");
-    let db = Database::open(&path).expect("open db copy (migrates it, incl. the V63 cube clear)");
-    let facts = SqliteFactStore::new(db);
-    let engine = MetricEngine::new(facts.clone());
-    let builder = MetricCubeBuilder::new(facts.clone());
+        .expect("usage: cube_equivalence <path to a DB COPY> [repo dir]");
+    let repo_dir = std::env::args()
+        .nth(2)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
+    let db = Database::open(&path).expect("open db copy (migrates it, incl. the cube clears)");
+    let facts = SqliteFactStore::new(db.clone());
+    // Mirror production wiring exactly: the SAME resolver on the engine and
+    // the builder (tsk102) — anything else verifies a configuration the app
+    // never runs.
+    let resolver = std::sync::Arc::new(VisibilityResolver::new(
+        oxplow_db::SqliteSnapshotStore::new(db),
+        &repo_dir,
+    ));
+    let engine = MetricEngine::new(facts.clone()).with_visibility(resolver.clone());
+    let builder = MetricCubeBuilder::new(facts.clone()).with_visibility(resolver);
 
     let measures = facts.list_measures().await.unwrap();
     for m in &measures {

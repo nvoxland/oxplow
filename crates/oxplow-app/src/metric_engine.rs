@@ -600,11 +600,22 @@ pub fn aggregate_series(
 /// ```
 ///
 /// - **`effective_commit(C)`** — *the first commit that CONTAINS C's tested code*:
-///   the commit of the next snapshot at-or-after C that has one. A dirty run's code
-///   lands in the next commit. `None` when never committed (abandoned work) ⇒ C is
-///   its own branch's business only.
+///   the commit of the next same-branch snapshot at-or-after C that has one. A
+///   dirty run's code lands in the next commit. `None` when never committed
+///   (abandoned work) ⇒ C is its own branch's business only.
 /// - **`base_commit(R)`** — the closest ANCESTOR commit at-or-before R; R's code is
-///   `base_commit(R) + delta`.
+///   `base_commit(R) + delta`. This is exactly what `closest_git_version` records
+///   (HEAD at record time, or the snapshot's own commit when exact — tsk95).
+///
+/// # Resolution is as-of-R, and that makes it IMMUTABLE
+///
+/// `effective` carries the absorbing commit's own timestamp, and [`Self::sees`]
+/// treats C as visible when that commit is YOUNGER than R: work not yet absorbed
+/// when R ran was plausibly still sitting (uncommitted) in the very worktree R
+/// read — a stream is one worktree, and dirty state rides across checkouts. The
+/// payoff is determinism: a new commit changes no existing `(C, R)` answer, only
+/// future readers' — so the cube's frozen seeds can never diverge from a fresh
+/// fact-path read, and no invalidate-on-commit machinery is needed.
 ///
 /// # Why not plain commit ancestry (tsk97's original rule — DISPROVEN)
 ///
@@ -623,13 +634,17 @@ pub fn aggregate_series(
 /// is never a regression and never silently stricter than before.
 #[derive(Debug, Clone, Default)]
 pub struct Visibility {
-    /// capture_id → the first commit containing that capture's code.
-    pub effective: HashMap<i64, String>,
+    /// capture_id → (the first commit containing that capture's code, that
+    /// commit's own timestamp — when the absorption became true).
+    pub effective: HashMap<i64, (String, Timestamp)>,
     /// capture_id → the closest ancestor commit at-or-before that capture.
     pub base: HashMap<i64, String>,
-    /// `(ancestor, descendant)` pairs, resolved from git once per read.
-    /// Ancestor-or-equal; a sha is always its own ancestor.
-    pub ancestor_of: std::collections::HashSet<(String, String)>,
+    /// `(ancestor, descendant) → resolved answer`, from git once per read.
+    /// ABSENT means the pair could not be resolved (commit gone, repo
+    /// unreadable) — which must degrade to VISIBLE, so it is distinct from
+    /// `Some(false)`. Equality is short-circuited in [`Self::sees`], so pairs
+    /// here are always distinct shas.
+    pub ancestor_of: HashMap<(String, String), bool>,
 }
 
 impl Visibility {
@@ -646,12 +661,26 @@ impl Visibility {
         if c.branch == r.branch {
             return true;
         }
-        let (Some(ec), Some(br)) = (self.effective.get(&c.id), self.base.get(&r.id)) else {
+        let (Some((ec, absorbed_at)), Some(br)) = (self.effective.get(&c.id), self.base.get(&r.id))
+        else {
             // Nothing to reason with ⇒ behave as before (visible). Never invent
             // strictness from missing data.
             return true;
         };
-        ec == br || self.ancestor_of.contains(&(ec.clone(), br.clone()))
+        // Absorbed AFTER r ran ⇒ the work was plausibly still sitting dirty in
+        // the worktree r read — visible, and permanently so (as-of-R keeps every
+        // resolved answer immutable; see the type docs).
+        if *absorbed_at > r.captured_at {
+            return true;
+        }
+        if ec == br {
+            return true;
+        }
+        // Absent pair = the resolver couldn't answer ⇒ visible, never stricter.
+        *self
+            .ancestor_of
+            .get(&(ec.clone(), br.clone()))
+            .unwrap_or(&true)
     }
 }
 
@@ -1067,11 +1096,29 @@ pub fn evaluate_formula(left: &[RollupRow], right: &[RollupRow], op: BinaryOp) -
 #[derive(Clone)]
 pub struct MetricEngine {
     facts: SqliteFactStore,
+    /// The ancestry resolver for the partial fold's cross-branch rule
+    /// (tsk102). `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
+    /// — pre-tsk102 behavior, never an error.
+    visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
 }
 
 impl MetricEngine {
     pub fn new(facts: SqliteFactStore) -> Self {
-        Self { facts }
+        Self {
+            facts,
+            visibility: None,
+        }
+    }
+
+    /// Attach the ancestry resolver. **The cube's builder must get the same
+    /// treatment** (`MetricCubeBuilder::with_visibility`) — one side resolved
+    /// with the other blind is how the cube silently diverges from the facts.
+    pub fn with_visibility(
+        mut self,
+        resolver: std::sync::Arc<crate::metric_visibility::VisibilityResolver>,
+    ) -> Self {
+        self.visibility = Some(resolver);
+        self
     }
 
     /// The time series for a measure under an aggregation + filter, optionally
@@ -1193,9 +1240,10 @@ impl MetricEngine {
                     m
                 }
             };
-            // TODO(tsk97): resolve real ancestry here. `blind` inherits
-            // everything earlier into a new branch's seed, which is today's
-            // behavior for single-branch data and never stricter.
+            let visibility = match &self.visibility {
+                Some(resolver) => resolver.for_captures(&captures).await,
+                None => Visibility::blind(),
+            };
             return Ok(tree_state_series(
                 &captures,
                 &facts,
@@ -1203,7 +1251,7 @@ impl MetricEngine {
                 agg,
                 filter,
                 group_by,
-                &Visibility::blind(),
+                &visibility,
             ));
         }
 

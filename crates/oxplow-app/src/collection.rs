@@ -402,6 +402,11 @@ pub struct CollectionService {
     /// open effort at record time only when unambiguous (`find_single_open_for_thread`);
     /// the concurrent case is resolved by the close reconcile + the agent's claim.
     attribution: Arc<SqliteAttributionStore>,
+    /// The metric-ancestry resolver (tsk102) for this service's own
+    /// `tree_state_series` call — built in `new` from the stores it already
+    /// holds, so the wiring can't be forgotten at a call site. Same rule,
+    /// same answers as the engine's resolver (both are pure over the same DB).
+    metric_visibility: Arc<crate::metric_visibility::VisibilityResolver>,
     /// Efforts already nudged about a report-less test run. In-memory:
     /// ephemeral guidance that shouldn't be persisted or survive a restart.
     /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
@@ -437,6 +442,10 @@ impl CollectionService {
         events: EventBus,
         attribution: Arc<SqliteAttributionStore>,
     ) -> Self {
+        let metric_visibility = Arc::new(crate::metric_visibility::VisibilityResolver::new(
+            (*snapshots).clone(),
+            &project_dir,
+        ));
         Self {
             facts,
             nudges,
@@ -448,6 +457,7 @@ impl CollectionService {
             project_dir,
             events,
             attribution,
+            metric_visibility,
             nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_commits: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_coverage: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
@@ -2692,6 +2702,7 @@ impl CollectionService {
                     scanned.entry(cid).or_default().push(path);
                 }
             }
+            let visibility = self.metric_visibility.for_captures(&cap_list).await;
             crate::metric_engine::tree_state_series(
                 &cap_list,
                 &facts,
@@ -2699,7 +2710,7 @@ impl CollectionService {
                 agg,
                 &filter,
                 None,
-                &crate::metric_engine::Visibility::blind(),
+                &visibility,
             )
             .into_iter()
             .map(|p| (p.capture_id, p.value))

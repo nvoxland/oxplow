@@ -372,14 +372,41 @@ welded to collection.
 > (`seed_rows`, one in-memory replay per new branch, written in one
 > transaction), so a new branch **inherits** the pre-fork suite instead of
 > collapsing to what it re-ran. `metric_cube` itself needs **no** branch column:
-> its grain is the capture, and the capture carries the branch. Both the fold
-> and the build pass `Visibility::blind()` today (inherit *everything* earlier —
-> right for main→branch, over-inclusive only for sibling branches, which don't
-> exist yet); **if a real ancestry resolver ever lands, both sides must switch
-> together** or the cube diverges from the facts it must mirror.
+> its grain is the capture, and the capture carries the branch.
 > `the_cube_keeps_each_branchs_state_separate_and_a_new_branch_inherits` pins
 > both halves — it began life as the decline guard that refused multi-branch
 > reads while the build lagged the fold, and was FLIPPED, not deleted.
+>
+> **"Visible to it" is the ancestry rule** (tsk102, `metric_visibility.rs` —
+> read `Visibility`'s type docs in `metric_engine.rs` for the rule itself):
+> same branch always sees; cross-branch, C is visible from R iff C's
+> **absorbing commit** (`effective_commit` — the first same-stream, same-branch
+> commit-stamped snapshot at-or-after C; an exact capture is its own anchor) is
+> an ancestor-or-equal of R's **base** (`closest_git_version` — tsk95's stamp
+> IS the base, which is why capture-level stamping stays). Three load-bearing
+> properties, each pinned by test:
+> - **Never anchor a dirty run to its fork point** — `closest_git_version` is
+>   an ancestor of everything, so ancestry over it cannot separate branches
+>   (tsk97's disproof). The anchor is the commit that ABSORBED the work.
+> - **As-of-R with the absorbing COMMIT's own timestamp**: work not yet
+>   absorbed when R ran reads visible, permanently — which makes every
+>   resolved `(C, R)` answer IMMUTABLE (new commits only affect future
+>   readers), so the cube's frozen seeds can never diverge from a fresh
+>   fact-path read and no invalidate-on-commit machinery exists or is needed.
+> - **Unresolvable ⇒ visible** (missing branch/stamp/sha, unreadable repo) —
+>   never invent strictness from missing data; degraded = pre-tsk102 blind.
+>
+> **One `VisibilityResolver` instance feeds every fold** — the engine's fact
+> fold and the cube's seed share `AppState.metric_visibility`;
+> `CollectionService` builds its own in `new()` (same pure rule, same DB ⇒
+> same answers). One side resolved with the other blind is how the cube
+> silently diverges — `the_cube_seed_and_the_fact_fold_resolve_ancestry_
+> identically` pins the pair. Known, symmetric limitation: cross-branch
+> results flow only through the seed at a branch's FIRST capture, so work
+> merged INTO an already-seeded branch never retro-appears on that branch's
+> points — in either path, by the same immutability that protects the cube.
+> It self-heals as the branch re-runs those tests, and a branch forked after
+> the merge seeds with the merged history.
 >
 > **The watermark** (`metric_cube_state`) exists because "no cube rows for capture
 > N" is otherwise ambiguous: state legitimately empty at N (a real value-0 point)

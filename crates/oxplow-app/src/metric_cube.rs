@@ -45,6 +45,11 @@ use crate::metric_engine::{
 #[derive(Clone)]
 pub struct MetricCubeBuilder {
     facts: SqliteFactStore,
+    /// The SAME ancestry resolver the engine's fact fold uses (tsk102) — the
+    /// seed must compute the exact visibility `tree_state_series` computes, or
+    /// the cube diverges from the facts. `None` ⇒ blind, matching an
+    /// unresolved engine.
+    visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
 }
 
 /// The canonical `dims_key` for a bucket: the promoted dimension values a fact
@@ -64,7 +69,20 @@ fn dims_key(f: &FactRow, promoted: &[String]) -> String {
 
 impl MetricCubeBuilder {
     pub fn new(facts: SqliteFactStore) -> Self {
-        Self { facts }
+        Self {
+            facts,
+            visibility: None,
+        }
+    }
+
+    /// Attach the ancestry resolver — the same instance the engine holds, so
+    /// the seed and the fact fold can never disagree on what a branch sees.
+    pub fn with_visibility(
+        mut self,
+        resolver: std::sync::Arc<crate::metric_visibility::VisibilityResolver>,
+    ) -> Self {
+        self.visibility = Some(resolver);
+        self
     }
 
     /// Build (incrementally) the cube for one measure, across every stream.
@@ -232,18 +250,19 @@ impl MetricCubeBuilder {
             // visible to it — the fact fold's seed (50fd1760), made durable. Skip
             // the seed and a new branch reads as a collapsed suite (only what it
             // re-ran); skip the branch KEY and a feature branch's failure lands on
-            // a point labelled main. `blind()` because that is what the fact fold
-            // passes today — when the git resolver lands (tsk97 item 2), BOTH
-            // sides must switch together or the cube diverges from the facts it
-            // must mirror.
+            // a point labelled main. Visibility comes from the SAME resolver the
+            // fact fold uses (tsk102) — and its as-of-R rule is what lets this
+            // seed be frozen: a later commit changes no answer the seed baked in.
             if !self
                 .facts
                 .cube_branch_seeded(measure.id, stream, c.branch.clone())
                 .await?
             {
-                let seed = self
-                    .seed_rows(measure, scope, caps, c, &Visibility::blind())
-                    .await?;
+                let visibility = match &self.visibility {
+                    Some(resolver) => resolver.for_captures(caps).await,
+                    None => Visibility::blind(),
+                };
+                let seed = self.seed_rows(measure, scope, caps, c, &visibility).await?;
                 self.facts
                     .seed_live_state(measure.id, stream, c.branch.clone(), seed)
                     .await?;
@@ -707,6 +726,13 @@ mod tests {
 
     /// A migrated in-memory store with streams 1 + 2 so capture FKs resolve.
     async fn fixture() -> (MetricEngine, SqliteFactStore, MetricCubeBuilder) {
+        let (engine, facts, builder, _db) = fixture_full().await;
+        (engine, facts, builder)
+    }
+
+    /// [`fixture`] plus the `Database` handle, for tests that need sibling
+    /// stores (snapshots) on the same in-memory DB.
+    async fn fixture_full() -> (MetricEngine, SqliteFactStore, MetricCubeBuilder, Database) {
         use oxplow_domain::stores::StreamStore;
         let db = Database::in_memory();
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
@@ -735,11 +761,12 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let facts = SqliteFactStore::new(db);
+        let facts = SqliteFactStore::new(db.clone());
         (
             MetricEngine::new(facts.clone()),
             facts.clone(),
             MetricCubeBuilder::new(facts),
+            db,
         )
     }
 
@@ -1233,6 +1260,101 @@ mod tests {
             2,
             "only the two new captures fold — the branch states are durable, not re-seeded"
         );
+        assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn the_cube_seed_and_the_fact_fold_resolve_ancestry_identically() {
+        // tsk102, end-to-end: with the resolver attached to BOTH sides, a
+        // sibling branch's absorbed work stays out of a new branch's seed — in
+        // the facts AND in the cube, landing on the same numbers.
+        //
+        // History: main asserts S=1 (exact at commit A). feat-a re-runs S=5
+        // (dirty at base A, later ABSORBED by its commit FA). feat-b (forked
+        // at A) runs T=3. feat-b's point = seed {S:1, from main} + {T:3} = 4.
+        // Blind visibility reads 8 — feat-a's S=5 leaking in — so 4 here is
+        // the proof the resolver actually engaged on both sides.
+        let (engine, facts, builder, db) = fixture_full().await;
+        let snapshots = oxplow_db::SqliteSnapshotStore::new(db);
+
+        struct TwoBranchDag;
+        impl crate::metric_visibility::AncestryOracle for TwoBranchDag {
+            fn is_ancestor_or_equal(&mut self, anc: &str, desc: &str) -> Option<bool> {
+                Some(anc == desc || (anc == "A" && desc == "FA"))
+            }
+            fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
+                match sha {
+                    "A" => Some(ts("2026-06-30T09:00:00Z")),
+                    // Absorbed BEFORE feat-b's run below ⇒ the strict answer
+                    // (FA ∉ ancestors(A)) applies to that reader.
+                    "FA" => Some(ts("2026-06-30T11:30:00Z")),
+                    _ => None,
+                }
+            }
+        }
+        let resolver =
+            std::sync::Arc::new(crate::metric_visibility::VisibilityResolver::with_oracle(
+                snapshots.clone(),
+                Box::new(TwoBranchDag),
+            ));
+        let engine = engine.with_visibility(resolver.clone());
+        let builder = builder.with_visibility(resolver);
+
+        // The stamped snapshot that absorbs feat-a's dirty run: same stream,
+        // same branch, created after it. (Its `created_at` is now() — later
+        // than every capture below, which is all the matching needs; the
+        // as-of comparisons use the ORACLE's commit times above.)
+        let snap = snapshots
+            .create_snapshot(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        snapshots
+            .set_snapshot_git_commit(snap, "FA".into())
+            .await
+            .unwrap();
+        snapshots
+            .set_snapshot_git_branch(snap, "feat-a".into())
+            .await
+            .unwrap();
+
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        let on = |branch: &str, at: &str, exact: bool| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            branch: Some(branch.into()),
+            closest_git_version: Some("A".into()),
+            git_version_exact: exact,
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        facts
+            .record_facts(
+                on("main", "2026-06-30T10:00:00Z", true),
+                vec![case(m, "S", 1.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                on("feat-a", "2026-06-30T11:00:00Z", false),
+                vec![case(m, "S", 5.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                on("feat-b", "2026-06-30T12:00:00Z", false),
+                vec![case(m, "T", 3.0)],
+            )
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![1.0, 5.0, 4.0],
+            "feat-b inherits main's pre-fork S=1, never sibling feat-a's S=5"
+        );
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 3);
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
     }
 

@@ -116,12 +116,12 @@ loading spinner) by:
   the stream, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.git_commit`/`git_branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
-  points for metric ancestry** (tsk97): a dirty test run's code is
-  placed by the *next* commit-stamped snapshot — the commit that
-  absorbed it, not the fork point its `closest_git_version` names.
-  The metric fold partitions per `(stream, branch)` and relies on
-  these anchors for any future cross-branch visibility rule — see
-  `.context/metrics.md`.
+  points for metric ancestry** (tsk97/tsk102): a dirty test run's code
+  is placed by the *next* same-branch commit-stamped snapshot — the
+  commit that absorbed it, not the fork point its `closest_git_version`
+  names. The metric fold partitions per `(stream, branch)` and its
+  cross-branch visibility rule (`metric_visibility.rs`) resolves from
+  these anchors — see `.context/metrics.md`.
 
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.

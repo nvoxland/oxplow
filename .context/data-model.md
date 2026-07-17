@@ -1038,7 +1038,8 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
 - **`metric_live_fact`** — the fold's live state made durable, keyed by
   `(measure, stream, branch, producer, subject_key)` — one partition per branch,
   mirroring the fact fold (V63); a new branch's partition is SEEDED from the
-  history visible at its first capture. `branch` is `''` for a branch-less
+  history visible at its first capture ("visible" = the ancestry rule,
+  tsk102/V65 — see `.context/metrics.md`). `branch` is `''` for a branch-less
   capture (a WITHOUT ROWID PK can't hold NULL; the `''` mapping lives in the
   store layer only). Sized by live subjects, not history.
 - **`metric_cube_state`** — the watermark, per `(measure, stream, branch)`
