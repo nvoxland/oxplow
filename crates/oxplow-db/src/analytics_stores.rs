@@ -1016,6 +1016,10 @@ pub struct FileSnapshot {
 /// these (tsk102).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StampedSnapshot {
+    /// The snapshot row id — captures reference it (`capture.snapshot_id`),
+    /// and a capture's OWN snapshot being stamped is the primary anchor (the
+    /// re-stamp flow leaves `created_at` BEFORE the captures that ran on it).
+    pub id: i64,
     pub stream_id: i64,
     pub branch: Option<String>,
     pub commit: String,
@@ -1254,13 +1258,13 @@ impl SqliteSnapshotStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT stream_id, git_branch, git_commit, created_at
+                    "SELECT id, stream_id, git_branch, git_commit, created_at
                        FROM snapshot
                       WHERE git_commit IS NOT NULL
                       ORDER BY created_at ASC, id ASC",
                 )?;
                 let rows = stmt.query_map([], |row| {
-                    let created_at: String = row.get(3)?;
+                    let created_at: String = row.get(4)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1269,9 +1273,10 @@ impl SqliteSnapshotStore {
                         )
                     };
                     Ok(StampedSnapshot {
-                        stream_id: row.get(0)?,
-                        branch: row.get(1)?,
-                        commit: row.get(2)?,
+                        id: row.get(0)?,
+                        stream_id: row.get(1)?,
+                        branch: row.get(2)?,
+                        commit: row.get(3)?,
                         created_at: string_to_ts(&created_at).map_err(map_err)?,
                     })
                 })?;

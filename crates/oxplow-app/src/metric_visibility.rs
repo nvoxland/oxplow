@@ -72,28 +72,40 @@ pub fn resolve(
             c.closest_git_version
                 .as_ref()
                 .map(|sha| (sha.clone(), c.captured_at))
-        } else if c.branch.is_some() {
-            // Dirty ⇒ the work lands in the next same-stream, same-branch
-            // commit. Timestamped with the COMMIT's own time, not the
-            // snapshot row's — a re-stamp of an old row must not claim
-            // absorption happened before the commit existed (that timestamp
-            // is what keeps every resolved (C, R) answer immutable).
-            stamped
-                .iter()
-                .find(|s| {
+        } else {
+            // The capture's OWN snapshot being stamped is the primary anchor —
+            // and the ROUTINE one (measured 77/77 on the real DB): the final
+            // green run sits between the last snapshot and the commit, whose
+            // re-stamp lands on that snapshot row, so its `created_at`
+            // PREDATES the capture and a time-window search misses it. The
+            // stamp means "this row IS that commit's tree", i.e. exactly the
+            // tree the capture ran on. Branch is deliberately not checked
+            // here: a clean checkout can re-stamp the row under another
+            // branch's name, but the TREE identity still holds.
+            let own = c.snapshot_id.and_then(|sid| {
+                stamped
+                    .iter()
+                    .find(|s| s.id == sid && s.stream_id == c.stream_id)
+            });
+            // Fallback: the work lands in the next same-stream, same-branch
+            // commit at-or-after the capture.
+            let absorbing = own.or_else(|| {
+                c.branch.as_ref()?;
+                stamped.iter().find(|s| {
                     s.stream_id == c.stream_id
                         && s.branch == c.branch
                         && s.created_at >= c.captured_at
                 })
-                .and_then(|s| {
-                    oracle
-                        .commit_time(&s.commit)
-                        .map(|at| (s.commit.clone(), at))
-                })
-        } else {
-            // No branch recorded (pre-stamping vintage) ⇒ nothing to anchor
-            // by ⇒ stays unresolved ⇒ visible.
-            None
+            });
+            // Timestamped with the COMMIT's own time, not the snapshot row's —
+            // a re-stamp of an old row must not claim absorption happened
+            // before the commit existed (that timestamp is what keeps every
+            // resolved (C, R) answer immutable).
+            absorbing.and_then(|s| {
+                oracle
+                    .commit_time(&s.commit)
+                    .map(|at| (s.commit.clone(), at))
+            })
         };
         if let Some(e) = eff {
             vis.effective.insert(c.id, e);
@@ -299,6 +311,7 @@ mod tests {
 
     fn stamp(branch: &str, commit: &str, at_secs: i64) -> StampedSnapshot {
         StampedSnapshot {
+            id: 100 + at_secs, // unique, disjoint from the ids tests pick
             stream_id: 1,
             branch: Some(branch.into()),
             commit: commit.into(),
@@ -416,6 +429,36 @@ mod tests {
             vis.effective.get(&1),
             Some(&("FA".to_string(), ts(30))),
             "effective = the absorbing commit and ITS time, never the base"
+        );
+    }
+
+    #[test]
+    fn a_capture_whose_own_snapshot_was_restamped_anchors_to_that_commit() {
+        // THE routine flow, measured on the real DB (77/77 own-snapshot anchors
+        // look like this): edit → snapshot row s → final green test run (the
+        // capture, carrying snapshot_id = s) → commit, which RE-STAMPS s because
+        // the worktree didn't change. s.created_at predates the capture, so a
+        // time-window search ("first stamp at-or-after the capture") misses it
+        // and anchors one commit too late — strict-wrong: a branch forked at
+        // the re-stamped commit would fail to inherit the run made just before
+        // it. The capture's OWN snapshot is the tree it tested; its stamp wins.
+        let mut c = cap(1, Some("main"), 20, Some("A"));
+        c.snapshot_id = Some(7);
+        let own = StampedSnapshot {
+            id: 7,
+            stream_id: 1,
+            branch: Some("main".into()),
+            commit: "A".into(),
+            created_at: ts(15), // BEFORE the capture — the re-stamp shape
+        };
+        let mut all = stamps();
+        all.insert(1, own); // keep oldest-first order
+        let vis = resolve(&[c], &all, &mut dag());
+        assert_eq!(
+            vis.effective.get(&1),
+            Some(&("A".to_string(), ts(10))),
+            "the OWN snapshot's commit at that commit's own time — a time-window \
+             search would (wrongly) anchor to the next main stamp, B"
         );
     }
 
