@@ -1283,6 +1283,15 @@ impl SqliteSnapshotStore {
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
+            // Sort AFTER parsing: `snapshot.created_at` predates canonical_ts,
+            // so its TEXT values mix fraction widths and a lexicographic
+            // ORDER BY can invert same-second neighbors ("…20.5Z" > "…20.51Z")
+            // — and "oldest first" is load-bearing for the resolver's
+            // first-stamp-at-or-after search (tsk103 review).
+            .map(|mut rows| {
+                rows.sort_by_key(|r| (r.created_at, r.id));
+                rows
+            })
     }
 
     /// Aggregate counts of created/modified/deleted files in a

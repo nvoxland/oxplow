@@ -162,6 +162,11 @@ impl MetricCubeBuilder {
         promoted: &[String],
     ) -> Result<usize, DomainError> {
         let todo = self.uncubed(measure, stream, caps).await?;
+        if todo.is_empty() {
+            return Ok(0);
+        }
+        let epoch = self.facts.cube_epoch().await?;
+        let mut folded = 0;
         for c in &todo {
             let own = self
                 .facts
@@ -171,7 +176,8 @@ impl MetricCubeBuilder {
             // Complete scope needs no branch STATE (each capture restates the
             // whole population), but the watermark row is per branch, so the
             // capture still advances — and, first time, creates — its own.
-            self.facts
+            let written = self
+                .facts
                 .write_cube_rows(
                     measure.id,
                     stream,
@@ -179,10 +185,19 @@ impl MetricCubeBuilder {
                     c.id,
                     c.captured_at,
                     rows,
+                    epoch,
                 )
                 .await?;
+            if !written {
+                // An invalidation (prune, grain/scope change) landed mid-pass:
+                // this todo-list predates the wipe. Abandon; the next build
+                // folds from the post-wipe watermark. Slow, never wrong.
+                tracing::debug!(measure = %measure.key, "cube build fenced by an invalidation; abandoning pass");
+                return Ok(folded);
+            }
+            folded += 1;
         }
-        Ok(todo.len())
+        Ok(folded)
     }
 
     /// The captures of `caps` this stream has not cubed yet — strictly after the
@@ -245,6 +260,11 @@ impl MetricCubeBuilder {
         promoted: &[String],
     ) -> Result<usize, DomainError> {
         let todo = self.uncubed(measure, stream, caps).await?;
+        if todo.is_empty() {
+            return Ok(0);
+        }
+        let epoch = self.facts.cube_epoch().await?;
+        let mut folded = 0;
         for c in &todo {
             // A branch's FIRST capture seeds its partition with the history
             // visible to it — the fact fold's seed (50fd1760), made durable. Skip
@@ -303,7 +323,8 @@ impl MetricCubeBuilder {
                 .live_facts(measure.id, stream, c.branch.clone())
                 .await?;
             let rows = cube_rows(&live, promoted);
-            self.facts
+            let written = self
+                .facts
                 .write_cube_rows(
                     measure.id,
                     stream,
@@ -311,10 +332,20 @@ impl MetricCubeBuilder {
                     c.id,
                     c.captured_at,
                     rows,
+                    epoch,
                 )
                 .await?;
+            if !written {
+                // Fenced: an invalidation landed mid-pass and this todo-list
+                // predates the wipe (its live-state applies above went to
+                // wiped partitions — harmless, the next pass re-seeds).
+                // Abandon; slow, never wrong.
+                tracing::debug!(measure = %measure.key, "cube build fenced by an invalidation; abandoning pass");
+                return Ok(folded);
+            }
+            folded += 1;
         }
-        Ok(todo.len())
+        Ok(folded)
     }
 
     /// The live set a NEW branch's partition starts from — the fold's seed,
@@ -355,10 +386,14 @@ impl MetricCubeBuilder {
             by_capture.entry(f.capture_id).or_default().push(f);
         }
         let mut scanned: HashMap<i64, Vec<String>> = HashMap::new();
-        if matches!(scope, CaptureScope::PerPath) {
-            for (cap, path) in self.facts.scanned_paths_for_captures(ids).await? {
-                scanned.entry(cap).or_default().push(path);
+        match scope {
+            CaptureScope::PerPath => {
+                for (cap, path) in self.facts.scanned_paths_for_captures(ids).await? {
+                    scanned.entry(cap).or_default().push(path);
+                }
             }
+            // Listed, not wildcarded — a fourth scope must decide (tsk103).
+            CaptureScope::PerSubject | CaptureScope::Complete => {}
         }
         let mut tree: HashMap<(String, String), Vec<i64>> = HashMap::new();
         for e in earlier {
@@ -399,7 +434,9 @@ impl MetricCubeBuilder {
                 .into_iter()
                 .map(|(_, path)| path)
                 .collect(),
-            _ => Vec::new(),
+            // Complete never reaches the state fold (build_measure dispatches
+            // it) — listed, not wildcarded, so a fourth scope must decide.
+            CaptureScope::PerSubject | CaptureScope::Complete => Vec::new(),
         };
         let own: Vec<&FactRow> = own.iter().collect();
         Ok(restated_keys(scope, &own, scanned))
@@ -415,8 +452,12 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
         // whose count dropped to 0 emits no fact but is still scanned, and a
         // deletion IS a scan result.
         CaptureScope::PerPath => scanned,
-        // A test run restates exactly the cases it executed.
-        _ => own.iter().filter_map(|f| f.subject_ref.clone()).collect(),
+        // A test run restates exactly the cases it executed. (Complete is
+        // unreachable — dispatched to its own build rule — but listed so a
+        // fourth scope is a compile error here, not a silent misfold; tsk103.)
+        CaptureScope::PerSubject | CaptureScope::Complete => {
+            own.iter().filter_map(|f| f.subject_ref.clone()).collect()
+        }
     };
     // A capture may also carry PATH-LESS facts (an agent-asserted repo scalar).
     // No path means the fold can't place or supersede them, so they keep the
@@ -561,7 +602,13 @@ pub async fn cube_series(
 
     // --- serve ---
     let rows = facts.cube_rows_for_measure(measure.id, stream).await?;
-    let mut kept: Vec<(&oxplow_db::CubeReadRow, Option<String>)> = Vec::new();
+    // Buckets that pass the FILTER. The group dim is deliberately NOT part of
+    // this cut — the fact path derives its capture list from filter-matching
+    // facts alone, so a producer whose matching facts carry no group dim must
+    // still keep its captures on the axis (its points then plot the OTHER
+    // producers' grouped live state, exactly as `tree_state_series` does).
+    // Group placement is decided per bucket below, at emit time.
+    let mut kept: Vec<&oxplow_db::CubeReadRow> = Vec::new();
     for r in &rows {
         let dims: BTreeMap<String, String> = serde_json::from_str(&r.dims_key).unwrap_or_default();
         let hit = |key: &str, want: &str| dims.get(key).map(String::as_str) == Some(want);
@@ -575,33 +622,38 @@ pub async fn cube_series(
                 continue;
             }
         }
-        let group = match group_by {
-            // A bucket missing the slice dim can't be placed on the axis —
-            // `tree_state_series` drops it, so this must too.
-            Some(dim) => match dims.get(dim) {
-                Some(g) => Some(g.clone()),
-                None => continue,
-            },
-            // Ungrouped merges ALL matching buckets, the null-dim one included.
-            None => None,
-        };
-        kept.push((r, group));
+        kept.push(r);
     }
 
     // The producers the FILTER narrows to — the fact path derives these from
     // filter-matching facts, and a fact is live at its own capture, so "ever
     // emitted a matching fact" ≡ "ever had a matching bucket".
-    let narrowed: BTreeSet<&str> = kept.iter().map(|(r, _)| r.producer.as_str()).collect();
+    let narrowed: BTreeSet<&str> = kept.iter().map(|r| r.producer.as_str()).collect();
     if narrowed.is_empty() {
         return Ok(None);
     }
 
     let mut by_capture: HashMap<i64, BTreeMap<Option<String>, Cell>> = HashMap::new();
-    for (r, group) in &kept {
+    for r in &kept {
+        let group = match group_by {
+            // A bucket missing the slice dim can't be placed on the axis —
+            // `tree_state_series` drops it from the buckets, so this must too
+            // (the row still counted for `narrowed` above).
+            Some(dim) => {
+                let dims: BTreeMap<String, String> =
+                    serde_json::from_str(&r.dims_key).unwrap_or_default();
+                match dims.get(dim) {
+                    Some(g) => Some(g.clone()),
+                    None => continue,
+                }
+            }
+            // Ungrouped merges ALL matching buckets, the null-dim one included.
+            None => None,
+        };
         by_capture
             .entry(r.capture_id)
             .or_default()
-            .entry(group.clone())
+            .entry(group)
             .or_default()
             .merge(&Cell {
                 count: r.fact_count,
@@ -1277,17 +1329,25 @@ mod tests {
         let (engine, facts, builder, db) = fixture_full().await;
         let snapshots = oxplow_db::SqliteSnapshotStore::new(db);
 
-        struct TwoBranchDag;
+        // Times are NOW-relative because the absorbing stamp row is created
+        // with now(): absorption = max(commit time, stamp-row creation), so
+        // the reader that must get the STRICT answer sits AFTER both, and the
+        // earlier captures sit before.
+        let now = Timestamp::now().unix_ms();
+        let t = |offset_min: i64| Timestamp::from_unix_ms(now + offset_min * 60_000);
+
+        struct TwoBranchDag {
+            a: Timestamp,
+            fa: Timestamp,
+        }
         impl crate::metric_visibility::AncestryOracle for TwoBranchDag {
             fn is_ancestor_or_equal(&mut self, anc: &str, desc: &str) -> Option<bool> {
                 Some(anc == desc || (anc == "A" && desc == "FA"))
             }
             fn commit_time(&mut self, sha: &str) -> Option<Timestamp> {
                 match sha {
-                    "A" => Some(ts("2026-06-30T09:00:00Z")),
-                    // Absorbed BEFORE feat-b's run below ⇒ the strict answer
-                    // (FA ∉ ancestors(A)) applies to that reader.
-                    "FA" => Some(ts("2026-06-30T11:30:00Z")),
+                    "A" => Some(self.a),
+                    "FA" => Some(self.fa),
                     _ => None,
                 }
             }
@@ -1295,15 +1355,16 @@ mod tests {
         let resolver =
             std::sync::Arc::new(crate::metric_visibility::VisibilityResolver::with_oracle(
                 snapshots.clone(),
-                Box::new(TwoBranchDag),
+                Box::new(TwoBranchDag {
+                    a: t(-180),
+                    fa: t(-30),
+                }),
             ));
         let engine = engine.with_visibility(resolver.clone());
         let builder = builder.with_visibility(resolver);
 
         // The stamped snapshot that absorbs feat-a's dirty run: same stream,
-        // same branch, created after it. (Its `created_at` is now() — later
-        // than every capture below, which is all the matching needs; the
-        // as-of comparisons use the ORACLE's commit times above.)
+        // same branch, created now — before the feat-b reader below at t(+60).
         let snap = snapshots
             .create_snapshot(oxplow_domain::StreamId::new(1))
             .await
@@ -1318,32 +1379,24 @@ mod tests {
             .unwrap();
 
         let m = per_subject_measure(&facts, "acme.test_case").await;
-        let on = |branch: &str, at: &str, exact: bool| NewMetricCapture {
-            captured_at: Some(ts(at)),
+        let on = |branch: &str, at: Timestamp, exact: bool| NewMetricCapture {
+            captured_at: Some(at),
             branch: Some(branch.into()),
             closest_git_version: Some("A".into()),
             git_version_exact: exact,
             ..NewMetricCapture::done(1, "tests", "builtin")
         };
         facts
-            .record_facts(
-                on("main", "2026-06-30T10:00:00Z", true),
-                vec![case(m, "S", 1.0)],
-            )
+            .record_facts(on("main", t(-120), true), vec![case(m, "S", 1.0)])
             .await
             .unwrap();
         facts
-            .record_facts(
-                on("feat-a", "2026-06-30T11:00:00Z", false),
-                vec![case(m, "S", 5.0)],
-            )
+            .record_facts(on("feat-a", t(-60), false), vec![case(m, "S", 5.0)])
             .await
             .unwrap();
+        // The reader: AFTER the stamp row and FA's commit time ⇒ strict.
         facts
-            .record_facts(
-                on("feat-b", "2026-06-30T12:00:00Z", false),
-                vec![case(m, "T", 3.0)],
-            )
+            .record_facts(on("feat-b", t(60), false), vec![case(m, "T", 3.0)])
             .await
             .unwrap();
         let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
@@ -1455,6 +1508,224 @@ mod tests {
         );
         builder.build_measure("acme.ast_hit").await.unwrap();
         assert_cube_answers(&engine, &facts, "acme.ast_hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn the_cube_serves_a_per_path_fold_evicting_a_scanned_but_silent_file() {
+        // tsk103 review: the per-path build rule was covered only by the
+        // manual harness. The property that distinguishes per-path from
+        // per-subject is pinned here: eviction comes from the SNAPSHOT's
+        // scanned set, not the emitted facts — a file whose count dropped to
+        // 0 emits nothing but was scanned, and its old facts must go. A build
+        // that evicted from emitted facts would keep a.rs=3 alive and read 5.
+        let (engine, facts, builder, db) = fixture_full().await;
+        let snapshots = oxplow_db::SqliteSnapshotStore::new(db);
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                capture_scope: "per-path".into(),
+                ..oxplow_db::NewMeasure::new("acme.hit", "Hits")
+            })
+            .await
+            .unwrap();
+        let file = |path: &str, snap: i64| oxplow_db::FileSnapshot {
+            id: 0,
+            stream_id: oxplow_domain::StreamId::new(1),
+            path: path.into(),
+            blob_hash: Some("h".into()),
+            size_bytes: 1,
+            captured_at: ts("2026-06-30T09:00:00Z"),
+            storage: oxplow_db::SnapshotStorage::Oxplow,
+            snapshot_id: Some(snap),
+            mtime_ms: None,
+        };
+        let snap1 = snapshots
+            .create_snapshot(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        for p in ["a.rs", "b.rs"] {
+            snapshots.capture(file(p, snap1)).await.unwrap();
+        }
+        let snap2 = snapshots
+            .create_snapshot(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap();
+        snapshots.capture(file("a.rs", snap2)).await.unwrap();
+
+        let scan = |snap: i64, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            snapshot_id: Some(snap),
+            ..NewMetricCapture::done(1, "gauge", "builtin")
+        };
+        let hit = |path: &str, v: f64| NewFact {
+            path: Some(path.into()),
+            ..NewFact::new(m, v)
+        };
+        facts
+            .record_facts(
+                scan(snap1, "2026-06-30T10:00:00Z"),
+                vec![hit("a.rs", 3.0), hit("b.rs", 2.0)],
+            )
+            .await
+            .unwrap();
+        // The second scan RESTATES a.rs (it's in snap2) but emits nothing for
+        // it — the count dropped to 0. b.rs is untouched and stays live.
+        facts
+            .record_facts(scan(snap2, "2026-06-30T11:00:00Z"), vec![])
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.hits", "acme.hit", "sum").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![5.0, 2.0],
+            "a.rs evicted by the scan despite emitting no fact; b.rs lives on"
+        );
+        assert_eq!(builder.build_measure("acme.hit").await.unwrap(), 2);
+        assert_cube_answers(&engine, &facts, "acme.hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_superseded_repo_scalar_reads_zero_through_a_filter_on_both_paths() {
+        // tsk103 review. "Latest assertion per producer wins" must be
+        // FILTER-INDEPENDENT: a newer path-less assertion supersedes the older
+        // one no matter which spec's lens you read through. The fact fold used
+        // to decide the scalar eviction from the FILTERED fact list, so a
+        // warning-severity assertion failed to supersede an error-severity one
+        // under an error-filtered spec ([5, 5]) while the cube's live state —
+        // whose eviction is unfiltered by design — read [5, 0]. Divergence,
+        // silent. The unfiltered eviction is the correct semantic on both.
+        let (engine, facts, builder) = fixture().await;
+        facts
+            .upsert_dimension(oxplow_db::NewDimension {
+                promoted: true,
+                ..oxplow_db::NewDimension::categorical("oxplow.severity", "Severity")
+            })
+            .await
+            .unwrap();
+        let m = per_subject_measure(&facts, "acme.assertion").await;
+        let scalar = |sev: &str, v: f64| NewFact {
+            severity: Some(sev.into()),
+            ..NewFact::new(m, v)
+        };
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![scalar("error", 5.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T11:00:00Z"),
+                vec![scalar("warning", 7.0)],
+            )
+            .await
+            .unwrap();
+        let mut s = NewMetricSpec::base("acme.errors", "Errors", "acme.assertion", "sum");
+        s.filter_json = Some(r#"{"severity":"error"}"#.into());
+        facts.upsert_spec(s).await.unwrap();
+        let spec = facts.get_spec("acme.errors").await.unwrap().unwrap();
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![5.0, 0.0],
+            "the warning assertion SUPERSEDES the error one even under an \
+             error filter — eviction is filter-independent"
+        );
+        builder.build_measure("acme.assertion").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.assertion", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_grouped_read_keeps_captures_whose_producer_carries_no_group_dim() {
+        // tsk103 review. The fact path derives its capture list from producers
+        // with FILTER-matching facts — group_by plays no part. The cube's
+        // grouped arm used to derive `narrowed` AFTER dropping buckets that
+        // lack the group dim, so a producer whose facts carry no group dim
+        // lost its captures entirely: the fact path plots a grouped point at
+        // q's capture (from p's live facts), the cube plotted nothing there.
+        let (engine, facts, builder) = fixture().await;
+        facts
+            .upsert_dimension(oxplow_db::NewDimension {
+                promoted: true,
+                ..oxplow_db::NewDimension::categorical("oxplow.rule", "Rule")
+            })
+            .await
+            .unwrap();
+        let m = per_subject_measure(&facts, "acme.ast_hit").await;
+        let by = |producer: &str, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            ..NewMetricCapture::done(1, producer, "builtin")
+        };
+        facts
+            .record_facts(
+                by("p", "2026-06-30T10:00:00Z"),
+                vec![NewFact {
+                    rule: Some("unwrap_expect".into()),
+                    ..case(m, "a.rs", 2.0)
+                }],
+            )
+            .await
+            .unwrap();
+        // q's fact matches the (empty) filter but carries NO rule dim.
+        facts
+            .record_facts(by("q", "2026-06-30T11:00:00Z"), vec![case(m, "x", 9.0)])
+            .await
+            .unwrap();
+
+        let filter = FactFilter::from_json("{}").unwrap();
+        // The ORACLE, grouped — taken before the build.
+        let fact_series = engine
+            .series(
+                "acme.ast_hit",
+                Aggregation::Sum,
+                &filter,
+                Some("oxplow.rule"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            fact_series
+                .iter()
+                .map(|p| (p.group.as_deref().unwrap_or(""), p.value))
+                .collect::<Vec<_>>(),
+            vec![("unwrap_expect", 2.0), ("unwrap_expect", 2.0)],
+            "two points: p's capture AND q's capture both plot the live \
+             unwrap_expect bucket"
+        );
+        builder.build_measure("acme.ast_hit").await.unwrap();
+        let measure = facts.get_measure("acme.ast_hit").await.unwrap().unwrap();
+        let served = cube_series(
+            &facts,
+            &measure,
+            CaptureScope::PerSubject,
+            Aggregation::Sum,
+            &filter,
+            Some("oxplow.rule"),
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("the cube must answer the grouped read");
+        assert_eq!(
+            served, fact_series,
+            "grouped cube-served must equal fact-served"
+        );
+        assert_eq!(
+            engine
+                .series(
+                    "acme.ast_hit",
+                    Aggregation::Sum,
+                    &filter,
+                    Some("oxplow.rule")
+                )
+                .await
+                .unwrap(),
+            fact_series,
+            "the wired grouped read lands in the same place"
+        );
     }
 
     #[tokio::test]

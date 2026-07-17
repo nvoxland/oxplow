@@ -13,9 +13,10 @@
 //!     collapses to one number ([`range_value`]): semi-additive snapshots take the
 //!     LAST capture; additive events SUM the captures; ratios re-derive Σnum/Σden.
 //!
-//! Built additively (no behaviour change): the producers (tsk14) feed facts, the
-//! read surface (tsk16) exposes these results. Materialisation into a series cache
-//! + derived-metric formulas are follow-ups under tsk15.
+//! The producers (tsk14) feed facts; the read surface (tsk16) exposes these
+//! results; derived-metric formulas evaluate through [`evaluate_formula`]; and
+//! the materialized fold lives in `metric_cube` (tsk96) — this engine's fact
+//! path remains the ORACLE the cube is verified against.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -90,9 +91,10 @@ fn parse_temporal(measure_key: &str, temporal_semantics: &str) -> Result<Tempora
     })
 }
 
-/// `complete` | `per-path` — what ONE capture RESTATES (V54, tsk41). A **separate
-/// axis** from [`Temporal`]: additivity says how values combine over time,
-/// completeness says how much of the population a single capture speaks for.
+/// `complete` | `per-path` | `per-subject` — what ONE capture RESTATES (V54
+/// tsk41; per-subject V55 tsk43). A **separate axis** from [`Temporal`]:
+/// additivity says how values combine over time, completeness says how much of
+/// the population a single capture speaks for.
 ///
 /// The two compose. A tree gauge measure is `semi-additive` (last value per file
 /// wins) AND `per-path` (a capture only speaks for the files in its snapshot).
@@ -102,8 +104,9 @@ fn parse_temporal(measure_key: &str, temporal_semantics: &str) -> Result<Tempora
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CaptureScope {
     /// Every capture restates the whole population — a coverage report, a clippy
-    /// run, a test run, a whole-tree duplication scan. The temporal fold applies
-    /// directly to the per-capture series.
+    /// run, a whole-tree duplication scan. (NOT a test run — those went
+    /// per-subject in V55.) The temporal fold applies directly to the
+    /// per-capture series.
     Complete,
     /// A capture restates only **the paths in its snapshot** (a tree gauge over a
     /// per-commit delta). The value must first be folded to the latest capture per
@@ -131,9 +134,13 @@ impl CaptureScope {
     }
 
     /// True when a capture speaks only for part of the population, so the value must
-    /// be folded across captures before it's aggregated.
+    /// be folded across captures before it's aggregated. Exhaustive so a future
+    /// fourth scope must DECIDE, not inherit complete-read semantics silently.
     pub(crate) fn is_partial(self) -> bool {
-        matches!(self, Self::PerPath | Self::PerSubject)
+        match self {
+            Self::PerPath | Self::PerSubject => true,
+            Self::Complete => false,
+        }
     }
 }
 
@@ -559,32 +566,6 @@ pub fn aggregate_series(
         .collect()
 }
 
-/// The trend for a **`per-path`** measure: the repo-wide value **as of each
-/// capture** (V54, tsk41).
-///
-/// A per-path capture restates only the paths it scanned, so [`aggregate_series`]
-/// (one point per capture, over that capture's own facts) would plot *delta-sized*
-/// values — "8 files' worth of unsafe blocks" — not the repo. Instead we replay the
-/// captures oldest-first, keeping the folded state: at each capture, **evict every
-/// path it restated** (scoped to that capture's producer) and **insert whatever
-/// facts it emitted** for them, then aggregate the whole live state into the point.
-///
-/// This is the same fold `latest_tree_facts` does in SQL, run incrementally so each
-/// capture yields a point. It falls out of it that:
-/// - a file whose count dropped to 0 emits no fact ⇒ evicted, nothing re-inserted;
-/// - a **deleted** path is in `scanned` (a deletion IS a scan result) ⇒ evicted;
-/// - symbol-grained / many-facts-per-path measures are replaced *wholesale per file*.
-///
-/// `captures` must be oldest-first and **include empty captures** (a scan that found
-/// nothing still restates its paths). `scanned` maps capture_id → the paths it
-/// restated.
-///
-/// Cost is O(captures × live facts) — the aggregate is recomputed per point. That's
-/// fine for a chart read; the HEADLINE never comes through here (it's the last point
-/// of this series, or the single-shot SQL fold), so the hot path stays cheap.
-/// The state key for a fact with no path/subject — an agent-asserted repo scalar
-/// (`record_metric` with no subject). Not a real path, so it can never collide with
-/// one (paths are never empty and never contain a NUL).
 /// Which earlier captures a reading capture may fold in — the ancestry rule
 /// (tsk97), as a PURE lookup so the fold stays unit-testable and never shells out
 /// to git per capture per read. A git-backed resolver populates it once per read
@@ -688,6 +669,9 @@ impl Visibility {
 /// currently contributes.
 type Tree<'a> = HashMap<(String, String), Vec<&'a FactRow>>;
 
+/// The state key for a fact with no path/subject — an agent-asserted repo scalar
+/// (`record_metric` with no subject). Not a real path, so it can never collide with
+/// one (paths are never empty and never contain a NUL).
 pub(crate) const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
 
 /// The path a fact is folded under, or `None` when it carries no location at all
@@ -696,6 +680,30 @@ pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
     f.path.as_deref().or(f.subject_ref.as_deref())
 }
 
+/// The trend for a **partial-scope** measure: the repo-wide value **as of each
+/// capture** (V54, tsk41).
+///
+/// A partial capture restates only what it scanned/ran, so [`aggregate_series`]
+/// (one point per capture, over that capture's own facts) would plot *delta-sized*
+/// values — "8 files' worth of unsafe blocks" — not the repo. Instead we replay the
+/// captures oldest-first, keeping the folded state per `(stream, branch)`: at each
+/// capture, **evict every key it restated** (scoped to that capture's producer)
+/// and **insert whatever facts it emitted**, then aggregate that partition's live
+/// state into the point.
+///
+/// This is the same fold `latest_tree_facts` does in SQL, run incrementally so each
+/// capture yields a point. It falls out of it that:
+/// - a file whose count dropped to 0 emits no fact ⇒ evicted, nothing re-inserted;
+/// - a **deleted** path is in `scanned` (a deletion IS a scan result) ⇒ evicted;
+/// - symbol-grained / many-facts-per-path measures are replaced *wholesale per file*.
+///
+/// `captures` must be oldest-first and **include empty captures** (a scan that found
+/// nothing still restates its paths). `scanned` maps capture_id → the paths it
+/// restated.
+///
+/// Cost is O(captures × live facts) — the aggregate is recomputed per point. That's
+/// fine for a chart read; the HEADLINE never comes through here (it's the last point
+/// of this series, or the single-shot SQL fold), so the hot path stays cheap.
 pub fn tree_state_series(
     captures: &[MetricCapture],
     facts: &[FactRow],
@@ -706,7 +714,18 @@ pub fn tree_state_series(
     visibility: &Visibility,
 ) -> Vec<SeriesPoint> {
     let mut by_capture: HashMap<i64, Vec<&FactRow>> = HashMap::new();
+    // Captures that asserted a PATH-LESS repo scalar — from the UNFILTERED
+    // facts, deliberately. Every eviction set is filter-independent (scanned
+    // paths, executed subjects — and this one): a newer assertion supersedes
+    // the older no matter which spec's lens reads the fold. Deciding it from
+    // the filtered list let an error-filtered spec keep a superseded error
+    // assertion alive forever — and diverge from the cube, whose durable live
+    // state is filter-agnostic by design (tsk103 review).
+    let mut scalar_asserted: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for f in facts {
+        if repo_scalar_key(f).is_none() {
+            scalar_asserted.insert(f.capture_id);
+        }
         if !filter.matches(f) {
             continue;
         }
@@ -721,19 +740,20 @@ pub fn tree_state_series(
         c: &MetricCapture,
         scanned: &HashMap<i64, Vec<String>>,
         by_capture: &HashMap<i64, Vec<&'a FactRow>>,
+        scalar_asserted: &std::collections::HashSet<i64>,
     ) {
         for path in scanned.get(&c.id).into_iter().flatten() {
             tree.remove(&(c.producer.clone(), path.clone()));
         }
-        let own: Vec<&&FactRow> = by_capture.get(&c.id).into_iter().flatten().collect();
         // A capture may also carry PATH-LESS facts — an agent-asserted repo scalar
         // (`record_metric` with no subject). Those aren't tree facts: no path means the
         // per-path fold can't place or supersede them, so they keep the plain
-        // "latest assertion per producer wins" rule. Emitting one restates it.
-        if own.iter().any(|f| repo_scalar_key(f).is_none()) {
+        // "latest assertion per producer wins" rule. Emitting one restates it —
+        // judged on the capture's UNFILTERED facts, like every other eviction.
+        if scalar_asserted.contains(&c.id) {
             tree.remove(&(c.producer.clone(), SCALAR_SUBJECT.to_string()));
         }
-        for f in own {
+        for f in by_capture.get(&c.id).into_iter().flatten() {
             let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
             tree.entry((c.producer.clone(), key)).or_default().push(*f);
         }
@@ -772,13 +792,13 @@ pub fn tree_state_series(
                     break;
                 }
                 if earlier.stream_id == c.stream_id && visibility.sees(earlier, c) {
-                    apply(&mut seeded, earlier, scanned, &by_capture);
+                    apply(&mut seeded, earlier, scanned, &by_capture, &scalar_asserted);
                 }
             }
             state.insert(key.clone(), seeded);
         }
         let tree = state.get_mut(&key).expect("seeded above");
-        apply(tree, c, scanned, &by_capture);
+        apply(tree, c, scanned, &by_capture, &scalar_asserted);
 
         // This capture's OWN (worktree, branch) tree — an unscoped read replays
         // every stream's captures into one timeline, but each point is still
@@ -1230,7 +1250,7 @@ impl MetricEngine {
             let restated = match scope {
                 CaptureScope::PerPath => self.scanned_paths(&captures).await?,
                 // A test run restates exactly the cases it executed.
-                _ => {
+                CaptureScope::PerSubject => {
                     let mut m: HashMap<i64, Vec<String>> = HashMap::new();
                     for f in &facts {
                         if let Some(s) = f.subject_ref.as_deref() {
@@ -1239,6 +1259,10 @@ impl MetricEngine {
                     }
                     m
                 }
+                // Unreachable — this whole branch is guarded by `is_partial()`
+                // above. Listed (not wildcarded) so a future fourth scope must
+                // decide its restated set here, at compile time (tsk103).
+                CaptureScope::Complete => HashMap::new(),
             };
             let visibility = match &self.visibility {
                 Some(resolver) => resolver.for_captures(&captures).await,
@@ -1328,40 +1352,43 @@ impl MetricEngine {
         measure: &oxplow_db::Measure,
         stream: Option<i64>,
     ) -> Result<Vec<FactRow>, DomainError> {
-        let scope = parse_capture_scope(&measure.key, &measure.capture_scope)?;
-        if scope == CaptureScope::PerSubject {
+        // Exhaustive on purpose (tsk103 review): scope conflation is the V54
+        // bug class, and every scope picks a DIFFERENT fold — a wildcard arm
+        // would let a future fourth scope compile clean and silently read as
+        // whichever default it fell into.
+        match parse_capture_scope(&measure.key, &measure.capture_scope)? {
             // The restated set is the capture's own facts, so the fold is simply the
             // latest fact per subject — a partial test run updates only the tests it ran.
-            return self.facts.latest_subject_facts(measure.id, stream).await;
-        }
-        if scope == CaptureScope::PerPath {
-            let mut folded = self.facts.latest_tree_facts(measure.id, stream).await?;
-            // The SQL fold joins on `path`, so PATH-LESS facts — an agent-asserted repo
-            // scalar (`record_metric` with no subject) — are not in it. They aren't tree
-            // facts: with no path there is nothing to supersede them per-path, so they
-            // keep the plain per-producer currency rule (latest assertion wins). Without
-            // this an asserted number would silently vanish from every read. SQL-side
-            // (tsk75): this used to load the measure's ENTIRE history to find the
-            // usually-zero scalars.
-            let scalars: Vec<FactRow> =
-                self.facts.pathless_scalar_facts(measure.id, stream).await?;
-            if !scalars.is_empty() {
-                let current = self.current_captures(&scalars).await?;
-                folded.extend(
-                    scalars
-                        .into_iter()
-                        .filter(|f| current.contains(&f.capture_id)),
-                );
+            CaptureScope::PerSubject => self.facts.latest_subject_facts(measure.id, stream).await,
+            CaptureScope::PerPath => {
+                let mut folded = self.facts.latest_tree_facts(measure.id, stream).await?;
+                // The SQL fold joins on `path`, so PATH-LESS facts — an agent-asserted repo
+                // scalar (`record_metric` with no subject) — are not in it. They aren't tree
+                // facts: with no path there is nothing to supersede them per-path, so they
+                // keep the plain per-producer currency rule (latest assertion wins). Without
+                // this an asserted number would silently vanish from every read. SQL-side
+                // (tsk75): this used to load the measure's ENTIRE history to find the
+                // usually-zero scalars.
+                let scalars: Vec<FactRow> =
+                    self.facts.pathless_scalar_facts(measure.id, stream).await?;
+                if !scalars.is_empty() {
+                    let current = self.current_captures(&scalars).await?;
+                    folded.extend(
+                        scalars
+                            .into_iter()
+                            .filter(|f| current.contains(&f.capture_id)),
+                    );
+                }
+                Ok(folded)
             }
-            return Ok(folded);
+            CaptureScope::Complete => Ok(self
+                .facts
+                .facts_for_measure(measure.id)
+                .await?
+                .into_iter()
+                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+                .collect()),
         }
-        Ok(self
-            .facts
-            .facts_for_measure(measure.id)
-            .await?
-            .into_iter()
-            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
-            .collect())
     }
 
     /// The currency gate [`compute_rollup`] should apply, per `capture_scope`.

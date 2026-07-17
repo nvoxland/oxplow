@@ -480,10 +480,12 @@ mod tests {
             "metric_spec",
             // V62 — the aggregate cube: the materialized fold (tsk96), its
             // durable live state, and the watermark — both keyed per
-            // (measure, stream, branch) since V63 (tsk97).
+            // (measure, stream, branch) since V63 (tsk97). V66 adds the
+            // global invalidation epoch that fences in-flight builds.
             "metric_cube",
             "metric_live_fact",
             "metric_cube_state",
+            "metric_cube_epoch",
         ];
         // `effort_observation` was dropped in V39 (tsk215); the V38
         // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.

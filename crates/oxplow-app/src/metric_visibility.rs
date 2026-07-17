@@ -15,15 +15,20 @@
 //!   [`AncestryOracle`] trait — pure data in, so the whole rule is
 //!   unit-testable against a fake DAG and never shells out per capture.
 //!
-//! Absorption is timestamped with the absorbing COMMIT's own time, which is
-//! what makes every resolved `(C, R)` answer immutable (see the `Visibility`
-//! docs): a re-stamp of an old snapshot reveals a commit whose time postdates
-//! every reader already recorded, so no cube seed built earlier is invalidated.
+//! Absorption is timestamped `max(commit's own time, stamp row's creation)`,
+//! which is what makes every resolved `(C, R)` answer immutable (see the
+//! `Visibility` docs): a fresh commit postdates recorded readers by its own
+//! time, and a PULLED commit — committer time arbitrarily old — postdates
+//! them by its stamp row's creation. So no cube seed built earlier is
+//! invalidated. (Residual mutation window: an old commit re-stamped onto an
+//! old snapshot row; bounded by that row's age, reconciled by any rebuild.)
 //!
-//! **Every fold must use the same visibility.** The fact fold
-//! (`tree_state_series`' callers) and the cube's seed (`metric_cube::seed_rows`)
-//! all take it from ONE shared [`VisibilityResolver`] — one side resolved with
-//! the other blind is how the cube silently diverges from the facts.
+//! **Every fold must use the same visibility RULE.** The engine's fact fold
+//! and the cube's seed (`metric_cube::seed_rows`) share one
+//! [`VisibilityResolver`] instance (`AppState.metric_visibility`);
+//! `CollectionService` builds its own in `new()` — same pure rule over the
+//! same DB, so the answers agree. One fold resolved with another blind is how
+//! the cube silently diverges from the facts.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -97,14 +102,19 @@ pub fn resolve(
                         && s.created_at >= c.captured_at
                 })
             });
-            // Timestamped with the COMMIT's own time, not the snapshot row's —
-            // a re-stamp of an old row must not claim absorption happened
-            // before the commit existed (that timestamp is what keeps every
-            // resolved (C, R) answer immutable).
+            // Absorption time = max(the commit's own time, the stamp row's
+            // creation). The commit-time half stops a re-stamp of an old row
+            // claiming absorption before the commit existed; the row-creation
+            // half stops a PULLED commit (committer time arbitrarily old)
+            // claiming absorption before the repo ever contained it. Either
+            // alone reopens a window where a resolved answer flips under an
+            // already-recorded reader; together the answers stay immutable
+            // for every flow the app produces (residual: an old commit
+            // re-stamped onto an old row — reconciled by any rebuild).
             absorbing.and_then(|s| {
                 oracle
                     .commit_time(&s.commit)
-                    .map(|at| (s.commit.clone(), at))
+                    .map(|at| (s.commit.clone(), at.max(s.created_at)))
             })
         };
         if let Some(e) = eff {
@@ -193,15 +203,12 @@ impl AncestryOracle for GitAncestryOracle {
 /// exactly the pre-tsk102 behavior, so it must never break a metrics read.
 pub struct VisibilityResolver {
     snapshots: SqliteSnapshotStore,
-    oracle: Mutex<Box<dyn AncestryOracle + Send>>,
+    oracle: std::sync::Arc<Mutex<Box<dyn AncestryOracle + Send>>>,
 }
 
 impl VisibilityResolver {
     pub fn new(snapshots: SqliteSnapshotStore, repo_dir: &Path) -> Self {
-        Self {
-            snapshots,
-            oracle: Mutex::new(Box::new(GitAncestryOracle::open(repo_dir))),
-        }
+        Self::with_oracle(snapshots, Box::new(GitAncestryOracle::open(repo_dir)))
     }
 
     /// A resolver with an injected oracle — for tests that need a fake DAG.
@@ -211,7 +218,7 @@ impl VisibilityResolver {
     ) -> Self {
         Self {
             snapshots,
-            oracle: Mutex::new(oracle),
+            oracle: std::sync::Arc::new(Mutex::new(oracle)),
         }
     }
 
@@ -219,8 +226,20 @@ impl VisibilityResolver {
         let Ok(stamped) = self.snapshots.commit_stamped_snapshots().await else {
             return Visibility::blind();
         };
-        let mut oracle = self.oracle.lock().unwrap_or_else(|e| e.into_inner());
-        resolve(captures, &stamped, oracle.as_mut())
+        // Ancestry walks are synchronous, disk-touching git work, and the
+        // first read after boot resolves the whole effective×base cross
+        // product — run it off the async workers so a cold cache can't stall
+        // the runtime, and so readers queueing on the oracle Mutex park a
+        // blocking thread, not a worker (tsk103 review). The lock is never
+        // held across an await either way.
+        let captures = captures.to_vec();
+        let oracle = self.oracle.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut oracle = oracle.lock().unwrap_or_else(|e| e.into_inner());
+            resolve(&captures, &stamped, oracle.as_mut())
+        })
+        .await
+        .unwrap_or_else(|_| Visibility::blind())
     }
 }
 
@@ -456,9 +475,10 @@ mod tests {
         let vis = resolve(&[c], &all, &mut dag());
         assert_eq!(
             vis.effective.get(&1),
-            Some(&("A".to_string(), ts(10))),
-            "the OWN snapshot's commit at that commit's own time — a time-window \
-             search would (wrongly) anchor to the next main stamp, B"
+            Some(&("A".to_string(), ts(15))),
+            "the OWN snapshot's commit — a time-window search would (wrongly) \
+             anchor to the next main stamp, B. Absorbed at max(commit time t10, \
+             row creation t15): never earlier than the repo contained it"
         );
     }
 
@@ -543,6 +563,52 @@ mod tests {
         let not_repo = tempfile::tempdir().unwrap();
         let mut blind = GitAncestryOracle::open(not_repo.path());
         assert_eq!(blind.is_ancestor_or_equal(&a, &b), None);
+    }
+
+    #[test]
+    fn a_pulled_commits_old_committer_time_cannot_backdate_absorption() {
+        // tsk103 review. A commit made ELSEWHERE and pulled in carries a
+        // committer time arbitrarily older than the moment this repo first
+        // contained it. If absorption used the commit's own time alone, a
+        // reader recorded before the pull would flip from visible to strict
+        // the moment the stamp landed — mutating an already-resolved answer
+        // and diverging any cube seed that baked in "visible". Absorption is
+        // max(commit time, stamp row creation): the pull can't reach back.
+        let on_feat_a = cap(1, Some("feat-a"), 20, Some("A"));
+        let before_pull = cap(2, Some("feat-b"), 40, Some("A"));
+        let after_pull = cap(3, Some("feat-b"), 60, Some("A"));
+        // The pulled commit "OLD" (committer time t5!) lands on a stamp row
+        // created at t50 — the moment this repo first had it.
+        let mut all = stamps();
+        all.retain(|s| s.branch.as_deref() != Some("feat-a"));
+        all.push(StampedSnapshot {
+            id: 300,
+            stream_id: 1,
+            branch: Some("feat-a".into()),
+            commit: "OLD".into(),
+            created_at: ts(50),
+        });
+        let mut oracle = dag();
+        oracle.times.insert("OLD", ts(5));
+        // OLD is not an ancestor of A (it's sibling work).
+        let vis = resolve(
+            &[on_feat_a.clone(), before_pull.clone(), after_pull.clone()],
+            &all,
+            &mut oracle,
+        );
+        assert_eq!(
+            vis.effective.get(&1).map(|(_, at)| *at),
+            Some(ts(50)),
+            "absorbed when the repo first contained it, not at committer time"
+        );
+        assert!(
+            vis.sees(&on_feat_a, &before_pull),
+            "a reader recorded before the pull keeps seeing the dirty work"
+        );
+        assert!(
+            !vis.sees(&on_feat_a, &after_pull),
+            "a reader after the pull gets the strict answer"
+        );
     }
 
     #[test]

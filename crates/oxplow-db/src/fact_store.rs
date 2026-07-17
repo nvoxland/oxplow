@@ -55,12 +55,15 @@ pub struct Measure {
     pub subject_kind: Option<String>,
     /// `additive` | `semi-additive` | `non-additive` — additivity OVER TIME.
     pub temporal_semantics: String,
-    /// `complete` | `per-path` (V54, tsk41) — what ONE capture restates. This is a
-    /// SEPARATE AXIS from `temporal_semantics`: `complete` means a capture restates
-    /// the whole population (a coverage report, a test run), so the temporal fold
-    /// applies as-is; `per-path` means a capture restates only the paths in its
-    /// snapshot (a tree gauge over a delta), so the value must first be folded to
-    /// the latest capture per (producer, path) — see `latest_tree_facts`.
+    /// `complete` | `per-path` | `per-subject` (V54 tsk41; per-subject V55
+    /// tsk43) — what ONE capture restates. This is a SEPARATE AXIS from
+    /// `temporal_semantics`: `complete` means a capture restates the whole
+    /// population (a coverage report, an analysis run), so the temporal fold
+    /// applies as-is; `per-path` restates only the paths in its snapshot (a
+    /// tree gauge over a delta); `per-subject` restates only the subjects it
+    /// emitted facts for (a test run — V55 moved test runs here). Partial
+    /// scopes fold to the latest capture per key first — see
+    /// `latest_tree_facts` / `latest_subject_facts`.
     pub capture_scope: String,
     /// `built-in` | `global` | `project`.
     pub scope: String,
@@ -757,11 +760,26 @@ impl SqliteFactStore {
     /// preserved across updates.
     pub async fn upsert_measure(&self, m: NewMeasure) -> Result<i64, DomainError> {
         self.db
-            .call(move |conn| {
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                // A `capture_scope` change swaps the cube's BUILD RULE (state
+                // fold vs per-capture GROUP BY), so rows built under the old
+                // rule must not survive to be served — invalidate that
+                // measure's cube in the same transaction (tsk103 review).
+                // Change-detected, never unconditional: `seed_catalog`
+                // re-upserts every measure at boot (the tsk100 lesson).
+                let prior_scope: Option<String> = tx
+                    .query_row(
+                        "SELECT capture_scope FROM measure WHERE key = ?1",
+                        params![m.key],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(map_sql_err)?;
                 let now = ts_to_string(Timestamp::now());
                 // `component_role` is omitted — it defaults to 'none' and is
                 // never read (dead V43 column, tsk15).
-                conn.execute(
+                tx.execute(
                     "INSERT INTO measure
                        (key, title, unit, subject_kind, temporal_semantics, capture_scope,
                         scope, description, created_at, updated_at)
@@ -784,12 +802,29 @@ impl SqliteFactStore {
                         m.description,
                         now,
                     ],
-                )?;
-                conn.query_row(
-                    "SELECT id FROM measure WHERE key = ?1",
-                    params![m.key],
-                    |r| r.get(0),
                 )
+                .map_err(map_sql_err)?;
+                let id: i64 = tx
+                    .query_row(
+                        "SELECT id FROM measure WHERE key = ?1",
+                        params![m.key],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                if prior_scope.is_some_and(|p| p != m.capture_scope) {
+                    for sql in [
+                        "DELETE FROM metric_cube WHERE measure_id = ?1",
+                        "DELETE FROM metric_live_fact WHERE measure_id = ?1",
+                        "DELETE FROM metric_cube_state WHERE measure_id = ?1",
+                    ] {
+                        tx.execute(sql, params![id]).map_err(map_sql_err)?;
+                    }
+                    // Fence any build in flight (tsk103).
+                    tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                        .map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(id)
             })
             .await
     }
@@ -817,10 +852,29 @@ impl SqliteFactStore {
     }
 
     /// Insert or update (by `key`) a dimension in the conformed catalog.
+    ///
+    /// A change to `promoted` changes the cube's GRAIN (`dims_key` buckets by
+    /// every promoted dim), so it invalidates the WHOLE cube in the same
+    /// transaction — otherwise a pre-promotion bucket lacks the new key and a
+    /// newly-eligible `dim_eq`/`group_by` read serves explicit 0s over real
+    /// history (tsk103 review; V64 states the rule its migration honors by
+    /// hand). Change-detected — `seed_catalog` re-upserts every dim at boot,
+    /// and an unconditional wipe would re-fold the cube every start (tsk100's
+    /// lesson). A brand-new dim arriving already-promoted also clears: facts
+    /// may have carried the key in `dims_json` before the catalog knew it.
     pub async fn upsert_dimension(&self, d: NewDimension) -> Result<(), DomainError> {
         self.db
-            .call(move |conn| {
-                conn.execute(
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let prior: Option<bool> = tx
+                    .query_row(
+                        "SELECT promoted FROM dimension WHERE key = ?1",
+                        params![d.key],
+                        |r| r.get::<_, i64>(0).map(|v| v != 0),
+                    )
+                    .optional()
+                    .map_err(map_sql_err)?;
+                tx.execute(
                     "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
                      ON CONFLICT(key) DO UPDATE SET
@@ -829,7 +883,24 @@ impl SqliteFactStore {
                         vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
                         promoted=excluded.promoted",
                     params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope, d.promoted],
-                )?;
+                )
+                .map_err(map_sql_err)?;
+                let grain_changed = match prior {
+                    Some(was) => was != d.promoted,
+                    None => d.promoted,
+                };
+                if grain_changed {
+                    for sql in [
+                        "DELETE FROM metric_cube",
+                        "DELETE FROM metric_live_fact",
+                        "DELETE FROM metric_cube_state",
+                        // Fence any build in flight (tsk103).
+                        "UPDATE metric_cube_epoch SET epoch = epoch + 1",
+                    ] {
+                        tx.execute(sql, []).map_err(map_sql_err)?;
+                    }
+                }
+                tx.commit().map_err(map_sql_err)?;
                 Ok(())
             })
             .await
@@ -1080,9 +1151,15 @@ impl SqliteFactStore {
                     .map(|i| format!("?{i}"))
                     .collect::<Vec<_>>()
                     .join(", ");
+                // `status = 'done'` keeps the doc rule "non-done captures are
+                // invisible to every fold" true for the in-memory fold and the
+                // cube build, not just the SQL folds (tsk103 review): a failed
+                // capture is a recorded event, never a data point — folded in,
+                // it emits a phantom repeat of prior state, and a complete-
+                // scope count/sum would zero-splice it.
                 let sql = format!(
                     "SELECT {CAPTURE_COLS} FROM metric_capture
-                      WHERE producer IN ({placeholders})
+                      WHERE producer IN ({placeholders}) AND status = 'done'
                       ORDER BY captured_at ASC, id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -1202,6 +1279,23 @@ impl SqliteFactStore {
             .map(|(at, id)| Ok((string_to_ts(&at).map_err(ts_conv_err)?, id)))
             .transpose()
             .map_err(map_sql_err)
+    }
+
+    /// The cube's global invalidation EPOCH — bumped by every wipe (prune with
+    /// drops, a dim's promoted flip, a measure's scope change). The builder
+    /// reads it before folding and `write_cube_rows` refuses to commit when it
+    /// moved, so a wipe landing MID build can't be followed by a stale write
+    /// that re-plants a watermark over rowless captures (tsk103 review).
+    pub async fn cube_epoch(&self) -> Result<i64, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT epoch FROM metric_cube_epoch WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
     }
 
     /// Whether `(measure, stream, branch)` has a live-state partition yet — the
@@ -1346,6 +1440,15 @@ impl SqliteFactStore {
     /// atomically. The delete makes a re-run of the same capture idempotent. The
     /// upsert's insert arm is also what creates the branch's `metric_cube_state`
     /// row — the "seeded" marker `cube_branch_seeded` reads.
+    ///
+    /// Returns `false` — writing NOTHING — when the cube epoch moved past
+    /// `expected_epoch`: an invalidation landed after the builder planned this
+    /// pass, so its in-memory progress describes wiped state. The stale pass
+    /// must abandon; the next build folds from the post-wipe watermark.
+    // Eight primitives, all storage-layer plumbing with distinct types-of-
+    // meaning; a param struct would add ceremony at every call site for no
+    // reader gain (same call CollectionService::new makes).
+    #[allow(clippy::too_many_arguments)]
     pub async fn write_cube_rows(
         &self,
         measure_id: i64,
@@ -1354,12 +1457,23 @@ impl SqliteFactStore {
         capture_id: i64,
         captured_at: Timestamp,
         rows: Vec<NewCubeRow>,
-    ) -> Result<(), DomainError> {
+        expected_epoch: i64,
+    ) -> Result<bool, DomainError> {
         let branch = branch.unwrap_or_default();
         let captured_at = ts_to_string(captured_at);
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
+                let epoch: i64 = tx
+                    .query_row(
+                        "SELECT epoch FROM metric_cube_epoch WHERE id = 1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                if epoch != expected_epoch {
+                    return Ok(false);
+                }
                 tx.execute(
                     "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id = ?2",
                     params![measure_id, capture_id],
@@ -1397,7 +1511,7 @@ impl SqliteFactStore {
                 )
                 .map_err(map_sql_err)?;
                 tx.commit().map_err(map_sql_err)?;
-                Ok(())
+                Ok(true)
             })
             .await
     }
@@ -1882,6 +1996,10 @@ impl SqliteFactStore {
                     ] {
                         tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
                     }
+                    // Fence any build already in flight (tsk103): its todo-list
+                    // predates this wipe, so its next write must abandon.
+                    tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                        .map_err(map_sql_err)?;
                 }
                 tx.commit().map_err(map_sql_err)?;
                 Ok(n as u64)
@@ -2667,7 +2785,15 @@ mod tests {
             (latest_full, "2026-06-30T10:00:00.000000Z", 3.0),
         ] {
             store
-                .write_cube_rows(m, 1, None, cap, at(at_s), vec![row(v)])
+                .write_cube_rows(
+                    m,
+                    1,
+                    None,
+                    cap,
+                    at(at_s),
+                    vec![row(v)],
+                    store.cube_epoch().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -2730,6 +2856,7 @@ mod tests {
                     numerator: 0.0,
                     denominator: 0.0,
                 }],
+                store.cube_epoch().await.unwrap(),
             )
             .await
             .unwrap();
@@ -2828,6 +2955,309 @@ mod tests {
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 7.0, "both gauges' facts survive");
         assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_stale_build_write_is_fenced_after_an_invalidation() {
+        // tsk103 review. The build runs outside the prune's transaction, so a
+        // wipe can land MID pass: the builder's todo-list predates it, and its
+        // next write would re-plant a watermark covering captures whose rows
+        // the wipe deleted — "covered but rowless", served as explicit 0s.
+        // Every invalidation bumps the epoch; a write carrying the stale epoch
+        // must refuse and write NOTHING.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            m,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        let latest = full_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0)],
+        )
+        .await;
+        let built = || NewCubeRow {
+            producer: "g".into(),
+            dims_key: "{}".into(),
+            fact_count: 1,
+            value_sum: 3.0,
+            value_min: Some(3.0),
+            value_max: Some(3.0),
+            numerator: 0.0,
+            denominator: 0.0,
+        };
+        // The builder plans its pass (reads the epoch)…
+        let planned_epoch = store.cube_epoch().await.unwrap();
+        // …then the prune drops a capture and wipes+fences.
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(pruned, 1);
+        // The stale write must refuse.
+        let written = store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                latest,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![built()],
+                planned_epoch,
+            )
+            .await
+            .unwrap();
+        assert!(!written, "a write planned before the wipe must be fenced");
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_none(),
+            "the fenced write planted nothing — no watermark over rowless captures"
+        );
+        // A fresh pass (current epoch) writes normally.
+        let fresh = store.cube_epoch().await.unwrap();
+        assert!(fresh > planned_epoch, "the wipe bumped the epoch");
+        assert!(store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                latest,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![built()],
+                fresh,
+            )
+            .await
+            .unwrap());
+        assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn flipping_a_dims_promoted_bit_invalidates_the_cube() {
+        // tsk103 review. Promotion changes the cube's GRAIN (`dims_key`), and
+        // V64's rule is that no old-grain row may survive to be served — a
+        // pre-promotion bucket lacks the new key and reads as an explicit 0
+        // through a dim filter. The migrations honor that by hand; the CONFIG
+        // path (`seed_catalog` → upsert_dimension, which runs EVERY boot) must
+        // honor it automatically — and only on an actual FLIP, or every boot
+        // wipes a healthy cube and turns tsk96's fix back off (the same
+        // lesson tsk100 learned for the boot prune).
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let cap = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            m,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        let built = |v: f64| NewCubeRow {
+            producer: "g".into(),
+            dims_key: "{}".into(),
+            fact_count: 1,
+            value_sum: v,
+            value_min: Some(v),
+            value_max: Some(v),
+            numerator: 0.0,
+            denominator: 0.0,
+        };
+        let dim = |promoted: bool| NewDimension {
+            promoted,
+            ..NewDimension::categorical("acme.kind", "Kind")
+        };
+
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                cap,
+                at("2026-06-30T09:00:00.000000Z"),
+                vec![built(8.0)],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        // The every-boot reseed with an UNCHANGED flag must leave the cube alone.
+        store.upsert_dimension(dim(false)).await.unwrap();
+        store.upsert_dimension(dim(false)).await.unwrap();
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_some(),
+            "an unchanged promoted bit is the every-boot case — no wipe"
+        );
+        // Flipping it ON is a grain change: the whole cube must go.
+        store.upsert_dimension(dim(true)).await.unwrap();
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_none(),
+            "promoting a dim by config must invalidate the cube — old-grain \
+             buckets would serve explicit 0s through the newly-eligible filter"
+        );
+        // And OFF again after a rebuild stand-in: also a grain change.
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                cap,
+                at("2026-06-30T09:00:00.000000Z"),
+                vec![built(8.0)],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        store.upsert_dimension(dim(false)).await.unwrap();
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_none(),
+            "demotion is a grain change too"
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_a_measures_capture_scope_invalidates_only_that_measures_cube() {
+        // tsk103 review. `capture_scope` picks the BUILD RULE (state fold vs
+        // per-capture GROUP BY); rows built under the old rule must not be
+        // served under the new one. Scoped to the one measure — and only on an
+        // actual change, since `seed_catalog` re-upserts every measure at boot.
+        let store = fixture().await;
+        let a = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.a", "A")
+            })
+            .await
+            .unwrap();
+        let b = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.b", "B")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let cap = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            a,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        let built = || NewCubeRow {
+            producer: "g".into(),
+            dims_key: "{}".into(),
+            fact_count: 1,
+            value_sum: 8.0,
+            value_min: Some(8.0),
+            value_max: Some(8.0),
+            numerator: 0.0,
+            denominator: 0.0,
+        };
+        for mid in [a, b] {
+            store
+                .write_cube_rows(
+                    mid,
+                    1,
+                    None,
+                    cap,
+                    at("2026-06-30T09:00:00.000000Z"),
+                    vec![built()],
+                    store.cube_epoch().await.unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        // Same-scope re-upsert (every boot): untouched.
+        store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.a", "A")
+            })
+            .await
+            .unwrap();
+        assert!(store.cube_watermark(a, 1).await.unwrap().is_some());
+        // Scope change: A's cube goes, B's stays.
+        store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.a", "A")
+            })
+            .await
+            .unwrap();
+        assert!(
+            store.cube_watermark(a, 1).await.unwrap().is_none(),
+            "a capture_scope change must invalidate that measure's cube"
+        );
+        assert!(
+            store.cube_watermark(b, 1).await.unwrap().is_some(),
+            "the other measure's cube is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_done_captures_stay_out_of_the_fold_inputs() {
+        // tsk103 review. The doc rule "non-done captures are invisible to
+        // every fold" held for the three SQL folds but NOT for
+        // `captures_for_producers`, which feeds the in-memory fold and the
+        // cube build: a failed capture emitted a phantom point (repeating the
+        // prior state at the failure's time) and, for a complete-scope
+        // count/sum, would zero-splice — the "one failure zeroes the metric"
+        // outcome the substrate promises against.
+        let store = fixture().await;
+        let m = measure(&store, "acme.case").await;
+        store
+            .record_facts(
+                NewMetricCapture {
+                    captured_at: Some(at("2026-06-30T10:00:00.000000Z")),
+                    ..NewMetricCapture::done(1, "tests", "builtin")
+                },
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        store
+            .record_facts(
+                NewMetricCapture {
+                    captured_at: Some(at("2026-06-30T11:00:00.000000Z")),
+                    status: "failed".into(),
+                    ..NewMetricCapture::done(1, "tests", "builtin")
+                },
+                Vec::new(),
+            )
+            .await
+            .unwrap();
+        let caps = store
+            .captures_for_producers(vec!["tests".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            caps.len(),
+            1,
+            "only the done capture feeds the folds — a failed run is a \
+             recorded event, never a data point"
+        );
+        assert_eq!(caps[0].status, "done");
     }
 
     #[tokio::test]

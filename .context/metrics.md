@@ -192,10 +192,13 @@ welded to collection.
 > trustworthy" both have answers.
 >
 > ⚠️ **Non-`done` captures are invisible to every fold** (`c.status = 'done'` in
-> `latest_tree_facts` / `latest_subject_facts` / `scanned_paths_for_captures`). This is
-> load-bearing: a failure capture carries **no facts**, and on a full-tree snapshot it
-> restates *every path* — so if the fold counted it, one timeout would supersede
-> everything and silently zero the metric. Worse than the bug it reports.
+> `latest_tree_facts` / `latest_subject_facts` / `scanned_paths_for_captures`, AND in
+> `captures_for_producers` — the in-memory fold's and the cube build's capture
+> source; the tsk103 review found the latter unfiltered, so the claim used to be
+> false for those two). This is load-bearing: a failure capture carries **no
+> facts**, and on a full-tree snapshot it restates *every path* — so if the fold
+> counted it, one timeout would supersede everything and silently zero the
+> metric. Worse than the bug it reports.
 >
 > `needs_tree_baseline` asks ONE question **per gauge** (`gauges_needing_baseline`):
 > *does this gauge have a completed `scan_kind='full'` capture at its current logic
@@ -425,18 +428,29 @@ welded to collection.
 > "never seeded". A crash between seed and first row-write simply re-seeds —
 > the seed is a transactional replace.
 >
-> **Deleting captures invalidates the cube** (tsk100). `prune_dominated_tree_captures`
-> drops per-path captures and their facts cascade; `metric_live_fact` cascades with
-> them (FK on `fact_id`) so live state self-heals, but **`metric_cube` rows are
-> frozen at build time and don't**. Usually they'd still agree — the baseline
-> restated those paths already — but not for a path the sweep never restated (a
-> changed gauge glob: neither scanned nor tombstoned), which stays live until the
-> prune deletes it. So the prune **invalidates that stream's cube in the same
-> transaction**, rather than reasoning about which prunes are safe; the next build
-> re-folds. **Only when it actually dropped something** — `rebuild_metric_baseline`
-> prunes on every boot, so unconditional invalidation would wipe a healthy cube each
-> start and turn the fix off for nothing. Any future code that deletes captures or
-> facts owes the cube the same treatment.
+> **Anything that changes what a replay would compute must invalidate the cube**
+> — the tsk100 rule, generalized by the tsk103 review from "anything that deletes
+> captures or facts". Three invalidators exist, each change-detected and each in
+> the SAME transaction as its change:
+> - **`prune_dominated_tree_captures`** (tsk100) — facts cascade and
+>   `metric_live_fact` self-heals (FK), but `metric_cube` rows are frozen at
+>   build time and don't. Only when it actually dropped something —
+>   `rebuild_metric_baseline` prunes on every boot, and unconditional
+>   invalidation would wipe a healthy cube each start.
+> - **`upsert_dimension` on a `promoted` flip** (either direction, and a new
+>   dim arriving promoted) — promotion is a GRAIN change; a pre-promotion
+>   bucket lacks the key and serves explicit 0s through a newly-eligible
+>   filter. The V64 migration honored this by hand; the config path
+>   (`seed_catalog`, every boot) now honors it automatically.
+> - **`upsert_measure` on a `capture_scope` change** — the scope picks the
+>   build RULE; scoped to that one measure.
+>
+> Every invalidation also bumps **`metric_cube_epoch`** (V66): the build runs
+> outside these transactions, so a wipe can land mid-pass, and the builder's
+> next `write_cube_rows` — carrying the epoch it planned under — refuses and
+> abandons rather than re-planting a watermark over captures whose rows the
+> wipe deleted ("covered but rowless" would serve explicit 0s). A fenced pass
+> costs one re-fold; a fenced write costs nothing. Slow, never wrong.
 >
 > **The grain's floor is the CAPTURE.** Never aggregate coarser (per-day,
 > per-commit): a capture *is* one scan/run, so `snapshot_id`/`effort_id`/
