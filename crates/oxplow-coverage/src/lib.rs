@@ -12,12 +12,23 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-/// Per-file line coverage. `instrumented` is every line the report mentions;
+/// Per-file coverage. `instrumented` is every line the report mentions;
 /// `covered` is the subset that executed (`covered ⊆ instrumented`).
+///
+/// Branch and function coverage are **counts**, not line-sets: a single line can
+/// hold several branches, and functions are named entities rather than lines, so
+/// neither maps onto a `BTreeSet<u32>` of line numbers. `*_found == 0` means the
+/// report carried no branch/function data for this file (many line-only reports),
+/// so aggregators skip it — a 0/0 file contributes nothing to the ratio rather
+/// than reading as "0% covered".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileCoverage {
     pub instrumented: BTreeSet<u32>,
     pub covered: BTreeSet<u32>,
+    pub branches_found: u32,
+    pub branches_hit: u32,
+    pub functions_found: u32,
+    pub functions_hit: u32,
 }
 
 /// A parsed coverage report: report-relative path → its line coverage. Paths

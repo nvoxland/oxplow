@@ -538,6 +538,16 @@ struct FileCoverageJson {
     instrumented: Vec<u32>,
     #[serde(default)]
     covered: Vec<u32>,
+    // Branch/function counts are optional — a line-only report omits them, and
+    // they default to 0 ("no branch/function data for this file").
+    #[serde(default, rename = "branchesFound")]
+    branches_found: u32,
+    #[serde(default, rename = "branchesHit")]
+    branches_hit: u32,
+    #[serde(default, rename = "functionsFound")]
+    functions_found: u32,
+    #[serde(default, rename = "functionsHit")]
+    functions_hit: u32,
 }
 
 impl From<CoverageJson> for CoverageReport {
@@ -551,6 +561,10 @@ impl From<CoverageJson> for CoverageReport {
                     FileCoverage {
                         instrumented: fc.instrumented.into_iter().collect::<BTreeSet<u32>>(),
                         covered: fc.covered.into_iter().collect::<BTreeSet<u32>>(),
+                        branches_found: fc.branches_found,
+                        branches_hit: fc.branches_hit,
+                        functions_found: fc.functions_found,
+                        functions_hit: fc.functions_hit,
                     },
                 )
             })
@@ -886,5 +900,23 @@ def transform(input):
         let f = cov.files.get("x").unwrap();
         assert_eq!(f.instrumented.len(), 3);
         assert!(f.covered.is_empty());
+        // Branch/function counts default to 0 when the report omits them (tsk123).
+        assert_eq!(f.branches_found, 0);
+        assert_eq!(f.functions_found, 0);
+    }
+
+    #[test]
+    fn coverage_json_carries_branch_and_function_counts() {
+        // tsk123: the plugins emit camelCase branch/function counts; they
+        // deserialize onto the typed FileCoverage.
+        let v = json!({ "files": { "x": {
+            "instrumented": [1, 2], "covered": [1],
+            "branchesFound": 4, "branchesHit": 3,
+            "functionsFound": 2, "functionsHit": 2,
+        } } });
+        let out = value_to_output(CollectorKind::Coverage, v).expect("typed");
+        let f = out.as_coverage().unwrap().files.get("x").unwrap().clone();
+        assert_eq!((f.branches_found, f.branches_hit), (4, 3));
+        assert_eq!((f.functions_found, f.functions_hit), (2, 2));
     }
 }

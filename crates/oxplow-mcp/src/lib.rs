@@ -1985,6 +1985,7 @@ impl OxplowMcp {
         };
         let filter = oxplow_app::metric_engine::FactFilter {
             min_value: params.0.min_value,
+            max_value: None,
             severity: params.0.severity,
             dim_eq: None,
         };

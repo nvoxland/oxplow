@@ -574,8 +574,9 @@ pub(crate) async fn run(builder: MetricCubeBuilder, mut rx: broadcast::Receiver<
 /// reads and is never a failure — the cube is a LOSSY projection by construction,
 /// and that lossiness is precisely what makes it fast. Reads that stay on the
 /// facts permanently, by design:
-/// - a **`min_value` threshold** (`oxplow.high_complexity_fns`,
-///   `oxplow.long_functions`) — the cube summed the individual values away;
+/// - a **value threshold** — `min_value` (`oxplow.high_complexity_fns`,
+///   `oxplow.long_functions`) or `max_value` (`oxplow.coverage.untested_files`)
+///   — the cube summed the individual values away;
 /// - **`group_by` on an unpromoted dim** (`subject` would need a bucket per test,
 ///   i.e. the fact table again);
 /// - **`last`**, which is not decomposable;
@@ -594,7 +595,10 @@ pub async fn cube_series(
     stream: Option<i64>,
 ) -> Result<Option<Vec<SeriesPoint>>, DomainError> {
     // --- eligibility: can the cube answer this EXACTLY? ---
-    if !Cell::decomposes(agg) || filter.min_value.is_some() {
+    // A value threshold (min/max) filters on each fact's OWN value, which the
+    // cube summed away — it must fall back to the facts (tsk124 added max_value
+    // for `oxplow.coverage.untested_files`).
+    if !Cell::decomposes(agg) || filter.min_value.is_some() || filter.max_value.is_some() {
         return Ok(None);
     }
     let promoted: BTreeSet<String> = facts

@@ -1112,6 +1112,27 @@ impl CollectionService {
     /// The effort-relative diff-coverage is derived later at READ from these
     /// line-sets ([`diff_coverage_for_effort`]). Attribution rides the unified
     /// `"run"` ledger (auto-claimed when unambiguous, else reconciled/claimed).
+    /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,
+    /// tsk123) IFF an enabled spec consumes it — else `None` (the per-measure
+    /// stop-collecting gate). Lookup errors read as "not active" so a
+    /// branch/function hiccup never sinks the line-coverage capture.
+    async fn active_coverage_measure(&self, key: &str) -> Option<i64> {
+        if !self
+            .facts
+            .measure_has_active_spec(key)
+            .await
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        self.facts
+            .get_measure(key)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.id)
+    }
+
     async fn observe_coverage(
         &self,
         thread: &ThreadId,
@@ -1171,8 +1192,36 @@ impl CollectionService {
                 let Some(measure) = self.facts.get_measure("oxplow.coverage").await? else {
                     return Ok::<Option<i64>, DomainError>(None);
                 };
+                // Branch/function coverage (tsk123) ride the SAME capture as extra
+                // per-file facts on their own measures — but only when an enabled
+                // spec consumes them (the stop-collecting gate, per measure), and
+                // only for files whose report actually carried the counts
+                // (`*_found > 0` — a line-only report leaves them 0, which must not
+                // read as "0% branch coverage").
+                let branch_measure = self.active_coverage_measure("oxplow.coverage.branch").await;
+                let function_measure = self
+                    .active_coverage_measure("oxplow.coverage.function")
+                    .await;
                 let mut facts = Vec::new();
                 for (path, fc) in &report.files {
+                    let ratio_fact = |measure_id: i64, hit: u32, found: u32| NewFact {
+                        numerator: Some(hit as f64),
+                        denominator: Some(found as f64),
+                        subject_kind: Some("file".into()),
+                        subject_ref: Some(format!("file:{path}")),
+                        path: Some(path.clone()),
+                        ..NewFact::new(measure_id, hit as f64 / found as f64 * 100.0)
+                    };
+                    if let Some(bm) = branch_measure {
+                        if fc.branches_found > 0 {
+                            facts.push(ratio_fact(bm, fc.branches_hit, fc.branches_found));
+                        }
+                    }
+                    if let Some(fm) = function_measure {
+                        if fc.functions_found > 0 {
+                            facts.push(ratio_fact(fm, fc.functions_hit, fc.functions_found));
+                        }
+                    }
                     let instr = fc.instrumented.len();
                     if instr == 0 {
                         continue;
@@ -4096,6 +4145,65 @@ mod tests {
             assert!(cov[0].branch.is_some(), "fact inherits the capture branch");
             assert_eq!(cov[0].provenance, "observed");
             assert_eq!(cov[0].source, "coverage-report");
+        }
+
+        #[tokio::test]
+        async fn ingest_coverage_records_branch_and_function_facts() {
+            // tsk123: a report carrying branch (condition-coverage) + function
+            // (methods) data lands per-file facts on oxplow.coverage.branch /
+            // .function beside the line facts, num/den = hit/found so the headline
+            // reads Σhit/Σfound. Branch 3/4 → 75%, function 1/2 → 50%.
+            const COBERTURA_BF: &str = r#"<?xml version="1.0"?>
+<coverage><packages><package name="p"><classes>
+  <class name="Foo" filename="src/foo.rs">
+    <methods>
+      <method name="a" signature="()V" line-rate="1.0"/>
+      <method name="b" signature="()V" line-rate="0.0"/>
+    </methods>
+    <lines>
+      <line number="1" hits="3" branch="true" condition-coverage="100% (2/2)"/>
+      <line number="2" hits="1" branch="true" condition-coverage="50% (1/2)"/>
+      <line number="4" hits="0"/>
+    </lines>
+  </class>
+</classes></package></packages></coverage>"#;
+            let h = build_full(Some(COBERTURA_BF), true, &[]).await;
+            h.service
+                .ingest_coverage(&h.thread, None, None, false)
+                .await
+                .unwrap();
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let bm = facts
+                .get_measure("oxplow.coverage.branch")
+                .await
+                .unwrap()
+                .expect("branch measure seeded by V68");
+            let br = facts.facts_for_measure(bm.id).await.unwrap();
+            assert_eq!(br.len(), 1, "one branch fact for the file");
+            assert_eq!(br[0].numerator, Some(3.0));
+            assert_eq!(br[0].denominator, Some(4.0));
+            assert!(
+                (br[0].value - 75.0).abs() < 0.01,
+                "branch value {}",
+                br[0].value
+            );
+            assert_eq!(br[0].subject_kind.as_deref(), Some("file"));
+
+            let fm = facts
+                .get_measure("oxplow.coverage.function")
+                .await
+                .unwrap()
+                .expect("function measure seeded by V68");
+            let fnf = facts.facts_for_measure(fm.id).await.unwrap();
+            assert_eq!(fnf.len(), 1, "one function fact for the file");
+            assert_eq!(fnf[0].numerator, Some(1.0));
+            assert_eq!(fnf[0].denominator, Some(2.0));
+            assert!(
+                (fnf[0].value - 50.0).abs() < 0.01,
+                "function value {}",
+                fnf[0].value
+            );
         }
 
         #[tokio::test]

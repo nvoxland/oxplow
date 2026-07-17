@@ -416,6 +416,52 @@ pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
             dimensions: TREE_DIMS,
             description: Some("Whole-report coverage %."),
         },
+        // branch + function coverage (tsk123) — same producer/capture as line
+        // coverage, higher-signal because a covered line says nothing about
+        // whether both sides of its branch, or every function, ran.
+        ProducerMetric {
+            key: "oxplow.coverage.branch_pct",
+            title: "Branch coverage",
+            kind: "coverage",
+            unit: "%",
+            direction: "higher-better",
+            default_agg: "last",
+            grain: None,
+            category: "coverage",
+            producer: "coverage",
+            dimensions: TREE_DIMS,
+            description: Some("Whole-report branch coverage %."),
+        },
+        ProducerMetric {
+            key: "oxplow.coverage.function_pct",
+            title: "Function coverage",
+            kind: "coverage",
+            unit: "%",
+            direction: "higher-better",
+            default_agg: "last",
+            grain: None,
+            category: "coverage",
+            producer: "coverage",
+            dimensions: TREE_DIMS,
+            description: Some("Whole-report function/method coverage %."),
+        },
+        // Untested files (tsk124) — instrumented files sitting at 0% line
+        // coverage. A `count` over `oxplow.coverage` filtered to value ≤ 0; a
+        // `findings` display so the drill-in lists exactly which files. Sharper
+        // and more actionable than the headline %: "12 files have zero coverage".
+        ProducerMetric {
+            key: "oxplow.coverage.untested_files",
+            title: "Untested files",
+            kind: "findings",
+            unit: "count",
+            direction: "lower-better",
+            default_agg: "last",
+            grain: Some("tree"),
+            category: "coverage",
+            producer: "coverage",
+            dimensions: TREE_DIMS,
+            description: Some("Instrumented files with 0% line coverage."),
+        },
         // analysis (collection.rs)
         ProducerMetric {
             key: "oxplow.analysis.errors",
@@ -485,6 +531,7 @@ pub fn builtin_producer_specs() -> Vec<NewMetricSpec> {
 fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<String>)> {
     let dim_eq = |k: &str, v: &str| format!("{{\"dim_eq\":[\"{k}\",\"{v}\"]}}");
     let severity = |v: &str| format!("{{\"severity\":\"{v}\"}}");
+    let max_value = |v: f64| format!("{{\"max_value\":{v}}}");
     Some(match key {
         "agent.tokens.input" => (
             "oxplow.tokens",
@@ -559,6 +606,10 @@ fn producer_spec_shape(key: &str) -> Option<(&'static str, &'static str, Option<
             Some(dim_eq("oxplow.tests_stat", "red_runs")),
         ),
         "oxplow.coverage.abs_pct" => ("oxplow.coverage", "ratio", None),
+        "oxplow.coverage.branch_pct" => ("oxplow.coverage.branch", "ratio", None),
+        "oxplow.coverage.function_pct" => ("oxplow.coverage.function", "ratio", None),
+        // Untested files = count of coverage facts at value ≤ 0 (tsk124).
+        "oxplow.coverage.untested_files" => ("oxplow.coverage", "count", Some(max_value(0.0))),
         "oxplow.analysis.errors" => ("oxplow.lint_hit", "count", Some(severity("error"))),
         "oxplow.analysis.warnings" => ("oxplow.lint_hit", "count", Some(severity("warning"))),
         _ => return None,
@@ -617,8 +668,27 @@ mod tests {
         );
         assert!(by_key["agent.tokens.total"].filter_json.is_none());
 
-        // Coverage is a ratio over Σnum/Σden.
+        // Coverage is a ratio over Σnum/Σden — line, branch, and function each
+        // over their own measure (tsk123).
         assert_eq!(by_key["oxplow.coverage.abs_pct"].aggregation, "ratio");
+        assert_eq!(
+            by_key["oxplow.coverage.branch_pct"]
+                .source_measure
+                .as_deref(),
+            Some("oxplow.coverage.branch")
+        );
+        assert_eq!(by_key["oxplow.coverage.branch_pct"].aggregation, "ratio");
+        assert_eq!(
+            by_key["oxplow.coverage.function_pct"]
+                .source_measure
+                .as_deref(),
+            Some("oxplow.coverage.function")
+        );
+        // Untested files = count over oxplow.coverage filtered to value ≤ 0 (tsk124).
+        let untested = by_key["oxplow.coverage.untested_files"];
+        assert_eq!(untested.source_measure.as_deref(), Some("oxplow.coverage"));
+        assert_eq!(untested.aggregation, "count");
+        assert_eq!(untested.filter_json.as_deref(), Some(r#"{"max_value":0}"#));
         // Tests count the test_case facts, sliced by status.
         assert_eq!(
             by_key["oxplow.tests.failed"].source_measure.as_deref(),

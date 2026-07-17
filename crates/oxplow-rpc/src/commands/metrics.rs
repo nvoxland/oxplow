@@ -112,6 +112,7 @@ pub async fn metric_series(
     };
     let filter = FactFilter {
         min_value,
+        max_value: None,
         severity,
         dim_eq: None,
     };

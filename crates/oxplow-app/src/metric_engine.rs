@@ -213,6 +213,10 @@ pub struct FactFilter {
     /// Keep facts with `value >= min_value` (e.g. complexity ≥ threshold).
     #[serde(default)]
     pub min_value: Option<f64>,
+    /// Keep facts with `value <= max_value` (e.g. coverage == 0 → an untested
+    /// file). The upper-bound analog of `min_value`; both may be set to bracket.
+    #[serde(default)]
+    pub max_value: Option<f64>,
     /// Keep facts whose reported `severity` equals this (e.g. `error`).
     #[serde(default)]
     pub severity: Option<String>,
@@ -231,6 +235,11 @@ impl FactFilter {
     pub fn matches(&self, f: &FactRow) -> bool {
         if let Some(min) = self.min_value {
             if f.value < min {
+                return false;
+            }
+        }
+        if let Some(max) = self.max_value {
+            if f.value > max {
                 return false;
             }
         }
@@ -2335,6 +2344,14 @@ mod tests {
         let f = FactFilter::from_json("{\"min_value\":10.0}").unwrap();
         assert_eq!(f.min_value, Some(10.0));
         assert!(f.severity.is_none());
+        // max_value (tsk124) parses and defaults to None.
+        assert!(f.max_value.is_none());
+        assert_eq!(
+            FactFilter::from_json("{\"max_value\":0.0}")
+                .unwrap()
+                .max_value,
+            Some(0.0)
+        );
         // Partial JSON is fine; a full filter round-trips including the dim pair.
         let f2 = FactFilter::from_json(
             "{\"severity\":\"error\",\"dim_eq\":[\"oxplow.language\",\"rust\"]}",
@@ -2516,6 +2533,47 @@ mod tests {
         assert_eq!(f("symbol:a::f").severity.as_deref(), Some("fail"));
         assert_eq!(f("symbol:a::f").line, Some(3));
         assert_eq!(f("symbol:a::g").severity, None);
+    }
+
+    #[tokio::test]
+    async fn count_with_max_value_keeps_only_facts_at_or_below() {
+        // tsk124: `oxplow.coverage.untested_files` is a `count` with
+        // `max_value: 0` — the files at 0% coverage. The upper-bound filter keeps
+        // value ≤ max and drops the rest.
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact {
+                        subject_ref: Some("a.rs".into()),
+                        path: Some("a.rs".into()),
+                        ..NewFact::new(complexity, 0.0)
+                    },
+                    NewFact {
+                        subject_ref: Some("b.rs".into()),
+                        path: Some("b.rs".into()),
+                        ..NewFact::new(complexity, 0.0)
+                    },
+                    // Covered → not untested, excluded by max_value.
+                    NewFact {
+                        subject_ref: Some("c.rs".into()),
+                        ..NewFact::new(complexity, 42.0)
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let mut spec = NewMetricSpec::base("acme.untested", "Untested", "acme.complexity", "count");
+        spec.filter_json = Some("{\"max_value\":0.0}".into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.untested").await.unwrap().unwrap();
+
+        let findings = engine.findings_for_spec(&spec, None).await.unwrap();
+        assert_eq!(findings.len(), 2, "the two zero-coverage files");
+        assert!(findings
+            .iter()
+            .all(|x| x.subject_ref.as_deref() != Some("c.rs")));
     }
 
     #[tokio::test]

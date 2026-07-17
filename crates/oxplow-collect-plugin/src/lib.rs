@@ -1052,9 +1052,17 @@ def transform(input):
     <package name="p">
       <classes>
         <class name="Foo" filename="src/foo.rs">
+          <methods>
+            <method name="a" signature="()V" line-rate="1.0" branch-rate="1.0">
+              <lines><line number="1" hits="3"/></lines>
+            </method>
+            <method name="b" signature="()V" line-rate="0.0" branch-rate="0.0">
+              <lines><line number="2" hits="0"/></lines>
+            </method>
+          </methods>
           <lines>
-            <line number="1" hits="3"/>
-            <line number="2" hits="0"/>
+            <line number="1" hits="3" branch="true" condition-coverage="100% (2/2)"/>
+            <line number="2" hits="0" branch="true" condition-coverage="0% (0/2)"/>
             <line number="5" hits="1"/>
           </lines>
         </class>
@@ -1068,7 +1076,7 @@ def transform(input):
   </packages>
 </coverage>"#;
 
-    const GOLD_LCOV: &str = "TN:\nSF:src/foo.rs\nDA:1,3\nDA:2,0\nDA:5,1\nend_of_record\nSF:src/bar.rs\nDA:10,0\nend_of_record\n";
+    const GOLD_LCOV: &str = "TN:\nSF:src/foo.rs\nFNF:2\nFNH:2\nDA:1,3\nDA:2,0\nDA:5,1\nBRF:4\nBRH:3\nend_of_record\nSF:src/bar.rs\nDA:10,0\nend_of_record\n";
 
     const GOLD_JACOCO: &str = r#"<?xml version="1.0"?>
 <report name="r">
@@ -1076,6 +1084,9 @@ def transform(input):
     <sourcefile name="Foo.java">
       <line nr="1" mi="0" ci="4"/>
       <line nr="2" mi="3" ci="0"/>
+      <counter type="BRANCH" missed="1" covered="3"/>
+      <counter type="METHOD" missed="0" covered="2"/>
+      <counter type="LINE" missed="1" covered="1"/>
     </sourcefile>
   </package>
   <package name="">
@@ -1112,6 +1123,9 @@ def transform(input):
                 oxplow_coverage::FileCoverage {
                     instrumented: instrumented.iter().copied().collect(),
                     covered: covered.iter().copied().collect(),
+                    // Line-only helper; branch/function set per-file in the tests
+                    // that exercise them.
+                    ..Default::default()
                 },
             );
         }
@@ -1132,15 +1146,27 @@ def transform(input):
         }
     }
 
+    /// Set a file's branch/function counts on an expected report (line-only
+    /// `cov` leaves them 0). `(bf, bh, ff, fh)`.
+    fn set_bf(report: &mut CoverageReport, path: &str, bf: u32, bh: u32, ff: u32, fh: u32) {
+        let f = report.files.get_mut(path).expect("file present");
+        f.branches_found = bf;
+        f.branches_hit = bh;
+        f.functions_found = ff;
+        f.functions_hit = fh;
+    }
+
     #[test]
     fn builtin_cobertura_plugin_produces_expected_coverage() {
         let out = CollectorRegistry::with_builtins()
             .run("cobertura", GOLD_COBERTURA)
             .expect("plugin runs");
-        let expected = cov(&[
+        let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
         ]);
+        // Branch: (2/2)+(0/2) → 4 found / 2 hit. Methods: 2, one with line-rate>0.
+        set_bf(&mut expected, "src/foo.rs", 4, 2, 2, 1);
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
@@ -1149,10 +1175,12 @@ def transform(input):
         let out = CollectorRegistry::with_builtins()
             .run("lcov", GOLD_LCOV)
             .expect("plugin runs");
-        let expected = cov(&[
+        let mut expected = cov(&[
             ("src/foo.rs", &[1, 2, 5], &[1, 5]),
             ("src/bar.rs", &[10], &[]),
         ]);
+        // BRF:4 BRH:3 FNF:2 FNH:2 on the foo record; bar has none → 0.
+        set_bf(&mut expected, "src/foo.rs", 4, 3, 2, 2);
         assert_eq!(out.as_coverage().unwrap(), &expected);
     }
 
@@ -1253,10 +1281,12 @@ def transform(input):
     #[test]
     fn builtin_jacoco_plugin_produces_expected_coverage() {
         let reg = CollectorRegistry::with_builtins();
-        let expected = cov(&[
+        let mut expected = cov(&[
             ("com/example/Foo.java", &[1, 2], &[1]),
             ("Root.java", &[7], &[7]),
         ]);
+        // Foo.java counters: BRANCH 3/4, METHOD 2/2. Root.java has none → 0.
+        set_bf(&mut expected, "com/example/Foo.java", 4, 3, 2, 2);
         for fmt in ["jacoco", "jacoco-xml"] {
             let out = reg.run(fmt, GOLD_JACOCO).expect("plugin runs");
             assert_eq!(out.as_coverage().unwrap(), &expected, "format {fmt}");

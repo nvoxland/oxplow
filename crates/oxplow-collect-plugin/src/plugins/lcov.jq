@@ -36,6 +36,12 @@
           value: {
             instrumented: ($das | map(.n)),
             covered: ($das | map(select(.h > 0) | .n)),
+            # lcov summary lines: BRF/BRH = branches found/hit, FNF/FNH =
+            # functions found/hit. A line-only record omits them → 0.
+            branchesFound: ((.BRF[0] | tonumber?) // 0),
+            branchesHit: ((.BRH[0] | tonumber?) // 0),
+            functionsFound: ((.FNF[0] | tonumber?) // 0),
+            functionsHit: ((.FNH[0] | tonumber?) // 0),
           },
         }
     )
