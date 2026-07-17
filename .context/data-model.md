@@ -1036,7 +1036,11 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
 **Rules before touching these:** never let a read take *data* from the cube that
 the facts don't have; never aggregate coarser than a capture (it's the floor that
 keeps snapshot/effort tie-back working); `dimension.promoted` defines the grain, so
-promoting a dim is a **rebuild**, not a schema change. Written outside the
+promoting a dim is a **rebuild**, not a schema change. **Anything that deletes
+captures or facts must invalidate the affected stream's cube in the same
+transaction** — cube rows are frozen at build time and don't cascade (tsk100;
+`prune_dominated_tree_captures` is the one such caller today, and it invalidates
+only when it actually dropped something, since it runs on every boot). Written outside the
 fact-insert transaction, which is safe only because whole-capture replay is
 idempotent and the watermark advances atomically with the rows. Full rationale +
 the read's eligibility rules: **`.context/metrics.md`**.

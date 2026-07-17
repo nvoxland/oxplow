@@ -366,6 +366,19 @@ welded to collection.
 > build re-runs whole captures, which is idempotent (evict+insert *replaces* a
 > subject's facts).
 >
+> **Deleting captures invalidates the cube** (tsk100). `prune_dominated_tree_captures`
+> drops per-path captures and their facts cascade; `metric_live_fact` cascades with
+> them (FK on `fact_id`) so live state self-heals, but **`metric_cube` rows are
+> frozen at build time and don't**. Usually they'd still agree — the baseline
+> restated those paths already — but not for a path the sweep never restated (a
+> changed gauge glob: neither scanned nor tombstoned), which stays live until the
+> prune deletes it. So the prune **invalidates that stream's cube in the same
+> transaction**, rather than reasoning about which prunes are safe; the next build
+> re-folds. **Only when it actually dropped something** — `rebuild_metric_baseline`
+> prunes on every boot, so unconditional invalidation would wipe a healthy cube each
+> start and turn the fix off for nothing. Any future code that deletes captures or
+> facts owes the cube the same treatment.
+>
 > **The grain's floor is the CAPTURE.** Never aggregate coarser (per-day,
 > per-commit): a capture *is* one scan/run, so `snapshot_id`/`effort_id`/
 > `thread_id`/`branch`/`closest_git_version`/`stream_id` stay reachable through

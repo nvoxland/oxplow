@@ -1740,11 +1740,23 @@ impl SqliteFactStore {
     /// Trade-off, accepted deliberately: a per-path measure's TREND loses its
     /// pre-baseline points (the current fold and every effort window at/after
     /// the baseline are unaffected). Runs after each successful full sweep.
+    ///
+    /// **Invalidates that stream's cube when it drops anything** (tsk100). Deleted
+    /// captures' facts cascade, and `metric_live_fact` cascades with them — but
+    /// `metric_cube` rows are frozen at build time and would keep counting a fact
+    /// the facts no longer have. Usually they'd agree anyway (the baseline already
+    /// evicted those paths), but not for a path the sweep never restated, so we
+    /// invalidate rather than reason about which prunes are safe. The cube is
+    /// disposable; the next build re-folds. A prune that drops NOTHING leaves it
+    /// alone — `rebuild_metric_baseline` prunes on every boot, and wiping a healthy
+    /// cube each start would turn tsk96's fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
         self.db
-            .call(move |conn| {
-                let n = conn.execute(
-                    "DELETE FROM metric_capture
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let n = tx
+                    .execute(
+                        "DELETE FROM metric_capture
                       WHERE id IN (
                         SELECT c.id
                           FROM metric_capture c
@@ -1773,8 +1785,22 @@ impl SqliteFactStore {
                                 AND m.capture_scope <> 'per-path'
                            )
                       )",
-                    params![stream_id],
-                )?;
+                        params![stream_id],
+                    )
+                    .map_err(map_sql_err)?;
+                // Same transaction as the delete: the cube must never be observable
+                // as "built" over history that no longer exists.
+                if n > 0 {
+                    for sql in [
+                        "DELETE FROM metric_cube WHERE capture_id IN
+                           (SELECT id FROM metric_capture WHERE stream_id = ?1)",
+                        "DELETE FROM metric_live_fact WHERE stream_id = ?1",
+                        "DELETE FROM metric_cube_state WHERE stream_id = ?1",
+                    ] {
+                        tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
+                    }
+                }
+                tx.commit().map_err(map_sql_err)?;
                 Ok(n as u64)
             })
             .await
@@ -2495,6 +2521,145 @@ mod tests {
         assert!(alive.contains(&new_delta));
         assert!(alive.contains(&stamped_id), "effort-stamped kept");
         assert!(alive.contains(&other), "producer without a baseline kept");
+    }
+
+    #[tokio::test]
+    async fn a_prune_that_drops_captures_invalidates_that_streams_cube() {
+        // tsk100. The prune deletes captures and their facts cascade.
+        // `metric_live_fact` cascades with them (FK on `fact_id`), so the live
+        // state self-heals — but `metric_cube` rows are FROZEN at build time and
+        // do NOT. Leave the watermark standing and the read treats those stale
+        // rows as authoritative: a wrong NUMBER, this subsystem's worst failure
+        // mode.
+        //
+        // Usually the frozen rows happen to agree (a `full` sweep restates every
+        // path it scanned, so a pruned capture's facts were already evicted at
+        // every surviving point). But not always — a path live from before the
+        // sweep that the sweep didn't restate (a changed gauge glob: neither
+        // scanned nor tombstoned) is still live, and pruning deletes it. So
+        // INVALIDATE rather than reason about which prunes are safe. The cube is
+        // disposable; throwing it away costs only the next rebuild.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        snapshot_with(&store, 2, &[("a.rs", "oxplow")]).await;
+        let old_full = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            m,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        let latest_full = full_capture(
+            &store,
+            "g",
+            2,
+            "2026-06-30T10:00:00.000000Z",
+            m,
+            &[("a.rs", 3.0)],
+        )
+        .await;
+
+        // Stand in for a built cube over that history.
+        let row = |v: f64| NewCubeRow {
+            producer: "g".into(),
+            dims_key: "{}".into(),
+            fact_count: 1,
+            value_sum: v,
+            value_min: Some(v),
+            value_max: Some(v),
+            numerator: 0.0,
+            denominator: 0.0,
+        };
+        for (cap, at_s, v) in [
+            (old_full, "2026-06-30T09:00:00.000000Z", 8.0),
+            (latest_full, "2026-06-30T10:00:00.000000Z", 3.0),
+        ] {
+            store
+                .write_cube_rows(m, 1, cap, at(at_s), vec![row(v)])
+                .await
+                .unwrap();
+        }
+        assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(pruned, 1, "the dominated full is dropped");
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_none(),
+            "a prune that dropped captures must invalidate the cube — an un-advanced \
+             watermark reads as `not cubed yet` and sends the read back to the facts, \
+             which are always right"
+        );
+        let rows = store.cube_rows_for_measure(m, Some(1)).await.unwrap();
+        assert!(
+            rows.is_empty(),
+            "stale cube rows must not survive the prune"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_prune_that_drops_nothing_leaves_the_cube_alone() {
+        // The other half, and NOT hypothetical: `rebuild_metric_baseline` prunes on
+        // EVERY boot (the "nothing to baseline" path). Invalidating unconditionally
+        // would wipe a healthy cube each start and force a full re-fold — turning
+        // tsk96's fix back off at boot, for nothing. Only a prune that actually
+        // deleted something may invalidate.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-path".into(),
+                ..NewMeasure::new("acme.hits", "acme.hits")
+            })
+            .await
+            .unwrap();
+        snapshot_with(&store, 1, &[("a.rs", "oxplow")]).await;
+        let only_full = full_capture(
+            &store,
+            "g",
+            1,
+            "2026-06-30T09:00:00.000000Z",
+            m,
+            &[("a.rs", 8.0)],
+        )
+        .await;
+        store
+            .write_cube_rows(
+                m,
+                1,
+                only_full,
+                at("2026-06-30T09:00:00.000000Z"),
+                vec![NewCubeRow {
+                    producer: "g".into(),
+                    dims_key: "{}".into(),
+                    fact_count: 1,
+                    value_sum: 8.0,
+                    value_min: Some(8.0),
+                    value_max: Some(8.0),
+                    numerator: 0.0,
+                    denominator: 0.0,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let pruned = store.prune_dominated_tree_captures(1).await.unwrap();
+        assert_eq!(pruned, 0, "nothing is dominated");
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_some(),
+            "a no-op prune must leave the cube built — else every boot pays a re-fold"
+        );
+        assert_eq!(
+            store.cube_rows_for_measure(m, Some(1)).await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]
