@@ -602,14 +602,30 @@ gauges, tokens, lifecycle — always insert fresh), `get_capture`,
   current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
-  file's stale last fact haunts the breakdown forever), latest-per-subject,
-  summed per dim value — **unless** the facts carry ratio components (a level
+  file's stale last fact haunts the breakdown forever), latest per
+  **(stream, producer, subject)** — the partition key, never the subject string
+  alone, which let one worktree's fact EVICT another's (tsk106) — summed per
+  dim value — **unless** the facts carry ratio components (a level
   ratio like coverage, tsk13), in which case the per-group value is Σn/Σd, never
   a sum of per-file percentages; additive → EVERY fact counts (tokens by model
   is a running total, not the last turn); non-additive → current captures,
   latest per subject, per-group Σnumerator/Σdenominator, never a naive
   sum/average of percentages. The rule is uniform: **any** group whose facts
-  have Σden≠0 collapses to Σn/Σd regardless of temporal class. `dim_value` reads the `severity`/`rule` columns and
+  have Σden≠0 collapses to Σn/Σd regardless of temporal class.
+
+  **Point-in-time reads describe the headline's own state** (tsk106). For a
+  partial-scope measure, `scoped_facts` serves each stream's newest capture's
+  `(stream, BRANCH)` partition from the cube's live state
+  (`partial_state_facts` → `live_facts`) — visibility-seeded and
+  branch-partitioned, i.e. exactly the state the series' last point aggregates,
+  so the breakdown/drill-in can never disagree with the headline
+  (`a_breakdowns_state_matches_the_branch_aware_headline` pins it). A stream
+  the cube hasn't caught up with falls back to the branch-blind SQL folds
+  (`latest_subject_facts`/`latest_tree_facts`) — the pre-tsk106 approximation,
+  held only while the cube lags. Unscoped reads UNION each stream's own
+  current partition (per-worktree states, never merged within a subject);
+  note the unscoped *headline* is narrower — the single newest worktree's
+  value — a known asymmetry only visible with multiple active worktrees. `dim_value` reads the `severity`/`rule` columns and
   `package`-from-path directly, else `dims_json[key]`; `oxplow.language` /
   bare `language` alias each other (the gauge scripts emit the conformed
   namespaced key; pre-rename facts and the Explorer's declared sliceable_dims

@@ -958,8 +958,14 @@ pub fn compute_rollup(
     current_caps: &std::collections::HashSet<i64>,
 ) -> Vec<RollupRow> {
     // The facts that contribute: all of them for an additive event measure;
-    // the current captures' latest-per-subject otherwise.
-    let mut latest: HashMap<String, &FactRow> = HashMap::new();
+    // the current captures' latest-per-subject otherwise. The dedupe key is
+    // `(stream, producer, subject)` — the same partition the currency gate and
+    // the SQL folds use — never the subject string alone: a subject-keyed map
+    // let worktree B's newest fact EVICT worktree A's for the same test, and
+    // one analyzer's fact evict another's for the same path — a merged state
+    // belonging to no worktree (the tsk98 forbidden shape; tsk106). Distinct
+    // partitions UNION into the group sums instead.
+    let mut latest: HashMap<(i64, &str, &str), &FactRow> = HashMap::new();
     let kept: Vec<&FactRow> = match temporal {
         Temporal::Additive => facts
             .iter()
@@ -973,7 +979,7 @@ pub fn compute_rollup(
                 let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) else {
                     continue;
                 };
-                latest.insert(subject.to_string(), f);
+                latest.insert((f.stream_id, f.producer.as_str(), subject), f);
             }
             latest.values().copied().collect()
         }
@@ -1357,6 +1363,89 @@ impl MetricEngine {
         // would let a future fourth scope compile clean and silently read as
         // whichever default it fell into.
         match parse_capture_scope(&measure.key, &measure.capture_scope)? {
+            scope @ (CaptureScope::PerSubject | CaptureScope::PerPath) => {
+                self.partial_state_facts(measure, scope, stream).await
+            }
+            CaptureScope::Complete => Ok(self
+                .facts
+                .facts_for_measure(measure.id)
+                .await?
+                .into_iter()
+                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+                .collect()),
+        }
+    }
+
+    /// The CURRENT state of a partial-scope measure: per stream, the newest
+    /// capture's `(stream, BRANCH)` partition — exactly the state the series'
+    /// last point describes, so the headline and its own breakdown/drill-in
+    /// can never disagree (tsk106, closing the tsk97/tsk98 gap for
+    /// point-in-time reads).
+    ///
+    /// Served from the cube's durable live state when the watermark covers the
+    /// stream's newest capture — that state is visibility-SEEDED (a branch
+    /// inherits its pre-fork history) and branch-partitioned, and reading it
+    /// is cheaper than the SQL window fold it replaces. A stream the cube
+    /// hasn't caught up with falls back to the branch-BLIND SQL fold — the
+    /// pre-tsk106 approximation, held only for the seconds the cube lags.
+    ///
+    /// Unscoped reads UNION each stream's own current partition (a
+    /// per-worktree breakdown that mixes no states); they do not collapse to
+    /// the single newest worktree the unscoped headline shows.
+    async fn partial_state_facts(
+        &self,
+        measure: &oxplow_db::Measure,
+        scope: CaptureScope,
+        stream: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        let producers = self.facts.producers_for_measure(measure.id).await?;
+        let captures: Vec<MetricCapture> = self
+            .facts
+            .captures_for_producers(producers)
+            .await?
+            .into_iter()
+            .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+            .collect();
+        // Newest capture per stream — `captures_for_producers` is oldest-first,
+        // so the last insert wins; BTreeMap for deterministic output order.
+        let mut newest: BTreeMap<i64, (Timestamp, i64, Option<String>)> = BTreeMap::new();
+        for c in &captures {
+            newest.insert(c.stream_id, (c.captured_at, c.id, c.branch.clone()));
+        }
+        let mut out: Vec<FactRow> = Vec::new();
+        let mut fallback_streams: Vec<i64> = Vec::new();
+        for (stream_id, (at, id, branch)) in newest {
+            let covered = self
+                .facts
+                .cube_watermark(measure.id, stream_id)
+                .await?
+                .is_some_and(|w| (at, id) <= w);
+            if covered {
+                out.extend(self.facts.live_facts(measure.id, stream_id, branch).await?);
+            } else {
+                fallback_streams.push(stream_id);
+            }
+        }
+        if !fallback_streams.is_empty() {
+            let folded = self.fallback_partial_facts(measure, scope, stream).await?;
+            out.extend(
+                folded
+                    .into_iter()
+                    .filter(|f| fallback_streams.contains(&f.stream_id)),
+            );
+        }
+        Ok(out)
+    }
+
+    /// The branch-blind SQL folds — [`Self::partial_state_facts`]' fallback for
+    /// streams the cube hasn't caught up with.
+    async fn fallback_partial_facts(
+        &self,
+        measure: &oxplow_db::Measure,
+        scope: CaptureScope,
+        stream: Option<i64>,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        match scope {
             // The restated set is the capture's own facts, so the fold is simply the
             // latest fact per subject — a partial test run updates only the tests it ran.
             CaptureScope::PerSubject => self.facts.latest_subject_facts(measure.id, stream).await,
@@ -1381,13 +1470,9 @@ impl MetricEngine {
                 }
                 Ok(folded)
             }
-            CaptureScope::Complete => Ok(self
-                .facts
-                .facts_for_measure(measure.id)
-                .await?
-                .into_iter()
-                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
-                .collect()),
+            // Unreachable — only the partial arms above call this. Listed so a
+            // fourth scope must decide its fallback at compile time (tsk103).
+            CaptureScope::Complete => Ok(Vec::new()),
         }
     }
 
