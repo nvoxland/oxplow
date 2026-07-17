@@ -16,6 +16,14 @@ exception so far: the entity-id scheme change edited the historical
 migrations in place and reset the dev DB, since there was no back-compat
 to preserve and only a single instance existed.)
 
+> ⚠️ Migrations are **embedded at compile time** (`refinery::embed_migrations!`,
+> a proc macro cargo knows nothing about). `crates/oxplow-db/build.rs` declares
+> `rerun-if-changed=migrations` so a migration-only change (pure SQL, no `.rs`
+> touched — V64 was the first) actually recompiles oxplow-db. Without it, cargo
+> reuses the cached crate and every downstream binary silently ships WITHOUT the
+> new migration — tests stay green, the app runs, the schema change just never
+> happens. Don't remove that build script.
+
 **Transactions.** One user-visible action that spans multiple writes
 to the same DB must commit as ONE transaction. The pattern (see the
 `transactional-boundaries-design` wiki page): store write ops are

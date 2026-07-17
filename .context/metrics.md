@@ -418,11 +418,20 @@ welded to collection.
 > **dimensions you can group by, never partitions that hide rows**.
 >
 > **`dimension.promoted` = the cube's grain** (tsk28's flag, inert until V62).
-> `oxplow.status` is promoted (cardinality 2; 125 → 152 rows, and it is what
-> `tests.passed`/`tests.failed` filter on). `oxplow.test_suite` is not
-> (cardinality 234 ⇒ 18,918 rows, for slicing no spec asks for). **Promoting a dim
-> later is a cube rebuild, not a schema change** — the raw facts always keep every
-> dim, so nothing is foreclosed.
+> Promoted: `oxplow.status` (V62 — cardinality 2, what `tests.passed`/`.failed`
+> filter on) and, since V64 (tsk101), the four filter dims the declining specs
+> needed — `oxplow.rule` (13), `oxplow.token_kind` (4), `oxplow.tests_stat` (4),
+> `oxplow.severity` (1). Measured grain cost of all five: ~1.4× rows.
+> `oxplow.test_suite` stays unpromoted (cardinality 234 ⇒ 18,918 rows, for
+> slicing no spec asks for). The dims live on different measures' facts, so the
+> grain doesn't cross-multiply — `dims_key` carries only the promoted dims a
+> fact actually has. **Gate any promotion on measured cardinality, and treat it
+> as a cube rebuild, not a schema change** (V64 clears all three cube tables —
+> a pre-promotion bucket merged values the new grain separates, and `metric_
+> live_fact` must be rebuilt alongside the watermarks: a replayed capture
+> re-aggregates the whole live partition, so leftover final-state rows would
+> leak future facts into historical points). The raw facts always keep every
+> dim, so nothing is foreclosed by waiting.
 >
 > ### Where the code lives (`metric_cube.rs`)
 >
@@ -473,18 +482,19 @@ welded to collection.
 > **zero divergence** from the fact path on any of them. Backfill ~25s once, in the
 > background. *That 9.26s every ~10s was the CPU burn.* Re-verified after the
 > branch-aware build (tsk97, 590k facts, a genuinely two-branch capture history):
-> all 68 identical again, **3.74s → 334ms**, same 42/68 served. The harness is
-> `examples/cube_equivalence.rs` — run it against a **fresh `VACUUM INTO` copy**
-> (never the live file, never a copy that's already been built: the oracle must be
-> fact-served, or it's the cube confirming itself).
+> all 68 identical again, **3.74s → 334ms**, 42/68 served; and after V64's dim
+> promotion (tsk101): all 68 identical, **4.07s → 446ms**, 58/68 served. The
+> harness is `examples/cube_equivalence.rs` — run it against a **fresh `VACUUM
+> INTO` copy** (never the live file, never a copy that's already been built: the
+> oracle must be fact-served, or it's the cube confirming itself).
 >
-> **42 of 68 specs are cube-served**; the other 26 decline, and every one is an
-> expected class — 18 filter `dim_eq` on an **unpromoted** dim (`oxplow.rule` ×10,
-> `oxplow.token_kind` ×4, `oxplow.tests_stat` ×4), 2 filter on `severity`
-> (unpromoted), 2 are `min_value` thresholds (permanent, by design), and 4 measures
-> have no facts at all. Those first 20 are a *grain* choice, not a limit — all four
-> dims are low-cardinality, so promoting them would cube those specs too (tsk101).
-> Verify a decline is one of these classes before assuming the cube is working.
+> **58 of 68 specs are cube-served** (42 before V64 promoted the four filter
+> dims — tsk101). The 10 that decline are all expected classes: 2 `min_value`
+> thresholds (permanent, by design) and 8 whose measure or filter matches **no
+> facts yet** (clean gauges, zero `severity=warning` rows) — those cube
+> automatically the moment matching facts exist, and declining them is correct:
+> the fact path owns empty-producer seeding (tsk62). Verify a decline is one of
+> these classes before assuming the cube is working.
 >
 > **The equivalence gate.** Tests take the fact-served oracle **before** the build
 > — after one, `series_for_spec` reads the cube, so a later oracle is just the cube

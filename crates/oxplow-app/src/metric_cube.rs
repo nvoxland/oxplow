@@ -1237,6 +1237,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_severity_filtered_spec_is_cube_served_once_severity_is_promoted() {
+        // tsk101. `oxplow.analysis.errors` / `.warnings` filter on `severity`,
+        // which lives in a fact COLUMN, not `dims_json` — `dims_key` must pick it
+        // up through the same `dim_value` the read uses, and the read's severity
+        // filter must select cube buckets exactly as the fact path selects facts.
+        // V64 promotes the dim on real deployments; the fixture promotes it here.
+        let (engine, facts, builder) = fixture().await;
+        facts
+            .upsert_dimension(oxplow_db::NewDimension {
+                promoted: true,
+                ..oxplow_db::NewDimension::categorical("oxplow.severity", "Severity")
+            })
+            .await
+            .unwrap();
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.analysis", "Analysis"))
+            .await
+            .unwrap();
+        let hit = |sev: &str, v: f64| NewFact {
+            severity: Some(sev.into()),
+            ..NewFact::new(m, v)
+        };
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![hit("error", 1.0), hit("error", 1.0), hit("warning", 1.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![hit("error", 1.0)])
+            .await
+            .unwrap();
+        let mut s = NewMetricSpec::base("acme.errors", "Errors", "acme.analysis", "count");
+        s.filter_json = Some(r#"{"severity":"error"}"#.into());
+        facts.upsert_spec(s).await.unwrap();
+        let spec = facts.get_spec("acme.errors").await.unwrap().unwrap();
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0],
+            "the fact path counts only the errors — the warning stays out"
+        );
+        builder.build_measure("acme.analysis").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.analysis", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_dim_eq_spec_on_a_promoted_dim_is_cube_served() {
+        // tsk101. The 10 idiom specs filter `dim_eq` on `oxplow.rule` and the 8
+        // token/tests specs on `dims_json` keys — all resolve through
+        // `dim_value`, so one column-backed case pins the class: the filter must
+        // select buckets (and narrow the producer set) exactly as the fact path
+        // filters facts. `b`'s `panic` fact never matching is the point — a
+        // bucket-blind read would sum it in.
+        let (engine, facts, builder) = fixture().await;
+        facts
+            .upsert_dimension(oxplow_db::NewDimension {
+                promoted: true,
+                ..oxplow_db::NewDimension::categorical("oxplow.rule", "Rule")
+            })
+            .await
+            .unwrap();
+        let m = per_subject_measure(&facts, "acme.ast_hit").await;
+        let hit = |subject: &str, rule: &str, v: f64| NewFact {
+            rule: Some(rule.into()),
+            ..case(m, subject, v)
+        };
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![hit("a.rs", "unwrap_expect", 2.0), hit("b.rs", "panic", 3.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T11:00:00Z"),
+                vec![hit("a.rs", "unwrap_expect", 1.0)],
+            )
+            .await
+            .unwrap();
+        let mut s = NewMetricSpec::base("acme.unwraps", "Unwraps", "acme.ast_hit", "sum");
+        s.filter_json = Some(r#"{"dim_eq":["oxplow.rule","unwrap_expect"]}"#.into());
+        facts.upsert_spec(s).await.unwrap();
+        let spec = facts.get_spec("acme.unwraps").await.unwrap().unwrap();
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0],
+            "the fold over unwrap_expect facts only — b.rs's panic hit stays out"
+        );
+        builder.build_measure("acme.ast_hit").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.ast_hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
     async fn the_cube_keeps_each_streams_state_separate() {
         // The cube-side of tsk98. Two worktrees run the same gauge over the same
         // subjects, so they share `(producer, subject)` keys — a stream-blind live

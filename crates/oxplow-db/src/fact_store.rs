@@ -149,9 +149,10 @@ pub struct NewDimension {
     pub subject_kind: Option<String>,
     pub vocabulary_json: Option<String>,
     pub scope: String,
-    /// Request a generated column + expression index on `fact` for this
-    /// dim (the config `promote: true`). Recorded on the row; the index
-    /// teeth are a follow-up — reads still filter in-app.
+    /// This dim is part of the aggregate cube's GRAIN (`metric_cube.dims_key`
+    /// buckets by every promoted dim a fact carries — V62/V64). Flipping it on
+    /// is a cube REBUILD, gated on measured cardinality; see
+    /// `.context/metrics.md`.
     pub promoted: bool,
 }
 
