@@ -2692,10 +2692,18 @@ impl CollectionService {
                     scanned.entry(cid).or_default().push(path);
                 }
             }
-            crate::metric_engine::tree_state_series(&cap_list, &facts, &scanned, agg, &filter, None)
-                .into_iter()
-                .map(|p| (p.capture_id, p.value))
-                .collect()
+            crate::metric_engine::tree_state_series(
+                &cap_list,
+                &facts,
+                &scanned,
+                agg,
+                &filter,
+                None,
+                &crate::metric_engine::Visibility::blind(),
+            )
+            .into_iter()
+            .map(|p| (p.capture_id, p.value))
+            .collect()
         } else {
             Default::default()
         };

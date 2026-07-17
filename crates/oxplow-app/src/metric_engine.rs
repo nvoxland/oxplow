@@ -583,6 +583,80 @@ pub fn aggregate_series(
 /// The state key for a fact with no path/subject — an agent-asserted repo scalar
 /// (`record_metric` with no subject). Not a real path, so it can never collide with
 /// one (paths are never empty and never contain a NUL).
+/// Which earlier captures a reading capture may fold in — the ancestry rule
+/// (tsk97), as a PURE lookup so the fold stays unit-testable and never shells out
+/// to git per capture per read. A git-backed resolver populates it once per read
+/// (cached); the fold only asks.
+///
+/// # The rule
+///
+/// ```text
+/// visible(C, R)  iff  C.captured_at <= R.captured_at  AND (
+///       C.branch == R.branch                      // own history, incl. uncommitted
+///    OR is_ancestor_or_equal(effective_commit(C), base_commit(R))
+/// )
+/// ```
+///
+/// - **`effective_commit(C)`** — *the first commit that CONTAINS C's tested code*:
+///   the commit of the next snapshot at-or-after C that has one. A dirty run's code
+///   lands in the next commit. `None` when never committed (abandoned work) ⇒ C is
+///   its own branch's business only.
+/// - **`base_commit(R)`** — the closest ANCESTOR commit at-or-before R; R's code is
+///   `base_commit(R) + delta`.
+///
+/// # Why not plain commit ancestry (tsk97's original rule — DISPROVEN)
+///
+/// 100% of test captures are dirty, and a dirty run on a branch stamps
+/// `closest_git_version` to the **fork point**, which is on main. Ancestry on that
+/// keeps the branch's results visible from main — the very bug being fixed. This
+/// rule anchors a dirty run to the commit that **absorbed** it, not the one it
+/// **branched from**, which separates them. It also gives the semantic this always
+/// wanted for free: once a branch merges, its commits become ancestors of main and
+/// its results correctly *become* visible.
+///
+/// # Degrading
+///
+/// Unknown capture, unresolvable branch (deleted after merge), no commit anywhere ⇒
+/// **visible**. That is today's branch-blind behavior, so an unresolvable ancestry
+/// is never a regression and never silently stricter than before.
+#[derive(Debug, Clone, Default)]
+pub struct Visibility {
+    /// capture_id → the first commit containing that capture's code.
+    pub effective: HashMap<i64, String>,
+    /// capture_id → the closest ancestor commit at-or-before that capture.
+    pub base: HashMap<i64, String>,
+    /// `(ancestor, descendant)` pairs, resolved from git once per read.
+    /// Ancestor-or-equal; a sha is always its own ancestor.
+    pub ancestor_of: std::collections::HashSet<(String, String)>,
+}
+
+impl Visibility {
+    /// Fold everything into everything — the pre-tsk97 behavior, and the fallback
+    /// whenever ancestry can't be resolved.
+    pub fn blind() -> Self {
+        Self::default()
+    }
+
+    /// Whether `c`'s facts may contribute to the state read at `r`.
+    pub fn sees(&self, c: &MetricCapture, r: &MetricCapture) -> bool {
+        // A branch's own history is always its own — including uncommitted work,
+        // which is exactly what has no commit to be placed by.
+        if c.branch == r.branch {
+            return true;
+        }
+        let (Some(ec), Some(br)) = (self.effective.get(&c.id), self.base.get(&r.id)) else {
+            // Nothing to reason with ⇒ behave as before (visible). Never invent
+            // strictness from missing data.
+            return true;
+        };
+        ec == br || self.ancestor_of.contains(&(ec.clone(), br.clone()))
+    }
+}
+
+/// The fold's live tree: `(producer, subject_key)` → the facts that subject
+/// currently contributes.
+type Tree<'a> = HashMap<(String, String), Vec<&'a FactRow>>;
+
 pub(crate) const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
 
 /// The path a fact is folded under, or `None` when it carries no location at all
@@ -598,6 +672,7 @@ pub fn tree_state_series(
     agg: Aggregation,
     filter: &FactFilter,
     group_by: Option<&str>,
+    visibility: &Visibility,
 ) -> Vec<SeriesPoint> {
     let mut by_capture: HashMap<i64, Vec<&FactRow>> = HashMap::new();
     for f in facts {
@@ -607,18 +682,15 @@ pub fn tree_state_series(
         by_capture.entry(f.capture_id).or_default().push(f);
     }
 
-    // The live tree, PER STREAM: stream → (producer, path) → the facts that path
-    // currently contributes. Stream keys the state because a stream is a WORKTREE
-    // and the fold reconstructs one worktree's tree (tsk98) — two worktrees running
-    // the same gauge share `(producer, path)` keys, so a stream-blind state lets one
-    // worktree's capture evict the other's paths and yields a point belonging to
-    // neither. This mirrors the scoping the fact fetch (tsk75) and the rollup
-    // (tsk46) already apply.
-    let mut state: HashMap<i64, HashMap<(String, String), Vec<&FactRow>>> = HashMap::new();
-    let mut out: Vec<SeriesPoint> = Vec::new();
-
-    for c in captures {
-        let tree = state.entry(c.stream_id).or_default();
+    /// Apply one capture to a tree: evict what it restated, insert what it emitted.
+    /// The fold's step, factored out so the SEED below replays through the exact
+    /// same code as the incremental path.
+    fn apply<'a>(
+        tree: &mut Tree<'a>,
+        c: &MetricCapture,
+        scanned: &HashMap<i64, Vec<String>>,
+        by_capture: &HashMap<i64, Vec<&'a FactRow>>,
+    ) {
         for path in scanned.get(&c.id).into_iter().flatten() {
             tree.remove(&(c.producer.clone(), path.clone()));
         }
@@ -632,12 +704,54 @@ pub fn tree_state_series(
         }
         for f in own {
             let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
-            tree.entry((c.producer.clone(), key)).or_default().push(f);
+            tree.entry((c.producer.clone(), key)).or_default().push(*f);
         }
+    }
 
-        // This capture's OWN stream's tree — an unscoped read replays every
-        // stream's captures into one timeline, but each point is still exactly
-        // one worktree's state.
+    // The live tree, per (STREAM, BRANCH).
+    //
+    // Stream, because a stream is a WORKTREE and the fold reconstructs one
+    // worktree's tree (tsk98) — two worktrees running the same gauge share
+    // `(producer, path)` keys, so a stream-blind state lets one worktree's capture
+    // evict the other's paths and yields a point belonging to neither.
+    //
+    // Branch, because a capture may only fold in what its own code state descends
+    // from (tsk97). One branch-blind state lets a feature branch's failure land on
+    // a point labelled `main` whenever main didn't re-run that test.
+    let mut state: HashMap<(i64, Option<String>), Tree<'_>> = HashMap::new();
+    let mut out: Vec<SeriesPoint> = Vec::new();
+
+    for c in captures {
+        let key = (c.stream_id, c.branch.clone());
+        // A branch INHERITS its parent's pre-fork history rather than starting
+        // empty — else every new branch reads as a collapsed suite (only what it
+        // re-ran). Seeded once, by replaying everything visible from this branch's
+        // first capture; its own captures then fold in incrementally.
+        //
+        // Known limitation: merging main INTO a feature branch mid-work does not
+        // retroactively re-inherit main's post-fork results — the seed is computed
+        // once. A rebuild picks them up.
+        if !state.contains_key(&key) {
+            let mut seeded: Tree<'_> = HashMap::new();
+            for earlier in captures {
+                if earlier.id == c.id {
+                    continue;
+                }
+                if (earlier.captured_at, earlier.id) >= (c.captured_at, c.id) {
+                    break;
+                }
+                if earlier.stream_id == c.stream_id && visibility.sees(earlier, c) {
+                    apply(&mut seeded, earlier, scanned, &by_capture);
+                }
+            }
+            state.insert(key.clone(), seeded);
+        }
+        let tree = state.get_mut(&key).expect("seeded above");
+        apply(tree, c, scanned, &by_capture);
+
+        // This capture's OWN (worktree, branch) tree — an unscoped read replays
+        // every stream's captures into one timeline, but each point is still
+        // exactly one worktree's state on one branch.
         let live: Vec<&FactRow> = tree.values().flatten().copied().collect();
         let point = |value: f64, numerator, denominator, group| SeriesPoint {
             capture_id: c.id,
@@ -1077,8 +1191,17 @@ impl MetricEngine {
                     m
                 }
             };
+            // TODO(tsk97): resolve real ancestry here. `blind` inherits
+            // everything earlier into a new branch's seed, which is today's
+            // behavior for single-branch data and never stricter.
             return Ok(tree_state_series(
-                &captures, &facts, &restated, agg, filter, group_by,
+                &captures,
+                &facts,
+                &restated,
+                agg,
+                filter,
+                group_by,
+                &Visibility::blind(),
             ));
         }
 
@@ -2389,6 +2512,87 @@ mod tests {
                 .await
                 .unwrap(),
             Some(40.0)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_feature_branchs_failure_never_lands_on_a_main_point() {
+        // tsk97, THE bug. The fold reaches back for any subject a capture didn't
+        // restate — and 119 of 125 real captures are partial, so reach-back is the
+        // NORMAL path. Branch-blind, a feature branch's failure lands on a point
+        // labelled `main` whenever main didn't re-run that test:
+        //
+        //   t1  main       full suite   → A pass, B pass
+        //   t2  feature-x  runs A only  → A FAILS (broken on the branch)
+        //   t3  main       runs B only  → reaches back for A ... and finds t2's fail
+        //
+        // Both halves matter and pull against each other: main must NOT see the
+        // branch's failure, AND the branch must still INHERIT main's suite (else
+        // every new branch reads as a collapsed 1-test suite — the reason plain
+        // branch-scoping was rejected).
+        let (engine, facts, _c) = engine_fixture().await;
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..oxplow_db::NewMeasure::new("acme.test_case", "Test case")
+            })
+            .await
+            .unwrap();
+        let case = |subject: &str, value: f64| oxplow_db::NewFact {
+            subject_ref: Some(subject.into()),
+            ..oxplow_db::NewFact::new(m, value)
+        };
+        let on = |branch: &str, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            branch: Some(branch.into()),
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        // pass = 1, fail = 0, summed: the whole suite green reads 2.
+        facts
+            .record_facts(
+                on("main", "2026-06-30T10:00:00Z"),
+                vec![case("A", 1.0), case("B", 1.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                on("feature-x", "2026-06-30T11:00:00Z"),
+                vec![case("A", 0.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(on("main", "2026-06-30T12:00:00Z"), vec![case("B", 1.0)])
+            .await
+            .unwrap();
+        facts
+            .upsert_spec(NewMetricSpec::base(
+                "acme.cases",
+                "Cases",
+                "acme.test_case",
+                "sum",
+            ))
+            .await
+            .unwrap();
+        let spec = facts.get_spec("acme.cases").await.unwrap().unwrap();
+
+        let series = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(
+            series.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0, 2.0],
+            "point 2 is the BRANCH (inherits B from main, its own A fails ⇒ 1); \
+             point 3 is MAIN, which must still read 2 — a branch-blind fold reads 1 \
+             here, reporting a failure that only ever existed on feature-x"
+        );
+        // ...and the points are labelled with the branch that produced them, so the
+        // branch's 1 is never mistaken for main's.
+        assert_eq!(
+            series
+                .iter()
+                .map(|p| p.branch.as_deref().unwrap_or("-"))
+                .collect::<Vec<_>>(),
+            vec!["main", "feature-x", "main"]
         );
     }
 
