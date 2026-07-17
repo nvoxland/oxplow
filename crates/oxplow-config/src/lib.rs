@@ -52,6 +52,10 @@ pub fn global_config_dir() -> Option<PathBuf> {
 }
 
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
+/// Metric retention defaults to KEEP EVERYTHING (tsk93): per-test history is
+/// what makes the fact substrate worth having, and ~420k facts read fine. The
+/// knob exists so growth can be bounded later without a code change.
+const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
@@ -527,6 +531,14 @@ pub struct OxplowConfig {
     /// File-snapshot retention window in days. 0 disables pruning.
     #[serde(rename = "snapshotRetentionDays")]
     pub snapshot_retention_days: u32,
+    /// Metric-capture retention window in days: captures older than the
+    /// cutoff are pruned (facts cascade) — EXCEPT effort-stamped ones
+    /// (attribution history), each producer's newest capture, and any capture
+    /// still contributing a current value to the fold. **0 (the default)
+    /// keeps everything** (tsk93); pruning trades away per-test drill-down /
+    /// flakiness horizon for bounded growth, so it is strictly opt-in.
+    #[serde(rename = "metricRetentionDays")]
+    pub metric_retention_days: u32,
     /// Extra `exclude`/`include` paths layered on top of `.gitignore`
     /// for fs-watch / snapshot capture / code-quality scans. `.git`,
     /// `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
@@ -612,6 +624,8 @@ struct RawConfig {
     agent_prompt_append: Option<String>,
     #[serde(rename = "snapshotRetentionDays", default)]
     snapshot_retention_days: Option<f64>,
+    #[serde(rename = "metricRetentionDays", default)]
+    metric_retention_days: Option<f64>,
     #[serde(rename = "generated", default)]
     generated: Option<RawGenerated>,
     #[serde(rename = "snapshotMaxFileBytes", default)]
@@ -816,6 +830,12 @@ pub fn write_project_config(
         doc.insert(
             "snapshotRetentionDays".into(),
             config.snapshot_retention_days.into(),
+        );
+    }
+    if config.metric_retention_days != DEFAULT_METRIC_RETENTION_DAYS {
+        doc.insert(
+            "metricRetentionDays".into(),
+            config.metric_retention_days.into(),
         );
     }
     if !config.generated.exclude.is_empty() || !config.generated.include.is_empty() {
@@ -1198,6 +1218,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
         snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
+        metric_retention_days: DEFAULT_METRIC_RETENTION_DAYS,
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
@@ -1245,6 +1266,15 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         }
         Some(n) => n as u32,
         None => DEFAULT_SNAPSHOT_RETENTION_DAYS,
+    };
+    let metric_retention_days = match raw.metric_retention_days {
+        Some(n) if !n.is_finite() || n < 0.0 => {
+            return Err(ConfigError::Invalid(
+                "metricRetentionDays must be a non-negative number".into(),
+            ));
+        }
+        Some(n) => n as u32,
+        None => DEFAULT_METRIC_RETENTION_DAYS,
     };
 
     let generated = match raw.generated {
@@ -1336,6 +1366,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         lsp_servers,
         agent_prompt_append,
         snapshot_retention_days,
+        metric_retention_days,
         generated,
         snapshot_max_file_bytes,
         inject_session_context,

@@ -2012,6 +2012,103 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Prune metric captures older than `cutoff` — the OPT-IN retention knob
+    /// (`metricRetentionDays`, tsk93; the default 0 means this is never
+    /// called). Deletes ONLY history no current value stands on; kept
+    /// unconditionally:
+    /// - **effort-stamped captures** — attribution history;
+    /// - each `(stream, producer)`'s **newest capture** — the headline /
+    ///   zero-fill anchor;
+    /// - any capture owning a **latest-per-partition fact** — latest per
+    ///   `(measure, stream, producer, subject_ref)`, per `(…, path)`, or the
+    ///   latest repo-scalar per `(measure, stream, producer)` — a
+    ///   conservative superset of "live in some fold" regardless of the
+    ///   measure's scope. Deleting a live fact would move TODAY's number,
+    ///   which retention must never do.
+    ///
+    /// Points older than the cutoff disappear from series and drill-down
+    /// (that IS retention — the trade the knob buys into). Facts cascade via
+    /// FK; the affected streams' cube is invalidated in the same transaction
+    /// and the epoch fenced (the tsk100 rule: replay inputs changed).
+    pub async fn prune_aged_captures(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
+        let cutoff = ts_to_string(cutoff);
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let doomed_where = "captured_at < ?1
+                       AND effort_id IS NULL
+                       AND id NOT IN (
+                         SELECT id FROM (
+                           SELECT id, ROW_NUMBER() OVER (
+                             PARTITION BY stream_id, producer
+                             ORDER BY captured_at DESC, id DESC) rn
+                           FROM metric_capture)
+                         WHERE rn = 1)
+                       AND id NOT IN (
+                         SELECT capture_id FROM (
+                           SELECT f.capture_id, ROW_NUMBER() OVER (
+                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.subject_ref
+                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
+                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                           WHERE f.subject_ref IS NOT NULL AND c.status = 'done')
+                         WHERE rn = 1)
+                       AND id NOT IN (
+                         SELECT capture_id FROM (
+                           SELECT f.capture_id, ROW_NUMBER() OVER (
+                             PARTITION BY f.measure_id, c.stream_id, c.producer, f.path
+                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
+                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                           WHERE f.path IS NOT NULL AND c.status = 'done')
+                         WHERE rn = 1)
+                       AND id NOT IN (
+                         SELECT capture_id FROM (
+                           SELECT f.capture_id, ROW_NUMBER() OVER (
+                             PARTITION BY f.measure_id, c.stream_id, c.producer
+                             ORDER BY c.captured_at DESC, c.id DESC, f.id DESC) rn
+                           FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                           WHERE f.subject_ref IS NULL AND f.path IS NULL
+                             AND c.status = 'done')
+                         WHERE rn = 1)";
+                let mut streams: Vec<i64> = {
+                    let sql = format!(
+                        "SELECT DISTINCT stream_id FROM metric_capture WHERE {doomed_where}"
+                    );
+                    let mut stmt = tx.prepare(&sql).map_err(map_sql_err)?;
+                    let rows = stmt
+                        .query_map(params![cutoff], |r| r.get::<_, i64>(0))
+                        .map_err(map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(map_sql_err)?;
+                    rows
+                };
+                streams.sort_unstable();
+                let n = tx
+                    .execute(
+                        &format!("DELETE FROM metric_capture WHERE {doomed_where}"),
+                        params![cutoff],
+                    )
+                    .map_err(map_sql_err)?;
+                if n > 0 {
+                    for stream_id in streams {
+                        for sql in [
+                            "DELETE FROM metric_cube WHERE capture_id IN
+                               (SELECT id FROM metric_capture WHERE stream_id = ?1)",
+                            "DELETE FROM metric_live_fact WHERE stream_id = ?1",
+                            "DELETE FROM metric_cube_state WHERE stream_id = ?1",
+                        ] {
+                            tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
+                        }
+                    }
+                    // Fence any build already in flight (tsk103).
+                    tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
+                        .map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
     /// Whether a producer has EVER completed a `scan_kind = 'full'` baseline
     /// capture in this stream — at `version` when given, at any version when
     /// `None`. This is the "has this gauge been baselined" question (tsk71):
@@ -2960,6 +3057,135 @@ mod tests {
         let facts = store.latest_tree_facts(m, Some(1)).await.unwrap();
         assert_eq!(total(&facts), 7.0, "both gauges' facts survive");
         assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn aged_pruning_keeps_everything_a_current_value_stands_on() {
+        // tsk93. `metricRetentionDays` is OPT-IN (default 0 = this never
+        // runs); when enabled it may delete only history no current value
+        // stands on: effort-stamped captures are attribution (kept), each
+        // producer's newest capture anchors the headline/zero-fill (kept),
+        // and any capture owning a latest-per-partition fact is LIVE in the
+        // fold (kept) — deleting it would move today's number, which
+        // retention must never do. Old, superseded, unstamped history is what
+        // goes; its points vanish from the series (that IS retention), and
+        // the affected stream's cube is invalidated + the epoch fenced.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.case", "acme.case")
+            })
+            .await
+            .unwrap();
+        let cap = |ts: &str| NewMetricCapture {
+            captured_at: Some(at(ts)),
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        let subject = |s: &str, v: f64| NewFact {
+            subject_ref: Some(s.into()),
+            ..NewFact::new(m, v)
+        };
+        // c1 OLD: A=1, later superseded → the one deletable capture.
+        let c1 = store
+            .record_facts(cap("2026-06-01T10:00:00.000000Z"), vec![subject("A", 1.0)])
+            .await
+            .unwrap();
+        // c2 OLD: B=2, never re-run → LIVE (latest B) → kept.
+        let c2 = store
+            .record_facts(cap("2026-06-01T11:00:00.000000Z"), vec![subject("B", 2.0)])
+            .await
+            .unwrap();
+        // c3 OLD: A=3 supersedes c1 → LIVE (latest A) → kept.
+        let c3 = store
+            .record_facts(cap("2026-06-01T12:00:00.000000Z"), vec![subject("A", 3.0)])
+            .await
+            .unwrap();
+        // c4 OLD, superseded, but EFFORT-STAMPED → attribution → kept.
+        let c4 = store
+            .record_facts(
+                NewMetricCapture {
+                    effort_id: Some(1),
+                    ..cap("2026-06-01T09:00:00.000000Z")
+                },
+                vec![subject("A", 0.5)],
+            )
+            .await
+            .unwrap();
+        // c5 NEW (inside the window, its own subject so c3 stays A's latest)
+        // → kept; also the producer's newest capture.
+        let c5 = store
+            .record_facts(cap("2026-06-30T10:00:00.000000Z"), vec![subject("C", 4.0)])
+            .await
+            .unwrap();
+        // A stand-in cube build so invalidation is observable.
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                c5,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![NewCubeRow {
+                    producer: "tests".into(),
+                    dims_key: "{}".into(),
+                    fact_count: 1,
+                    value_sum: 4.0,
+                    value_min: Some(4.0),
+                    value_max: Some(4.0),
+                    numerator: 0.0,
+                    denominator: 0.0,
+                }],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+        let epoch_before = store.cube_epoch().await.unwrap();
+
+        let pruned = store
+            .prune_aged_captures(at("2026-06-15T00:00:00.000000Z"))
+            .await
+            .unwrap();
+        assert_eq!(pruned, 1, "exactly c1 — old, superseded, unstamped");
+
+        let alive: Vec<i64> = store
+            .captures_for_producers(vec!["tests".into()])
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert!(!alive.contains(&c1), "superseded old history pruned");
+        assert!(
+            alive.contains(&c2),
+            "a still-live subject keeps its capture"
+        );
+        assert!(alive.contains(&c3), "the superseding capture is live");
+        assert!(alive.contains(&c4), "effort-stamped = attribution, kept");
+        assert!(alive.contains(&c5), "inside the window, kept");
+        assert!(
+            store.cube_watermark(m, 1).await.unwrap().is_none(),
+            "the prune changed replay inputs — the stream's cube must go"
+        );
+        assert!(
+            store.cube_epoch().await.unwrap() > epoch_before,
+            "and any in-flight build must be fenced"
+        );
+
+        // A second pass deletes nothing and must leave the (rebuilt) cube
+        // alone — this runs daily once enabled.
+        assert_eq!(
+            store
+                .prune_aged_captures(at("2026-06-15T00:00:00.000000Z"))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store.cube_epoch().await.unwrap(),
+            epoch_before + 1,
+            "a no-op pass must not re-fence"
+        );
     }
 
     #[tokio::test]

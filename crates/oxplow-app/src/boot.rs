@@ -142,6 +142,38 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         snapshot_svc.spawn_cleanup_loop(retention_days, Some(state.background_tasks.clone()));
     }
 
+    // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
+    // to 0 = keep everything (per-test history is what makes the substrate
+    // worth having). When enabled, a daily pass prunes captures older than
+    // the window that no current value stands on — effort-stamped captures,
+    // each producer's newest, and fold-live facts' captures are always kept
+    // (see `prune_aged_captures`). Config is re-read each pass, so flipping
+    // the setting takes effect without a restart.
+    {
+        let facts = state.fact_store.clone();
+        let config = state.config.clone();
+        tokio::spawn(async move {
+            // Stay out of boot's way (backfill, sweeps, snapshot cleanup).
+            tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+            loop {
+                let days = config.read().map(|c| c.metric_retention_days).unwrap_or(0);
+                if days > 0 {
+                    let cutoff = oxplow_domain::Timestamp::from_unix_ms(
+                        oxplow_domain::Timestamp::now().unix_ms() - (days as i64) * 86_400_000,
+                    );
+                    match facts.prune_aged_captures(cutoff).await {
+                        Ok(n) if n > 0 => {
+                            tracing::info!(pruned = n, days, "metric retention pass")
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(error = %e, "metric retention pass failed"),
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+            }
+        });
+    }
+
     // Comment cleanup loop — prunes resolved/orphaned comment threads
     // whose last activity is older than the retention window. Runs at
     // boot and every 24h.

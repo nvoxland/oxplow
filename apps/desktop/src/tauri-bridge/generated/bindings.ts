@@ -2259,6 +2259,15 @@ export type OxplowConfig = {
 	// File-snapshot retention window in days. 0 disables pruning.
 	snapshotRetentionDays: number,
 	/**
+	 *  Metric-capture retention window in days: captures older than the
+	 *  cutoff are pruned (facts cascade) — EXCEPT effort-stamped ones
+	 *  (attribution history), each producer's newest capture, and any capture
+	 *  still contributing a current value to the fold. **0 (the default)
+	 *  keeps everything** (tsk93); pruning trades away per-test drill-down /
+	 *  flakiness horizon for bounded growth, so it is strictly opt-in.
+	 */
+	metricRetentionDays: number,
+	/**
 	 *  Extra `exclude`/`include` paths layered on top of `.gitignore`
 	 *  for fs-watch / snapshot capture / code-quality scans. `.git`,
 	 *  `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)

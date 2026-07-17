@@ -286,8 +286,16 @@ welded to collection.
   `git_version_exact`/`branch`/`basis_ref`; who `stream_id` (NOT NULL, the CASCADE
   scope) / `thread_id` / **`effort_id`** (nullable, `ON DELETE SET NULL` — the
   *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
-  trust `provenance`/`source`. **Captures are durable** (they carry the facts'
-  context — no independent sweep).
+  trust `provenance`/`source`. **Captures are durable by default** (they carry
+  the facts' context — no independent sweep). The one opt-in exception is
+  `metricRetentionDays` (tsk93, **default 0 = keep everything**): when set, a
+  daily pass (`prune_aged_captures`) deletes captures older than the window
+  that no current value stands on — effort-stamped captures, each producer's
+  newest, and any capture owning a fold-live fact are always kept, the
+  affected cube is invalidated + epoch-fenced in the same transaction, and
+  the trade is explicit: series/drill-down/flakiness history beyond the
+  window is gone. Turning the knob is watching-and-deciding territory, not a
+  default.
   > **Stamp `closest_git_version` on every capture you add (tsk95).** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
   > reads `git_version_exact = true`, otherwise it falls back to HEAD with
