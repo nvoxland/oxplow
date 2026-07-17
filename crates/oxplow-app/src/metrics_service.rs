@@ -400,13 +400,34 @@ impl MetricsService {
         // collection gate). Built-in gauges keep their spec seeded when merely
         // un-`use:`d — the gauge simply doesn't RUN (gated in `resolved_gauges`) —
         // so a disable is only ever an explicit marker.
+        // A spec whose aggregation the engine cannot compute must not seed
+        // (tsk108): the V44 CHECK reserves `p95`/`count_distinct` in the
+        // schema vocabulary and config doesn't validate the string, but an
+        // unimplemented aggregation would open the COLLECTION gate
+        // (`measure_has_active_spec`) for a metric that can never render —
+        // data gathered for nothing, forever. Pruned like a disabled entry
+        // (implementing the aggregation later re-seeds it cleanly). Formula
+        // specs carry no aggregation of their own to validate.
+        let computable = |spec: &oxplow_db::NewMetricSpec| {
+            let ok = spec.source_measure.is_none()
+                || crate::metric_engine::Aggregation::parse(&spec.aggregation).is_some();
+            if !ok {
+                tracing::warn!(
+                    key = %spec.key, aggregation = %spec.aggregation,
+                    "spec uses an aggregation the engine can't compute (reserved in the \
+                     schema); pruning it so collection doesn't run for a metric that can \
+                     never render"
+                );
+            }
+            ok
+        };
         for spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
             .chain(crate::producer_metrics::builtin_producer_specs())
         {
             let key = spec.key.clone();
-            let res = if config_state(&key) != Some(false) {
+            let res = if config_state(&key) != Some(false) && computable(&spec) {
                 facts.upsert_spec(spec).await.map(|_| ())
             } else {
                 facts.delete_spec(&key).await
@@ -424,8 +445,9 @@ impl MetricsService {
         // disabled entry (`enabled: false`) is pruned instead of seeded.
         let resolved = self.resolved_specs();
         for s in &resolved {
-            let res = if s.enabled {
-                facts.upsert_spec(spec_to_new_spec(s)).await.map(|_| ())
+            let spec = spec_to_new_spec(s);
+            let res = if s.enabled && computable(&spec) {
+                facts.upsert_spec(spec).await.map(|_| ())
             } else {
                 facts.delete_spec(&s.key).await
             };
@@ -3698,6 +3720,49 @@ def transform(input):
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn an_unimplemented_aggregation_cannot_reach_the_catalog() {
+        // tsk108. `p95`/`count_distinct` are reserved in the V44 CHECK's
+        // vocabulary but the engine can't compute them, and a spec that seeds
+        // anyway opens the COLLECTION gate (`measure_has_active_spec`) for a
+        // metric that can never render. Two fences keep that impossible:
+        // config validation rejects the string with the allowed set (pinned
+        // here — the review assumed this fence didn't exist), and
+        // `seed_catalog`'s computable() guard prunes rather than seeds if an
+        // uncomputable spec ever arrives another way (a typo'd BUILT-IN list,
+        // which no config validation sees).
+        let (svc, dir) = fixture().await;
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "metrics:\n  - key: repo.latency_p95\n    title: \"p95\"\n    \
+             sourceMeasure: acme.latency\n    aggregation: p95\n",
+        )
+        .unwrap();
+        let err = svc.reload_config_from_disk().unwrap_err();
+        assert!(
+            err.to_string().contains("aggregation must be one of"),
+            "config names the allowed vocabulary, got: {err}"
+        );
+        // The bad config never loaded; seeding runs with the prior (empty)
+        // config and nothing reaches the catalog or the gate.
+        svc.metrics.seed_catalog().await;
+        assert!(
+            svc.fact_store
+                .get_spec("repo.latency_p95")
+                .await
+                .unwrap()
+                .is_none(),
+            "the rejected spec must not exist in the catalog"
+        );
+        assert!(
+            !svc.fact_store
+                .measure_has_active_spec("acme.latency")
+                .await
+                .unwrap(),
+            "and the collection gate stays closed"
+        );
     }
 
     #[tokio::test]
