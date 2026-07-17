@@ -27,4 +27,27 @@ describe("lineStatValue", () => {
       expect(lineStatValue([], key)).toBeNull();
     }
   });
+
+  test("distance to target is the latest plotted value minus target, signed (tsk120)", () => {
+    // Samples are newest-first, so the target stats read samples[0].
+    expect(lineStatValue(s(72, 70, 68), "distance", 80)).toBe(-8);
+    expect(lineStatValue(s(85, 82), "distance", 80)).toBe(5);
+  });
+  test("distance is null when the metric has no target", () => {
+    expect(lineStatValue(s(72), "distance", null)).toBeNull();
+    expect(lineStatValue(s(72), "distance")).toBeNull();
+  });
+  test("percent of target is the latest value over target, ×100", () => {
+    expect(lineStatValue(s(72), "pctTarget", 80)).toBe(90);
+    expect(lineStatValue(s(120), "pctTarget", 80)).toBe(150);
+  });
+  test("percent of target is null without a target, or a zero target", () => {
+    expect(lineStatValue(s(72), "pctTarget", null)).toBeNull();
+    expect(lineStatValue(s(72), "pctTarget", 0)).toBeNull();
+  });
+  test("both target stats are listed as line-value options", () => {
+    const keys = LINE_STATS.map((o) => o.key);
+    expect(keys).toContain("distance");
+    expect(keys).toContain("pctTarget");
+  });
 });

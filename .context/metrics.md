@@ -1282,9 +1282,20 @@ bar writes (scaffold).
   (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
   because it *is* that sparkline's last point — both read the same
   range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
-  "latest value" is the latest **within the selected filters**, not all-time. Each `<tr>` adopts browser-style
+  "latest value" is the latest **within the selected filters**, not all-time.
+  The rail's **Line value** dropdown (`recordedMetricsStat.ts`, tsk115/tsk120)
+  picks *what* number terminates the line — all computed over that same plotted
+  window: `Latest value` (default) / `Change` (signed newest − oldest) /
+  `Distance to target` (latest − `target`, signed, metric unit) / `Percent of
+  target` (latest ÷ `target` × 100, rendered `%`) / `Mean` / `Min` / `Max`. The
+  two target stats render `—` when the metric has no target (Percent also on a
+  zero target); `Change`/`Distance` carry a sign, `Distance` keeping the
+  metric's status color while `Change` gets improved/worsened coloring. Each
+  `<tr>` adopts browser-style
   click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
-  modifier/middle/right → new tab). The **"+ New metric" scaffold bar**
+  modifier/middle/right → new tab), passing the **sibling chain** (the sections
+  flattened in visual order, `metricSiblings`) so the detail page gets up/down
+  nav (tsk119). The **"+ New metric" scaffold bar**
   (`NewMetricBar.tsx`, moved here from the retired Settings page by tsk117)
   rides at the foot of the body. Live-refreshes on `metricSamplesChanged`
   (debounced — see the OTLP-burst note) and `configChanged` (immediate: enable

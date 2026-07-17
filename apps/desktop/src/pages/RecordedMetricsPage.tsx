@@ -128,9 +128,15 @@ function RecordedRow({
   // The stat is computed over the SAME filtered samples the sparkline plots
   // (tsk82's invariant, generalized by tsk115): the number that terminates the
   // line always describes the line. `change` gets an explicit `+` and the
-  // improved/worsened color; the level stats keep the metric's status color.
-  const shown = lineStatValue(samples, stat);
+  // improved/worsened color; `distance` is also signed but keeps the metric's
+  // status color (it describes the latest value's standing, like the level
+  // stats); the target stats need the def's `target` (tsk120).
+  const shown = lineStatValue(samples, stat, def?.target ?? null);
   const valueColor = stat === "change" ? changeColor(def, shown) : color;
+  const signed = stat === "change" || stat === "distance";
+  // Percent-of-target is a percent regardless of the metric's own unit;
+  // distance is in the metric's unit; everything else too.
+  const unit = stat === "pctTarget" ? "%" : def?.unit;
   return (
     <tr
       onClick={handlers.onClick}
@@ -150,10 +156,10 @@ function RecordedRow({
       </td>
       <td
         style={{ padding: "6px 8px", fontWeight: 600, color: valueColor }}
-        title={shown != null ? formatMetricValueExact(shown, def?.unit) : undefined}
+        title={shown != null ? formatMetricValueExact(shown, unit) : undefined}
       >
         {shown != null
-          ? `${stat === "change" && shown > 0 ? "+" : ""}${formatMetricValue(shown, def?.unit)}`
+          ? `${signed && shown > 0 ? "+" : ""}${formatMetricValue(shown, unit)}`
           : "—"}
       </td>
     </tr>
