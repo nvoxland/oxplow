@@ -2707,10 +2707,14 @@ impl CollectionService {
                 &cap_list,
                 &facts,
                 &scanned,
-                agg,
-                &filter,
-                None,
-                &visibility,
+                &crate::metric_engine::FoldRead {
+                    agg,
+                    filter: &filter,
+                    group_by: None,
+                    visibility: &visibility,
+                    // This branch IS the per-path arm (`per_path` guard above).
+                    scope: crate::metric_engine::CaptureScope::PerPath,
+                },
             )
             .into_iter()
             .map(|p| (p.capture_id, p.value))

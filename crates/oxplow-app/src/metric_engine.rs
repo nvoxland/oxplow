@@ -17,6 +17,12 @@
 //! results; derived-metric formulas evaluate through [`evaluate_formula`]; and
 //! the materialized fold lives in `metric_cube` (tsk96) — this engine's fact
 //! path remains the ORACLE the cube is verified against.
+//!
+//! Visibility policy (tsk109): items are `pub` only when a sibling crate uses
+//! them (the IPC/RPC wire types — `Aggregation`, `FactFilter`, `FactFinding`,
+//! `RollupRow`, `SeriesPoint` — plus `MetricEngine` itself) or the
+//! `cube_equivalence` example needs them (noted on each). Everything else the
+//! fold machinery shares stays `pub(crate)`.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -400,6 +406,17 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
     }
 }
 
+/// A RATIO cell whose denominator summed to zero is NO DATA, not 0% — a
+/// coverage capture over zero instrumented lines must not render the worst
+/// possible reading (tsk109; matches `BinaryOp::Div`, which drops the row).
+/// Every point-emit site skips such a cell — the fact fold, `aggregate_series`,
+/// and the cube's serve arms share this ONE predicate so they cannot drift.
+/// Only `Ratio`: an `avg` cell's denominator is its fact count, which is
+/// nonzero whenever there is anything to emit.
+pub(crate) fn ratio_empty(agg: Aggregation, denominator: Option<f64>) -> bool {
+    matches!(agg, Aggregation::Ratio) && denominator == Some(0.0)
+}
+
 /// The decomposable aggregate of a BUCKET of facts — the cube's stored cell
 /// (tsk96). It exists so a read can re-derive an aggregation by **merging cells**
 /// instead of re-reading the facts: one `(capture × promoted dims)` cube answers
@@ -509,17 +526,19 @@ impl Cell {
 /// time-ascending without a re-sort. Facts failing `filter` are dropped; when
 /// `group_by` is set, facts missing that dimension are dropped (they can't be
 /// placed on an axis).
-pub fn aggregate_series(
+pub(crate) fn aggregate_series(
     facts: &[FactRow],
     agg: Aggregation,
     filter: &FactFilter,
     group_by: Option<&str>,
 ) -> Vec<SeriesPoint> {
-    // Preserve first-seen (time-ascending) order while grouping.
-    let mut order: Vec<(i64, Option<String>)> = Vec::new();
-    let mut index: HashMap<(i64, Option<String>), usize> = HashMap::new();
-    let mut buckets: Vec<Vec<&FactRow>> = Vec::new();
-
+    // Captures in first-seen (time-ascending) order; groups SORTED within a
+    // capture — matching `tree_state_series` and the cube's BTreeMap buckets,
+    // so a grouped cube-served read is identical to the fact-served one
+    // including point ORDER (tsk109 — an order-sensitive consumer like
+    // `range_value`'s `.last()` must land on the same point either way).
+    let mut caps: Vec<i64> = Vec::new();
+    let mut by_cap: HashMap<i64, BTreeMap<Option<String>, Vec<&FactRow>>> = HashMap::new();
     for f in facts {
         if !filter.matches(f) {
             continue;
@@ -531,26 +550,31 @@ pub fn aggregate_series(
             },
             None => None,
         };
-        let key = (f.capture_id, group);
-        match index.get(&key) {
-            Some(&i) => buckets[i].push(f),
-            None => {
-                index.insert(key.clone(), buckets.len());
-                order.push(key);
-                buckets.push(vec![f]);
-            }
-        }
+        by_cap
+            .entry(f.capture_id)
+            .or_insert_with(|| {
+                caps.push(f.capture_id);
+                BTreeMap::new()
+            })
+            .entry(group)
+            .or_default()
+            .push(f);
     }
 
-    order
-        .into_iter()
-        .enumerate()
-        .map(|(i, (capture_id, group))| {
-            let fs = &buckets[i];
+    let mut out: Vec<SeriesPoint> = Vec::new();
+    for cap in caps {
+        let Some(groups) = by_cap.remove(&cap) else {
+            continue;
+        };
+        for (group, fs) in groups {
             let captured_at = fs[0].captured_at;
-            let (value, numerator, denominator) = aggregate_facts(fs, agg);
-            SeriesPoint {
-                capture_id,
+            let (value, numerator, denominator) = aggregate_facts(&fs, agg);
+            // A zero-denominator ratio capture is no data, not 0% (tsk109).
+            if ratio_empty(agg, denominator) {
+                continue;
+            }
+            out.push(SeriesPoint {
+                capture_id: cap,
                 captured_at,
                 value,
                 numerator,
@@ -561,9 +585,10 @@ pub fn aggregate_series(
                 provenance: Some(fs[0].provenance.clone()),
                 git_version: fs[0].closest_git_version.clone(),
                 source: Some(fs[0].source.clone()),
-            }
-        })
-        .collect()
+            });
+        }
+    }
+    out
 }
 
 /// Which earlier captures a reading capture may fold in — the ancestry rule
@@ -680,6 +705,23 @@ pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
     f.path.as_deref().or(f.subject_ref.as_deref())
 }
 
+/// The state key a fact folds under for `scope` — and it MUST match the
+/// scope's EVICTION key (the restated set), or a fact legally carrying both
+/// identities (`subject_ref` + `path`) is inserted under one and evicted by
+/// the other, accumulating forever on every path that folds it (tsk109).
+/// `None` = a repo-scalar assertion (no identity at all), same under either
+/// preference order.
+pub(crate) fn fold_key(scope: CaptureScope, f: &FactRow) -> Option<&str> {
+    match scope {
+        // Per-subject restates the subjects it executed — the subject IS the
+        // identity; a path is just its location.
+        CaptureScope::PerSubject => f.subject_ref.as_deref().or(f.path.as_deref()),
+        // Per-path restates scanned paths. Complete never folds state, but a
+        // fourth scope must decide here rather than inherit (tsk103).
+        CaptureScope::PerPath | CaptureScope::Complete => repo_scalar_key(f),
+    }
+}
+
 /// The trend for a **partial-scope** measure: the repo-wide value **as of each
 /// capture** (V54, tsk41).
 ///
@@ -704,15 +746,30 @@ pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
 /// Cost is O(captures × live facts) — the aggregate is recomputed per point. That's
 /// fine for a chart read; the HEADLINE never comes through here (it's the last point
 /// of this series, or the single-shot SQL fold), so the hot path stays cheap.
-pub fn tree_state_series(
+/// The read-side parameters of one partial-scope fold — grouped so
+/// [`tree_state_series`]' signature stays a readable set of inputs as they
+/// accrete (visibility arrived with tsk97, scope with tsk109).
+pub(crate) struct FoldRead<'a> {
+    pub agg: Aggregation,
+    pub filter: &'a FactFilter,
+    pub group_by: Option<&'a str>,
+    pub visibility: &'a Visibility,
+    pub scope: CaptureScope,
+}
+
+pub(crate) fn tree_state_series(
     captures: &[MetricCapture],
     facts: &[FactRow],
     scanned: &HashMap<i64, Vec<String>>,
-    agg: Aggregation,
-    filter: &FactFilter,
-    group_by: Option<&str>,
-    visibility: &Visibility,
+    read: &FoldRead<'_>,
 ) -> Vec<SeriesPoint> {
+    let FoldRead {
+        agg,
+        filter,
+        group_by,
+        visibility,
+        scope,
+    } = *read;
     let mut by_capture: HashMap<i64, Vec<&FactRow>> = HashMap::new();
     // Captures that asserted a PATH-LESS repo scalar — from the UNFILTERED
     // facts, deliberately. Every eviction set is filter-independent (scanned
@@ -723,7 +780,7 @@ pub fn tree_state_series(
     // state is filter-agnostic by design (tsk103 review).
     let mut scalar_asserted: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for f in facts {
-        if repo_scalar_key(f).is_none() {
+        if fold_key(scope, f).is_none() {
             scalar_asserted.insert(f.capture_id);
         }
         if !filter.matches(f) {
@@ -741,6 +798,7 @@ pub fn tree_state_series(
         scanned: &HashMap<i64, Vec<String>>,
         by_capture: &HashMap<i64, Vec<&'a FactRow>>,
         scalar_asserted: &std::collections::HashSet<i64>,
+        scope: CaptureScope,
     ) {
         for path in scanned.get(&c.id).into_iter().flatten() {
             tree.remove(&(c.producer.clone(), path.clone()));
@@ -754,7 +812,7 @@ pub fn tree_state_series(
             tree.remove(&(c.producer.clone(), SCALAR_SUBJECT.to_string()));
         }
         for f in by_capture.get(&c.id).into_iter().flatten() {
-            let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
+            let key = fold_key(scope, f).unwrap_or(SCALAR_SUBJECT).to_string();
             tree.entry((c.producer.clone(), key)).or_default().push(*f);
         }
     }
@@ -792,13 +850,20 @@ pub fn tree_state_series(
                     break;
                 }
                 if earlier.stream_id == c.stream_id && visibility.sees(earlier, c) {
-                    apply(&mut seeded, earlier, scanned, &by_capture, &scalar_asserted);
+                    apply(
+                        &mut seeded,
+                        earlier,
+                        scanned,
+                        &by_capture,
+                        &scalar_asserted,
+                        scope,
+                    );
                 }
             }
             state.insert(key.clone(), seeded);
         }
         let tree = state.get_mut(&key).expect("seeded above");
-        apply(tree, c, scanned, &by_capture, &scalar_asserted);
+        apply(tree, c, scanned, &by_capture, &scalar_asserted, scope);
 
         // This capture's OWN (worktree, branch) tree — an unscoped read replays
         // every stream's captures into one timeline, but each point is still
@@ -824,7 +889,10 @@ pub fn tree_state_series(
                 } else {
                     aggregate_facts(&live, agg)
                 };
-                out.push(point(value, numerator, denominator, None));
+                // A live-but-zero-denominator ratio is no data, not 0%.
+                if live.is_empty() || !ratio_empty(agg, denominator) {
+                    out.push(point(value, numerator, denominator, None));
+                }
             }
             Some(dim) => {
                 // Group the LIVE tree (not the capture's own facts) so each group's
@@ -838,7 +906,9 @@ pub fn tree_state_series(
                 }
                 for (key, fs) in buckets {
                     let (value, numerator, denominator) = aggregate_facts(&fs, agg);
-                    out.push(point(value, numerator, denominator, Some(key)));
+                    if !ratio_empty(agg, denominator) {
+                        out.push(point(value, numerator, denominator, Some(key)));
+                    }
                 }
             }
         }
@@ -904,34 +974,32 @@ pub(crate) fn splice_zero_points(
 /// A `per-path` measure needs no new arm here: [`tree_state_series`] already makes
 /// every point the repo-wide value as of that capture, so `SemiAdditive`'s
 /// "take the last point" IS the current repo total.
-pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
+pub(crate) fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
     if series.is_empty() {
         return None;
     }
-    Some(match temporal {
+    match temporal {
         // Level snapshot → the latest capture. For a level RATIO (coverage,
         // tsk13) re-derive from the latest point's RAW Σn/Σd, not its `.value`
         // (which a percent spec has already scaled ×100) — so the spec's
         // presentation scale is applied exactly once downstream, matching the
         // non-additive branch.
-        Temporal::SemiAdditive => series
-            .last()
-            .map(|p| match (p.numerator, p.denominator) {
-                (Some(n), Some(d)) if d != 0.0 => n / d,
-                _ => p.value,
-            })
-            .unwrap_or(0.0),
-        Temporal::Additive => series.iter().map(|p| p.value).sum(),
+        Temporal::SemiAdditive => series.last().map(|p| match (p.numerator, p.denominator) {
+            (Some(n), Some(d)) if d != 0.0 => n / d,
+            _ => p.value,
+        }),
+        Temporal::Additive => Some(series.iter().map(|p| p.value).sum()),
         Temporal::NonAdditive => {
             let num: f64 = series.iter().filter_map(|p| p.numerator).sum();
             let den: f64 = series.iter().filter_map(|p| p.denominator).sum();
             if den != 0.0 {
-                num / den
+                Some(num / den)
             } else {
-                0.0
+                // Σden = 0 across every point is NO DATA, not 0 (tsk109).
+                None
             }
         }
-    })
+    }
 }
 
 /// Roll a measure's facts up by a dimension — the "breakdown" card (which
@@ -951,7 +1019,7 @@ pub fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<f64> {
 ///
 /// Largest first; ties broken on key for determinism. Facts are expected
 /// oldest-first, so the last fact seen per subject is its latest.
-pub fn compute_rollup(
+pub(crate) fn compute_rollup(
     facts: &[FactRow],
     dimension: &str,
     temporal: Temporal,
@@ -1048,7 +1116,7 @@ pub fn compute_rollup(
 /// a worktree and a producer is one scan kind, so "the latest scan" is per
 /// (stream, producer) — a measure fed by several gauges keeps each gauge's
 /// latest capture.
-pub fn current_capture_ids(
+pub(crate) fn current_capture_ids(
     kept: &[FactRow],
     captures: &[MetricCapture],
 ) -> std::collections::HashSet<i64> {
@@ -1259,7 +1327,9 @@ impl MetricEngine {
                 CaptureScope::PerSubject => {
                     let mut m: HashMap<i64, Vec<String>> = HashMap::new();
                     for f in &facts {
-                        if let Some(s) = f.subject_ref.as_deref() {
+                        // The scope's fold key, not subject_ref alone — the
+                        // eviction set must match the insertion key (tsk109).
+                        if let Some(s) = fold_key(scope, f) {
                             m.entry(f.capture_id).or_default().push(s.to_string());
                         }
                     }
@@ -1278,10 +1348,13 @@ impl MetricEngine {
                 &captures,
                 &facts,
                 &restated,
-                agg,
-                filter,
-                group_by,
-                &visibility,
+                &FoldRead {
+                    agg,
+                    filter,
+                    group_by,
+                    visibility: &visibility,
+                    scope,
+                },
             ));
         }
 

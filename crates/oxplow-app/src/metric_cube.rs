@@ -36,8 +36,8 @@ use tokio::sync::broadcast;
 
 use crate::events::OxplowEvent;
 use crate::metric_engine::{
-    dim_value, parse_capture_scope, repo_scalar_key, splice_zero_points, Aggregation, CaptureScope,
-    Cell, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
+    dim_value, fold_key, parse_capture_scope, ratio_empty, splice_zero_points, Aggregation,
+    CaptureScope, Cell, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
 };
 
 /// Folds a measure's captures into `metric_cube`, incrementally from the
@@ -296,7 +296,7 @@ impl MetricCubeBuilder {
                 .iter()
                 .map(|f| {
                     (
-                        repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string(),
+                        fold_key(scope, f).unwrap_or(SCALAR_SUBJECT).to_string(),
                         f.id,
                     )
                 })
@@ -402,7 +402,7 @@ impl MetricCubeBuilder {
                 tree.remove(&(e.producer.clone(), key));
             }
             for f in own {
-                let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
+                let key = fold_key(scope, f).unwrap_or(SCALAR_SUBJECT).to_string();
                 tree.entry((e.producer.clone(), key))
                     .or_default()
                     .push(f.id);
@@ -452,18 +452,20 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
         // whose count dropped to 0 emits no fact but is still scanned, and a
         // deletion IS a scan result.
         CaptureScope::PerPath => scanned,
-        // A test run restates exactly the cases it executed. (Complete is
-        // unreachable — dispatched to its own build rule — but listed so a
-        // fourth scope is a compile error here, not a silent misfold; tsk103.)
-        CaptureScope::PerSubject | CaptureScope::Complete => {
-            own.iter().filter_map(|f| f.subject_ref.clone()).collect()
-        }
+        // A test run restates exactly the cases it executed — keyed by the
+        // scope's FOLD KEY, which the insertion side shares (tsk109).
+        // (Complete is unreachable — dispatched to its own build rule — but
+        // listed so a fourth scope is a compile error, not a misfold; tsk103.)
+        CaptureScope::PerSubject | CaptureScope::Complete => own
+            .iter()
+            .filter_map(|f| fold_key(scope, f).map(str::to_string))
+            .collect(),
     };
     // A capture may also carry PATH-LESS facts (an agent-asserted repo scalar).
     // No path means the fold can't place or supersede them, so they keep the
     // plain "latest assertion per producer wins" rule — emitting one restates
     // it. Mirrors `tree_state_series` exactly.
-    if own.iter().any(|f| repo_scalar_key(f).is_none()) {
+    if own.iter().any(|f| fold_key(scope, f).is_none()) {
         keys.push(SCALAR_SUBJECT.to_string());
     }
     keys
@@ -480,7 +482,7 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
 ///
 /// Nothing here is load-bearing for correctness: if this task never ran, every
 /// read would simply take the fact path, exactly as before the cube existed.
-pub async fn run(builder: MetricCubeBuilder, mut rx: broadcast::Receiver<OxplowEvent>) {
+pub(crate) async fn run(builder: MetricCubeBuilder, mut rx: broadcast::Receiver<OxplowEvent>) {
     // The backfill IS the incremental loop from an empty watermark — deliberately
     // not a second, SQL-side fold, which would be a second implementation free to
     // drift from this one.
@@ -703,6 +705,11 @@ pub async fn cube_series(
                     // `splice_zero_points` decides below.
                     (0, false) => continue,
                     _ => {
+                        // A zero-denominator ratio cell is no data, not 0% —
+                        // the same `ratio_empty` skip the fact paths apply.
+                        if ratio_empty(agg, Some(cell.den)) {
+                            continue;
+                        }
                         let Some(t) = cell.project(agg) else {
                             return Ok(None);
                         };
@@ -713,6 +720,9 @@ pub async fn cube_series(
             // Grouped: BTreeMap order, matching `tree_state_series`' sorted groups.
             Some(_) => {
                 for (group, cell) in groups.into_iter().flatten() {
+                    if ratio_empty(agg, Some(cell.den)) {
+                        continue;
+                    }
                     let Some(t) = cell.project(agg) else {
                         return Ok(None);
                     };
@@ -1583,6 +1593,78 @@ mod tests {
         );
         assert_eq!(builder.build_measure("acme.hit").await.unwrap(), 2);
         assert_cube_answers(&engine, &facts, "acme.hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_fact_carrying_both_identities_still_evicts_by_its_scopes_key() {
+        // tsk109. A per-subject fact may legally carry BOTH `subject_ref` and
+        // `path` (MCP-asserted facts; a test with a file location). Eviction
+        // keys on the scope's identity (`subject_ref`), so insertion must too —
+        // the old path-first insert key filed the fact where no per-subject
+        // eviction could ever find it, and re-runs accumulated forever:
+        // [1, 3] instead of [1, 2], on both paths, silently.
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        let located = |v: f64| NewFact {
+            path: Some("tests/a.rs".into()),
+            ..case(m, "T", v)
+        };
+        facts
+            .record_facts(cap_in(1, "2026-06-30T10:00:00Z"), vec![located(1.0)])
+            .await
+            .unwrap();
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![located(2.0)])
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![1.0, 2.0],
+            "the re-run SUPERSEDES the earlier result — never accumulates"
+        );
+        builder.build_measure("acme.test_case").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_ratio_over_a_zero_denominator_emits_no_point_on_either_path() {
+        // tsk109. A coverage capture over zero instrumented lines is NO DATA,
+        // not 0% (the worst possible reading) — matching the substrate's
+        // stance elsewhere and `BinaryOp::Div`, which drops the row. Both
+        // paths must skip the point identically, and the headline collapse
+        // must read None rather than 0.
+        let (engine, facts, builder) = fixture().await;
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.coverage", "Coverage"))
+            .await
+            .unwrap();
+        let ratio = |n: f64, d: f64| NewFact {
+            numerator: Some(n),
+            denominator: Some(d),
+            ..NewFact::new(m, if d != 0.0 { n / d } else { 0.0 })
+        };
+        facts
+            .record_facts(cap_in(1, "2026-06-30T10:00:00Z"), vec![ratio(2.0, 4.0)])
+            .await
+            .unwrap();
+        // Zero instrumented lines: components present, denominator 0.
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![ratio(0.0, 0.0)])
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cov", "acme.coverage", "ratio").await;
+
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![0.5],
+            "the zero-denominator capture contributes NO point — not a 0%"
+        );
+        builder.build_measure("acme.coverage").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.coverage", &spec, &oracle).await;
     }
 
     #[tokio::test]

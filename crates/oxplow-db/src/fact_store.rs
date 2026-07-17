@@ -1309,6 +1309,11 @@ impl SqliteFactStore {
         stream_id: i64,
         branch: Option<String>,
     ) -> Result<bool, DomainError> {
+        // `''` = "no branch" throughout the cube tables (a WITHOUT ROWID PK
+        // can't hold NULL). Known, accepted collision: a capture recording
+        // `Some("")` would share the partition `None` gets — but git forbids
+        // empty branch names and no producer fabricates one, and the fact
+        // fold keys on `Option`, where they'd differ (tsk109 audit note).
         let branch = branch.unwrap_or_default();
         self.db
             .call(move |conn| {
