@@ -34,6 +34,8 @@ import {
   SHOW_MODES,
   type ShowMode,
   filterMetricRows,
+  isOffTarget,
+  metricStatus,
   metricSiblings,
 } from "./recordedMetricsRows.js";
 import {
@@ -86,16 +88,20 @@ function Sparkline({ values, color }: { values: number[]; color?: string }) {
 }
 
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
- *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). */
+ *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220).
+ *  Delegates to the shared `metricStatus` classifier so the row color and the
+ *  Off-target filter can't disagree (tsk121). */
 function statusColor(def: MetricSpec, value: number): string | undefined {
-  if (def.direction === "neutral") return undefined;
-  const higher = def.direction === "higher-better";
-  const meets = (t: number) => (higher ? value >= t : value <= t);
-  const okThreshold = def.target ?? def.warn_at;
-  if (okThreshold != null && meets(okThreshold)) return "var(--ok, #3fb950)";
-  if (def.fail_at != null && !meets(def.fail_at)) return "var(--err, #f85149)";
-  if (okThreshold != null || def.fail_at != null) return "var(--warn, #e5a50a)";
-  return undefined;
+  switch (metricStatus(def, value)) {
+    case "ok":
+      return "var(--ok, #3fb950)";
+    case "fail":
+      return "var(--err, #f85149)";
+    case "warn":
+      return "var(--warn, #e5a50a)";
+    default:
+      return undefined;
+  }
 }
 
 /** The color for a rendered CHANGE: green when the move improved the metric
@@ -257,15 +263,20 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   }, [reloadTick]);
 
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
-  // Which metrics are LISTED (Show mode + search), then each survivor's
-  // latest + trend scoped to the range + branch — an in-scope metric with no
-  // recording in the window stays listed and just shows "—".
+  // Which metrics are LISTED (Show mode + search), each scoped to the range +
+  // branch — an in-scope metric with no recording in the window stays listed
+  // and just shows "—". We window FIRST so `off-target` can test each row's
+  // latest value *within the selected filters* (the same value that colors the
+  // row), then narrow: filterMetricRows handles enabled-ness + query, and the
+  // off-target value test runs against the windowed latest (tsk121).
   const viewRows = useMemo(() => {
     const range = rangeFromPreset(rangeKey, Date.now());
-    return filterMetricRows(rows, showMode, query).map((r) => {
+    const windowed = filterMetricRows(rows, showMode, query).map((r) => {
       const samples = filterByBranch(filterByRange(r.samples, range), branch);
       return { ...r, latest: samples[0] ?? null, samples };
     });
+    if (showMode !== "off-target") return windowed;
+    return windowed.filter((r) => r.latest != null && isOffTarget(r.def, r.latest.value));
   }, [rows, rangeKey, branch, query, showMode]);
 
   const sections = useMemo(
@@ -313,7 +324,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               value={showMode}
               onChange={(e) => setShowMode(e.target.value as ShowMode)}
               data-testid="recorded-show-mode"
-              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't."
+              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't; Off target lists just the enabled ones missing their target in the current window."
               style={sel}
             >
               {SHOW_MODES.map((m) => (
@@ -391,7 +402,11 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
           // The Show mode + search can empty the list even though metrics exist,
           // which the "nothing recorded yet" state above doesn't cover.
           <div data-testid="recorded-no-match" style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            No metrics match.
+            {showMode === "off-target"
+              ? query
+                ? "No matching metrics are off target."
+                : "No metrics are off target — everything with a target is meeting it."
+              : "No metrics match."}
             {showMode === "enabled" ? " Try Show: All to include metrics this project hasn't enabled." : ""}
           </div>
         ) : (

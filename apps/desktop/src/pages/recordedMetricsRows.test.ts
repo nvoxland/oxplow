@@ -4,10 +4,21 @@ import {
   DEFAULT_SHOW_MODE,
   SHOW_MODES,
   filterMetricRows,
+  isOffTarget,
+  metricStatus,
   metricSiblings,
 } from "./recordedMetricsRows.js";
 
 const row = (key: string, enabled: boolean, title = key) => ({ key, title, enabled });
+
+const spec = (
+  over: Partial<{
+    direction: string;
+    target: number | null;
+    warn_at: number | null;
+    fail_at: number | null;
+  }> = {},
+) => ({ direction: "higher-better", target: null, warn_at: null, fail_at: null, ...over });
 
 const ROWS = [
   row("oxplow.rust.unsafe_blocks", true, "unsafe blocks"),
@@ -30,6 +41,19 @@ describe("filterMetricRows", () => {
 
   it("shows every metric under `all`", () => {
     expect(filterMetricRows(ROWS, "all", "")).toHaveLength(4);
+  });
+
+  it("off-target mode keeps only enabled rows, like `enabled` (the value test is the page's job)", () => {
+    // filterMetricRows can't see values; it narrows to the enabled set + query,
+    // and RecordedMetricsPage then drops the on-target rows via isOffTarget.
+    expect(filterMetricRows(ROWS, "off-target", "").map((r) => r.key)).toEqual([
+      "oxplow.rust.unsafe_blocks",
+      "oxplow.tests.failed",
+    ]);
+  });
+
+  it("lists Off target as a Show option", () => {
+    expect(SHOW_MODES.map((m) => m.key)).toContain("off-target");
   });
 
   it("matches the query against both title and key, case-insensitively", () => {
@@ -66,8 +90,8 @@ describe("filterMetricRows", () => {
     ]);
   });
 
-  it("offers exactly the two documented modes", () => {
-    expect(SHOW_MODES.map((m) => m.key)).toEqual(["enabled", "all"]);
+  it("offers exactly the three documented modes", () => {
+    expect(SHOW_MODES.map((m) => m.key)).toEqual(["enabled", "all", "off-target"]);
   });
 });
 
@@ -96,5 +120,37 @@ describe("metricSiblings", () => {
 
   it("returns an empty chain for no sections", () => {
     expect(metricSiblings([], () => ({ id: "x", kind: "metric-detail", payload: null })).entries).toEqual([]);
+  });
+});
+
+describe("metricStatus (tsk121)", () => {
+  it("is ok when a higher-better value meets its target", () => {
+    expect(metricStatus(spec({ target: 80 }), 85)).toBe("ok");
+    expect(metricStatus(spec({ target: 80 }), 80)).toBe("ok");
+  });
+  it("warns when a target is set but unmet and no fail breach", () => {
+    expect(metricStatus(spec({ target: 80 }), 72)).toBe("warn");
+    expect(metricStatus(spec({ target: 80, fail_at: 50 }), 72)).toBe("warn");
+  });
+  it("fails when the value is past fail_at", () => {
+    expect(metricStatus(spec({ target: 80, fail_at: 50 }), 40)).toBe("fail");
+  });
+  it("honors lower-better direction", () => {
+    expect(metricStatus(spec({ direction: "lower-better", target: 10 }), 8)).toBe("ok");
+    expect(metricStatus(spec({ direction: "lower-better", target: 10 }), 14)).toBe("warn");
+  });
+  it("is none with no thresholds or a neutral direction (nothing to be off of)", () => {
+    expect(metricStatus(spec({}), 5)).toBe("none");
+    expect(metricStatus(spec({ direction: "neutral", target: 80 }), 5)).toBe("none");
+  });
+});
+
+describe("isOffTarget (tsk121)", () => {
+  it("is true for warn or fail, false for ok / none / null def", () => {
+    expect(isOffTarget(spec({ target: 80 }), 72)).toBe(true); // warn
+    expect(isOffTarget(spec({ target: 80, fail_at: 50 }), 40)).toBe(true); // fail
+    expect(isOffTarget(spec({ target: 80 }), 85)).toBe(false); // ok
+    expect(isOffTarget(spec({}), 5)).toBe(false); // no threshold
+    expect(isOffTarget(null, 5)).toBe(false); // disabled/pruned spec
   });
 });

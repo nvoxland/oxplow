@@ -1274,12 +1274,19 @@ bar writes (scaffold).
   the only source that knows `use:`; the seeded spec joins in by key for unit /
   direction / thresholds and is null only for an explicitly-disabled metric whose
   spec was pruned). The rail's **Show** dropdown picks `Enabled` (**default**) /
-  `All` — see the box above for why that distinction isn't free. Pure row
-  filtering (Show mode + search, composed so a search never resurfaces a disabled
-  metric) lives in `recordedMetricsRows.ts`. A section only renders when it has
-  rows, since `buildMetricSections` groups what it's given; a filtered-empty list
-  falls back to a "No metrics match" state. Rows are colored by `statusColor`
-  (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
+  `All` / `Off target` — see the box above for why the Enabled/All distinction
+  isn't free. Pure row filtering (Show mode + search, composed so a search never
+  resurfaces a disabled metric) lives in `recordedMetricsRows.ts`. **`Off target`
+  (tsk121)** narrows to the enabled metrics whose latest value *within the
+  current range/branch window* misses its target — a two-step filter: the pure
+  `filterMetricRows` narrows enabled-ness + query (it can't see values), then the
+  page applies `isOffTarget(def, latest)` against the windowed latest. Off-target
+  status comes from the shared `metricStatus(def, value)` classifier
+  (`ok`/`warn`/`fail`/`none`), which `statusColor` also delegates to so a row's
+  color and its off-target membership can't drift. A section only renders when it
+  has rows, since `buildMetricSections` groups what it's given; a filtered-empty
+  list falls back to a "No metrics match" / "No metrics are off target" state.
+  Rows are colored by `statusColor` (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
   because it *is* that sparkline's last point — both read the same
   range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
   "latest value" is the latest **within the selected filters**, not all-time.
