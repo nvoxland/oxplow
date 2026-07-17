@@ -398,6 +398,27 @@ pub async fn cube_series(
         return Ok(None);
     }
 
+    // ⚠️ tsk97, TEMPORARY. The FACT fold is branch-aware (its state is keyed by
+    // (stream, branch)); the cube's BUILD is not yet — `metric_live_fact` is keyed
+    // by (measure, stream, producer, subject) with no branch, so a multi-branch
+    // measure's stored rows encode a branch-BLIND fold and would disagree with the
+    // facts. That is a silently-wrong number, this subsystem's worst failure mode,
+    // so decline rather than serve it.
+    //
+    // Correctness over speed, deliberately: a multi-branch measure falls back to
+    // the (correct, slower) fact path until the build is branch-aware too. REMOVE
+    // this the moment `metric_live_fact` carries a branch — and not before.
+    if scope.is_partial()
+        && captures
+            .iter()
+            .map(|c| c.branch.as_deref())
+            .collect::<BTreeSet<Option<&str>>>()
+            .len()
+            > 1
+    {
+        return Ok(None);
+    }
+
     // The cube must cover EVERY capture this read would use. "No cube rows for
     // capture N" is otherwise AMBIGUOUS — legitimately-empty state (a real 0
     // point) vs not-cubed-yet — and conflating those is how a materialized read
@@ -1005,6 +1026,75 @@ mod tests {
         );
         builder.build_measure("acme.lint_hit").await.unwrap();
         assert_cube_answers(&engine, &facts, "acme.lint_hit", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_multi_branch_measure_declines_the_cube_and_the_facts_stay_right() {
+        // tsk97. The fact fold is branch-aware; the cube's BUILD is not yet (its
+        // live state has no branch column). So a multi-branch measure's cube rows
+        // encode a branch-blind fold — they'd read 1 on main's last point, a
+        // failure that only ever existed on feature-x. Serving that is worse than
+        // being slow, so the read must DECLINE while the build lags.
+        //
+        // This test is the guard on that gap. When `metric_live_fact` gains a
+        // branch, this flips to `assert_cube_answers` — it must never simply be
+        // deleted, or the divergence ships silently.
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        let on = |branch: &str, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            branch: Some(branch.into()),
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        facts
+            .record_facts(
+                on("main", "2026-06-30T10:00:00Z"),
+                vec![case(m, "A", 1.0), case(m, "B", 1.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                on("feature-x", "2026-06-30T11:00:00Z"),
+                vec![case(m, "A", 0.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(on("main", "2026-06-30T12:00:00Z"), vec![case(m, "B", 1.0)])
+            .await
+            .unwrap();
+        builder.build_measure("acme.test_case").await.unwrap();
+
+        let measure = facts.get_measure("acme.test_case").await.unwrap().unwrap();
+        let filter = FactFilter::from_json("{}").unwrap();
+        assert!(
+            cube_series(
+                &facts,
+                &measure,
+                CaptureScope::PerSubject,
+                Aggregation::Sum,
+                &filter,
+                None,
+                None
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "a branch-blind cube must not answer a multi-branch read"
+        );
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+        assert_eq!(
+            engine
+                .series_for_spec(&spec, None)
+                .await
+                .unwrap()
+                .iter()
+                .map(|p| p.value)
+                .collect::<Vec<_>>(),
+            vec![2.0, 1.0, 2.0],
+            "the facts answer correctly — main's last point is 2, not the branch's 1"
+        );
     }
 
     #[tokio::test]
