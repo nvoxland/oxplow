@@ -129,9 +129,10 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Snapshot cleanup loop — prunes rows older than the configured
-    // retention window (keeping the most-recent row per path) and
-    // GC's orphaned blob files. Runs ~60s after boot and every 24h.
+    // Snapshot cleanup loop — expires blob CONTENT older than the configured
+    // retention window (tsk105: the rows are permanent records; each
+    // (stream, path)'s newest content is kept at any age). Runs ~60s after
+    // boot and every 24h. `snapshotRetentionDays: 0` disables it.
     {
         let retention_days = state
             .config

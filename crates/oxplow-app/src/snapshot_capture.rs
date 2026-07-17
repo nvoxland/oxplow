@@ -560,6 +560,13 @@ impl SnapshotCaptureService {
         &self,
         retention_days: u32,
     ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        // `0` is documented as "retention disabled" (`snapshotRetentionDays`
+        // in oxplow-config) — and without this guard it silently meant the
+        // OPPOSITE: a cutoff of `now`, i.e. expire everything but each path's
+        // newest content (tsk110).
+        if retention_days == 0 {
+            return Ok(0);
+        }
         let cutoff = Timestamp::from_unix_ms(
             Timestamp::now().unix_ms() - (retention_days as i64) * 86_400_000,
         );
@@ -2147,6 +2154,40 @@ mod tests {
             svc.inner.blobs.has(b_rows[0].blob_hash.as_ref().unwrap()),
             "a path's newest row keeps its content at any age"
         );
+    }
+
+    #[tokio::test]
+    async fn zero_retention_days_disables_cleanup_entirely() {
+        // tsk110. `snapshotRetentionDays: 0` is documented as "disabled", and
+        // without the guard it silently meant the OPPOSITE — a cutoff of now,
+        // expiring everything but each path's newest content.
+        let project = tempdir().unwrap();
+        let file = project.path().join("a.txt");
+        let (svc, store) = svc_for(project.path()).await;
+        std::fs::write(&file, "v1").unwrap();
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        std::fs::write(&file, "v2").unwrap();
+        svc.mark_dirty(file.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        oxplow_db::SqliteSnapshotStore::backdate_for_test(
+            store.clone(),
+            "a.txt",
+            Timestamp::from_unix_ms(0),
+        )
+        .await;
+        assert_eq!(
+            svc.run_cleanup(0).await.unwrap(),
+            0,
+            "0 = disabled: nothing expires, no matter how old"
+        );
+        for row in store.list_for_path("a.txt").await.unwrap() {
+            assert!(svc.inner.blobs.has(row.blob_hash.as_ref().unwrap()));
+        }
     }
 
     #[tokio::test]
