@@ -567,6 +567,25 @@ pub struct NewCubeRow {
     pub denominator: f64,
 }
 
+/// One capture's live-partition mutation within a build batch (tsk113) — the
+/// fold's step (`evict restated, insert own`), precomputed by the builder.
+#[derive(Debug, Clone)]
+pub struct BatchApply {
+    pub branch: Option<String>,
+    pub producer: String,
+    pub restated: Vec<String>,
+    pub inserted: Vec<(String, i64)>,
+}
+
+/// One capture's cube rows + watermark advance within a build batch (tsk113).
+#[derive(Debug, Clone)]
+pub struct BatchRows {
+    pub branch: Option<String>,
+    pub capture_id: i64,
+    pub captured_at: Timestamp,
+    pub rows: Vec<NewCubeRow>,
+}
+
 /// A cube bucket joined to its capture's spine — everything a `SeriesPoint` needs
 /// without touching a single fact row. The capture attributes come from the JOIN
 /// rather than being denormalized into `metric_cube`: a capture IS one scan/run,
@@ -1353,62 +1372,6 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Apply ONE capture to its branch's live partition: evict every `restated`
-    /// subject key, then insert the capture's own `(subject_key, fact_id)` pairs.
-    /// This IS the fold's step (`state[N] = state[N-1] − restated(N) + facts(N)`),
-    /// made durable — scoped to `(measure, stream, branch)` because a capture may
-    /// only rewrite its own branch's state (tsk97).
-    ///
-    /// **Idempotent on whole captures** — evict+insert *replaces* a subject's
-    /// facts, so re-running a capture after a torn write lands in the same place.
-    /// That is what makes the un-transactional cube build crash-safe.
-    pub async fn apply_capture_to_live_state(
-        &self,
-        measure_id: i64,
-        stream_id: i64,
-        branch: Option<String>,
-        producer: String,
-        restated: Vec<String>,
-        facts: Vec<(String, i64)>,
-    ) -> Result<(), DomainError> {
-        let branch = branch.unwrap_or_default();
-        self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(map_sql_err)?;
-                {
-                    let mut evict = tx
-                        .prepare_cached(
-                            "DELETE FROM metric_live_fact
-                              WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3
-                                AND producer = ?4 AND subject_key = ?5",
-                        )
-                        .map_err(map_sql_err)?;
-                    for key in &restated {
-                        evict
-                            .execute(params![measure_id, stream_id, branch, producer, key])
-                            .map_err(map_sql_err)?;
-                    }
-                    let mut insert = tx
-                        .prepare_cached(
-                            "INSERT OR IGNORE INTO metric_live_fact
-                               (measure_id, stream_id, branch, producer, subject_key, fact_id)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        )
-                        .map_err(map_sql_err)?;
-                    for (key, fact_id) in &facts {
-                        insert
-                            .execute(params![
-                                measure_id, stream_id, branch, producer, key, fact_id
-                            ])
-                            .map_err(map_sql_err)?;
-                    }
-                }
-                tx.commit().map_err(map_sql_err)?;
-                Ok(())
-            })
-            .await
-    }
-
     /// Establish a branch's live partition in ONE transaction: drop whatever the
     /// partition holds and insert `(producer, subject_key, fact_id)` rows — the
     /// final state of the builder's in-memory replay of the history visible to
@@ -2032,6 +1995,123 @@ impl SqliteFactStore {
                 }
                 tx.commit().map_err(map_sql_err)?;
                 Ok(n as u64)
+            })
+            .await
+    }
+
+    /// Apply one BUILD BATCH — a chunk of captures' folds — in a single
+    /// transaction (tsk113). Per step, in capture order: evict+insert the
+    /// live partition, replace the capture's cube rows, advance its branch's
+    /// watermark. ONE epoch check guards the whole chunk; `false` means an
+    /// invalidation landed after the builder planned it — nothing is written,
+    /// the stale pass abandons.
+    ///
+    /// Batching is what the profile asked for (one tiny transaction per
+    /// capture rewrote the same hot B-tree pages into the WAL ~10k times per
+    /// backfill) and it STRENGTHENS the crash story: a torn chunk lands
+    /// nothing, and re-running it replays whole captures idempotently.
+    pub async fn apply_build_batch(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+        steps: Vec<(Option<BatchApply>, BatchRows)>,
+        expected_epoch: i64,
+    ) -> Result<bool, DomainError> {
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let epoch: i64 = tx
+                    .prepare_cached("SELECT epoch FROM metric_cube_epoch WHERE id = 1")
+                    .map_err(map_sql_err)?
+                    .query_row([], |r| r.get(0))
+                    .map_err(map_sql_err)?;
+                if epoch != expected_epoch {
+                    return Ok(false);
+                }
+                for (apply, rows) in &steps {
+                    if let Some(a) = apply {
+                        let branch = a.branch.clone().unwrap_or_default();
+                        let mut evict = tx
+                            .prepare_cached(
+                                "DELETE FROM metric_live_fact
+                                  WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3
+                                    AND producer = ?4 AND subject_key = ?5",
+                            )
+                            .map_err(map_sql_err)?;
+                        for key in &a.restated {
+                            evict
+                                .execute(params![measure_id, stream_id, branch, a.producer, key])
+                                .map_err(map_sql_err)?;
+                        }
+                        let mut insert = tx
+                            .prepare_cached(
+                                "INSERT OR IGNORE INTO metric_live_fact
+                                   (measure_id, stream_id, branch, producer, subject_key, fact_id)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            )
+                            .map_err(map_sql_err)?;
+                        for (key, fact_id) in &a.inserted {
+                            insert
+                                .execute(params![
+                                    measure_id, stream_id, branch, a.producer, key, fact_id
+                                ])
+                                .map_err(map_sql_err)?;
+                        }
+                    }
+                    let branch = rows.branch.clone().unwrap_or_default();
+                    let captured_at = ts_to_string(rows.captured_at);
+                    tx.prepare_cached(
+                        "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id = ?2",
+                    )
+                    .map_err(map_sql_err)?
+                    .execute(params![measure_id, rows.capture_id])
+                    .map_err(map_sql_err)?;
+                    {
+                        let mut insert = tx
+                            .prepare_cached(
+                                "INSERT INTO metric_cube
+                                   (measure_id, capture_id, producer, dims_key, fact_count,
+                                    value_sum, value_min, value_max, numerator, denominator)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                            )
+                            .map_err(map_sql_err)?;
+                        for r in &rows.rows {
+                            insert
+                                .execute(params![
+                                    measure_id,
+                                    rows.capture_id,
+                                    r.producer,
+                                    r.dims_key,
+                                    r.fact_count,
+                                    r.value_sum,
+                                    r.value_min,
+                                    r.value_max,
+                                    r.numerator,
+                                    r.denominator
+                                ])
+                                .map_err(map_sql_err)?;
+                        }
+                    }
+                    tx.prepare_cached(
+                        "INSERT INTO metric_cube_state
+                           (measure_id, stream_id, branch, last_capture_id, last_captured_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT(measure_id, stream_id, branch) DO UPDATE SET
+                           last_capture_id = excluded.last_capture_id,
+                           last_captured_at = excluded.last_captured_at",
+                    )
+                    .map_err(map_sql_err)?
+                    .execute(params![
+                        measure_id,
+                        stream_id,
+                        branch,
+                        rows.capture_id,
+                        captured_at
+                    ])
+                    .map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(true)
             })
             .await
     }
@@ -3210,6 +3290,87 @@ mod tests {
             epoch_before + 1,
             "a no-op pass must not re-fence"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stale_epoch_batch_lands_nothing() {
+        // tsk113. The batch's whole point is one transaction per chunk — and
+        // the fence must hold at that granularity: an invalidation after the
+        // builder planned the chunk means NONE of it may land — not the live
+        // applies, not the rows, not the watermark.
+        let store = fixture().await;
+        let m = store
+            .upsert_measure(NewMeasure {
+                capture_scope: "per-subject".into(),
+                ..NewMeasure::new("acme.case", "acme.case")
+            })
+            .await
+            .unwrap();
+        let cap = store
+            .record_facts(
+                NewMetricCapture {
+                    captured_at: Some(at("2026-06-30T10:00:00.000000Z")),
+                    ..NewMetricCapture::done(1, "tests", "builtin")
+                },
+                vec![NewFact {
+                    subject_ref: Some("T".into()),
+                    ..NewFact::new(m, 1.0)
+                }],
+            )
+            .await
+            .unwrap();
+        let step = |fact_id: i64| {
+            (
+                Some(BatchApply {
+                    branch: None,
+                    producer: "tests".into(),
+                    restated: vec!["T".into()],
+                    inserted: vec![("T".into(), fact_id)],
+                }),
+                BatchRows {
+                    branch: None,
+                    capture_id: cap,
+                    captured_at: at("2026-06-30T10:00:00.000000Z"),
+                    rows: vec![NewCubeRow {
+                        producer: "tests".into(),
+                        dims_key: "{}".into(),
+                        fact_count: 1,
+                        value_sum: 1.0,
+                        value_min: Some(1.0),
+                        value_max: Some(1.0),
+                        numerator: 0.0,
+                        denominator: 0.0,
+                    }],
+                },
+            )
+        };
+        let fact_id: i64 = 1;
+        let planned = store.cube_epoch().await.unwrap();
+        // An invalidation lands after planning (a dim flip is one).
+        store
+            .upsert_dimension(NewDimension {
+                promoted: true,
+                ..NewDimension::categorical("acme.kind", "Kind")
+            })
+            .await
+            .unwrap();
+        assert!(
+            !store
+                .apply_build_batch(m, 1, vec![step(fact_id)], planned)
+                .await
+                .unwrap(),
+            "the stale chunk must refuse"
+        );
+        assert!(store.cube_watermark(m, 1).await.unwrap().is_none());
+        assert!(store.live_facts(m, 1, None).await.unwrap().is_empty());
+        // The fresh epoch commits the same chunk.
+        let fresh = store.cube_epoch().await.unwrap();
+        assert!(store
+            .apply_build_batch(m, 1, vec![step(fact_id)], fresh)
+            .await
+            .unwrap());
+        assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+        assert_eq!(store.live_facts(m, 1, None).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

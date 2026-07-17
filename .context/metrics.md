@@ -423,9 +423,13 @@ welded to collection.
 > N" is otherwise ambiguous: state legitimately empty at N (a real value-0 point)
 > vs N not cubed yet (fall back). Conflating those is how a materialized read
 > reports 0 instead of admitting it doesn't know. It also makes the build
-> **crash-safe**: the cube is written outside the fact-insert transaction, so a
-> torn write just leaves the watermark un-advanced — reads fall back and the next
-> build re-runs whole captures, which is idempotent (evict+insert *replaces* a
+> **crash-safe**: the cube is written outside the fact-insert transaction, and
+> since tsk113 the build folds captures in CHUNKS — the in-memory fold's
+> evict/insert per capture, one `apply_build_batch` transaction per ~256
+> captures (the profile showed ~10k per-capture transactions rewriting the
+> same hot WAL pages; batching halved the backfill). A torn chunk lands
+> NOTHING and leaves the watermark un-advanced — reads fall back and the next
+> build replays whole captures, which is idempotent (evict+insert *replaces* a
 > subject's facts).
 >
 > Watermark rows are per `(measure, stream, branch)` (V63) and do double duty:
@@ -499,9 +503,11 @@ welded to collection.
 >
 > - **`MetricCubeBuilder::build_measure`** — dispatches on scope to **two build
 >   rules, deliberately not merged** (tsk99):
->   - **partial** (`build_stream`) — folds each capture after the watermark: seed
->     the branch's partition if it's new → evict what the capture restates →
->     insert its facts → re-aggregate the **whole live partition**.
+>   - **partial** (`build_stream`) — folds captures after the watermark in
+>     chunks: seed a new branch's partition → load each touched partition
+>     ONCE → evict/insert in memory per capture → re-aggregate the **whole
+>     live partition** into that capture's rows → flush the chunk as one
+>     transaction (tsk113).
 >   - **complete** (`build_stream_complete`) — a GROUP BY over the capture's **own**
 >     facts. No `metric_live_fact`, no eviction, no reach-back: every capture
 >     restates the whole population, so `state[N] = facts(N)`.

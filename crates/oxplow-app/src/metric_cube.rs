@@ -52,6 +52,16 @@ pub struct MetricCubeBuilder {
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
 }
 
+/// Captures folded per build transaction (tsk113). Large enough to amortize
+/// the WAL page rewrites the profile flagged; small enough to bound the
+/// transaction and the in-memory step list.
+const BUILD_CHUNK: usize = 256;
+
+/// One branch partition's in-memory live state during a batched build:
+/// `(producer, subject_key)` → that key's live facts — the durable
+/// `metric_live_fact` shape, held in Rust for the chunk (tsk113).
+type LivePartition = HashMap<(String, String), Vec<FactRow>>;
+
 /// The canonical `dims_key` for a bucket: the promoted dimension values a fact
 /// carries, as sorted-key JSON. `{}` when nothing is promoted or the fact carries
 /// none of the promoted dims.
@@ -167,35 +177,41 @@ impl MetricCubeBuilder {
         }
         let epoch = self.facts.cube_epoch().await?;
         let mut folded = 0;
-        for c in &todo {
-            let own = self
+        for chunk in todo.chunks(BUILD_CHUNK) {
+            let mut steps: Vec<(Option<oxplow_db::BatchApply>, oxplow_db::BatchRows)> = Vec::new();
+            for c in chunk {
+                let own = self
+                    .facts
+                    .facts_for_captures(measure.id, vec![c.id])
+                    .await?;
+                let own_refs: Vec<&FactRow> = own.iter().collect();
+                let rows = cube_rows(&own_refs, promoted);
+                // Complete scope needs no branch STATE (each capture restates
+                // the whole population), but the watermark row is per branch,
+                // so the capture still advances — and, first time, creates —
+                // its own.
+                steps.push((
+                    None,
+                    oxplow_db::BatchRows {
+                        branch: c.branch.clone(),
+                        capture_id: c.id,
+                        captured_at: c.captured_at,
+                        rows,
+                    },
+                ));
+            }
+            let n = steps.len();
+            if !self
                 .facts
-                .facts_for_captures(measure.id, vec![c.id])
-                .await?;
-            let rows = cube_rows(&own, promoted);
-            // Complete scope needs no branch STATE (each capture restates the
-            // whole population), but the watermark row is per branch, so the
-            // capture still advances — and, first time, creates — its own.
-            let written = self
-                .facts
-                .write_cube_rows(
-                    measure.id,
-                    stream,
-                    c.branch.clone(),
-                    c.id,
-                    c.captured_at,
-                    rows,
-                    epoch,
-                )
-                .await?;
-            if !written {
-                // An invalidation (prune, grain/scope change) landed mid-pass:
-                // this todo-list predates the wipe. Abandon; the next build
-                // folds from the post-wipe watermark. Slow, never wrong.
+                .apply_build_batch(measure.id, stream, steps, epoch)
+                .await?
+            {
+                // An invalidation landed mid-pass: the chunk landed NOTHING.
+                // Abandon; the next build folds from the post-wipe watermark.
                 tracing::debug!(measure = %measure.key, "cube build fenced by an invalidation; abandoning pass");
                 return Ok(folded);
             }
-            folded += 1;
+            folded += n;
         }
         Ok(folded)
     }
@@ -251,6 +267,17 @@ impl MetricCubeBuilder {
 
     /// Fold one stream's un-cubed captures. `caps` is that stream's captures
     /// oldest-first (as `captures_for_producers` returns them).
+    ///
+    /// BATCHED (tsk113): captures fold in chunks — each touched branch
+    /// partition is loaded ONCE, the fold's evict/insert runs in memory
+    /// (the same step the SQL apply performed, and the same shapes
+    /// [`Self::seed_rows`] already replays), each capture's cube rows are
+    /// bucketed from that in-memory state, and one [`SqliteFactStore::
+    /// apply_build_batch`] transaction flushes the chunk with a single epoch
+    /// check. The profile (tsk111) showed ~10k per-capture transactions
+    /// rewriting the same hot B-tree pages into the WAL every backfill; the
+    /// chunk transaction writes them once. Crash story unchanged-or-better:
+    /// a torn chunk lands NOTHING and replays idempotently.
     async fn build_stream(
         &self,
         measure: &Measure,
@@ -265,85 +292,116 @@ impl MetricCubeBuilder {
         }
         let epoch = self.facts.cube_epoch().await?;
         let mut folded = 0;
-        for c in &todo {
-            // A branch's FIRST capture seeds its partition with the history
-            // visible to it — the fact fold's seed (50fd1760), made durable. Skip
-            // the seed and a new branch reads as a collapsed suite (only what it
-            // re-ran); skip the branch KEY and a feature branch's failure lands on
-            // a point labelled main. Visibility comes from the SAME resolver the
-            // fact fold uses (tsk102) — and its as-of-R rule is what lets this
-            // seed be frozen: a later commit changes no answer the seed baked in.
+        // Branches this pass already seeded: the DB's seeded marker (the
+        // cube_state row) only lands at flush, so a chunk's second capture on
+        // a new branch must not re-seed within the pass.
+        let mut seeded: std::collections::HashSet<Option<String>> =
+            std::collections::HashSet::new();
+        for chunk in todo.chunks(BUILD_CHUNK) {
+            // Seeds first — rare, and transactional replaces on their own. A
+            // branch's FIRST capture seeds its partition with the history
+            // visible to it (50fd1760); visibility comes from the SAME
+            // resolver the fact fold uses (tsk102), whose as-of-R rule is
+            // what lets a frozen seed never diverge from a fresh fact read.
+            for c in chunk {
+                if seeded.contains(&c.branch) {
+                    continue;
+                }
+                if !self
+                    .facts
+                    .cube_branch_seeded(measure.id, stream, c.branch.clone())
+                    .await?
+                {
+                    let visibility = match &self.visibility {
+                        Some(resolver) => resolver.for_captures(caps).await,
+                        None => Visibility::blind(),
+                    };
+                    let seed = self.seed_rows(measure, scope, caps, c, &visibility).await?;
+                    self.facts
+                        .seed_live_state(measure.id, stream, c.branch.clone(), seed)
+                        .await?;
+                }
+                seeded.insert(c.branch.clone());
+            }
+            // Load each touched partition once. Keys mirror the stored
+            // `subject_key` exactly — both sides are `fold_key`.
+            let mut parts: HashMap<Option<String>, LivePartition> = HashMap::new();
+            for c in chunk {
+                if !parts.contains_key(&c.branch) {
+                    let mut part: LivePartition = HashMap::new();
+                    for f in self
+                        .facts
+                        .live_facts(measure.id, stream, c.branch.clone())
+                        .await?
+                    {
+                        let key = (
+                            f.producer.clone(),
+                            fold_key(scope, &f).unwrap_or(SCALAR_SUBJECT).to_string(),
+                        );
+                        part.entry(key).or_default().push(f);
+                    }
+                    parts.insert(c.branch.clone(), part);
+                }
+            }
+            let mut steps: Vec<(Option<oxplow_db::BatchApply>, oxplow_db::BatchRows)> = Vec::new();
+            for c in chunk {
+                let own = self
+                    .facts
+                    .facts_for_captures(measure.id, vec![c.id])
+                    .await?;
+                let restated = self.restated_by(scope, c, &own).await?;
+                let part = parts.get_mut(&c.branch).expect("loaded above");
+                for key in &restated {
+                    part.remove(&(c.producer.clone(), key.clone()));
+                }
+                let inserted: Vec<(String, i64)> = own
+                    .iter()
+                    .map(|f| {
+                        (
+                            fold_key(scope, f).unwrap_or(SCALAR_SUBJECT).to_string(),
+                            f.id,
+                        )
+                    })
+                    .collect();
+                for f in own {
+                    let key = (
+                        c.producer.clone(),
+                        fold_key(scope, &f).unwrap_or(SCALAR_SUBJECT).to_string(),
+                    );
+                    part.entry(key).or_default().push(f);
+                }
+                // Re-aggregate the WHOLE live partition rather than adjusting
+                // the previous row: min/max are not decrementable, so a fresh
+                // aggregate is correct for every aggregation by construction.
+                let live: Vec<&FactRow> = part.values().flatten().collect();
+                let rows = cube_rows(&live, promoted);
+                steps.push((
+                    Some(oxplow_db::BatchApply {
+                        branch: c.branch.clone(),
+                        producer: c.producer.clone(),
+                        restated,
+                        inserted,
+                    }),
+                    oxplow_db::BatchRows {
+                        branch: c.branch.clone(),
+                        capture_id: c.id,
+                        captured_at: c.captured_at,
+                        rows,
+                    },
+                ));
+            }
+            let n = steps.len();
             if !self
                 .facts
-                .cube_branch_seeded(measure.id, stream, c.branch.clone())
+                .apply_build_batch(measure.id, stream, steps, epoch)
                 .await?
             {
-                let visibility = match &self.visibility {
-                    Some(resolver) => resolver.for_captures(caps).await,
-                    None => Visibility::blind(),
-                };
-                let seed = self.seed_rows(measure, scope, caps, c, &visibility).await?;
-                self.facts
-                    .seed_live_state(measure.id, stream, c.branch.clone(), seed)
-                    .await?;
-            }
-            let own = self
-                .facts
-                .facts_for_captures(measure.id, vec![c.id])
-                .await?;
-            let restated = self.restated_by(scope, c, &own).await?;
-            let inserted: Vec<(String, i64)> = own
-                .iter()
-                .map(|f| {
-                    (
-                        fold_key(scope, f).unwrap_or(SCALAR_SUBJECT).to_string(),
-                        f.id,
-                    )
-                })
-                .collect();
-            self.facts
-                .apply_capture_to_live_state(
-                    measure.id,
-                    stream,
-                    c.branch.clone(),
-                    c.producer.clone(),
-                    restated,
-                    inserted,
-                )
-                .await?;
-
-            // Re-aggregate the WHOLE live state rather than adjusting the previous
-            // row. min/max are not decrementable — evict the subject holding the
-            // max and the new max is unrecoverable from the aggregate alone — so
-            // delta arithmetic would be silently wrong for `slowest_ms` (a `max`
-            // over a per-subject measure). A fresh aggregate is correct for every
-            // aggregation by construction.
-            let live = self
-                .facts
-                .live_facts(measure.id, stream, c.branch.clone())
-                .await?;
-            let rows = cube_rows(&live, promoted);
-            let written = self
-                .facts
-                .write_cube_rows(
-                    measure.id,
-                    stream,
-                    c.branch.clone(),
-                    c.id,
-                    c.captured_at,
-                    rows,
-                    epoch,
-                )
-                .await?;
-            if !written {
-                // Fenced: an invalidation landed mid-pass and this todo-list
-                // predates the wipe (its live-state applies above went to
-                // wiped partitions — harmless, the next pass re-seeds).
-                // Abandon; slow, never wrong.
+                // Fenced: an invalidation landed after this pass was planned.
+                // The chunk landed NOTHING; abandon — slow, never wrong.
                 tracing::debug!(measure = %measure.key, "cube build fenced by an invalidation; abandoning pass");
                 return Ok(folded);
             }
-            folded += 1;
+            folded += n;
         }
         Ok(folded)
     }
@@ -748,9 +806,9 @@ pub async fn cube_series(
 ///
 /// Keyed on the FACT's producer, not the capture's — the state at capture N holds
 /// every producer's live facts, including ones whose last run was long ago.
-fn cube_rows(live: &[FactRow], promoted: &[String]) -> Vec<NewCubeRow> {
+fn cube_rows(live: &[&FactRow], promoted: &[String]) -> Vec<NewCubeRow> {
     let mut buckets: BTreeMap<(String, String), Vec<&FactRow>> = BTreeMap::new();
-    for f in live {
+    for &f in live {
         buckets
             .entry((f.producer.clone(), dims_key(f, promoted)))
             .or_default()

@@ -42,9 +42,9 @@ pub use effort_store::{
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
 pub use fact_store::{
-    CubeReadRow, Dimension, EffortMetricDelta, FactRow, Measure, MetricCapture, MetricSpec,
-    NewCubeRow, NewDimension, NewFact, NewMeasure, NewMetricCapture, NewMetricSpec,
-    SqliteFactStore,
+    BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, Measure,
+    MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure, NewMetricCapture,
+    NewMetricSpec, SqliteFactStore,
 };
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
