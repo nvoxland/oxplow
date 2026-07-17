@@ -419,6 +419,13 @@ pub struct Cell {
 }
 
 impl Cell {
+    /// Whether `agg` survives bucketing at all — the cube's precondition. `false`
+    /// only for `last`, whose meaning depends on an ordering that merging
+    /// destroys. A read on a non-decomposable aggregation must use the facts.
+    pub fn decomposes(agg: Aggregation) -> bool {
+        Self::default().project(agg).is_some()
+    }
+
     /// The cell for a bucket of facts.
     pub fn of(facts: &[&FactRow]) -> Self {
         let mut cell = Self::default();
@@ -933,6 +940,28 @@ impl MetricEngine {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
         };
+        let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
+
+        // The aggregate cube (tsk96): a GROUP BY over a few hundred PRE-FOLDED
+        // rows instead of a replay over every fact. It answers only the reads it
+        // can answer exactly and returns `None` for the rest, which fall through
+        // to the code below — the base facts answer everything, so this is a
+        // navigator, never a gate. Deliberately BEFORE the fact load: that load
+        // (and the producer scan under it) IS the cost being removed.
+        if let Some(points) = crate::metric_cube::cube_series(
+            &self.facts,
+            &measure,
+            scope,
+            agg,
+            filter,
+            group_by,
+            stream,
+        )
+        .await?
+        {
+            return Ok(points);
+        }
+
         // A trend legitimately reads the measure's history (one point per
         // capture) — but stream-bounded SQL-side (tsk75), never loaded whole
         // then filtered in Rust.
@@ -979,7 +1008,6 @@ impl MetricEngine {
         // Zero-fill is deliberately NOT applied: an empty capture restated nothing, so
         // it means "nothing changed", not "the repo is zero" — zero-filling would yank
         // the headline to 0.
-        let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
         if scope.is_partial() {
             let captures = self
                 .facts
@@ -1402,7 +1430,7 @@ pub fn threshold_state(
 /// vocabulary is a superset (`count_distinct`/`p95` are reserved in the schema);
 /// an aggregation the engine can't yet compute is an honest error, not a silent
 /// wrong number.
-fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
+pub(crate) fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
     Aggregation::parse(&spec.aggregation).ok_or_else(|| {
         DomainError::Invalid(format!(
             "aggregation `{}` is not yet supported by the engine",
@@ -1427,7 +1455,7 @@ fn spec_value_scale(spec: &MetricSpec) -> f64 {
 }
 
 /// A spec's `filter_json` as a [`FactFilter`] (the empty filter when absent).
-fn spec_filter(spec: &MetricSpec) -> Result<FactFilter, DomainError> {
+pub(crate) fn spec_filter(spec: &MetricSpec) -> Result<FactFilter, DomainError> {
     match spec.filter_json.as_deref() {
         Some(j) => FactFilter::from_json(j),
         None => Ok(FactFilter::default()),
