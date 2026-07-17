@@ -546,6 +546,53 @@ impl NewFact {
     }
 }
 
+/// One `metric_cube` bucket to write (V62, tsk96) — the decomposable aggregate of
+/// the facts sharing a `(capture, promoted dims)` grain. Built by
+/// `metric_engine::Cell`, which owns the arithmetic; this is just the wire shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewCubeRow {
+    /// The producer whose live facts this bucket holds — not necessarily the
+    /// capture's own producer.
+    pub producer: String,
+    pub dims_key: String,
+    pub fact_count: i64,
+    pub value_sum: f64,
+    pub value_min: Option<f64>,
+    pub value_max: Option<f64>,
+    pub numerator: f64,
+    pub denominator: f64,
+}
+
+/// A cube bucket joined to its capture's spine — everything a `SeriesPoint` needs
+/// without touching a single fact row. The capture attributes come from the JOIN
+/// rather than being denormalized into `metric_cube`: a capture IS one scan/run,
+/// so this is the ordinary star-schema shape (aggregate fact + shared dimension),
+/// and it's what keeps branch/thread/stream/snapshot reachable from the cube.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CubeReadRow {
+    /// The producer whose live facts this bucket holds — the key the read's
+    /// "producers that ever emitted a matching fact" derivation needs.
+    pub producer: String,
+    pub dims_key: String,
+    pub fact_count: i64,
+    pub value_sum: f64,
+    pub value_min: Option<f64>,
+    pub value_max: Option<f64>,
+    pub numerator: f64,
+    pub denominator: f64,
+    pub capture_id: i64,
+    pub captured_at: Timestamp,
+    pub stream_id: i64,
+    /// The CAPTURE's producer — what the capture list is filtered on. Distinct
+    /// from `producer` above: a capture by `nextest` still carries `bun-test`'s
+    /// live facts in the state it folds to.
+    pub capture_producer: String,
+    pub branch: Option<String>,
+    pub provenance: String,
+    pub source: String,
+    pub closest_git_version: Option<String>,
+}
+
 /// The joined read view of a fact: its own measurement columns PLUS the spine it
 /// inherits from its capture (`captured_at`, `branch`, version, effort, trust).
 /// One metric's roll-up over a single effort — the wire shape the task/effort
@@ -1082,6 +1129,212 @@ impl SqliteFactStore {
                 );
                 let mut stmt = conn.prepare(&sql)?;
                 let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    // --- the aggregate cube (V62, tsk96) --------------------------------
+    //
+    // The cube is an ACCELERATOR and is DISPOSABLE: every row here is derivable
+    // from `fact`, and dropping them all costs only speed. Nothing may read data
+    // from the cube that the facts don't have. See `.context/metrics.md`.
+
+    /// How far the cube is built for `(measure, stream)` — the newest capture
+    /// folded in, as `(captured_at, id)` so it compares on the same key the fold
+    /// orders by. `None` ⇒ nothing cubed yet.
+    ///
+    /// This is what disambiguates "no cube rows for capture N": state legitimately
+    /// empty at N (a real value-0 point) vs N not cubed yet (fall back to facts).
+    pub async fn cube_watermark(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+    ) -> Result<Option<(Timestamp, i64)>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT last_captured_at, last_capture_id FROM metric_cube_state
+                      WHERE measure_id = ?1 AND stream_id = ?2",
+                    params![measure_id, stream_id],
+                    |r| {
+                        let at: String = r.get(0)?;
+                        Ok((at, r.get::<_, i64>(1)?))
+                    },
+                )
+                .optional()
+            })
+            .await?
+            .map(|(at, id)| Ok((string_to_ts(&at).map_err(ts_conv_err)?, id)))
+            .transpose()
+            .map_err(map_sql_err)
+    }
+
+    /// The facts currently LIVE for `(measure, stream)` — the fold's state, read
+    /// back as whole facts so the caller buckets them with the same `dim_value`
+    /// the read path uses (never a second dim-extraction implementation in SQL).
+    pub async fn live_facts(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+    ) -> Result<Vec<FactRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = format!(
+                    "SELECT {FACT_ROW_COLS} FROM metric_live_fact lf
+                       JOIN fact f ON f.id = lf.fact_id
+                       JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE lf.measure_id = ?1 AND lf.stream_id = ?2
+                      ORDER BY c.captured_at ASC, f.id ASC"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Apply ONE capture to the live state: evict every `restated` subject key,
+    /// then insert the capture's own `(subject_key, fact_id)` pairs. This IS the
+    /// fold's step (`state[N] = state[N-1] − restated(N) + facts(N)`), made
+    /// durable.
+    ///
+    /// **Idempotent on whole captures** — evict+insert *replaces* a subject's
+    /// facts, so re-running a capture after a torn write lands in the same place.
+    /// That is what makes the un-transactional cube build crash-safe.
+    pub async fn apply_capture_to_live_state(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+        producer: String,
+        restated: Vec<String>,
+        facts: Vec<(String, i64)>,
+    ) -> Result<(), DomainError> {
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                for key in &restated {
+                    tx.execute(
+                        "DELETE FROM metric_live_fact
+                          WHERE measure_id = ?1 AND stream_id = ?2
+                            AND producer = ?3 AND subject_key = ?4",
+                        params![measure_id, stream_id, producer, key],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                for (key, fact_id) in &facts {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO metric_live_fact
+                           (measure_id, stream_id, producer, subject_key, fact_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![measure_id, stream_id, producer, key, fact_id],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Replace a capture's cube rows and advance the watermark, atomically. The
+    /// delete makes a re-run of the same capture idempotent.
+    pub async fn write_cube_rows(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+        capture_id: i64,
+        captured_at: Timestamp,
+        rows: Vec<NewCubeRow>,
+    ) -> Result<(), DomainError> {
+        let captured_at = ts_to_string(captured_at);
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                tx.execute(
+                    "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id = ?2",
+                    params![measure_id, capture_id],
+                )
+                .map_err(map_sql_err)?;
+                for r in &rows {
+                    tx.execute(
+                        "INSERT INTO metric_cube
+                           (measure_id, capture_id, producer, dims_key, fact_count,
+                            value_sum, value_min, value_max, numerator, denominator)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![
+                            measure_id,
+                            capture_id,
+                            r.producer,
+                            r.dims_key,
+                            r.fact_count,
+                            r.value_sum,
+                            r.value_min,
+                            r.value_max,
+                            r.numerator,
+                            r.denominator
+                        ],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                tx.execute(
+                    "INSERT INTO metric_cube_state
+                       (measure_id, stream_id, last_capture_id, last_captured_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(measure_id, stream_id) DO UPDATE SET
+                       last_capture_id = excluded.last_capture_id,
+                       last_captured_at = excluded.last_captured_at",
+                    params![measure_id, stream_id, capture_id, captured_at],
+                )
+                .map_err(map_sql_err)?;
+                tx.commit().map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Every cube bucket for a measure, oldest capture first, joined to its
+    /// capture's spine — the read's replacement for decoding the raw facts.
+    /// `stream` bounds it to one worktree; `None` reads every stream (each row
+    /// still carries its own, so an unscoped read is a UNION, never a merge).
+    pub async fn cube_rows_for_measure(
+        &self,
+        measure_id: i64,
+        stream: Option<i64>,
+    ) -> Result<Vec<CubeReadRow>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let sql = "SELECT mc.producer, mc.dims_key, mc.fact_count, mc.value_sum,
+                                  mc.value_min, mc.value_max, mc.numerator, mc.denominator,
+                                  c.id, c.captured_at, c.stream_id, c.producer, c.branch,
+                                  c.provenance, c.source, c.closest_git_version
+                             FROM metric_cube mc
+                             JOIN metric_capture c ON c.id = mc.capture_id
+                            WHERE mc.measure_id = ?1
+                              AND (?2 IS NULL OR c.stream_id = ?2)
+                            ORDER BY c.captured_at ASC, c.id ASC, mc.dims_key ASC";
+                let mut stmt = conn.prepare(sql)?;
+                let rows = stmt.query_map(params![measure_id, stream], |r| {
+                    let captured_at: String = r.get(9)?;
+                    Ok(CubeReadRow {
+                        producer: r.get(0)?,
+                        dims_key: r.get(1)?,
+                        fact_count: r.get(2)?,
+                        value_sum: r.get(3)?,
+                        value_min: r.get(4)?,
+                        value_max: r.get(5)?,
+                        numerator: r.get(6)?,
+                        denominator: r.get(7)?,
+                        capture_id: r.get(8)?,
+                        captured_at: string_to_ts(&captured_at).map_err(ts_conv_err)?,
+                        stream_id: r.get(10)?,
+                        capture_producer: r.get(11)?,
+                        branch: r.get(12)?,
+                        provenance: r.get(13)?,
+                        source: r.get(14)?,
+                        closest_git_version: r.get(15)?,
+                    })
+                })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await

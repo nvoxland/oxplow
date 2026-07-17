@@ -55,6 +55,19 @@
 CREATE TABLE metric_cube (
     measure_id INTEGER NOT NULL REFERENCES measure(id) ON DELETE CASCADE,
     capture_id INTEGER NOT NULL REFERENCES metric_capture(id) ON DELETE CASCADE,
+    -- The producer whose live facts this bucket holds — NOT necessarily the
+    -- capture's own producer (the state at capture N includes every producer's
+    -- live facts, including ones that last ran earlier).
+    --
+    -- In the grain for two reasons. (1) It mirrors the fold, whose state is
+    -- already keyed by producer. (2) The read derives its capture list from "the
+    -- producers that ever emitted a fact matching this spec's filter", so a cube
+    -- that merged producers into one row could not reproduce that derivation, and
+    -- two specs over the same measure with different filters would silently get
+    -- the same capture list. Merging across producers is decomposable, so the
+    -- point is unchanged; the cost is only row count (~152 -> ~304 for tests,
+    -- still nothing).
+    producer TEXT NOT NULL,
     -- Canonical JSON of the promoted dimension values for this bucket
     -- (`{"oxplow.status":"passed"}`), '{}' when no dim is promoted. Built by the
     -- SAME `dim_value` the read uses — the bucketing is done in Rust precisely so
@@ -68,7 +81,7 @@ CREATE TABLE metric_cube (
     value_max REAL,
     numerator REAL NOT NULL DEFAULT 0,
     denominator REAL NOT NULL DEFAULT 0,
-    PRIMARY KEY (measure_id, capture_id, dims_key)
+    PRIMARY KEY (measure_id, capture_id, producer, dims_key)
 ) WITHOUT ROWID;
 
 -- The read is "every bucket of this measure, oldest capture first", so the PK's
