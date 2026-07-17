@@ -1645,20 +1645,6 @@ impl SqliteSnapshotStore {
 
     /// Distinct non-null `blob_hash` values referenced by any row.
     /// Used by blob GC to decide which on-disk content is still live.
-    pub async fn referenced_blob_hashes(
-        &self,
-    ) -> Result<std::collections::HashSet<String>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT blob_hash FROM file_snapshot WHERE blob_hash IS NOT NULL",
-                )?;
-                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-                rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()
-            })
-            .await
-    }
-
     /// Test-only: rewrite the oldest row for `path` to a given
     /// `captured_at`. Lets cleanup tests construct rows that fall
     /// outside a retention window without time-traveling the clock.
@@ -1682,19 +1668,34 @@ impl SqliteSnapshotStore {
     /// `cutoff`, except the most-recent row per path (so every
     /// file keeps at least one history entry no matter how old).
     /// Returns the number of rows deleted.
-    pub async fn prune_older_than(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
+    /// The blob hashes the daily cleanup must KEEP on disk: every row inside
+    /// the retention window, plus each `(stream, path)`'s newest row at ANY
+    /// age — so every worktree's current tree stays viewable/rollbackable
+    /// forever. Every other hash is content the cleanup may expire.
+    ///
+    /// The ROWS are never deleted (tsk105): retention's job is bounding the
+    /// on-disk file copies, and the records are a different thing — durable
+    /// facts other subsystems replay (the per-path metric fold derives each
+    /// capture's RESTATED SET from them, and the ancestry anchors ride the
+    /// parent `snapshot` rows). Rows weigh bytes; blobs weigh megabytes.
+    /// Deleting rows to save disk was aiming at the wrong mass, and it rotted
+    /// the fold's inputs out from under durable captures.
+    pub async fn retained_blob_hashes(
+        &self,
+        cutoff: Timestamp,
+    ) -> Result<std::collections::HashSet<String>, DomainError> {
         let cutoff_str = ts_to_string(cutoff);
         self.db
             .call(move |conn| {
-                let n = conn.execute(
-                    "DELETE FROM file_snapshot
-                     WHERE captured_at < ?1
-                       AND id NOT IN (
-                         SELECT MAX(id) FROM file_snapshot GROUP BY path
-                       )",
-                    params![cutoff_str],
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT blob_hash FROM file_snapshot
+                      WHERE blob_hash IS NOT NULL
+                        AND (captured_at >= ?1
+                             OR id IN (SELECT MAX(id) FROM file_snapshot
+                                        GROUP BY stream_id, path))",
                 )?;
-                Ok(n as u64)
+                let rows = stmt.query_map(params![cutoff_str], |row| row.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()
             })
             .await
     }

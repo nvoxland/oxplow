@@ -545,21 +545,28 @@ impl SnapshotCaptureService {
         );
     }
 
-    /// Prune snapshot rows older than `retention_days` (keeping the
-    /// most-recent row per path) and GC any on-disk blobs no longer
-    /// referenced. Returns `(rows_pruned, blobs_removed)`.
+    /// Expire snapshot CONTENT older than `retention_days` — the on-disk blob
+    /// copies — while keeping every `file_snapshot` ROW forever (tsk105).
+    ///
+    /// Retention's job is bounding the blob directory; the rows are durable
+    /// records other subsystems replay (the per-path metric fold's scanned
+    /// sets, the ancestry anchors), and they weigh bytes where blobs weigh
+    /// megabytes. The GC keep-set is every row inside the window plus each
+    /// `(stream, path)`'s newest row at any age, so every worktree's current
+    /// tree stays viewable/rollbackable forever; older content reads degrade
+    /// to "expired" (`read_snapshot_file_content` → `None`; restores refuse
+    /// with a clear message). Returns the number of blobs removed.
     pub async fn run_cleanup(
         &self,
         retention_days: u32,
-    ) -> Result<(u64, u64), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
         let cutoff = Timestamp::from_unix_ms(
             Timestamp::now().unix_ms() - (retention_days as i64) * 86_400_000,
         );
-        let pruned = self.inner.store.prune_older_than(cutoff).await?;
-        let referenced = self.inner.store.referenced_blob_hashes().await?;
+        let keep = self.inner.store.retained_blob_hashes(cutoff).await?;
         let blobs = self.inner.blobs.clone();
-        let removed = tokio::task::spawn_blocking(move || blobs.gc(&referenced)).await??;
-        Ok((pruned, removed))
+        let removed = tokio::task::spawn_blocking(move || blobs.gc(&keep)).await??;
+        Ok(removed)
     }
 
     /// Spawn a long-running cleanup loop: runs once shortly after
@@ -579,26 +586,24 @@ impl SnapshotCaptureService {
                 let task = bts.as_ref().map(|s| {
                     s.start(crate::background_task::StartInput {
                         kind: crate::background_task::BackgroundTaskKind::Snapshot,
-                        label: "Pruning snapshot history".into(),
+                        label: "Expiring old snapshot content".into(),
                         detail: None,
                         progress: None,
                     })
                 });
                 let cleanup_started = Instant::now();
                 match this.run_cleanup(retention_days).await {
-                    Ok((rows, blobs)) => {
+                    Ok(blobs) => {
                         tracing::info!(
-                            rows_pruned = rows,
                             blobs_removed = blobs,
                             retention_days,
                             elapsed_ms = cleanup_started.elapsed().as_millis() as u64,
-                            "snapshot cleanup pass",
+                            "snapshot content cleanup pass (records are permanent)",
                         );
                         if let (Some(s), Some(t)) = (bts.as_ref(), task.as_ref()) {
                             s.complete(
                                 &t.id,
                                 Some(serde_json::json!({
-                                    "rowsPruned": rows,
                                     "blobsRemoved": blobs,
                                 })),
                             );
@@ -2073,19 +2078,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_prunes_old_rows_and_gcs_orphan_blobs() {
+    async fn cleanup_expires_old_content_but_keeps_every_record() {
+        // tsk105. Retention bounds the on-disk blob copies, NEVER the rows:
+        // the records are durable facts other subsystems replay (the per-path
+        // metric fold derives each capture's restated set from them), and
+        // deleting them rotted the fold's inputs out from under durable
+        // captures. Content expires; history doesn't.
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
+        let single = project.path().join("b.txt");
         let (svc, store) = svc_for(project.path()).await;
 
-        // First capture — content "v1".
+        // a.txt: two captures ("v1" then "v2"). b.txt: one capture — its only
+        // row IS its stream's newest, so its blob must survive at ANY age.
         std::fs::write(&file, "v1").unwrap();
+        std::fs::write(&single, "only").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
+        svc.mark_dirty(single.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
             .await
             .unwrap();
-
-        // Mutate and capture again — content "v2".
         std::fs::write(&file, "v2").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotSourceKind::Startup)
@@ -2093,26 +2105,48 @@ mod tests {
             .unwrap();
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 2);
 
-        // Backdate the older row so it falls outside any positive
-        // retention window. Then run cleanup with 1 day retention —
-        // the older row should be pruned but the newest kept.
+        // Backdate the superseded v1 row AND b.txt's only row outside any
+        // positive retention window.
         oxplow_db::SqliteSnapshotStore::backdate_for_test(
             store.clone(),
             "a.txt",
             Timestamp::from_unix_ms(0),
         )
         .await;
-        let (rows, blobs) = svc.run_cleanup(1).await.unwrap();
-        assert_eq!(rows, 1, "old row should be pruned");
-        // The pruned row's blob is no longer referenced → GC removes
-        // it. The kept row's blob stays.
-        assert_eq!(blobs, 1, "orphan blob should be removed");
-        let remaining = store.list_for_path("a.txt").await.unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert!(svc
-            .inner
-            .blobs
-            .has(remaining[0].blob_hash.as_ref().unwrap()));
+        oxplow_db::SqliteSnapshotStore::backdate_for_test(
+            store.clone(),
+            "b.txt",
+            Timestamp::from_unix_ms(0),
+        )
+        .await;
+        let blobs = svc.run_cleanup(1).await.unwrap();
+        assert_eq!(
+            blobs, 1,
+            "exactly v1's blob expires — b.txt's only row is its path's newest"
+        );
+
+        // EVERY record survives; only v1's content is gone.
+        let a_rows = store.list_for_path("a.txt").await.unwrap();
+        assert_eq!(
+            a_rows.len(),
+            2,
+            "records are permanent — replay inputs never rot"
+        );
+        // list_for_path is newest-first.
+        assert!(
+            svc.inner.blobs.has(a_rows[0].blob_hash.as_ref().unwrap()),
+            "the current content stays viewable"
+        );
+        assert!(
+            !svc.inner.blobs.has(a_rows[1].blob_hash.as_ref().unwrap()),
+            "the superseded content expired from disk"
+        );
+        let b_rows = store.list_for_path("b.txt").await.unwrap();
+        assert_eq!(b_rows.len(), 1);
+        assert!(
+            svc.inner.blobs.has(b_rows[0].blob_hash.as_ref().unwrap()),
+            "a path's newest row keeps its content at any age"
+        );
     }
 
     #[tokio::test]

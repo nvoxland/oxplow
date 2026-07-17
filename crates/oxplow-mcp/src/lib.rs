@@ -1163,7 +1163,15 @@ impl OxplowMcp {
             &self.services.layout.project_dir,
             &self.services.blobs,
         )
-        .map_err(internal)?;
+        .map_err(|e| match e {
+            // Routine since tsk105: the record is permanent, the bytes expire.
+            oxplow_app::snapshot_content::SnapshotReadError::Blob(_) => McpError::invalid_params(
+                "this snapshot's content has expired from Local History — the record is \
+                 permanent, but file bytes are only kept for the retention window",
+                None,
+            ),
+            other => internal(other),
+        })?;
         let target = self.services.layout.project_dir.join(&snap.path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(internal)?;

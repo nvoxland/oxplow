@@ -452,6 +452,13 @@ welded to collection.
 > wipe deleted ("covered but rowless" would serve explicit 0s). A fenced pass
 > costs one re-fold; a fenced write costs nothing. Slow, never wrong.
 >
+> The fold's third input — the `file_snapshot` rows the per-path restated
+> sets are derived from — is **durable by construction** since tsk105:
+> Local History retention expires only blob CONTENT, never the rows, so
+> replay inputs cannot rot out from under durable captures and no
+> invalidation is needed for retention. See the data-model doc's Retention
+> section.
+>
 > **The grain's floor is the CAPTURE.** Never aggregate coarser (per-day,
 > per-commit): a capture *is* one scan/run, so `snapshot_id`/`effort_id`/
 > `thread_id`/`branch`/`closest_git_version`/`stream_id` stay reachable through

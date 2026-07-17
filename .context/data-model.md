@@ -619,16 +619,26 @@ bytes are gone — we deliberately never copied them. `read_blob` returns
 Uncommitted working-tree content always takes the `oxplow` path and is
 never at this risk.
 
-**Retention.** `SnapshotStore.cleanupOldSnapshots(retentionDays)`
-deletes snapshots older than the cutoff (default 7 days, configurable
-via `.oxplow/project.yaml`'s `snapshotRetentionDays`; `0` disables pruning). The
-most recent snapshot per stream is always kept. `gcBlobs()` then sweeps
-`.oxplow/snapshots/objects/` and removes any blob whose hash isn't
-referenced by a surviving `file_snapshot` row (only `oxplow`-class rows
-hold blob-store hashes; `git` rows reference the git odb, which GC never
-touches). The blob store is shared across all
-streams (`.oxplow/snapshots/objects/`), so GC runs at the project level
-and dedupes identical content across branches.
+**Retention: content expires, records don't (tsk105).** Retention's job
+is bounding the ON-DISK blob copies — the megabytes. The
+`snapshot`/`file_snapshot` ROWS are **never deleted**: they are durable
+records other subsystems replay — the per-path metric fold derives each
+capture's restated set from them, and the ancestry anchors ride the
+parent `snapshot` rows' git stamps — and they only weigh bytes. (The
+pre-tsk105 row prune rotted the fold's replay inputs out from under
+durable captures; deleting rows to save disk was aiming at the wrong
+mass.) The daily cleanup (`SnapshotCaptureService::run_cleanup`, boot +
+every 24h) GCs `.oxplow/snapshots/objects/` down to
+`retained_blob_hashes(cutoff)`: every row inside the retention window
+(default 7 days, `snapshotRetentionDays` in `.oxplow/project.yaml`)
+plus each `(stream, path)`'s newest row at ANY age — so every
+worktree's current tree stays viewable/rollbackable forever. Older
+content reads degrade to "expired": `read_snapshot_file_content` →
+`None`, restores refuse with an explicit message, never a half-restore.
+Only `oxplow`-class rows hold blob-store hashes; `git` rows reference
+the git odb, which this GC never touches. The blob store is shared
+across all streams, so GC runs at the project level and dedupes
+identical content across branches.
 
 Cleanup runs at runtime startup and again once every 24 hours via
 `runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in

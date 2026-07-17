@@ -109,7 +109,10 @@ pub async fn list_snapshot_change_entries(
 /// Returns `None` when:
 /// - the row id doesn't exist,
 /// - the row has no blob hash (deletion row or oversize-tracked),
-/// - the blob has been pruned from disk.
+/// - the content has EXPIRED from Local History (tsk105: records are
+///   permanent; on-disk bytes are kept only for the retention window plus
+///   each path's newest row) — the routine case for old history, which the
+///   UI treats as content-unavailable.
 ///
 /// Binary bytes pass through as UTF-8 lossy — the renderer's diff /
 /// function-analysis pipeline treats the result as text either way.
@@ -700,7 +703,16 @@ pub async fn restore_file_from_snapshot(svc: &Services, snapshot_id: i64) -> Res
         &svc.layout.project_dir,
         &svc.blobs,
     )
-    .map_err(|e| IpcError::internal(e.to_string()))?;
+    .map_err(|e| match e {
+        // The routine miss since tsk105: records are permanent, but the
+        // on-disk bytes age out of the retention window. Refuse plainly —
+        // never a half-restore, never an opaque internal error.
+        oxplow_app::snapshot_content::SnapshotReadError::Blob(_) => IpcError::invalid(
+            "this snapshot's content has expired from Local History — the record is \
+             permanent, but file bytes are only kept for the retention window",
+        ),
+        other => IpcError::internal(other.to_string()),
+    })?;
     let target = svc.layout.project_dir.join(&snap.path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| IpcError::internal(e.to_string()))?;
