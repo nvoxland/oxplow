@@ -78,7 +78,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | "stream-settings" | "thread-settings"
 | "op-error"
 | "external-url"
-| "usage" | "metrics" | "metrics-recorded" | "metric-detail" | "metric-recording" | "metrics-catalog"
+| "usage" | "metrics" | "metrics-recorded" | "metric-detail" | "metric-recording"
 | "page-analytics" | "token-analytics"
 ```
 
@@ -103,7 +103,7 @@ versions of what today are left-rail or bottom-drawer panels.
 | uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
 | change-analysis | `change-analysis:<target>` (dashboard) or `change-analysis:<target>:<scopeKind>:<scopeValue>` (drilldown — `scopeKind` is `ext` / `dir` / `status`) | `change-analysis:working`, `change-analysis:abc1234:ext:rs` |
 | dashboard | `dashboard:<variant>` | `dashboard:planning` |
-| usage / metrics / metrics-recorded / metrics-catalog / page-analytics / token-analytics | the kind name (index pages) | `usage`, `metrics`, `metrics-recorded`, `metrics-catalog`, `page-analytics`, `token-analytics` |
+| usage / metrics / metrics-recorded / page-analytics / token-analytics | the kind name (index pages) | `usage`, `metrics`, `metrics-recorded`, `page-analytics`, `token-analytics` |
 | metric-detail | `metric-detail:<key>` | `metric-detail:oxplow.coverage.abs_pct` |
 | metric-recording | `metric-recording:<runId>` | `metric-recording:42` |
 | new-stream | `new-stream` | `new-stream` |

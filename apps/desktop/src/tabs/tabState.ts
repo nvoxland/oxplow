@@ -51,7 +51,6 @@ export type PageKind =
   | "metrics-recorded"
   | "metric-detail"
   | "metric-recording"
-  | "metrics-catalog"
   | "page-analytics"
   | "token-analytics";
 

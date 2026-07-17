@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { type MetricSpec, listMetricDefinitions, subscribeOxplowEvents } from "../api.js";
 import { cardLinkButton } from "../components/Card.js";
-import { metricRef, metricsCatalogRef, recordedMetricsRef } from "../tabs/pageRefs.js";
+import { metricRef, recordedMetricsRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { RouteLink } from "../tabs/RouteLink.js";
@@ -80,14 +80,6 @@ export function MetricsExplorerPage({
             testId="metrics-recorded-link"
           >
             Recorded metrics →
-          </RouteLink>
-          <RouteLink
-            to={metricsCatalogRef()}
-            onNavigate={onOpenPage}
-            style={cardLinkButton}
-            testId="metrics-configure-link"
-          >
-            Configure metrics →
           </RouteLink>
         </div>
       }

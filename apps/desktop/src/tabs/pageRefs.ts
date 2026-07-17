@@ -110,7 +110,7 @@ export function metricRef(
   return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "metrics-catalog" | "page-analytics" | "token-analytics"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "page-analytics" | "token-analytics"): TabRef {
   return { id: kind, kind, payload: null };
 }
 
@@ -142,14 +142,6 @@ export function metricsExplorerRef(): TabRef {
  *  page has one job (tsk283). */
 export function recordedMetricsRef(): TabRef {
   return indexRef("metrics-recorded");
-}
-
-/** The Metric Settings page — browse the available catalog (built-in ∪ global
- *  ∪ project), enable/disable, edit target/trigger, and scaffold new metrics.
- *  The *configure* surface, split off from the *observe* Metrics page. The
- *  `metrics-catalog` slug outlives the "Metrics Catalog" title (tsk80). */
-export function metricsCatalogRef(): TabRef {
-  return indexRef("metrics-catalog");
 }
 
 /** The global Comments inbox: every comment in the current stream. */

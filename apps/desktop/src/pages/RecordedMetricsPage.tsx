@@ -14,11 +14,12 @@ import {
   CollapsibleSections,
   SectionCollapseControls,
 } from "../components/CollapsibleSections.js";
-import { metricRef } from "../tabs/pageRefs.js";
+import { fileRef, metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
+import { NewMetricBar } from "./NewMetricBar.js";
 import {
   DEFAULT_RANGE_KEY,
   RANGE_PRESETS,
@@ -161,12 +162,13 @@ const sel = { fontSize: 12, width: "100%" } as const;
  * Recorded Metrics — every catalogued metric as a `title · trend sparkline ·
  * latest value` row, organized as **one table per section** under headings, via
  * the shared `buildMetricSections` (Code gauges / Tests / Coverage / then one
- * top-level section **per language** for static analysis / Operational) — the
- * same sectioning Metric Settings renders, so the two pages can't disagree
+ * top-level section **per language** for static analysis / Operational)
  * (tsk81). A right-side panel scopes the latest/trend by a preset time range
  * (default 7 days) and branch, picks Enabled (default) / All, and holds the
  * Expand/Collapse-all controls. Rows open the per-metric detail page
- * (`metricRef`). Live on `metricSamplesChanged`.
+ * (`metricRef`), which is also where a metric is enabled/disabled and its
+ * target set (tsk117); the "+ New metric" scaffold bar rides at the foot.
+ * Live on `metricSamplesChanged` (debounced) and `configChanged`.
  *
  * **The row set is the CATALOG, not the spec table (tsk87).** Only the catalog
  * knows about `use:`: a built-in gauge keeps its seeded spec when merely
@@ -184,6 +186,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
   const [lineStat, setLineStat] = useState<LineStat>(DEFAULT_LINE_STAT);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,6 +228,13 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
     // coalesce a turn's burst of exports into one reload.
     let timer: ReturnType<typeof setTimeout> | null = null;
     const off = subscribeOxplowEvents((e) => {
+      // configChanged is user-action-rate (an enable toggle on the detail
+      // page, a scaffold create, a project.yaml edit) — refresh immediately.
+      // Only the OTLP-burst metricSamplesChanged needs the debounce.
+      if (e.kind === "configChanged") {
+        refresh();
+        return;
+      }
       if (e.kind !== "metricSamplesChanged") return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(refresh, 2_500);
@@ -234,7 +244,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
       off();
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [reloadTick]);
 
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
   // Which metrics are LISTED (Show mode + search), then each survivor's
@@ -396,6 +406,12 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
               </CollapsibleSection>
             ))}
           </>
+        )}
+        {loading ? null : (
+          <NewMetricBar
+            onOpenScript={onOpenPage ? (path) => onOpenPage(fileRef(path)) : undefined}
+            onCreated={() => setReloadTick((t) => t + 1)}
+          />
         )}
       </div>
     </Page>

@@ -3,14 +3,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type EffortMetricDelta,
   type FactFinding,
+  type MetricCatalogEntry,
   type MetricSpec,
   type SeriesPoint,
   listEffortMetricDeltas,
+  listMetricCatalog,
   listMetricDefinitions,
   listMetricFindings,
   listMetricSamples,
+  setMetricEnabled,
+  setMetricOverride,
   subscribeOxplowEvents,
 } from "../api.js";
+import { recordOpError } from "../components/opErrorsStore.js";
 import { Page } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -64,6 +69,8 @@ export function MetricDetailPage({
   onOpenPage?: (ref: TabRef) => void;
 } = {}) {
   const [def, setDef] = useState<MetricSpec | null>(null);
+  const [entry, setEntry] = useState<MetricCatalogEntry | null>(null);
+  const [configBusy, setConfigBusy] = useState(false);
   const [samples, setSamples] = useState<SeriesPoint[]>([]);
   const [findings, setFindings] = useState<FactFinding[]>([]);
   const [effortDelta, setEffortDelta] = useState<EffortMetricDelta | null>(null);
@@ -75,7 +82,7 @@ export function MetricDetailPage({
   // def loads, but stop overriding once the user picks a mode (tsk302).
   const modeTouched = useRef(false);
   const [branch, setBranch] = useState<string | null>(null);
-  usePageTitle(def?.title ?? "Metric");
+  usePageTitle(def?.title ?? entry?.title ?? "Metric");
 
   useEffect(() => {
     if (def && !modeTouched.current) setMode(defaultChartMode(def.aggregation));
@@ -98,6 +105,12 @@ export function MetricDetailPage({
           setLoading(false);
         }
       });
+      // The catalog entry is what a DISABLED metric still has (its spec is
+      // pruned): it carries title + enabled + resolved target, and it is what
+      // the Configure block toggles (tsk117 — Metric Settings folded in here).
+      void listMetricCatalog().then((entries) => {
+        if (!cancelled) setEntry(entries.find((e) => e.key === metricKey) ?? null);
+      });
       void listMetricSamples(metricKey, SAMPLE_LIMIT).then(async (rows) => {
         if (cancelled) return;
         setSamples(rows);
@@ -108,7 +121,9 @@ export function MetricDetailPage({
     };
     refresh();
     const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
+      // configChanged: an enable/target write (ours or an external
+      // .oxplow/project.yaml edit) re-resolves the catalog + spec.
+      if (e.kind === "metricSamplesChanged" || e.kind === "configChanged") refresh();
     });
     return () => {
       cancelled = true;
@@ -137,8 +152,89 @@ export function MetricDetailPage({
   );
   const points = useMemo(() => transformSeries(seriesPoints(filtered), mode), [filtered, mode]);
 
+  const toggleEnabled = async () => {
+    if (!entry) return;
+    setConfigBusy(true);
+    try {
+      await setMetricEnabled(entry.key, !entry.enabled);
+    } catch (e) {
+      recordOpError({
+        label: `${entry.enabled ? "Disable" : "Enable"} ${entry.key}`,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setConfigBusy(false);
+    }
+  };
+  const overrideTarget = async (next: number | null) => {
+    if (!entry) return;
+    setConfigBusy(true);
+    try {
+      await setMetricOverride(entry.key, next);
+    } catch (e) {
+      recordOpError({
+        label: `Update ${entry.key}`,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setConfigBusy(false);
+    }
+  };
+
+  // The configure block — Metric Settings folded into the detail page
+  // (tsk117): the detail IS the one place a metric is configured now. Enable
+  // writes a `use:` into .oxplow/project.yaml and the runner reseeds; target
+  // is a config override (empty clears), editable only while enabled — same
+  // rules the Settings page enforced.
+  const configure = entry ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionLabel>Configure</SectionLabel>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+        <input
+          type="checkbox"
+          checked={entry.enabled}
+          disabled={configBusy}
+          onChange={() => void toggleEnabled()}
+          data-testid="metric-detail-enabled"
+        />
+        Enabled
+      </label>
+      {entry.enabled ? (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          <span style={{ opacity: 0.6 }}>Target</span>
+          <input
+            // Uncontrolled (so typing isn't clobbered mid-edit), but keyed on
+            // the resolved target so an external config edit arriving via
+            // `configChanged` remounts it with the new value.
+            key={`target-${entry.key}-${entry.target ?? "none"}`}
+            type="number"
+            defaultValue={entry.target ?? ""}
+            placeholder="none"
+            disabled={configBusy}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const next = raw === "" ? null : Number(raw);
+              if (next !== entry.target && !(next != null && Number.isNaN(next))) {
+                void overrideTarget(next);
+              }
+            }}
+            data-testid="metric-detail-target"
+            style={{ width: 80, fontSize: 12, textAlign: "right" }}
+          />
+        </label>
+      ) : null}
+    </div>
+  ) : null;
+
   const body = (() => {
     if (loading) return <div style={{ opacity: 0.6 }}>Loading…</div>;
+    if (!def && entry)
+      return (
+        <div style={{ opacity: 0.6, lineHeight: 1.6 }} data-testid="metric-detail-disabled">
+          This metric is disabled — nothing records for it. Enable it in the
+          Configure panel to start collecting.
+        </div>
+      );
     if (!def) return <div style={{ opacity: 0.6 }}>Metric not found.</div>;
     const hasDrillIn = DRILL_IN_KINDS.has(def.display_kind);
     return (
@@ -173,7 +269,7 @@ export function MetricDetailPage({
   return (
     <Page
       testId="page-metric-detail"
-      title={def?.title ?? "Metric"}
+      title={def?.title ?? entry?.title ?? "Metric"}
       layout="details"
       rightRailTitle="Details"
       rightRail={
@@ -189,8 +285,13 @@ export function MetricDetailPage({
               onBranch={setBranch}
             />
             <MetricStatsRail def={def} samples={filtered} effort={effort} effortDelta={effortDelta} />
+            {configure}
           </div>
-        ) : undefined
+        ) : (
+          // A disabled metric has no spec (pruned) but still configures —
+          // the rail is exactly how it gets turned back on (tsk117).
+          (configure ?? undefined)
+        )
       }
     >
       {body}

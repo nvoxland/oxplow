@@ -79,7 +79,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "usage", label: "Usage", ref: indexRef("usage"), category: "Activity" },
     { id: "metrics", label: "Metrics", ref: indexRef("metrics"), category: "Activity" },
     { id: "metrics-recorded", label: "Recorded Metrics", ref: indexRef("metrics-recorded"), category: "Activity" },
-    { id: "metrics-catalog", label: "Metric Settings", ref: indexRef("metrics-catalog"), category: "Activity" },
     { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
     { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },

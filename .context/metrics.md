@@ -1226,19 +1226,22 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
 
 ## UI
 
-The metric UI is **four separate pages**, each with one job, all reading the one
+The metric UI is **three pages**, each with one job, all reading the one
 fact table — no per-metric UI code. Each is registered like the `usage` index
 page (`tabState.PageKind`, `pageRefs.indexRef`, `RailHud/sections.ts`, `App.tsx`,
-`pageKinds.tsx`) and cross-links to the others in its header. The split happened
-in two steps: the Catalog off first (tsk282), then Explorer/Recorded/Detail
-(tsk283). The three **observe** pages are read-only; the Catalog is the only one
-that **writes**.
+`pageKinds.tsx`) and cross-links to the others in its header. (History: the
+configure surface was split off as a fourth "Metric Settings" page in
+tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
+lives on the Metric Detail page, and the scaffold bar on Recorded Metrics; see
+"The configure surface" below.) Explorer and Recorded observe; Detail both
+observes and **writes** (its Configure block), and Recorded's "+ New metric"
+bar writes (scaffold).
 
 - **Metrics Explorer** (`MetricsExplorerPage.tsx` wrapping `MetricsExplorer.tsx`)
   — the marquee page and the rail "Metrics" entry (`indexRef("metrics")` /
-  `metricsExplorerRef()`). Header links: "Recorded metrics →", "Configure
-  metrics →". A measure's title navigates to the metric's **detail page** (via
-  `onOpenDetail` → `metricRef`).
+  `metricsExplorerRef()`). Header link: "Recorded metrics →" (the "Configure
+  metrics →" link died with the Settings page, tsk117). A measure's title
+  navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
 > ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
 >
 > `seed_catalog` seeds **every** built-in spec (`builtin_metric_specs` /
@@ -1251,9 +1254,10 @@ that **writes**.
 > `use:`**. Reading `list_metric_definitions` alone and calling the result
 > "enabled metrics" is wrong: in this Rust/TS repo the bundled `oxplow.csharp.*`
 > and `oxplow.clojure.*` idiom specs are seeded, never run, and have no facts —
-> so Recorded Metrics listed them as permanent `—` rows while Metric Settings
-> showed the same rows *unchecked*. That's why the page's row set is the
-> **catalog**, with the spec joined in by key for presentation metadata.
+> so Recorded Metrics listed them as permanent `—` rows while the (since-folded)
+> Metric Settings page showed the same rows *unchecked*. That's why the page's
+> row set is the **catalog**, with the spec joined in by key for presentation
+> metadata.
 >
 > (The "spec table = the enabled set" phrasing under the collection gate above is
 > about the **producer** measures, where disabling does prune. Don't generalize it
@@ -1280,8 +1284,11 @@ that **writes**.
   range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
   "latest value" is the latest **within the selected filters**, not all-time. Each `<tr>` adopts browser-style
   click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
-  modifier/middle/right → new tab). Header links: "Explorer →", "Configure
-  metrics →". Live-refreshes on `metricSamplesChanged`.
+  modifier/middle/right → new tab). The **"+ New metric" scaffold bar**
+  (`NewMetricBar.tsx`, moved here from the retired Settings page by tsk117)
+  rides at the foot of the body. Live-refreshes on `metricSamplesChanged`
+  (debounced — see the OTLP-burst note) and `configChanged` (immediate: enable
+  toggles from a detail page and scaffold creates are user-action-rate).
 
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
 >
@@ -1291,23 +1298,23 @@ that **writes**.
 > details rail** beside the filters (`SectionCollapseControls`, tsk86). Collapsed
 > state persists under `pageKey: "metrics-recorded"`. The provider wraps the whole
 > `<Page>` so its context reaches the rail as well as the body. See
-> `.context/usability.md` → "Collapsible page sections". Metric Settings has not
-> adopted it (its headers already carry the tri-state group checkbox).
+> `.context/usability.md` → "Collapsible page sections".
 >
-> Recorded Metrics and Metric Settings render the **same section list**, built by
-> the shared pure `buildMetricSections(rows, getCategory, getLanguage)` in
-> `metricCategories.ts`: categories in `CATEGORY_ORDER`, **except
-> `static-quality`**, which gets no section of its own — its real top-level
-> division is by language, so each language is promoted to a top-level section
-> (a peer of Tests / Coverage / Operational) and the language-agnostic analysers
-> (`oxplow.analysis.*`) fall under **"General"**. Both pages call the one helper;
-> the rule is deliberately **not** restated per page, because two copies drift
-> into two different groupings of the same metrics.
+> The section list is built by the pure
+> `buildMetricSections(rows, getCategory, getLanguage)` in
+> `metricCategories.ts`: sections sorted **alphabetically by label** (tsk116 —
+> no hand-kept `CATEGORY_ORDER`, so plugged-in languages/categories slot in
+> automatically), **except `static-quality`**, which gets no section of its
+> own — its real top-level division is by language, so each language is
+> promoted to a top-level section (a peer of Tests / Coverage / Operational)
+> and the language-agnostic analysers (`oxplow.analysis.*`) fall under
+> **"General"**. (The helper had two callers until tsk117 retired the Metric
+> Settings page; it stays the single sectioning rule so any future second
+> caller can't drift.)
 >
-> **Both pages now group off `MetricCatalogEntry.language`** — Metric Settings
-> always did; Recorded Metrics joined it when its row set became the catalog
-> (tsk87). For a built-in gauge the catalog takes that slug straight from the
-> *gauge* (`builtin_metrics()`), so the two agree by construction.
+> **Grouping keys off `MetricCatalogEntry.language`** (tsk87). For a built-in
+> gauge the catalog takes that slug straight from the *gauge*
+> (`builtin_metrics()`), so catalog and spec agree by construction.
 >
 > `builtin_ast_specs` nevertheless **reads each spec's language off its gauge by
 > key** rather than restating the slug
@@ -1324,16 +1331,18 @@ that **writes**.
 > as its "General" bucket.
 - **Metric Detail** (`MetricDetailPage.tsx` wrapping `MetricDetail.tsx`,
   `PageKind` `"metric-detail"`, routed by `metricRef(key, effort)`) — its own
-  page (tsk283), navigated into from the Explorer, Recorded Metrics, the
-  **Catalog** (each metric name is a `RouteLink` to `metricRef(key)`, tsk33), and
-  the task-page EffortMetrics drill-in (so there's no inline overlay). Back goes
+  page (tsk283), navigated into from the Explorer, Recorded Metrics (each row is
+  a `RouteLink` to `metricRef(key)`), and the task-page EffortMetrics drill-in
+  (so there's no inline overlay). Back goes
   through `PageNavigationContext` (`goBack`, falling back to Recorded Metrics).
   The metric name is the H1; the definition's **`description`** renders as intro
   text under it (tsk309). Layout is the details layout: a right rail ("Details")
   holds the range/chart-mode/branch controls + the agg-aware in-range stat + the
   full **definition metadata** (`MetricStatsRail`, tsk33: ID/key, Type
   (display_kind), Aggregation, source Measure, Scope, Category, Language, Unit,
-  Direction, Target, Warn/Fail thresholds, Branch); the main column has the trend
+  Direction, Target, Warn/Fail thresholds, Branch) + the **Configure block**
+  (tsk117 — Enabled checkbox + Target input; see "The configure surface"
+  below); the main column has the trend
   chart → **paginated** recordings table (`RecordingsTable`, 25/page) → kind
   drill-in. See the `MetricDetail` component bullet below for what each kind
   renders.
@@ -1380,21 +1389,44 @@ its drill-in from the latest run's findings (`list_metric_findings`):
 `test-detail` payload), **coverage** → per-file uncovered changed lines
 (`coverage-detail`), **event** → top-N subjects, **gauge** → trend only.
 
-The **configure** page (tsk282):
+### The configure surface (tsk282 → folded into Detail/Recorded by tsk117)
 
-- **Metric Settings** (`MetricsCatalogPage.tsx` wrapping `MetricsCatalog.tsx`,
-  P4) — a dedicated top-level page (`PageKind` `"metrics-catalog"`,
-  `metricsCatalogRef()`, launcher Activity category), the only metrics surface
-  that **writes**. **Titled "Metric Settings" since tsk80** — "Catalog" read as a
-  browsable index, which is the *Recorded Metrics* job; this page is where you
-  configure. The `metrics-catalog` **slug is deliberately unchanged** (page kind,
-  tab id, `metricsCatalogRef()`, `page-metrics-catalog` testid) so existing refs,
-  bookmarks, and probes keep resolving — only the user-visible label moved.
-  It's a **registry of everything available**, NOT a list of metrics with
-  recorded data — every metric the system can produce is listed via
-  `list_metric_catalog`, **grouped by category** (Code gauges / Tests / Coverage
-  / Static analysis / Operational), even before any sample exists. `catalog()`
-  unions **four** sources, deduped by key: (1) the bundled code gauges
+There is **no Metric Settings page anymore**. Configuration was a dedicated
+page ("Metrics Catalog" tsk282, retitled "Metric Settings" tsk80) until tsk117
+folded it into the surfaces where you already look at a metric:
+
+- **Per-metric config lives on the Metric Detail page** — a "Configure" block
+  at the bottom of the details rail: an **Enabled** checkbox
+  (`metric-detail-enabled` → `set_metric_enabled`) and, only while enabled, a
+  **Target** input (`metric-detail-target` → `set_metric_override`; empty
+  clears the override, uncontrolled but keyed on the resolved target so an
+  external config edit remounts it). Failures surface via `recordOpError`.
+  The block reads the **catalog entry** (`list_metric_catalog`), NOT the spec:
+  a disabled metric's spec is pruned, so the spec-driven page body would
+  otherwise dead-end. A disabled metric's detail page renders an enable-prompt
+  body (`metric-detail-disabled`) with the Configure block still in the rail —
+  that rail is exactly how the metric gets turned back on. The page refreshes
+  on `configChanged` as well as `metricSamplesChanged`.
+- **"+ New metric" scaffolding lives on Recorded Metrics** (`NewMetricBar.tsx`
+  at the foot of the body): collapsed to a button, expanding to the inline
+  key/title/language/glob/scope form (Enter submits, Escape cancels, key
+  autofocuses; testids `new-metric-open`/`new-metric-key`/`new-metric-scope`/
+  `new-metric-create`).
+- **Retired with the page:** the per-section **tri-state bulk enable/disable**
+  (`GroupCheckbox`/`sectionCheckboxState`, tsk32) — enable/disable is
+  per-metric only now (`set_metrics_enabled` batch IPC still exists,
+  currently uncallable from the UI); and the Explorer's "Configure metrics →"
+  header link. The `metrics-catalog` page kind is gone from
+  `tabState`/`pageRefs`/`pageKinds`/`RailHud`/`App` — a persisted
+  `metrics-catalog` tab id no longer matches any render branch, so stale tabs
+  **drop silently on restore** (the tab-build chain only pushes matched kinds).
+
+The mechanics behind those controls (unchanged by tsk117):
+
+- **The catalog is a registry of everything available**, NOT a list of metrics
+  with recorded data — every metric the system can produce is listed via
+  `list_metric_catalog`, even before any sample exists. `catalog()` unions
+  **four** sources, deduped by key: (1) the bundled code gauges
   (`builtin_metrics()`, toggleable); (2) project/global `metrics:` entries
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis, effort
@@ -1404,53 +1436,38 @@ The **configure** page (tsk282):
   "always on" class is retired: producers/plugins can be enabled/disabled just
   like code gauges. `catalog()` reads each row's `enabled` from config
   (`config_state`): a built-in gauge is on only when a non-disabled `use:`
-  resolves it; producers/plugins are default-ON unless an `enabled: false` marker
-  disables them. **Layout (tsk29):** each category is a *section*
-  (`<h2>` title + a list of metric rows), NOT one flat table — a row shows only
-  the on/off **checkbox**, the metric **name** (a `RouteLink` to its Metric
-  Detail page, tsk33), and its **target** (no kind / scope / trigger / raw key
-  columns; the key rides as a hover `title`). Each
-  section header carries a **tri-state group checkbox** to the right of the title
-  (`GroupCheckbox` + pure `sectionCheckboxState`, tsk32): checked when every
-  metric is on, indeterminate when only some are; a click enables all (from
-  off/indeterminate) or disables all (from fully-on) in one batch write
-  (`set_metrics_enabled` — one config write + one reseed for the whole section).
-  **Static analysis
-  has no single section** — its real top-level division is by language, so each
-  language becomes its own top-level `<h2>` section (peer to Tests / Coverage /
-  Operational), ordered via `groupByLanguage` in `metricCategories.ts`: the
-  language-agnostic code gauges + analysis producers fall under **"General"**
-  (first), then Rust / TypeScript / C# / Clojure / … by display label. (The
-  `groupCatalog` category still positions the whole static-analysis block where
-  `static-quality` sits in `CATEGORY_ORDER`; the render expands that one group
-  into N per-language sections instead of an umbrella.)
-  Enable/disable via `set_metric_enabled` — its config shape is default-aware
-  (`apply_metric_enabled` + `is_default_on`): a default-OFF metric (built-in code
-  gauge / global def) toggles by the presence of a bare `use:` entry, while a
-  default-ON metric (producer/plugin) or a config `key:` definition toggles by an
-  `enabled: false` **marker** (so disabling never deletes a `key:` definition).
-  `seed_catalog` then **reconciles** the `metric_spec` table down to exactly the
-  enabled set — upsert the enabled, `delete_spec` the disabled — so all
-  spec-driven reads (Explorer/Recorded/Detail/effort-deltas/MCP) go empty for a
-  disabled metric, and its producer's collection stops via the
-  `measure_has_active_spec` gate (see the producer section: **base data is not
-  collected when no active metric consumes its measure** — shared-measure
-  families like `oxplow.tokens`/`oxplow.test_case` keep flowing until *all* their
-  metrics are off). Historical facts are never deleted, so re-enabling restores
-  the chart. **Inline-edit the target** (tsk233) via
-  `set_metric_override` → `MetricsService::set_metric_override` writes the
-  target override onto the `use:` entry. **Trigger is inherent to the
-  definition** — *when* a metric is collected is a property of what it measures,
-  not a per-project knob — so it's shown **read-only** and never user-pickable;
-  `resolve_one` reads it from the definition (like `compute`), a `use:` entry
-  can't override it, and `set_metric_override` no longer accepts it (tsk290).
-  **"New metric"** scaffolds the **trio** (measure + gauge + metric) at
+  resolves it; producers/plugins are default-ON unless an `enabled: false`
+  marker disables them.
+- **Enable/disable** via `set_metric_enabled` — its config shape is
+  default-aware (`apply_metric_enabled` + `is_default_on`): a default-OFF
+  metric (built-in code gauge / global def) toggles by the presence of a bare
+  `use:` entry, while a default-ON metric (producer/plugin) or a config `key:`
+  definition toggles by an `enabled: false` **marker** (so disabling never
+  deletes a `key:` definition). `seed_catalog` then **reconciles** the
+  `metric_spec` table down to exactly the enabled set — upsert the enabled,
+  `delete_spec` the disabled — so all spec-driven reads
+  (Explorer/Recorded/Detail/effort-deltas/MCP) go empty for a disabled metric,
+  and its producer's collection stops via the `measure_has_active_spec` gate
+  (see the producer section: **base data is not collected when no active
+  metric consumes its measure** — shared-measure families like
+  `oxplow.tokens`/`oxplow.test_case` keep flowing until *all* their metrics
+  are off). Historical facts are never deleted, so re-enabling restores the
+  chart.
+- **Target** (tsk233) via `set_metric_override` →
+  `MetricsService::set_metric_override` writes the target override onto the
+  `use:` entry. **Trigger is inherent to the definition** — *when* a metric is
+  collected is a property of what it measures, not a per-project knob — so
+  it's never user-pickable; `resolve_one` reads it from the definition (like
+  `compute`), a `use:` entry can't override it, and `set_metric_override` no
+  longer accepts it (tsk290).
+- **"New metric"** scaffolds the **trio** (measure + gauge + metric) at
   **project** or **global** scope: `scaffold_metric` →
   `MetricsService::scaffold_metric` writes a starter fact-emitting Starlark stub +
   a `measures:` entry (`<key>.count`) + a `gauges:` entry (`<key>`) + a `metrics:`
   spec (`<key>`, `sum` over the measure). *Project* writes the script under
   `oxplow/gauges/<slug>.star` + the three entries in `.oxplow/project.yaml`,
-  returns the project-relative path, and the page opens it. *Global* writes the
+  returns the project-relative path, and the bar opens it in the editor.
+  *Global* writes the
   script + three manifests under `<global_config_dir>/{gauges,measures,metrics}/`
   (via `write_global_{gauges,measures,metrics}_file`) **and** adds a project `use:`
   so the metric is active here (the global gauge + measure are active
@@ -1469,9 +1486,11 @@ live on `metricSamplesChanged`. A row drills into the metric's detail via
 before→after callout (+ per-file count) above the full trend.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
-`set_metric_override` (RPC cores in `commands/metrics.rs`, Tauri adapters,
-`ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
-set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type.
+`set_metric_override` + `scaffold_metric` (RPC cores in `commands/metrics.rs`,
+Tauri adapters, `ui`-scoped in surface-parity), backed by
+`MetricsService::{catalog, set_metric_enabled, set_metric_override,
+scaffold_metric}` and the `MetricCatalogEntry` type — consumed by the Metric
+Detail Configure block, the Recorded Metrics rows, and `NewMetricBar`.
 **Token Analytics is retired** as a bespoke page (tsk233) — its `token-analytics`
 tab now renders the **Metrics Explorer** page with the "Tokens by model" preset.
 (Page/Usage

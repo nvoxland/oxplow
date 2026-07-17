@@ -9,8 +9,7 @@ export type ShowMode = "enabled" | "all";
  * `.oxplow/project.yaml` — the bundled C#/Clojure idiom gauges, say, in a
  * Rust/TS repo. Those gauges never run (`resolved_gauges` elides them), so they
  * can only ever render `—`. Listing them by default makes the page look like it
- * tracks things it doesn't, and disagrees with Metric Settings, which shows the
- * same rows unchecked.
+ * tracks things it doesn't.
  */
 export const DEFAULT_SHOW_MODE: ShowMode = "enabled";
 

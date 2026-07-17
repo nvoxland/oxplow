@@ -131,8 +131,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Gauge;
     case "metric-recording":
       return AlertTriangle;
-    case "metrics-catalog":
-      return Library;
     case "page-analytics":
       return BarChart3;
     case "token-analytics":
@@ -235,8 +233,6 @@ export function pageKindLabel(kind: string): string {
       return "metric";
     case "metric-recording":
       return "recording";
-    case "metrics-catalog":
-      return "metric settings";
     case "page-analytics":
       return "page analytics";
     case "token-analytics":
@@ -274,7 +270,6 @@ const INDEX_KINDS = new Set<string>([
   "usage",
   "metrics",
   "metrics-recorded",
-  "metrics-catalog",
   "page-analytics",
   "token-analytics",
 ]);

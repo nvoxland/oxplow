@@ -119,7 +119,6 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
-import { MetricsCatalogPage } from "./pages/MetricsCatalogPage.js";
 import { MetricsExplorerPage } from "./pages/MetricsExplorerPage.js";
 import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
@@ -1874,7 +1873,6 @@ export function App() {
       case "metrics-recorded":
       case "metric-detail":
       case "metric-recording":
-      case "metrics-catalog":
       case "page-analytics":
       case "token-analytics":
       case "op-error": {
@@ -2809,13 +2807,6 @@ export function App() {
               onOpenPage={navOpen}
             />
           ),
-        });
-      } else if (ref.kind === "metrics-catalog") {
-        tabs.push({
-          id: ref.id,
-          label: "Metric Settings",
-          closable: true,
-          render: () => <MetricsCatalogPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({

@@ -70,16 +70,15 @@ export type MetricSection<T> = {
 };
 
 /**
- * The section list both metric surfaces render — Metric Settings (the catalog
- * rows) and Recorded Metrics (the latest-value table). Sections ALPHABETICAL
+ * The section list Recorded Metrics renders. Sections ALPHABETICAL
  * by label, **except that `static-quality`** gets no section of its own: its real
  * top-level division is by language, so each language is promoted to a top-level
  * section (a peer of Tests / Coverage / Operational) and the language-agnostic
  * analysers fall under "General".
  *
- * Shared rather than duplicated per page (tsk81) for the same reason the Rust
- * specs read their language off the gauge: two copies of this rule drift, and
- * the pages then group the same metrics differently. Pure — entries keep their
+ * Kept as the one sectioning rule (tsk81) for the same reason the Rust specs
+ * read their language off the gauge: two copies of this rule drift, and two
+ * surfaces then group the same metrics differently. Pure — entries keep their
  * incoming order within a section.
  */
 export function buildMetricSections<T>(
