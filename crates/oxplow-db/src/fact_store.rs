@@ -1140,6 +1140,28 @@ impl SqliteFactStore {
     // from `fact`, and dropping them all costs only speed. Nothing may read data
     // from the cube that the facts don't have. See `.context/metrics.md`.
 
+    /// Every producer that has ever emitted a fact for this measure — the cube
+    /// builder's capture-list seed.
+    ///
+    /// The builder is spec-INDEPENDENT (one cube serves every spec over the
+    /// measure), so it folds every producer's captures. The read needs the
+    /// narrower "producers matching THIS spec's filter" and derives that from the
+    /// cube's own buckets rather than from the facts — deriving it from the facts
+    /// is the 374k-row decode the cube exists to remove.
+    pub async fn producers_for_measure(&self, measure_id: i64) -> Result<Vec<String>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT DISTINCT c.producer FROM fact f
+                       JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.measure_id = ?1",
+                )?;
+                let rows = stmt.query_map(params![measure_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// How far the cube is built for `(measure, stream)` — the newest capture
     /// folded in, as `(captured_at, id)` so it compares on the same key the fold
     /// orders by. `None` ⇒ nothing cubed yet.

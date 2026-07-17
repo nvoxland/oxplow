@@ -31,6 +31,7 @@ pub mod indexer;
 pub mod link_check;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod metric_cube;
 pub mod metric_engine;
 pub mod metrics_service;
 pub mod otlp_tokens;

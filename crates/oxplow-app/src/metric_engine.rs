@@ -132,13 +132,13 @@ impl CaptureScope {
 
     /// True when a capture speaks only for part of the population, so the value must
     /// be folded across captures before it's aggregated.
-    fn is_partial(self) -> bool {
+    pub(crate) fn is_partial(self) -> bool {
         matches!(self, Self::PerPath | Self::PerSubject)
     }
 }
 
 /// Parse a measure's `capture_scope`, naming the measure in the error.
-fn parse_capture_scope(
+pub(crate) fn parse_capture_scope(
     measure_key: &str,
     capture_scope: &str,
 ) -> Result<CaptureScope, DomainError> {
@@ -293,7 +293,7 @@ fn package_of(path: &str) -> String {
 /// Read a conformed-dimension value off a fact: the reported `severity`/`rule`
 /// columns for those keys, `package` derived from the path, otherwise the
 /// `dims_json` entry under the (namespaced) dimension key.
-fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
+pub(crate) fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
     match dimension {
         "oxplow.severity" => f.severity.clone(),
         "oxplow.rule" => f.rule.clone(),
@@ -576,11 +576,11 @@ pub fn aggregate_series(
 /// The state key for a fact with no path/subject — an agent-asserted repo scalar
 /// (`record_metric` with no subject). Not a real path, so it can never collide with
 /// one (paths are never empty and never contain a NUL).
-const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
+pub(crate) const SCALAR_SUBJECT: &str = "\u{0}repo-scalar";
 
 /// The path a fact is folded under, or `None` when it carries no location at all
 /// (a repo-scalar assertion).
-fn repo_scalar_key(f: &FactRow) -> Option<&str> {
+pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
     f.path.as_deref().or(f.subject_ref.as_deref())
 }
 
