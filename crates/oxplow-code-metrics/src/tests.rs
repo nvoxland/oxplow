@@ -306,6 +306,62 @@ fn private_fn() {}
 }
 
 #[test]
+fn rust_has_doc_detects_doc_comments_only() {
+    let src = r#"
+/// A documented function.
+pub fn documented() {}
+
+// Just a regular comment, not a doc comment.
+pub fn plain_comment() {}
+
+pub fn undocumented() {}
+
+/// Documented, with an attribute between the doc and the fn.
+#[inline]
+pub fn documented_with_attr() {}
+"#;
+    let m = analyze_file("src/x.rs", src);
+    let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
+    assert!(has("documented"), "/// is a doc comment");
+    assert!(!has("plain_comment"), "a plain // is not a doc comment");
+    assert!(!has("undocumented"));
+    assert!(has("documented_with_attr"), "walks past #[inline]");
+}
+
+#[test]
+fn python_has_doc_detects_docstrings() {
+    let src = "def documented():\n    \"\"\"A docstring.\"\"\"\n    return 1\n\ndef undocumented():\n    return 1\n";
+    let m = analyze_file("src/x.py", src);
+    let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
+    assert!(has("documented"));
+    assert!(!has("undocumented"));
+}
+
+#[test]
+fn typescript_has_doc_requires_jsdoc_prefix() {
+    let src = r#"
+/** JSDoc. */
+export function documented(): void {}
+
+// plain leading comment
+export function plain(): void {}
+"#;
+    let m = analyze_file("src/x.ts", src);
+    let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
+    assert!(has("documented"), "/** */ is JSDoc");
+    assert!(!has("plain"), "a plain // is not JSDoc");
+}
+
+#[test]
+fn go_has_doc_counts_any_preceding_comment() {
+    let src = "// Documented is documented (Go convention: any preceding comment).\nfunc Documented() {}\n\nfunc Undocumented() {}\n";
+    let m = analyze_file("src/x.go", src);
+    let has = |name: &str| m.iter().find(|f| f.name == name).unwrap().has_doc;
+    assert!(has("Documented"));
+    assert!(!has("Undocumented"));
+}
+
+#[test]
 fn typescript_class_method_visibility() {
     let src = r#"
 class Greeter {

@@ -76,8 +76,29 @@ pub struct LanguageSpec {
     /// Same shape as `function_form_heads` but for decision points
     /// (cyclomatic complexity counter).
     pub decision_form_heads: &'static [&'static str],
+    /// How a documented function is recognized in this language (for
+    /// `FunctionMetrics::has_doc` → the `oxplow.doc_coverage` metric).
+    pub doc: DocStrategy,
     /// Loader for the bundled tree-sitter grammar.
     grammar: fn() -> TsLanguage,
+}
+
+/// How "does this function have documentation?" is decided per language.
+#[derive(Debug, Clone, Copy)]
+pub enum DocStrategy {
+    /// A doc comment immediately precedes the item (skipping any
+    /// attribute/decorator/annotation nodes between). It counts only when its
+    /// text starts with one of these prefixes (`///` etc.) — a plain
+    /// explanatory `//` comment is not a doc comment.
+    PrecedingComment(&'static [&'static str]),
+    /// Python-style: the first statement in the function body is a string
+    /// literal (the docstring).
+    PythonDocstring,
+    /// Clojure-style: a string literal is a direct child of the `(defn …)` form
+    /// (the docstring position, after the name symbol).
+    ClojureDocstring,
+    /// No documentation convention detected for this language — always `false`.
+    None,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -250,6 +271,7 @@ static RUST: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::RustModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["///", "//!", "/**"]),
     grammar: || tree_sitter_rust::LANGUAGE.into(),
 };
 
@@ -266,6 +288,7 @@ static TYPESCRIPT: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**"]),
     grammar: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
 };
 
@@ -280,6 +303,7 @@ static TSX: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**"]),
     grammar: || tree_sitter_typescript::LANGUAGE_TSX.into(),
 };
 
@@ -294,6 +318,7 @@ static JAVASCRIPT: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::TsClassModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**"]),
     grammar: || tree_sitter_javascript::LANGUAGE.into(),
 };
 
@@ -375,6 +400,7 @@ static PYTHON: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::PythonUnderscore,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PythonDocstring,
     grammar: || tree_sitter_python::LANGUAGE.into(),
 };
 
@@ -402,6 +428,7 @@ static GO: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::GoCapitalization,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["//", "/*"]),
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
@@ -438,6 +465,7 @@ static JAVA: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::JavaModifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**"]),
     grammar: || tree_sitter_java::LANGUAGE.into(),
 };
 
@@ -462,6 +490,7 @@ static C: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::CStatic,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**", "///", "//!", "/*!"]),
     grammar: || tree_sitter_c::LANGUAGE.into(),
 };
 
@@ -491,6 +520,7 @@ static CPP: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::CppAccessSpecifier,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["/**", "///", "//!", "/*!"]),
     grammar: || tree_sitter_cpp::LANGUAGE.into(),
 };
 
@@ -536,6 +566,7 @@ static CLOJURE: LanguageSpec = LanguageSpec {
         "or",
         "try",
     ],
+    doc: DocStrategy::ClojureDocstring,
     grammar: || tree_sitter_clojure_orchard::LANGUAGE.into(),
 };
 
@@ -583,6 +614,7 @@ static CSHARP: LanguageSpec = LanguageSpec {
     visibility: VisibilityStrategy::Unknown,
     function_form_heads: &[],
     decision_form_heads: &[],
+    doc: DocStrategy::PrecedingComment(&["///", "/**"]),
     grammar: || tree_sitter_c_sharp::LANGUAGE.into(),
 };
 

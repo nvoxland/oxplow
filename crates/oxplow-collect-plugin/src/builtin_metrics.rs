@@ -153,6 +153,24 @@ const CODE: &[BuiltinMetric] = &[
         "lower-better",
         include_str!("plugins/metrics/code/long_functions.star"),
     ),
+    // Doc coverage is a per-file RATIO (%), not a count, so it can't use the
+    // count-based `code_gauge` helper (tsk125).
+    BuiltinMetric {
+        key: "oxplow.doc_coverage",
+        kind: "coverage",
+        title: "Doc coverage",
+        description: "% of public functions/methods carrying a doc comment (or docstring), across all languages.",
+        unit: "%",
+        direction: "higher-better",
+        grain: "tree",
+        language: "",
+        dimensions: &["language", "git_version"],
+        target: None,
+        trigger: "on-snapshot",
+        runtime: "starlark",
+        input: "text",
+        script: include_str!("plugins/metrics/code/doc_coverage.star"),
+    },
 ];
 
 /// A language-agnostic tree gauge (the unified code metrics). Like `ast_gauge`
@@ -540,6 +558,26 @@ const g = (a: any) => a!;
             "(defn greet [n] (str \"hi \" n)) ; FIXME i18n\n".to_string(),
         );
         m
+    }
+
+    #[test]
+    fn doc_coverage_golden() {
+        // tsk125: one per-file RATIO fact — documented public ÷ public. a() is a
+        // documented public fn, b() an undocumented public fn, c() is private
+        // (excluded). → 1/2 = 50%.
+        let mut files = HashMap::new();
+        files.insert(
+            "src/a.rs".to_string(),
+            "/// documented\npub fn a() {}\npub fn b() {}\nfn c() {}\n".to_string(),
+        );
+        let report = report_over("oxplow.doc_coverage", files);
+        assert_eq!(report.facts.len(), 1, "one per-file doc-coverage fact");
+        let f = &report.facts[0];
+        assert_eq!(f.measure, "oxplow.doc_coverage");
+        assert_eq!(f.num, Some(1.0), "1 documented public");
+        assert_eq!(f.den, Some(2.0), "2 public");
+        assert!((f.value - 50.0).abs() < 0.01, "value {}", f.value);
+        assert_eq!(f.path.as_deref(), Some("src/a.rs"));
     }
 
     #[test]

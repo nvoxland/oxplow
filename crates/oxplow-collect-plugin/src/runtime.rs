@@ -239,7 +239,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
     }
     /// Per-function code metrics for `text` in `language` — a flat list of
     /// `{name, complexity, length, parameter_count, start_line, end_line,
-    /// visibility}`. Backed by `oxplow_code_metrics`' tree-sitter walker (the
+    /// visibility, has_doc}`. Backed by `oxplow_code_metrics`' tree-sitter walker (the
     /// cyclomatic-complexity / length / param computations that the in-process
     /// code-quality producer used), exposed generically so a bundled or
     /// user-authored metric can project them. Pure → `observed`.
@@ -267,6 +267,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
                     "start_line": m.start_line,
                     "end_line": m.end_line,
                     "visibility": visibility,
+                    "has_doc": m.has_doc,
                 })
             })
             .collect();

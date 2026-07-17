@@ -70,6 +70,10 @@ pub struct FunctionMetrics {
     pub container_path: Vec<String>,
     /// Coarse public/private classification (heuristic per language).
     pub visibility: Visibility,
+    /// Whether the function carries a doc comment (or, for Python/Clojure, a
+    /// docstring). Per-language detection — see [`LanguageSpec::doc`]. The
+    /// `oxplow.doc_coverage` metric is documented-public ÷ public over this.
+    pub has_doc: bool,
 }
 
 /// A code "unit" — the generic, language-agnostic structural element the
@@ -413,6 +417,7 @@ fn function_metrics(
     let complexity = count_decision_points(node, src, spec) + 1;
     let container_path = container_path(node, src, spec);
     let visibility = visibility_for(node, src, spec, &name);
+    let has_doc = has_doc_for(node, src, spec);
 
     Some(FunctionMetrics {
         path: path.into(),
@@ -424,7 +429,79 @@ fn function_metrics(
         end_line,
         container_path,
         visibility,
+        has_doc,
     })
+}
+
+/// Whether `node` (a function) carries documentation, per the language's
+/// [`DocStrategy`]. Used by the `oxplow.doc_coverage` metric.
+fn has_doc_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec) -> bool {
+    use crate::spec::DocStrategy::*;
+    match spec.doc {
+        None => false,
+        PrecedingComment(prefixes) => {
+            // Climb out of export wrappers (TS/JS `export function …`): the doc
+            // comment precedes the `export_statement`, not the inner declaration.
+            let mut item = node;
+            while let Some(parent) = item.parent() {
+                if parent.kind().contains("export") {
+                    item = parent;
+                } else {
+                    break;
+                }
+            }
+            // Walk back over any attribute / decorator / annotation nodes that
+            // sit between the item and its doc comment, to the nearest real
+            // preceding sibling. A doc comment there — text starting with one of
+            // the prefixes (`///` etc., NOT a plain `//`) — marks it documented.
+            let mut prev = item.prev_named_sibling();
+            while let Some(p) = prev {
+                let k = p.kind();
+                if k.contains("attribute") || k.contains("annotation") || k.contains("decorator") {
+                    prev = p.prev_named_sibling();
+                    continue;
+                }
+                if k.contains("comment") {
+                    if let Ok(text) = p.utf8_text(src) {
+                        let t = text.trim_start();
+                        return prefixes.iter().any(|pre| t.starts_with(pre));
+                    }
+                }
+                break;
+            }
+            false
+        }
+        PythonDocstring => {
+            // The function body's first statement is a bare string literal.
+            let Some(body) = node.child_by_field_name("body") else {
+                return false;
+            };
+            let Some(first) = body.named_child(0) else {
+                return false;
+            };
+            match first.kind() {
+                "expression_statement" => {
+                    first.named_child(0).is_some_and(|s| s.kind() == "string")
+                }
+                "string" => true,
+                _ => false,
+            }
+        }
+        ClojureDocstring => {
+            // A string literal in the docstring position — a direct child of the
+            // `(defn …)` form appearing before the parameter vector.
+            let mut idx = 0;
+            while let Some(child) = node.named_child(idx) {
+                match child.kind() {
+                    "str_lit" => return true,
+                    "vec_lit" => return false, // reached the params, no docstring
+                    _ => {}
+                }
+                idx += 1;
+            }
+            false
+        }
+    }
 }
 
 fn visibility_for(node: Node<'_>, src: &[u8], spec: &LanguageSpec, name: &str) -> Visibility {

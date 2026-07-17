@@ -1594,7 +1594,11 @@ metrics:                              # the read SPEC (the chartable metric)
     file. Two families:
     - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
       `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
-      `oxplow.long_functions`. Built via the `code_gauge` helper with
+      `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (tsk125 — a per-file
+      RATIO of documented-public ÷ public over `code_metrics()`'s `has_doc`;
+      measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
+      higher-better, not a count so it's an inline `BuiltinMetric`/`NewMetricSpec`
+      rather than the count-only `code_gauge`/`spec()` helpers). Built via the `code_gauge` helper with
       `language: ""`; the scripts (under `plugins/metrics/code/`) sweep the
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,

@@ -227,6 +227,7 @@ mod tests {
             end_line: end,
             container_path: Vec::new(),
             visibility: Visibility::Unknown,
+            has_doc: false,
         }
     }
 

@@ -3925,9 +3925,9 @@ mod tests {
         // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
         // oxplow.test_duration in V57 + cache_tokens/cache_usage/effort_tokens in
         // V59 + effort_steering/effort_time_to_green in V60 + oxplow.token_waste
-        // in V61 + coverage.branch/coverage.function in V68); this upsert added
-        // one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 25);
+        // in V61 + coverage.branch/coverage.function in V68 + doc_coverage in
+        // V69); this upsert added one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 26);
     }
 
     #[tokio::test]

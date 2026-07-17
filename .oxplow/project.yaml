@@ -24,485 +24,267 @@ collection:
   - clippy --message-format=json
   - lint:collect
   agentHint: 'Run EVERY test invocation via `OXPLOW_TASK=<your task id> bun run test:collect` in the FOREGROUND — including red-phase/failing runs and quick single-test runs, not just the final green one. Never use bare `cargo test`/`bun test`/`bun run test` (or background it): only `test:collect` emits the lcov + JUnit reports oxplow parses into the effort''s Tests/coverage panel, so any other run won''t show there. The `OXPLOW_TASK=` prefix pins the run to your effort even with concurrent efforts; a backgrounded run finishes after the collection hook fires, so its reports are never ingested. Run it (foreground) before closing any task that changes logic.'
-measures:
-- key: repo.rust_clone
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.rust_allow
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.eslint_disable
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.react_use_effect
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.rust_shared_state
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.rust_async_fn
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.ts_as_cast
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.dangerous_html
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.skipped_tests
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.focused_tests
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.file_loc
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.ts_as_any
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.eval_usage
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.rust_dyn
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.file_imports
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.innerhtml_assign
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.ts_hooks
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.hardcoded_secrets
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.hardcoded_colors
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.css_important
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-- key: repo.inline_styles
-  subjectKind: file
-  unit: count
-  temporalSemantics: semi-additive
-  captureScope: per-path
-gauges:
-# ONE CONCERN PER GAUGE — one ast_query pass over its file set, mirroring the
-# bundled idiom gauges. A gauge must finish a FULL-TREE scan inside the 5s
-# Starlark SandboxBudget; two broad queries in one gauge does not (tsk42), and a
-# gauge that times out writes no capture, so its metric silently freezes.
-# ast_query (native tree-sitter) rather than whole-file regex — regex only on
-# small comment nodes.
-- key: repo.scan_clone
-  title: Rust .clone() scan
-  trigger: on-snapshot
-  emits: [repo.rust_clone]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_clone.star }
-- key: repo.scan_allow
-  title: Rust #[allow] scan
-  trigger: on-snapshot
-  emits: [repo.rust_allow]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_allow.star }
-- key: repo.scan_use_effect
-  title: React useEffect scan
-  trigger: on-snapshot
-  emits: [repo.react_use_effect]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_use_effect.star }
-- key: repo.scan_eslint
-  title: ESLint suppression scan
-  trigger: on-snapshot
-  emits: [repo.eslint_disable]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eslint.star }
-- key: repo.scan_shared_state
-  title: Rust Arc/Mutex/RwLock scan
-  trigger: on-snapshot
-  emits: [repo.rust_shared_state]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_shared_state.star }
-- key: repo.scan_async_fn
-  title: Rust async fn scan
-  trigger: on-snapshot
-  emits: [repo.rust_async_fn]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_async_fn.star }
-- key: repo.scan_as_cast
-  title: TS as-cast scan
-  trigger: on-snapshot
-  emits: [repo.ts_as_cast]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_as_cast.star }
-- key: repo.scan_dangerous_html
-  title: dangerouslySetInnerHTML scan
-  trigger: on-snapshot
-  emits: [repo.dangerous_html]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_dangerous_html.star }
-- key: repo.scan_skipped_tests
-  title: Skipped/ignored test scan
-  trigger: on-snapshot
-  emits: [repo.skipped_tests]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_skipped_tests.star }
-- key: repo.scan_focused_tests
-  title: Focused (.only) test scan
-  trigger: on-snapshot
-  emits: [repo.focused_tests]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_focused_tests.star }
-- key: repo.scan_file_loc
-  title: File LOC scan
-  trigger: on-snapshot
-  emits: [repo.file_loc]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_file_loc.star }
-- key: repo.scan_as_any
-  title: TS as-any scan
-  trigger: on-snapshot
-  emits: [repo.ts_as_any]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_as_any.star }
-- key: repo.scan_eval
-  title: eval() scan
-  trigger: on-snapshot
-  emits: [repo.eval_usage]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_eval.star }
-- key: repo.scan_dyn
-  title: Rust dyn dispatch scan
-  trigger: on-snapshot
-  emits: [repo.rust_dyn]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_dyn.star }
-- key: repo.scan_imports
-  title: TS import scan
-  trigger: on-snapshot
-  emits: [repo.file_imports]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_imports.star }
-- key: repo.scan_innerhtml
-  title: innerHTML assignment scan
-  trigger: on-snapshot
-  emits: [repo.innerhtml_assign]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_innerhtml.star }
-- key: repo.scan_hooks
-  title: React hook scan
-  trigger: on-snapshot
-  emits: [repo.ts_hooks]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_hooks.star }
-- key: repo.scan_secrets
-  title: Hardcoded-secret scan
-  trigger: on-snapshot
-  emits: [repo.hardcoded_secrets]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_secrets.star }
-- key: repo.scan_hardcoded_colors
-  title: Hardcoded-color scan
-  trigger: on-snapshot
-  emits: [repo.hardcoded_colors]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_hardcoded_colors.star }
-- key: repo.scan_css_important
-  title: css !important scan
-  trigger: on-snapshot
-  emits: [repo.css_important]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_css_important.star }
-- key: repo.scan_inline_styles
-  title: Inline style-object scan
-  trigger: on-snapshot
-  emits: [repo.inline_styles]
-  compute: { runtime: starlark, entryFile: oxplow/gauges/repo_inline_styles.star }
 metrics:
 - key: repo.rust_clone
   title: .clone() calls
   sourceMeasure: repo.rust_clone
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: rust
-  description: ".clone() call sites — allocation/perf awareness."
+  description: .clone() call sites — allocation/perf awareness.
 - key: repo.rust_allow
   title: Rust lint suppressions
   sourceMeasure: repo.rust_allow
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: rust
-  description: "#[allow(...)] attributes — Rust lints being hidden."
+  description: '#[allow(...)] attributes — Rust lints being hidden.'
 - key: repo.eslint_disable
   title: ESLint suppressions
   sourceMeasure: repo.eslint_disable
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "eslint-disable directives — TS/JS lints being hidden."
+  description: eslint-disable directives — TS/JS lints being hidden.
 - key: repo.react_use_effect
   title: useEffect calls
   sourceMeasure: repo.react_use_effect
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "useEffect call sites — a re-render/complexity signal."
+  description: useEffect call sites — a re-render/complexity signal.
 - key: repo.rust_shared_state
   title: Arc/Mutex/RwLock usages
   sourceMeasure: repo.rust_shared_state
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: rust
-  description: "Arc/Mutex/RwLock type usages — shared-state / concurrency-complexity signal."
+  description: Arc/Mutex/RwLock type usages — shared-state / concurrency-complexity signal.
 - key: repo.rust_async_fn
   title: async fn count
   sourceMeasure: repo.rust_async_fn
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: rust
-  description: "`async fn` definitions — async surface density."
+  description: '`async fn` definitions — async surface density.'
 - key: repo.ts_as_cast
   title: as-cast assertions
   sourceMeasure: repo.ts_as_cast
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "`x as T` type-assertion casts — a type-safety escape hatch."
+  description: '`x as T` type-assertion casts — a type-safety escape hatch.'
 - key: repo.dangerous_html
   title: dangerouslySetInnerHTML
   sourceMeasure: repo.dangerous_html
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "dangerouslySetInnerHTML usages — XSS-injection surface."
+  description: dangerouslySetInnerHTML usages — XSS-injection surface.
 - key: repo.skipped_tests
   title: Skipped / ignored tests
   sourceMeasure: repo.skipped_tests
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: testing
-  description: "`#[ignore]` (Rust) + `.skip`/`.todo` (TS test files) — hidden test debt."
+  description: '`#[ignore]` (Rust) + `.skip`/`.todo` (TS test files) — hidden test debt.'
 - key: repo.complexity_max
   title: Max cyclomatic complexity
   sourceMeasure: oxplow.complexity
   aggregation: max
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "The single most cyclomatically-complex function in the tree."
+  description: The single most cyclomatically-complex function in the tree.
 - key: repo.complexity_avg
   title: Avg cyclomatic complexity
   sourceMeasure: oxplow.complexity
   aggregation: avg
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "Mean cyclomatic complexity across all functions."
+  description: Mean cyclomatic complexity across all functions.
 - key: repo.fn_length_max
   title: Longest function
   sourceMeasure: oxplow.fn_length
   aggregation: max
-  direction: lower-better
   unit: lines
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "Length (lines) of the longest function in the tree."
+  description: Length (lines) of the longest function in the tree.
 - key: repo.focused_tests
   title: Focused (.only) tests
   sourceMeasure: repo.focused_tests
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: testing
-  description: "`.only` focused tests — a committed one disables the rest of the suite."
+  description: '`.only` focused tests — a committed one disables the rest of the suite.'
 - key: repo.total_loc
   title: Total lines of code
   sourceMeasure: repo.file_loc
   aggregation: sum
-  direction: neutral
   unit: lines
+  direction: neutral
   displayKind: gauge
   category: static-quality
-  description: "Total lines across .rs/.ts/.tsx source files — a size trend."
+  description: Total lines across .rs/.ts/.tsx source files — a size trend.
 - key: repo.max_file_loc
   title: Largest file
   sourceMeasure: repo.file_loc
   aggregation: max
-  direction: lower-better
   unit: lines
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "Line count of the largest source file (god-file / generated-blob detector)."
+  description: Line count of the largest source file (god-file / generated-blob detector).
 - key: repo.ts_as_any
   title: as-any casts
   sourceMeasure: repo.ts_as_any
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "`x as any` casts — silences all type-checking on the value."
+  description: '`x as any` casts — silences all type-checking on the value.'
 - key: repo.eval_usage
   title: eval() usage
   sourceMeasure: repo.eval_usage
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "`eval(...)` calls — dynamic-code-execution / injection surface."
+  description: '`eval(...)` calls — dynamic-code-execution / injection surface.'
 - key: repo.parameter_count_max
   title: Most parameters
   sourceMeasure: oxplow.parameter_count
   aggregation: max
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "Largest parameter list of any function in the tree."
+  description: Largest parameter list of any function in the tree.
 - key: repo.rust_dyn
   title: dyn dispatch usages
   sourceMeasure: repo.rust_dyn
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: rust
-  description: "`dyn Trait` dynamic-dispatch usages — runtime-dispatch / indirection signal."
+  description: '`dyn Trait` dynamic-dispatch usages — runtime-dispatch / indirection signal.'
 - key: repo.total_imports
   title: Total imports
   sourceMeasure: repo.file_imports
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "Total `import` statements across TS files — module-coupling trend."
+  description: Total `import` statements across TS files — module-coupling trend.
 - key: repo.max_file_imports
   title: Most imports in a file
   sourceMeasure: repo.file_imports
   aggregation: max
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "Import count of the most-coupled TS file (fan-out hotspot)."
+  description: Import count of the most-coupled TS file (fan-out hotspot).
 - key: repo.innerhtml_assign
   title: innerHTML assignments
   sourceMeasure: repo.innerhtml_assign
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "`x.innerHTML = …` assignments — XSS-injection surface."
+  description: '`x.innerHTML = …` assignments — XSS-injection surface.'
 - key: repo.ts_hooks
   title: React hook calls
   sourceMeasure: repo.ts_hooks
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "React hook call sites (useState/useEffect/useMemo/…) — re-render/complexity density."
+  description: React hook call sites (useState/useEffect/useMemo/…) — re-render/complexity density.
 - key: repo.hardcoded_secrets
   title: Hardcoded secrets
   sourceMeasure: repo.hardcoded_secrets
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "String literals matching AWS/GitHub/Slack/PEM/Google secret shapes — should be 0."
+  description: String literals matching AWS/GitHub/Slack/PEM/Google secret shapes — should be 0.
 - key: repo.hardcoded_colors
   title: Hardcoded colors
   sourceMeasure: repo.hardcoded_colors
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "Hex/rgb color literals in TS/TSX — should be a var(--…), see theming.md."
+  description: Hex/rgb color literals in TS/TSX — should be a var(--…), see theming.md.
 - key: repo.css_important
-  title: "!important uses"
+  title: '!important uses'
   sourceMeasure: repo.css_important
   aggregation: sum
-  direction: lower-better
   unit: count
+  direction: lower-better
   displayKind: gauge
   category: static-quality
-  description: "!important declarations — the specificity escape hatch (theming.md)."
+  description: '!important declarations — the specificity escape hatch (theming.md).'
 - key: repo.inline_styles
   title: Inline style objects
   sourceMeasure: repo.inline_styles
   aggregation: sum
-  direction: neutral
   unit: count
+  direction: neutral
   displayKind: gauge
   category: static-quality
   language: typescript
-  description: "style={…} JSX attributes — inline-style density / migration pressure (theming.md)."
+  description: style={…} JSX attributes — inline-style density / migration pressure (theming.md).
 - use: oxplow.rust.unsafe_blocks
 - use: oxplow.rust.unwrap_expect_calls
 - use: oxplow.rust.panic_macros
@@ -523,3 +305,283 @@ metrics:
 - use: oxplow.tests.peak_failed
 - use: oxplow.tests.distinct_failed
 - use: oxplow.tests.red_runs
+- use: oxplow.analysis.errors
+  target: 10.0
+- key: repo.type_coverage
+  title: Type coverage
+  sourceMeasure: repo.type_coverage
+  aggregation: ratio
+  unit: '%'
+  direction: higher-better
+  displayKind: coverage
+  category: coverage
+  language: typescript
+  description: '% of TS expressions with a non-any type (the type-coverage tool).'
+gauges:
+- key: repo.scan_clone
+  title: Rust .clone() scan
+  trigger: on-snapshot
+  emits:
+  - repo.rust_clone
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_clone.star
+- key: repo.scan_allow
+  title: Rust
+  trigger: on-snapshot
+  emits:
+  - repo.rust_allow
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_allow.star
+- key: repo.scan_use_effect
+  title: React useEffect scan
+  trigger: on-snapshot
+  emits:
+  - repo.react_use_effect
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_use_effect.star
+- key: repo.scan_eslint
+  title: ESLint suppression scan
+  trigger: on-snapshot
+  emits:
+  - repo.eslint_disable
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_eslint.star
+- key: repo.scan_shared_state
+  title: Rust Arc/Mutex/RwLock scan
+  trigger: on-snapshot
+  emits:
+  - repo.rust_shared_state
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_shared_state.star
+- key: repo.scan_async_fn
+  title: Rust async fn scan
+  trigger: on-snapshot
+  emits:
+  - repo.rust_async_fn
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_async_fn.star
+- key: repo.scan_as_cast
+  title: TS as-cast scan
+  trigger: on-snapshot
+  emits:
+  - repo.ts_as_cast
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_as_cast.star
+- key: repo.scan_dangerous_html
+  title: dangerouslySetInnerHTML scan
+  trigger: on-snapshot
+  emits:
+  - repo.dangerous_html
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_dangerous_html.star
+- key: repo.scan_skipped_tests
+  title: Skipped/ignored test scan
+  trigger: on-snapshot
+  emits:
+  - repo.skipped_tests
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_skipped_tests.star
+- key: repo.scan_focused_tests
+  title: Focused (.only) test scan
+  trigger: on-snapshot
+  emits:
+  - repo.focused_tests
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_focused_tests.star
+- key: repo.scan_file_loc
+  title: File LOC scan
+  trigger: on-snapshot
+  emits:
+  - repo.file_loc
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_file_loc.star
+- key: repo.scan_as_any
+  title: TS as-any scan
+  trigger: on-snapshot
+  emits:
+  - repo.ts_as_any
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_as_any.star
+- key: repo.scan_eval
+  title: eval() scan
+  trigger: on-snapshot
+  emits:
+  - repo.eval_usage
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_eval.star
+- key: repo.scan_dyn
+  title: Rust dyn dispatch scan
+  trigger: on-snapshot
+  emits:
+  - repo.rust_dyn
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_dyn.star
+- key: repo.scan_imports
+  title: TS import scan
+  trigger: on-snapshot
+  emits:
+  - repo.file_imports
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_imports.star
+- key: repo.scan_innerhtml
+  title: innerHTML assignment scan
+  trigger: on-snapshot
+  emits:
+  - repo.innerhtml_assign
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_innerhtml.star
+- key: repo.scan_hooks
+  title: React hook scan
+  trigger: on-snapshot
+  emits:
+  - repo.ts_hooks
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_hooks.star
+- key: repo.scan_secrets
+  title: Hardcoded-secret scan
+  trigger: on-snapshot
+  emits:
+  - repo.hardcoded_secrets
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_secrets.star
+- key: repo.scan_hardcoded_colors
+  title: Hardcoded-color scan
+  trigger: on-snapshot
+  emits:
+  - repo.hardcoded_colors
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_hardcoded_colors.star
+- key: repo.scan_css_important
+  title: css !important scan
+  trigger: on-snapshot
+  emits:
+  - repo.css_important
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_css_important.star
+- key: repo.scan_inline_styles
+  title: Inline style-object scan
+  trigger: on-snapshot
+  emits:
+  - repo.inline_styles
+  compute:
+    runtime: starlark
+    entryFile: oxplow/gauges/repo_inline_styles.star
+- key: repo.scan_type_coverage
+  title: TypeScript type coverage
+  trigger: on-snapshot
+  emits:
+  - repo.type_coverage
+  compute:
+    runtime: jaq
+    input: text
+    entryFile: oxplow/plugins/type_coverage.jq
+    report: target/type-coverage.json
+measures:
+- key: repo.type_coverage
+  unit: '%'
+  subjectKind: repo
+  temporalSemantics: semi-additive
+- key: repo.rust_clone
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.rust_allow
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.eslint_disable
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.react_use_effect
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.rust_shared_state
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.rust_async_fn
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.ts_as_cast
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.dangerous_html
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.skipped_tests
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.focused_tests
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.file_loc
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.ts_as_any
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.eval_usage
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.rust_dyn
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.file_imports
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.innerhtml_assign
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.ts_hooks
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.hardcoded_secrets
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.hardcoded_colors
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.css_important
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive
+- key: repo.inline_styles
+  unit: count
+  subjectKind: file
+  temporalSemantics: semi-additive

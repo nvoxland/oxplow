@@ -2011,6 +2011,25 @@ fn builtin_metric_specs() -> Vec<NewMetricSpec> {
             "findings",
             "TODO/FIXME/HACK/XXX/BUG markers — count over oxplow.todo facts.",
         ),
+        // Doc coverage (tsk125) is a RATIO over oxplow.doc_coverage (num/den =
+        // documented/public per file), not a count — so it's built inline
+        // rather than via the count-only `spec()` helper.
+        {
+            let mut s = NewMetricSpec::base(
+                "oxplow.doc_coverage",
+                "Doc coverage",
+                "oxplow.doc_coverage",
+                "ratio",
+            );
+            s.unit = Some("%".into());
+            s.direction = "higher-better".into();
+            s.display_kind = "coverage".into();
+            s.category = Some("coverage".into());
+            s.description = Some(
+                "% of public functions/methods with a doc comment — Σdocumented/Σpublic over oxplow.doc_coverage facts.".into(),
+            );
+            s
+        },
     ]
 }
 
