@@ -1015,7 +1015,7 @@ capture id. See `.context/metrics.md`.
 > `database::canonical_ts`. Any new store that orders or range-compares on a
 > timestamp column should do the same.
 
-### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migration `V62__metric_cube.sql`, tsk96)
+### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` tsk96 + `V63__branch_aware_cube.sql` tsk97)
 
 **Derived tables — the only ones in the schema that hold no source of truth.**
 Every row is 100% reconstructible from `fact`; deleting all three costs speed and
@@ -1028,10 +1028,16 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
   `count/sum/min/max/numerator/denominator`. Sits beside `fact` sharing the same
   `metric_capture` dimension — ordinary star-schema aggregate navigation.
 - **`metric_live_fact`** — the fold's live state made durable, keyed by
-  `(measure, stream, producer, subject_key)`. Sized by live subjects, not history.
-- **`metric_cube_state`** — the per-`(measure, stream)` watermark. Distinguishes
-  "state was legitimately empty here" from "not cubed yet"; without it a
-  materialized read reports 0 instead of admitting it doesn't know.
+  `(measure, stream, branch, producer, subject_key)` — one partition per branch,
+  mirroring the fact fold (V63); a new branch's partition is SEEDED from the
+  history visible at its first capture. `branch` is `''` for a branch-less
+  capture (a WITHOUT ROWID PK can't hold NULL; the `''` mapping lives in the
+  store layer only). Sized by live subjects, not history.
+- **`metric_cube_state`** — the watermark, per `(measure, stream, branch)`
+  (V63). Distinguishes "state was legitimately empty here" from "not cubed yet";
+  without it a materialized read reports 0 instead of admitting it doesn't know.
+  The stream's watermark is the MAX across its branch rows, and a row's
+  existence doubles as the branch-seeded marker.
 
 **Rules before touching these:** never let a read take *data* from the cube that
 the facts don't have; never aggregate coarser than a capture (it's the floor that

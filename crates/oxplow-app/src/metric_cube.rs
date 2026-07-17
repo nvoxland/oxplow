@@ -2,7 +2,10 @@
 //! materialized fold.
 //!
 //! A `per-path` / `per-subject` measure's series is a stateful replay:
-//! `state[N] = state[N-1] − restated(N) + facts(N)`, `point[N] = agg(state[N])`.
+//! `state[N] = state[N-1] − restated(N) + facts(N)`, `point[N] = agg(state[N])`,
+//! with one state per `(stream, branch)` — a capture folds only into its own
+//! worktree's, own branch's partition, and a new branch SEEDS from the history
+//! visible at its first capture (tsk97, 50fd1760).
 //! [`metric_engine::tree_state_series`] does that in memory on every read, which
 //! is why one sparkline over `oxplow.test_case` decodes 240k facts. This module
 //! runs the SAME fold once at WRITE time and stores its output, so a read becomes
@@ -34,7 +37,7 @@ use tokio::sync::broadcast;
 use crate::events::OxplowEvent;
 use crate::metric_engine::{
     dim_value, parse_capture_scope, repo_scalar_key, splice_zero_points, Aggregation, CaptureScope,
-    Cell, FactFilter, SeriesPoint, SCALAR_SUBJECT,
+    Cell, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
 };
 
 /// Folds a measure's captures into `metric_cube`, incrementally from the
@@ -147,8 +150,18 @@ impl MetricCubeBuilder {
                 .facts_for_captures(measure.id, vec![c.id])
                 .await?;
             let rows = cube_rows(&own, promoted);
+            // Complete scope needs no branch STATE (each capture restates the
+            // whole population), but the watermark row is per branch, so the
+            // capture still advances — and, first time, creates — its own.
             self.facts
-                .write_cube_rows(measure.id, stream, c.id, c.captured_at, rows)
+                .write_cube_rows(
+                    measure.id,
+                    stream,
+                    c.branch.clone(),
+                    c.id,
+                    c.captured_at,
+                    rows,
+                )
                 .await?;
         }
         Ok(todo.len())
@@ -215,6 +228,26 @@ impl MetricCubeBuilder {
     ) -> Result<usize, DomainError> {
         let todo = self.uncubed(measure, stream, caps).await?;
         for c in &todo {
+            // A branch's FIRST capture seeds its partition with the history
+            // visible to it — the fact fold's seed (50fd1760), made durable. Skip
+            // the seed and a new branch reads as a collapsed suite (only what it
+            // re-ran); skip the branch KEY and a feature branch's failure lands on
+            // a point labelled main. `blind()` because that is what the fact fold
+            // passes today — when the git resolver lands (tsk97 item 2), BOTH
+            // sides must switch together or the cube diverges from the facts it
+            // must mirror.
+            if !self
+                .facts
+                .cube_branch_seeded(measure.id, stream, c.branch.clone())
+                .await?
+            {
+                let seed = self
+                    .seed_rows(measure, scope, caps, c, &Visibility::blind())
+                    .await?;
+                self.facts
+                    .seed_live_state(measure.id, stream, c.branch.clone(), seed)
+                    .await?;
+            }
             let own = self
                 .facts
                 .facts_for_captures(measure.id, vec![c.id])
@@ -233,6 +266,7 @@ impl MetricCubeBuilder {
                 .apply_capture_to_live_state(
                     measure.id,
                     stream,
+                    c.branch.clone(),
                     c.producer.clone(),
                     restated,
                     inserted,
@@ -245,27 +279,100 @@ impl MetricCubeBuilder {
             // delta arithmetic would be silently wrong for `slowest_ms` (a `max`
             // over a per-subject measure). A fresh aggregate is correct for every
             // aggregation by construction.
-            let live = self.facts.live_facts(measure.id, stream).await?;
+            let live = self
+                .facts
+                .live_facts(measure.id, stream, c.branch.clone())
+                .await?;
             let rows = cube_rows(&live, promoted);
             self.facts
-                .write_cube_rows(measure.id, stream, c.id, c.captured_at, rows)
+                .write_cube_rows(
+                    measure.id,
+                    stream,
+                    c.branch.clone(),
+                    c.id,
+                    c.captured_at,
+                    rows,
+                )
                 .await?;
         }
         Ok(todo.len())
     }
 
-    /// The subject keys a capture RESTATES — the fold's eviction set. This is the
-    /// one place the two partial scopes differ.
+    /// The live set a NEW branch's partition starts from — the fold's seed,
+    /// replayed in memory: every capture of this stream strictly before `first`
+    /// (same `(captured_at, id)` order the fold breaks on) that is visible to it,
+    /// applied through the same evict-then-insert step the incremental path uses.
+    ///
+    /// Returned whole so `seed_live_state` writes it in ONE transaction — a torn
+    /// seed leaves no half-partition, and because the branch's `metric_cube_state`
+    /// row (the seeded marker) only lands with its first `write_cube_rows`, a
+    /// crash anywhere between simply re-seeds from scratch.
+    ///
+    /// One replay per NEW branch, incremental ever after — the same one-time cost
+    /// the fact fold pays for its seed.
+    async fn seed_rows(
+        &self,
+        measure: &Measure,
+        scope: CaptureScope,
+        caps: &[MetricCapture],
+        first: &MetricCapture,
+        visibility: &Visibility,
+    ) -> Result<Vec<(String, String, i64)>, DomainError> {
+        let earlier: Vec<&MetricCapture> = caps
+            .iter()
+            .take_while(|e| (e.captured_at, e.id) < (first.captured_at, first.id))
+            .filter(|e| visibility.sees(e, first))
+            .collect();
+        if earlier.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<i64> = earlier.iter().map(|e| e.id).collect();
+        let facts = self
+            .facts
+            .facts_for_captures(measure.id, ids.clone())
+            .await?;
+        let mut by_capture: HashMap<i64, Vec<&FactRow>> = HashMap::new();
+        for f in &facts {
+            by_capture.entry(f.capture_id).or_default().push(f);
+        }
+        let mut scanned: HashMap<i64, Vec<String>> = HashMap::new();
+        if matches!(scope, CaptureScope::PerPath) {
+            for (cap, path) in self.facts.scanned_paths_for_captures(ids).await? {
+                scanned.entry(cap).or_default().push(path);
+            }
+        }
+        let mut tree: HashMap<(String, String), Vec<i64>> = HashMap::new();
+        for e in earlier {
+            let own: Vec<&FactRow> = by_capture.remove(&e.id).unwrap_or_default();
+            for key in restated_keys(scope, &own, scanned.remove(&e.id).unwrap_or_default()) {
+                tree.remove(&(e.producer.clone(), key));
+            }
+            for f in own {
+                let key = repo_scalar_key(f).unwrap_or(SCALAR_SUBJECT).to_string();
+                tree.entry((e.producer.clone(), key))
+                    .or_default()
+                    .push(f.id);
+            }
+        }
+        Ok(tree
+            .into_iter()
+            .flat_map(|((producer, key), fact_ids)| {
+                fact_ids
+                    .into_iter()
+                    .map(move |id| (producer.clone(), key.clone(), id))
+            })
+            .collect())
+    }
+
+    /// The eviction set of ONE capture, with the per-path scan list fetched — the
+    /// async shell over [`restated_keys`] the incremental step uses.
     async fn restated_by(
         &self,
         scope: CaptureScope,
         c: &MetricCapture,
         own: &[FactRow],
     ) -> Result<Vec<String>, DomainError> {
-        let mut keys: Vec<String> = match scope {
-            // The capture's snapshot's file rows — NOT the facts it emitted. A
-            // file whose count dropped to 0 emits no fact but is still scanned, and
-            // a deletion IS a scan result.
+        let scanned = match scope {
             CaptureScope::PerPath => self
                 .facts
                 .scanned_paths_for_captures(vec![c.id])
@@ -273,21 +380,33 @@ impl MetricCubeBuilder {
                 .into_iter()
                 .map(|(_, path)| path)
                 .collect(),
-            // A test run restates exactly the cases it executed.
-            _ => own
-                .iter()
-                .filter_map(|f| f.subject_ref.clone())
-                .collect::<Vec<_>>(),
+            _ => Vec::new(),
         };
-        // A capture may also carry PATH-LESS facts (an agent-asserted repo scalar).
-        // No path means the fold can't place or supersede them, so they keep the
-        // plain "latest assertion per producer wins" rule — emitting one restates
-        // it. Mirrors `tree_state_series` exactly.
-        if own.iter().any(|f| repo_scalar_key(f).is_none()) {
-            keys.push(SCALAR_SUBJECT.to_string());
-        }
-        Ok(keys)
+        let own: Vec<&FactRow> = own.iter().collect();
+        Ok(restated_keys(scope, &own, scanned))
     }
+}
+
+/// The subject keys a capture RESTATES — the fold's eviction set, pure so the
+/// SEED replay and the incremental step share one implementation. This is the
+/// one place the two partial scopes differ.
+fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) -> Vec<String> {
+    let mut keys: Vec<String> = match scope {
+        // The capture's snapshot's file rows — NOT the facts it emitted. A file
+        // whose count dropped to 0 emits no fact but is still scanned, and a
+        // deletion IS a scan result.
+        CaptureScope::PerPath => scanned,
+        // A test run restates exactly the cases it executed.
+        _ => own.iter().filter_map(|f| f.subject_ref.clone()).collect(),
+    };
+    // A capture may also carry PATH-LESS facts (an agent-asserted repo scalar).
+    // No path means the fold can't place or supersede them, so they keep the
+    // plain "latest assertion per producer wins" rule — emitting one restates
+    // it. Mirrors `tree_state_series` exactly.
+    if own.iter().any(|f| repo_scalar_key(f).is_none()) {
+        keys.push(SCALAR_SUBJECT.to_string());
+    }
+    keys
 }
 
 /// Keep the cube fresh off the event bus: backfill once at startup, then fold
@@ -395,27 +514,6 @@ pub async fn cube_series(
         .filter(|c| stream.map_or(true, |s| c.stream_id == s))
         .collect();
     if captures.is_empty() {
-        return Ok(None);
-    }
-
-    // ⚠️ tsk97, TEMPORARY. The FACT fold is branch-aware (its state is keyed by
-    // (stream, branch)); the cube's BUILD is not yet — `metric_live_fact` is keyed
-    // by (measure, stream, producer, subject) with no branch, so a multi-branch
-    // measure's stored rows encode a branch-BLIND fold and would disagree with the
-    // facts. That is a silently-wrong number, this subsystem's worst failure mode,
-    // so decline rather than serve it.
-    //
-    // Correctness over speed, deliberately: a multi-branch measure falls back to
-    // the (correct, slower) fact path until the build is branch-aware too. REMOVE
-    // this the moment `metric_live_fact` carries a branch — and not before.
-    if scope.is_partial()
-        && captures
-            .iter()
-            .map(|c| c.branch.as_deref())
-            .collect::<BTreeSet<Option<&str>>>()
-            .len()
-            > 1
-    {
         return Ok(None);
     }
 
@@ -1029,16 +1127,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_multi_branch_measure_declines_the_cube_and_the_facts_stay_right() {
-        // tsk97. The fact fold is branch-aware; the cube's BUILD is not yet (its
-        // live state has no branch column). So a multi-branch measure's cube rows
-        // encode a branch-blind fold — they'd read 1 on main's last point, a
-        // failure that only ever existed on feature-x. Serving that is worse than
-        // being slow, so the read must DECLINE while the build lags.
+    async fn the_cube_keeps_each_branchs_state_separate_and_a_new_branch_inherits() {
+        // tsk97, flipped from the decline-guard it used to be (0865a39a): the
+        // build's live state is now keyed by branch, so the cube must ANSWER a
+        // multi-branch read and land exactly on the branch-aware fact fold.
         //
-        // This test is the guard on that gap. When `metric_live_fact` gains a
-        // branch, this flips to `assert_cube_answers` — it must never simply be
-        // deleted, or the divergence ships silently.
+        // Both halves of the branch rule live in this one series:
+        // - ISOLATION — main's last point is 2, not 1: feature-x's failure must
+        //   not land on a point labelled `main`. A branch-blind build reads
+        //   [2, 1, 1] here.
+        // - INHERITANCE — feature-x's point is 1, not 0: its first capture SEEDS
+        //   from the pre-fork history (B stays live), else a new branch reads as
+        //   a collapsed suite. A seed-less build reads [2, 0, 2].
         let (engine, facts, builder) = fixture().await;
         let m = per_subject_measure(&facts, "acme.test_case").await;
         let on = |branch: &str, at: &str| NewMetricCapture {
@@ -1064,37 +1164,76 @@ mod tests {
             .record_facts(on("main", "2026-06-30T12:00:00Z"), vec![case(m, "B", 1.0)])
             .await
             .unwrap();
-        builder.build_measure("acme.test_case").await.unwrap();
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
 
-        let measure = facts.get_measure("acme.test_case").await.unwrap().unwrap();
-        let filter = FactFilter::from_json("{}").unwrap();
-        assert!(
-            cube_series(
-                &facts,
-                &measure,
-                CaptureScope::PerSubject,
-                Aggregation::Sum,
-                &filter,
-                None,
-                None
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0, 2.0],
+            "the branch-aware fold, from the facts"
+        );
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 3);
+        assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_branchs_second_capture_folds_incrementally_after_its_seed() {
+        // The seed runs ONCE per (stream, branch) — its `metric_cube_state` row is
+        // the marker — and every later capture folds into the durable state. This
+        // pins two things across two build passes with interleaved branches:
+        // the fold-count of the second pass (2, not 4 — the watermark and the
+        // branch state both survived the first pass), and that each capture lands
+        // in ITS OWN branch partition. c4's A=5 is chosen so a misrouted apply is
+        // visible: main would read a stale 2 instead of 6.
+        let (engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        let on = |branch: &str, at: &str| NewMetricCapture {
+            captured_at: Some(ts(at)),
+            branch: Some(branch.into()),
+            ..NewMetricCapture::done(1, "tests", "builtin")
+        };
+        facts
+            .record_facts(
+                on("main", "2026-06-30T10:00:00Z"),
+                vec![case(m, "A", 1.0), case(m, "B", 1.0)],
             )
             .await
-            .unwrap()
-            .is_none(),
-            "a branch-blind cube must not answer a multi-branch read"
-        );
+            .unwrap();
+        facts
+            .record_facts(
+                on("feature-x", "2026-06-30T11:00:00Z"),
+                vec![case(m, "A", 0.0)],
+            )
+            .await
+            .unwrap();
+        assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 2);
+
+        facts
+            .record_facts(
+                on("feature-x", "2026-06-30T12:00:00Z"),
+                vec![case(m, "B", 0.0)],
+            )
+            .await
+            .unwrap();
+        facts
+            .record_facts(on("main", "2026-06-30T13:00:00Z"), vec![case(m, "A", 5.0)])
+            .await
+            .unwrap();
         let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+        // Still the FACT oracle despite the build above: c3/c4 sit past the
+        // watermark, so `series_for_spec` declines the cube and replays the facts.
+        let oracle = oracle(&engine, &spec).await;
         assert_eq!(
-            engine
-                .series_for_spec(&spec, None)
-                .await
-                .unwrap()
-                .iter()
-                .map(|p| p.value)
-                .collect::<Vec<_>>(),
-            vec![2.0, 1.0, 2.0],
-            "the facts answer correctly — main's last point is 2, not the branch's 1"
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 1.0, 0.0, 6.0],
+            "feature-x decays to 0 on its own branch; main reads its own A=5 + B=1"
         );
+        assert_eq!(
+            builder.build_measure("acme.test_case").await.unwrap(),
+            2,
+            "only the two new captures fold — the branch states are durable, not re-seeded"
+        );
+        assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
     }
 
     #[tokio::test]

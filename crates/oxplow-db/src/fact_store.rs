@@ -1172,6 +1172,11 @@ impl SqliteFactStore {
     ///
     /// This is what disambiguates "no cube rows for capture N": state legitimately
     /// empty at N (a real value-0 point) vs N not cubed yet (fall back to facts).
+    ///
+    /// `metric_cube_state` rows are per BRANCH (V63); the stream's watermark is
+    /// the MAX across them, which equals "the last capture folded" because the
+    /// build processes a stream's captures in global `(captured_at, id)` order —
+    /// every row it advances is the newest so far.
     pub async fn cube_watermark(
         &self,
         measure_id: i64,
@@ -1181,7 +1186,9 @@ impl SqliteFactStore {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT last_captured_at, last_capture_id FROM metric_cube_state
-                      WHERE measure_id = ?1 AND stream_id = ?2",
+                      WHERE measure_id = ?1 AND stream_id = ?2
+                      ORDER BY last_captured_at DESC, last_capture_id DESC
+                      LIMIT 1",
                     params![measure_id, stream_id],
                     |r| {
                         let at: String = r.get(0)?;
@@ -1196,34 +1203,65 @@ impl SqliteFactStore {
             .map_err(map_sql_err)
     }
 
-    /// The facts currently LIVE for `(measure, stream)` — the fold's state, read
-    /// back as whole facts so the caller buckets them with the same `dim_value`
-    /// the read path uses (never a second dim-extraction implementation in SQL).
+    /// Whether `(measure, stream, branch)` has a live-state partition yet — the
+    /// existence of its `metric_cube_state` row. `false` means the branch's first
+    /// capture hasn't been folded and the build must SEED the partition by
+    /// replaying the history visible to it. Existence, not row count: a seeded
+    /// partition may legitimately hold zero live facts.
+    pub async fn cube_branch_seeded(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+        branch: Option<String>,
+    ) -> Result<bool, DomainError> {
+        let branch = branch.unwrap_or_default();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT 1 FROM metric_cube_state
+                      WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3",
+                    params![measure_id, stream_id, branch],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map(|r| r.is_some())
+            })
+            .await
+    }
+
+    /// The facts currently LIVE for `(measure, stream, branch)` — one branch
+    /// partition of the fold's state, read back as whole facts so the caller
+    /// buckets them with the same `dim_value` the read path uses (never a second
+    /// dim-extraction implementation in SQL).
     pub async fn live_facts(
         &self,
         measure_id: i64,
         stream_id: i64,
+        branch: Option<String>,
     ) -> Result<Vec<FactRow>, DomainError> {
+        let branch = branch.unwrap_or_default();
         self.db
             .call(move |conn| {
                 let sql = format!(
                     "SELECT {FACT_ROW_COLS} FROM metric_live_fact lf
                        JOIN fact f ON f.id = lf.fact_id
                        JOIN metric_capture c ON c.id = f.capture_id
-                      WHERE lf.measure_id = ?1 AND lf.stream_id = ?2
+                      WHERE lf.measure_id = ?1 AND lf.stream_id = ?2 AND lf.branch = ?3
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                let rows =
+                    stmt.query_map(params![measure_id, stream_id, branch], row_to_fact_row)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
-    /// Apply ONE capture to the live state: evict every `restated` subject key,
-    /// then insert the capture's own `(subject_key, fact_id)` pairs. This IS the
-    /// fold's step (`state[N] = state[N-1] − restated(N) + facts(N)`), made
-    /// durable.
+    /// Apply ONE capture to its branch's live partition: evict every `restated`
+    /// subject key, then insert the capture's own `(subject_key, fact_id)` pairs.
+    /// This IS the fold's step (`state[N] = state[N-1] − restated(N) + facts(N)`),
+    /// made durable — scoped to `(measure, stream, branch)` because a capture may
+    /// only rewrite its own branch's state (tsk97).
     ///
     /// **Idempotent on whole captures** — evict+insert *replaces* a subject's
     /// facts, so re-running a capture after a torn write lands in the same place.
@@ -1232,28 +1270,30 @@ impl SqliteFactStore {
         &self,
         measure_id: i64,
         stream_id: i64,
+        branch: Option<String>,
         producer: String,
         restated: Vec<String>,
         facts: Vec<(String, i64)>,
     ) -> Result<(), DomainError> {
+        let branch = branch.unwrap_or_default();
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
                 for key in &restated {
                     tx.execute(
                         "DELETE FROM metric_live_fact
-                          WHERE measure_id = ?1 AND stream_id = ?2
-                            AND producer = ?3 AND subject_key = ?4",
-                        params![measure_id, stream_id, producer, key],
+                          WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3
+                            AND producer = ?4 AND subject_key = ?5",
+                        params![measure_id, stream_id, branch, producer, key],
                     )
                     .map_err(map_sql_err)?;
                 }
                 for (key, fact_id) in &facts {
                     tx.execute(
                         "INSERT OR IGNORE INTO metric_live_fact
-                           (measure_id, stream_id, producer, subject_key, fact_id)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![measure_id, stream_id, producer, key, fact_id],
+                           (measure_id, stream_id, branch, producer, subject_key, fact_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![measure_id, stream_id, branch, producer, key, fact_id],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -1263,16 +1303,58 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Replace a capture's cube rows and advance the watermark, atomically. The
-    /// delete makes a re-run of the same capture idempotent.
+    /// Establish a branch's live partition in ONE transaction: drop whatever the
+    /// partition holds and insert `(producer, subject_key, fact_id)` rows — the
+    /// final state of the builder's in-memory replay of the history visible to
+    /// this branch. Atomic so a torn seed leaves no half-partition: the branch's
+    /// `metric_cube_state` row (the seeded marker) only lands later, with its
+    /// first `write_cube_rows`, so a crash between the two re-seeds from scratch.
+    pub async fn seed_live_state(
+        &self,
+        measure_id: i64,
+        stream_id: i64,
+        branch: Option<String>,
+        facts: Vec<(String, String, i64)>,
+    ) -> Result<(), DomainError> {
+        let branch = branch.unwrap_or_default();
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                tx.execute(
+                    "DELETE FROM metric_live_fact
+                      WHERE measure_id = ?1 AND stream_id = ?2 AND branch = ?3",
+                    params![measure_id, stream_id, branch],
+                )
+                .map_err(map_sql_err)?;
+                for (producer, key, fact_id) in &facts {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO metric_live_fact
+                           (measure_id, stream_id, branch, producer, subject_key, fact_id)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![measure_id, stream_id, branch, producer, key, fact_id],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                tx.commit().map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Replace a capture's cube rows and advance its BRANCH's watermark,
+    /// atomically. The delete makes a re-run of the same capture idempotent. The
+    /// upsert's insert arm is also what creates the branch's `metric_cube_state`
+    /// row — the "seeded" marker `cube_branch_seeded` reads.
     pub async fn write_cube_rows(
         &self,
         measure_id: i64,
         stream_id: i64,
+        branch: Option<String>,
         capture_id: i64,
         captured_at: Timestamp,
         rows: Vec<NewCubeRow>,
     ) -> Result<(), DomainError> {
+        let branch = branch.unwrap_or_default();
         let captured_at = ts_to_string(captured_at);
         self.db
             .call_mut(move |conn| {
@@ -1305,12 +1387,12 @@ impl SqliteFactStore {
                 }
                 tx.execute(
                     "INSERT INTO metric_cube_state
-                       (measure_id, stream_id, last_capture_id, last_captured_at)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(measure_id, stream_id) DO UPDATE SET
+                       (measure_id, stream_id, branch, last_capture_id, last_captured_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT(measure_id, stream_id, branch) DO UPDATE SET
                        last_capture_id = excluded.last_capture_id,
                        last_captured_at = excluded.last_captured_at",
-                    params![measure_id, stream_id, capture_id, captured_at],
+                    params![measure_id, stream_id, branch, capture_id, captured_at],
                 )
                 .map_err(map_sql_err)?;
                 tx.commit().map_err(map_sql_err)?;
@@ -2584,7 +2666,7 @@ mod tests {
             (latest_full, "2026-06-30T10:00:00.000000Z", 3.0),
         ] {
             store
-                .write_cube_rows(m, 1, cap, at(at_s), vec![row(v)])
+                .write_cube_rows(m, 1, None, cap, at(at_s), vec![row(v)])
                 .await
                 .unwrap();
         }
@@ -2634,6 +2716,7 @@ mod tests {
             .write_cube_rows(
                 m,
                 1,
+                None,
                 only_full,
                 at("2026-06-30T09:00:00.000000Z"),
                 vec![NewCubeRow {

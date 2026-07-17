@@ -479,7 +479,8 @@ mod tests {
             // V44 — the metric SPEC layer.
             "metric_spec",
             // V62 — the aggregate cube: the materialized fold (tsk96), its
-            // durable live state, and the per-(measure, stream) watermark.
+            // durable live state, and the watermark — both keyed per
+            // (measure, stream, branch) since V63 (tsk97).
             "metric_cube",
             "metric_live_fact",
             "metric_cube_state",

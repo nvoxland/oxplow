@@ -285,18 +285,24 @@ welded to collection.
   *producing* effort, stamped only when unambiguous; ledger-backfilled otherwise);
   trust `provenance`/`source`. **Captures are durable** (they carry the facts'
   context — no independent sweep).
-  > **Stamp `closest_git_version` on every capture you add (tsk95).** A result is
-  > about a **code state, not a branch name**, and the version is the *only*
-  > ancestry material the fold can use (tsk97). It is **NOT backfillable** —
-  > which commit a past run tested is unrecoverable, so an unstamped capture is
-  > permanently ancestry-blind. This was missed for 125 `test_case` captures
-  > because version resolution rode on `GaugeRunContext`'s `snapshot_id` and test
-  > runs carry no snapshot. Use `file_ref_version::resolve(store, dir, snap)`: a
-  > snapshot with its own commit reads `git_version_exact = true`, otherwise it
-  > falls back to HEAD with `exact = false`. **Dirty is the normal case** (the
-  > agent edits, then runs tests), which is exactly what the
-  > `closest_git_version` + `git_version_exact` pair is for — don't add a third
-  > field.
+  > **Stamp `closest_git_version` on every capture you add (tsk95).** Use
+  > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
+  > reads `git_version_exact = true`, otherwise it falls back to HEAD with
+  > `exact = false`. **Dirty is the normal case** (the agent edits, then runs
+  > tests), which is exactly what the `closest_git_version` +
+  > `git_version_exact` pair is for — don't add a third field.
+  >
+  > **But commit ancestry alone cannot place a dirty run (tsk97, verified).** A
+  > dirty run on a feature branch stamps the *fork-point* commit — which is on
+  > main — so "visible iff ancestor-or-equal" keeps the branch's results visible
+  > from main: the exact cross-contamination it was meant to prevent. Hence the
+  > fold partitions by **branch** (see the cube box below), and a future
+  > ancestry resolver must anchor a dirty run to the commit that **absorbed** it
+  > (the next snapshot carrying a commit), never the one it branched from.
+  > That IS recoverable: every test capture carries a `snapshot_id`, snapshots
+  > carry `git_commit`/`git_branch`, and the git-refs listener re-stamps a
+  > stream's latest snapshot on commit — the "permanently ancestry-blind
+  > captures" this box used to claim were verified to be zero.
 - **`fact`** — the durable atomic measurement (folds `metric_sample` +
   `metric_finding`): `capture_id` **NOT NULL** (→ all context via the capture),
   `measure_id`, `value`, `numerator`/`denominator`; subject `subject_kind`/
@@ -304,8 +310,9 @@ welded to collection.
   `severity`/`rule`/`detail` (null for pure measurements); `dims_json` (long-tail
   dims). **No when/where/who columns** — those are the capture's.
 - **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
-  (`V62__metric_cube.sql`, tsk96) — the **aggregate cube**: the materialized fold.
-  See the box below.
+  (`V62__metric_cube.sql`, tsk96; live state + watermark re-keyed per **branch**
+  by `V63__branch_aware_cube.sql`, tsk97) — the **aggregate cube**: the
+  materialized fold. See the box below.
 
 > ### ⚠️ The cube is an accelerator, NEVER a replacement for the facts (V62, tsk96)
 >
@@ -357,6 +364,23 @@ welded to collection.
 > live state is correct for every aggregation by construction, and it is what
 > turns a replay into an increment.
 >
+> **The live state is partitioned per `(stream, BRANCH)`** (V63, tsk97),
+> mirroring the fact fold (50fd1760): a capture evicts/inserts only within its
+> own branch's partition — else a feature branch's failure lands on a point
+> labelled `main` whenever main didn't re-run that test — and a branch's FIRST
+> capture **seeds** its partition by replaying the history visible to it
+> (`seed_rows`, one in-memory replay per new branch, written in one
+> transaction), so a new branch **inherits** the pre-fork suite instead of
+> collapsing to what it re-ran. `metric_cube` itself needs **no** branch column:
+> its grain is the capture, and the capture carries the branch. Both the fold
+> and the build pass `Visibility::blind()` today (inherit *everything* earlier —
+> right for main→branch, over-inclusive only for sibling branches, which don't
+> exist yet); **if a real ancestry resolver ever lands, both sides must switch
+> together** or the cube diverges from the facts it must mirror.
+> `the_cube_keeps_each_branchs_state_separate_and_a_new_branch_inherits` pins
+> both halves — it began life as the decline guard that refused multi-branch
+> reads while the build lagged the fold, and was FLIPPED, not deleted.
+>
 > **The watermark** (`metric_cube_state`) exists because "no cube rows for capture
 > N" is otherwise ambiguous: state legitimately empty at N (a real value-0 point)
 > vs N not cubed yet (fall back). Conflating those is how a materialized read
@@ -365,6 +389,14 @@ welded to collection.
 > torn write just leaves the watermark un-advanced — reads fall back and the next
 > build re-runs whole captures, which is idempotent (evict+insert *replaces* a
 > subject's facts).
+>
+> Watermark rows are per `(measure, stream, branch)` (V63) and do double duty:
+> the STREAM's watermark — what the read checks coverage against — is the MAX
+> across its branch rows (valid because the build processes a stream's captures
+> in global `(captured_at, id)` order), and a row's **existence** is the
+> branch-seeded marker, keeping "seeded but legitimately empty" distinct from
+> "never seeded". A crash between seed and first row-write simply re-seeds —
+> the seed is a transactional replace.
 >
 > **Deleting captures invalidates the cube** (tsk100). `prune_dominated_tree_captures`
 > drops per-path captures and their facts cascade; `metric_live_fact` cascades with
@@ -402,8 +434,9 @@ welded to collection.
 >
 > - **`MetricCubeBuilder::build_measure`** — dispatches on scope to **two build
 >   rules, deliberately not merged** (tsk99):
->   - **partial** (`build_stream`) — folds each capture after the watermark: evict
->     what it restates → insert its facts → re-aggregate the **whole live state**.
+>   - **partial** (`build_stream`) — folds each capture after the watermark: seed
+>     the branch's partition if it's new → evict what the capture restates →
+>     insert its facts → re-aggregate the **whole live partition**.
 >   - **complete** (`build_stream_complete`) — a GROUP BY over the capture's **own**
 >     facts. No `metric_live_fact`, no eviction, no reach-back: every capture
 >     restates the whole population, so `state[N] = facts(N)`.
@@ -438,7 +471,12 @@ welded to collection.
 > **Measured on the real DB (512k facts).** The 5 test specs: **9.26s → 70ms
 > (~131×)**. All **68** specs (both scopes, after tsk99): **11.53s → 1.03s**, with
 > **zero divergence** from the fact path on any of them. Backfill ~25s once, in the
-> background. *That 9.26s every ~10s was the CPU burn.*
+> background. *That 9.26s every ~10s was the CPU burn.* Re-verified after the
+> branch-aware build (tsk97, 590k facts, a genuinely two-branch capture history):
+> all 68 identical again, **3.74s → 334ms**, same 42/68 served. The harness is
+> `examples/cube_equivalence.rs` — run it against a **fresh `VACUUM INTO` copy**
+> (never the live file, never a copy that's already been built: the oracle must be
+> fact-served, or it's the cube confirming itself).
 >
 > **42 of 68 specs are cube-served**; the other 26 decline, and every one is an
 > expected class — 18 filter `dim_eq` on an **unpromoted** dim (`oxplow.rule` ×10,

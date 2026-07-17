@@ -138,7 +138,9 @@ impl CaptureScope {
 }
 
 /// Parse a measure's `capture_scope`, naming the measure in the error.
-pub(crate) fn parse_capture_scope(
+/// Fully `pub` (not `pub(crate)`) for the `cube_equivalence` example, which
+/// probes `cube_series` the way the engine does.
+pub fn parse_capture_scope(
     measure_key: &str,
     capture_scope: &str,
 ) -> Result<CaptureScope, DomainError> {
@@ -1576,7 +1578,8 @@ pub fn threshold_state(
 /// vocabulary is a superset (`count_distinct`/`p95` are reserved in the schema);
 /// an aggregation the engine can't yet compute is an honest error, not a silent
 /// wrong number.
-pub(crate) fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
+/// `pub` for the `cube_equivalence` example, like [`parse_capture_scope`].
+pub fn spec_aggregation(spec: &MetricSpec) -> Result<Aggregation, DomainError> {
     Aggregation::parse(&spec.aggregation).ok_or_else(|| {
         DomainError::Invalid(format!(
             "aggregation `{}` is not yet supported by the engine",
@@ -1601,7 +1604,8 @@ fn spec_value_scale(spec: &MetricSpec) -> f64 {
 }
 
 /// A spec's `filter_json` as a [`FactFilter`] (the empty filter when absent).
-pub(crate) fn spec_filter(spec: &MetricSpec) -> Result<FactFilter, DomainError> {
+/// `pub` for the `cube_equivalence` example, like [`parse_capture_scope`].
+pub fn spec_filter(spec: &MetricSpec) -> Result<FactFilter, DomainError> {
     match spec.filter_json.as_deref() {
         Some(j) => FactFilter::from_json(j),
         None => Ok(FactFilter::default()),

@@ -112,6 +112,16 @@ loading spinner) by:
 - `ProjectPanel` — refreshes the indexed git statuses.
 - (Formerly `GitChangesPanel`, now folded into `ProjectPanel`'s filter
   modes.)
+- `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
+  the stream, so every commit lands a snapshot row stamped with the new
+  HEAD (`snapshot.git_commit`/`git_branch`) even when the worktree
+  didn't change. Beyond Local History, those rows are the **anchor
+  points for metric ancestry** (tsk97): a dirty test run's code is
+  placed by the *next* commit-stamped snapshot — the commit that
+  absorbed it, not the fork point its `closest_git_version` names.
+  The metric fold partitions per `(stream, branch)` and relies on
+  these anchors for any future cross-branch visibility rule — see
+  `.context/metrics.md`.
 
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
