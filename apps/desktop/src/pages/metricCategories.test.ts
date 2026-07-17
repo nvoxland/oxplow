@@ -65,20 +65,21 @@ describe("buildMetricSections", () => {
       row("oxplow.analysis.errors", "static-quality", null),
       row("oxplow.agent.turns", "operational"),
     ]);
+    // Sections render ALPHABETICALLY by label (tsk116) — the language
+    // sections interleave with the category sections as equals.
     expect(built.map((s) => s.label)).toEqual([
-      "Tests",
-      // Static analysis' own sections, General first then languages by label.
       "General",
-      "Rust",
-      "TypeScript",
       "Operational",
+      "Rust",
+      "Tests",
+      "TypeScript",
     ]);
     expect(built.find((s) => s.label === "Rust")?.entries.map((e) => e.key)).toEqual([
       "oxplow.rust.unsafe_blocks",
     ]);
   });
 
-  it("keeps every other category as a single section, in display order", () => {
+  it("keeps every other category as a single section, alphabetical by label", () => {
     const built = sections([
       row("c", "operational"),
       row("a", "custom"),
@@ -88,12 +89,28 @@ describe("buildMetricSections", () => {
     expect(built.map((s) => s.key)).toEqual(["custom", "coverage", "operational"]);
   });
 
+  it("stays alphabetical as new languages and categories plug in (tsk116)", () => {
+    // No hand-maintained order list: an unknown category (labeled by its raw
+    // key) and a brand-new language slot themselves in alphabetically.
+    const built = sections([
+      row("z", "experiments"),
+      row("a", "custom"),
+      row("e", "static-quality", "elixir"),
+      row("b", "coverage"),
+    ]);
+    expect(built.map((s) => s.label)).toEqual([
+      "Code gauges",
+      "Coverage",
+      "Elixir",
+      "experiments",
+    ]);
+  });
+
   it("gives each section a key distinct from any category key", () => {
     // Keys drive React keys + testids; a language section must not collide with
-    // a category section of the same name.
-    // Ordered by CATEGORY_ORDER, so testing leads static-quality's languages.
+    // a category section of the same name. Alphabetical: Rust < Tests.
     const built = sections([row("x", "static-quality", "rust"), row("y", "testing")]);
-    expect(built.map((s) => s.key)).toEqual(["testing", "static-rust"]);
+    expect(built.map((s) => s.key)).toEqual(["static-rust", "testing"]);
   });
 
   it("has no static-analysis section at all when nothing is in that category", () => {
@@ -101,7 +118,7 @@ describe("buildMetricSections", () => {
     expect(built.map((s) => s.key)).toEqual(["testing"]);
   });
 
-  it("sorts an unknown category last and buckets nulls under Other", () => {
+  it("slots unknown categories and the Other bucket in alphabetically too", () => {
     const built = sections([
       row("agent.tokens.total", "operational"),
       row("oxplow.rust.unsafe_blocks", "custom"),
@@ -109,13 +126,15 @@ describe("buildMetricSections", () => {
       row("orphan", null),
       row("oxplow.tests.passed", "testing"),
     ]);
+    // Unknown category renders under its raw key; null under "Other" — both
+    // simply alphabetical like everything else (tsk116; locale collation is
+    // case-insensitive, so "mystery" sits between Code gauges and Operational).
     expect(built.map((s) => s.label)).toEqual([
       "Code gauges",
-      "Tests",
-      "Operational",
-      // Unknown category renders under its raw key; null under "Other".
       "mystery",
+      "Operational",
       "Other",
+      "Tests",
     ]);
   });
 

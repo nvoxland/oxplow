@@ -2,16 +2,6 @@
 // one display order + label set, and a generic group-by-category so both pages
 // organize metrics the same way. Pure — no React, unit-testable.
 
-/** Display order: code gauges (the toggleable opt-in compute) lead; the
- *  always-on producer families follow. Unknown categories fall to the end. */
-export const CATEGORY_ORDER = [
-  "custom",
-  "testing",
-  "coverage",
-  "static-quality",
-  "operational",
-] as const;
-
 const CATEGORY_LABEL: Record<string, string> = {
   custom: "Code gauges",
   testing: "Tests",
@@ -26,14 +16,10 @@ export function categoryLabel(cat: string | null): string {
   return CATEGORY_LABEL[cat] ?? cat;
 }
 
-function categoryOrder(cat: string | null): number {
-  const i = CATEGORY_ORDER.indexOf((cat ?? "") as (typeof CATEGORY_ORDER)[number]);
-  return i === -1 ? CATEGORY_ORDER.length : i;
-}
-
-/** Group rows by their category in display order. Pure — entries keep their
- *  incoming order within each group. `getCategory` reads the category off each
- *  row (so it works for both `MetricCatalogEntry` and `{def}` rows). */
+/** Group rows by their category, groups in first-seen order (the section list
+ *  alphabetizes at the end — see `buildMetricSections`). Pure — entries keep
+ *  their incoming order within each group. `getCategory` reads the category off
+ *  each row (so it works for both `MetricCatalogEntry` and `{def}` rows). */
 export function groupByCategory<T>(
   rows: T[],
   getCategory: (row: T) => string | null,
@@ -45,9 +31,7 @@ export function groupByCategory<T>(
     if (list) list.push(r);
     else byCat.set(cat, [r]);
   }
-  return [...byCat.entries()]
-    .map(([category, entries]) => ({ category, entries }))
-    .sort((a, b) => categoryOrder(a.category) - categoryOrder(b.category));
+  return [...byCat.entries()].map(([category, entries]) => ({ category, entries }));
 }
 
 // Display labels for language slugs (as carried on `MetricCatalogEntry.language`
@@ -87,8 +71,8 @@ export type MetricSection<T> = {
 
 /**
  * The section list both metric surfaces render — Metric Settings (the catalog
- * rows) and Recorded Metrics (the latest-value table). Categories in display
- * order, **except `static-quality`**, which gets no section of its own: its real
+ * rows) and Recorded Metrics (the latest-value table). Sections ALPHABETICAL
+ * by label, **except that `static-quality`** gets no section of its own: its real
  * top-level division is by language, so each language is promoted to a top-level
  * section (a peer of Tests / Coverage / Operational) and the language-agnostic
  * analysers fall under "General".
@@ -123,7 +107,12 @@ export function buildMetricSections<T>(
       });
     }
   }
-  return out;
+  // ALPHABETICAL by display label, uniformly (tsk116): language sections
+  // interleave with category sections as equals, and a brand-new language or
+  // category slots itself in with zero curation — there is no hand-maintained
+  // order list to forget to update. Locale-aware compare, matching the
+  // locale-formatted values the rows show (tsk114).
+  return out.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Sub-group rows by language slug. Pure — entries keep their incoming order.
