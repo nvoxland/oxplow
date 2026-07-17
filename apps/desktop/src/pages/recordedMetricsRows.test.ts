@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
-import { DEFAULT_SHOW_MODE, SHOW_MODES, filterMetricRows } from "./recordedMetricsRows.js";
+import {
+  DEFAULT_SHOW_MODE,
+  SHOW_MODES,
+  filterMetricRows,
+  metricSiblings,
+} from "./recordedMetricsRows.js";
 
 const row = (key: string, enabled: boolean, title = key) => ({ key, title, enabled });
 
@@ -63,5 +68,33 @@ describe("filterMetricRows", () => {
 
   it("offers exactly the two documented modes", () => {
     expect(SHOW_MODES.map((m) => m.key)).toEqual(["enabled", "all"]);
+  });
+});
+
+describe("metricSiblings", () => {
+  const section = (keys: string[]) => ({
+    entries: keys.map((key) => ({ key, title: key.toUpperCase() })),
+  });
+
+  it("flattens sections in render order so up/down walks the visible list (tsk119)", () => {
+    // The sibling chain must continue ACROSS section boundaries — stepping
+    // down from the last Tests row lands on the first TypeScript row, exactly
+    // as the eye reads the page.
+    const sibs = metricSiblings(
+      [section(["a", "b"]), section(["c"])],
+      (key) => ({ id: `metric-detail:${key}`, kind: "metric-detail", payload: null }),
+    );
+    expect(sibs.entries.map((e) => e.ref.id)).toEqual([
+      "metric-detail:a",
+      "metric-detail:b",
+      "metric-detail:c",
+    ]);
+    // Labels are the row titles — they feed the prev/next hover tooltips.
+    expect(sibs.entries.map((e) => e.label)).toEqual(["A", "B", "C"]);
+    expect(sibs.indexByKey.get("c")).toBe(2);
+  });
+
+  it("returns an empty chain for no sections", () => {
+    expect(metricSiblings([], () => ({ id: "x", kind: "metric-detail", payload: null })).entries).toEqual([]);
   });
 });

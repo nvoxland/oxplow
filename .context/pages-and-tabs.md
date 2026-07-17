@@ -489,6 +489,11 @@ Adopted lists:
 - `pages/DashboardPage.tsx` — `RowButton` now optionally takes
   `navRef` + `siblings` + `onNavigate`; the Planning dashboard wires
   ready / backlog / recent-notes lists.
+- `pages/RecordedMetricsPage.tsx` — each metric row passes the whole
+  page's rows flattened in visual order (`metricSiblings` in
+  `recordedMetricsRows.ts` — the chain continues across section
+  boundaries), so a drilled-into metric detail steps through the
+  metrics exactly as the page lists them (tsk119).
 
 `WorkGroupList` rows (Plan / Tasks / Backlog pages) intentionally do
 NOT adopt: clicking opens the edit modal, not a page. Sibling nav

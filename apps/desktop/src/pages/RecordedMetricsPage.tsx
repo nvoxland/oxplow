@@ -17,6 +17,7 @@ import {
 import { fileRef, metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
+import type { NavSiblings } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { buildMetricSections } from "./metricCategories.js";
 import { NewMetricBar } from "./NewMetricBar.js";
@@ -33,6 +34,7 @@ import {
   SHOW_MODES,
   type ShowMode,
   filterMetricRows,
+  metricSiblings,
 } from "./recordedMetricsRows.js";
 import {
   DEFAULT_LINE_STAT,
@@ -113,14 +115,16 @@ function RecordedRow({
   row,
   stat,
   onOpenPage,
+  siblings,
 }: {
   row: Row;
   stat: LineStat;
   onOpenPage?: (ref: TabRef) => void;
+  siblings?: NavSiblings;
 }) {
   const { def, latest, samples } = row;
   const color = def && latest ? statusColor(def, latest.value) : undefined;
-  const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage });
+  const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage, siblings });
   // The stat is computed over the SAME filtered samples the sparkline plots
   // (tsk82's invariant, generalized by tsk115): the number that terminates the
   // line always describes the line. `change` gets an explicit `+` and the
@@ -269,6 +273,10 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
     [viewRows],
   );
 
+  // The up/down sibling chain a drilled-into detail page steps through
+  // (tsk119): the rendered sections flattened in visual order.
+  const siblings = useMemo(() => metricSiblings(sections, (key) => metricRef(key)), [sections]);
+
   return (
     // The provider wraps the whole Page so its context reaches BOTH the details
     // rail (which holds the Expand/Collapse-all controls) and the body (which
@@ -400,7 +408,17 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                   </colgroup>
                   <tbody>
                     {group.entries.map((row) => (
-                      <RecordedRow key={row.key} row={row} stat={lineStat} onOpenPage={onOpenPage} />
+                      <RecordedRow
+                        key={row.key}
+                        row={row}
+                        stat={lineStat}
+                        onOpenPage={onOpenPage}
+                        siblings={{
+                          entries: siblings.entries,
+                          index: siblings.indexByKey.get(row.key) ?? 0,
+                          title: "Recorded Metrics",
+                        }}
+                      />
                     ))}
                   </tbody>
                 </table>
