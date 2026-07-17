@@ -19,10 +19,15 @@ use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
 
 fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
+    // Canonical fixed-width form (6-digit fraction), like fact_store — these
+    // strings are compared lexicographically by every `ORDER BY … _at`, and
+    // the `time` crate's trimmed RFC-3339 inverts same-second neighbors
+    // ("…20.5Z" > "…20.51Z"). V67 normalized the pre-existing rows (tsk107).
+    crate::database::canonical_ts(
+        serde_json::to_string(&ts)
+            .expect("Timestamp serializes to JSON")
+            .trim_matches('"'),
+    )
 }
 
 fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
@@ -1283,11 +1288,11 @@ impl SqliteSnapshotStore {
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
-            // Sort AFTER parsing: `snapshot.created_at` predates canonical_ts,
-            // so its TEXT values mix fraction widths and a lexicographic
-            // ORDER BY can invert same-second neighbors ("…20.5Z" > "…20.51Z")
-            // — and "oldest first" is load-bearing for the resolver's
-            // first-stamp-at-or-after search (tsk103 review).
+            // Belt-and-braces: writes are canonical and V67 normalized old
+            // rows (tsk107), so the SQL ORDER BY is chronological — but
+            // "oldest first" is load-bearing for the resolver's
+            // first-stamp-at-or-after search, so the parsed-value sort stays
+            // as insurance against any stray non-canonical value.
             .map(|mut rows| {
                 rows.sort_by_key(|r| (r.created_at, r.id));
                 rows
@@ -1771,6 +1776,20 @@ impl SqliteSnapshotStore {
 mod tests {
     use super::*;
     use oxplow_domain::ChangeStatus;
+
+    #[test]
+    fn timestamps_serialize_in_the_canonical_fixed_width_form() {
+        // tsk107. Every `ORDER BY … _at` in this store compares these strings
+        // lexicographically, and the trimmed RFC-3339 the `time` crate emits
+        // inverts same-second neighbors ("…20.5Z" > "…20.51Z"). A whole-second
+        // value is the deterministic trap: trimmed form has NO fraction.
+        assert_eq!(
+            ts_to_string(Timestamp::from_unix_ms(1_000)),
+            "1970-01-01T00:00:01.000000Z",
+            "fixed 6-digit fraction, always 27 chars"
+        );
+        assert_eq!(ts_to_string(Timestamp::from_unix_ms(1_500)).len(), 27);
+    }
 
     /// Seed a stream + snapshots + file_snapshot rows for diff tests.
     /// `rows`: (snapshot_id, path, blob_hash, oversize).
