@@ -77,6 +77,27 @@ export function isOffTarget(def: StatusSpec | null, value: number): boolean {
   return status === "warn" || status === "fail";
 }
 
+/** The color for a value judged against its target — the rendering half of
+ *  {@link metricStatus}. `undefined` when there's no threshold to judge by.
+ *
+ *  Lives here, next to the classifier, because more than one surface paints
+ *  this: the Recorded Metrics rows and the dashboard tiles' off-target
+ *  highlight (tsk149). Keeping the mapping in one place is the same rule the
+ *  classifier itself follows — a second copy would let two surfaces disagree
+ *  about what "off target" looks like. */
+export function metricStatusColor(def: StatusSpec, value: number): string | undefined {
+  switch (metricStatus(def, value)) {
+    case "ok":
+      return "var(--ok, #3fb950)";
+    case "fail":
+      return "var(--err, #f85149)";
+    case "warn":
+      return "var(--warn, #e5a50a)";
+    default:
+      return undefined;
+  }
+}
+
 /**
  * The sibling-navigation chain for the page's rows (tsk119): the rendered
  * sections flattened in render order, so the nav-bar up/down buttons on a

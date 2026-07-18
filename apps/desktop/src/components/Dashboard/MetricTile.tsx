@@ -27,6 +27,7 @@ import {
   latestValue,
   resolveTileWindow,
 } from "../../pages/customDashboardData.js";
+import { metricStatus, metricStatusColor } from "../../pages/recordedMetricsRows.js";
 import type { MenuItem } from "../../menu.js";
 import { Sparkline } from "../Sparkline.js";
 import { useContextMenu } from "../useRowContextMenu.js";
@@ -61,6 +62,9 @@ export function TileCard({
   onContextMenu,
   children,
   menu,
+  minHeight = 240,
+  alertColor,
+  alertLabel,
 }: {
   testId: string;
   title: string;
@@ -68,6 +72,14 @@ export function TileCard({
   onContextMenu?: (e: React.MouseEvent) => void;
   children: React.ReactNode;
   menu?: React.ReactNode;
+  /** Floor for the card. The grid's rows size to content (so a heading band
+   *  can be one line tall), so a chart tile asserts its own height here
+   *  rather than relying on `gridAutoRows` (tsk147). */
+  minHeight?: number;
+  /** When set, the card is off target: its border takes this color and a chip
+   *  reading {@link alertLabel} sits beside the title (tsk149). */
+  alertColor?: string;
+  alertLabel?: string;
 }) {
   return (
     <section
@@ -75,7 +87,7 @@ export function TileCard({
       onContextMenu={onContextMenu}
       style={{
         background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
+        border: `1px solid ${alertColor ?? "var(--border-subtle)"}`,
         borderRadius: 6,
         padding: 12,
         display: "flex",
@@ -83,29 +95,52 @@ export function TileCard({
         gap: 10,
         minWidth: 0,
         height: "100%",
+        minHeight,
       }}
     >
-      <button
-        type="button"
-        onClick={(e) => onTitleClick?.(e.metaKey || e.ctrlKey)}
-        onAuxClick={(e) => {
-          if (e.button === 1) onTitleClick?.(true);
-        }}
-        disabled={!onTitleClick}
-        title={onTitleClick ? "Open metric detail" : undefined}
-        style={{
-          all: "unset",
-          cursor: onTitleClick ? "pointer" : "default",
-          fontWeight: 600,
-          fontSize: "var(--text-base, 14px)",
-          color: "var(--text, #ddd)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {title}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <button
+          type="button"
+          onClick={(e) => onTitleClick?.(e.metaKey || e.ctrlKey)}
+          onAuxClick={(e) => {
+            if (e.button === 1) onTitleClick?.(true);
+          }}
+          disabled={!onTitleClick}
+          title={onTitleClick ? "Open metric detail" : undefined}
+          style={{
+            all: "unset",
+            cursor: onTitleClick ? "pointer" : "default",
+            fontWeight: 600,
+            fontSize: "var(--text-base, 14px)",
+            color: "var(--text, #ddd)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+          }}
+        >
+          {title}
+        </button>
+        {alertColor && alertLabel ? (
+          <span
+            data-testid="tile-off-target"
+            title="This metric is missing its target"
+            style={{
+              flexShrink: 0,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: alertColor,
+              border: `1px solid ${alertColor}`,
+              borderRadius: 4,
+              padding: "1px 5px",
+            }}
+          >
+            {alertLabel}
+          </span>
+        ) : null}
+      </div>
       {children}
       {menu}
     </section>
@@ -213,6 +248,18 @@ export function MetricTile({
     return filterByBranch(byRange, branch);
   }, [opts, dashboard, samples]);
 
+  // Off-target highlight (tsk149). Uses the project's ONE classifier
+  // (`metricStatus`) and its shared color mapping, so a tile can't disagree
+  // with the Recorded Metrics page or its Off-target filter about a verdict.
+  // Defaults on: it only fires for a metric that HAS a target and is missing
+  // it, so it stays silent for the many metrics with no target at all.
+  const alertEnabled = opts.alertOffTarget ?? true;
+  const currentValue = latestValue(windowed);
+  const status = def && currentValue != null ? metricStatus(def, currentValue) : "none";
+  const offTarget = alertEnabled && (status === "warn" || status === "fail");
+  const alertColor =
+    offTarget && def && currentValue != null ? metricStatusColor(def, currentValue) : undefined;
+
   const openDetail = (newTab?: boolean) => {
     if (metricKey && onOpenPage) onOpenPage(metricRef(metricKey), newTab ? { newTab: true } : undefined);
   };
@@ -234,13 +281,27 @@ export function MetricTile({
       id: "size",
       label: "Size",
       enabled: !!onConfigure,
-      submenu: (["small", "wide", "tall"] as const).map((s) => ({
+      submenu: (
+        [
+          ["small", "Small"],
+          ["wide", "Wide (2 columns)"],
+          ["tall", "Tall (2 rows)"],
+          ["full", "Full width"],
+        ] as const
+      ).map(([s, label]) => ({
         id: `size:${s}`,
-        label: s[0]!.toUpperCase() + s.slice(1),
+        label,
         enabled: true,
         checked: (opts.size ?? "small") === s,
         run: () => onConfigure?.({ size: s }),
       })),
+    },
+    {
+      id: "alert",
+      label: "Warn when off target",
+      enabled: !!onConfigure,
+      checked: alertEnabled,
+      run: () => onConfigure?.({ alertOffTarget: !alertEnabled }),
     },
     { id: "sep", label: "", enabled: false, separator: true },
     { id: "open", label: "Open metric detail", enabled: !!metricKey, run: () => openDetail() },
@@ -263,8 +324,11 @@ export function MetricTile({
       const delta = deltaVsFirst(windowed);
       const tone = delta != null ? deltaTone(delta, def.direction) : "neutral";
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }} data-testid="metric-tile-number">
-          <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1 }}>
+        <div
+          style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}
+          data-testid="metric-tile-number"
+        >
+          <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1, color: alertColor }}>
             {value != null ? fmt(value) : "—"}
             {def.unit ? <span style={{ fontSize: 15, opacity: 0.6, marginLeft: 4 }}>{def.unit}</span> : null}
           </div>
@@ -285,7 +349,10 @@ export function MetricTile({
       const values = seriesPoints(windowed).map((p) => p.v);
       const value = latestValue(windowed);
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="metric-tile-sparkline">
+        <div
+          style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 8 }}
+          data-testid="metric-tile-sparkline"
+        >
           <div style={{ fontSize: 20, fontWeight: 600 }}>
             {value != null ? fmt(value) : "—"}
             {def.unit ? <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 4 }}>{def.unit}</span> : null}
@@ -344,12 +411,16 @@ export function MetricTile({
     const mode = opts.mode ?? "value";
     const points = transformSeries(seriesPoints(windowed), mode);
     return (
-      <div data-testid="metric-tile-line">
+      <div data-testid="metric-tile-line" style={{ flex: 1, display: "flex", alignItems: "center" }}>
         <TrendChart
           points={points}
           target={mode === "value" ? def.target : null}
           unit={def.unit}
           scale={opts.scale ?? "auto"}
+          // Sized near the tile's own width so the drawing renders ~1:1 and the
+          // 9px tick labels stay readable instead of scaling down (tsk144).
+          width={opts.size === "wide" ? 820 : 400}
+          height={opts.size === "tall" ? 380 : 200}
         />
       </div>
     );
@@ -362,6 +433,13 @@ export function MetricTile({
       onTitleClick={metricKey ? (newTab) => openDetail(newTab) : undefined}
       onContextMenu={(e) => ctxMenu.open(e, menuItems)}
       menu={ctxMenu.menu}
+      // `tall` asks for twice the height; with content-sized rows the tile
+      // states that directly rather than leaning on the row track.
+      minHeight={opts.size === "tall" ? 500 : 240}
+      alertColor={alertColor}
+      // Direction-agnostic wording: "below" would be wrong for a lower-better
+      // metric, where missing the target means being ABOVE it.
+      alertLabel={offTarget ? (status === "fail" ? "Failing" : "Off target") : undefined}
     >
       {body}
     </TileCard>

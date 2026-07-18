@@ -28,22 +28,27 @@ export interface TileOptions {
   scale?: ChartScale;
   /** Title override — else the metric's own title. */
   title?: string;
-  /** Grid footprint: `wide` spans 2 columns, `tall` spans 2 rows. Default
-   *  `small` (1×1). */
-  size?: "small" | "wide" | "tall";
+  /** Grid footprint: `wide` spans 2 columns, `tall` spans 2 rows, `full` spans
+   *  the whole grid width (the heading-band size text tiles default to).
+   *  Default `small` (1×1). */
+  size?: "small" | "wide" | "tall" | "full";
   /** Breakdown dimension for a `bar` tile (e.g. `package`, `language`). */
   dim?: string;
-  /** Markdown body for a `text` tile. */
+  /** Heading text for a `text` tile. Plain text, not markdown — see `TextTile`. */
   text?: string;
   /** Per-tile time-range override: a {@link RANGE_PRESETS} key, or `all` for no
    *  window. Absent → inherit the dashboard's filter. */
   range?: string;
   /** Per-tile branch override. Absent → inherit the dashboard's filter. */
   branch?: string;
+  /** Highlight the tile when the metric is missing its target. Absent → the
+   *  tile's default (on): it only shows for a metric that *has* a target and is
+   *  missing it, so it's never noise for target-less metrics. */
+  alertOffTarget?: boolean;
 }
 
 const VIZ = new Set<TileOptions["viz"]>(["line", "number", "sparkline", "bar"]);
-const SIZES = new Set<TileOptions["size"]>(["small", "wide", "tall"]);
+const SIZES = new Set<TileOptions["size"]>(["small", "wide", "tall", "full"]);
 const MODES = new Set<ChartMode>(["value", "cumulative", "change", "avg"]);
 const SCALES = new Set<ChartScale>(["auto", "zero"]);
 
@@ -79,12 +84,15 @@ export function parseTileOptions(json: string | null | undefined): TileOptions {
   if (typeof obj.text === "string") out.text = obj.text;
   if (typeof obj.range === "string") out.range = obj.range;
   if (typeof obj.branch === "string") out.branch = obj.branch;
+  if (typeof obj.alertOffTarget === "boolean") out.alertOffTarget = obj.alertOffTarget;
   return out;
 }
 
-/** Grid footprint for a tile size — `wide` spans two columns, `tall` two rows,
- *  anything else stays 1×1. Returned as a style fragment the grid item spreads. */
+/** Grid footprint for a tile size — `full` spans every column (a heading band),
+ *  `wide` two columns, `tall` two rows, anything else stays 1×1. Returned as a
+ *  style fragment the grid item spreads. */
 export function tileSpanStyle(size: TileOptions["size"]): { gridColumn?: string; gridRow?: string } {
+  if (size === "full") return { gridColumn: "1 / -1" };
   if (size === "wide") return { gridColumn: "span 2" };
   if (size === "tall") return { gridRow: "span 2" };
   return {};
@@ -126,48 +134,12 @@ export function deltaTone(delta: number, direction: string): "good" | "bad" | "n
   return "neutral";
 }
 
-// Category grouping for the add-metric picker — mirrors the Catalog page's
-// `category` axis (`operational` | `testing` | `static-quality` | `custom`;
-// null → "other"), in a fixed display order.
-const CATEGORY_ORDER: Array<{ key: string; label: string }> = [
-  { key: "operational", label: "Operational" },
-  { key: "testing", label: "Testing" },
-  { key: "static-quality", label: "Static quality" },
-  { key: "custom", label: "Custom" },
-  { key: "other", label: "Other" },
-];
-
-/** Build the right-click "Add metric" menu: one submenu per non-empty category
- *  (in {@link CATEGORY_ORDER}), each listing its metrics alphabetically by
- *  title. Picking a leaf calls `onPick(metricKey)`. Pure — the caller owns the
- *  actual `addDashboardItem` write. */
-export function buildAddMetricMenu(
-  catalog: MetricCatalogEntry[],
-  onPick: (metricKey: string) => void,
-): MenuItem[] {
-  const byCategory = new Map<string, MetricCatalogEntry[]>();
-  for (const e of catalog) {
-    const cat = e.category && CATEGORY_ORDER.some((c) => c.key === e.category) ? e.category : "other";
-    const bucket = byCategory.get(cat) ?? [];
-    bucket.push(e);
-    byCategory.set(cat, bucket);
-  }
-  const menu: MenuItem[] = [];
-  for (const { key, label } of CATEGORY_ORDER) {
-    const entries = byCategory.get(key);
-    if (!entries || entries.length === 0) continue;
-    const submenu = [...entries]
-      .sort((a, b) => a.title.localeCompare(b.title))
-      .map<MenuItem>((e) => ({
-        id: `add-metric:${e.key}`,
-        label: e.title,
-        enabled: true,
-        run: () => onPick(e.key),
-      }));
-    menu.push({ id: `add-metric-cat:${key}`, label, enabled: true, submenu });
-  }
-  return menu;
-}
+// NOTE: an earlier revision defined its own `CATEGORY_ORDER` + `buildAddMetricMenu`
+// here, which grouped metrics differently from the Recorded Metrics page. Metric
+// sectioning has exactly one home — `buildMetricSections` in
+// `pages/metricCategories.ts` — and the picker now goes through it via
+// `components/Dashboard/metricPicker.ts` (tsk145). Don't reintroduce a local
+// category table.
 
 /** Build the metric-detail "Add to dashboard ▾" menu: one entry per existing
  *  dashboard, then (when there are any) a separator and **New dashboard…**.

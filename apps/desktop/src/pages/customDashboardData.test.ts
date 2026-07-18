@@ -1,8 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
 
-import type { MetricCatalogEntry, SeriesPoint } from "../api.js";
+import type { SeriesPoint } from "../api.js";
 import {
-  buildAddMetricMenu,
   buildAddToDashboardMenu,
   deltaTone,
   latestValue,
@@ -10,21 +9,6 @@ import {
   resolveTileWindow,
   tileSpanStyle,
 } from "./customDashboardData.js";
-
-function entry(key: string, title: string, category: string | null): MetricCatalogEntry {
-  return {
-    key,
-    title,
-    kind: "gauge",
-    language: null,
-    scope: "built-in",
-    enabled: true,
-    target: null,
-    trigger: "onCapture",
-    toggleable: false,
-    category,
-  };
-}
 
 function sample(capturedAt: string, value: number): SeriesPoint {
   return {
@@ -107,12 +91,24 @@ describe("parseTileOptions — phase 4 fields", () => {
     expect(opts.viz).toBe("line");
     expect(opts.size).toBeUndefined();
   });
+
+  it("parses the off-target alert toggle, dropping non-booleans", () => {
+    expect(parseTileOptions('{"alertOffTarget":false}').alertOffTarget).toBe(false);
+    expect(parseTileOptions('{"alertOffTarget":true}').alertOffTarget).toBe(true);
+    // Absent means "unset" — the tile applies its own default.
+    expect(parseTileOptions("{}").alertOffTarget).toBeUndefined();
+    expect(parseTileOptions('{"alertOffTarget":"yes"}').alertOffTarget).toBeUndefined();
+  });
 });
 
 describe("tileSpanStyle", () => {
   it("maps wide to a column span and tall to a row span", () => {
     expect(tileSpanStyle("wide")).toEqual({ gridColumn: "span 2" });
     expect(tileSpanStyle("tall")).toEqual({ gridRow: "span 2" });
+  });
+
+  it("maps full to the whole grid width — the heading-band size", () => {
+    expect(tileSpanStyle("full")).toEqual({ gridColumn: "1 / -1" });
   });
 
   it("gives a small / absent size no span at all", () => {
@@ -168,48 +164,9 @@ describe("deltaTone", () => {
   });
 });
 
-describe("buildAddMetricMenu", () => {
-  const catalog: MetricCatalogEntry[] = [
-    entry("oxplow.coverage.line_pct", "Line coverage", "testing"),
-    entry("oxplow.tokens.total", "Tokens", "operational"),
-    entry("oxplow.complexity.avg", "Avg complexity", "static-quality"),
-    entry("my.custom.metric", "My metric", "custom"),
-    entry("weird.one", "Uncategorized", null),
-  ];
-
-  it("groups metrics into category submenus in a stable order", () => {
-    const menu = buildAddMetricMenu(catalog, () => {});
-    // One submenu per non-empty category, ordered operational → testing →
-    // static-quality → custom → other.
-    expect(menu.map((m) => m.label)).toEqual([
-      "Operational",
-      "Testing",
-      "Static quality",
-      "Custom",
-      "Other",
-    ]);
-    for (const group of menu) {
-      expect(group.submenu && group.submenu.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("sorts metrics alphabetically within a category and calls onPick with the key", () => {
-    const catalog2 = [
-      entry("b.key", "Beta", "testing"),
-      entry("a.key", "Alpha", "testing"),
-    ];
-    const onPick = mock((_key: string) => {});
-    const menu = buildAddMetricMenu(catalog2, onPick);
-    const testing = menu.find((m) => m.label === "Testing");
-    expect(testing?.submenu?.map((i) => i.label)).toEqual(["Alpha", "Beta"]);
-    testing?.submenu?.[0]?.run?.();
-    expect(onPick).toHaveBeenCalledWith("a.key");
-  });
-
-  it("returns an empty menu for an empty catalog", () => {
-    expect(buildAddMetricMenu([], () => {})).toEqual([]);
-  });
-});
+// NB: the add-metric picker's sectioning + search now live in
+// `components/Dashboard/metricPicker.ts` (backed by the canonical
+// `buildMetricSections`) and are covered by `metricPicker.test.ts`.
 
 describe("buildAddToDashboardMenu", () => {
   const dashboards = [

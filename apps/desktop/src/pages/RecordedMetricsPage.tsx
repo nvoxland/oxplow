@@ -36,6 +36,7 @@ import {
   filterMetricRows,
   isOffTarget,
   metricStatus,
+  metricStatusColor,
   metricSiblings,
 } from "./recordedMetricsRows.js";
 import {
@@ -65,21 +66,11 @@ const SAMPLE_LIMIT = 200;
 
 
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
- *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220).
- *  Delegates to the shared `metricStatus` classifier so the row color and the
- *  Off-target filter can't disagree (tsk121). */
-function statusColor(def: MetricSpec, value: number): string | undefined {
-  switch (metricStatus(def, value)) {
-    case "ok":
-      return "var(--ok, #3fb950)";
-    case "fail":
-      return "var(--err, #f85149)";
-    case "warn":
-      return "var(--warn, #e5a50a)";
-    default:
-      return undefined;
-  }
-}
+ *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). The
+ *  mapping now lives beside the `metricStatus` classifier it delegates to
+ *  (`recordedMetricsRows.ts`), so this page and the dashboard tiles' off-target
+ *  highlight paint the same verdict the same way (tsk149). */
+const statusColor = metricStatusColor;
 
 /** The color for a rendered CHANGE: green when the move improved the metric
  *  per its `direction`, red when it worsened it — the same semantics

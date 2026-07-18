@@ -65,6 +65,8 @@ export function TrendChart({
   domain,
   unit,
   scale = "auto",
+  width = 760,
+  height = 220,
 }: {
   points: ChartPoint[];
   target?: number | null;
@@ -76,6 +78,13 @@ export function TrendChart({
   unit?: string | null;
   /** Y-axis scaling: `auto` fits the data (default), `zero` forces through 0. */
   scale?: ChartScale;
+  /** SVG coordinate-space size. The chart scales to its container via the
+   *  viewBox, so these also set the **effective text scale**: a 760-wide chart
+   *  squeezed into a 310px dashboard tile shrinks its tick labels ~2.4× and
+   *  they stop being readable. Callers rendering small (tiles) pass their own
+   *  size so the drawing sits near 1:1 (tsk144). */
+  width?: number;
+  height?: number;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   // Drag selection in SVG-x coordinates (null = not dragging).
@@ -83,12 +92,14 @@ export function TrendChart({
   // Index of the point under the pointer (hover-to-inspect), or null.
   const [hoverI, setHoverI] = useState<number | null>(null);
 
-  const w = 760;
-  const h = 220;
-  const padL = 44;
-  const padR = 12;
+  const w = width;
+  const h = height;
+  // A compact chart can't afford the full y-label gutter or x-label strip.
+  const compact = w < 520;
+  const padL = compact ? 34 : 44;
+  const padR = compact ? 8 : 12;
   const padT = 10;
-  const padB = 36;
+  const padB = compact ? 24 : 36;
 
   if (pts.length < 2) {
     return <div style={{ opacity: 0.6, padding: 16 }}>Not enough samples to chart yet.</div>;
@@ -110,7 +121,10 @@ export function TrendChart({
   // window (e.g. 1.94–1.97) needs decimals a fixed `.toFixed(1)` would collapse
   // to "1.9"/"2.0".
   const tickDecimals = vRange >= 10 ? 0 : vRange >= 1 ? 1 : vRange >= 0.1 ? 2 : 3;
-  const fmtTick = (v: number) => (tickDecimals === 0 ? String(Math.round(v)) : v.toFixed(tickDecimals));
+  // NB: named `fmtYTick`, not `fmtTick` — an earlier revision called this
+  // `fmtTick` and shadowed the module-level *time* formatter of that name, so
+  // the x axis and the hover tooltip rendered raw epoch ms (tsk144).
+  const fmtYTick = (v: number) => (tickDecimals === 0 ? String(Math.round(v)) : v.toFixed(tickDecimals));
   const x = (t: number) => padL + ((t - tMin) / tRange) * (w - padL - padR);
   const y = (v: number) => h - padB - ((v - vMin) / vRange) * (h - padT - padB);
   // Inverse of `x`: SVG-x pixel → time, clamped to the plot area.
@@ -125,7 +139,9 @@ export function TrendChart({
     return (clientX - rect.left) * (w / rect.width);
   };
   const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  const ticks = [0, 1, 2, 3].map((i) => tMin + (i / 3) * tRange);
+  // Date labels are wide; a compact chart only has room for the two endpoints.
+  const tickCount = compact ? 2 : 4;
+  const ticks = Array.from({ length: tickCount }, (_, i) => tMin + (i / (tickCount - 1)) * tRange);
 
   // Nearest point (by x) to a given SVG-x — drives the hover tooltip.
   const nearestIndex = (svgX: number) => {
@@ -158,7 +174,16 @@ export function TrendChart({
       // tooltip near the edge scales with it (tsk300).
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="xMidYMid meet"
-      style={{ display: "block", width: "100%", height: "auto", maxWidth: w, cursor: "crosshair", userSelect: "none" }}
+      style={{
+        display: "block",
+        width: "100%",
+        height: "auto",
+        maxWidth: w,
+        // Only a range-selectable chart is draggable; a read-only tile chart
+        // shouldn't advertise a crosshair.
+        cursor: onSelectRange ? "crosshair" : "default",
+        userSelect: "none",
+      }}
       role="img"
       aria-label="metric trend"
       onPointerDown={
@@ -195,7 +220,7 @@ export function TrendChart({
         return (
           <g key={fr}>
             <text x={padL - 6} y={y(v) + 3} textAnchor="end" fontSize={9} fill="var(--text-muted, #888)">
-              {fmtTick(v)}
+              {fmtYTick(v)}
             </text>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="var(--border, #2a2a2a)" opacity={0.3} />
           </g>
