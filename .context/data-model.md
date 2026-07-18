@@ -24,6 +24,21 @@ to preserve and only a single instance existed.)
 > new migration — tests stay green, the app runs, the schema change just never
 > happens. Don't remove that build script.
 
+**DB dispatch is gated to the pool size (tsk131).** `Database::call`,
+`call_mut`, and `transaction` each take a `tokio::sync::Semaphore` permit —
+sized to the r2d2 pool (`max_size`) — *before* `spawn_blocking`, and hold it for
+the duration of the DB work. Without the gate every caller spawned a blocking
+thread regardless: the metric path fanned out to ~197 against 8 connections, so
+~189 OS threads (≈2 MB of stack each, ~400 MB, matching observed RSS growth)
+existed only to block inside `pool.get()`, and the profile counted **2,841
+blocking threads created**. Throughput is unchanged — only `max_size` tasks
+could ever hold a connection — the queue just moves to a cheap async wait.
+
+It cannot deadlock: a permit is held only across the `spawn_blocking`, and those
+closures are synchronous, so they can't await another gated call and permits
+never nest. The in-memory test pool is `max_size(1)`, so the whole suite runs
+through a **one-permit** gate — a standing stress of that property.
+
 **Transactions.** One user-visible action that spans multiple writes
 to the same DB must commit as ONE transaction. The pattern (see the
 `transactional-boundaries-design` wiki page): store write ops are

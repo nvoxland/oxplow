@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -8,6 +12,64 @@ use tracing::info;
 
 mod embedded {
     refinery::embed_migrations!("migrations");
+}
+
+/// Database-scoped memo cells for expensive read-only lookups whose
+/// invalidation the owning store controls.
+///
+/// It lives on [`Database`] rather than on the store that uses it because the
+/// app builds **several store instances over the same `Database`** — `Services`
+/// holds one `SqliteFactStore`, `MetricEngine` constructs another, and tests
+/// build more from the same `db.clone()`. A per-store cache would let a write
+/// through one instance leave another instance's copy stale, which is a
+/// correctness bug (a new producer's facts silently missing from reads), not
+/// just a missed optimization. Cloning a `Database` shares this, exactly as it
+/// already shares the pool.
+#[derive(Default)]
+pub struct QueryMemo {
+    /// `measure_id` → the producers that have emitted facts for it (tsk130).
+    producers_for_measure: Mutex<HashMap<i64, Vec<String>>>,
+    /// Bumped on every fact write. Read-side stores the generation they queried
+    /// under and refuse to cache a result computed across a write — see
+    /// [`Self::producers_put`].
+    facts_generation: AtomicU64,
+}
+
+impl QueryMemo {
+    /// A poisoned memo is not a reason to take the process down: it's a cache,
+    /// and the worst a poisoned map holds is a value we'd have recomputed.
+    fn producers(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Vec<String>>> {
+        self.producers_for_measure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Look up a memoized producer list, along with the generation it was read
+    /// under — pass that back to [`Self::producers_put`].
+    pub(crate) fn producers_get(&self, measure_id: i64) -> (u64, Option<Vec<String>>) {
+        let generation = self.facts_generation.load(Ordering::Acquire);
+        let hit = self.producers().get(&measure_id).cloned();
+        (generation, hit)
+    }
+
+    /// Memoize a producer list, but **only if no fact write landed since
+    /// `generation`**. Without that check a query that started before a write
+    /// and finished after it would install a result missing the new producer,
+    /// and nothing would clear it until the *next* write — a metric silently
+    /// blind to a producer.
+    pub(crate) fn producers_put(&self, measure_id: i64, generation: u64, value: &[String]) {
+        if self.facts_generation.load(Ordering::Acquire) != generation {
+            return;
+        }
+        self.producers().insert(measure_id, value.to_vec());
+    }
+
+    /// Called after facts are committed: bump the generation (so an in-flight
+    /// read declines to cache) and drop what's memoized.
+    pub(crate) fn invalidate_facts(&self) {
+        self.facts_generation.fetch_add(1, Ordering::AcqRel);
+        self.producers().clear();
+    }
 }
 
 /// Pooled SQLite connection used by every store impl in this crate.
@@ -19,6 +81,10 @@ mod embedded {
 #[derive(Clone)]
 pub struct Database {
     pool: Arc<Pool<SqliteConnectionManager>>,
+    memo: Arc<QueryMemo>,
+    /// Bounds how many DB tasks are dispatched to the blocking pool at once,
+    /// sized to the connection pool (tsk131).
+    gate: Arc<Semaphore>,
 }
 
 impl Database {
@@ -45,8 +111,11 @@ impl Database {
             .map_err(|e| DbInitError::Migration(e.to_string()))?;
         info!("oxplow db opened at {}", path.as_ref().display());
 
+        let permits = pool.max_size() as usize;
         Ok(Self {
             pool: Arc::new(pool),
+            memo: Arc::new(QueryMemo::default()),
+            gate: Arc::new(Semaphore::new(permits)),
         })
     }
 
@@ -67,9 +136,39 @@ impl Database {
         embedded::migrations::runner()
             .run(&mut *conn)
             .expect("in-memory migrations run");
+        let permits = pool.max_size() as usize;
         Self {
             pool: Arc::new(pool),
+            memo: Arc::new(QueryMemo::default()),
+            gate: Arc::new(Semaphore::new(permits)),
         }
+    }
+
+    /// Take a slot before dispatching DB work to the blocking pool.
+    ///
+    /// Sized to the connection pool: without it, `Database::call` spawns a
+    /// blocking thread per caller, and the metric path fanned out to ~197 of
+    /// them against 8 connections — ~189 OS threads (2 MB of stack each) whose
+    /// entire job was to block inside `pool.get()` (tsk131). Waiting here
+    /// instead makes the queue a cheap async wait. Throughput is unchanged:
+    /// only `max_size` tasks could ever hold a connection anyway.
+    ///
+    /// Safe against deadlock because a permit is only held across the
+    /// `spawn_blocking` itself, and the closures are synchronous — they cannot
+    /// await another gated call, so permits never nest.
+    async fn db_permit(&self) -> Result<OwnedSemaphorePermit, oxplow_domain::DomainError> {
+        self.gate
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| oxplow_domain::DomainError::Storage("db gate closed".into()))
+    }
+
+    /// The shared memo cells (see [`QueryMemo`]). Scoped to this `Database`,
+    /// so every store built over the same handle sees one another's
+    /// invalidations.
+    pub(crate) fn memo(&self) -> &QueryMemo {
+        &self.memo
     }
 
     /// Borrow a connection from the pool. Most stores should call this
@@ -122,10 +221,14 @@ impl Database {
         F: FnOnce(&Connection) -> rusqlite::Result<R> + Send + 'static,
         R: Send + 'static,
     {
+        let permit = self.db_permit().await?;
         let db = self.clone();
-        tokio::task::spawn_blocking(move || db.with_conn(f))
-            .await
-            .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit; // held for the duration of the DB work
+            db.with_conn(f)
+        })
+        .await
+        .map_err(|e| oxplow_domain::DomainError::Storage(format!("db task panicked: {e}")))?
     }
 
     /// Like [`Self::call`] but hands the closure a `&mut Connection`, for
@@ -138,8 +241,10 @@ impl Database {
         F: FnOnce(&mut Connection) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
         R: Send + 'static,
     {
+        let permit = self.db_permit().await?;
         let db = self.clone();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut conn = db
                 .conn()
                 .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
@@ -176,8 +281,10 @@ impl Database {
             std::time::Duration::from_millis(50),
             std::time::Duration::from_millis(200),
         ];
+        let permit = self.db_permit().await?;
         let db = self.clone();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut attempt: u32 = 0;
             loop {
                 attempt += 1;

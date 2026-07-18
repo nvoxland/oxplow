@@ -1678,6 +1678,36 @@ Feedback is **advisory — oxplow never blocks**. Two paths:
   one UserPromptSubmit `additionalContext`. Returns `None` (adds nothing) when no
   metric moved and no crossing is fresh, so steady-state turns stay quiet.
 
+## Performance: the `producers_for_measure` memo (tsk130)
+
+`SqliteFactStore::producers_for_measure` was the single biggest backend CPU sink
+in the tsk129 profile — **309 s inclusive, ~46% of all backend CPU**. Not a
+missing index (`idx_fact_measure_capture` covers it): a **call-volume** problem.
+It runs once per measure in `metric_cube::build_measure`, the cube read fold, and
+`metric_engine::partial_state_facts`, so every metric read recomputed an answer
+that only changes when new facts land.
+
+It is now **memoized by `measure_id`**, and two things about that are load-bearing:
+
+- **The memo lives on `Database` (`QueryMemo`), not on the store.** The app builds
+  *several* `SqliteFactStore` instances over one `db.clone()` — `Services` holds
+  one, `MetricEngine` constructs another, tests make more. A per-store cache
+  would let a write through one instance leave another's copy stale, so a new
+  producer's facts would be silently missing from reads until the next write.
+  `Database` is `Clone` over an `Arc`, so the memo is shared by exactly the
+  instances that share the data. `fact_store.rs` has a test that writes through a
+  *second* store and asserts the first sees it — a per-store cache fails it.
+- **Invalidation is generation-guarded.** `record_facts` (the only path that
+  inserts facts — one private `insert_fact` helper with one caller) bumps a
+  generation counter and clears the memo *after* the commit. The read side
+  records the generation it queried under and **declines to cache** if it changed,
+  because a query that started before a write and finished after it would
+  otherwise install a result missing the new producer, with nothing to clear it
+  until the next write.
+
+If you add another path that inserts into `fact`, it must call
+`db.memo().invalidate_facts()` after committing.
+
 ## Gotchas
 
 - **Provenance is the spine** (carried from collection.md): in-process/parsed →

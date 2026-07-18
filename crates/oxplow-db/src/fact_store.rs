@@ -1058,7 +1058,8 @@ impl SqliteFactStore {
         capture: NewMetricCapture,
         facts: Vec<NewFact>,
     ) -> Result<i64, DomainError> {
-        self.db
+        let result = self
+            .db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
                 // Idempotent ingestion (tsk14): if this capture carries a
@@ -1088,7 +1089,15 @@ impl SqliteFactStore {
                 tx.commit().map_err(map_sql_err)?;
                 Ok(capture_id)
             })
-            .await
+            .await;
+        // New facts can introduce a producer, which is the one thing that
+        // changes `producers_for_measure`. Invalidate AFTER the commit, and only
+        // on success — a rolled-back write changed nothing. The idempotent
+        // early-return above also lands here, where clearing is merely wasteful.
+        if result.is_ok() {
+            self.db.memo().invalidate_facts();
+        }
+        result
     }
 
     pub async fn get_capture(&self, capture_id: i64) -> Result<Option<MetricCapture>, DomainError> {
@@ -1250,8 +1259,25 @@ impl SqliteFactStore {
     /// from a DISTINCT over the measure's facts (hundreds of thousands). Same
     /// answer, ~4× cheaper on real data (8ms vs 32ms for `oxplow.test_case`) —
     /// and the builder runs this on every recording, so the constant matters.
+    ///
+    /// **Memoized** (tsk130). This was the single biggest backend CPU sink in
+    /// the tsk129 profile — 309 s inclusive, ~46% of all backend CPU — not for
+    /// want of an index (`idx_fact_measure_capture` covers it) but from call
+    /// volume: it runs once per measure inside the cube build, the cube read
+    /// fold, and the facts fallback, so every metric read pays it again for an
+    /// answer that only changes when new facts land.
+    ///
+    /// The memo lives on [`Database`] rather than on this struct because the
+    /// app builds several `SqliteFactStore`s over one `Database` — see
+    /// [`crate::database::QueryMemo`]. Invalidation is a single wholesale clear
+    /// in [`Self::record_facts`], which is the only path that inserts facts.
     pub async fn producers_for_measure(&self, measure_id: i64) -> Result<Vec<String>, DomainError> {
-        self.db
+        let (generation, hit) = self.db.memo().producers_get(measure_id);
+        if let Some(hit) = hit {
+            return Ok(hit);
+        }
+        let producers = self
+            .db
             .call(move |conn| {
                 let mut stmt = conn.prepare_cached(
                     "SELECT DISTINCT c.producer FROM metric_capture c
@@ -1261,7 +1287,12 @@ impl SqliteFactStore {
                 let rows = stmt.query_map(params![measure_id], |r| r.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
-            .await
+            .await?;
+        // Declines to cache if a fact write landed while the query ran.
+        self.db
+            .memo()
+            .producers_put(measure_id, generation, &producers);
+        Ok(producers)
     }
 
     /// How far the cube is built for `(measure, stream)` — the newest capture
@@ -4143,6 +4174,47 @@ mod tests {
         assert_eq!(rows[0].subject_ref.as_deref(), Some("src/a.rs::foo"));
         assert_eq!(rows[0].value, 14.0);
         assert_eq!(rows[1].value, 3.0);
+    }
+
+    #[tokio::test]
+    async fn producers_for_measure_memo_sees_a_write_through_another_store() {
+        // tsk130: `producers_for_measure` is memoized (it was ~46% of backend
+        // CPU). The memo lives on `Database`, not on the store, because the app
+        // builds SEVERAL stores over one Database — so a write through any of
+        // them has to invalidate what the others memoized. This is the test for
+        // that: a per-store cache passes the first two asserts and fails the
+        // last, silently hiding a producer from every read until the next write.
+        let store = fixture().await;
+        let m = measure(&store, "acme.hits").await;
+
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "alpha", "builtin"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.producers_for_measure(m).await.unwrap(), vec!["alpha"]);
+        // Served from the memo the second time — same answer.
+        assert_eq!(store.producers_for_measure(m).await.unwrap(), vec!["alpha"]);
+
+        let other = SqliteFactStore::new(store.db.clone());
+        other
+            .record_facts(
+                NewMetricCapture::done(1, "beta", "builtin"),
+                vec![NewFact::new(m, 2.0)],
+            )
+            .await
+            .unwrap();
+
+        let mut got = store.producers_for_measure(m).await.unwrap();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["alpha", "beta"],
+            "a fact write through another store over the same Database must \
+             invalidate the memo"
+        );
     }
 
     #[tokio::test]
