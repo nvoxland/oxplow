@@ -24,6 +24,7 @@ import {
   type ChartScale,
   RANGE_PRESETS,
   type TimeRange,
+  breakdownDimensions,
   fromLocalInput,
   inRangeStat,
   matchPresetKey,
@@ -722,23 +723,8 @@ export function KindDrillIn({
   }
 }
 
-/** The dimensions a per-file metric can be broken down by: always `package`
- *  (the file's directory), plus any per-file `dims_json` key the metric
- *  declares (e.g. `language`). Run/time dims that aren't a per-file grain
- *  (`git_version`, `branch`) are excluded. */
-function breakdownDimensions(def: MetricSpec): string[] {
-  const out = ["package"];
-  if (def.sliceable_dims_json) {
-    try {
-      for (const d of JSON.parse(def.sliceable_dims_json) as string[]) {
-        if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return out;
-}
+// `breakdownDimensions` moved to `metricDetailData.ts` (tsk150) so the
+// dashboard's breakout picker reads the same rule this card does.
 
 /** Breakdown card: roll the metric's latest per-file values up by a chosen
  *  dimension (package / language / …) and render a horizontal bar list,

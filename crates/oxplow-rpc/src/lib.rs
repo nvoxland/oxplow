@@ -208,6 +208,8 @@ rpc_dispatch! {
     "get_dashboard" => commands::dashboards::get_dashboard { id: oxplow_domain::DashboardId },
     "create_dashboard" => commands::dashboards::create_dashboard { title: String },
     "rename_dashboard" => commands::dashboards::rename_dashboard { req: crate::commands::dashboards::RenameDashboardRequest },
+    "set_dashboard_settings" => commands::dashboards::set_dashboard_settings { req: crate::commands::dashboards::SetDashboardSettingsRequest },
+    "duplicate_dashboard" => commands::dashboards::duplicate_dashboard { req: crate::commands::dashboards::DuplicateDashboardRequest },
     "delete_dashboard" => commands::dashboards::delete_dashboard { id: oxplow_domain::DashboardId },
     "add_dashboard_item" => commands::dashboards::add_dashboard_item { req: crate::commands::dashboards::AddDashboardItemRequest },
     "update_dashboard_item" => commands::dashboards::update_dashboard_item { req: crate::commands::dashboards::UpdateDashboardItemRequest },

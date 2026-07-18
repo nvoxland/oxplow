@@ -3,9 +3,12 @@ import { describe, expect, it, mock } from "bun:test";
 import type { SeriesPoint } from "../api.js";
 import {
   buildAddToDashboardMenu,
+  dashboardBreakoutDims,
   deltaTone,
+  parseDashboardSettings,
   latestValue,
   parseTileOptions,
+  resolveGroupFilter,
   resolveTileWindow,
   tileSpanStyle,
 } from "./customDashboardData.js";
@@ -144,6 +147,101 @@ describe("resolveTileWindow", () => {
     expect(resolveTileWindow({ branch: "feature" }, { range: null, branch: "main" }, now).branch).toBe(
       "feature",
     );
+  });
+});
+
+describe("dashboardBreakoutDims", () => {
+  const spec = (key: string, dims: string[] | null) =>
+    ({ key, sliceable_dims_json: dims ? JSON.stringify(dims) : null }) as unknown as Parameters<
+      typeof dashboardBreakoutDims
+    >[0][number];
+
+  it("unions the dimensions across every tile's metric, sorted", () => {
+    const dims = dashboardBreakoutDims([
+      spec("a", ["language"]),
+      spec("b", ["team", "language"]),
+      spec("c", null),
+    ]);
+    // `package` is always available; the declared dims join it, de-duped.
+    expect(dims).toEqual(["language", "package", "team"]);
+  });
+
+  it("excludes run/time dims that aren't a per-file grain", () => {
+    const dims = dashboardBreakoutDims([spec("a", ["branch", "git_version", "language"])]);
+    expect(dims).not.toContain("branch");
+    expect(dims).not.toContain("git_version");
+    expect(dims).toContain("language");
+  });
+
+  it("returns just package when no metric declares extra dims, and nothing for no metrics", () => {
+    expect(dashboardBreakoutDims([spec("a", null)])).toEqual(["package"]);
+    expect(dashboardBreakoutDims([])).toEqual([]);
+  });
+});
+
+describe("parseDashboardSettings", () => {
+  it("returns an empty object for null / blank / malformed JSON", () => {
+    expect(parseDashboardSettings(null)).toEqual({});
+    expect(parseDashboardSettings("")).toEqual({});
+    expect(parseDashboardSettings("{nope")).toEqual({});
+    expect(parseDashboardSettings("7")).toEqual({});
+  });
+
+  it("parses a saved view", () => {
+    expect(
+      parseDashboardSettings('{"range":"7d","branch":"main","filterDim":"package","filterValue":"core"}'),
+    ).toEqual({ range: "7d", branch: "main", filterDim: "package", filterValue: "core" });
+  });
+
+  it("drops non-string fields rather than seeding the filter row with junk", () => {
+    expect(parseDashboardSettings('{"range":5,"branch":true,"filterDim":{},"filterValue":[]}')).toEqual({});
+  });
+});
+
+describe("resolveGroupFilter", () => {
+  const groups = (values: string[], loaded = true) => ({ loaded, values });
+
+  it("is inactive when no dimension is selected", () => {
+    expect(resolveGroupFilter(null, null, ["package"], groups(["a"]))).toEqual({
+      filtered: false,
+      notApplicable: false,
+    });
+  });
+
+  it("is inactive (not dimmed) when a dimension is chosen but no value yet", () => {
+    // The tile keeps showing everything until the user narrows to a value.
+    expect(resolveGroupFilter("package", null, ["package"], groups(["a"]))).toEqual({
+      filtered: false,
+      notApplicable: false,
+    });
+  });
+
+  it("filters when the metric declares the dimension and has that value", () => {
+    expect(resolveGroupFilter("package", "core", ["package"], groups(["core", "ui"]))).toEqual({
+      filtered: true,
+      notApplicable: false,
+    });
+  });
+
+  it("is not-applicable when the metric doesn't declare the dimension", () => {
+    expect(resolveGroupFilter("language", "rust", ["package"], groups([]))).toEqual({
+      filtered: false,
+      notApplicable: true,
+    });
+  });
+
+  it("is not-applicable when the metric declares the dimension but has no data for that value", () => {
+    expect(resolveGroupFilter("package", "core", ["package"], groups(["ui", "api"]))).toEqual({
+      filtered: false,
+      notApplicable: true,
+    });
+  });
+
+  it("does not flash not-applicable while the groups are still loading", () => {
+    expect(resolveGroupFilter("package", "core", ["package"], groups([], false))).toEqual({
+      filtered: true,
+      notApplicable: false,
+    });
   });
 });
 

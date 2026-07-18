@@ -42,8 +42,59 @@ pub struct RenameDashboardRequest {
     pub title: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DuplicateDashboardRequest {
+    /// Dashboard to copy.
+    pub id: DashboardId,
+    /// Title for the copy.
+    pub title: String,
+    /// Saved view for the copy — the caller's current filter row.
+    #[serde(rename = "settingsJson")]
+    pub settings_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SetDashboardSettingsRequest {
+    pub id: DashboardId,
+    /// Opaque saved-view blob; `None` clears it.
+    #[serde(rename = "settingsJson")]
+    pub settings_json: Option<String>,
+}
+
 pub async fn rename_dashboard(svc: &Services, req: RenameDashboardRequest) -> Result<(), IpcError> {
     svc.dashboard_store.rename(req.id, req.title).await?;
+    svc.events.emit(OxplowEvent::DashboardsChanged);
+    Ok(())
+}
+
+/// "Save as": copy a dashboard (tiles and all) under a new title, with the
+/// caller's current filter row as the copy's saved view. `None` if the source is
+/// gone. One transaction in the store, so one event rather than one per tile.
+pub async fn duplicate_dashboard(
+    svc: &Services,
+    req: DuplicateDashboardRequest,
+) -> Result<Option<Dashboard>, IpcError> {
+    let Some(new_id) = svc
+        .dashboard_store
+        .duplicate(req.id, req.title, req.settings_json)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let created = svc.dashboard_store.get(new_id).await?.map(|d| d.dashboard);
+    svc.events.emit(OxplowEvent::DashboardsChanged);
+    Ok(created)
+}
+
+/// Save (or clear) the dashboard's default view — the filter row's state,
+/// restored the next time it's opened (tsk151).
+pub async fn set_dashboard_settings(
+    svc: &Services,
+    req: SetDashboardSettingsRequest,
+) -> Result<(), IpcError> {
+    svc.dashboard_store
+        .set_settings(req.id, req.settings_json)
+        .await?;
     svc.events.emit(OxplowEvent::DashboardsChanged);
     Ok(())
 }

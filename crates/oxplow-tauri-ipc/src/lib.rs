@@ -70,6 +70,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::dashboards::get_dashboard,
             commands::dashboards::create_dashboard,
             commands::dashboards::rename_dashboard,
+            commands::dashboards::set_dashboard_settings,
+            commands::dashboards::duplicate_dashboard,
             commands::dashboards::delete_dashboard,
             commands::dashboards::add_dashboard_item,
             commands::dashboards::update_dashboard_item,

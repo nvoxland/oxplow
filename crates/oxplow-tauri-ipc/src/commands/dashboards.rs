@@ -6,8 +6,8 @@ use oxplow_db::{Dashboard, DashboardWithItems};
 use oxplow_domain::{DashboardId, DashboardItemId};
 
 pub use oxplow_rpc::commands::dashboards::{
-    AddDashboardItemRequest, RenameDashboardRequest, ReorderDashboardItemsRequest,
-    UpdateDashboardItemRequest,
+    AddDashboardItemRequest, DuplicateDashboardRequest, RenameDashboardRequest,
+    ReorderDashboardItemsRequest, SetDashboardSettingsRequest, UpdateDashboardItemRequest,
 };
 
 use crate::error::IpcError;
@@ -46,6 +46,24 @@ pub async fn rename_dashboard(
     req: RenameDashboardRequest,
 ) -> Result<(), IpcError> {
     oxplow_rpc::commands::dashboards::rename_dashboard(&state, req).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_dashboard_settings(
+    state: tauri::State<'_, AppState>,
+    req: SetDashboardSettingsRequest,
+) -> Result<(), IpcError> {
+    oxplow_rpc::commands::dashboards::set_dashboard_settings(&state, req).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn duplicate_dashboard(
+    state: tauri::State<'_, AppState>,
+    req: DuplicateDashboardRequest,
+) -> Result<Option<Dashboard>, IpcError> {
+    oxplow_rpc::commands::dashboards::duplicate_dashboard(&state, req).await
 }
 
 #[tauri::command]

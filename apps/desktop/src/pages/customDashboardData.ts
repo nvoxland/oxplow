@@ -1,9 +1,10 @@
-import type { Dashboard, MetricCatalogEntry, SeriesPoint } from "../api.js";
+import type { Dashboard, MetricCatalogEntry, MetricSpec, SeriesPoint } from "../api.js";
 import type { MenuItem } from "../menu.js";
 import {
   type ChartMode,
   type ChartScale,
   type TimeRange,
+  breakdownDimensions,
   rangeFromPreset,
   seriesPoints,
 } from "./metricDetailData.js";
@@ -121,6 +122,84 @@ export function resolveTileWindow(
 export function latestValue(samples: SeriesPoint[]): number | null {
   const pts = seriesPoints(samples);
   return pts.length ? pts[pts.length - 1]!.v : null;
+}
+
+/** A dashboard's saved default **view** — what the filter row was set to when
+ *  the user hit Save, restored the next time the dashboard is opened (tsk151).
+ *  Persisted as the dashboard row's opaque `settings_json`. */
+export interface DashboardSettings {
+  /** {@link RANGE_PRESETS} key, or `all`. */
+  range?: string;
+  branch?: string;
+  filterDim?: string;
+  filterValue?: string;
+}
+
+/** Parse a dashboard's `settings_json`, tolerating null / blank / malformed
+ *  JSON (→ `{}`) and dropping any non-string field. A bad blob means "no saved
+ *  view" rather than seeding the filter row with junk — same defensive posture
+ *  as {@link parseTileOptions}. */
+export function parseDashboardSettings(json: string | null | undefined): DashboardSettings {
+  if (!json) return {};
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return {};
+  }
+  if (typeof raw !== "object" || raw === null) return {};
+  const obj = raw as Record<string, unknown>;
+  const out: DashboardSettings = {};
+  if (typeof obj.range === "string") out.range = obj.range;
+  if (typeof obj.branch === "string") out.branch = obj.branch;
+  if (typeof obj.filterDim === "string") out.filterDim = obj.filterDim;
+  if (typeof obj.filterValue === "string") out.filterValue = obj.filterValue;
+  return out;
+}
+
+/** The dimensions a whole dashboard can break out by: the sorted union of what
+ *  each tile's metric is sliceable by. A dimension only *some* metrics declare
+ *  still appears — tiles that lack it render normally, greyed, rather than
+ *  disappearing (tsk150). Delegates per-metric to the canonical
+ *  {@link breakdownDimensions} so the dashboard and the metric detail page can't
+ *  disagree about what a metric slices by. */
+export function dashboardBreakoutDims(defs: MetricSpec[]): string[] {
+  const all = new Set<string>();
+  for (const def of defs) for (const d of breakdownDimensions(def)) all.add(d);
+  return [...all].sort();
+}
+
+/**
+ * Whether a tile's series is scoped to the dashboard's selected dimension value
+ * — e.g. "show me everything for package `crates/oxplow-app`" (tsk150).
+ *
+ * The tile keeps its own visualization either way; this only decides which
+ * points feed it. Same shape as the metric-detail page's breakdown-row click,
+ * which charts one group's series.
+ *
+ * `notApplicable` (→ render normally, dimmed) has **two** causes:
+ *  1. the metric's spec doesn't declare the dimension at all;
+ *  2. it declares it but has no data under the selected value — a metric can
+ *     be sliceable by `package` and simply have no facts in *that* package.
+ *
+ * A dimension chosen with **no value yet** is not a filter and not dimmed: the
+ * tile shows everything until the user narrows it. While groups are still
+ * loading the tile is treated as filtered, so it doesn't flash dimmed on the
+ * way to its scoped data.
+ */
+export function resolveGroupFilter(
+  dim: string | null | undefined,
+  value: string | null | undefined,
+  dims: string[],
+  groups: { loaded: boolean; values: string[] },
+): { filtered: boolean; notApplicable: boolean } {
+  if (!dim) return { filtered: false, notApplicable: false };
+  if (!dims.includes(dim)) return { filtered: false, notApplicable: true };
+  if (!value) return { filtered: false, notApplicable: false };
+  if (groups.loaded && !groups.values.includes(value)) {
+    return { filtered: false, notApplicable: true };
+  }
+  return { filtered: true, notApplicable: false };
 }
 
 /** Whether a change is good / bad / neutral given the metric's preferred

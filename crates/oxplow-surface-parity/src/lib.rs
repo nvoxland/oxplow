@@ -315,6 +315,8 @@ pub const MANIFEST: &[Capability] = &[
     both("create_dashboard"),
     both("add_dashboard_item"),
     ui("rename_dashboard"),
+    ui("set_dashboard_settings"),
+    ui("duplicate_dashboard"),
     ui("delete_dashboard"),
     ui("update_dashboard_item"),
     ui("remove_dashboard_item"),

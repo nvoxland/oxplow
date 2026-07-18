@@ -1,4 +1,4 @@
-import type { SeriesPoint } from "../api.js";
+import type { MetricSpec, SeriesPoint } from "../api.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
@@ -149,6 +149,32 @@ export function transformSeries(points: ChartPoint[], mode: ChartMode): ChartPoi
     default:
       return points;
   }
+}
+
+/**
+ * The dimensions a per-file metric can be broken down by: always `package`
+ * (the file's directory), plus any per-file `dims_json` key the metric declares
+ * (e.g. `language`). Run/time dims that aren't a per-file grain (`git_version`,
+ * `branch`) are excluded.
+ *
+ * Lives here rather than inside `MetricDetail.tsx` (where it started) because
+ * more than one surface asks the question: the detail page's breakdown card and
+ * the dashboard's breakout picker, which needs to know whether a given tile can
+ * participate in a chosen dimension (tsk150). One rule, so the two can't
+ * disagree about what a metric is sliceable by.
+ */
+export function breakdownDimensions(def: MetricSpec): string[] {
+  const out = ["package"];
+  if (def.sliceable_dims_json) {
+    try {
+      for (const d of JSON.parse(def.sliceable_dims_json) as string[]) {
+        if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
 }
 
 /** Distinct non-null branches present in the series points, sorted. */

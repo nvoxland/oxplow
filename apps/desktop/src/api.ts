@@ -1706,6 +1706,20 @@ export async function createDashboard(title: string): Promise<Dashboard> {
 export async function renameDashboard(id: string, title: string): Promise<void> {
   unwrap(await commands.renameDashboard({ id, title }));
 }
+/** Save (or clear, with null) a dashboard's default view — the filter row's
+ *  state, restored the next time it's opened. */
+export async function setDashboardSettings(id: string, settingsJson: string | null): Promise<void> {
+  unwrap(await commands.setDashboardSettings({ id, settingsJson }));
+}
+/** "Save as": copy a dashboard (tiles and all) under a new title, with
+ *  `settingsJson` as the copy's saved view. Null if the source is gone. */
+export async function duplicateDashboard(
+  id: string,
+  title: string,
+  settingsJson: string | null,
+): Promise<Dashboard | null> {
+  return unwrap(await commands.duplicateDashboard({ id, title, settingsJson }));
+}
 export async function deleteDashboard(id: string): Promise<void> {
   unwrap(await commands.deleteDashboard(id));
 }

@@ -166,6 +166,15 @@ export const commands = {
 } | null, IpcError>(__TAURI_INVOKE("get_dashboard", { id })),
 	createDashboard: (title: string) => typedError<Dashboard, IpcError>(__TAURI_INVOKE("create_dashboard", { title })),
 	renameDashboard: (req: RenameDashboardRequest) => typedError<null, IpcError>(__TAURI_INVOKE("rename_dashboard", { req })),
+	setDashboardSettings: (req: SetDashboardSettingsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("set_dashboard_settings", { req })),
+	duplicateDashboard: (req: DuplicateDashboardRequest) => typedError<{
+	id: DashboardId,
+	title: string,
+	sort_index: number,
+	settings_json: string | null,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+} | null, IpcError>(__TAURI_INVOKE("duplicate_dashboard", { req })),
 	deleteDashboard: (id: DashboardId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_dashboard", { id })),
 	addDashboardItem: (req: AddDashboardItemRequest) => typedError<DashboardItemId, IpcError>(__TAURI_INVOKE("add_dashboard_item", { req })),
 	updateDashboardItem: (req: UpdateDashboardItemRequest) => typedError<null, IpcError>(__TAURI_INVOKE("update_dashboard_item", { req })),
@@ -1373,11 +1382,19 @@ export type CreateWorktreeRequest = {
 	branchSource: string,
 };
 
-// One dashboard (a named grid of tiles). Project-global.
+/**
+ *  One dashboard (a named grid of tiles). Project-global.
+ * 
+ *  `settings_json` is the saved default **view** — the filter row's range,
+ *  branch, and dimension filter — restored when the dashboard is next opened.
+ *  Opaque JSON for the same reason `DashboardItem::options_json` is: the filter
+ *  row will grow, and a blob grows without a migration. `None` = no saved view.
+ */
 export type Dashboard = {
 	id: DashboardId,
 	title: string,
 	sort_index: number,
+	settings_json: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 };
@@ -1458,6 +1475,15 @@ export type DimensionEntry = {
 	 *  `dims_json`, promoted only when hot.
 	 */
 	promote?: boolean,
+};
+
+export type DuplicateDashboardRequest = {
+	// Dashboard to copy.
+	id: DashboardId,
+	// Title for the copy.
+	title: string,
+	// Saved view for the copy — the caller's current filter row.
+	settingsJson: string | null,
 };
 
 /**
@@ -2222,7 +2248,7 @@ export type MetricEntry = {
 	 *  `event` (default `gauge`).
 	 */
 	displayKind?: string | null,
-	// Catalog grouping: `operational` | `testing` | `static-quality` | `custom`.
+	// Catalog grouping: `operational` | `testing` | `coverage` | `static-quality` | `custom`.
 	category?: string | null,
 	// Language this metric measures (e.g. `rust`), for the catalog filter.
 	language?: string | null,
@@ -2714,6 +2740,12 @@ export type SeriesPoint = {
 	git_version: string | null,
 	// The capture's collector source (e.g. `nextest`, `agent-reported`).
 	source: string | null,
+};
+
+export type SetDashboardSettingsRequest = {
+	id: DashboardId,
+	// Opaque saved-view blob; `None` clears it.
+	settingsJson: string | null,
 };
 
 export type SetStreamPromptRequest = {

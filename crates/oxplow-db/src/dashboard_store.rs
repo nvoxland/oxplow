@@ -25,11 +25,17 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
 }
 
 /// One dashboard (a named grid of tiles). Project-global.
+///
+/// `settings_json` is the saved default **view** — the filter row's range,
+/// branch, and dimension filter — restored when the dashboard is next opened.
+/// Opaque JSON for the same reason `DashboardItem::options_json` is: the filter
+/// row will grow, and a blob grows without a migration. `None` = no saved view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct Dashboard {
     pub id: DashboardId,
     pub title: String,
     pub sort_index: i64,
+    pub settings_json: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -56,7 +62,7 @@ pub struct DashboardWithItems {
     pub items: Vec<DashboardItem>,
 }
 
-const DASH_COLS: &str = "id, title, sort_index, created_at, updated_at";
+const DASH_COLS: &str = "id, title, sort_index, settings_json, created_at, updated_at";
 const ITEM_COLS: &str =
     "id, dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at";
 
@@ -68,8 +74,9 @@ fn row_to_dashboard(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dashboard> {
         id: DashboardId::new(row.get(0)?),
         title: row.get(1)?,
         sort_index: row.get(2)?,
-        created_at: string_to_ts(&row.get::<_, String>(3)?).map_err(map_err)?,
-        updated_at: string_to_ts(&row.get::<_, String>(4)?).map_err(map_err)?,
+        settings_json: row.get(3)?,
+        created_at: string_to_ts(&row.get::<_, String>(4)?).map_err(map_err)?,
+        updated_at: string_to_ts(&row.get::<_, String>(5)?).map_err(map_err)?,
     })
 }
 
@@ -183,6 +190,87 @@ impl SqliteDashboardStore {
                 conn.execute(
                     "UPDATE dashboard SET title = ?2, updated_at = ?3 WHERE id = ?1",
                     params![id_val, title, now],
+                )
+                .map_err(map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Copy a dashboard under a new title — the "Save as" action. Tiles are
+    /// duplicated in order (kind / metric_key / options_json preserved) and the
+    /// caller supplies the new dashboard's saved view, which is the *current*
+    /// filter row rather than the source's stored one.
+    ///
+    /// One transaction, so a failure part-way through can't leave a half-copied
+    /// dashboard behind, and one `DashboardsChanged` instead of one per tile.
+    /// `None` when the source no longer exists.
+    pub async fn duplicate(
+        &self,
+        source: DashboardId,
+        title: String,
+        settings_json: Option<String>,
+    ) -> Result<Option<DashboardId>, DomainError> {
+        let src = source.value();
+        self.db
+            .call_mut(move |conn| {
+                let now = ts_to_string(Timestamp::now());
+                let tx = conn.transaction().map_err(map_sql_err)?;
+                let exists: i64 = tx
+                    .query_row(
+                        "SELECT COUNT(*) FROM dashboard WHERE id = ?1",
+                        params![src],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                if exists == 0 {
+                    return Ok(None);
+                }
+                let next: i64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM dashboard",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO dashboard (title, sort_index, settings_json, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4)",
+                    params![title, next, settings_json, now],
+                )
+                .map_err(map_sql_err)?;
+                let new_id = tx.last_insert_rowid();
+                // Copy tiles in the source's display order; the INSERT ... SELECT
+                // keeps sort_index as-is so the copy lays out identically.
+                tx.execute(
+                    "INSERT INTO dashboard_item
+                       (dashboard_id, sort_index, kind, metric_key, options_json, created_at, updated_at)
+                     SELECT ?1, sort_index, kind, metric_key, options_json, ?2, ?2
+                       FROM dashboard_item WHERE dashboard_id = ?3
+                      ORDER BY sort_index ASC, id ASC",
+                    params![new_id, now, src],
+                )
+                .map_err(map_sql_err)?;
+                tx.commit().map_err(map_sql_err)?;
+                Ok(Some(DashboardId::new(new_id)))
+            })
+            .await
+    }
+
+    /// Save (or clear, with `None`) the dashboard's default view — the filter
+    /// row's state, restored the next time it's opened.
+    pub async fn set_settings(
+        &self,
+        id: DashboardId,
+        settings_json: Option<String>,
+    ) -> Result<(), DomainError> {
+        let id_val = id.value();
+        self.db
+            .call_mut(move |conn| {
+                let now = ts_to_string(Timestamp::now());
+                conn.execute(
+                    "UPDATE dashboard SET settings_json = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![id_val, settings_json, now],
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -326,6 +414,106 @@ mod tests {
         assert_eq!(got.dashboard.id, a);
         assert!(got.items.is_empty());
         assert!(s.get(DashboardId::new(999)).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn duplicate_copies_tiles_and_leaves_the_source_alone() {
+        let s = store();
+        let src = s.create("Coverage".into()).await.unwrap();
+        s.add_item(src, metric_tile("a.one")).await.unwrap();
+        s.add_item(src, metric_tile("b.two")).await.unwrap();
+        s.set_settings(src, Some(r#"{"range":"7d"}"#.into()))
+            .await
+            .unwrap();
+
+        let copy = s
+            .duplicate(
+                src,
+                "Coverage (copy)".into(),
+                Some(r#"{"range":"1d"}"#.into()),
+            )
+            .await
+            .unwrap()
+            .expect("source exists");
+        assert_ne!(copy, src);
+
+        let got = s.get(copy).await.unwrap().unwrap();
+        assert_eq!(got.dashboard.title, "Coverage (copy)");
+        // The copy takes the settings it was GIVEN (the current filter row),
+        // not the source's stored view.
+        assert_eq!(
+            got.dashboard.settings_json.as_deref(),
+            Some(r#"{"range":"1d"}"#)
+        );
+        // Tiles copied, in order.
+        assert_eq!(
+            got.items
+                .iter()
+                .map(|i| i.metric_key.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("a.one"), Some("b.two")]
+        );
+        // Distinct rows, not shared with the source.
+        let source_items = s.get(src).await.unwrap().unwrap().items;
+        assert_eq!(source_items.len(), 2);
+        for item in &got.items {
+            assert!(source_items.iter().all(|s| s.id != item.id));
+        }
+        // And the source keeps its own saved view.
+        assert_eq!(
+            s.get(src)
+                .await
+                .unwrap()
+                .unwrap()
+                .dashboard
+                .settings_json
+                .as_deref(),
+            Some(r#"{"range":"7d"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn duplicate_of_a_missing_dashboard_is_none() {
+        let s = store();
+        assert!(s
+            .duplicate(DashboardId::new(999), "Nope".into(), None)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn settings_round_trip_and_clear() {
+        let s = store();
+        let a = s.create("Coverage".into()).await.unwrap();
+        // A fresh dashboard has no saved view.
+        assert_eq!(
+            s.get(a).await.unwrap().unwrap().dashboard.settings_json,
+            None
+        );
+
+        s.set_settings(a, Some(r#"{"range":"7d","branch":"main"}"#.into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            s.get(a)
+                .await
+                .unwrap()
+                .unwrap()
+                .dashboard
+                .settings_json
+                .as_deref(),
+            Some(r#"{"range":"7d","branch":"main"}"#)
+        );
+        // The saved view also rides along on the list read.
+        assert!(s.list().await.unwrap()[0].settings_json.is_some());
+
+        // Passing None clears it back to "no saved view".
+        s.set_settings(a, None).await.unwrap();
+        assert_eq!(
+            s.get(a).await.unwrap().unwrap().dashboard.settings_json,
+            None
+        );
     }
 
     #[tokio::test]

@@ -14,7 +14,9 @@ one set per project, reachable from any stream/thread. The `dashboard` table has
 Two tables, mirroring the `comment` / `comment_message` two-table shape:
 
 - **`dashboard`** — `id` (PK AUTOINCREMENT), `title`, `sort_index` (dashboards
-  list in a chosen order), `created_at` / `updated_at`.
+  list in a chosen order), `settings_json` (`V71`; the **saved default view** —
+  the filter row's range/branch/dimension — opaque for the same reason
+  `options_json` is), `created_at` / `updated_at`.
 - **`dashboard_item`** — `id`, `dashboard_id` (FK `ON DELETE CASCADE`),
   `sort_index`, `kind` (`metric` | `text`), `metric_key` (null for text tiles),
   `options_json` (**opaque** per-tile blob: viz / mode / scale / size /
@@ -148,6 +150,65 @@ metrics never light up.
 > color and a filter can't disagree". `metricStatusColor` was **lifted out of**
 > `RecordedMetricsPage` (where it was private) rather than copied into the tile.
 > Same rule as metric sectioning: one classifier, one color mapping.
+
+**Dimension filter (tsk150)** — a **Filter by** dimension select plus a value
+select, scoping the whole dashboard to one slice: *"show me everything for
+package `crates/oxplow-app`"*. Tiles keep their own visualization — only the
+points feeding them change. This is the same move as the metric-detail page's
+breakdown-row click (tsk136), which charts one group's series.
+
+Dimension options are `dashboardBreakoutDims(defs)`: the sorted **union** of what
+every tile's metric is sliceable by (per-metric via the canonical
+`breakdownDimensions`, lifted out of `MetricDetail.tsx` into
+`metricDetailData.ts` so the dashboard and the detail page can't disagree). Value
+options are the **union the tiles report upward** (`onGroupValues`) once a
+dimension is chosen — the grouped fetch happens as soon as the *dimension* is
+picked, because its distinct groups are what populates the value list. Choosing a
+dimension alone is not yet a filter; tiles show everything until a value is
+picked. The dimension self-clears if the last tile supporting it is removed, and
+changing dimension resets the value.
+
+A tile that can't honour the scope keeps showing **all** of its data, struck
+through with a **corner-to-corner X** across the whole pane, plus a dashed card
+edge and a ⊘ badge whose tooltip explains why and what's shown instead. The X
+overlay is `pointerEvents: none` (so it never intercepts the title click or the
+right-click menu) and uses `vector-effect: non-scaling-stroke`, since its viewBox
+is stretched to a non-square card and the stroke would otherwise render uneven.
+
+Two earlier attempts at this marker are worth not repeating: fading the card to
+55% made the chart harder to read for no gain, and printing the reason as an
+inline chip tried to fit a package path into chip-sized space. The rule that
+emerged: **the chart stays fully legible, the marker carries the meaning, and the
+explanation lives in a tooltip** where it has room.
+
+That verdict is the unit-tested `resolveGroupFilter`, and it has **two** causes:
+the metric doesn't declare the dimension at all, or it declares it but has no
+data under the selected value — a metric can be sliceable by `package` and simply
+have no facts in *that* package. While groups are still loading the tile counts
+as filtered, so it doesn't flash the unscoped marker on the way to its data.
+
+**Saved view (tsk151)** — a **Save view** button at the end of the filter row
+writes the current range/branch/dimension/value to the dashboard's
+`settings_json` (`set_dashboard_settings`), and opening the dashboard seeds the
+filter row back from it via the pure `parseDashboardSettings`. Only *non-default*
+keys are written, so a saved view never pins a filter the user left alone.
+
+Beside it sits **Save Copy** (tsk152): one click calls `duplicate_dashboard`,
+which copies every tile in **one transaction** and carries the *current* filter
+row as the copy's saved view, names it `<title> (copy)`, and opens it — where
+the in-body H1 is already how a dashboard gets renamed. Deliberately two plain
+buttons rather than a split control with an inline rename field; that was tried
+first and read as fiddly for what is a one-click action. Composing the copy
+client-side from `create` + N × `add_item` would be non-atomic and would fire
+**N `DashboardsChanged` events**, each re-fetching every open dashboard page;
+the store op emits once.
+
+It lives in the **database, not `localStorage`**: dashboards are project-global
+and agent-readable over MCP, so a per-machine saved view would be invisible to
+both. The seeding is guarded by a `seededFor` ref keyed on the dashboard id —
+the same load runs on every `dashboardsChanged` (adding a tile, a rename, an
+agent write), and re-seeding there would yank the filters out from under a user
+who had since changed them.
 
 **Dashboard filter (tsk142)** — a range + branch control under the header that
 **every tile inherits**, via the pure `resolveTileWindow(opts, dashboard, now)`:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type DashboardWithItems,
@@ -6,12 +6,14 @@ import {
   type MetricSpec,
   addDashboardItem,
   deleteDashboard,
+  duplicateDashboard,
   getDashboard,
   listMetricCatalog,
   listMetricDefinitions,
   removeDashboardItem,
   renameDashboard,
   reorderDashboardItems,
+  setDashboardSettings,
   subscribeOxplowEvents,
   updateDashboardItem,
 } from "../api.js";
@@ -22,12 +24,19 @@ import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlineEdit } from "../components/InlineEdit.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { dashboardsRef } from "../tabs/pageRefs.js";
+import { customDashboardRef, dashboardsRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RANGE_PRESETS, rangeFromPreset } from "./metricDetailData.js";
-import { type TileOptions, parseTileOptions, tileSpanStyle } from "./customDashboardData.js";
+import {
+  type DashboardSettings,
+  type TileOptions,
+  dashboardBreakoutDims,
+  parseDashboardSettings,
+  parseTileOptions,
+  tileSpanStyle,
+} from "./customDashboardData.js";
 
 /** Drag payload for tile reordering — distinct from the rail's section MIME so
  *  a rail drag can never drop into the grid. */
@@ -79,6 +88,11 @@ export function CustomDashboardPage({
   const [rangeKey, setRangeKey] = useState("all");
   const [branch, setBranch] = useState<string | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
+  // Scope the whole dashboard to one dimension value (e.g. package = X).
+  // `filterDim` alone shows everything; picking a value narrows every tile.
+  const [filterDim, setFilterDim] = useState<string | null>(null);
+  const [filterValue, setFilterValue] = useState<string | null>(null);
+  const [groupValues, setGroupValues] = useState<string[]>([]);
   // Drag-reorder state: the tile being dragged + the slot it would land in.
   const [dragId, setDragId] = useState<string | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -87,6 +101,9 @@ export function CustomDashboardPage({
   const [overSide, setOverSide] = useState<"before" | "after">("before");
   // The add-metric picker's anchor, or null when closed.
   const [pickerAt, setPickerAt] = useState<{ x: number; y: number } | null>(null);
+  // Which dashboard's saved view we've already applied — see the load effect.
+  const seededFor = useRef<string | null>(null);
+  const [savedView, setSavedView] = useState(false);
 
   usePageTitle(data?.dashboard.title ?? "Dashboard");
 
@@ -103,9 +120,20 @@ export function CustomDashboardPage({
     };
     const refresh = () => {
       void getDashboard(dashboardId).then((d) => {
-        if (!cancelled) {
-          setData(d);
-          setLoading(false);
+        if (cancelled) return;
+        setData(d);
+        setLoading(false);
+        // Seed the filter row from the saved view ONCE per dashboard. This
+        // refresh also runs on every `dashboardsChanged` (adding a tile, a
+        // rename, an agent write), so re-seeding here would yank the filters
+        // out from under a user who has since changed them.
+        if (d?.dashboard && seededFor.current !== dashboardId) {
+          seededFor.current = dashboardId;
+          const saved = parseDashboardSettings(d.dashboard.settings_json);
+          if (saved.range) setRangeKey(saved.range);
+          if (saved.branch) setBranch(saved.branch);
+          if (saved.filterDim) setFilterDim(saved.filterDim);
+          if (saved.filterValue) setFilterValue(saved.filterValue);
         }
       });
     };
@@ -206,6 +234,48 @@ export function CustomDashboardPage({
     [dashboardId],
   );
 
+  /** The filter row as a saved-view blob. Only set keys are written, so a saved
+   *  view never pins a filter the user left at its default. */
+  const currentSettingsJson = useCallback((): string | null => {
+    const settings: DashboardSettings = {};
+    if (rangeKey !== "all") settings.range = rangeKey;
+    if (branch) settings.branch = branch;
+    if (filterDim) settings.filterDim = filterDim;
+    if (filterValue) settings.filterValue = filterValue;
+    return Object.keys(settings).length ? JSON.stringify(settings) : null;
+  }, [rangeKey, branch, filterDim, filterValue]);
+
+  /** Persist the filter row as this dashboard's default view. */
+  const saveView = useCallback(() => {
+    if (!dashboardId) return;
+    const json = currentSettingsJson();
+    void setDashboardSettings(dashboardId, json)
+      .then(() => {
+        setSavedView(true);
+        window.setTimeout(() => setSavedView(false), 1800);
+      })
+      .catch((e) =>
+        recordOpError({ label: "Save view", message: e instanceof Error ? e.message : String(e) }),
+      );
+  }, [dashboardId, currentSettingsJson]);
+
+  /** "Save Copy": copy this dashboard's tiles under a `(copy)` name, carrying
+   *  the CURRENT filter row as the copy's saved view (the point is to snapshot
+   *  what you're looking at), then open it — where the in-body H1 renames it. */
+  const saveAs = useCallback(
+    (title: string) => {
+      if (!dashboardId) return;
+      void duplicateDashboard(dashboardId, title.trim(), currentSettingsJson())
+        .then((created) => {
+          if (created) onOpenPage?.(customDashboardRef(created.id));
+        })
+        .catch((e) =>
+          recordOpError({ label: "Save as", message: e instanceof Error ? e.message : String(e) }),
+        );
+    },
+    [dashboardId, currentSettingsJson, onOpenPage],
+  );
+
   const removeDashboard = useCallback(() => {
     if (!dashboardId) return;
     void deleteDashboard(dashboardId)
@@ -241,6 +311,49 @@ export function CustomDashboardPage({
   const addedKeys = useMemo(
     () => new Set(items.map((i) => i.metric_key).filter((k): k is string => !!k)),
     [items],
+  );
+
+  // Breakout options are the union across the dashboard's metrics, so a
+  // dimension only some tiles declare is still offered — the tiles that lack it
+  // grey out rather than vanish.
+  const breakoutOptions = useMemo(() => {
+    const specs = items
+      .map((i) => (i.metric_key ? defs.get(i.metric_key) : null))
+      .filter((d): d is MetricSpec => !!d);
+    return dashboardBreakoutDims(specs);
+  }, [items, defs]);
+
+  // A dimension the remaining tiles no longer support (last such tile removed)
+  // would silently grey the whole board — drop it instead.
+  useEffect(() => {
+    if (filterDim && !breakoutOptions.includes(filterDim)) setFilterDim(null);
+  }, [filterDim, breakoutOptions]);
+
+  // Changing the dimension invalidates the chosen value and the collected
+  // options — they belong to the old dimension.
+  useEffect(() => {
+    setFilterValue(null);
+    setGroupValues([]);
+  }, [filterDim]);
+
+  // Tiles report the values they have for the selected dimension; the picker
+  // offers the union. Same stable-identity merge as the branch list.
+  const mergeGroupValues = useCallback((incoming: string[]) => {
+    setGroupValues((prev) => {
+      const merged = new Set(prev);
+      let grew = false;
+      for (const v of incoming) {
+        if (merged.has(v)) continue;
+        merged.add(v);
+        grew = true;
+      }
+      return grew ? [...merged].sort() : prev;
+    });
+  }, []);
+
+  const groupFilter = useMemo(
+    () => ({ dim: filterDim, value: filterValue }),
+    [filterDim, filterValue],
   );
 
   const body = (() => {
@@ -334,6 +447,80 @@ export function CustomDashboardPage({
               ))}
             </select>
           </label>
+          {breakoutOptions.length > 0 ? (
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ opacity: 0.6 }}>Filter by</span>
+              <select
+                value={filterDim ?? ""}
+                onChange={(e) => setFilterDim(e.target.value || null)}
+                data-testid="dashboard-filter-dim"
+                title="Scope every tile to one value of this dimension. Tiles whose metric doesn't have it stay as they are, dimmed."
+                style={selectStyle}
+              >
+                <option value="">Nothing</option>
+                {breakoutOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {filterDim ? (
+            <select
+              value={filterValue ?? ""}
+              onChange={(e) => setFilterValue(e.target.value || null)}
+              data-testid="dashboard-filter-value"
+              title={`Which ${filterDim} to show`}
+              style={{ ...selectStyle, maxWidth: 260 }}
+            >
+              <option value="">All {filterDim}s</option>
+              {groupValues.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {/* Two plain buttons — no split control or inline rename. The copy
+              names itself and opens, where the in-body H1 is already the way
+              to rename a dashboard. */}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              onClick={saveView}
+              data-testid="dashboard-save-view"
+              title="Remember this range, branch and filter as the dashboard's default view"
+              style={{
+                fontSize: 12,
+                padding: "4px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border-subtle)",
+                background: "var(--surface-card)",
+                color: savedView ? "var(--success, #3fb950)" : "var(--text, #ddd)",
+                cursor: "pointer",
+              }}
+            >
+              {savedView ? "Saved ✓" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={() => saveAs(`${data.dashboard.title} (copy)`)}
+              data-testid="dashboard-save-copy"
+              title="Copy this dashboard's tiles and current filters into a new dashboard"
+              style={{
+                fontSize: 12,
+                padding: "4px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border-subtle)",
+                background: "var(--surface-card)",
+                color: "var(--text, #ddd)",
+                cursor: "pointer",
+              }}
+            >
+              Save Copy
+            </button>
+          </span>
         </div>
 
         {items.length === 0 ? (
@@ -477,10 +664,12 @@ export function CustomDashboardPage({
                       opts={opts}
                       def={it.metric_key ? (defs.get(it.metric_key) ?? null) : null}
                       dashboard={dashboardFilter}
+                      groupFilter={groupFilter}
                       onOpenPage={onOpenPage}
                       onRemove={() => void removeTile(it.id)}
                       onConfigure={(next) => configureTile(it.id, it.metric_key, opts, next)}
                       onBranches={mergeBranches}
+                      onGroupValues={mergeGroupValues}
                     />
                   )}
                 </div>
