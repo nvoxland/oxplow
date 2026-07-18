@@ -228,7 +228,7 @@ pub struct MetricEntry {
     /// `event` (default `gauge`).
     #[serde(rename = "displayKind", default)]
     pub display_kind: Option<String>,
-    /// Catalog grouping: `operational` | `testing` | `static-quality` | `custom`.
+    /// Catalog grouping: `operational` | `testing` | `coverage` | `static-quality` | `custom`.
     #[serde(default)]
     pub category: Option<String>,
     /// Language this metric measures (e.g. `rust`), for the catalog filter.
@@ -1424,7 +1424,13 @@ const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max", "count", "rat
 /// Formula binary ops a `metrics:` spec may declare (`ratio` aliases `div`).
 const METRIC_FORMULA_OPS: &[&str] = &["add", "sub", "mul", "div", "ratio"];
 /// Catalog groupings a `metrics:` spec may declare.
-const METRIC_CATEGORIES: &[&str] = &["operational", "testing", "static-quality", "custom"];
+const METRIC_CATEGORIES: &[&str] = &[
+    "operational",
+    "testing",
+    "coverage",
+    "static-quality",
+    "custom",
+];
 /// Gauge triggers (when a `gauges:` producer runs).
 const METRIC_TRIGGERS: &[&str] = &[
     "on-report",
@@ -3011,6 +3017,23 @@ metrics:
         // a full valid spec is accepted.
         assert!(load_from_yaml(
             "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    aggregation: count\n    displayKind: findings\n    category: static-quality\n"
+        )
+        .is_ok());
+        // every category the built-in producer specs emit must round-trip: the app
+        // WRITES those categories back into project.yaml, so a category the
+        // validator rejects is a config the app can't re-read (it panicked at boot
+        // on `coverage` — the built-in coverage specs' own category).
+        for cat in METRIC_CATEGORIES {
+            assert!(
+                load_from_yaml(&format!(
+                    "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: {cat}\n"
+                ))
+                .is_ok(),
+                "category {cat} should validate"
+            );
+        }
+        assert!(load_from_yaml(
+            "metrics:\n  - key: a.b\n    sourceMeasure: acme.m\n    category: coverage\n"
         )
         .is_ok());
         // the same key declared twice (a `key:` define + a `use:`).

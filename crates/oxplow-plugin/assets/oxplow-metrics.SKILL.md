@@ -95,7 +95,7 @@ Namespace every key `<vendor>.<id>` (e.g. `repo.todo_count`, `acme.bundle_size`)
 | `direction` | `higher-better` \| `lower-better` \| `neutral` — red/green sense |
 | `target` / `warnAt` / `failAt` | thresholds (via `direction`) — coloring + the Stop-hook nudge |
 | `displayKind` | read presentation: `gauge` \| `findings` \| `test` \| `coverage` \| `event` |
-| `category` | catalog grouping: `operational` \| `testing` \| `static-quality` \| `custom` |
+| `category` | catalog grouping: `operational` \| `testing` \| `coverage` \| `static-quality` \| `custom` |
 | `sliceableDims` | conformed-dimension keys for group-by / drill-across |
 
 **Two-axis aggregation.** `aggregation` combines the facts inside one capture; the
