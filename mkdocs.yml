@@ -59,6 +59,8 @@ nav:
       - Wiki pages: guide/wiki.md
       - Local History: guide/local-history.md
       - Change Analysis: guide/change-analysis.md
+      - Metrics: guide/metrics.md
+      - Dashboards: guide/dashboards.md
       - Editor and pages: guide/editor.md
       - Agents: guide/agents.md
       - Terminal: guide/terminal.md

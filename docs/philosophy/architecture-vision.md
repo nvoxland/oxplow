@@ -22,11 +22,18 @@ shipped today; most is not.
   `.oxplow/wiki/`, with `[[wikilinks]]` to other wiki pages,
   files, and commits, plus cross-kind backlinks.
 - **Web-style UI.** Pages, tabs per thread, browser-style
-  back / forward, kebabs instead of right-click menus, drag-to-
-  add-context onto the agent terminal. Plain-click navigates
-  in-tab; modifier-click opens a new tab. Modals have been
-  retired in favor of inline confirms / inline edits / kebab
-  popovers.
+  back / forward, right-click row menus, drag-to-add-context onto
+  the agent terminal. Plain-click navigates in-tab; modifier-click
+  opens a new tab. Modals have been retired in favor of inline
+  confirms / inline edits / context menus. (We shipped `⋯` kebabs
+  for a while on the discoverability argument and reverted them —
+  right-click won on density once every row had actions.)
+- **Metrics.** A durable, branch-aware metric substrate: measures,
+  gauges, and facts in SQLite, aggregated by an engine and served
+  to the Metrics pages and user-built dashboards. Covers both code
+  shape (complexity, duplication, lint suppressions, coverage) and
+  the driving itself (steering per effort, redo rate, time to
+  green, wasted tokens).
 - **MCP control plane.** Oxplow exposes its primitives (work
   items, wiki pages, threads, dispatch, LSP) over MCP so the
   agent can drive them directly.
@@ -51,10 +58,11 @@ shipped today; most is not.
 - **Better wiki.** Wiki pages are shipping as a first-class
   surface; the next step is treating them as durable memory the
   agent can consult, not just the human.
-- **Tighter LSP and test-runner integration.** The editor knows
-  more than the agent does about the project. The agent should be
-  able to ask: where is this defined, what tests cover this file,
-  what does the type checker think.
+- **Acting on what the metrics say.** The substrate records the
+  numbers; it doesn't yet do anything with them. The obvious next
+  step is the runtime noticing that a task is on its fourth effort,
+  or that this week's steering rate doubled, and saying so at the
+  time rather than leaving it for you to find on a chart.
 - **Smarter dispatch.** Today the user resumes queue work by
   prompting or running `/work-next`, which dispatches either an
   epic-as-unit or the next standalone cluster. Eventually the

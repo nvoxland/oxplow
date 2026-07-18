@@ -44,8 +44,32 @@ Each navigator job has a primitive in the product:
 | Catch regressions | **Local History** — every effort snapshots the files it touched |
 | Switch contexts cleanly | **Streams** — each agent has its own branch, worktree, and queue |
 | Talk without losing your place | **Threads** — query an agent in a read-only thread without risking writes |
+| Tell whether it's working | **Metrics** — steering per effort, redo rate, time to green, tokens spent on work you reverted |
 
 You stay in the problem. The agent stays in the keys.
+
+## Measuring the pairing, not just the code
+
+The last row is the newest and the least obvious. Most code metrics
+answer "is the codebase healthy". A navigator has a second question
+that no existing tool answers: *am I any good at this?*
+
+You can't tell from the diff. A task that took six attempts and one
+that took one attempt produce the same final diff. A task where you
+had to correct the agent nine times looks, in git, exactly like one
+that went cleanly. That information exists only in the working
+session, and it evaporates when the session ends.
+
+So oxplow records it: how many steering events a closed effort
+needed, how many attempts a task took, how long from first red test
+to first green, how many tokens went into commits that were later
+reverted. None of it says whether the code is good -- that's still
+your call. It says whether the way you're briefing, scoping, and
+gating the agent is producing less rework than it did last month.
+
+That's a feedback loop for a skill that's about three years old and
+that nobody has good instincts for yet. See
+[Metrics](../guide/metrics.md).
 
 ## Why this doesn't reduce to "review the diff"
 

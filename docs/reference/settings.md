@@ -12,15 +12,33 @@ editing a file.
 
     ```
     .oxplow/
+      project.yaml        # shared project config — commit this
+      .gitignore          # written by oxplow on first run
       local.sqlite        # tasks, threads, snapshots, settings
       wiki/               # wiki pages (markdown)
       snapshots/          # per-effort file snapshots (Local History)
       runtime/            # generated agent runtime files
-      lsp/                # cached LSP server binaries (Mason packages)
+      lsp/                # installed LSP server binaries (appears after
+                          #   an explicit install)
+      lsp-cache/          # download cache for the above
     ```
 
-    Add `.oxplow/` to `.gitignore`; oxplow does not commit
-    project state.
+    **Don't add `.oxplow/` to `.gitignore`.** On first run oxplow
+    writes `.oxplow/.gitignore` containing:
+
+    ```
+    *
+    !.gitignore
+    !project.yaml
+    ```
+
+    so `project.yaml` is committable and shared with the team while
+    the database, snapshots, wiki, and runtime files stay local to
+    your machine. An existing `.gitignore` is left untouched.
+    Ignoring the whole directory defeats that split.
+
+    Note the wiki is *not* excepted — `.oxplow/wiki/` is local-only
+    by default.
 
 - **Per-user** — the Tauri app's data dir under your OS config
   location: `~/Library/Application Support/oxplow/` (macOS),
@@ -113,11 +131,30 @@ page if the default doesn't fit (most users never touch this).
 
 ### Generated paths
 
-`.oxplow/project.yaml` carries a `generated` list of paths the project
-should treat as build output / generated content. Anything on
-the list is invisible to fs-watch, snapshot capture, the
-startup sweep, code-quality scans, and every snapshot list view
-in the UI. Entries can be:
+**Your `.gitignore` is the baseline.** Oxplow reads the root
+`.gitignore`, every nested `.gitignore`, and `.git/info/exclude`,
+so `node_modules`, `target`, `dist` and friends are already
+invisible without any oxplow config. Most projects need nothing
+here.
+
+The `generated` block is for the two cases `.gitignore` can't
+express: build output that *is* committed, and ignored paths you
+want oxplow to watch anyway.
+
+```yaml
+# .oxplow/project.yaml
+generated:
+  exclude:
+    - target             # single segment — matches at any depth
+    - apps/desktop/dist  # repo-relative — only this path
+  include:
+    - vendor/generated   # force back in, despite .gitignore
+```
+
+Both keys are optional, but `generated` is a **map**, not a list —
+a bare sequence (`generated: [target, …]`) is rejected at load.
+
+Entries in either list take one of two forms:
 
 - A **single-segment name** (no `/`) — matches anywhere in the
   path. `target` filters every `target/` directory in the tree.
@@ -126,20 +163,18 @@ in the UI. Entries can be:
   directory, not unrelated `dist/` elsewhere. `docs/generated/output.txt`
   filters just that file.
 
-```yaml
-# .oxplow/project.yaml
-generated:
-  - target
-  - node_modules
-  - .idea
-  - apps/desktop/dist
-```
+Precedence, highest first:
 
-Two paths are *always* ignored regardless of config: `.git/`,
-and everything under `.oxplow/` except `.oxplow/wiki/`. Build
-dirs that used to be hardcoded (`node_modules`, `target`,
-`.next`, …) are now the user's call — projects without a
-`generated` list will see them captured.
+1. `.git/`, and everything under `.oxplow/` except `.oxplow/wiki/`,
+   are *always* ignored — not overridable.
+2. An `include` match is **kept**, overriding both `exclude` and
+   `.gitignore`.
+3. An `exclude` match is ignored.
+4. Otherwise `.gitignore` decides.
+
+Anything ignored is invisible to fs-watch, snapshot capture, the
+startup sweep, code-quality scans, and every snapshot list view
+in the UI.
 
 You can edit `.oxplow/project.yaml` directly, or right-click any
 directory in the file tree → **Mark as generated** to append

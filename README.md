@@ -24,7 +24,8 @@ not an IDE: the focus is the system, not the editor.
   of read-only query threads. Agents on query threads can ask the
   writer anything but can't modify files.
 - **Work queue.** A durable list of tasks with status lifecycle
-  (`ready → in_progress → human_check → done`), grouped by epic,
+  (`ready → in_progress → done`, plus `blocked` / `canceled` /
+  `archived`), grouped by epic,
   dragged between sections, and ordered by a single `sort_index`
   shared with commit points and wait points.
 - **Commit points and wait points.** Inline markers in the queue.
