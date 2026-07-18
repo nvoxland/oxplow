@@ -442,6 +442,8 @@ pub struct Services {
     /// Persisted agent nudges (report-less-run / commit-hygiene) — the
     /// human-facing record of what oxplow steered the agent to do.
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
+    /// User-created dashboards (grids of metric tiles) — project-global (tsk138).
+    pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     /// Per-turn agent token usage parsed from the hook transcript (tsk104).
@@ -531,6 +533,7 @@ impl Services {
             .with_visibility(metric_visibility.clone());
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
+        let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -708,6 +711,7 @@ impl Services {
             attribution_store,
             metrics,
             nudge_store,
+            dashboard_store,
             collection,
             token_usage_store,
             token_usage,

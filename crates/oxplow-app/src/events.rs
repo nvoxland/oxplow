@@ -224,6 +224,10 @@ pub enum OxplowEvent {
     /// running `/oxplow:configure`). The in-memory config has been swapped;
     /// the renderer refetches `get_config`.
     ConfigChanged,
+    /// A user dashboard or one of its tiles was created / edited / reordered /
+    /// deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
+    /// fieldless — the renderer refetches the affected dashboard(s).
+    DashboardsChanged,
     /// A code-quality scan transitioned states (started / completed /
     /// failed). The renderer refreshes scan + finding lists on receipt.
     CodeQualityScanned {

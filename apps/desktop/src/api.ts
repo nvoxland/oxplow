@@ -1690,6 +1690,60 @@ export type {
   RollupRow,
 } from "./tauri-bridge/index.js";
 
+import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
+export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
+
+// User-created dashboards (tsk138) — project-global grids of metric tiles.
+export async function listDashboards(): Promise<Dashboard[]> {
+  return unwrap(await commands.listDashboards());
+}
+export async function getDashboard(id: string): Promise<DashboardWithItems | null> {
+  return unwrap(await commands.getDashboard(id));
+}
+export async function createDashboard(title: string): Promise<Dashboard> {
+  return unwrap(await commands.createDashboard(title));
+}
+export async function renameDashboard(id: string, title: string): Promise<void> {
+  unwrap(await commands.renameDashboard({ id, title }));
+}
+export async function deleteDashboard(id: string): Promise<void> {
+  unwrap(await commands.deleteDashboard(id));
+}
+export async function addDashboardItem(req: {
+  dashboardId: string;
+  kind: string;
+  metricKey?: string | null;
+  optionsJson?: string | null;
+}): Promise<string> {
+  return unwrap(
+    await commands.addDashboardItem({
+      dashboardId: req.dashboardId,
+      kind: req.kind,
+      metricKey: req.metricKey ?? null,
+      optionsJson: req.optionsJson ?? null,
+    }),
+  );
+}
+export async function updateDashboardItem(
+  id: string,
+  metricKey: string | null,
+  optionsJson: string | null,
+): Promise<void> {
+  unwrap(await commands.updateDashboardItem({ id, metricKey, optionsJson }));
+}
+export async function removeDashboardItem(id: string): Promise<void> {
+  unwrap(await commands.removeDashboardItem(id));
+}
+export async function reorderDashboardItems(dashboardId: string, order: string[]): Promise<void> {
+  unwrap(await commands.reorderDashboardItems({ dashboardId, order }));
+}
+/** Fires on any dashboard/tile create/edit/reorder/delete (project-global). */
+export function subscribeDashboardEvents(fn: () => void): () => void {
+  return subscribeOxplowEvents((event) => {
+    if (event.kind === "dashboardsChanged") fn();
+  });
+}
+
 /** The metric catalog — every known metric SPEC (built-in / global / project).
  *  A metric is an aggregation defined OVER a measure (epic tsk12), not a second
  *  store of rows. Optional `language` / `scope` filter. */

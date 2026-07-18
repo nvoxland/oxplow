@@ -24,6 +24,7 @@ pub mod churn;
 pub mod code_quality;
 pub mod comments;
 pub mod config;
+pub mod dashboards;
 pub mod effort;
 pub mod followup;
 pub mod git;

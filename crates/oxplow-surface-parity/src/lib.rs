@@ -308,6 +308,17 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: tasks / backlog ----
     ui("move_task"),
     ui("get_backlog_state"),
+    // ---- dashboards (tsk138) — reads + create/add-tile are agent-authorable
+    // (both); the rest are pure-UI edits (tsk140). ----
+    both("list_dashboards"),
+    both("get_dashboard"),
+    both("create_dashboard"),
+    both("add_dashboard_item"),
+    ui("rename_dashboard"),
+    ui("delete_dashboard"),
+    ui("update_dashboard_item"),
+    ui("remove_dashboard_item"),
+    ui("reorder_dashboard_items"),
     // ---- ui-only: notes ----
     ui("list_task_events"),
     // ---- ui-only: comments (anchor management / destructive) ----

@@ -244,6 +244,31 @@ pub struct RebuildMetricsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct CreateDashboardParams {
+    /// Display title for the new dashboard.
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GetDashboardParams {
+    /// Dashboard id (`dsh<n>`).
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddDashboardItemParams {
+    /// Dashboard id (`dsh<n>`) to add the tile to.
+    pub dashboard_id: String,
+    /// `metric` (charts one metric) | `text` (a heading / markdown note).
+    pub kind: String,
+    /// Metric spec key for a `metric` tile (see `list_metric_definitions`).
+    pub metric_key: Option<String>,
+    /// Optional per-tile options JSON (viz/mode/scale/size/title; or, for a
+    /// `text` tile, `{"text":"…"}`).
+    pub options_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RecordMetricParams {
     /// Metric definition key (must already exist — see list_metric_definitions).
     pub key: String,
@@ -910,6 +935,95 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&list)
+    }
+
+    #[tool(
+        description = "List the user's dashboards (id + title). A dashboard is a grid of metric \
+                       tiles. Use `get_dashboard` for one dashboard's tiles (tsk138)."
+    )]
+    async fn list_dashboards(&self) -> Result<CallToolResult, McpError> {
+        let list = self
+            .services
+            .dashboard_store
+            .list()
+            .await
+            .map_err(internal)?;
+        json_result(&list)
+    }
+
+    #[tool(
+        description = "Get one dashboard plus its tiles, in display order. `id` is a `dsh<n>` id."
+    )]
+    async fn get_dashboard(
+        &self,
+        params: Parameters<GetDashboardParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let id = oxplow_domain::DashboardId::try_from_str(&params.0.id)
+            .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
+        let got = self
+            .services
+            .dashboard_store
+            .get(id)
+            .await
+            .map_err(internal)?;
+        json_result(&got)
+    }
+
+    #[tool(
+        description = "Create a new empty dashboard (a grid of metric tiles). Returns it (id + \
+                       title). Then populate it with `add_dashboard_item` — e.g. build a \
+                       'Coverage' dashboard of the coverage metrics."
+    )]
+    async fn create_dashboard(
+        &self,
+        params: Parameters<CreateDashboardParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let id = self
+            .services
+            .dashboard_store
+            .create(params.0.title)
+            .await
+            .map_err(internal)?;
+        let created = self
+            .services
+            .dashboard_store
+            .get(id)
+            .await
+            .map_err(internal)?
+            .map(|d| d.dashboard);
+        self.services.events.emit(OxplowEvent::DashboardsChanged);
+        json_result(&created)
+    }
+
+    #[tool(
+        description = "Add a tile to a dashboard. `kind` is `metric` (charts one metric — set \
+                       `metric_key` to a metric spec key from `list_metric_definitions`) or `text` \
+                       (a heading / markdown note — put the markdown in `options_json` as \
+                       `{\"text\":\"…\"}`). `options_json` may also set the tile's viz/mode/scale/\
+                       size. Returns the new tile id."
+    )]
+    async fn add_dashboard_item(
+        &self,
+        params: Parameters<AddDashboardItemParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let dash = oxplow_domain::DashboardId::try_from_str(&p.dashboard_id)
+            .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
+        let id = self
+            .services
+            .dashboard_store
+            .add_item(
+                dash,
+                oxplow_db::NewDashboardItem {
+                    kind: p.kind,
+                    metric_key: p.metric_key,
+                    options_json: p.options_json,
+                },
+            )
+            .await
+            .map_err(internal)?;
+        self.services.events.emit(OxplowEvent::DashboardsChanged);
+        json_result(&serde_json::json!({ "id": id }))
     }
 
     #[tool(
@@ -6622,5 +6736,75 @@ mod tests {
             }))
             .await;
         assert!(result.is_err(), "`oxplow.` is reserved for built-ins");
+    }
+
+    #[tokio::test]
+    async fn dashboard_create_add_tile_and_read_back() {
+        let (_project, _services, server) = boot();
+
+        // create_dashboard returns the new dashboard (id + title).
+        let created: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .create_dashboard(Parameters(CreateDashboardParams {
+                    title: "Coverage".into(),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let dash_id = created["id"].as_str().unwrap().to_string();
+        assert!(dash_id.starts_with("dsh"), "id should be a dsh<n> id");
+        assert_eq!(created["title"], "Coverage");
+
+        // add_dashboard_item returns the new tile id.
+        let added: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .add_dashboard_item(Parameters(AddDashboardItemParams {
+                    dashboard_id: dash_id.clone(),
+                    kind: "metric".into(),
+                    metric_key: Some("oxplow.coverage.line_pct".into()),
+                    options_json: Some(r#"{"viz":"line"}"#.into()),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(added["id"].as_str().unwrap().starts_with("dti"));
+
+        // get_dashboard reads back the dashboard with its one tile.
+        let got: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .get_dashboard(Parameters(GetDashboardParams {
+                    id: dash_id.clone(),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(got["dashboard"]["id"], dash_id);
+        let items = got["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["kind"], "metric");
+        assert_eq!(items[0]["metric_key"], "oxplow.coverage.line_pct");
+
+        // list_dashboards surfaces it.
+        let listed: serde_json::Value =
+            serde_json::from_str(&text_payload(server.list_dashboards().await.unwrap())).unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["id"], dash_id);
+    }
+
+    #[tokio::test]
+    async fn add_dashboard_item_rejects_a_bad_dashboard_id() {
+        let (_project, _services, server) = boot();
+        let result = server
+            .add_dashboard_item(Parameters(AddDashboardItemParams {
+                dashboard_id: "not-an-id".into(),
+                kind: "metric".into(),
+                metric_key: None,
+                options_json: None,
+            }))
+            .await;
+        assert!(result.is_err(), "a malformed dashboard id must be rejected");
     }
 }

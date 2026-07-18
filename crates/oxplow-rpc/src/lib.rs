@@ -203,6 +203,16 @@ rpc_dispatch! {
     "update_task" => commands::tasks::update_task { req: crate::commands::tasks::UpdateTaskRequest },
     "reorder_tasks" => commands::tasks::reorder_tasks { req: crate::commands::tasks::ReorderTasksRequest },
     "move_task" => commands::tasks::move_task { req: crate::commands::tasks::MoveTaskRequest },
+    // dashboards (tsk138)
+    "list_dashboards" => commands::dashboards::list_dashboards {},
+    "get_dashboard" => commands::dashboards::get_dashboard { id: oxplow_domain::DashboardId },
+    "create_dashboard" => commands::dashboards::create_dashboard { title: String },
+    "rename_dashboard" => commands::dashboards::rename_dashboard { req: crate::commands::dashboards::RenameDashboardRequest },
+    "delete_dashboard" => commands::dashboards::delete_dashboard { id: oxplow_domain::DashboardId },
+    "add_dashboard_item" => commands::dashboards::add_dashboard_item { req: crate::commands::dashboards::AddDashboardItemRequest },
+    "update_dashboard_item" => commands::dashboards::update_dashboard_item { req: crate::commands::dashboards::UpdateDashboardItemRequest },
+    "remove_dashboard_item" => commands::dashboards::remove_dashboard_item { id: oxplow_domain::DashboardItemId },
+    "reorder_dashboard_items" => commands::dashboards::reorder_dashboard_items { req: crate::commands::dashboards::ReorderDashboardItemsRequest },
     // effort
     "list_task_efforts" => commands::effort::list_task_efforts { item_id: oxplow_domain::TaskId },
     "list_efforts_in_window" => commands::effort::list_efforts_in_window { window_start: oxplow_domain::Timestamp, window_end: oxplow_domain::Timestamp },

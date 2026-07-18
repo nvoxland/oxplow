@@ -159,6 +159,18 @@ export const commands = {
 	updateTask: (req: UpdateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("update_task", { req })),
 	reorderTasks: (req: ReorderTasksRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_tasks", { req })),
 	moveTask: (req: MoveTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("move_task", { req })),
+	listDashboards: () => typedError<Dashboard[], IpcError>(__TAURI_INVOKE("list_dashboards")),
+	getDashboard: (id: DashboardId) => typedError<{
+	dashboard: Dashboard,
+	items: DashboardItem[],
+} | null, IpcError>(__TAURI_INVOKE("get_dashboard", { id })),
+	createDashboard: (title: string) => typedError<Dashboard, IpcError>(__TAURI_INVOKE("create_dashboard", { title })),
+	renameDashboard: (req: RenameDashboardRequest) => typedError<null, IpcError>(__TAURI_INVOKE("rename_dashboard", { req })),
+	deleteDashboard: (id: DashboardId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_dashboard", { id })),
+	addDashboardItem: (req: AddDashboardItemRequest) => typedError<DashboardItemId, IpcError>(__TAURI_INVOKE("add_dashboard_item", { req })),
+	updateDashboardItem: (req: UpdateDashboardItemRequest) => typedError<null, IpcError>(__TAURI_INVOKE("update_dashboard_item", { req })),
+	removeDashboardItem: (id: DashboardItemId) => typedError<null, IpcError>(__TAURI_INVOKE("remove_dashboard_item", { id })),
+	reorderDashboardItems: (req: ReorderDashboardItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_dashboard_items", { req })),
 	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
 	// Bucketed backlog view: ready/blocked/in_progress/done.
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
@@ -786,6 +798,14 @@ export const commands = {
 };
 
 /* Types */
+export type AddDashboardItemRequest = {
+	dashboardId: DashboardId,
+	// `metric` | `text`.
+	kind: string,
+	metricKey: string | null,
+	optionsJson: string | null,
+};
+
 export type AdoptWorktreeRequest = {
 	path: string,
 	title: string,
@@ -1351,6 +1371,41 @@ export type CreateWorktreeRequest = {
 	title: string,
 	branch: string,
 	branchSource: string,
+};
+
+// One dashboard (a named grid of tiles). Project-global.
+export type Dashboard = {
+	id: DashboardId,
+	title: string,
+	sort_index: number,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+};
+
+export type DashboardId = string;
+
+/**
+ *  One tile on a dashboard. `kind` is `metric` | `text`; `metric_key` names the
+ *  charted metric (null for text tiles); `options_json` is the opaque per-tile
+ *  options blob (viz/mode/scale/size/overrides/text body).
+ */
+export type DashboardItem = {
+	id: DashboardItemId,
+	dashboard_id: DashboardId,
+	sort_index: number,
+	kind: string,
+	metric_key: string | null,
+	options_json: string | null,
+	created_at: Timestamp,
+	updated_at: Timestamp,
+};
+
+export type DashboardItemId = string;
+
+// A dashboard plus its tiles, in display order — the `get_dashboard` read shape.
+export type DashboardWithItems = {
+	dashboard: Dashboard,
+	items: DashboardItem[],
 };
 
 /**
@@ -2445,6 +2500,12 @@ detail: string | null } |
  */
 { kind: "configChanged" } | 
 /**
+ *  A user dashboard or one of its tiles was created / edited / reordered /
+ *  deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
+ *  fieldless — the renderer refetches the affected dashboard(s).
+ */
+{ kind: "dashboardsChanged" } | 
+/**
  *  A code-quality scan transitioned states (started / completed /
  *  failed). The renderer refreshes scan + finding lists on receipt.
  */
@@ -2555,6 +2616,11 @@ export type RemoteBranchEntry = {
 	last_commit_subject: string,
 };
 
+export type RenameDashboardRequest = {
+	id: DashboardId,
+	title: string,
+};
+
 export type RenameStreamRequest = {
 	id: StreamId,
 	title: string,
@@ -2563,6 +2629,11 @@ export type RenameStreamRequest = {
 export type RenameThreadRequest = {
 	id: ThreadId,
 	title: string,
+};
+
+export type ReorderDashboardItemsRequest = {
+	dashboardId: DashboardId,
+	order: DashboardItemId[],
 };
 
 export type ReorderTasksRequest = {
@@ -3063,6 +3134,12 @@ export type UiLogEntry = {
 	 */
 	context: string | null,
 	timestamp: string | null,
+};
+
+export type UpdateDashboardItemRequest = {
+	id: DashboardItemId,
+	metricKey: string | null,
+	optionsJson: string | null,
 };
 
 /**

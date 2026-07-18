@@ -36,11 +36,13 @@ pub enum EntityKind {
     Followup,
     PageVisit,
     UsageEvent,
+    Dashboard,
+    DashboardItem,
 }
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 13] = [
+    pub const ALL: [EntityKind; 15] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Task,
@@ -54,6 +56,8 @@ impl EntityKind {
         EntityKind::Followup,
         EntityKind::PageVisit,
         EntityKind::UsageEvent,
+        EntityKind::Dashboard,
+        EntityKind::DashboardItem,
     ];
 
     /// The fixed 3-letter prefix that opens every id of this kind.
@@ -72,6 +76,8 @@ impl EntityKind {
             EntityKind::Followup => "fup",
             EntityKind::PageVisit => "pgv",
             EntityKind::UsageEvent => "usg",
+            EntityKind::Dashboard => "dsh",
+            EntityKind::DashboardItem => "dti",
         }
     }
 
@@ -92,6 +98,8 @@ impl EntityKind {
             EntityKind::Followup => "follow-up id (fup…)",
             EntityKind::PageVisit => "page-visit id (pgv…)",
             EntityKind::UsageEvent => "usage-event id (usg…)",
+            EntityKind::Dashboard => "dashboard id (dsh…)",
+            EntityKind::DashboardItem => "dashboard-item id (dti…)",
         }
     }
 
@@ -306,6 +314,8 @@ id_type!(CommentMessageId, CommentMessage);
 id_type!(FollowupId, Followup);
 id_type!(PageVisitId, PageVisit);
 id_type!(UsageEventId, UsageEvent);
+id_type!(DashboardId, Dashboard);
+id_type!(DashboardItemId, DashboardItem);
 
 #[cfg(test)]
 mod tests {

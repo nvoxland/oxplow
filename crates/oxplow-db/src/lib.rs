@@ -9,6 +9,7 @@ pub mod agent_stores;
 pub mod analytics_stores;
 pub mod attribution_store;
 pub mod comment_store;
+pub mod dashboard_store;
 mod database;
 pub mod effort_store;
 pub mod fact_store;
@@ -36,6 +37,9 @@ pub use attribution_store::{
     SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,
 };
 pub use comment_store::SqliteCommentStore;
+pub use dashboard_store::{
+    Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
+};
 pub use database::{Database, DbInitError};
 pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
