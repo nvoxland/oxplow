@@ -100,19 +100,47 @@ checklist:
   `RouteLink` → `customDashboardRef`) + a **+ New dashboard** action. In the
   launcher via a `computePagesDirectory` **Activity** entry.
 
-**Tiles** — `components/Dashboard/MetricTile.tsx`. One `metric` tile switches on
-the `options_json` `viz`: `line` (default, the shared `TrendChart` over the
-reused `metricDetailData` pipeline) or `number` (a big latest value + a signed
-delta chip colored by the spec's `direction`). The page resolves each tile's
-`def` from one `listMetricDefinitions()` fetch and passes it in; the tile fetches
-its own samples and refreshes on `metricSamplesChanged`. Clicking the title
-drills through to the metric detail; right-click is the tile actions menu
-(open / open-in-new-tab / remove).
+**Tiles** — `components/Dashboard/MetricTile.tsx` (+ `TextTile.tsx`). A `metric`
+tile switches on the `options_json` `viz`:
 
-**Add-metric picker** — `buildAddMetricMenu(catalog, onPick)` (pure, in
-`pages/customDashboardData.ts`) groups `listMetricCatalog()` into per-category
-submenus; the rail button, the empty-state button, and a right-click on the grid
-all open it via `useContextMenu`.
+| `viz` | Renders |
+|---|---|
+| `line` (default) | the shared `TrendChart` over the reused `metricDetailData` pipeline |
+| `number` | a big latest value + a signed delta chip colored by the spec's `direction` |
+| `sparkline` | the shared `Sparkline` (lifted out of `RecordedMetricsPage` in tsk142) + the latest value |
+| `bar` | the metric rolled up by `dim` (default `package`) via `metricDimensionRollup`, top 6 bars |
+
+A `text`-kind item is a heading / markdown note (`TextTile`): `InlineEdit`
+(multiline) over `MarkdownView`, for grouping a grid.
+
+The page resolves each tile's `def` from one `listMetricDefinitions()` fetch and
+passes it in; the tile fetches its own samples and refreshes on
+`metricSamplesChanged`. Clicking the title drills through to the metric detail;
+right-click is the tile menu — **Visualization** and **Size** submenus (checked
+= current, writing through `updateDashboardItem`) plus open / open-in-new-tab /
+remove.
+
+**Dashboard filter (tsk142)** — a range + branch control under the header that
+**every tile inherits**, via the pure `resolveTileWindow(opts, dashboard, now)`:
+a per-tile `range`/`branch` option wins, and a tile `range` of `"all"` explicitly
+opts out of a windowed dashboard. Range defaults to **All time** (a dashboard is
+an overview; a bounded default would blank out sparse metrics). The branch
+options are the **union of the branches the tiles report upward** (`onBranches`),
+since no single page-level sample fetch exists. A `bar` tile reads the dimension
+roll-up, which is inherently latest-state, so the time filter doesn't apply to it.
+
+**Sizing + reorder (tsk142)** — `tileSpanStyle(size)` maps `wide` →
+`gridColumn: span 2` and `tall` → `gridRow: span 2` (the grid sets
+`gridAutoRows` so a row span means something). Tiles **drag to reorder** with
+MIME `application/x-oxplow-dashboard-tile` (distinct from the rail's section
+MIME so a rail drag can't drop into the grid), the pure `moveToIndex` from
+`centerTabsReorder.ts`, an inset accent edge as the drop indicator, and a drop on
+the grid background meaning "move to the end" → `reorderDashboardItems`.
+
+**Add picker** — `buildAddMetricMenu(catalog, onPick)` (pure) groups
+`listMetricCatalog()` into per-category submenus; the page appends an **Add text
+/ heading** item. The header button, the empty-state button, and a right-click on
+the grid all open it via `useContextMenu`.
 
 **New Dashboard command** — `dashboard.new` in `commands.ts` (Tasks/"plan"
 group); the App handler create-then-navigates (`createDashboard` →
@@ -120,8 +148,7 @@ group); the App handler create-then-navigates (`createDashboard` →
 
 Pure helpers live in `pages/customDashboardData.ts` (React-free, unit-tested):
 `parseTileOptions` (tolerant of null/malformed JSON, drops unknown enum values),
-`latestValue`, `deltaTone`, `buildAddMetricMenu`.
+`latestValue`, `deltaTone`, `buildAddMetricMenu`, `tileSpanStyle`,
+`resolveTileWindow`.
 
-_Phases 4–5 (tsk142–143): remaining tile types (sparkline / bar / text), tile
-sizing, drag-drop reorder, a dashboard-level time+branch filter tiles inherit,
-and an "Add to dashboard…" block on the metric-detail rail._
+_Phase 5 (tsk143): an "Add to dashboard…" block on the metric-detail rail._

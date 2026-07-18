@@ -14,6 +14,7 @@ import {
   CollapsibleSections,
   SectionCollapseControls,
 } from "../components/CollapsibleSections.js";
+import { Sparkline } from "../components/Sparkline.js";
 import { metricRef } from "../tabs/pageRefs.js";
 import { Page } from "../tabs/Page.js";
 import { useRouteDispatch } from "../tabs/RouteLink.js";
@@ -62,29 +63,6 @@ type Row = {
 const SAMPLE_LIMIT = 200;
 
 
-
-/** Inline-SVG sparkline of a metric's values over time (oldest → newest). */
-function Sparkline({ values, color }: { values: number[]; color?: string }) {
-  if (values.length < 2) return <span style={{ opacity: 0.35 }}>—</span>;
-  const w = 90;
-  const h = 22;
-  const pad = 2;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const pts = values
-    .map((v, i) => {
-      const x = pad + (i / (values.length - 1)) * (w - 2 * pad);
-      const y = h - pad - ((v - min) / range) * (h - 2 * pad);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg width={w} height={h} style={{ display: "block" }} aria-hidden>
-      <polyline points={pts} fill="none" stroke={color ?? "var(--accent, #58a6ff)"} strokeWidth={1.5} />
-    </svg>
-  );
-}
 
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
  *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220).

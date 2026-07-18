@@ -1,6 +1,12 @@
 import type { MetricCatalogEntry, SeriesPoint } from "../api.js";
 import type { MenuItem } from "../menu.js";
-import { type ChartMode, type ChartScale, seriesPoints } from "./metricDetailData.js";
+import {
+  type ChartMode,
+  type ChartScale,
+  type TimeRange,
+  rangeFromPreset,
+  seriesPoints,
+} from "./metricDetailData.js";
 
 // Pure helpers behind the custom-dashboard page + tiles (tsk141, epic tsk138).
 // Kept React-free so the tile-option parsing and the add-metric menu assembly
@@ -13,17 +19,31 @@ import { type ChartMode, type ChartScale, seriesPoints } from "./metricDetailDat
  *  per-tile range+branch override. Everything is optional — an absent field
  *  falls back to the tile default. */
 export interface TileOptions {
-  /** `line` (a trend chart) | `number` (a big headline value). Default `line`. */
-  viz?: "line" | "number";
+  /** `line` (trend chart) | `number` (big headline value) | `sparkline` (bare
+   *  trend line) | `bar` (breakdown bars by `dim`). Default `line`. */
+  viz?: "line" | "number" | "sparkline" | "bar";
   /** Chart transform for a `line` tile (value / cumulative / change / avg). */
   mode?: ChartMode;
   /** Y-axis scaling for a `line` tile (auto / from-zero). */
   scale?: ChartScale;
   /** Title override — else the metric's own title. */
   title?: string;
+  /** Grid footprint: `wide` spans 2 columns, `tall` spans 2 rows. Default
+   *  `small` (1×1). */
+  size?: "small" | "wide" | "tall";
+  /** Breakdown dimension for a `bar` tile (e.g. `package`, `language`). */
+  dim?: string;
+  /** Markdown body for a `text` tile. */
+  text?: string;
+  /** Per-tile time-range override: a {@link RANGE_PRESETS} key, or `all` for no
+   *  window. Absent → inherit the dashboard's filter. */
+  range?: string;
+  /** Per-tile branch override. Absent → inherit the dashboard's filter. */
+  branch?: string;
 }
 
-const VIZ = new Set<TileOptions["viz"]>(["line", "number"]);
+const VIZ = new Set<TileOptions["viz"]>(["line", "number", "sparkline", "bar"]);
+const SIZES = new Set<TileOptions["size"]>(["small", "wide", "tall"]);
 const MODES = new Set<ChartMode>(["value", "cumulative", "change", "avg"]);
 const SCALES = new Set<ChartScale>(["auto", "zero"]);
 
@@ -52,7 +72,39 @@ export function parseTileOptions(json: string | null | undefined): TileOptions {
     out.scale = obj.scale as ChartScale;
   }
   if (typeof obj.title === "string") out.title = obj.title;
+  if (typeof obj.size === "string" && SIZES.has(obj.size as TileOptions["size"])) {
+    out.size = obj.size as TileOptions["size"];
+  }
+  if (typeof obj.dim === "string") out.dim = obj.dim;
+  if (typeof obj.text === "string") out.text = obj.text;
+  if (typeof obj.range === "string") out.range = obj.range;
+  if (typeof obj.branch === "string") out.branch = obj.branch;
   return out;
+}
+
+/** Grid footprint for a tile size — `wide` spans two columns, `tall` two rows,
+ *  anything else stays 1×1. Returned as a style fragment the grid item spreads. */
+export function tileSpanStyle(size: TileOptions["size"]): { gridColumn?: string; gridRow?: string } {
+  if (size === "wide") return { gridColumn: "span 2" };
+  if (size === "tall") return { gridRow: "span 2" };
+  return {};
+}
+
+/** The window a tile actually renders: the dashboard-level filter, with any
+ *  per-tile override winning. A tile `range` of `all` explicitly means "no time
+ *  window" (so a tile can opt out of a windowed dashboard). Pure — `now` is
+ *  passed in so preset resolution is testable. */
+export function resolveTileWindow(
+  opts: TileOptions,
+  dashboard: { range: TimeRange | null; branch: string | null },
+  now: number,
+): { range: TimeRange | null; branch: string | null } {
+  const range = opts.range
+    ? opts.range === "all"
+      ? null
+      : rangeFromPreset(opts.range, now)
+    : dashboard.range;
+  return { range, branch: opts.branch ?? dashboard.branch };
 }
 
 /** The newest sample's value (largest `captured_at`), or `null` when nothing

@@ -1,7 +1,14 @@
 import { describe, expect, it, mock } from "bun:test";
 
 import type { MetricCatalogEntry, SeriesPoint } from "../api.js";
-import { buildAddMetricMenu, deltaTone, latestValue, parseTileOptions } from "./customDashboardData.js";
+import {
+  buildAddMetricMenu,
+  deltaTone,
+  latestValue,
+  parseTileOptions,
+  resolveTileWindow,
+  tileSpanStyle,
+} from "./customDashboardData.js";
 
 function entry(key: string, title: string, category: string | null): MetricCatalogEntry {
   return {
@@ -73,6 +80,73 @@ describe("latestValue", () => {
   it("returns null when there are no parseable samples", () => {
     expect(latestValue([])).toBeNull();
     expect(latestValue([sample("not-a-date", 5)])).toBeNull();
+  });
+});
+
+describe("parseTileOptions — phase 4 fields", () => {
+  it("parses the added viz kinds, size, dim, text, range and branch", () => {
+    expect(
+      parseTileOptions(
+        '{"viz":"sparkline","size":"wide","dim":"package","text":"# Hi","range":"30d","branch":"main"}',
+      ),
+    ).toEqual({
+      viz: "sparkline",
+      size: "wide",
+      dim: "package",
+      text: "# Hi",
+      range: "30d",
+      branch: "main",
+    });
+    expect(parseTileOptions('{"viz":"bar"}').viz).toBe("bar");
+    expect(parseTileOptions('{"size":"tall"}').size).toBe("tall");
+  });
+
+  it("drops an unrecognized size but keeps the rest", () => {
+    const opts = parseTileOptions('{"viz":"line","size":"enormous"}');
+    expect(opts.viz).toBe("line");
+    expect(opts.size).toBeUndefined();
+  });
+});
+
+describe("tileSpanStyle", () => {
+  it("maps wide to a column span and tall to a row span", () => {
+    expect(tileSpanStyle("wide")).toEqual({ gridColumn: "span 2" });
+    expect(tileSpanStyle("tall")).toEqual({ gridRow: "span 2" });
+  });
+
+  it("gives a small / absent size no span at all", () => {
+    expect(tileSpanStyle("small")).toEqual({});
+    expect(tileSpanStyle(undefined)).toEqual({});
+  });
+});
+
+describe("resolveTileWindow", () => {
+  const now = Date.parse("2026-07-18T00:00:00Z");
+  const dashRange = { from: now - 1000, to: now };
+
+  it("inherits the dashboard's range and branch when the tile overrides nothing", () => {
+    expect(resolveTileWindow({}, { range: dashRange, branch: "main" }, now)).toEqual({
+      range: dashRange,
+      branch: "main",
+    });
+  });
+
+  it("lets a per-tile range preset win over the dashboard's", () => {
+    const got = resolveTileWindow({ range: "1d" }, { range: dashRange, branch: null }, now);
+    expect(got.range).not.toBeNull();
+    // A "last day" preset spans 24h ending now.
+    expect(got.range!.to).toBe(now);
+    expect(now - got.range!.from).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it("treats a tile range of 'all' as no time window, overriding the dashboard", () => {
+    expect(resolveTileWindow({ range: "all" }, { range: dashRange, branch: null }, now).range).toBeNull();
+  });
+
+  it("lets a per-tile branch win over the dashboard's", () => {
+    expect(resolveTileWindow({ branch: "feature" }, { range: null, branch: "main" }, now).branch).toBe(
+      "feature",
+    );
   });
 });
 
