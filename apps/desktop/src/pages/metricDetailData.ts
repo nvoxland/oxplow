@@ -81,6 +81,40 @@ export const CHART_MODES: Array<{ key: ChartMode; label: string }> = [
   { key: "avg", label: "Moving avg" },
 ];
 
+/** Y-axis scaling. `auto` fits the data (+ target) with padding — the same
+ *  data-relative scaling the Recorded Metrics sparkline uses, so a metric whose
+ *  variation is small relative to its value (avg complexity ~1.96, coverage
+ *  ~98%) still shows its trend instead of a flat line pinned near the top.
+ *  `zero` forces the axis through 0 (honest about absolute magnitude). */
+export type ChartScale = "auto" | "zero";
+
+export const CHART_SCALES: Array<{ key: ChartScale; label: string }> = [
+  { key: "auto", label: "Auto" },
+  { key: "zero", label: "From zero" },
+];
+
+export const DEFAULT_CHART_SCALE: ChartScale = "auto";
+
+/** The chart's Y-axis `[min, max]` for a set of values (+ an optional target
+ *  line that always stays in view). `zero` forces the axis through 0; `auto`
+ *  fits the data with ~8% padding — for a flat series (span 0) it pads by a
+ *  fraction of the value so the line renders mid-chart rather than on an edge.
+ *  Pure + exported so the scaling is unit-tested independent of the SVG. */
+export function yDomain(
+  values: number[],
+  target: number | null | undefined,
+  scale: ChartScale,
+): { min: number; max: number } {
+  const lo = Math.min(...values, target ?? Infinity);
+  const hi = Math.max(...values, target ?? -Infinity);
+  if (scale === "zero") {
+    return { min: Math.min(0, lo), max: Math.max(0, hi) };
+  }
+  const span = hi - lo;
+  const pad = span > 0 ? span * 0.08 : Math.abs(hi) * 0.08 || 1;
+  return { min: lo - pad, max: hi + pad };
+}
+
 const AVG_WINDOW = 5;
 
 /** The chart mode that best matches the spec's `aggregation`: a `sum`/per-event

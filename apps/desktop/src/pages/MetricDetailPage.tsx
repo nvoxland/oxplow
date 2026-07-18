@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   type EffortMetricDelta,
@@ -16,7 +16,7 @@ import {
   subscribeOxplowEvents,
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { Page } from "../tabs/Page.js";
+import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
@@ -29,6 +29,8 @@ import {
 } from "./MetricDetail.js";
 import {
   type ChartMode,
+  type ChartScale,
+  DEFAULT_CHART_SCALE,
   DEFAULT_RANGE_KEY,
   type TimeRange,
   branchOptions,
@@ -41,12 +43,118 @@ import {
 } from "./metricDetailData.js";
 
 const SAMPLE_LIMIT = 500;
+// A grouped fetch returns one point per (capture × group); the read caps TOTAL
+// points, so a breakdown-filtered chart needs headroom for every group's whole
+// series. Breakdown dims are low-cardinality (package / language), so this is
+// generous rather than unbounded (tsk136).
+const GROUP_SAMPLE_LIMIT = 20000;
 const DRILL_IN_KINDS = new Set(["findings", "test", "coverage", "event"]);
 
 function SectionLabel({ children }: { children: string }) {
   return (
     <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
       {children}
+    </div>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+  testId,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      aria-selected={active}
+      style={{
+        fontSize: 12,
+        fontWeight: 600,
+        padding: "4px 10px",
+        border: "none",
+        borderBottom: active ? "2px solid var(--accent, #58a6ff)" : "2px solid transparent",
+        background: "none",
+        color: active ? "var(--text, #ddd)" : "var(--text-muted, #888)",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** The main-column data section: Breakdown and Recordings behind a tab
+ *  selector, **Breakdown default** (most viewers want the roll-up, not the raw
+ *  per-capture rows). When the metric has no per-file breakdown — the roll-up
+ *  comes back empty (coverage, operational metrics) — the Breakdown tab is
+ *  dropped and Recordings shows on its own (tsk134). Breakdown stays mounted via
+ *  a display toggle so its availability callback fires even under Recordings. */
+function BreakdownRecordings({
+  def,
+  samples,
+  onOpenPage,
+  onSelectGroup,
+  onDimChange,
+  activeGroup,
+}: {
+  def: MetricSpec;
+  samples: SeriesPoint[];
+  onOpenPage?: (ref: TabRef) => void;
+  onSelectGroup?: (dim: string, value: string) => void;
+  onDimChange?: () => void;
+  activeGroup?: string | null;
+}) {
+  const [tab, setTab] = useState<"breakdown" | "recordings">("breakdown");
+  // null = still loading; false = the roll-up returned nothing to break down.
+  const [hasBreakdown, setHasBreakdown] = useState<boolean | null>(null);
+  // Sticky-true: once a dimension has data, switching to an empty dimension
+  // must not yank the whole tab away. Stable identity so the card's fetch
+  // effect doesn't re-run every render.
+  const reportBreakdown = useCallback(
+    (has: boolean) => setHasBreakdown((prev) => (prev === true ? true : has)),
+    [],
+  );
+  const active = hasBreakdown === false ? "recordings" : tab;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="metric-detail-panels">
+      {hasBreakdown === false ? (
+        <SectionLabel>Recordings</SectionLabel>
+      ) : (
+        <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border, #2a2a2a)" }}>
+          <TabButton
+            label="Breakdown"
+            active={active === "breakdown"}
+            onClick={() => setTab("breakdown")}
+            testId="metric-tab-breakdown"
+          />
+          <TabButton
+            label="Recordings"
+            active={active === "recordings"}
+            onClick={() => setTab("recordings")}
+            testId="metric-tab-recordings"
+          />
+        </div>
+      )}
+      <div style={{ display: active === "breakdown" ? "block" : "none" }}>
+        <MetricBreakdownCard
+          def={def}
+          onAvailability={reportBreakdown}
+          onSelectGroup={onSelectGroup}
+          onDimChange={onDimChange}
+          activeGroup={activeGroup}
+        />
+      </div>
+      <div style={{ display: active === "recordings" ? "block" : "none" }}>
+        <RecordingsTable samples={samples} unit={def.unit} metricKey={def.key} onOpenPage={onOpenPage} />
+      </div>
     </div>
   );
 }
@@ -78,10 +186,15 @@ export function MetricDetailPage({
   // Filters. Default to the last 7 days, all branches, raw value.
   const [range, setRange] = useState<TimeRange>(() => rangeFromPreset(DEFAULT_RANGE_KEY, Date.now()));
   const [mode, setMode] = useState<ChartMode>("value");
+  const [scale, setScale] = useState<ChartScale>(DEFAULT_CHART_SCALE);
   // Seed the chart mode from the metric's roll-up (sum→cumulative, …) when the
   // def loads, but stop overriding once the user picks a mode (tsk302).
   const modeTouched = useRef(false);
   const [branch, setBranch] = useState<string | null>(null);
+  // A clicked breakdown group ({dim, value}) filters the chart to that group's
+  // series (tsk136); `groupSamples` holds that group's fetched points.
+  const [breakdownFilter, setBreakdownFilter] = useState<{ dim: string; value: string } | null>(null);
+  const [groupSamples, setGroupSamples] = useState<SeriesPoint[]>([]);
   usePageTitle(def?.title ?? entry?.title ?? "Metric");
 
   useEffect(() => {
@@ -145,12 +258,39 @@ export function MetricDetailPage({
     };
   }, [effort?.effortId, metricKey, effort]);
 
+  // Drop any breakdown filter when navigating to a different metric.
+  useEffect(() => setBreakdownFilter(null), [metricKey]);
+
+  // When a breakdown group is selected, fetch that dimension's grouped series
+  // and keep just the clicked group's points (tsk136). Cleared when the filter
+  // is dropped or the metric changes.
+  useEffect(() => {
+    if (!metricKey || !breakdownFilter) {
+      setGroupSamples([]);
+      return;
+    }
+    let cancelled = false;
+    const { dim, value } = breakdownFilter;
+    void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, dim).then((all) => {
+      if (!cancelled) setGroupSamples(all.filter((p) => p.group === value));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [metricKey, breakdownFilter]);
+
   const branches = useMemo(() => branchOptions(samples), [samples]);
+  // The whole-metric window feeds the Recordings table + stats rail.
   const filtered = useMemo(
     () => filterByBranch(filterByRange(samples, range), branch),
     [samples, range, branch],
   );
-  const points = useMemo(() => transformSeries(seriesPoints(filtered), mode), [filtered, mode]);
+  // The CHART uses the breakdown-filtered group series when one is selected.
+  const points = useMemo(() => {
+    const src = breakdownFilter ? groupSamples : samples;
+    const windowed = filterByBranch(filterByRange(src, range), branch);
+    return transformSeries(seriesPoints(windowed), mode);
+  }, [breakdownFilter, groupSamples, samples, range, branch, mode]);
 
   const toggleEnabled = async () => {
     if (!entry) return;
@@ -239,23 +379,52 @@ export function MetricDetailPage({
     const hasDrillIn = DRILL_IN_KINDS.has(def.display_kind);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }} data-testid="metric-detail">
+        <h1 style={pageH1Style} data-testid="metric-detail-title">
+          {def.title}
+        </h1>
         {def.description ? (
           <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5, opacity: 0.8 }} data-testid="metric-description">
             {def.description}
           </p>
+        ) : null}
+        {breakdownFilter ? (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}
+            data-testid="breakdown-filter-chip"
+          >
+            <span style={{ opacity: 0.6 }}>Charting</span>
+            <span style={{ fontWeight: 600 }}>{breakdownFilter.value}</span>
+            <span style={{ opacity: 0.5 }}>· {breakdownFilter.dim}</span>
+            <button
+              type="button"
+              onClick={() => setBreakdownFilter(null)}
+              data-testid="breakdown-filter-clear"
+              title="Back to the whole metric"
+              aria-label="Back to the whole metric"
+              style={{ fontSize: 11, cursor: "pointer", padding: "1px 6px" }}
+            >
+              ✕
+            </button>
+          </div>
         ) : null}
         <TrendChart
           points={points}
           target={mode === "value" ? def.target : null}
           domain={range}
           unit={def.unit}
+          scale={scale}
           onSelectRange={(from, to) => setRange({ from, to })}
         />
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <SectionLabel>Recordings</SectionLabel>
-          <RecordingsTable samples={filtered} unit={def.unit} metricKey={def.key} onOpenPage={onOpenPage} />
-        </div>
-        <MetricBreakdownCard def={def} />
+        <BreakdownRecordings
+          def={def}
+          samples={filtered}
+          onOpenPage={onOpenPage}
+          onSelectGroup={(dim, value) =>
+            setBreakdownFilter((cur) => (cur?.dim === dim && cur.value === value ? null : { dim, value }))
+          }
+          onDimChange={() => setBreakdownFilter(null)}
+          activeGroup={breakdownFilter?.value ?? null}
+        />
         {hasDrillIn ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <SectionLabel>Latest recording</SectionLabel>
@@ -270,6 +439,7 @@ export function MetricDetailPage({
     <Page
       testId="page-metric-detail"
       title={def?.title ?? entry?.title ?? "Metric"}
+      titleInBody
       layout="details"
       rightRailTitle="Details"
       rightRail={
@@ -280,6 +450,8 @@ export function MetricDetailPage({
               onRange={setRange}
               mode={mode}
               onMode={handleMode}
+              scale={scale}
+              onScale={setScale}
               branch={branch}
               branches={branches}
               onBranch={setBranch}

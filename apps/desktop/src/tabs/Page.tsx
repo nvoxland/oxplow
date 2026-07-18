@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { PageNavBar } from "./PageNavBar.js";
 import { useOptionalPageNavigation } from "./PageNavigationContext.js";
@@ -100,6 +100,11 @@ export interface PageProps {
   /** When false, suppress the title/chips/actions header. Defaults
    *  to true. */
   showHeader?: boolean;
+  /** When true, the page renders its OWN title as an `<h1>` in the body
+   *  (via {@link pageH1Style}), so the chrome (nav bar / header) does NOT
+   *  render the title — avoiding a duplicate. The tab-strip label
+   *  (`usePageTitle`) is unaffected. Defaults to false. */
+  titleInBody?: boolean;
   /** Body layout. `"full"` (default) renders edge-to-edge — today's
    *  behavior. `"details"` renders a two-column grid: a bounded
    *  reading-width center column (`.oxplow-reading-column`, 78ch,
@@ -119,6 +124,17 @@ export interface PageProps {
  *  center column). */
 const DETAILS_RAIL_THRESHOLD_PX = 960;
 
+/** The shared page-title `<h1>` style for pages that render their title in the
+ *  body (with `titleInBody` on {@link Page}) rather than in the chrome. Keeps
+ *  the in-body title consistent across pages (metric detail, diff view, …). */
+export const pageH1Style: CSSProperties = {
+  margin: 0,
+  fontSize: "var(--text-2xl)",
+  fontWeight: 700,
+  color: "var(--text-primary)",
+  lineHeight: 1.2,
+};
+
 /**
  * Shared chrome for every page rendered inside a tab body. Provides:
  *  - A header (title + kind chip + status/metadata chips + actions slot)
@@ -128,7 +144,7 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, layout = "full", rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, kind, chips, actions, children, backlinks, outbound, snapshots, commentsNav, navBar, testId, showNavBar = true, showHeader = true, titleInBody = false, layout = "full", rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // In the details layout the `⋯` actions move into the right rail's
   // panel header; keep them out of the page header to avoid duplication.
@@ -220,7 +236,7 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
           onBack={effectiveNavBar.onBack}
           onForward={effectiveNavBar.onForward}
           siblings={effectiveNavBar.siblings}
-          title={effectiveTitle}
+          title={titleInBody ? undefined : effectiveTitle}
           kind={kind}
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
@@ -244,19 +260,21 @@ export function Page({ title, kind, chips, actions, children, backlinks, outboun
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, flex: 1, minWidth: 0 }}>
-          <span
-            data-testid="page-title"
-            style={{
-              fontSize: "var(--text-lg)",
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {effectiveTitle}
-          </span>
+          {titleInBody ? null : (
+            <span
+              data-testid="page-title"
+              style={{
+                fontSize: "var(--text-lg)",
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {effectiveTitle}
+            </span>
+          )}
           {chips?.map((chip, i) => (
             <span
               key={i}

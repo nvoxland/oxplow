@@ -18,8 +18,10 @@ import { useRouteDispatch } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
 import {
   CHART_MODES,
+  CHART_SCALES,
   type ChartMode,
   type ChartPoint,
+  type ChartScale,
   RANGE_PRESETS,
   type TimeRange,
   fromLocalInput,
@@ -27,6 +29,7 @@ import {
   matchPresetKey,
   rangeFromPreset,
   toLocalInput,
+  yDomain,
 } from "./metricDetailData.js";
 
 // Composable pieces of the Metric detail page (tsk213, P4 / tsk232 / tsk291).
@@ -61,6 +64,7 @@ export function TrendChart({
   onSelectRange,
   domain,
   unit,
+  scale = "auto",
 }: {
   points: ChartPoint[];
   target?: number | null;
@@ -70,6 +74,8 @@ export function TrendChart({
   domain?: { from: number; to: number };
   /** Unit appended to the hover tooltip's value. */
   unit?: string | null;
+  /** Y-axis scaling: `auto` fits the data (default), `zero` forces through 0. */
+  scale?: ChartScale;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   // Drag selection in SVG-x coordinates (null = not dragging).
@@ -92,10 +98,19 @@ export function TrendChart({
   // data extent.
   const tMin = domain ? domain.from : Math.min(...pts.map((p) => p.t));
   const tMax = domain ? domain.to : Math.max(...pts.map((p) => p.t));
-  const vMin = Math.min(0, ...pts.map((p) => p.v));
-  const vMax = Math.max(...pts.map((p) => p.v), target ?? -Infinity);
+  // Y-axis fits the data (auto) or is anchored at 0 (zero) — see `yDomain`.
+  const { min: vMin, max: vMax } = yDomain(
+    pts.map((p) => p.v),
+    target,
+    scale,
+  );
   const tRange = tMax - tMin || 1;
   const vRange = vMax - vMin || 1;
+  // Y-tick label precision scaled to the visible range — a tight auto-scaled
+  // window (e.g. 1.94–1.97) needs decimals a fixed `.toFixed(1)` would collapse
+  // to "1.9"/"2.0".
+  const tickDecimals = vRange >= 10 ? 0 : vRange >= 1 ? 1 : vRange >= 0.1 ? 2 : 3;
+  const fmtTick = (v: number) => (tickDecimals === 0 ? String(Math.round(v)) : v.toFixed(tickDecimals));
   const x = (t: number) => padL + ((t - tMin) / tRange) * (w - padL - padR);
   const y = (v: number) => h - padB - ((v - vMin) / vRange) * (h - padT - padB);
   // Inverse of `x`: SVG-x pixel → time, clamped to the plot area.
@@ -180,7 +195,7 @@ export function TrendChart({
         return (
           <g key={fr}>
             <text x={padL - 6} y={y(v) + 3} textAnchor="end" fontSize={9} fill="var(--text-muted, #888)">
-              {Number.isInteger(v) ? v : v.toFixed(1)}
+              {fmtTick(v)}
             </text>
             <line x1={padL} y1={y(v)} x2={w - padR} y2={y(v)} stroke="var(--border, #2a2a2a)" opacity={0.3} />
           </g>
@@ -258,6 +273,8 @@ export function MetricControls({
   onRange,
   mode,
   onMode,
+  scale,
+  onScale,
   branch,
   branches,
   onBranch,
@@ -266,6 +283,8 @@ export function MetricControls({
   onRange: (r: TimeRange) => void;
   mode: ChartMode;
   onMode: (m: ChartMode) => void;
+  scale: ChartScale;
+  onScale: (s: ChartScale) => void;
   branch: string | null;
   branches: string[];
   onBranch: (b: string | null) => void;
@@ -349,6 +368,22 @@ export function MetricControls({
           {CHART_MODES.map((m) => (
             <option key={m.key} value={m.key}>
               {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div style={rowStyle}>
+        <span style={labelStyle}>Scale</span>
+        <select
+          value={scale}
+          onChange={(e) => onScale(e.target.value as ChartScale)}
+          title="Auto fits the data; From zero anchors the Y-axis at 0."
+          data-testid="chart-scale"
+          style={selStyle}
+        >
+          {CHART_SCALES.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.label}
             </option>
           ))}
         </select>
@@ -685,25 +720,46 @@ function breakdownDimensions(def: MetricSpec): string[] {
  *  largest first. Exercises the `metric_subject` package grain + the per-file
  *  dim breakdown (tsk328 package / tsk319 language). Self-hides when the
  *  metric has no per-file samples (e.g. coverage, operational metrics). */
-export function MetricBreakdownCard({ def }: { def: MetricSpec }) {
+export function MetricBreakdownCard({
+  def,
+  onAvailability,
+  onSelectGroup,
+  onDimChange,
+  activeGroup,
+}: {
+  def: MetricSpec;
+  /** Reports whether the current dimension's roll-up returned any rows — the
+   *  tab wrapper uses it to decide whether to offer a Breakdown tab (tsk134). */
+  onAvailability?: (has: boolean) => void;
+  /** Click a row to filter the trend chart to that dim value (tsk136). */
+  onSelectGroup?: (dim: string, value: string) => void;
+  /** Switching the dimension clears any active chart filter (it was on the old dim). */
+  onDimChange?: () => void;
+  /** The currently charted group value (for the row highlight), or null. */
+  activeGroup?: string | null;
+}) {
   const dims = useMemo(() => breakdownDimensions(def), [def]);
   const [dim, setDim] = useState<string>(dims[0] ?? "package");
   const [rows, setRows] = useState<RollupRow[]>([]);
   useEffect(() => {
     let cancelled = false;
     void metricDimensionRollup(def.key, dim).then((r) => {
-      if (!cancelled) setRows(r);
+      if (cancelled) return;
+      setRows(r);
+      onAvailability?.(r.length > 0);
     });
     return () => {
       cancelled = true;
     };
-  }, [def.key, dim]);
+  }, [def.key, dim, onAvailability]);
 
   if (rows.length === 0) return null;
   const max = Math.max(...rows.map((r) => r.value), 1);
+  const dimLabel = dim.charAt(0).toUpperCase() + dim.slice(1);
+  const valueLabel = "Value";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="metric-breakdown">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div
           style={{
             fontSize: 12,
@@ -717,7 +773,10 @@ export function MetricBreakdownCard({ def }: { def: MetricSpec }) {
         </div>
         <select
           value={dim}
-          onChange={(e) => setDim(e.target.value)}
+          onChange={(e) => {
+            setDim(e.target.value);
+            onDimChange?.();
+          }}
           aria-label="Breakdown dimension"
           style={{ fontSize: 12 }}
         >
@@ -728,11 +787,61 @@ export function MetricBreakdownCard({ def }: { def: MetricSpec }) {
           ))}
         </select>
       </div>
-      {rows.slice(0, 20).map((r) => (
-        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+      {/* Column header — the value/count numbers are otherwise unlabeled. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 10,
+          opacity: 0.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          borderBottom: "1px solid var(--border, #2a2a2a)",
+          paddingBottom: 2,
+        }}
+      >
+        <span style={{ width: "32%" }}>{dimLabel}</span>
+        <div style={{ flex: 1 }} />
+        <span style={{ width: 64, textAlign: "right" }} title={`Rolled-up ${valueLabel} for the group`}>
+          {valueLabel}
+        </span>
+        <span style={{ width: 56, textAlign: "right" }} title="Number of subjects (functions / files) in the group">
+          Subjects
+        </span>
+      </div>
+      {rows.slice(0, 20).map((r) => {
+        const active = r.key === activeGroup;
+        return (
+        <div
+          key={r.key}
+          onClick={onSelectGroup ? () => onSelectGroup(dim, r.key) : undefined}
+          data-testid={`breakdown-row-${r.key}`}
+          title={
+            onSelectGroup
+              ? `${r.key}: ${fmt(r.value)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"} — click to chart this ${dim}`
+              : `${r.key}: ${fmt(r.value)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`
+          }
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 12,
+            cursor: onSelectGroup ? "pointer" : undefined,
+            background: active ? "var(--accent-bg, rgba(88,166,255,0.12))" : undefined,
+            borderRadius: 3,
+            padding: "1px 3px",
+            margin: "0 -3px",
+          }}
+        >
           <span
-            style={{ width: "32%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            title={`${r.key} · ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`}
+            style={{
+              width: "32%",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontWeight: active ? 600 : undefined,
+            }}
           >
             {r.key}
           </span>
@@ -746,12 +855,13 @@ export function MetricBreakdownCard({ def }: { def: MetricSpec }) {
               }}
             />
           </div>
-          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-            {fmt(r.value)}
-            <span style={{ opacity: 0.5 }}> · {r.subject_count}</span>
+          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(r.value)}</span>
+          <span style={{ width: 56, textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: 0.55 }}>
+            {r.subject_count}
           </span>
         </div>
-      ))}
+        );
+      })}
       {rows.length > 20 ? (
         <div style={{ fontSize: 11, opacity: 0.5, paddingTop: 2 }}>
           +{rows.length - 20} more {dim === "package" ? "packages" : `${dim} values`}

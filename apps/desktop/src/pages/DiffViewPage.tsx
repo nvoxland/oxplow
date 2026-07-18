@@ -25,7 +25,7 @@ import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import { DISK, refVersion } from "../file-version.js";
-import { Page } from "../tabs/Page.js";
+import { Page, pageH1Style } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import {
@@ -691,13 +691,14 @@ function ResolvedEndpointDiff({
     <Page
       testId="page-diff-view"
       kind="diff-view"
+      titleInBody
       backlinks={backlinks}
       outbound={outbound}
       layout="details"
       rightRail={rail}
     >
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <h1 style={h1Style} data-testid="diff-view-title">{plainTitle}</h1>
+      <h1 style={pageH1Style} data-testid="diff-view-title">{plainTitle}</h1>
 
       {effortDescription && effortDescription.trim() ? (
         <div data-testid="diff-view-effort-description" style={{ fontSize: "var(--text-sm)" }}>
@@ -961,13 +962,6 @@ const linkButton: React.CSSProperties = {
   fontFamily: "var(--mono, monospace)",
   fontSize: "var(--text-xs)",
   cursor: "pointer",
-};
-const h1Style: React.CSSProperties = {
-  margin: 0,
-  fontSize: "var(--text-2xl)",
-  fontWeight: 700,
-  color: "var(--text-primary)",
-  lineHeight: 1.2,
 };
 const h2Style: React.CSSProperties = {
   margin: "0 0 8px",

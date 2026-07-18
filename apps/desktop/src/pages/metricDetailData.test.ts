@@ -13,6 +13,7 @@ import {
   matchPresetKey,
   rangeFromPreset,
   seriesPoints,
+  yDomain,
 } from "./metricDetailData.js";
 
 const s = (o: Partial<SeriesPoint>) => o as unknown as SeriesPoint;
@@ -131,4 +132,33 @@ test("defaultChartMode follows the spec aggregation", () => {
   expect(defaultChartMode("avg")).toBe("avg");
   expect(defaultChartMode("last")).toBe("value");
   expect(defaultChartMode("whatever")).toBe("value");
+});
+
+test("yDomain zero-scale anchors the axis at 0", () => {
+  // The squished case: near-constant ~1.96 data on a 0-based axis (tsk133).
+  expect(yDomain([1.95, 1.96, 1.96], null, "zero")).toEqual({ min: 0, max: 1.96 });
+  // Negative data still spans through 0.
+  expect(yDomain([-3, -1], null, "zero")).toEqual({ min: -3, max: 0 });
+});
+
+test("yDomain auto-scale fits the data with padding (not through 0)", () => {
+  const d = yDomain([1.95, 1.96], null, "auto");
+  // Tight window around the data, NOT anchored at 0 — this is what un-squishes it.
+  expect(d.min).toBeGreaterThan(1.9);
+  expect(d.min).toBeLessThan(1.95);
+  expect(d.max).toBeGreaterThan(1.96);
+  expect(d.max).toBeLessThan(2.0);
+});
+
+test("yDomain folds the target line into both bounds", () => {
+  // A target above the data extends the top; below extends the bottom.
+  expect(yDomain([10, 12], 20, "zero").max).toBe(20);
+  expect(yDomain([10, 12], 5, "zero").min).toBe(0);
+  expect(yDomain([10, 12], 20, "auto").max).toBeGreaterThanOrEqual(20);
+});
+
+test("yDomain auto pads a flat series so it isn't on an edge", () => {
+  const d = yDomain([5, 5, 5], null, "auto");
+  expect(d.min).toBeLessThan(5);
+  expect(d.max).toBeGreaterThan(5);
 });
