@@ -1,21 +1,31 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  type Dashboard,
   type EffortMetricDelta,
   type FactFinding,
   type MetricCatalogEntry,
   type MetricSpec,
   type SeriesPoint,
+  addDashboardItem,
+  createDashboard,
+  listDashboards,
   listEffortMetricDeltas,
   listMetricCatalog,
   listMetricDefinitions,
   listMetricFindings,
   listMetricSamples,
+  removeDashboardItem,
   setMetricEnabled,
   setMetricOverride,
+  subscribeDashboardEvents,
   subscribeOxplowEvents,
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
+import { showToast } from "../components/toastStore.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
+import { buildAddToDashboardMenu } from "./customDashboardData.js";
+import { customDashboardRef } from "../tabs/pageRefs.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -195,7 +205,27 @@ export function MetricDetailPage({
   // series (tsk136); `groupSamples` holds that group's fetched points.
   const [breakdownFilter, setBreakdownFilter] = useState<{ dim: string; value: string } | null>(null);
   const [groupSamples, setGroupSamples] = useState<SeriesPoint[]>([]);
+  // "Add to dashboard" picker (tsk143).
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const addToDashboardMenu = useContextMenu();
   usePageTitle(def?.title ?? entry?.title ?? "Metric");
+
+  // Keep the picker's options live so a dashboard created elsewhere — another
+  // tab, or the agent via the MCP tools — shows up without a reload.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void listDashboards().then((rows) => {
+        if (!cancelled) setDashboards(rows);
+      });
+    };
+    refresh();
+    const off = subscribeDashboardEvents(refresh);
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
 
   useEffect(() => {
     if (def && !modeTouched.current) setMode(defaultChartMode(def.aggregation));
@@ -320,6 +350,78 @@ export function MetricDetailPage({
       setConfigBusy(false);
     }
   };
+
+  // A new tile inherits the chart you're actually looking at (mode + scale),
+  // so "add to dashboard" captures the current view rather than a default.
+  const tileOptionsJson = () => JSON.stringify({ viz: "line", mode, scale });
+
+  const addToDashboard = async (dashboardId: string) => {
+    if (!metricKey) return;
+    try {
+      const tileId = await addDashboardItem({
+        dashboardId,
+        kind: "metric",
+        metricKey,
+        optionsJson: tileOptionsJson(),
+      });
+      const title = dashboards.find((d) => d.id === dashboardId)?.title ?? "dashboard";
+      // Stay on the metric — the toast carries the undo (remove the new tile).
+      showToast({ message: `Added to ${title}`, onUndo: () => void removeDashboardItem(tileId) });
+    } catch (e) {
+      recordOpError({ label: "Add to dashboard", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const addToNewDashboard = async () => {
+    if (!metricKey) return;
+    try {
+      const created = await createDashboard("Untitled dashboard");
+      await addDashboardItem({
+        dashboardId: created.id,
+        kind: "metric",
+        metricKey,
+        optionsJson: tileOptionsJson(),
+      });
+      // A brand-new dashboard is worth showing; adding to an existing one
+      // leaves you here with an undo toast instead.
+      onOpenPage?.(customDashboardRef(created.id));
+    } catch (e) {
+      recordOpError({ label: "New dashboard", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const dashboardBlock = metricKey ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <SectionLabel>Dashboard</SectionLabel>
+      <button
+        type="button"
+        onClick={(e) =>
+          addToDashboardMenu.open(
+            e,
+            buildAddToDashboardMenu(
+              dashboards,
+              (id) => void addToDashboard(id),
+              () => void addToNewDashboard(),
+            ),
+          )
+        }
+        data-testid="metric-add-to-dashboard"
+        style={{
+          fontSize: 13,
+          padding: "6px 10px",
+          borderRadius: 6,
+          border: "1px solid var(--border-subtle)",
+          background: "var(--surface-card)",
+          color: "var(--text, #ddd)",
+          cursor: "pointer",
+          textAlign: "left",
+        }}
+      >
+        Add to dashboard ▾
+      </button>
+      {addToDashboardMenu.menu}
+    </div>
+  ) : null;
 
   // The configure block — Metric Settings folded into the detail page
   // (tsk117): the detail IS the one place a metric is configured now. Enable
@@ -457,6 +559,7 @@ export function MetricDetailPage({
               onBranch={setBranch}
             />
             <MetricStatsRail def={def} samples={filtered} effort={effort} effortDelta={effortDelta} />
+            {dashboardBlock}
             {configure}
           </div>
         ) : (

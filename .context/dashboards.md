@@ -151,4 +151,14 @@ Pure helpers live in `pages/customDashboardData.ts` (React-free, unit-tested):
 `latestValue`, `deltaTone`, `buildAddMetricMenu`, `tileSpanStyle`,
 `resolveTileWindow`.
 
-_Phase 5 (tsk143): an "Add to dashboard…" block on the metric-detail rail._
+**Add to dashboard (tsk143)** — the metric-detail page's Details rail carries a
+**Dashboard** block: an "Add to dashboard ▾" button whose menu is the pure
+`buildAddToDashboardMenu(dashboards, onPick, onNew)` — one entry per dashboard,
+then a separator and **New dashboard…**. The new tile inherits the chart
+currently on screen (`mode` + `scale`), so it captures the view you were looking
+at rather than a default. Picking an **existing** dashboard keeps you on the
+metric and shows an **undo toast** (undo removes the tile just added); **New
+dashboard…** creates, adds, and navigates to it (a brand-new dashboard is worth
+showing). The picker list is kept live via `subscribeDashboardEvents`, so a
+dashboard the agent creates over MCP appears without a reload. The block hides
+for a disabled metric (no spec ⇒ nothing to chart).

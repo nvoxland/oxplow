@@ -1,4 +1,4 @@
-import type { MetricCatalogEntry, SeriesPoint } from "../api.js";
+import type { Dashboard, MetricCatalogEntry, SeriesPoint } from "../api.js";
 import type { MenuItem } from "../menu.js";
 import {
   type ChartMode,
@@ -167,4 +167,24 @@ export function buildAddMetricMenu(
     menu.push({ id: `add-metric-cat:${key}`, label, enabled: true, submenu });
   }
   return menu;
+}
+
+/** Build the metric-detail "Add to dashboard ▾" menu: one entry per existing
+ *  dashboard, then (when there are any) a separator and **New dashboard…**.
+ *  Picking a dashboard calls `onPick(dashboardId)`; the last entry calls
+ *  `onNew()`. Pure — the caller owns the `addDashboardItem` write (tsk143). */
+export function buildAddToDashboardMenu(
+  dashboards: Dashboard[],
+  onPick: (dashboardId: string) => void,
+  onNew: () => void,
+): MenuItem[] {
+  const rows: MenuItem[] = dashboards.map((d) => ({
+    id: `add-to-dash:${d.id}`,
+    label: d.title,
+    enabled: true,
+    run: () => onPick(d.id),
+  }));
+  if (rows.length > 0) rows.push({ id: "add-to-dash-sep", label: "", enabled: false, separator: true });
+  rows.push({ id: "add-to-dash-new", label: "New dashboard…", enabled: true, run: onNew });
+  return rows;
 }
