@@ -76,6 +76,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "git-commit":
       return GitCommit;
     case "dashboard":
+    case "custom-dashboard":
+    case "dashboards":
       return LayoutDashboard;
     case "op-error":
       return AlertCircle;
@@ -233,6 +235,8 @@ export function pageKindLabel(kind: string): string {
       return "metric";
     case "metric-recording":
       return "recording";
+    case "custom-dashboard":
+      return "dashboard";
     case "page-analytics":
       return "page analytics";
     case "token-analytics":
@@ -270,6 +274,7 @@ const INDEX_KINDS = new Set<string>([
   "usage",
   "metrics",
   "metrics-recorded",
+  "dashboards",
   "page-analytics",
   "token-analytics",
 ]);

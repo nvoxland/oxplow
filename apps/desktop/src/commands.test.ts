@@ -171,6 +171,7 @@ describe("buildMenuGroupSnapshots", () => {
     expect(tasksGroup?.items.map((item) => item.id)).toEqual([
       "tasks.dashboard",
       "plan.newTask",
+      "dashboard.new",
       "thread.new",
       "stream.new",
     ]);
@@ -190,6 +191,7 @@ function noopHandlers() {
     showWiki() {},
     newTask() {},
     newStream() {},
+    newDashboard() {},
     newThread() {},
     openHistory() {},
     commitFiles() {},

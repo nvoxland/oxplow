@@ -110,8 +110,21 @@ export function metricRef(
   return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "page-analytics" | "token-analytics"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "dashboards" | "page-analytics" | "token-analytics"): TabRef {
   return { id: kind, kind, payload: null };
+}
+
+/** One user-created dashboard — a payload-bearing page kind (like
+ *  `metric-detail`). The dashboard id (`dsh<n>`) rides in both the tab id and
+ *  the payload so a history-restored tab (no payload) still resolves via
+ *  `refFromTabId`. */
+export function customDashboardRef(id: string): TabRef {
+  return { id: `custom-dashboard:${id}`, kind: "custom-dashboard", payload: { id } };
+}
+
+/** The Dashboards index — the list of the user's custom dashboards. */
+export function dashboardsRef(): TabRef {
+  return indexRef("dashboards");
 }
 
 /** Drill-in to a single **recording** of a metric — the located items (the
@@ -423,6 +436,9 @@ export function refFromTabId(id: string): TabRef {
     case "metric-detail":
       // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
+    case "custom-dashboard":
+      // `rest` is the `dsh<n>` id.
+      return customDashboardRef(rest);
     case "metric-recording": {
       // `<captureId>` or `<captureId>:<metricKey>` — the key is needed to
       // fetch the findings after a restore (tsk46); capturedAt/value stay

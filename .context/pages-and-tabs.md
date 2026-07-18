@@ -79,6 +79,7 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | "op-error"
 | "external-url"
 | "usage" | "metrics" | "metrics-recorded" | "metric-detail" | "metric-recording"
+| "custom-dashboard" | "dashboards"
 | "page-analytics" | "token-analytics"
 ```
 
@@ -106,6 +107,8 @@ versions of what today are left-rail or bottom-drawer panels.
 | usage / metrics / metrics-recorded / page-analytics / token-analytics | the kind name (index pages) | `usage`, `metrics`, `metrics-recorded`, `page-analytics`, `token-analytics` |
 | metric-detail | `metric-detail:<key>` | `metric-detail:oxplow.coverage.abs_pct` |
 | metric-recording | `metric-recording:<runId>` | `metric-recording:42` |
+| custom-dashboard | `custom-dashboard:<dashboardId>` | `custom-dashboard:dsh3` |
+| dashboards | the kind name (index page) | `dashboards` |
 | new-stream | `new-stream` | `new-stream` |
 | new-task | `new-task` | `new-task` |
 | stream-settings | `stream-settings:<streamId>` | `stream-settings:s-7` |

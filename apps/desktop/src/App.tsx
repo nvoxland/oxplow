@@ -49,6 +49,7 @@ import {
   reorderThreads,
   reorderStreams,
   switchStream,
+  createDashboard,
   updateTask,
   writeWorkspaceFile,
   type BacklogState,
@@ -121,6 +122,8 @@ import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
 import { MetricsExplorerPage } from "./pages/MetricsExplorerPage.js";
 import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
+import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
+import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
@@ -138,7 +141,7 @@ import { NewTaskPage } from "./pages/NewTaskPage.js";
 import { GitCommitPage } from "./pages/GitCommitPage.js";
 import { OpErrorPage } from "./pages/OpErrorPage.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { closedThreadsRef, commentsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
+import { closedThreadsRef, commentsRef, customDashboardRef, dashboardsRef, directoryRef, effortDiffRef, externalUrlRef, fileRef, gitCommitRef, gitDashboardRef, indexRef, newStreamRef, newTaskRef, opErrorRef, uncommittedChangesRef, wikiPageRef, streamSettingsRef, threadSettingsRef, taskRef, type DiffViewPayload } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { getOpErrorsStore, recordOpError } from "./components/opErrorsStore.js";
 import { classifyExternalUrl } from "./external-url-allowlist.js";
@@ -1366,6 +1369,14 @@ export function App() {
     newStream() {
       handleOpenPageRef.current?.(newStreamRef());
     },
+    newDashboard() {
+      // Create-then-open: no form, mirroring the NewStreamPage
+      // create→navigate pattern. The new dashboard opens ready to
+      // populate (rename via its in-body H1, add tiles via right-click).
+      void createDashboard("Untitled dashboard").then((d) => {
+        handleOpenPageRef.current?.(customDashboardRef(d.id));
+      });
+    },
     newThread() {
       if (!stream) return;
       // The Navigator owns thread creation (inline title + agent
@@ -1873,6 +1884,8 @@ export function App() {
       case "metrics-recorded":
       case "metric-detail":
       case "metric-recording":
+      case "custom-dashboard":
+      case "dashboards":
       case "page-analytics":
       case "token-analytics":
       case "op-error": {
@@ -2807,6 +2820,22 @@ export function App() {
               onOpenPage={navOpen}
             />
           ),
+        });
+      } else if (ref.kind === "custom-dashboard") {
+        // `customDashboardRef(id)` — one user-created dashboard (grid of tiles).
+        const p = (ref.payload ?? null) as { id?: string } | null;
+        tabs.push({
+          id: ref.id,
+          label: "Dashboard",
+          closable: true,
+          render: () => <CustomDashboardPage dashboardId={p?.id} onOpenPage={navOpen} />,
+        });
+      } else if (ref.kind === "dashboards") {
+        tabs.push({
+          id: ref.id,
+          label: "Dashboards",
+          closable: true,
+          render: () => <DashboardsIndexPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "page-analytics") {
         tabs.push({

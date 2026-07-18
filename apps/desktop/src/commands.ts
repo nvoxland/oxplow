@@ -15,6 +15,7 @@ export type CommandId =
   | "git.push"
   | "tasks.dashboard"
   | "plan.newTask"
+  | "dashboard.new"
   | "stream.new"
   | "thread.new"
   | "project.open"
@@ -85,6 +86,7 @@ export interface CommandHandlers {
   showWiki(): void;
   newTask(): void;
   newStream(): void;
+  newDashboard(): void;
   newThread(): void;
   openHistory(): void;
   commitFiles(): void;
@@ -161,6 +163,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       items: [
         { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
         { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
+        { id: "dashboard.new", label: "New Dashboard…", enabled: state.hasStream },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },
       ],
@@ -185,6 +188,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "git.push": handlers.pushChanges,
     "tasks.dashboard": handlers.showTasks,
     "plan.newTask": handlers.newTask,
+    "dashboard.new": handlers.newDashboard,
     "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
     "project.open": handlers.openProject,

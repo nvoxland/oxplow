@@ -76,11 +76,52 @@ These four are **`both(...)`** in `oxplow-surface-parity/src/lib.rs`; the pure-U
 edits (`rename` / `delete` / `update_item` / `remove_item` / `reorder_items`)
 stay **`ui(...)`**. Every MCP write also emits `DashboardsChanged`.
 
-## UI
+## UI (tsk141 — Phase 3)
 
-_Phases 3–5 (tsk141–143): the `custom-dashboard` payload-bearing page kind +
-`CustomDashboardPage` tile grid, the **New Dashboard** command + dashboards
-index, tile types (line / number / sparkline / bar / text), tile sizing,
-drag-drop reorder, a dashboard-level time+branch filter tiles inherit, and an
-"Add to dashboard…" block on the metric-detail rail. This section is filled in
-as those land._
+Two page kinds, wired per `.context/pages-and-tabs.md`'s "adding a tab kind"
+checklist:
+
+- **`custom-dashboard`** — payload-bearing (modeled on `metric-detail`): the id
+  is `custom-dashboard:dsh<n>`, `customDashboardRef(id)` carries the id in both
+  the tab id and payload, and a **`refFromTabId` case** rebuilds it from a
+  history-restored tab (no payload). `CustomDashboardPage` uses `Page`
+  **`layout="full"`** + `titleInBody` and owns its own padding — a tile grid
+  wants every pixel, so it deliberately does **not** use the details layout
+  (whose 78ch reading column + 320px rail squeeze the grid; the rail version
+  was reverted after review). The page renders its own **header row** instead:
+  the editable title `<h1>` (`InlineEdit` → `renameDashboard`) on the left,
+  **+ Add metric** and a **Delete** `InlineConfirm` on the right. Body is a
+  responsive flow grid
+  (`grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))`) of tiles;
+  empty state is a dashed drop-zone card. Live-refreshes on `dashboardsChanged`
+  (structure) + `configChanged` (defs).
+- **`dashboards`** — a literal-id index kind (**in `INDEX_KINDS`**,
+  `dashboardsRef()`): `DashboardsIndexPage` lists the user's dashboards (rows via
+  `RouteLink` → `customDashboardRef`) + a **+ New dashboard** action. In the
+  launcher via a `computePagesDirectory` **Activity** entry.
+
+**Tiles** — `components/Dashboard/MetricTile.tsx`. One `metric` tile switches on
+the `options_json` `viz`: `line` (default, the shared `TrendChart` over the
+reused `metricDetailData` pipeline) or `number` (a big latest value + a signed
+delta chip colored by the spec's `direction`). The page resolves each tile's
+`def` from one `listMetricDefinitions()` fetch and passes it in; the tile fetches
+its own samples and refreshes on `metricSamplesChanged`. Clicking the title
+drills through to the metric detail; right-click is the tile actions menu
+(open / open-in-new-tab / remove).
+
+**Add-metric picker** — `buildAddMetricMenu(catalog, onPick)` (pure, in
+`pages/customDashboardData.ts`) groups `listMetricCatalog()` into per-category
+submenus; the rail button, the empty-state button, and a right-click on the grid
+all open it via `useContextMenu`.
+
+**New Dashboard command** — `dashboard.new` in `commands.ts` (Tasks/"plan"
+group); the App handler create-then-navigates (`createDashboard` →
+`customDashboardRef`), no form.
+
+Pure helpers live in `pages/customDashboardData.ts` (React-free, unit-tested):
+`parseTileOptions` (tolerant of null/malformed JSON, drops unknown enum values),
+`latestValue`, `deltaTone`, `buildAddMetricMenu`.
+
+_Phases 4–5 (tsk142–143): remaining tile types (sparkline / bar / text), tile
+sizing, drag-drop reorder, a dashboard-level time+branch filter tiles inherit,
+and an "Add to dashboard…" block on the metric-detail rail._
