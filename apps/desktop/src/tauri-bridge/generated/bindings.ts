@@ -1185,6 +1185,19 @@ export type CollectionConfig = {
 	 */
 	testCommand: string | null,
 	/**
+	 *  Optional coverage-free counterpart to `test_command`, for the red/green
+	 *  loop (tsk171). It must still emit a test report (JUnit) so the
+	 *  progression lands in the effort's Tests panel, but it skips coverage
+	 *  instrumentation and should accept a filter argument.
+	 * 
+	 *  This exists because the alternative is worse. When the only
+	 *  report-emitting command is a full instrumented run of the whole suite,
+	 *  "route every invocation through it" is unfollowable in a TDD loop, so it
+	 *  gets dropped — and then NONE of the red→green runs are recorded. A
+	 *  weaker rule that is actually followed beats a stricter one that isn't.
+	 */
+	fastTestCommand: string | null,
+	/**
 	 *  Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
 	 *  and/or test results (junit). oxplow parses each that is fresher
 	 *  than the effort start, so several stacks coexist.

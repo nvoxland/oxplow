@@ -4,6 +4,7 @@ agents:
 - opencode
 collection:
   testCommand: bun run test:collect
+  fastTestCommand: bun run test:fast
   reports:
   - path: target/coverage/lcov.info
     format: lcov

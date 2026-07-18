@@ -55,6 +55,13 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # A NUL byte makes git and every grep-family tool treat a source file as
+      # binary, so nothing in it is searchable — while it still compiles and its
+      # tests still pass. In a codebase navigated by search that is a
+      # correctness property (tsk173).
+      - name: Sources are searchable (no NUL bytes)
+        run: bun run lint:searchable
+
       # Frontend unit + component tests (happy-dom harness lives in
       # apps/desktop/bunfig.toml, so run from there).
       - name: Frontend tests

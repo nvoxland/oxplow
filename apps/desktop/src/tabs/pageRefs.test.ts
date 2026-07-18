@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   agentRef,
+  customDashboardRef,
   dashboardRef,
+  directoryRef,
   diffRef,
   effortDiffRef,
   endpointDiffRef,
@@ -12,6 +14,7 @@ import {
   hookEventsRef,
   indexRef,
   metricRecordingRef,
+  metricRef,
   newTaskRef,
   refFromTabId,
   snapshotRef,
@@ -174,5 +177,55 @@ describe("refFromTabId", () => {
       kind: "git-dashboard",
       payload: null,
     });
+  });
+
+  // tsk163: a ref that can't be rebuilt from its own id is a dead row — the
+  // launcher's Recent, the rail's History, and the Go To page all reopen pages
+  // by id. Two constructors had drifted: `dashboard:<variant>` had no case at
+  // all (so every variant reopened as Planning), and `dir:` was matched under
+  // the spelling "directory" (so the case could never fire and the page never
+  // opened). Round-trip EVERY constructor rather than spot-checking, so the
+  // next one to drift fails here.
+  test("every ref rebuilds from its own tab id", () => {
+    const refs = [
+      agentRef(),
+      dashboardRef("planning"),
+      dashboardRef("review"),
+      dashboardRef("quality"),
+      dashboardRef("visits"),
+      directoryRef("src/components"),
+      externalUrlRef("https://x.test/p"),
+      fileRef("src/a.ts"),
+      findingRef("f1"),
+      gitCommitRef("abc123"),
+      hookEventsRef(),
+      indexRef("tasks"),
+      indexRef("git-dashboard"),
+      metricRef("oxplow.todos"),
+      metricRecordingRef(7, { metricKey: "oxplow.todos" }),
+      newTaskRef(),
+      snapshotRef(112),
+      taskRef("42"),
+      wikiPageRef("some-slug"),
+      customDashboardRef("dsh1"),
+      effortDiffRef("eff9"),
+    ];
+    for (const ref of refs) {
+      const rebuilt = refFromTabId(ref.id);
+      expect(rebuilt.id).toBe(ref.id);
+      expect(rebuilt.kind).toBe(ref.kind);
+    }
+  });
+
+  test("each dashboard variant reopens as itself, not the default", () => {
+    for (const v of ["planning", "review", "quality", "visits"] as const) {
+      expect(refFromTabId(dashboardRef(v).id)).toEqual(dashboardRef(v));
+    }
+  });
+
+  test("a directory page reopens with its path payload", () => {
+    expect(refFromTabId(directoryRef("src/components").id)).toEqual(
+      directoryRef("src/components"),
+    );
   });
 });

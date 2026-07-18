@@ -769,7 +769,7 @@ pub async fn cube_series(
                     _ => {
                         // A zero-denominator ratio cell is no data, not 0% —
                         // the same `ratio_empty` skip the fact paths apply.
-                        if ratio_empty(agg, Some(cell.den)) {
+                        if ratio_empty(agg, Some(cell.num), Some(cell.den)) {
                             continue;
                         }
                         let Some(t) = cell.project(agg) else {
@@ -782,7 +782,7 @@ pub async fn cube_series(
             // Grouped: BTreeMap order, matching `tree_state_series`' sorted groups.
             Some(_) => {
                 for (group, cell) in groups.into_iter().flatten() {
-                    if ratio_empty(agg, Some(cell.den)) {
+                    if ratio_empty(agg, Some(cell.num), Some(cell.den)) {
                         continue;
                     }
                     let Some(t) = cell.project(agg) else {

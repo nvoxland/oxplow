@@ -271,6 +271,13 @@ fn blob_text(repo: &git2::Repository, id: git2::Oid) -> Option<String> {
 ///
 /// This is the IntelliJ-magic-wand pass: it can only *reduce* the
 /// conflict count, never introduce new content.
+/// Whether an index-entry mode is a regular file blob — `100644` or `100755`.
+/// Excludes symlinks (`120000`) and gitlinks (`160000`), whose "content" is a
+/// target path / commit OID rather than text to merge.
+fn is_regular_blob(mode: u32) -> bool {
+    mode == 0o100_644 || mode == 0o100_755
+}
+
 pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
     let Ok(repo) = git2::Repository::open(repo_path) else {
         return AutoResolveReport::default();
@@ -293,6 +300,18 @@ pub fn auto_resolve_conflicts(repo_path: &Path) -> AutoResolveReport {
             let Ok(path) = std::str::from_utf8(&our.path) else {
                 continue;
             };
+            // REGULAR BLOBS ONLY. A symlink's blob is its target path, so it
+            // reads back as ordinary small UTF-8 and merges like any other
+            // file — then `std::fs::write` FOLLOWS the link and overwrites an
+            // unrelated tracked file, while we stage the conflict away and
+            // report it cleanly resolved. Gitlinks (submodule commit OIDs) are
+            // equally out of scope. Neither has a sane textual 3-way merge.
+            if !(is_regular_blob(ancestor.mode)
+                && is_regular_blob(our.mode)
+                && is_regular_blob(their.mode))
+            {
+                continue;
+            }
             let (Some(base), Some(ours), Some(theirs)) = (
                 blob_text(&repo, ancestor.id),
                 blob_text(&repo, our.id),
@@ -623,6 +642,74 @@ mod tests {
             "AST reconstruction must re-parse: {merged}"
         );
     }
+
+    /// Commit a symlink at `link` pointing to `target`.
+    fn commit_symlink(p: &Path, link: &str, target: &str, msg: &str) {
+        let lp = p.join(link);
+        let _ = std::fs::remove_file(&lp);
+        std::os::unix::fs::symlink(target, &lp).unwrap();
+        run_git(p, &["add", "-A"]);
+        run_git(p, &["commit", "-q", "-m", msg]);
+    }
+
+    /// A symlink's blob IS its target path, so it reads back as ordinary small
+    /// UTF-8 text and merges like any other file. Writing the "merged" result
+    /// through `std::fs::write` then FOLLOWS the link and overwrites whatever it
+    /// points at — an unrelated tracked file — while reporting the conflict
+    /// cleanly resolved. Non-regular modes must be skipped outright.
+    #[test]
+    fn auto_resolve_never_writes_through_a_symlink_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+
+        // The victim: a perfectly ordinary tracked file that no one is merging.
+        std::fs::create_dir_all(p.join("d1")).unwrap();
+        std::fs::write(p.join("d1/victim.txt"), PRECIOUS).unwrap();
+        std::fs::write(p.join("d1/base.txt"), "base target\n").unwrap();
+        std::fs::create_dir_all(p.join("d2")).unwrap();
+        std::fs::write(p.join("d2/base.txt"), "other\n").unwrap();
+        run_git(p, &["add", "-A"]);
+        run_git(p, &["commit", "-q", "-m", "files"]);
+
+        // base -> d1/base.txt; one side changes the DIR part, the other the
+        // FILE part, so a token diff3 merges them without conflict.
+        //
+        // git resolves the worktree entry to the CURRENT branch's symlink for
+        // the duration of the conflict, so main's target is what a follow-through
+        // write lands on — that's the one aimed at the victim.
+        commit_symlink(p, "link", "d1/base.txt", "base link");
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        commit_symlink(p, "link", "d2/base.txt", "feature: other dir");
+        run_git(p, &["checkout", "-q", "main"]);
+        commit_symlink(p, "link", "d1/victim.txt", "main: point at the victim");
+
+        let out = std::process::Command::new("git")
+            .args(["merge", "--no-edit", "feature"])
+            .current_dir(p)
+            .output()
+            .expect("spawn git merge");
+        assert!(!out.status.success(), "expected git merge to conflict");
+        assert_eq!(count_unmerged(p), 1, "the symlink is the conflict");
+
+        let report = auto_resolve_conflicts(p);
+
+        // The victim must be untouched, whatever we decide about the link.
+        let victim = std::fs::read_to_string(p.join("d1/victim.txt")).unwrap();
+        assert_eq!(
+            victim, PRECIOUS,
+            "auto-resolve wrote through the symlink and destroyed an unrelated \
+             tracked file; report was {report:?}"
+        );
+        // And we must not claim to have resolved it.
+        assert!(
+            report.resolved.is_empty(),
+            "a symlink conflict is out of scope, not resolved: {report:?}"
+        );
+        assert_eq!(report.remaining, 1, "left for the user: {report:?}");
+    }
+
+    const PRECIOUS: &str = "PRECIOUS VICTIM CONTENT\n";
 
     /// An unsupported extension gets no AST tier: an add/add conflict
     /// Tier-1 also can't resolve is left exactly as git produced it.

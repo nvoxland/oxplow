@@ -62,14 +62,30 @@ section for the column.
   author one. Paths/classnames are verbatim from the report; the caller maps
   paths to repo-relative and the UI builds the test tree from `classname`+`name`.
 - **Collection profile** (`collection:` block in `.oxplow/project.yaml`, parsed by
-  `crates/oxplow-config/src/lib.rs`): `testCommand`, `reports: [{ path,
+  `crates/oxplow-config/src/lib.rs`): `testCommand`, `fastTestCommand`,
+  `reports: [{ path,
   format }]`, `testRunPatterns`, `analysisRunPatterns`, and `plugins: [...]`
   (project-defined parsers — see below). `format` is no longer gate-kept against a hardcoded
   list; it's resolved against the collector registry at collection time, so a
   plugin-provided format works and an unknown one is a *warning*, not a config
   error. The `reports` list is what makes a **polyglot repo** work — list every
   stack's report(s); the ride-along parses each that's fresher than the effort
-  start, so each stack lights up on its own run. (The pre-`reports` singular
+  start, so each stack lights up on its own run.
+
+  **`fastTestCommand` (tsk171)** is the coverage-free counterpart to
+  `testCommand`, for the red/green loop. It must still emit a test report, but
+  skips instrumentation and should accept a filter. It exists because
+  `testCommand` in a coverage-instrumented repo is far too slow to run every
+  cycle (here: ~11s for the full suite vs 0.007s for one filtered test), so
+  "route every invocation through it" was unfollowable — and an unfollowable
+  rule doesn't degrade gracefully, it gets dropped entirely and NONE of the
+  red→green runs get recorded. A weaker rule that is followed beats a stricter
+  one that isn't.
+
+  Both configured commands are also treated as implicit `testRunPatterns` by
+  `on_post_tool_use`, so a fast command whose script name contains no built-in
+  pattern (`bun run test:fast`) is still detected as a test run without having
+  to be restated. (The pre-`reports` singular
   fields `coverageReportPath`/`coverageFormat`/`testReportPath`/`testReportFormat`
   are still read for back-compat and folded into `reports`.) All optional.
   Edits hot-reload via the config watcher (`ConfigWatcher`, see
@@ -106,7 +122,24 @@ hook + MCP wiring):
   ledger. An agent forces EXACT attribution by prefixing the command with
   `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and `record_test_run`
   claims the run for that task's open effort (`find_open_for_task`), correct even
-  under concurrent efforts; without it the single-open auto rule applies.
+  under concurrent efforts. Without the token, resolution is, in order:
+  **single open effort** → **target overlap** (tsk169: score each open effort by
+  what the command names — `-p <crate>`, path args — against the files it has
+  claimed, and take a STRICT unique winner) → **unattributed**. Ties and
+  whole-suite runs that name nothing decline on purpose: a mis-attributed run is
+  worse than an unattributed one, because the agent can still claim the latter at
+  close. An unattributed test run with 2+ efforts open fires the
+  `unattributed-run` nudge immediately (tsk170) rather than waiting for the
+  closing EFFORT REVIEW.
+
+  **The filing discipline and attribution pull in opposite directions, and
+  nothing else warns you.** "One user-visible concern per row" encourages many
+  small tasks; batching several in one session means several efforts open at
+  once, which is exactly when auto-attribution has to decline. Either
+  **serialize** (close each task before starting the next) or **prefix every run
+  with `OXPLOW_TASK=`**. Doing neither is what produces a closing audit full of
+  unattributed runs to hand-reconcile — the failure mode tsk169/tsk170 exist to
+  shrink, not to eliminate.
   **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
   split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
   sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a

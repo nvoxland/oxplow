@@ -450,8 +450,19 @@ export function refFromTabId(id: string): TabRef {
         ? metricRecordingRef(n, metricKey ? { metricKey } : undefined)
         : { id, kind: "metric-recording", payload: null };
     }
-    case "directory":
+    // The id scheme is `dir:` (see `directoryRef`), not the kind name — spelling
+    // this "directory" made the case unreachable, so directory pages fell to the
+    // default and reopened with a null payload that `handleOpenPage` drops.
+    case "dir":
       return directoryRef(rest);
+    case "dashboard": {
+      // `rest` is the variant. Without this case every variant fell to the
+      // default's null payload and reopened as the "planning" default.
+      const variants: readonly string[] = ["planning", "review", "quality", "visits"];
+      return variants.includes(rest)
+        ? dashboardRef(rest as DashboardKind)
+        : { id, kind: "dashboard", payload: null };
+    }
     case "diff-view": {
       // `rest` is `snapshot:<N>` | `effort:<id>` | `endpoints:<start>..<end>`.
       const sub = rest.indexOf(":");

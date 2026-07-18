@@ -370,6 +370,12 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         thread: &ThreadId,
     ) -> Result<Option<TaskEffort>, DomainError>;
+    /// EVERY open effort for `thread`, newest first. The disambiguation input
+    /// for target-overlap attribution (tsk169): when more than one is open
+    /// `find_single_open_for_thread` declines by design, and the caller scores
+    /// these candidates by what the run's command actually names.
+    async fn list_open_for_thread(&self, thread: &ThreadId)
+        -> Result<Vec<TaskEffort>, DomainError>;
     /// Most-recent effort for `task` regardless of state, or `None`
     /// when the task has never had one. Used by `record_effort` to
     /// reattach files to a just-closed lifecycle effort.
@@ -846,6 +852,24 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     (Some(e), None) => Some(e),
                     _ => None,
                 })
+            })
+            .await
+    }
+
+    async fn list_open_for_thread(
+        &self,
+        thread: &ThreadId,
+    ) -> Result<Vec<TaskEffort>, DomainError> {
+        let thread = *thread;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM task_effort
+                     WHERE thread_id = ?1 AND ended_at IS NULL
+                     ORDER BY started_at DESC",
+                )?;
+                let rows = stmt.query_map(params![thread.value()], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }

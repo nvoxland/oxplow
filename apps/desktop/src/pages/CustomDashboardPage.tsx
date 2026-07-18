@@ -103,6 +103,15 @@ export function CustomDashboardPage({
   const [pickerAt, setPickerAt] = useState<{ x: number; y: number } | null>(null);
   // Which dashboard's saved view we've already applied — see the load effect.
   const seededFor = useRef<string | null>(null);
+  // The dimension the saved view just hydrated, held until the reset effect has
+  // seen it once. Hydration moves `filterDim` null->saved in the same commit
+  // that sets `filterValue`, which is indistinguishable from a user picking a
+  // new dimension — and that reset would wipe the value we just restored
+  // (tsk167).
+  const hydratedDim = useRef<string | null>(null);
+  // `defs` loads on its own promise, so `breakoutOptions` is empty until it
+  // lands. Validating the saved dimension against an empty list drops it.
+  const [defsLoaded, setDefsLoaded] = useState(false);
   const [savedView, setSavedView] = useState(false);
 
   usePageTitle(data?.dashboard.title ?? "Dashboard");
@@ -115,7 +124,9 @@ export function CustomDashboardPage({
     let cancelled = false;
     const loadDefs = () => {
       void listMetricDefinitions().then((rows) => {
-        if (!cancelled) setDefs(new Map(rows.map((d) => [d.key, d])));
+        if (cancelled) return;
+        setDefs(new Map(rows.map((d) => [d.key, d])));
+        setDefsLoaded(true);
       });
     };
     const refresh = () => {
@@ -132,7 +143,10 @@ export function CustomDashboardPage({
           const saved = parseDashboardSettings(d.dashboard.settings_json);
           if (saved.range) setRangeKey(saved.range);
           if (saved.branch) setBranch(saved.branch);
-          if (saved.filterDim) setFilterDim(saved.filterDim);
+          if (saved.filterDim) {
+            hydratedDim.current = saved.filterDim;
+            setFilterDim(saved.filterDim);
+          }
           if (saved.filterValue) setFilterValue(saved.filterValue);
         }
       });
@@ -298,7 +312,7 @@ export function CustomDashboardPage({
       setOverIndex(null);
       if (!id || !dashboardId) return;
       const next = moveToIndex(ids, id, index);
-      if (next.join(" ") === ids.join(" ")) return;
+      if (next.join("\u0000") === ids.join("\u0000")) return;
       void reorderDashboardItems(dashboardId, next).catch((e) =>
         recordOpError({ label: "Reorder tiles", message: e instanceof Error ? e.message : String(e) }),
       );
@@ -326,12 +340,22 @@ export function CustomDashboardPage({
   // A dimension the remaining tiles no longer support (last such tile removed)
   // would silently grey the whole board — drop it instead.
   useEffect(() => {
+    // Not until `defs` has landed — `breakoutOptions` is empty before that, so
+    // this would drop a perfectly valid saved dimension purely on load order
+    // (tsk167).
+    if (!defsLoaded) return;
     if (filterDim && !breakoutOptions.includes(filterDim)) setFilterDim(null);
-  }, [filterDim, breakoutOptions]);
+  }, [filterDim, breakoutOptions, defsLoaded]);
 
   // Changing the dimension invalidates the chosen value and the collected
-  // options — they belong to the old dimension.
+  // options — they belong to the old dimension. Hydration is not a change:
+  // the saved view sets dimension and value together, so consume the marker
+  // and leave the restored value alone (tsk167).
   useEffect(() => {
+    if (hydratedDim.current !== null && hydratedDim.current === filterDim) {
+      hydratedDim.current = null;
+      return;
+    }
     setFilterValue(null);
     setGroupValues([]);
   }, [filterDim]);

@@ -58,6 +58,10 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     // Scheme-prefixed kinds (TabRef.kind).
     case "file":
       return FileText;
+    // Directory is the one kind whose id scheme (`dir:`) differs from its
+    // TabRef.kind (`directory`), and `kindForTabId` yields the scheme — so
+    // accept both or directory tabs render with no icon (tsk163).
+    case "dir":
     case "directory":
       return Folder;
     case "diff":

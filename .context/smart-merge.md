@@ -224,6 +224,24 @@ conflicted file whose extension maps to a grammar:
 5. Same write+`git add`-only-on-clean discipline as Tier-1, so it can
    only reduce the conflict count.
 
+## Candidate scope: REGULAR BLOBS ONLY
+
+Both tiers only ever see conflicts whose three stages are all mode
+`100644`/`100755` (`is_regular_blob` in `smart_merge.rs`). This is a
+safety gate, not an optimization.
+
+A symlink's blob **is its target path**, so it reads back as ordinary
+small UTF-8 and merges like any other text file — and then
+`std::fs::write` FOLLOWS the link and overwrites whatever it points at.
+tsk158 reproduced this destroying an unrelated tracked file while
+reporting `resolved: ["link"], remaining: 0`. Gitlinks (`160000`,
+submodule commit OIDs) are excluded for the same reason: no sane
+textual 3-way merge exists for them.
+
+Note this also bounds the "can only reduce the conflict count" claim
+above: it holds *within* the candidate set. Widening the set to
+non-regular modes breaks it.
+
 **Languages, in value order:** rust, typescript+tsx+javascript, python,
 go — cover these first (they're the repo's own stack and the bulk of
 user code). java/c/cpp/clojure fall out of the same machinery once the

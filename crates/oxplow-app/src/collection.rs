@@ -252,6 +252,121 @@ fn parse_task_token(command: &str) -> Option<TaskId> {
     TaskId::try_from_str(val).or_else(|| val.parse::<i64>().ok().map(TaskId::new))
 }
 
+/// Source-file extensions that make a bare argument a PATH target rather than a
+/// test-name filter. `cargo test -p oxplow-git symlink` names a test, not a file.
+const PATH_LIKE_EXTS: &[&str] = &[
+    ".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".clj", ".cs", ".c", ".cpp", ".h",
+];
+
+/// What a test command says it is testing — cargo package names (`-p` /
+/// `--package`) and path-ish arguments (tsk169).
+///
+/// Used to disambiguate which open effort a run belongs to when several are
+/// open and no `OXPLOW_TASK=` token pinned it. Deliberately conservative: a
+/// bare word with no `/` and no source extension is a TEST-NAME filter
+/// (`symlink`, `gauge`) and contributes nothing, because matching those against
+/// file paths invents relationships that aren't there.
+fn run_targets(command: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut toks = command.split_whitespace().peekable();
+    while let Some(tok) = toks.next() {
+        if tok == "-p" || tok == "--package" {
+            if let Some(pkg) = toks.next() {
+                let pkg = pkg.trim_matches(['"', '\'']);
+                if !pkg.is_empty() && !pkg.starts_with('-') {
+                    out.push(pkg.to_string());
+                }
+            }
+            continue;
+        }
+        if tok.starts_with('-') {
+            continue;
+        }
+        let arg = tok.trim_matches(['"', '\'']).trim_end_matches('/');
+        if arg.is_empty() {
+            continue;
+        }
+        let looks_like_path = arg.contains('/') || PATH_LIKE_EXTS.iter().any(|e| arg.ends_with(e));
+        if looks_like_path {
+            out.push(arg.to_string());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Whether `target` (from [`run_targets`]) refers to `path` (a file an effort
+/// claimed). A package name matches when it is a whole PATH SEGMENT — so
+/// `oxplow-git` matches `crates/oxplow-git/src/lib.rs` but not
+/// `crates/oxplow-github/…`. A path target matches on containment either way,
+/// which covers both a narrower run (`src/tabs/x.test.ts` under a claimed
+/// `apps/desktop/src/tabs/x.test.ts`) and a broader one (`src/pages/`).
+fn target_matches_path(target: &str, path: &str) -> bool {
+    if target.contains('/') || PATH_LIKE_EXTS.iter().any(|e| target.ends_with(e)) {
+        if path.contains(target) || target.contains(path) {
+            return true;
+        }
+        // Sibling fallback: editing `foo.ts` and running `foo.test.ts` is one
+        // piece of work, but neither path contains the other. Compare the
+        // containing directories instead. Still decisive in practice, because
+        // two efforts in the SAME directory tie and therefore decline.
+        fn dir(p: &str) -> &str {
+            p.rsplit_once('/').map(|(d, _)| d).unwrap_or("")
+        }
+        let (td, pd) = (dir(target), dir(path));
+        return !td.is_empty() && !pd.is_empty() && (pd.contains(td) || td.contains(pd));
+    }
+    path.split('/').any(|seg| seg == target)
+}
+
+/// How many of `targets` any of `paths` accounts for. Counting TARGETS (not
+/// path hits) keeps a broad effort from outscoring a precise one purely by
+/// having touched more files.
+fn target_overlap(targets: &[String], paths: &[String]) -> usize {
+    targets
+        .iter()
+        .filter(|t| paths.iter().any(|p| target_matches_path(t, p)))
+        .count()
+}
+
+/// The single open effort a run's targets point at, or `None` when the answer
+/// isn't unique (tsk169).
+///
+/// Attribution must never be *wrong-exact* — a mis-attributed run is worse than
+/// an unattributed one, since the agent can still claim the latter at close.
+/// So this returns a winner ONLY on a strict maximum: any tie, or no overlap at
+/// all, defers to the existing unclaimed path. A generic target like `src` that
+/// matches every candidate therefore self-neutralizes rather than guessing.
+fn unique_best_by_targets<'a, T>(
+    targets: &[String],
+    candidates: &'a [(T, Vec<String>)],
+) -> Option<&'a T> {
+    if targets.is_empty() {
+        return None;
+    }
+    let mut best: Option<(&T, usize)> = None;
+    let mut tied = false;
+    for (item, paths) in candidates {
+        let score = target_overlap(targets, paths);
+        if score == 0 {
+            continue;
+        }
+        match best {
+            Some((_, b)) if score < b => {}
+            Some((_, b)) if score == b => tied = true,
+            _ => {
+                best = Some((item, score));
+                tied = false;
+            }
+        }
+    }
+    if tied {
+        return None;
+    }
+    best.map(|(item, _)| item)
+}
+
 /// The Bash command + best-effort exit code pulled out of a PostToolUse
 /// envelope. `None` when the tool wasn't Bash or no command was present.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -569,7 +684,9 @@ impl CollectionService {
         // Resolve the owning effort ONCE — used to stamp the fact-capture below
         // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
         // the ledger at the tail. Same resolution the auto-claim uses.
-        let owning = self.resolve_owning_effort(thread, task).await;
+        let owning = self
+            .resolve_owning_effort_for_command(thread, task, Some(command))
+            .await;
         let owning_val = owning.as_ref().map(|e| e.id.value());
 
         // Write the run CAPTURE into the durable fact layer (epic tsk12): one
@@ -777,8 +894,11 @@ impl CollectionService {
         thread: &ThreadId,
         run_id: i64,
         task: Option<TaskId>,
+        command: Option<&str>,
     ) -> Option<TaskEffort> {
-        let attribute_to = self.resolve_owning_effort(thread, task).await;
+        let attribute_to = self
+            .resolve_owning_effort_for_command(thread, task, command)
+            .await;
         if let Some(effort) = attribute_to.as_ref() {
             self.claim_run(effort, run_id).await;
         }
@@ -797,15 +917,64 @@ impl CollectionService {
         thread: &ThreadId,
         task: Option<TaskId>,
     ) -> Option<TaskEffort> {
-        match task {
-            Some(tid) => self.efforts.find_open_for_task(tid).await.ok().flatten(),
-            None => self
-                .efforts
-                .find_single_open_for_thread(thread)
-                .await
-                .ok()
-                .flatten(),
+        self.resolve_owning_effort_for_command(thread, task, None)
+            .await
+    }
+
+    /// [`resolve_owning_effort`], plus the run's command when there is one.
+    ///
+    /// Order of precedence:
+    /// 1. a named task — EXACT-or-nothing, unchanged;
+    /// 2. exactly one open effort — the existing AUTO rule;
+    /// 3. **several open, but the command names exactly one of them** — attribute
+    ///    by target overlap (tsk169).
+    ///
+    /// (3) is what turns the common concurrent-effort case from "unattributed,
+    /// reconcile later" into a correct answer at record time: `cargo test -p
+    /// oxplow-git symlink` belongs to whichever open effort is working in
+    /// `crates/oxplow-git/`. It never *guesses* — [`unique_best_by_targets`]
+    /// requires a strict maximum, so ties and misses fall through to the
+    /// unclaimed path exactly as before. The invariant is preserved: less
+    /// exact, never wrong-exact.
+    async fn resolve_owning_effort_for_command(
+        &self,
+        thread: &ThreadId,
+        task: Option<TaskId>,
+        command: Option<&str>,
+    ) -> Option<TaskEffort> {
+        if let Some(tid) = task {
+            return self.efforts.find_open_for_task(tid).await.ok().flatten();
         }
+        if let Some(single) = self
+            .efforts
+            .find_single_open_for_thread(thread)
+            .await
+            .ok()
+            .flatten()
+        {
+            return Some(single);
+        }
+        let targets = run_targets(command?);
+        if targets.is_empty() {
+            return None;
+        }
+        let open = self.efforts.list_open_for_thread(thread).await.ok()?;
+        if open.len() < 2 {
+            return None;
+        }
+        let mut candidates: Vec<(TaskEffort, Vec<String>)> = Vec::new();
+        for e in open {
+            let paths = self
+                .efforts
+                .list_files(&e.id)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| f.path)
+                .collect();
+            candidates.push((e, paths));
+        }
+        unique_best_by_targets(&targets, &candidates).cloned()
     }
 
     /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
@@ -1548,7 +1717,15 @@ impl CollectionService {
             return Ok(None);
         };
         let cfg = self.collection_cfg();
-        let is_test = detect_test_run(&bash.command, &cfg.test_run_patterns);
+        // The project's OWN configured commands count as test-run patterns
+        // without having to be restated in `testRunPatterns` — if you declared
+        // it as the way to run tests, running it is a test run. This is what
+        // makes `fastTestCommand` (tsk171) detectable when its script name
+        // doesn't happen to contain a built-in pattern like `cargo test`.
+        let mut test_patterns = cfg.test_run_patterns.clone();
+        test_patterns.extend(cfg.test_command.clone());
+        test_patterns.extend(cfg.fast_test_command.clone());
+        let is_test = detect_test_run(&bash.command, &test_patterns);
         let is_analysis = detect_analysis_run(&bash.command, &cfg.analysis_run_patterns);
         let is_commit = detect_git_commit(&bash.command);
         let is_revert = detect_git_revert(&bash.command);
@@ -1667,6 +1844,33 @@ impl CollectionService {
         // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
         // run with a single open effort. The runs above are already recorded.
         let Some(effort) = effort_opt else {
+            // No single open effort — so this test run may have landed
+            // unattributed. Say so NOW, while a one-token fix is available on the
+            // next command, rather than leaving it for the closing EFFORT REVIEW
+            // to reconcile in bulk long after the context is gone (tsk170).
+            //
+            // Only when the run is genuinely unattributed: an `OXPLOW_TASK=`
+            // token or a target-overlap match (tsk169) resolves most of these
+            // silently, and nagging about a run that WAS attributed would train
+            // the agent to ignore the nudge.
+            if is_test && parse_task_token(&bash.command).is_none() {
+                let resolved = self
+                    .resolve_owning_effort_for_command(thread, None, Some(&bash.command))
+                    .await;
+                if resolved.is_none() {
+                    let open = self
+                        .efforts
+                        .list_open_for_thread(thread)
+                        .await
+                        .unwrap_or_default();
+                    if open.len() > 1 {
+                        let msg = unattributed_run_message(&bash.command, &open);
+                        self.persist_nudge(thread, None, "unattributed-run", &msg, &bash.command)
+                            .await;
+                        return Ok(Some(msg));
+                    }
+                }
+            }
             return Ok(None);
         };
         // Derive THIS effort's diff-coverage from the absolute report (read-time)
@@ -2167,6 +2371,18 @@ impl CollectionService {
                         let entry = merged.files.entry(path).or_default();
                         entry.instrumented.extend(fc.instrumented);
                         entry.covered.extend(fc.covered);
+                        // Counters SUM where the line sets union (tsk160): two
+                        // toolchains reporting the same file each contribute
+                        // their own branches/functions. Dropping these left
+                        // observe_coverage's `*_found > 0` gate permanently
+                        // closed, so oxplow.coverage.branch/.function never got
+                        // a fact on this path.
+                        entry.branches_found =
+                            entry.branches_found.saturating_add(fc.branches_found);
+                        entry.branches_hit = entry.branches_hit.saturating_add(fc.branches_hit);
+                        entry.functions_found =
+                            entry.functions_found.saturating_add(fc.functions_found);
+                        entry.functions_hit = entry.functions_hit.saturating_add(fc.functions_hit);
                     }
                     if collector.runtime() == CollectorRuntime::Exec {
                         exec_names.push(collector.name().to_string());
@@ -2361,7 +2577,10 @@ impl CollectionService {
         // effort it landed on (command-only runs have no run → refresh the single
         // open effort if any).
         let attribute_to = match run_id {
-            Some(rid) => self.auto_attribute_run(thread, rid, None).await,
+            Some(rid) => {
+                self.auto_attribute_run(thread, rid, None, Some(command))
+                    .await
+            }
             None => effort,
         };
         if let Some(e) = attribute_to.as_ref() {
@@ -3078,6 +3297,28 @@ impl CollectionService {
 /// echoes the project's own configured command (or routes to
 /// `/oxplow:configure`), so it works for any current/future test tool
 /// without the hook knowing anything tool-specific.
+/// The nudge shown when a test run lands with SEVERAL efforts open and nothing
+/// resolves which one owns it (tsk170).
+///
+/// Timing is the whole point. The closing EFFORT REVIEW already reports these,
+/// but by then they arrive in bulk, detached from what the agent was doing, and
+/// fixing them means hand-mapping run ids to efforts. Here it costs one token on
+/// the next command. It names the candidate tasks so the right id doesn't have
+/// to be looked up.
+fn unattributed_run_message(command: &str, open: &[TaskEffort]) -> String {
+    let ids: Vec<String> = open.iter().map(|e| e.task_id.to_string()).collect();
+    format!(
+        "`{cmd}` was recorded but NOT attributed to an effort — {n} efforts are open \
+         ({list}) and the command doesn't name which one it's for. Prefix the run with \
+         `OXPLOW_TASK=<task id>` (e.g. `OXPLOW_TASK={first} {cmd}`) to pin it. Otherwise \
+         it stays unattributed until you claim it at close.",
+        cmd = command.trim(),
+        n = open.len(),
+        list = ids.join(", "),
+        first = ids.first().map(String::as_str).unwrap_or("tskNN"),
+    )
+}
+
 fn report_nudge_message(cfg: &oxplow_config::CollectionConfig, command: &str) -> String {
     let cmd = command.trim();
     if let Some(tc) = cfg
@@ -3605,6 +3846,126 @@ mod tests {
             "OXPLOW_TASK=tsk42 bun run test:collect 2>&1 | tail -5",
             &extra,
         ));
+    }
+
+    #[test]
+    fn run_targets_reads_packages_and_paths_but_not_test_names() {
+        // The real commands from the session that motivated tsk169.
+        assert_eq!(
+            run_targets("cargo test -p oxplow-config gauge"),
+            vec!["oxplow-config"],
+            "`gauge` is a test-name filter, not a path"
+        );
+        assert_eq!(
+            run_targets("cargo test -p oxplow-git symlink"),
+            vec!["oxplow-git"]
+        );
+        assert_eq!(
+            run_targets("cargo test -p oxplow-app --lib metric_engine::tests::ratio_"),
+            vec!["oxplow-app"],
+            "a `--lib` flag and a module path are not targets"
+        );
+        assert_eq!(
+            run_targets("bun test src/tabs/pageRefs.test.ts"),
+            vec!["src/tabs/pageRefs.test.ts"]
+        );
+        assert_eq!(
+            run_targets("bun test src/pages/"),
+            vec!["src/pages"],
+            "a directory arg keeps working after the trailing slash is trimmed"
+        );
+        assert!(
+            run_targets("bun run test:collect").is_empty(),
+            "a whole-suite run names no target"
+        );
+    }
+
+    #[test]
+    fn target_matching_is_segment_exact_for_packages() {
+        assert!(target_matches_path(
+            "oxplow-git",
+            "crates/oxplow-git/src/smart_merge.rs"
+        ));
+        assert!(
+            !target_matches_path("oxplow-git", "crates/oxplow-github/src/lib.rs"),
+            "a package name must match a WHOLE segment, not a prefix"
+        );
+        // A narrower run under a claimed file, and a broader directory run.
+        assert!(target_matches_path(
+            "src/tabs/pageRefs.test.ts",
+            "apps/desktop/src/tabs/pageRefs.test.ts"
+        ));
+        assert!(target_matches_path(
+            "src/pages",
+            "apps/desktop/src/pages/CustomDashboardPage.tsx"
+        ));
+    }
+
+    #[test]
+    fn unique_best_picks_the_owner_across_concurrent_efforts() {
+        // The exact shape that went unattributed: several efforts open, each
+        // in a different crate, runs naming their crate.
+        let candidates = vec![
+            (
+                "eff-config",
+                vec!["crates/oxplow-config/src/lib.rs".to_string()],
+            ),
+            (
+                "eff-git",
+                vec!["crates/oxplow-git/src/smart_merge.rs".to_string()],
+            ),
+            // Note this effort claimed the SOURCE file while the run below
+            // names its test sibling — the everyday case, and the one the
+            // directory fallback in `target_matches_path` exists for.
+            (
+                "eff-tabs",
+                vec!["apps/desktop/src/tabs/pageRefs.ts".to_string()],
+            ),
+        ];
+        let pick = |cmd: &str| unique_best_by_targets(&run_targets(cmd), &candidates).copied();
+        assert_eq!(
+            pick("cargo test -p oxplow-config gauge"),
+            Some("eff-config")
+        );
+        assert_eq!(pick("cargo test -p oxplow-git symlink"), Some("eff-git"));
+        assert_eq!(pick("bun test src/tabs/pageRefs.test.ts"), Some("eff-tabs"));
+    }
+
+    #[test]
+    fn unique_best_declines_rather_than_guessing() {
+        // A mis-attributed run is worse than an unattributed one — the agent can
+        // still claim the latter at close. So every ambiguous case must decline.
+        let two_in_one_crate = vec![
+            (
+                "eff-a",
+                vec!["crates/oxplow-app/src/collection.rs".to_string()],
+            ),
+            (
+                "eff-b",
+                vec!["crates/oxplow-app/src/metric_engine.rs".to_string()],
+            ),
+        ];
+        assert_eq!(
+            unique_best_by_targets(&run_targets("cargo test -p oxplow-app"), &two_in_one_crate),
+            None,
+            "a tie must decline"
+        );
+        assert_eq!(
+            unique_best_by_targets(&run_targets("bun run test:collect"), &two_in_one_crate),
+            None,
+            "no targets at all must decline"
+        );
+        assert_eq!(
+            unique_best_by_targets(&run_targets("cargo test -p oxplow-tmux"), &two_in_one_crate),
+            None,
+            "no overlap must decline"
+        );
+        // A target generic enough to match everything self-neutralizes.
+        let generic = vec![
+            ("eff-a", vec!["apps/desktop/src/a.ts".to_string()]),
+            ("eff-b", vec!["apps/desktop/src/b.ts".to_string()]),
+        ];
+        assert_eq!(unique_best_by_targets(&["src".to_string()], &generic), None);
     }
 
     #[test]
@@ -4204,6 +4565,113 @@ mod tests {
                 "function value {}",
                 fnf[0].value
             );
+        }
+
+        #[tokio::test]
+        async fn merge_fresh_coverage_preserves_branch_and_function_counts() {
+            // tsk160: the passive ride-along is the PRIMARY ingestion path, and
+            // it merges per-file coverage from every fresh report. It used to
+            // copy only the line sets, so branch/function counters arrived as 0
+            // and observe_coverage's `*_found > 0` gate meant
+            // oxplow.coverage.branch/.function never got a fact here — while the
+            // explicit ingest_coverage path (which passes the parse straight
+            // through) worked. Same report as
+            // `ingest_coverage_records_branch_and_function_facts`: branch 3/4,
+            // function 1/2.
+            const COBERTURA_BF: &str = r#"<?xml version="1.0"?>
+<coverage><packages><package name="p"><classes>
+  <class name="Foo" filename="src/foo.rs">
+    <methods>
+      <method name="a" signature="()V" line-rate="1.0"/>
+      <method name="b" signature="()V" line-rate="0.0"/>
+    </methods>
+    <lines>
+      <line number="1" hits="3" branch="true" condition-coverage="100% (2/2)"/>
+      <line number="2" hits="1" branch="true" condition-coverage="50% (1/2)"/>
+      <line number="4" hits="0"/>
+    </lines>
+  </class>
+</classes></package></packages></coverage>"#;
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("cov.xml"), COBERTURA_BF).unwrap();
+            let cfg = oxplow_config::CollectionConfig {
+                reports: vec![oxplow_config::ReportConfig {
+                    path: "cov.xml".into(),
+                    format: "cobertura".into(),
+                }],
+                ..Default::default()
+            };
+            // Floor at the epoch so the just-written report is always fresh
+            // (same approach as the merge_fresh_test_reports tests).
+            let registry = h.service.registry(&cfg);
+            let (merged, _errors) =
+                h.service
+                    .merge_fresh_coverage(Timestamp::from_unix_ms(0), &cfg, &registry);
+            let (report, _source) = merged.expect("fresh cobertura report should merge");
+            let fc = report
+                .files
+                .get("src/foo.rs")
+                .expect("src/foo.rs in the merged report");
+
+            assert_eq!(
+                fc.branches_found, 4,
+                "branch denominator survives the merge"
+            );
+            assert_eq!(fc.branches_hit, 3, "branch numerator survives the merge");
+            assert_eq!(
+                fc.functions_found, 2,
+                "function denominator survives the merge"
+            );
+            assert_eq!(fc.functions_hit, 1, "function numerator survives the merge");
+        }
+
+        #[tokio::test]
+        async fn merge_fresh_coverage_sums_counts_across_reports() {
+            // Two reports covering the same file (a polyglot repo reporting from
+            // more than one toolchain, which 0.5 explicitly supports) must SUM
+            // their branch/function counters, matching how the line sets union.
+            const A: &str = r#"<?xml version="1.0"?>
+<coverage><packages><package name="p"><classes>
+  <class name="Foo" filename="src/foo.rs">
+    <methods><method name="a" signature="()V" line-rate="1.0"/></methods>
+    <lines><line number="1" hits="1" branch="true" condition-coverage="50% (1/2)"/></lines>
+  </class>
+</classes></package></packages></coverage>"#;
+            const B: &str = r#"<?xml version="1.0"?>
+<coverage><packages><package name="p"><classes>
+  <class name="Foo" filename="src/foo.rs">
+    <methods><method name="b" signature="()V" line-rate="0.0"/></methods>
+    <lines><line number="2" hits="0" branch="true" condition-coverage="0% (0/2)"/></lines>
+  </class>
+</classes></package></packages></coverage>"#;
+            let h = build(None).await;
+            std::fs::write(h.tmp.path().join("a.xml"), A).unwrap();
+            std::fs::write(h.tmp.path().join("b.xml"), B).unwrap();
+            let cfg = oxplow_config::CollectionConfig {
+                reports: vec![
+                    oxplow_config::ReportConfig {
+                        path: "a.xml".into(),
+                        format: "cobertura".into(),
+                    },
+                    oxplow_config::ReportConfig {
+                        path: "b.xml".into(),
+                        format: "cobertura".into(),
+                    },
+                ],
+                ..Default::default()
+            };
+            let registry = h.service.registry(&cfg);
+            let (merged, _errors) =
+                h.service
+                    .merge_fresh_coverage(Timestamp::from_unix_ms(0), &cfg, &registry);
+            let (report, _source) = merged.expect("both reports should merge");
+            let fc = report.files.get("src/foo.rs").expect("merged file");
+
+            assert_eq!(fc.branches_found, 4, "2 + 2");
+            assert_eq!(fc.branches_hit, 1, "1 + 0");
+            assert_eq!(fc.functions_found, 2, "1 + 1");
+            assert_eq!(fc.functions_hit, 1, "1 + 0");
+            assert_eq!(fc.instrumented.len(), 2, "line sets still union");
         }
 
         #[tokio::test]
@@ -5597,6 +6065,201 @@ mod tests {
                 .unwrap();
             assert_eq!(d.baseline, Some(2.0));
             assert_eq!(d.current, 5.0);
+        }
+
+        #[tokio::test]
+        async fn an_unattributable_run_nudges_at_the_moment_it_happens() {
+            // tsk170: with several efforts open and nothing naming an owner, the
+            // run IS recorded (observe-always) but lands unattributed. Say so
+            // now, while `OXPLOW_TASK=` is a one-token fix on the next command —
+            // the closing EFFORT REVIEW reports the same thing in bulk, detached
+            // from what the agent was doing, needing run ids mapped by hand.
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "second".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            h.efforts.start(task2, &h.thread, None).await.unwrap();
+
+            // Names no crate and no path, so target overlap can't resolve it.
+            let msg = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("cargo test --workspace", 0))
+                .await
+                .unwrap()
+                .expect("an unattributable run must nudge");
+            assert!(msg.contains("NOT attributed"), "{msg}");
+            assert!(msg.contains("OXPLOW_TASK="), "names the fix: {msg}");
+            assert!(
+                msg.contains(&task2.to_string()),
+                "lists the candidate tasks so the id needn't be looked up: {msg}"
+            );
+        }
+
+        #[tokio::test]
+        async fn an_attributable_run_does_not_nudge() {
+            // The nudge must stay quiet whenever something DID resolve the owner,
+            // or it trains the agent to ignore it. Here the command names a crate
+            // that exactly one open effort is working in (tsk169), so attribution
+            // succeeds silently even though two efforts are open.
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "second".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            for (eid, path) in [
+                (eff1, "crates/oxplow-git/src/smart_merge.rs"),
+                (eff2.id, "crates/oxplow-config/src/lib.rs"),
+            ] {
+                h.efforts
+                    .record_file(
+                        &eid,
+                        path,
+                        oxplow_db::EffortFileChange::Updated,
+                        oxplow_db::FileRefVersion {
+                            local_snapshot_id: 0,
+                            closest_git_version: None,
+                            git_version_exact: false,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+
+            let msg = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("cargo test -p oxplow-git", 0))
+                .await
+                .unwrap();
+            assert!(
+                msg.is_none(),
+                "target overlap resolved the owner — no nudge: {msg:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn concurrent_efforts_attribute_by_what_the_command_names() {
+            // tsk169: two efforts open at once, each working in a different
+            // crate. Before this, `find_single_open_for_thread` declined and BOTH
+            // runs landed unattributed, to be reconciled by hand at close. The
+            // command names its target, so each run can be attributed at record
+            // time instead.
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let task2 = SqliteTaskStore::new(h.db.clone())
+                .insert(&Task {
+                    id: TaskId::placeholder(),
+                    thread_id: Some(h.thread),
+                    parent_id: None,
+                    title: "second".into(),
+                    description: String::new(),
+                    status: TaskStatus::InProgress,
+                    priority: TaskPriority::Medium,
+                    sort_index: 0,
+                    created_by: TaskActorKind::User,
+                    created_at: now,
+                    updated_at: now,
+                    completed_at: None,
+                    deleted_at: None,
+                    note_count: 0,
+                    author: Some(TaskAuthor::User),
+                })
+                .await
+                .unwrap();
+            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+
+            // Each effort declares the file it is working on — the signal the
+            // command gets matched against.
+            let claim = |eid: oxplow_domain::EffortId, path: &'static str| {
+                let efforts = h.efforts.clone();
+                async move {
+                    efforts
+                        .record_file(
+                            &eid,
+                            path,
+                            oxplow_db::EffortFileChange::Updated,
+                            oxplow_db::FileRefVersion {
+                                local_snapshot_id: 0,
+                                closest_git_version: None,
+                                git_version_exact: false,
+                            },
+                        )
+                        .await
+                        .unwrap();
+                }
+            };
+            claim(eff1, "crates/oxplow-git/src/smart_merge.rs").await;
+            claim(eff2.id, "crates/oxplow-config/src/lib.rs").await;
+
+            // Sanity: with two open, the old single-open rule genuinely declines.
+            assert!(
+                h.efforts
+                    .find_single_open_for_thread(&h.thread)
+                    .await
+                    .unwrap()
+                    .is_none(),
+                "two efforts open — the single-open rule must decline"
+            );
+
+            let owner = |cmd: &'static str| {
+                let svc = h.service.clone();
+                let thread = h.thread;
+                async move {
+                    svc.resolve_owning_effort_for_command(&thread, None, Some(cmd))
+                        .await
+                        .map(|e| e.id)
+                }
+            };
+            assert_eq!(
+                owner("cargo test -p oxplow-git symlink").await,
+                Some(eff1),
+                "the git run belongs to the effort working in crates/oxplow-git"
+            );
+            assert_eq!(
+                owner("cargo test -p oxplow-config gauge").await,
+                Some(eff2.id),
+                "the config run belongs to the other effort"
+            );
+            // A whole-suite run names nothing, so it still declines rather than
+            // guessing — the agent claims it at close.
+            assert_eq!(owner("bun run test:collect").await, None);
         }
 
         #[tokio::test]

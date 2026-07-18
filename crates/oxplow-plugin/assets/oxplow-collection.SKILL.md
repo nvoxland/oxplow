@@ -19,16 +19,41 @@ attribute to the effort. The test command is recorded in the
 
 Run it three specific ways:
 
-- **Run EVERY test invocation through it** — including **red-phase / failing**
-  runs and quick **single-test** runs, not just the final green one. Only
-  report-emitting runs (`testCommand`) enter the effort's Tests panel; a bare
-  `bun test <file>` / `cargo test <name>` is a report-less run and won't show
-  there (so your red→green progression and any failures stay invisible).
+- **Run EVERY test invocation through a report-emitting command** — including
+  **red-phase / failing** runs and quick **single-test** runs, not just the
+  final green one. A bare `bun test <file>` / `cargo test <name>` is a
+  report-less run and won't reach the Tests panel, so your red→green
+  progression and any failures stay invisible.
+
+    Which command depends on what you're doing:
+
+    - **Iterating (red/green, one test, one crate): `fastTestCommand`** when the
+      project declares one. It emits the same test report but skips coverage
+      instrumentation, and it takes a filter — so it's seconds, not minutes.
+    - **Before `complete_task`: `testCommand`.** The full run, with coverage.
+      Diff coverage for the effort comes only from this one.
+
+    If the project declares no `fastTestCommand`, use `testCommand` throughout.
+    If that turns out to be too slow to run every cycle, say so and offer to add
+    one — do NOT quietly fall back to a bare `cargo test`, which records
+    nothing. An unrecorded run is the failure mode this rule exists to prevent.
 - **Prefix `OXPLOW_TASK=<your task id>`** (e.g. `OXPLOW_TASK=tsk42 <testCommand>`).
   The collection hook reads the token and pins the run to **exactly** your
-  task's effort via `find_open_for_task` — correct even when several efforts
-  are open. Without it, a run is only auto-attributed when a single effort is
-  open.
+  task's effort — correct even when several efforts are open.
+
+    Without the token oxplow falls back to: the single open effort, else
+    whichever open effort the command's target names (`-p <crate>`, a path arg),
+    else **unattributed**. That covers a lot, but a whole-suite run
+    (`<testCommand>` with no filter) names nothing and cannot be resolved that
+    way.
+
+    **Whenever you have more than one task in progress, prefix every run.**
+    This is easy to miss because the filing discipline pushes the other way —
+    one concern per row means batching work opens several efforts at once, which
+    is precisely when attribution has to give up. Either close each task before
+    starting the next, or use the token. If a run does land unattributed you'll
+    get an `unattributed-run` nudge naming the candidate tasks; fix it on the
+    next command rather than leaving it for the close-time audit.
 - **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
   when the Bash call *returns*; a backgrounded run returns at launch (before
   the reports regenerate), so its reports are never ingested and the effort

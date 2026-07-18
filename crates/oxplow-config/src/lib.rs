@@ -446,6 +446,18 @@ pub struct CollectionConfig {
     /// the agent so it knows how to produce the reports).
     #[serde(rename = "testCommand")]
     pub test_command: Option<String>,
+    /// Optional coverage-free counterpart to `test_command`, for the red/green
+    /// loop (tsk171). It must still emit a test report (JUnit) so the
+    /// progression lands in the effort's Tests panel, but it skips coverage
+    /// instrumentation and should accept a filter argument.
+    ///
+    /// This exists because the alternative is worse. When the only
+    /// report-emitting command is a full instrumented run of the whole suite,
+    /// "route every invocation through it" is unfollowable in a TDD loop, so it
+    /// gets dropped — and then NONE of the red→green runs are recorded. A
+    /// weaker rule that is actually followed beats a stricter one that isn't.
+    #[serde(rename = "fastTestCommand")]
+    pub fast_test_command: Option<String>,
     /// Reports the test run emits — coverage (lcov/cobertura/jacoco-xml)
     /// and/or test results (junit). oxplow parses each that is fresher
     /// than the effort start, so several stacks coexist.
@@ -674,6 +686,8 @@ struct RawPlugin {
 struct RawCollectionBlock {
     #[serde(rename = "testCommand", default)]
     test_command: Option<String>,
+    #[serde(rename = "fastTestCommand", default)]
+    fast_test_command: Option<String>,
     #[serde(default)]
     reports: Option<Vec<RawReport>>,
     // Back-compat: the pre-`reports` singular fields. Folded into
@@ -787,6 +801,7 @@ pub fn write_project_config(
         "lsp",
         "collection",
         "metrics",
+        "gauges",
         "measures",
         "dimensions",
         "agentModels",
@@ -884,6 +899,7 @@ pub fn write_project_config(
 
     let c = &config.collection;
     if c.test_command.is_some()
+        || c.fast_test_command.is_some()
         || !c.reports.is_empty()
         || !c.test_run_patterns.is_empty()
         || !c.analysis_run_patterns.is_empty()
@@ -893,6 +909,9 @@ pub fn write_project_config(
         let mut col = serde_yaml::Mapping::new();
         if let Some(v) = &c.test_command {
             col.insert("testCommand".into(), v.clone().into());
+        }
+        if let Some(v) = &c.fast_test_command {
+            col.insert("fastTestCommand".into(), v.clone().into());
         }
         if !c.reports.is_empty() {
             let reports: Vec<_> = c
@@ -2380,6 +2399,7 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
     let plugins = validate_plugins(raw.plugins)?;
     Ok(CollectionConfig {
         test_command: opt_trimmed(raw.test_command),
+        fast_test_command: opt_trimmed(raw.fast_test_command),
         reports,
         test_run_patterns,
         analysis_run_patterns,
@@ -2625,6 +2645,119 @@ lsp:
     }
 
     #[test]
+    fn fast_test_command_round_trips() {
+        // tsk171: the coverage-free counterpart to `testCommand`, used for the
+        // red/green loop so those runs still emit a report instead of being
+        // dropped because the full instrumented run is too slow to repeat.
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "collection:\n  testCommand: bun run test:collect\n  fastTestCommand: bun run test:fast\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.collection.fast_test_command.as_deref(),
+            Some("bun run test:fast")
+        );
+        write_project_config(dir.path(), &cfg).unwrap();
+        let reloaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            reloaded.collection.fast_test_command.as_deref(),
+            Some("bun run test:fast"),
+            "survives a write/reload round-trip"
+        );
+        assert_eq!(
+            reloaded.collection.test_command.as_deref(),
+            Some("bun run test:collect"),
+            "and doesn't displace the full command"
+        );
+    }
+
+    #[test]
+    fn write_preserves_an_added_gauge_when_the_file_already_has_one() {
+        // tsk164: `gauges` was missing from MANAGED_KEYS, so the on-disk block
+        // was collected as an "extra" and re-inserted AFTER the in-memory one —
+        // reverting it. The first scaffold worked (no `gauges:` key on disk
+        // yet); every one after was silently lost, leaving an orphaned metric
+        // with no producer.
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "gauges:\n\
+             - key: repo.scan_one\n  \
+               title: One\n  \
+               trigger: on-snapshot\n  \
+               emits: [repo.one]\n  \
+               compute:\n    \
+                 runtime: starlark\n    \
+                 entryFile: oxplow/gauges/one.star\n",
+        )
+        .unwrap();
+
+        let mut cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.gauges.len(), 1, "fixture loads its one gauge");
+
+        // What `scaffold_metric` does: append a second gauge, then write.
+        let mut added = cfg.gauges[0].clone();
+        added.key = Some("repo.scan_two".into());
+        added.title = Some("Two".into());
+        cfg.gauges.push(added);
+        write_project_config(dir.path(), &cfg).unwrap();
+
+        let reloaded = load_project_config(dir.path()).unwrap();
+        let keys: Vec<&str> = reloaded
+            .gauges
+            .iter()
+            .filter_map(|g| g.key.as_deref())
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["repo.scan_one", "repo.scan_two"],
+            "both gauges survive the round-trip"
+        );
+    }
+
+    #[test]
+    fn managed_keys_covers_every_block_the_writer_emits() {
+        // Guard against the next block drifting the same way tsk164's did: any
+        // top-level key `write_project_config` serializes must be MANAGED, or
+        // the stale on-disk copy silently wins.
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "gauges:\n\
+             - key: repo.scan_one\n  \
+               title: One\n  \
+               trigger: on-snapshot\n  \
+               emits: [repo.one]\n  \
+               compute:\n    \
+                 runtime: starlark\n    \
+                 entryFile: oxplow/gauges/one.star\n\
+             projectName: demo\n\
+             snapshotRetentionDays: 3\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        write_project_config(dir.path(), &cfg).unwrap();
+        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
+        let doc: serde_yaml::Value = serde_yaml::from_str(&raw).unwrap();
+        let serde_yaml::Value::Mapping(map) = doc else {
+            panic!("config is a mapping");
+        };
+        // Every key present after a write must round-trip through a reload,
+        // which is what being MANAGED buys.
+        let reloaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(reloaded.gauges.len(), 1);
+        assert_eq!(reloaded.project_name, "demo");
+        assert_eq!(reloaded.snapshot_retention_days, 3);
+        assert!(
+            map.contains_key(serde_yaml::Value::String("gauges".into())),
+            "gauges block written, got:\n{raw}"
+        );
+    }
+
+    #[test]
     fn agent_models_round_trip() {
         let dir = tempdir().unwrap();
         std::fs::write(
@@ -2858,6 +2991,7 @@ collection:
         let cfg = OxplowConfig {
             collection: CollectionConfig {
                 test_command: Some("pytest".into()),
+                fast_test_command: None,
                 reports: vec![
                     ReportConfig {
                         path: "coverage.xml".into(),

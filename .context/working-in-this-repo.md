@@ -108,9 +108,17 @@ Frontend tests still use `bun test` (run from `apps/desktop/`); root
 `bun test`.** `test:collect` (`cargo cov && bun run --cwd apps/desktop
 test:junit`) is the configured `collection.testCommand` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
-effort's "Coverage & tests" panel. Bare `cargo test` / `bun test` /
-`bun run test` are fine for fast iteration, but they emit **no reports**,
-so the effort's test-run row shows only the command and no coverage. The
+effort's "Coverage & tests" panel.
+
+**For the red/green loop, use `bun run test:fast` (the configured
+`collection.fastTestCommand`) rather than a bare `cargo test`.** It takes
+the same filters (`bun run test:fast -p oxplow-git symlink`) and still
+writes `target/nextest/default/junit.xml`, so the red→green progression
+lands in the panel — it just skips coverage instrumentation, which is the
+slow part (~11s for the full suite vs milliseconds for one filtered test).
+`bun run test:fast:ts` is the frontend counterpart. Bare `cargo test` /
+`bun test` emit **no reports**, so the run shows only the command and none
+of the tests. The
 Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
@@ -162,6 +170,26 @@ formatting/lint hygiene, and drift accumulates silently between
 commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
+
+## Sources must stay searchable
+
+CI runs `bun run lint:searchable` (`scripts/check-control-chars.py`),
+which fails on a NUL byte in any tracked non-binary file.
+
+This is a correctness check, not style. A NUL makes git classify the
+file as **binary**, and grep / ugrep / ripgrep then refuse to print
+matches — while the file still compiles and its tests still pass. The
+file becomes invisible to every codebase search, and the search reports
+success with zero hits rather than an error. In a repo an agent
+navigates by search, that is the worst possible failure mode: silent,
+asymmetric, and indistinguishable from "no such symbol".
+
+It has already happened three times, all the same way — a raw control
+character used as a key separator in a template literal
+(`` `${a}<NUL>${b}` ``) instead of the `\u0000` escape. Write the escape.
+
+If you add a genuinely binary file type, add its extension to
+`BINARY_EXTS` in the script rather than weakening the check.
 
 ## Tasks are observational
 

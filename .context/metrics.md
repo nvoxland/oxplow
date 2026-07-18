@@ -607,7 +607,8 @@ index; the report ingests set it via `CollectionService::ingest_idempotency_key`
 = hash(producer + git version + snapshot + verbatim payload). Keyless captures —
 gauges, tokens, lifecycle — always insert fresh), `get_capture`,
 `facts_for_measure` (joined to the capture for the time/version/effort spine),
-`facts_for_captures` (the attribution-by-claim read), `aggregate_ratio`.
+`facts_for_captures` (the attribution-by-claim read). Ratio re-aggregation is
+NOT a store method — it lives in `metric_engine::aggregate_facts`.
 
 ### The aggregation engine — `crates/oxplow-app/src/metric_engine.rs`
 
@@ -625,15 +626,24 @@ gauges, tokens, lifecycle — always insert fresh), `get_capture`,
   current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
-  file's stale last fact haunts the breakdown forever), latest per
-  **(stream, producer, subject)** — the partition key, never the subject string
-  alone, which let one worktree's fact EVICT another's (tsk106) — summed per
+  file's stale last fact haunts the breakdown forever) — summed per
   dim value — **unless** the facts carry ratio components (a level
   ratio like coverage, tsk13), in which case the per-group value is Σn/Σd, never
   a sum of per-file percentages; additive → EVERY fact counts (tokens by model
   is a running total, not the last turn); non-additive → current captures,
-  latest per subject, per-group Σnumerator/Σdenominator, never a naive
-  sum/average of percentages. The rule is uniform: **any** group whose facts
+  per-group Σnumerator/Σdenominator, never a naive
+  sum/average of percentages.
+
+  **Currency is `current_capture_ids` alone — there is NO per-subject dedupe**
+  (tsk157). That set admits at most one capture per `(stream, producer)`, so
+  every fact surviving the filter is from that partition's newest scan, and
+  distinct partitions UNION (worktree B never evicts worktree A; one analyzer
+  never evicts another for the same path — the tsk98/tsk106 forbidden shape).
+  A `latest per (stream, producer, subject)` map on top of that was a no-op for
+  gauge-style measures and silently wrong for occurrence-grained ones:
+  `oxplow.lint_hit` and `oxplow.todo` emit one fact PER HIT with the containing
+  file as the subject, so it made the breakdown count FILES while the headline
+  counted hits. The rule is uniform: **any** group whose facts
   have Σden≠0 collapses to Σn/Σd regardless of temporal class.
 
   **Point-in-time reads describe the headline's own state** (tsk106). For a
@@ -729,6 +739,26 @@ Landed:
 | turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The `parse_claude_turns`/`parse_claude_usage` dedupe-by-`message.id` fix (tsk22) removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). **Also (tsk38)** emits four `oxplow.effort_test_outcome` facts per close, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run), `red_runs` (# runs with ≥1 failure). Computed by the pure `test_outcome::{runs_from_case_facts, compute_effort_test_outcome}` from the effort's `oxplow.test_case` facts (grouped per capture): these "within-effort" aggregates are **not expressible** as a spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so they're materialized here. Gated by `measure_has_active_spec("oxplow.effort_test_outcome")` |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
+
+**Two entry points, not one (tsk172).** `project_effort_lifecycle_metrics` runs
+from the status transition (`update`, on crossing OUT of `in_progress`) **and**
+from `record_effort`, which synthesizes an effort when `complete_task` closes a
+task that was never `in_progress`. Only the transition path existed originally,
+so synthesized efforts produced files but **no lifecycle facts at all** — the
+work was invisible to exactly the measures that answer "how is the driving
+going", and the bias ran toward small/quick tasks (the ones most likely to be
+closed this way), so the numbers skewed optimistic.
+
+The two paths are mutually exclusive by construction: `record_effort` projects
+only when there was NO prior effort for the task, and a task that was
+`in_progress` always has one — so `task.efforts` can't double-count.
+
+A synthesized effort passes `synthesized: true`, which suppresses **only** the
+`oxplow.cycle_time` fact. Its `started_at == ended_at`, so the honest reading is
+"unknown duration", and emitting 0 would drag the mean cycle time down with a
+number describing bookkeeping rather than work. Every other lifecycle fact still
+lands. Note this also means such an effort can never own a test run: it has no
+open window for a run to land in.
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` | one `oxplow.test_case` fact per case, status as the `oxplow.status` dim (+ `oxplow.test_suite`). MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |

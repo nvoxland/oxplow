@@ -415,15 +415,28 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
     }
 }
 
-/// A RATIO cell whose denominator summed to zero is NO DATA, not 0% — a
-/// coverage capture over zero instrumented lines must not render the worst
-/// possible reading (tsk109; matches `BinaryOp::Div`, which drops the row).
-/// Every point-emit site skips such a cell — the fact fold, `aggregate_series`,
-/// and the cube's serve arms share this ONE predicate so they cannot drift.
+/// A RATIO cell that is 0/0 is NO DATA, not 0% — a coverage capture over zero
+/// instrumented lines must not render the worst possible reading (tsk109;
+/// matches `BinaryOp::Div`, which drops the row). Every point-emit site skips
+/// such a cell — the fact fold, `aggregate_series`, and the cube's serve arms
+/// share this ONE predicate so they cannot drift.
+///
+/// The numerator is part of the test (tsk156): a zero denominator with a
+/// NON-zero numerator is a real numerator-only contribution, not an empty
+/// cell. `oxplow.token_waste` is built that way on purpose — an effort close
+/// appends (num 0 / den spend) and a detected revert appends (num spend /
+/// den 0), so Σn/Σd over the measure is the wasted share. Testing the
+/// denominator alone matched the revert leg exactly and dropped it, which
+/// pinned `task.tokens.wasted_pct` at 0% for every possible input.
+///
 /// Only `Ratio`: an `avg` cell's denominator is its fact count, which is
 /// nonzero whenever there is anything to emit.
-pub(crate) fn ratio_empty(agg: Aggregation, denominator: Option<f64>) -> bool {
-    matches!(agg, Aggregation::Ratio) && denominator == Some(0.0)
+pub(crate) fn ratio_empty(
+    agg: Aggregation,
+    numerator: Option<f64>,
+    denominator: Option<f64>,
+) -> bool {
+    matches!(agg, Aggregation::Ratio) && denominator == Some(0.0) && numerator.unwrap_or(0.0) == 0.0
 }
 
 /// The decomposable aggregate of a BUCKET of facts — the cube's stored cell
@@ -579,7 +592,7 @@ pub(crate) fn aggregate_series(
             let captured_at = fs[0].captured_at;
             let (value, numerator, denominator) = aggregate_facts(&fs, agg);
             // A zero-denominator ratio capture is no data, not 0% (tsk109).
-            if ratio_empty(agg, denominator) {
+            if ratio_empty(agg, numerator, denominator) {
                 continue;
             }
             out.push(SeriesPoint {
@@ -899,7 +912,7 @@ pub(crate) fn tree_state_series(
                     aggregate_facts(&live, agg)
                 };
                 // A live-but-zero-denominator ratio is no data, not 0%.
-                if live.is_empty() || !ratio_empty(agg, denominator) {
+                if live.is_empty() || !ratio_empty(agg, numerator, denominator) {
                     out.push(point(value, numerator, denominator, None));
                 }
             }
@@ -915,7 +928,7 @@ pub(crate) fn tree_state_series(
                 }
                 for (key, fs) in buckets {
                     let (value, numerator, denominator) = aggregate_facts(&fs, agg);
-                    if !ratio_empty(agg, denominator) {
+                    if !ratio_empty(agg, numerator, denominator) {
                         out.push(point(value, numerator, denominator, Some(key)));
                     }
                 }
@@ -999,6 +1012,18 @@ pub(crate) fn range_value(series: &[SeriesPoint], temporal: Temporal) -> Option<
         }),
         Temporal::Additive => Some(series.iter().map(|p| p.value).sum()),
         Temporal::NonAdditive => {
+            // Not a ratio-shaped read at all — e.g. `sum` over the non-additive
+            // `oxplow.token_waste` (task.tokens.wasted totals reverted spend).
+            // Temporal semantics govern how to combine ACROSS TIME; when the
+            // points carry no components the metric's own aggregation already
+            // decided how to combine, so total them rather than reporting NO
+            // DATA (tsk156).
+            if !series
+                .iter()
+                .any(|p| p.numerator.is_some() || p.denominator.is_some())
+            {
+                return Some(series.iter().map(|p| p.value).sum());
+            }
             let num: f64 = series.iter().filter_map(|p| p.numerator).sum();
             let den: f64 = series.iter().filter_map(|p| p.denominator).sum();
             if den != 0.0 {
@@ -1035,31 +1060,30 @@ pub(crate) fn compute_rollup(
     current_caps: &std::collections::HashSet<i64>,
 ) -> Vec<RollupRow> {
     // The facts that contribute: all of them for an additive event measure;
-    // the current captures' latest-per-subject otherwise. The dedupe key is
-    // `(stream, producer, subject)` — the same partition the currency gate and
-    // the SQL folds use — never the subject string alone: a subject-keyed map
-    // let worktree B's newest fact EVICT worktree A's for the same test, and
-    // one analyzer's fact evict another's for the same path — a merged state
-    // belonging to no worktree (the tsk98 forbidden shape; tsk106). Distinct
-    // partitions UNION into the group sums instead.
-    let mut latest: HashMap<(i64, &str, &str), &FactRow> = HashMap::new();
+    // the CURRENT captures' facts otherwise.
+    //
+    // Currency is enforced by `current_caps` alone, which admits at most one
+    // capture per `(stream, producer)` — so every fact that survives the filter
+    // is from that partition's newest scan. Distinct partitions UNION into the
+    // group sums; worktree B never evicts worktree A, and one analyzer never
+    // evicts another for the same path (the tsk98 forbidden shape; tsk106).
+    //
+    // There is deliberately NO per-subject dedupe on top of that. It would be a
+    // no-op for gauge-style measures (one fact per subject per capture) and
+    // silently wrong for occurrence-grained ones — `oxplow.lint_hit` and
+    // `oxplow.todo` emit one fact PER HIT with the containing file as the
+    // subject, so keeping one per subject made the breakdown count files while
+    // the headline counted hits (tsk157).
     let kept: Vec<&FactRow> = match temporal {
         Temporal::Additive => facts
             .iter()
             .filter(|f| f.subject_ref.is_some() || f.path.is_some())
             .collect(),
-        Temporal::SemiAdditive | Temporal::NonAdditive => {
-            for f in facts {
-                if !current_caps.contains(&f.capture_id) {
-                    continue;
-                }
-                let Some(subject) = f.subject_ref.as_deref().or(f.path.as_deref()) else {
-                    continue;
-                };
-                latest.insert((f.stream_id, f.producer.as_str(), subject), f);
-            }
-            latest.values().copied().collect()
-        }
+        Temporal::SemiAdditive | Temporal::NonAdditive => facts
+            .iter()
+            .filter(|f| current_caps.contains(&f.capture_id))
+            .filter(|f| f.subject_ref.is_some() || f.path.is_some())
+            .collect(),
     };
 
     #[derive(Default)]
@@ -2018,6 +2042,72 @@ mod tests {
     }
 
     #[test]
+    fn ratio_keeps_a_numerator_only_capture_so_token_waste_can_reach_100pct() {
+        // tsk156: `oxplow.token_waste` is a two-legged append-only ratio. An
+        // effort CLOSE contributes (num 0 / den spend); a detected revert
+        // contributes (num spend / den 0) in its OWN capture, so Σn/Σd across
+        // the measure is the wasted share. The tsk109 "zero-denominator ratio
+        // is no data" guard matched the revert leg's shape exactly and dropped
+        // it, pinning task.tokens.wasted_pct at 0% for every input. A cell
+        // carrying a numerator IS data; only 0/0 is empty.
+        let facts = vec![
+            FactRow {
+                numerator: Some(0.0),
+                denominator: Some(5000.0),
+                ..fact(1, "2026-06-30T10:00:00Z", 0.0)
+            },
+            FactRow {
+                numerator: Some(5000.0),
+                denominator: Some(0.0),
+                ..fact(2, "2026-06-30T11:00:00Z", 5000.0)
+            },
+        ];
+        let series = aggregate_series(&facts, Aggregation::Ratio, &FactFilter::default(), None);
+        assert_eq!(
+            series.len(),
+            2,
+            "the revert leg must survive as its own point"
+        );
+        // Σnum/Σden = 5000/5000: all metered spend was later reverted.
+        assert_eq!(range_value(&series, Temporal::NonAdditive), Some(1.0));
+    }
+
+    #[test]
+    fn range_value_sums_a_non_ratio_read_of_a_non_additive_measure() {
+        // tsk156, second symptom: `task.tokens.wasted` is a `sum` metric over
+        // the non-additive `oxplow.token_waste` measure. A summed point carries
+        // no numerator/denominator, so the Σn/Σd branch found Σden = 0 and
+        // reported NO DATA — the MCP headline read empty even with waste
+        // recorded. (The desktop UI masked it by recomputing from the series.)
+        // Temporal semantics govern combining ACROSS TIME; when the points
+        // aren't ratio-shaped the metric's own aggregation already decided how
+        // to combine, so total them.
+        let facts = vec![
+            fact(1, "2026-06-30T10:00:00Z", 100.0),
+            fact(2, "2026-06-30T11:00:00Z", 200.0),
+        ];
+        let series = aggregate_series(&facts, Aggregation::Sum, &FactFilter::default(), None);
+        assert_eq!(series.len(), 2, "both captures emit a point");
+        assert_eq!(range_value(&series, Temporal::NonAdditive), Some(300.0));
+    }
+
+    #[test]
+    fn ratio_still_drops_a_genuinely_empty_zero_over_zero_capture() {
+        // The tsk109 case must keep working: a coverage capture over zero
+        // instrumented lines is no data, not the worst possible reading.
+        let facts = vec![FactRow {
+            numerator: Some(0.0),
+            denominator: Some(0.0),
+            ..fact(1, "2026-06-30T10:00:00Z", 0.0)
+        }];
+        let series = aggregate_series(&facts, Aggregation::Ratio, &FactFilter::default(), None);
+        assert!(
+            series.is_empty(),
+            "0/0 carries no numerator — still no data"
+        );
+    }
+
+    #[test]
     fn range_value_semi_additive_ratio_reads_the_latest_capture_not_a_blend() {
         // tsk13: coverage is a semi-additive LEVEL ratio. Capture 1 = 50%
         // (1/2), capture 2 = 85% (17/20). The in-range headline is the
@@ -2094,6 +2184,44 @@ mod tests {
                 (Some("typescript".to_string()), 7.0),
             ]
         );
+    }
+
+    #[test]
+    fn rollup_counts_every_occurrence_when_a_subject_repeats_in_one_capture() {
+        // tsk157: `oxplow.lint_hit` and `oxplow.todo` emit ONE FACT PER
+        // OCCURRENCE with the containing FILE as the subject. Deduping by
+        // (stream, producer, subject) kept exactly one of them, so the
+        // breakdown counted FILES while the series/headline counted
+        // occurrences: 3 clippy errors in a.rs + 1 in b.rs read as 4 in the
+        // headline and 2 in the package card.
+        //
+        // The dedupe was never load-bearing here — `current_capture_ids` already
+        // admits at most ONE capture per (stream, producer), so every surviving
+        // fact for a subject comes from that same capture and is current. It is
+        // a no-op for gauge-style measures (one fact per subject per capture)
+        // and destructive for occurrence-grained ones.
+        let hit = |file: &str| FactRow {
+            subject_ref: Some(format!("file:{file}")),
+            path: Some(file.into()),
+            ..fact(2, "2026-06-30T11:00:00Z", 1.0)
+        };
+        let facts = vec![
+            hit("src/app/a.rs"),
+            hit("src/app/a.rs"),
+            hit("src/app/a.rs"),
+            hit("src/app/b.rs"),
+        ];
+        let rollup = compute_rollup(
+            &facts,
+            "package",
+            Temporal::SemiAdditive,
+            &current_capture_ids(&facts, &[]),
+        );
+        assert_eq!(rollup.len(), 1, "one package");
+        assert_eq!(rollup[0].key, "src/app");
+        assert_eq!(rollup[0].value, 4.0, "every hit counts, not one per file");
+        // Distinct FILES is still the right subject count — two files hold them.
+        assert_eq!(rollup[0].subject_count, 2);
     }
 
     #[test]

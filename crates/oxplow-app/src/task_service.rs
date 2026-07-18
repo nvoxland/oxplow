@@ -382,7 +382,7 @@ impl TaskService {
                 if let (true, oxplow_db::EffortTransition::Finished(effort_id)) =
                     (crossed_out, transition)
                 {
-                    self.project_effort_lifecycle_metrics(&item, &thread_id, &effort_id)
+                    self.project_effort_lifecycle_metrics(item.id, &thread_id, &effort_id, false)
                         .await;
                     // Run any config-declared `on-effort-complete` gauges
                     // against the effort's end snapshot (tsk213, P3).
@@ -516,11 +516,19 @@ impl TaskService {
     /// redo-rate signal). Reads `task_effort` as the source of truth; the
     /// table is untouched. Best-effort — a metric write error is logged and
     /// never blocks the status transition.
+    /// `synthesized` marks an effort that `record_effort` created and closed in
+    /// one action because the task was never `in_progress` (tsk172). Such an
+    /// effort has no real duration — `started_at == ended_at` — so its
+    /// `cycle_time` is suppressed rather than reported as 0, which would drag
+    /// the mean down with a number that describes bookkeeping, not work. Every
+    /// other lifecycle fact still lands, so the work stops being invisible to
+    /// the pairing metrics.
     async fn project_effort_lifecycle_metrics(
         &self,
-        item: &Task,
+        task_id: TaskId,
         thread_id: &ThreadId,
         effort_id: &EffortId,
+        synthesized: bool,
     ) {
         let Some(effort_store) = self.effort_store.as_ref() else {
             return;
@@ -546,7 +554,7 @@ impl TaskService {
             return; // not actually closed — nothing to measure
         };
         let cycle_ms = (ended_at.unix_ms() - effort.started_at.unix_ms()).max(0);
-        let efforts_so_far = match effort_store.list_for_item(item.id).await {
+        let efforts_so_far = match effort_store.list_for_item(task_id).await {
             Ok(rows) => rows.len() as i64,
             Err(e) => {
                 tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
@@ -576,10 +584,11 @@ impl TaskService {
                 // Stop-collecting gate (tsk31): only emit each lifecycle fact when
                 // an enabled metric consumes its measure (`effort.cycle_time_ms` /
                 // `task.efforts`).
-                if facts
-                    .measure_has_active_spec("oxplow.cycle_time")
-                    .await
-                    .unwrap_or(true)
+                if !synthesized
+                    && facts
+                        .measure_has_active_spec("oxplow.cycle_time")
+                        .await
+                        .unwrap_or(true)
                 {
                     if let Some(measure) = facts.get_measure("oxplow.cycle_time").await? {
                         rows.push(NewFact {
@@ -599,7 +608,7 @@ impl TaskService {
                     if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
                         rows.push(NewFact {
                             subject_kind: Some("task".into()),
-                            subject_ref: Some(item.id.to_string()),
+                            subject_ref: Some(task_id.to_string()),
                             numerator: Some(efforts_so_far as f64),
                             denominator: Some(1.0),
                             ..NewFact::new(measure.id, efforts_so_far as f64)
@@ -958,7 +967,15 @@ impl TaskService {
         // attribution itself (attach-or-start + files + impacts +
         // finish/summary) commits as one transaction, so a crash can
         // no longer leave files recorded without their summary/finish.
-        let version = match effort_store.most_recent_for_task(item).await? {
+        // No prior effort means the atomic op below will SYNTHESIZE one: the
+        // task was closed without ever being `in_progress`, so the status
+        // transition never crossed out of the in-progress band and
+        // `project_effort_lifecycle_metrics` never ran for it (tsk172). We
+        // project it ourselves at the tail — otherwise the work is invisible to
+        // exactly the metrics that measure how the pairing is going.
+        let prior = effort_store.most_recent_for_task(item).await?;
+        let synthesized = prior.is_none();
+        let version = match prior {
             Some(e) => self.resolve_effort_file_version(&e).await,
             // No effort yet — the atomic op will open one with no
             // snapshot pin, so the version triple is the unpinned
@@ -974,7 +991,7 @@ impl TaskService {
             .filter(|p| !p.is_empty())
             .map(|p| (p.clone(), classify_change(worktree_root, p)))
             .collect();
-        effort_store
+        let effort_id = effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
                 task: item,
                 thread: *thread,
@@ -988,6 +1005,13 @@ impl TaskService {
                 summary,
             })
             .await?;
+        if synthesized {
+            // Only in the synthesized case — a task that WAS `in_progress`
+            // gets this from its status transition, and projecting here too
+            // would double-count `task.efforts`.
+            self.project_effort_lifecycle_metrics(item, thread, &effort_id, true)
+                .await;
+        }
         Ok(())
     }
 
@@ -1697,6 +1721,75 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn closing_a_never_started_task_still_counts_toward_efforts_per_task() {
+        // tsk172: `complete_task` on a task that was never `in_progress`
+        // synthesizes the effort so `touched_files` attributes — but the status
+        // transition never crosses OUT of the in-progress band, so
+        // `project_effort_lifecycle_metrics` never ran and the work was invisible
+        // to the pairing metrics. Verified in a real DB: two such efforts had
+        // files recorded but ZERO facts on `oxplow.cycle_time` /
+        // `oxplow.effort_steering`, where properly-opened efforts all had them.
+        //
+        // The bias mattered: this shape is most common for small, quick tasks,
+        // so the redo-rate signal skewed optimistic.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "closed without ever starting".into(),
+                    status: Some(TaskStatus::Ready),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        svc.record_effort(
+            &effort_store,
+            item.id,
+            &tid,
+            &["src/a.rs".to_string()],
+            Some("done".into()),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let facts = svc.fact_store.as_ref().expect("fact store attached");
+        let effort_measure = facts
+            .get_measure("oxplow.task_effort")
+            .await
+            .unwrap()
+            .expect("task_effort measure seeded by V43");
+        let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
+        assert_eq!(
+            effort_facts.len(),
+            1,
+            "the synthesized effort must count toward efforts-per-task"
+        );
+        assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("task"));
+
+        // Cycle time is deliberately NOT emitted: `started_at == ended_at` on a
+        // synthesized effort, so a fact here would report 0 and drag the mean
+        // down with a number that describes bookkeeping rather than work.
+        let cycle_measure = facts
+            .get_measure("oxplow.cycle_time")
+            .await
+            .unwrap()
+            .expect("cycle_time measure seeded by V43");
+        assert!(
+            facts
+                .facts_for_measure(cycle_measure.id)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a synthesized effort has no real duration — better absent than 0"
+        );
     }
 
     #[tokio::test]
