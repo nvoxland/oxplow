@@ -1,6 +1,7 @@
 # Agents
 
-Oxplow supports **Claude Code** and **Codex** as agent backends. A
+Oxplow supports **Claude Code**, **Codex**, and **OpenCode** as agent
+backends. A
 project can enable either one or both, and every thread records which
 agent it runs.
 
@@ -12,7 +13,8 @@ agent they use.
 
 ## Enable agents for a project
 
-Open the project **Settings** page and enable Claude, Codex, or both.
+Open the project **Settings** page and enable any combination of
+Claude, Codex, and OpenCode.
 Use **Up** and **Down** to set their priority. The first enabled agent is
 the default when a new thread is created.
 
@@ -96,6 +98,7 @@ available on `PATH`:
 
 - `claude` for Claude Code
 - `codex` for Codex
+- `opencode` for OpenCode
 
 Enabling an agent in `.oxplow/project.yaml` does not install its CLI or configure
 its provider credentials.

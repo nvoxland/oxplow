@@ -67,7 +67,7 @@ while it's working; it goes red when the agent is waiting on
 you. Asking the agent a question that doesn't need file edits
 just stops cleanly when it's answered — there's nothing to file.
 
-Oxplow supports Claude Code and Codex. The project Settings page
+Oxplow supports Claude Code, Codex, and OpenCode. The project Settings page
 controls which agents are enabled and their default order. If both are
 enabled, choose one when creating a thread; the assignment stays with
 that thread. See [Agents](../guide/agents.md).
@@ -93,7 +93,7 @@ A few things happen:
 3. The agent edits `README.md` and snapshots it before/after.
 4. The agent closes the item to `done` with a summary note.
 
-Open **Local History** from the rail's Pages directory (or
+Open **Local History** from the launcher (++cmd+p++) (or
 right-click the file → Local History) and you'll see the
 snapshot. Click to diff against current; click **Restore** to
 revert just that file.
@@ -115,7 +115,8 @@ thread. By default new threads are read-only — their writes are
 denied at the hook level. Use them to ask "how does X work" or
 "trace this codepath" without risking file edits.
 
-Promote a thread to writer from its tab kebab menu when you want
+Make a thread the writer by right-clicking it in the navigator →
+**Make writer**, when you want
 it to ship changes (only one writer per stream).
 
 ## 7. What to read next
@@ -128,5 +129,5 @@ it to ship changes (only one writer per stream).
   backlinks, how the agent uses them.
 - [Agent control](../guide/agent-control.md) — Stop hook, write
   guard, filing enforcement.
-- [Agents](../guide/agents.md) — Claude Code and Codex selection,
+- [Agents](../guide/agents.md) — Claude Code / Codex / OpenCode selection,
   configuration, and runtime integration.

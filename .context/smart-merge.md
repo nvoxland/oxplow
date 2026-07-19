@@ -104,6 +104,22 @@ unsupported extension → `None`, leaving git's markers untouched. Same
 write + `git add`-only-on-clean discipline as Tier-1, so the pass can
 still only *reduce* the conflict count.
 
+**"Only reduces" is about conflicts, and says nothing about content.** The
+re-parse guard proves the output is well-formed, NOT that it is complete —
+source with a licence header deleted parses perfectly. tsk159 was exactly
+that: comment runs separated from the next declaration by a blank line
+belonged to no `Item`, and `reconstruct` emits only `Item.text`, so headers
+and trailing notes vanished from a file reported as cleanly resolved.
+
+Detached comment runs are now items in their own right, keyed by normalized
+text (like imports) so an identical header across all three sides survives
+once and an edited one lands in the conflict path instead of being rewritten.
+`reconstruct` re-emits the blank line that made the run detached.
+
+The general lesson for anything added to Tier-2: **a guard that validates
+shape cannot catch loss of content.** New reconstruction logic needs a test
+that asserts specific bytes SURVIVE, not just that the result parses.
+
 `AutoResolveReport` gained an `ast_resolved: u32` counter: AST-resolved
 paths go into the same `resolved` Vec (so `GitOpResult.auto_resolved =
 resolved.len()` already surfaces them in the toast/HUD — no parallel

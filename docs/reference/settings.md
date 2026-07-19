@@ -54,14 +54,14 @@ Sensible defaults; opinionated product.
 ### Writer thread
 
 Per-stream. Exactly one thread is the writer. Other threads are
-read-only. Switch the writer from the thread tab kebab.
+read-only. Right-click a thread in the navigator → **Make writer**.
 Switching kicks any in-flight write attempt on the old writer
 back through the hook (which fails it cleanly).
 
 ### Stream and thread custom prompts
 
 Each stream and thread has its own settings page (open from the
-tab kebab → Settings) with a custom prompt field appended to the
+context menu → Settings) with a custom prompt field appended to the
 agent's system prompt at launch. Use it for stream-specific
 framing ("you're on the migration branch, priority is not
 breaking schema") or thread-specific framing ("research only —
@@ -85,6 +85,7 @@ Supported values:
 | --- | --- |
 | `claude` | Claude Code (`claude`) |
 | `codex` | Codex (`codex`) |
+| `opencode` | OpenCode (`opencode`) |
 
 The list order matters: the first entry is the default for new threads.
 The Settings page's **Up** and **Down** buttons change that order. If
@@ -119,15 +120,35 @@ integration, and concurrent operation.
 
 Per-thread. Default on. The agent process runs inside a tmux
 session so it survives oxplow restarts. Toggle from the agent
-tab kebab. The tmux session name is requested when you switch a
+tab's context menu. The tmux session name is requested when you switch a
 thread into tmux mode.
 
 ### Snapshot retention
 
-Snapshots from closed tasks are pruned on a 24-hour schedule
+Snapshot **content** is expired on a 24-hour schedule
 (orphaned blobs in `.oxplow/snapshots/` are GC'd at the same
 time). Tune the retention window from the project's settings
 page if the default doesn't fit (most users never touch this).
+
+### Other project keys
+
+Everything else `.oxplow/project.yaml` accepts, with its default:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `projectName` | the directory name | Display name for the project. |
+| `snapshotRetentionDays` | `7` | Days to keep snapshot *content*. `0` disables expiry entirely. |
+| `metricRetentionDays` | `0` | Days to keep raw metric facts. `0` means **keep everything** — pruning is opt-in. |
+| `snapshotMaxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
+| `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
+| `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
+| `agentModels` | *empty* | Per-agent model override, e.g. `opencode: github-copilot/gpt-5-mini`. |
+| `lsp.servers` | *empty* | Per-project language-server pins. |
+
+The four metric blocks — `measures`, `gauges`, `metrics`, and
+`dimensions` — are covered in [Metrics](../guide/metrics.md), which
+also explains why you normally let the agent write them rather than
+editing them by hand.
 
 ### Generated paths
 
@@ -240,16 +261,19 @@ source.
 
 ### LSP servers
 
-Auto-managed. Oxplow's bundled LSP installer fetches Mason
-packages on first use, caches them under `.oxplow/lsp/`, and the
-proxy hands the right binary to whichever stream asked. There is
-no `lsp.json` to maintain — supported languages are
-auto-detected from project content (file extensions, root
-markers).
+Installs are **explicit**, not automatic. Use the **Language
+Servers** section of the Settings page, or let the agent do it via
+the `lsp_install_server` MCP tool. Nothing is fetched just because
+you opened a file.
 
-If a server you need isn't yet supported, file a task; the
-installer's manifest lives in
-`crates/oxplow-lsp/src/installer/`.
+Servers install into `.oxplow/lsp/` (downloads are cached
+separately in `.oxplow/lsp-cache/`), and the proxy hands the right
+binary to whichever stream asked. Which server serves a file is
+resolved by language id, not by root markers.
+
+You can also pin servers per project under an `lsp.servers` block
+in `.oxplow/project.yaml`. If a server you need isn't packaged, the
+Mason-backed installer lives in `crates/oxplow-lsp-installer/`.
 
 ### Theme
 

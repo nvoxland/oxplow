@@ -84,6 +84,6 @@ authored project change.
 
 If you edit wiki pages externally (your own editor, a script),
 the file watcher catches it and re-baselines. If you want to
-force a sync immediately, use the page's kebab menu (or the
+force a sync immediately, right-click the page (or use the
 agent does it after its own writes).
 

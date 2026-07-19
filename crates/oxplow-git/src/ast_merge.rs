@@ -191,10 +191,16 @@ pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
 
         // Absorb the preceding comment run into this item's span iff it
         // is directly attached (no blank line between it and the decl).
+        // A DETACHED run (blank line between) becomes its own item instead of
+        // being dropped — a licence header or section divider is content, and
+        // silently losing it while reporting a clean merge is the worst
+        // outcome available (tsk159).
         let mut start = child.start_byte();
         if let Some((cstart, cend)) = comment_run {
             let gap = &src[cend..child.start_byte()];
-            if !gap.contains("\n\n") {
+            if gap.contains("\n\n") {
+                push_comment_item(&mut items, src, cstart, cend);
+            } else {
                 start = cstart;
             }
         }
@@ -210,8 +216,38 @@ pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
         });
     }
 
+    // A run trailing the last declaration (or a comment-only file) attaches to
+    // nothing, so it needs the same treatment.
+    if let Some((cstart, cend)) = comment_run {
+        push_comment_item(&mut items, src, cstart, cend);
+    }
+
     Some(items)
 }
+
+/// Emit a detached comment run as a standalone [`Item`].
+///
+/// Keyed by normalized text, like imports: an identical header on all three
+/// sides matches and survives once, while a header edited on one side reads as
+/// a delete + add and lands in the conservative conflict path rather than being
+/// silently rewritten. Whitespace-only runs are skipped — `is_extra()` covers
+/// whitespace as well as comments, and a blank-line "item" is not content.
+fn push_comment_item(items: &mut Vec<Item>, src: &str, start: usize, end: usize) {
+    let text = &src[start..end];
+    if text.trim().is_empty() {
+        return;
+    }
+    items.push(Item {
+        key: format!("{COMMENT_KEY_PREFIX}{}", normalize_ws(text)),
+        text: text.to_string(),
+        byte_span: start..end,
+    });
+}
+
+/// Key prefix marking a standalone comment block (tsk159). `reconstruct` reads
+/// it to restore the blank line that made the block detached in the first
+/// place.
+const COMMENT_KEY_PREFIX: &str = "comment::";
 
 /// Compute an item's identity key per the spec's rules.
 fn item_key(node: Node, src: &str, spec: &MergeSpec) -> String {
@@ -755,6 +791,12 @@ fn reconstruct(items: &[Item]) -> String {
     for it in items {
         out.push_str(it.text.trim_end());
         out.push('\n');
+        // A standalone comment block was detached by a blank line — that blank
+        // line is what made it standalone, so put it back rather than gluing a
+        // licence header onto the first declaration (tsk159).
+        if it.key.starts_with(COMMENT_KEY_PREFIX) {
+            out.push('\n');
+        }
     }
     out
 }
@@ -778,6 +820,102 @@ mod tests {
 
     fn keys(items: &[Item]) -> Vec<&str> {
         items.iter().map(|i| i.key.as_str()).collect()
+    }
+
+    /// tsk159: a comment run separated from the next declaration by a blank
+    /// line — a licence header, a section divider, a trailing note — belongs to
+    /// no item, so `reconstruct` (which emits only `Item.text`) dropped it.
+    /// The re-parse guard cannot catch this: source with the header removed
+    /// parses perfectly.
+    ///
+    /// This falsified the documented invariant that Tier-2 "can only ever
+    /// reduce the conflict count, never introduce new content" — it *removed*
+    /// content, silently, in the most common file shape there is, and reported
+    /// success.
+    #[test]
+    fn detached_comment_runs_survive_a_structural_merge() {
+        let base = "// Copyright 2026 ACME Corp.\n\
+                    // SPDX-License-Identifier: MIT\n\
+                    \n\
+                    use std::fmt;\n\
+                    \n\
+                    pub fn run() -> u32 {\n    1\n}\n\
+                    \n\
+                    // TODO: revisit the retry policy\n";
+        let ours = base.replace("use std::fmt;", "use std::fmt;\nuse std::io;");
+        let theirs = base.replace("use std::fmt;", "use std::fmt;\nuse std::net;");
+
+        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, Language::Rust)
+        else {
+            panic!("both sides adding a different import must resolve structurally");
+        };
+
+        assert!(
+            merged.contains("// Copyright 2026 ACME Corp."),
+            "licence header dropped:\n{merged}"
+        );
+        assert!(
+            merged.contains("// SPDX-License-Identifier: MIT"),
+            "SPDX line dropped:\n{merged}"
+        );
+        assert!(
+            merged.contains("// TODO: revisit the retry policy"),
+            "trailing comment at EOF dropped:\n{merged}"
+        );
+        // The merge itself still has to work.
+        assert!(merged.contains("use std::io;"), "{merged}");
+        assert!(merged.contains("use std::net;"), "{merged}");
+        assert!(merged.contains("pub fn run()"), "{merged}");
+        // And the header must stay at the top, not float into the body.
+        let header = merged.find("// Copyright").expect("header present");
+        let first_decl = merged.find("use std::").expect("an import present");
+        assert!(
+            header < first_decl,
+            "header must precede the declarations:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn a_detached_comment_run_is_parsed_as_its_own_item() {
+        let src = "// header\n\nuse std::fmt;\n\n// trailing\n";
+        let items = parse_top_level_items(src, Language::Rust).expect("parses");
+        assert_spans_match(src, &items);
+        // header, the use, trailing — three items, in source order.
+        assert_eq!(items.len(), 3, "got keys {:?}", keys(&items));
+        assert!(items[0].text.contains("// header"));
+        assert!(items[1].text.contains("use std::fmt;"));
+        assert!(items[2].text.contains("// trailing"));
+    }
+
+    #[test]
+    fn detached_comments_survive_in_python_too() {
+        // The fix rides tree-sitter's `is_extra()`, so it should be
+        // language-agnostic — but the original report named Python explicitly,
+        // so pin it rather than assume.
+        let base = "# Copyright 2026 ACME Corp.\n\nimport os\n\ndef run():\n    return 1\n";
+        let ours = base.replace("import os", "import os\nimport sys");
+        let theirs = base.replace("import os", "import os\nimport json");
+        let AstMerge::Resolved(merged) = merge_top_level(base, &ours, &theirs, Language::Python)
+        else {
+            panic!("independent imports must resolve structurally");
+        };
+        assert!(
+            merged.contains("# Copyright 2026 ACME Corp."),
+            "header dropped:\n{merged}"
+        );
+        assert!(merged.contains("import sys"), "{merged}");
+        assert!(merged.contains("import json"), "{merged}");
+    }
+
+    #[test]
+    fn an_attached_doc_comment_still_rides_with_its_declaration() {
+        // The existing behaviour must not regress: no blank line means the
+        // comment belongs to the decl and moves with it.
+        let src = "/// docs for run\npub fn run() {}\n";
+        let items = parse_top_level_items(src, Language::Rust).expect("parses");
+        assert_eq!(items.len(), 1, "got keys {:?}", keys(&items));
+        assert!(items[0].text.contains("/// docs for run"));
+        assert!(items[0].text.contains("pub fn run()"));
     }
 
     #[test]

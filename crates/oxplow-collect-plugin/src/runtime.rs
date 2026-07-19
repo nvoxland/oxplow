@@ -12,6 +12,13 @@
 //! timeout) so a malformed or runaway script is isolated and surfaced as an
 //! error rather than hanging or crashing collection.
 //!
+//! [`run_exec`] honours the SAME budget, and is the only tier where the budget
+//! actually stops the work: a child process can be killed, whereas an
+//! overrunning in-process script can only be abandoned to keep spinning (see
+//! [`run_sandboxed`]). It also drains stdout/stderr on their own threads while
+//! writing stdin, because doing those in sequence deadlocks any streaming
+//! filter once a pipe buffer fills (tsk161).
+//!
 //! Every engine takes an already-parsed JSON input value (the host applied the
 //! collector's declared container parser first — see `CollectorInput`) and
 //! returns a JSON value, which the caller deserializes into the kind's typed
@@ -459,8 +466,12 @@ fn run_starlark_inner(
 /// raw report `content` is written to its stdin and its stdout is parsed as the
 /// kind's JSON output. Unlike the in-process tiers this can do I/O, so callers
 /// tag it lower-trust.
-pub fn run_exec(argv: &[String], content: &str) -> Result<Value, CollectError> {
-    use std::io::Write;
+pub fn run_exec(
+    budget: &SandboxBudget,
+    argv: &[String],
+    content: &str,
+) -> Result<Value, CollectError> {
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
 
     let (program, args) = argv
@@ -473,23 +484,82 @@ pub fn run_exec(argv: &[String], content: &str) -> Result<Value, CollectError> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| CollectError::Exec(format!("spawn {program}: {e}")))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(content.as_bytes())
-            .map_err(|e| CollectError::Exec(e.to_string()))?;
+
+    // Every pipe gets its own thread (tsk161). Writing the whole report to
+    // stdin and only THEN calling `wait_with_output` deadlocks any streaming
+    // filter: once the child's stdout pipe fills (~64 KB) the child blocks
+    // writing, so it stops reading stdin, so the parent blocks writing — and
+    // neither side ever moves. Reproduced with 4 MB through `cat`.
+    //
+    // The stdin write needs a thread of its own too: a child that never reads
+    // stdin blocks the writer regardless of how diligently we drain stdout, and
+    // the caller must stay free to enforce the deadline below.
+    let mut stdin = child.stdin.take();
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let payload = content.to_string();
+    let writer = std::thread::spawn(move || {
+        if let Some(si) = stdin.as_mut() {
+            // A broken pipe here is expected when we kill an overrunning child,
+            // and a child that legitimately ignores its input isn't an error
+            // either — the exit status is what decides success.
+            let _ = si.write_all(payload.as_bytes());
+        }
+        drop(stdin); // close → EOF for the child
+    });
+    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|e| CollectError::Exec(e.to_string()))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let out_thread = drain(stdout.take());
+    let err_thread = drain(stderr.take());
+
+    // Unlike the in-process tiers — where an overrunning script can only be
+    // abandoned, never stopped — a child process can actually be killed, so
+    // exec gets a real enforced ceiling rather than a detached thread.
+    let deadline = std::time::Instant::now() + budget.timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(CollectError::Exec(e.to_string()));
+            }
+        }
+    };
+
+    let stdout_bytes = out_thread.join().unwrap_or_default();
+    let stderr_bytes = err_thread.join().unwrap_or_default();
+    let _ = writer.join();
+
+    let Some(status) = status else {
+        return Err(CollectError::Exec(format!(
+            "{program} exceeded the {}s budget and was killed",
+            budget.timeout.as_secs()
+        )));
+    };
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
         return Err(CollectError::Exec(format!(
             "{program} exited with {}: {}",
-            output.status,
+            status,
             stderr.trim()
         )));
     }
-    serde_json::from_slice(&output.stdout).map_err(|e| CollectError::Shape(e.to_string()))
+    serde_json::from_slice(&stdout_bytes).map_err(|e| CollectError::Shape(e.to_string()))
 }
 
 // ---- typed-output deserialization (one place: JSON value → kind output) ----
@@ -703,6 +773,66 @@ impl From<TestReportJson> for TestReport {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// tsk161: the deadlock. A streaming filter that echoes its input can't be
+    /// fed a payload larger than the pipe buffer unless stdout is drained
+    /// concurrently — the child blocks writing stdout, so it stops reading
+    /// stdin, so the parent blocks writing, forever. 4 MB through `cat` used to
+    /// hang indefinitely with no budget to stop it.
+    ///
+    /// The generous budget here is deliberate: this test must fail by HANGING
+    /// (and being killed by the harness) if the drain regresses, not by
+    /// tripping a short timeout, which would pass for the wrong reason.
+    #[test]
+    fn exec_streams_a_payload_larger_than_the_pipe_buffer() {
+        let budget = SandboxBudget::with_timeout(std::time::Duration::from_secs(60));
+        // Multiple MB of JSON — ~50x the ~64 KB pipe buffer, in both directions.
+        let big: Vec<i64> = (0..500_000).collect();
+        let payload = serde_json::to_string(&json!({ "files": {}, "pad": big })).unwrap();
+        assert!(payload.len() > 1_000_000, "payload {} bytes", payload.len());
+
+        let argv = vec!["cat".to_string()];
+        let out = run_exec(&budget, &argv, &payload).expect("cat round-trips the payload");
+        assert_eq!(
+            out.get("pad").and_then(|p| p.as_array()).map(Vec::len),
+            Some(500_000),
+            "the whole payload made it through both pipes"
+        );
+    }
+
+    #[test]
+    fn exec_kills_a_child_that_exceeds_its_budget() {
+        // Unlike the in-process tiers, which can only abandon an overrunning
+        // script, a child process can be killed — so exec gets a real ceiling.
+        let budget = SandboxBudget::with_timeout(std::time::Duration::from_millis(200));
+        let argv = vec!["sleep".to_string(), "30".to_string()];
+        let started = std::time::Instant::now();
+        let err = run_exec(&budget, &argv, "{}").expect_err("must not wait for the sleep");
+        assert!(
+            matches!(&err, CollectError::Exec(m) if m.contains("budget")),
+            "got {err:?}"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "returned in {:?} — the child was not actually killed",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn exec_surfaces_a_failing_child_with_its_stderr() {
+        let budget = SandboxBudget::with_timeout(std::time::Duration::from_secs(10));
+        let argv = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "echo boom >&2; exit 3".to_string(),
+        ];
+        let err = run_exec(&budget, &argv, "{}").expect_err("non-zero exit is an error");
+        assert!(
+            matches!(&err, CollectError::Exec(m) if m.contains("boom")),
+            "stderr must reach the caller: {err:?}"
+        );
+    }
 
     #[test]
     fn jaq_maps_input_to_coverage_output() {

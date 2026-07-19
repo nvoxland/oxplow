@@ -476,7 +476,7 @@ impl Collector {
                 runtime::value_to_output(kind, raw)
             }
             Runner::Exec { argv } => {
-                let raw = runtime::run_exec(argv, content)?;
+                let raw = runtime::run_exec(&self.budget, argv, content)?;
                 runtime::value_to_output(kind, raw)
             }
         }

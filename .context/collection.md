@@ -413,9 +413,18 @@ script, never a Rust change (`crates/oxplow-collect-plugin/`):
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
-I/O, so it's tagged lower-trust). In-process tiers run under a `SandboxBudget`
+I/O, so it's tagged lower-trust). All three tiers run under a `SandboxBudget`
 (wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
 a hang.
+
+**`exec` is the one tier whose budget actually STOPS the work** (tsk161): a
+child process can be killed, so `run_exec` enforces the deadline with
+`try_wait` + `kill` rather than detaching. It also drains stdout and stderr on
+their own threads while writing stdin from a third. Doing that in sequence —
+write the whole report, *then* `wait_with_output` — deadlocks any streaming
+filter the moment a pipe buffer (~64 KB) fills: the child blocks writing
+stdout, so it stops reading stdin, so the parent blocks writing. Reproduced
+with multiple MB through `cat`, and it had no budget to break out of it.
 
 > ### ⚠️ The sandbox timeout bounds the CALLER'S WAIT, not the WORK (tsk88)
 >
@@ -426,9 +435,11 @@ a hang.
 > - **Tightening the budget costs CPU instead of saving it.** The caller gives up
 >   and is free to retry — and the coverage ride-along *does* retry (tsk79) — so a
 >   marginal parse means *two* workers on the same input, not one.
-> - **It is not containment.** A hostile/infinite script detaches and spins
->   forever; the budget only hides it from the caller. Real containment needs a
->   step-limited interpreter or a killable child process. Until then the number is
+> - **It is not containment** *for the in-process tiers*. A hostile/infinite jaq
+>   or Starlark script detaches and spins forever; the budget only hides it from
+>   the caller. Real containment needs a step-limited interpreter or a killable
+>   child process — which is exactly what `exec` now has, so this caveat applies
+>   to `jaq`/`starlark` only. Until then the number is
 >   a **diagnostic ceiling for honest-but-slow scripts** (120s, matching
 >   `GAUGE_TIMEOUT`) and must be set generously enough that honest ones never trip.
 >

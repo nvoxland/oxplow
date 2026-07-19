@@ -57,6 +57,8 @@ nav:
   - Guide:
       - Work queue: guide/work-queue.md
       - Wiki pages: guide/wiki.md
+      - Comments: guide/comments.md
+      - Search: guide/search.md
       - Local History: guide/local-history.md
       - Change Analysis: guide/change-analysis.md
       - Metrics: guide/metrics.md

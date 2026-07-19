@@ -8,7 +8,7 @@ commits, working tree vs. `HEAD` — and it answers the question
 
 ## Opening it
 
-From the rail's **Pages** directory → **Change Analysis**, or by
+From the launcher (++cmd+p++) → **Change Analysis**, or by
 following a Change Analysis link from the Git dashboard / a work
 item / a commit page. The page chrome carries Parent vs … /
 Refresh / Open commit so you can rebase the comparison without

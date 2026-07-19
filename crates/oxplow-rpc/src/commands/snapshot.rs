@@ -432,10 +432,16 @@ fn cells_for_endpoint(
     filter: &WorkspaceFilter,
 ) -> Result<(BTreeMap<String, Cell>, Space), String> {
     match ep {
+        // EVERY arm applies the filter, not just `Working` (tsk177). Filtering
+        // one side only makes a hidden path look DELETED — it's present in the
+        // commit/snapshot tree and absent from the filtered worktree scan — and
+        // it lands with the file's full line count as `deletions`. A filtered
+        // path is out of scope, so it must be absent from both sides.
         DiffEndpoint::Snapshot { .. } => {
             let cells = snap_tree
                 .unwrap_or_default()
                 .into_iter()
+                .filter(|(path, _)| !filter.ignore(Path::new(path), false))
                 .map(|(path, id)| (path, classify_snapshot_cell(id)))
                 .collect();
             Ok((cells, Space::Snapshot))
@@ -444,6 +450,7 @@ fn cells_for_endpoint(
             let tree = oxplow_git::tree_at_commit(project_dir, sha).map_err(|e| e.to_string())?;
             let cells = tree
                 .into_iter()
+                .filter(|(path, _)| !filter.ignore(Path::new(path), false))
                 .map(|(path, oid)| {
                     (
                         path,
@@ -1004,6 +1011,63 @@ mod tests {
             .expect("m.txt changed");
         assert_eq!(m.status, "modified");
         assert_eq!((m.additions, m.deletions), (2, 1), "line counts: {m:?}");
+    }
+
+    #[tokio::test]
+    async fn diff_endpoints_does_not_report_filtered_files_as_deleted() {
+        // tsk177: the ignore-filter was applied to the WORKING endpoint only, so
+        // any path present in the other endpoint but hidden from the worktree
+        // scan classified as "deleted" with its full line count. A filtered path
+        // isn't deleted — it's out of scope, and must be absent from BOTH sides.
+        //
+        // `.oxplow/project.yaml` is the live case: tracked in git (oxplow writes
+        // `.oxplow/.gitignore` with `!project.yaml` precisely so it can be
+        // committed), while WorkspaceFilter drops `.oxplow` unconditionally.
+        let (svc, dir) = crate::test_support::services();
+        let p = dir.path();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(p)
+                .status()
+                .unwrap()
+                .success());
+        };
+        std::fs::create_dir_all(p.join(".oxplow")).unwrap();
+        std::fs::write(
+            p.join(".oxplow/.gitignore"),
+            "*\n!.gitignore\n!project.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(p.join(".oxplow/project.yaml"), "collection:\n  a: 1\n").unwrap();
+        std::fs::write(p.join("normal.txt"), "x\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "c1"]);
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(p)
+            .output()
+            .unwrap();
+        let c1 = String::from_utf8(out.stdout).unwrap().trim().to_string();
+
+        // Nothing was removed from the worktree — both files are still there.
+        let entries = super::diff_endpoints(
+            &svc,
+            Some(super::DiffEndpoint::Commit { sha: c1 }),
+            super::DiffEndpoint::Working,
+        )
+        .await
+        .unwrap();
+
+        let phantom: Vec<_> = entries
+            .iter()
+            .filter(|e| e.status == "deleted")
+            .map(|e| e.path.as_str())
+            .collect();
+        assert!(
+            phantom.is_empty(),
+            "nothing was deleted, but the diff claims: {phantom:?}"
+        );
     }
 
     #[tokio::test]

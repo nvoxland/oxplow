@@ -57,7 +57,7 @@ if the two disagree — see
 
 ## The Local History dashboard
 
-Open from the rail's **Pages** directory → **Local History**.
+Open from the launcher (++cmd+p++) → **Local History**.
 The page replaces the old bottom-rail SnapshotsPanel; it's now
 a full page tab with two view modes:
 
@@ -72,7 +72,7 @@ a full page tab with two view modes:
   no other tracked changes); a dedicated **Uncommitted** group
   collects dirty-worktree captures.
 
-A row's kebab takes you into the per-snapshot detail page.
+Clicking a row takes you into its diff.
 
 ## Per-snapshot detail page
 

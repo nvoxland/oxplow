@@ -2,9 +2,9 @@
 
 The center of the window is a stack of **page tabs**. Most
 pages are one of: file, diff, task, wiki page,
-code-quality finding, dashboard, settings, agent terminal, or
-a panel-style index page (Files, Notes, Code quality, Local
-history, Git history, etc.).
+finding, dashboard, metric, settings, agent terminal, or
+a panel-style index page (Files, Wiki, Local History, Git
+History, Metrics, Dashboards, etc.).
 
 ## Tabs are per-thread
 
@@ -32,7 +32,7 @@ workspace root: even if your worktree happens to live inside a
 larger repo, the file browser stays inside the stream's
 checkout.
 
-Right-click (or row kebab) for:
+Right-click a row for:
 
 - Open
 - Open to side
@@ -52,7 +52,7 @@ matching, code folding. Editors are pinned to dark mode —
 oxplow is dark-only on purpose.
 
 The blame margin shows the commit and author that last touched
-each line; hover for the message and click the per-row kebab to
+each line; hover for the message and right-click the row to
 open that commit's page.
 
 The chrome carries a per-snapshot history dropdown that lists
@@ -93,30 +93,33 @@ talks to language servers through Monaco's LSP client, scoped
 to the stream's worktree. Hover, go-to-definition, and
 find-references work against the workspace root.
 
-Servers are auto-installed on first use via the bundled LSP
-installer: Mason packages are fetched and cached under
-`.oxplow/lsp/`, and the proxy hands the right binary to whichever
-stream asked. Ten languages are supported out of the box,
-including Clojure as of 0.3 — no manual `lsp.json` to maintain.
+Servers are installed explicitly — from Settings → **Language
+Servers**, or by the agent via `lsp_install_server`. They land in
+`.oxplow/lsp/` and the proxy hands the right binary to whichever
+stream asked. Nothing installs merely because you opened a file.
+See [Settings](../reference/settings.md#lsp-servers).
 
 The agent can also reach LSP through the same bridge — same
 servers as the editor, so answers stay consistent.
 
 ## Change Analysis
 
-A separate top-level page (rail → **Pages** → **Change Analysis**)
+A separate top-level page (++cmd+p++ → **Change Analysis**)
 for understanding diffs. Ranks files by interestingness, supports
 drilldown by extension / directory / status, and shows per-function
 before/after metrics. See [Change Analysis](change-analysis.md).
 
-## Code quality
+## Duplication findings
 
-The **Code quality** page surfaces findings from oxplow's
-in-process scanners — complexity (cyclomatic) and duplication —
-both running as Rust tree-sitter scanners against the worktree
-and persisted in the project SQLite store. Findings open as
-their own pages with a *Jump to source* action; the same
-findings feed the Change Analysis dashboard.
+Duplicate-block detection runs as a Rust tree-sitter scanner
+against the worktree, persisted in the project SQLite store. It
+surfaces inside [Change Analysis](change-analysis.md) — on the
+diff view, Uncommitted, and commit pages — rather than as a
+standalone index; an individual block opens as its own page with
+a *Jump to source* action.
+
+Complexity and other per-function metrics feed the Change
+Analysis cards directly. There is no separate Code quality page.
 
 ## What's deliberately missing
 

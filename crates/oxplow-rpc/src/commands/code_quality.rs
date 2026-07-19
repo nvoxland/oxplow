@@ -68,6 +68,23 @@ impl FileFilterSpec {
     }
 }
 
+/// Abbreviate a ref for a human-facing progress label — a full sha is noise in
+/// a status bar, so long refs show their first 7.
+///
+/// Truncates by CHARACTERS (tsk178). The original tested `len() > 12`, which
+/// counts BYTES, then sliced `[..7]`, which demands a char boundary — so a
+/// non-ASCII branch name passed the guard and panicked on the slice. That took
+/// out the whole request (the daemon has no `CatchPanicLayer`, so no error
+/// envelope) and stranded the scan row, created earlier, as permanently
+/// "running".
+fn short_ref(r#ref: &str) -> String {
+    if r#ref.chars().count() > 12 {
+        r#ref.chars().take(7).collect()
+    } else {
+        r#ref.to_string()
+    }
+}
+
 /// Run a duplicate-block scan against `tree_version`, scoped by
 /// `file_filter`. The corpus is the WHOLE tree at the requested
 /// version — `file_filter` defines which files findings are
@@ -126,14 +143,7 @@ pub async fn run_duplication_scan_at(
     // gets the standard "running" affordance while the scan runs.
     let bg_label = match &tree_version {
         TreeVersion::Disk => "Scanning duplicates (working tree)".to_string(),
-        TreeVersion::Ref { r#ref } => {
-            let short = if r#ref.len() > 12 {
-                &r#ref[..7]
-            } else {
-                r#ref.as_str()
-            };
-            format!("Scanning duplicates @{short}")
-        }
+        TreeVersion::Ref { r#ref } => format!("Scanning duplicates @{}", short_ref(r#ref)),
         TreeVersion::Snapshot { id } => format!("Scanning duplicates @snapshot {id}"),
     };
     let bg_task = svc.background_tasks.start(StartInput {
@@ -822,6 +832,50 @@ mod tests {
             .unwrap();
         assert_eq!(cap.producer, "duplication");
         assert!(cap.basis_ref.is_some());
+    }
+
+    #[tokio::test]
+    async fn duplication_scan_survives_a_multibyte_ref() {
+        // tsk178: the background-task label truncated a ref by BYTES after
+        // testing its length in bytes, so a non-ASCII branch name panicked on a
+        // mid-character slice. The scan row and Started event are emitted before
+        // the label is built, so the panic also stranded the row as permanently
+        // "running" — and with no CatchPanicLayer on the daemon, the request
+        // died without an error envelope.
+        //
+        // 33 bytes, 11 chars: passes a `> 12` byte check, and byte 7 lands
+        // mid-character.
+        let (svc, _dir) = crate::test_support::services();
+        svc.streams.ensure_primary().await.unwrap();
+        let multibyte = "日本語ブランチ名テスト";
+        assert_eq!(multibyte.len(), 33, "33 bytes");
+        assert_eq!(multibyte.chars().count(), 11, "but only 11 chars");
+        assert!(
+            !multibyte.is_char_boundary(7),
+            "byte 7 is mid-character — the old `&r#ref[..7]` panicked here"
+        );
+
+        // Short enough by CHARACTER count, so it is passed through whole.
+        assert_eq!(short_ref(multibyte), multibyte);
+        // A long ref still abbreviates, and on a char boundary.
+        assert_eq!(short_ref("abcdef0123456789"), "abcdef0");
+        // 7 CHARACTERS, not 7 bytes — which would have split the first one.
+        assert_eq!(
+            short_ref("日本語ブランチ名テストです工事中"),
+            "日本語ブランチ"
+        );
+        assert_eq!(short_ref("main"), "main");
+
+        // And the whole command path survives it rather than unwinding.
+        let _ = run_duplication_scan_at(
+            &svc,
+            TreeVersion::Ref {
+                r#ref: multibyte.into(),
+            },
+            FileFilterSpec::All,
+            "project".into(),
+        )
+        .await;
     }
 
     #[tokio::test]

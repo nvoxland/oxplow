@@ -112,13 +112,14 @@ You can:
 - Enable and order Claude Code and Codex for the project (project
   Settings or `.oxplow/project.yaml`). The selected agent is fixed when a thread
   is created.
-- Switch the writer thread per stream (thread kebab → "Promote
+- Switch the writer thread per stream (right-click the thread in
+  the navigator → "Make
   to writer").
 - Promote a read-only thread when you want it to commit.
 - Edit per-stream / per-thread custom prompts (Stream Settings
   / Thread Settings pages).
 - Pause or resume a thread's agent process from the thread
-  tab kebab.
+  tab's context menu.
 
 See [Agents](agents.md) for agent selection and generated runtime
 details.

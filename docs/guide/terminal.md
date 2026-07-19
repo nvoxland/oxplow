@@ -1,7 +1,7 @@
 # Terminal
 
 Each thread has an **Agent** tab that wraps a tmux pane running
-the thread's assigned agent, Claude Code or Codex, in the stream's
+the thread's assigned agent — Claude Code, Codex, or OpenCode — in the stream's
 worktree. The pane survives oxplow restarts because tmux owns the process —
 killing oxplow doesn't kill your in-flight agent.
 
@@ -18,7 +18,7 @@ status dot flips yellow (working) or red (waiting on you).
 
 Per-thread bits worth knowing:
 
-- **Lifecycle hook integration.** Claude Code and Codex load their own
+- **Lifecycle hook integration.** Each agent loads its own
   generated hook configuration. Stop and tool events drive the
   in-progress audit, filing enforcement, and snapshot tracking. Oxplow
   installs the per-agent files under `.oxplow/runtime/` automatically.
@@ -32,19 +32,16 @@ Per-thread bits worth knowing:
 - **Per-stream isolation.** The agent's CWD is the stream's
   worktree. It cannot see other streams' working trees.
 
-## Header kebab
+## Tab actions
 
-The agent tab's header kebab carries:
-
-- Copy / Paste / Clear (replaces the legacy xterm right-click
-  menu — oxplow uses kebabs, not context menus)
-- Restart agent
-- Toggle tmux mode
+Right-click a terminal's tab in the tab strip to rename or close
+it. Copy is automatic on selection and paste is the platform
+shortcut — see [Keybindings](../reference/keybindings.md).
 
 ## Drag-to-add-context
 
-Drag rows from the rail's recent files, active item, up-next,
-backlinks lists, task rows, or code-quality file groups
+Drag rows from the rail's Work and Go To panes, backlinks lists,
+task rows, or the file tree
 onto the agent terminal to inject them into the agent's
 context. Multi-select drag works for task lists.
 
@@ -58,8 +55,8 @@ they share the worktree but are otherwise independent.
 ## tmux mode
 
 The agent terminal runs in tmux by default so detaching and
-reattaching survives oxplow restarts. Toggle from the agent
-tab kebab if you want a plain pty instead. Sessions are
+reattaching survives oxplow restarts. Toggle it from the agent
+tab's context menu if you want a plain pty instead. Sessions are
 per-thread.
 
 ## Copy / paste

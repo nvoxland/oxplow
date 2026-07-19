@@ -21,10 +21,16 @@ authoritative list lives in
 | Find in current editor | `Cmd+F` | `Ctrl+F` |
 | File new task (in plan view) | `Cmd+Shift+N` | `Ctrl+Shift+N` |
 
-`Cmd+P` opens the QuickOpen overlay — fuzzy-match across files
-in the active stream's worktree plus oxplow's named pages (Plan
-work, Backlog, Local History, Change Analysis, Git dashboard,
-etc.).
+`Cmd+P` opens the launcher — fuzzy-match across files in the
+active stream's worktree, oxplow's named pages (Tasks, Backlog,
+Local History, Change Analysis, Git, Metrics, Dashboards, …),
+and commands. With an empty query it shows a **Recent** section
+over a collapsible category tree, so it doubles as the directory
+of every page you can open.
+
+There is only one launcher. The separate command palette
+(`Cmd+K`) and search palette (`Cmd+Shift+F`) were removed in
+favour of it.
 
 ## Tabs and pages
 
@@ -33,7 +39,8 @@ etc.).
 | Open link in new tab | `Cmd/Ctrl+Click`, middle-click, or right-click on any `RouteLink` |
 | Browser back / forward | Click the back / forward buttons in the page nav bar |
 | Bookmark current page | Click the star in the page nav bar |
-| Close active tab | Tab kebab → Close |
+| Close active tab | Click the tab's `×`, or right-click the tab → Close |
+| Close other tabs / tabs to the right | Right-click the tab |
 
 Browser-tab semantics are non-negotiable: plain-click navigates
 *in-tab*; only Cmd/Ctrl-click + middle-click + right-click open a
@@ -57,7 +64,7 @@ Standard Monaco bindings apply. The most-used:
 LSP go-to-definition / hover / references all flow through the
 oxplow LSP bridge — same servers the agent calls via MCP.
 
-## tasks (Plan / Backlog / Done / Archived pages)
+## Tasks (Tasks / Backlog / Done Work / Archived pages)
 
 | Action | Key |
 |---|---|
@@ -65,14 +72,20 @@ oxplow LSP bridge — same servers the agent calls via MCP.
 | File the new row | type a title and press `Enter` |
 | Edit selected item | `Enter` |
 | Cancel inline edit | `Escape` |
-| Delete / archive / cancel | row kebab — no single-key shortcut |
+| Delete / archive / cancel | right-click the row — no single-key shortcut |
+| Open a row's menu from the keyboard | `Menu` key or `Shift+F10` |
 | Reorder | drag with the row handle |
 
 Destructive actions (delete, archive, cancel) are deliberately
-behind a kebab popover, never a single keystroke — keeps the
-queue from losing data to a stray keypress. The whole product
-uses kebabs instead of right-click menus for the same reason:
-discoverability over chord memorization.
+behind a menu, never a single keystroke — that keeps the queue
+from losing data to a stray keypress.
+
+**Row actions are right-click, product-wide.** An earlier pass put
+them on visible `⋯` kebab buttons and we reversed it: right-click
+is discoverable enough for anyone who expects it, and a kebab on
+every row ate space the rows needed. Every context menu has
+keyboard parity via `Menu` / `Shift+F10`, so right-click is never
+the only way in.
 
 ## Terminal
 
@@ -80,7 +93,7 @@ discoverability over chord memorization.
 |---|---|---|
 | Paste | `Cmd+V` | `Ctrl+Shift+V` (xterm-default) |
 | Copy | selection → release (auto-copy) | selection → release |
-| Per-tab Copy / Paste / Clear | header kebab (replaces xterm right-click) |
+| Rename / close a terminal | right-click its tab in the tab strip |
 
 ## Drop targets
 
@@ -89,9 +102,9 @@ highlights as you drag. Drop highlighting is *the* signal that a
 drop will work — if you don't see a highlight, the drop isn't
 supported there.
 
-The agent terminal accepts drag-to-add-context from task
-rows, file rows, the rail's recent-files / active item / up-next
-lists, backlinks entries, and code-quality file groups.
+The agent terminal accepts drag-to-add-context from task rows,
+file rows, the rail's Work and Go To entries, and backlinks
+entries.
 
 ## Why so few
 

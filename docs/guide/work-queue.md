@@ -29,21 +29,21 @@ unless an item is `in_progress`.
 
 ## Where to find work
 
-The rail HUD on the left of every window surfaces the live state
-of the queue:
+The rail HUD's **Work** pane surfaces the live state of the queue:
 
-- **Active item** — the lowest-priority `in_progress` item for
-  the current thread, with a live agent-status dot.
-- **Up next** — the top five `ready` items.
-- A **Backlog** entry under "Pages" with a count badge for the
-  stream-global backlog.
+- **Active item** — the highest-priority `in_progress` item for
+  the current thread (the one with the lowest `sort_index`), with
+  a live agent-status dot.
+- **Up next** — the next `ready` items, up to ten.
+- A **Backlog** entry with a count badge for the stream-global
+  backlog.
 
-Full lists live in dedicated pages, opened from the rail's
-**Pages** directory:
+Full lists live in dedicated pages, opened from the launcher
+(++cmd+p++):
 
-- **Plan work** — the current thread's planning surface (To Do +
+- **Tasks** — the current thread's planning surface (To Do +
   Blocked, with previews of recently done).
-- **Done work** — full descending list of done + canceled items.
+- **Done Work** — full descending list of done + canceled items.
 - **Backlog** — the stream-global backlog.
 - **Archived** — archived items only.
 
@@ -97,7 +97,7 @@ under the epic header.
 
 ## Where to drive it
 
-- **Plan work / Backlog pages** — drag, drop, reorder, file,
+- **Tasks / Backlog pages** — drag, drop, reorder, file,
   edit, archive. Multi-select for bulk transitions.
 - **Rail HUD** — quick navigation; never auto-opens tabs.
 - **Inline new-row** at the top of any work list — type a title,
