@@ -120,7 +120,6 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
-import { MetricsExplorerPage } from "./pages/MetricsExplorerPage.js";
 import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
@@ -1887,7 +1886,6 @@ export function App() {
       case "custom-dashboard":
       case "dashboards":
       case "page-analytics":
-      case "token-analytics":
       case "op-error": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
@@ -2771,17 +2769,10 @@ export function App() {
           closable: true,
           render: () => <UsagePage onOpenPage={navOpen} />,
         });
-      } else if (ref.kind === "metrics") {
-        tabs.push({
-          id: ref.id,
-          label: "Metrics",
-          closable: true,
-          render: () => <MetricsExplorerPage onOpenPage={navOpen} />,
-        });
       } else if (ref.kind === "metrics-recorded") {
         tabs.push({
           id: ref.id,
-          label: "Recorded Metrics",
+          label: "Metrics",
           closable: true,
           render: () => <RecordedMetricsPage onOpenPage={navOpen} />,
         });
@@ -2843,15 +2834,6 @@ export function App() {
           label: "Page Analytics",
           closable: true,
           render: () => <PageAnalyticsPage onOpenPage={navOpen} />,
-        });
-      } else if (ref.kind === "token-analytics") {
-        // Retired as a bespoke page (tsk233): Token Analytics is now a saved
-        // Explorer preset over the substrate's `agent.tokens.*`/`agent.cost_usd`.
-        tabs.push({
-          id: ref.id,
-          label: "Token Analytics",
-          closable: true,
-          render: () => <MetricsExplorerPage initialPreset="Tokens by model" onOpenPage={navOpen} />,
         });
       } else if (
         ref.kind === "tasks"

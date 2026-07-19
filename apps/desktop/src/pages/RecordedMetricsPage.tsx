@@ -272,7 +272,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
     <CollapsibleSections pageKey="metrics-recorded" testIdPrefix="recorded">
     <Page
       testId="page-metrics-recorded"
-      title="Recorded Metrics"
+      title="Metrics"
       layout="details"
       rightRailTitle="Filters"
       rightRail={
@@ -430,7 +430,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                         siblings={{
                           entries: siblings.entries,
                           index: siblings.indexByKey.get(row.key) ?? 0,
-                          title: "Recorded Metrics",
+                          title: "Metrics",
                         }}
                       />
                     ))}

@@ -10,6 +10,7 @@ import {
   metricDimensionRollup,
   subscribeOxplowEvents,
 } from "../../api.js";
+import { formatMetricValue } from "../format.js";
 import { metricRef } from "../../tabs/pageRefs.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { TrendChart } from "../../pages/MetricDetail.js";
@@ -45,15 +46,17 @@ const GROUP_SAMPLE_LIMIT = 20000;
  *  page; the metric detail is where the full roll-up lives. */
 const BAR_ROWS = 6;
 
-/** Compact number formatting for tile headlines: thousands → `1.2k`, small
- *  fractions keep 2 decimals, integers stay bare. */
+/** Tile headline numbers go through the SHARED formatter (tsk183). The local
+ *  implementation this replaces compacted at 1k where the shared one compacts
+ *  at 10k, so the same metric read `1.2k` on a tile and `1,234` on Recorded
+ *  Metrics — the inconsistency the one-formatter rule exists to prevent.
+ *
+ *  No `unit` is passed: this tile renders `def.unit` in its own span beside the
+ *  number, so letting the formatter append it too would read "1.2k tokens
+ *  tokens". */
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  if (Number.isInteger(n)) return String(n);
-  return n.toFixed(abs < 1 ? 3 : 2);
+  return formatMetricValue(n);
 }
 
 const TONE_COLOR: Record<"good" | "bad" | "neutral", string> = {

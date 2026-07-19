@@ -162,8 +162,11 @@ describe("dashboardBreakoutDims", () => {
       spec("b", ["team", "language"]),
       spec("c", null),
     ]);
-    // `package` is always available; the declared dims join it, de-duped.
-    expect(dims).toEqual(["language", "package", "team"]);
+    // Union of what the specs DECLARE, de-duped and sorted. A metric that
+    // declares nothing contributes nothing (tsk179) — `package` used to be
+    // added unconditionally here, which offered it on boards whose metrics
+    // couldn't answer it.
+    expect(dims).toEqual(["language", "team"]);
   });
 
   it("excludes run/time dims that aren't a per-file grain", () => {
@@ -173,9 +176,19 @@ describe("dashboardBreakoutDims", () => {
     expect(dims).toContain("language");
   });
 
-  it("returns just package when no metric declares extra dims, and nothing for no metrics", () => {
-    expect(dashboardBreakoutDims([spec("a", null)])).toEqual(["package"]);
+  it("returns nothing when no metric declares a dimension", () => {
+    // `package` is an ordinary declared dimension now, so a metric that
+    // declares none offers none — the filter row hides rather than showing a
+    // choice that yields empty groups.
+    expect(dashboardBreakoutDims([spec("a", null)])).toEqual([]);
     expect(dashboardBreakoutDims([])).toEqual([]);
+  });
+
+  it("carries package through when a metric declares it", () => {
+    expect(dashboardBreakoutDims([spec("a", ["package", "language"])])).toEqual([
+      "language",
+      "package",
+    ]);
   });
 });
 

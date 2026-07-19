@@ -101,8 +101,8 @@ export function effortCoverageRef(effortId: string): TabRef {
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
- *  further exploration). Its own page kind (`metric-detail`); the Explorer and
- *  Recorded Metrics pages both navigate into it. */
+ *  further exploration). Its own page kind (`metric-detail`); Recorded Metrics
+ *  and the dashboard tiles both navigate into it. */
 export function metricRef(
   metricKey: string,
   effort?: { effortId: string; start: string; end: string | null },
@@ -110,7 +110,7 @@ export function metricRef(
   return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics" | "metrics-recorded" | "dashboards" | "page-analytics" | "token-analytics"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics-recorded" | "dashboards" | "page-analytics"): TabRef {
   return { id: kind, kind, payload: null };
 }
 
@@ -144,15 +144,8 @@ export function metricRecordingRef(
   };
 }
 
-/** The Metrics Explorer page — multi-measure charts over time. The marquee
- *  *observe* surface; `indexRef("metrics")` is the rail "Metrics" entry. */
-export function metricsExplorerRef(): TabRef {
-  return indexRef("metrics");
-}
-
 /** The Recorded Metrics page — the seeded definitions with latest value, trend
- *  sparkline, capture branch, sample count. Split off from the Explorer so each
- *  page has one job (tsk283). */
+ *  sparkline, capture branch, sample count. */
 export function recordedMetricsRef(): TabRef {
   return indexRef("metrics-recorded");
 }

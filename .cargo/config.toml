@@ -7,4 +7,7 @@
 #                       via the [profile.default.junit] in .config/nextest.toml)
 # Requires cargo-llvm-cov + cargo-nextest (`cargo install cargo-llvm-cov
 # cargo-nextest`); CI already uses llvm-cov.
-cov = "llvm-cov nextest --workspace --lcov --output-path target/coverage/lcov.info"
+# `--no-fail-fast` so a failure NAMES itself: without it nextest cancels on the
+# first one and the run ends before printing which test failed, which is how an
+# intermittent failure stayed unidentified across several runs (tsk175).
+cov = "llvm-cov nextest --workspace --no-fail-fast --lcov --output-path target/coverage/lcov.info"

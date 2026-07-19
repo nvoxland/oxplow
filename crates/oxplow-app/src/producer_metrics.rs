@@ -42,7 +42,12 @@ pub struct ProducerMetric {
 /// The canonical list of always-on producer metrics. Mirrors exactly what the
 /// producers used to inline; now they build from this.
 pub fn builtin_producer_metrics() -> &'static [ProducerMetric] {
-    const TOKEN_DIMS: &[&str] = &["model", "agent"];
+    // Only dimensions the producers ACTUALLY emit (tsk182). `agent` was
+    // declared here for a long time and never written by anything — harmless
+    // while nothing read these, then a dead breakdown option the moment tsk179
+    // started surfacing them. A declared dimension is a promise the facts have
+    // to keep: verify against `dims_json` before adding one.
+    const TOKEN_DIMS: &[&str] = &["model"];
     const EFFORT_DIMS: &[&str] = &["branch", "effort"];
     const NUDGE_DIMS: &[&str] = &["subject", "branch", "thread"];
     const BRANCH_DIMS: &[&str] = &["branch"];
@@ -513,6 +518,14 @@ pub fn builtin_producer_specs() -> Vec<NewMetricSpec> {
             s.category = Some(m.category.into());
             s.description = m.description.map(Into::into);
             s.filter_json = filter_json;
+            // Carry the declared dimensions onto the spec (tsk179). The metric
+            // detail page derives its breakdown options from this column, so a
+            // producer whose dimensions stop here offers the user nothing it can
+            // actually slice by — token metrics were declaring model/agent and
+            // surfacing neither. The gauge path (`metrics_service.rs`) has always
+            // done this; producers were the gap.
+            s.sliceable_dims_json = (!m.dimensions.is_empty())
+                .then(|| serde_json::to_string(m.dimensions).unwrap_or_else(|_| "[]".into()));
             if m.key == "oxplow.coverage.abs_pct" {
                 // Coverage red/green policy in DATA, not a hardcoded UI ramp
                 // (tsk220): fail < 50%, warn < 80%, ok ≥ 80%. Lives on the spec
@@ -702,6 +715,69 @@ mod tests {
         );
         // Surface fields carry over from the producer descriptor.
         assert_eq!(by_key["oxplow.coverage.abs_pct"].display_kind, "coverage");
+    }
+
+    #[test]
+    fn producer_specs_carry_their_declared_dimensions() {
+        // tsk179: `ProducerMetric.dimensions` was declared on every producer and
+        // read by NOBODY — `builtin_producer_specs` copied unit/direction/
+        // category/description/filter and skipped `sliceable_dims_json`. The
+        // metric detail page derives its breakdown options from exactly that
+        // column, so every token metric offered only the hardcoded `package`
+        // (which returns nothing — token facts carry no path) while hiding
+        // `model` and `agent`, which they DO carry.
+        let specs = builtin_producer_specs();
+        let by_key: std::collections::HashMap<&str, &NewMetricSpec> =
+            specs.iter().map(|s| (s.key.as_str(), s)).collect();
+
+        let dims = |key: &str| -> Vec<String> {
+            let json = by_key[key]
+                .sliceable_dims_json
+                .as_deref()
+                .unwrap_or_else(|| panic!("{key} declares no sliceable dims"));
+            serde_json::from_str(json).expect("dims are a JSON array")
+        };
+
+        for key in [
+            "agent.tokens.input",
+            "agent.tokens.output",
+            "agent.tokens.total",
+        ] {
+            let d = dims(key);
+            assert!(
+                d.contains(&"model".to_string()),
+                "{key} sliceable by model: {d:?}"
+            );
+            // NOT `agent` (tsk182): no producer emits it, so offering it in the
+            // breakdown picker gave an empty result the user couldn't back out
+            // of. A declared dimension is a promise the facts have to keep.
+            assert!(
+                !d.contains(&"agent".to_string()),
+                "{key} must not claim a dimension nothing emits: {d:?}"
+            );
+        }
+        // Every producer metric's declaration reaches its spec, not just tokens.
+        for m in builtin_producer_metrics() {
+            if m.dimensions.is_empty() {
+                continue;
+            }
+            let Some(spec) = by_key.get(m.key) else {
+                continue; // no measure home yet — not all producers have a spec
+            };
+            let declared: Vec<String> = serde_json::from_str(
+                spec.sliceable_dims_json
+                    .as_deref()
+                    .unwrap_or_else(|| panic!("{} lost its dimensions", m.key)),
+            )
+            .expect("dims are a JSON array");
+            for d in m.dimensions {
+                assert!(
+                    declared.contains(&d.to_string()),
+                    "{} declares {d} but the spec dropped it",
+                    m.key
+                );
+            }
+        }
     }
 
     #[test]

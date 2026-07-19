@@ -21,7 +21,6 @@ import {
   BookOpen,
   CheckCheck,
   CheckSquare,
-  Coins,
   Copy,
   ExternalLink,
   FileText,
@@ -129,8 +128,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Activity;
     case "usage":
       return Activity;
-    case "metrics":
-      return Activity;
     case "metrics-recorded":
       return BarChart3;
     case "metric-detail":
@@ -139,8 +136,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return AlertTriangle;
     case "page-analytics":
       return BarChart3;
-    case "token-analytics":
-      return Coins;
     case "terminal":
       return Terminal;
     case "new-stream":
@@ -231,10 +226,8 @@ export function pageKindLabel(kind: string): string {
       return "error";
     case "usage":
       return "usage";
-    case "metrics":
-      return "metrics";
     case "metrics-recorded":
-      return "recorded metrics";
+      return "metrics";
     case "metric-detail":
       return "metric";
     case "metric-recording":
@@ -243,8 +236,6 @@ export function pageKindLabel(kind: string): string {
       return "dashboard";
     case "page-analytics":
       return "page analytics";
-    case "token-analytics":
-      return "token analytics";
     default:
       return kind;
   }
@@ -276,11 +267,9 @@ const INDEX_KINDS = new Set<string>([
   "closed-threads",
   "uncommitted-changes",
   "usage",
-  "metrics",
   "metrics-recorded",
   "dashboards",
   "page-analytics",
-  "token-analytics",
 ]);
 
 /**

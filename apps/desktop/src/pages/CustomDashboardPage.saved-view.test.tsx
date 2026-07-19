@@ -41,9 +41,11 @@ const DASHBOARD = {
   ],
 };
 
-// `breakdownDimensions` always offers "package", so this def alone makes
-// "package" a legal breakout option — once `defs` has actually loaded.
-const DEFS = [{ key: "m.one", title: "One", sliceable_dims_json: null }];
+// Breakout options come from the spec's declared dims (tsk179), so the def has
+// to declare "package" for it to be a legal option — once `defs` has loaded.
+const DEFS = [
+  { key: "m.one", title: "One", sliceable_dims_json: JSON.stringify(["package"]) },
+];
 
 mock.module("../api.js", () => ({
   ...realApi,

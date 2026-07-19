@@ -8,6 +8,7 @@ import type {
   SeriesPoint,
 } from "../api.js";
 import { metricDimensionRollup } from "../api.js";
+import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import {
   deltaColor,
   deltaSummary,
@@ -38,12 +39,14 @@ import {
 // stats, the main column carries the trend chart, the recordings table, and the
 // kind-specific drill-in selected from `metric_definition.kind`.
 
-function fmt(v: number): string {
-  return Number.isInteger(v) ? String(v) : v.toFixed(2);
-}
-
-function fmtValue(v: number, unit?: string | null): string {
-  return `${fmt(v)}${unit ? ` ${unit}` : ""}`;
+// Every number on this page goes through the SHARED formatter (tsk183) — the
+// rule in `.context/usability.md`. The local implementation this replaces did
+// `toFixed(2)` with no locale grouping, no compaction, and no `ms`/`%`
+// handling, so the same metric read one way here and another on Recorded
+// Metrics (which always used the shared one). `unit` is optional only because a
+// few call sites genuinely lack it in scope; pass it wherever you have it.
+function fmt(v: number, unit?: string | null): string {
+  return formatMetricValue(v, unit);
 }
 
 /** Short date+time label for an epoch-ms tick on the trend's time axis. */
@@ -266,7 +269,7 @@ export function TrendChart({
             const p = pts[hoverI]!;
             const px = x(p.t);
             const py = y(p.v);
-            const valLbl = `${fmt(p.v)}${unit ? ` ${unit}` : ""}`;
+            const valLbl = fmt(p.v, unit);
             const timeLbl = fmtTick(p.t);
             const boxW = Math.max(valLbl.length, timeLbl.length) * 6.2 + 12;
             const boxH = 32;
@@ -466,7 +469,7 @@ function RecordingRow({
       style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
     >
       <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{new Date(String(s.captured_at)).toLocaleString()}</td>
-      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmtValue(s.value, unit)}</td>
+      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmt(s.value, unit)}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
         {s.git_version ? s.git_version.slice(0, 8) : "—"}
@@ -571,14 +574,16 @@ export function MetricStatsRail({
   const rangeStat = inRangeStat(samples, def.aggregation);
   const rangeText = rangeStat
     ? rangeStat.signed
-      ? `${rangeStat.value > 0 ? "+" : ""}${fmtValue(rangeStat.value, def.unit)}`
-      : fmtValue(rangeStat.value, def.unit)
+      ? `${rangeStat.value > 0 ? "+" : ""}${fmt(rangeStat.value, def.unit)}`
+      : fmt(rangeStat.value, def.unit)
     : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }} data-testid="metric-detail-stats">
       {rangeStat ? (
         <Stat label={rangeStat.label}>
-          <strong>{rangeText}</strong>
+          {/* Exact value on hover — the headline compacts at 10k, so the precise
+              number has to stay reachable (tsk183). */}
+          <strong title={formatMetricValueExact(rangeStat.value, def.unit)}>{rangeText}</strong>
         </Stat>
       ) : null}
       {/* Definition metadata — the full "what is this metric" block (tsk33). */}
@@ -597,9 +602,9 @@ export function MetricStatsRail({
       {def.language ? <Stat label="Language">{def.language}</Stat> : null}
       {def.unit ? <Stat label="Unit">{def.unit}</Stat> : null}
       <Stat label="Direction">{def.direction}</Stat>
-      {def.target != null ? <Stat label="Target">{fmt(def.target)}</Stat> : null}
-      {def.warn_at != null ? <Stat label="Warn at">{fmt(def.warn_at)}</Stat> : null}
-      {def.fail_at != null ? <Stat label="Fail at">{fmt(def.fail_at)}</Stat> : null}
+      {def.target != null ? <Stat label="Target">{fmt(def.target, def.unit)}</Stat> : null}
+      {def.warn_at != null ? <Stat label="Warn at">{fmt(def.warn_at, def.unit)}</Stat> : null}
+      {def.fail_at != null ? <Stat label="Fail at">{fmt(def.fail_at, def.unit)}</Stat> : null}
       {latest?.branch ? (
         <Stat label="Branch">
           <code style={{ fontSize: 11 }}>{latest.branch}</code>
@@ -764,7 +769,17 @@ export function MetricBreakdownCard({
     };
   }, [def.key, dim, onAvailability]);
 
-  if (rows.length === 0) return null;
+  // Hide the card only when there is nothing to break down BY — a metric that
+  // declares no sliceable dimensions (coverage, most operational metrics).
+  //
+  // Emphatically NOT when the chosen dimension returned no rows (tsk181): the
+  // early return used to sit below this and above the picker, so an empty
+  // result unmounted the card *including its own <select>*, leaving the tab
+  // selected, blank, and with no control to choose a different dimension —
+  // recoverable only by closing the tab. Any dimension can come back empty for
+  // the current range or branch, so that trap was reachable with a perfectly
+  // valid choice.
+  if (dims.length === 0) return null;
   const max = Math.max(...rows.map((r) => r.value), 1);
   const dimLabel = dim.charAt(0).toUpperCase() + dim.slice(1);
   const valueLabel = "Value";
@@ -798,6 +813,16 @@ export function MetricBreakdownCard({
           ))}
         </select>
       </div>
+      {rows.length === 0 ? (
+        <div
+          data-testid="breakdown-empty"
+          style={{ fontSize: 12, opacity: 0.6, padding: "6px 2px" }}
+        >
+          No data for <strong>{dim}</strong> in the selected range. Pick another
+          dimension above, or widen the range.
+        </div>
+      ) : (
+        <>
       {/* Column header — the value/count numbers are otherwise unlabeled. */}
       <div
         style={{
@@ -830,8 +855,8 @@ export function MetricBreakdownCard({
           data-testid={`breakdown-row-${r.key}`}
           title={
             onSelectGroup
-              ? `${r.key}: ${fmt(r.value)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"} — click to chart this ${dim}`
-              : `${r.key}: ${fmt(r.value)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`
+              ? `${r.key}: ${fmt(r.value, def.unit)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"} — click to chart this ${dim}`
+              : `${r.key}: ${fmt(r.value, def.unit)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`
           }
           style={{
             display: "flex",
@@ -866,7 +891,7 @@ export function MetricBreakdownCard({
               }}
             />
           </div>
-          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(r.value)}</span>
+          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(r.value, def.unit)}</span>
           <span style={{ width: 56, textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: 0.55 }}>
             {r.subject_count}
           </span>
@@ -878,6 +903,8 @@ export function MetricBreakdownCard({
           +{rows.length - 20} more {dim === "package" ? "packages" : `${dim} values`}
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

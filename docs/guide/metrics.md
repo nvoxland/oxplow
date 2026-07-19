@@ -41,14 +41,14 @@ you brief the agent actually reduced the back-and-forth.
 
 ## The pages
 
-- **Metrics** -- the explorer. Every metric with an active spec,
-  charted, filterable by branch and date range.
-- **Recorded Metrics** -- the catalog. Every metric oxplow knows
+- **Recorded Metrics** -- the catalog, and the way in. Every metric oxplow knows
   about, grouped into sections, with an Enabled / All / Off-target
   filter. This is where you turn metrics on and set targets.
-- **Metric detail** -- one metric: the chart, its breakdown by
-  package / language / branch, the recordings table, and its
-  settings.
+- **Metric detail** -- one metric: the chart over time, a breakdown
+  by any dimension the metric declares (package and language for
+  code metrics, model and agent for token metrics), the recordings
+  table, and its settings. Click a recording to drill into the
+  individual facts behind it.
 - **Dashboards** -- your own arrangements of metric tiles. See
   [Dashboards](dashboards.md).
 

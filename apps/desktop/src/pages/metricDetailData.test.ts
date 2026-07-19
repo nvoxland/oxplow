@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import type { SeriesPoint } from "../api.js";
 import {
   branchOptions,
+  breakdownDimensions,
   defaultChartMode,
   deltaVsFirst,
   filterByRange,
@@ -161,4 +162,40 @@ test("yDomain auto pads a flat series so it isn't on an edge", () => {
   const d = yDomain([5, 5, 5], null, "auto");
   expect(d.min).toBeLessThan(5);
   expect(d.max).toBeGreaterThan(5);
+});
+
+
+// tsk179: breakdown options are whatever the SPEC declares — nothing more.
+// `package` used to be seeded unconditionally, which meant a token metric
+// offered a breakdown its facts can't answer (they carry no path, so every
+// group is empty) while hiding `model` and `agent`, which they do carry.
+// `package` is not special: `oxplow.package` is a registered dimension like
+// `oxplow.model`, and `dim_value` resolves both.
+const spec = (sliceable: string[] | null) =>
+  ({
+    key: "m.one",
+    title: "One",
+    sliceable_dims_json: sliceable === null ? null : JSON.stringify(sliceable),
+  }) as never;
+
+test("breakdown options come only from the spec", () => {
+  expect(breakdownDimensions(spec(["model", "agent"]))).toEqual(["model", "agent"]);
+  // A per-file metric declares package and gets it — as an ordinary dimension.
+  expect(breakdownDimensions(spec(["package", "language"]))).toEqual(["package", "language"]);
+});
+
+test("a metric declaring nothing offers no breakdowns", () => {
+  // Better an empty picker than one dead option: the old seed offered
+  // `package` on token metrics, where it can only ever return nothing.
+  expect(breakdownDimensions(spec(null))).toEqual([]);
+  expect(breakdownDimensions(spec([]))).toEqual([]);
+});
+
+test("git_version and branch stay out of the breakdown picker", () => {
+  // Both are spine dimensions with their own controls on the page.
+  expect(breakdownDimensions(spec(["package", "git_version", "branch"]))).toEqual(["package"]);
+});
+
+test("duplicate declarations collapse", () => {
+  expect(breakdownDimensions(spec(["package", "package", "model"]))).toEqual(["package", "model"]);
 });

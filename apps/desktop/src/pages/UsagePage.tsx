@@ -91,20 +91,7 @@ export function UsagePage({ onOpenPage }: { onOpenPage(ref: TabRef): void }) {
           ) : null}
         </Card>
 
-        <Card
-          testId="usage-token-analytics-card"
-          title="Token Analytics"
-          action={
-            <button
-              type="button"
-              data-testid="usage-open-token-analytics"
-              style={cardLinkButton}
-              onClick={() => onOpenPage(indexRef("token-analytics"))}
-            >
-              View Token Analytics →
-            </button>
-          }
-        >
+        <Card testId="usage-token-analytics-card" title="Tokens">
           <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
             {formatTokens(tokens?.total_tokens ?? 0)} tokens across {tokens?.turns ?? 0} turn
             {tokens?.turns === 1 ? "" : "s"}.

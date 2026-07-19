@@ -54,7 +54,7 @@ export type PageKind =
   | "custom-dashboard"
   | "dashboards"
   | "page-analytics"
-  | "token-analytics";
+
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

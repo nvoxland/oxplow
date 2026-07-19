@@ -2,7 +2,7 @@ import type { MetricSpec, SeriesPoint } from "../api.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
-// `buildExplorerSeries` in MetricsExplorer. Operates over the engine's
+// the metric detail page's chart. Operates over the engine's
 // per-capture `SeriesPoint`s (epic tsk12); `ChartPoint` is the reduced `{t,v}`
 // shape the trend chart plots.
 
@@ -164,10 +164,20 @@ export function transformSeries(points: ChartPoint[], mode: ChartMode): ChartPoi
  * disagree about what a metric is sliceable by.
  */
 export function breakdownDimensions(def: MetricSpec): string[] {
-  const out = ["package"];
+  // Exactly what the spec declares (tsk179). `package` used to be seeded here
+  // unconditionally, which papered over specs that declared nothing — at the
+  // cost of offering it on metrics whose facts carry no path, where every group
+  // comes back empty. Token metrics got that dead option and lost `model` and
+  // `agent`, which they genuinely carry. `package` isn't special:
+  // `oxplow.package` is a registered dimension like `oxplow.model`, and the
+  // engine's `dim_value` resolves both — so a metric sliceable by package
+  // declares it like anything else.
+  const out: string[] = [];
   if (def.sliceable_dims_json) {
     try {
       for (const d of JSON.parse(def.sliceable_dims_json) as string[]) {
+        // `git_version` and `branch` are spine dimensions with their own
+        // controls on the page — not breakdown choices.
         if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
       }
     } catch {

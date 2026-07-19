@@ -23,8 +23,8 @@ authoritative list lives in
 
 `Cmd+P` opens the launcher — fuzzy-match across files in the
 active stream's worktree, oxplow's named pages (Tasks, Backlog,
-Local History, Change Analysis, Git, Metrics, Dashboards, …),
-and commands. With an empty query it shows a **Recent** section
+Local History, Change Analysis, Git, Metrics, Dashboards, …), and
+commands. With an empty query it shows a **Recent** section
 over a collapsible category tree, so it doubles as the directory
 of every page you can open.
 
