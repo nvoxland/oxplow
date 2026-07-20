@@ -125,12 +125,39 @@ hook + MCP wiring):
   under concurrent efforts. Without the token, resolution is, in order:
   **single open effort** → **target overlap** (tsk169: score each open effort by
   what the command names — `-p <crate>`, path args — against the files it has
-  claimed, and take a STRICT unique winner) → **unattributed**. Ties and
+  claimed **union the paths its task's own text names**, and take a STRICT
+  unique winner) → **unattributed**.
+
+  The task-text half is not a nicety (tsk185). Claimed files can legitimately be
+  EMPTY, for two reasons that have nothing to do with timing — file claiming is
+  SYNCHRONOUS on the PostToolUse hook, not a race (a first diagnosis said
+  otherwise and was wrong):
+  1. a brand-new effort has claimed nothing yet, and
+  2. a file written through **Bash** (codegen, a formatter, an agent using a
+     heredoc) is deliberately never auto-claimed — only Edit / Write /
+     MultiEdit / NotebookEdit are, so those writes stay for snapshot
+     reconciliation and will always surface at close.
+
+  Files alone therefore cannot resolve the run you most want recorded.
+  `task_target_paths` reads only `[[wikilinks]]` and backticked spans that look
+  like paths (trimming a `:42` line suffix); scraping free prose would invent
+  matches. Union rather than fallback: widening the pool can only create ties,
+  which the strict-winner rule declines on. Ties and
   whole-suite runs that name nothing decline on purpose: a mis-attributed run is
   worse than an unattributed one, because the agent can still claim the latter at
   close. An unattributed test run with 2+ efforts open fires the
   `unattributed-run` nudge immediately (tsk170) rather than waiting for the
   closing EFFORT REVIEW.
+
+  **The same decision governs the per-file auto-claim** (tsk186).
+  `claim_open_effort_file` used to return early whenever more than one effort was
+  open — "we can't know which one edited the file" — which switched claiming off
+  precisely when attribution is hardest, and compounded: run scoring reads
+  claimed files, so an unclaimed file also meant unattributed runs and a
+  close-time reconcile by hand. It now calls the same
+  `attribution::resolve_by_targets`, scoring the EDITED PATH instead of a
+  command's targets. One implementation for both call sites on purpose — a file
+  claim and a run claim must never disagree about which effort owns the work.
 
   **The filing discipline and attribution pull in opposite directions, and
   nothing else warns you.** "One user-visible concern per row" encourages many

@@ -184,8 +184,9 @@ fn classify(event: &notify::Event) -> WatchEventKind {
 /// language caches, IDE state) is the user's call via the
 /// `generated` config; we don't pretend to know which dirs each
 /// project actually treats as generated. `.oxplow` is handled
-/// separately above with a `.oxplow/wiki/` carve-out, not via this
-/// segment list.
+/// separately above — watched for the wiki and for anything
+/// `.oxplow/.gitignore` un-ignores with a `!` — not via this segment
+/// list.
 const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 
 /// The single source of truth for "is this workspace path ignored?".
@@ -287,8 +288,11 @@ impl WorkspaceFilter {
     pub fn ignore(&self, path: &Path, is_dir: bool) -> bool {
         use std::path::Component;
 
-        // 1. Absolute defaults: `.git` anywhere, `.oxplow` (except
-        //    `.oxplow/wiki/`). Not overridable by include/exclude.
+        // 1. Absolute defaults: `.git` anywhere, and oxplow's own `.oxplow`
+        //    state dir. Not overridable by the `generated` include/exclude
+        //    lists — but `.oxplow` DOES honour its own `.gitignore`
+        //    negations, so a file the project declares shareable (notably
+        //    `project.yaml`) is watched.
         let mut comps = path.components().peekable();
         while let Some(c) = comps.next() {
             if let Component::Normal(seg) = c {
@@ -301,7 +305,42 @@ impl WorkspaceFilter {
                         Component::Normal(n) => n.to_str(),
                         _ => None,
                     });
-                    return next != Some("wiki");
+                    return match next {
+                        // `.oxplow` ITSELF must not be reported as ignored:
+                        // walkers prune on directories (`WalkDir::filter_entry`,
+                        // the capture sweep), so returning true here stops the
+                        // walk before it can ever see the files below — which is
+                        // what made `project.yaml` invisible even once the
+                        // per-file rule was right (tsk176).
+                        None => false,
+                        // The wiki is watched. This can't be expressed in
+                        // `.gitignore`: it is deliberately NOT committed, but it
+                        // IS snapshotted (Local History's wiki badges read
+                        // `list_wiki_slugs_for_snapshots`). `.gitignore` answers
+                        // "should this be committed?"; this filter answers
+                        // "should oxplow watch this?" — and for the wiki those
+                        // differ, so the one distinction gitignore can't carry
+                        // lives here.
+                        Some("wiki") => false,
+                        // Every other SUBDIRECTORY is pruned wholesale, so a
+                        // walk never descends into `snapshots/` (thousands of
+                        // blobs), `runtime/`, or the LSP caches. Negations
+                        // therefore reach files sitting directly in `.oxplow/`,
+                        // which is exactly what `.oxplow/.gitignore` negates.
+                        Some(_) if is_dir => true,
+                        // A file in oxplow's own state directory: ignored by
+                        // default — watching the live SQLite would feed
+                        // oxplow's own writes back through its watcher — UNLESS
+                        // `.oxplow/.gitignore` un-ignores it with a `!`. oxplow
+                        // writes `!project.yaml` there so the config is
+                        // shareable, and a project may negate more. Honouring
+                        // the `!` keeps this general: the visible set is data,
+                        // not a per-file carve-out in code.
+                        Some(_) => {
+                            let abs = self.root.join(path);
+                            !gitignore_decision(&self.gitignores, &abs, is_dir).is_whitelist()
+                        }
+                    };
                 }
                 if DEFAULT_IGNORED_SEGMENTS.contains(&s) {
                     return true;
@@ -407,7 +446,12 @@ fn collect_nested_gitignores(dir: &Path, out: &mut Vec<ignore::gitignore::Gitign
         let abs = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if name == ".git" || name == ".oxplow" {
+        // `.git` is never interesting. `.oxplow` IS descended into, purely to
+        // pick up its own `.gitignore` — that file's `!` negations are what
+        // make a shareable `project.yaml` visible (tsk176). Its `*` rule then
+        // prunes the rest of the directory on the next recursion, so this
+        // costs one extra `read_dir`, not a walk of the snapshot store.
+        if name == ".git" {
             continue;
         }
         // Don't descend into (or load `.gitignore`s from) an ignored dir.
@@ -806,6 +850,77 @@ mod tests {
         let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
         assert!(f.ignore(Path::new("a.secret"), false)); // ignored at root
         assert!(!f.ignore(Path::new("keep/a.secret"), false)); // re-included under keep/
+    }
+
+    #[test]
+    fn oxplow_dir_honours_its_own_gitignore_negations() {
+        // tsk176: `.oxplow` is oxplow's OWN state dir, so it's ignored by
+        // default — watching the live SQLite would feed oxplow's writes back
+        // through its own watcher. But oxplow writes `.oxplow/.gitignore` as
+        // `*` / `!.gitignore` / `!project.yaml` precisely so the config is
+        // shareable, and that `!` has to be honoured or the one file in there
+        // meant to be committed is invisible to snapshots, Local History and
+        // effort attribution.
+        //
+        // Generalised deliberately: this is NOT a `project.yaml` carve-out.
+        // Whatever a project un-ignores in that file becomes visible.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow/wiki")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow/snapshots")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/.gitignore"),
+            "*\n!.gitignore\n!project.yaml\n!team-shared.toml\n",
+        )
+        .unwrap();
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
+
+        // Negated → watched.
+        assert!(
+            !f.ignore(Path::new(".oxplow/project.yaml"), false),
+            "project.yaml is un-ignored by `!` and must be watched"
+        );
+        assert!(
+            !f.ignore(Path::new(".oxplow/team-shared.toml"), false),
+            "ANY negated file, not just project.yaml — the rule is general"
+        );
+
+        // Everything else in oxplow's state dir stays ignored.
+        assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
+        assert!(f.ignore(Path::new(".oxplow/snapshots/ab/cd"), false));
+        assert!(f.ignore(Path::new(".oxplow/runtime/hooks.json"), false));
+        // Subdirectories are pruned wholesale so a walk never descends into
+        // the blob store; `.oxplow` itself must NOT be, or the walk stops
+        // before it can see the negated files directly inside it.
+        assert!(
+            f.ignore(Path::new(".oxplow/snapshots"), true),
+            "prune the blob store"
+        );
+        assert!(
+            !f.ignore(Path::new(".oxplow"), true),
+            "but descend into .oxplow itself"
+        );
+        assert!(
+            !f.ignore(Path::new(".oxplow/wiki"), true),
+            "and into the wiki"
+        );
+
+        // The wiki stays watched. This one CANNOT come from .gitignore:
+        // it is deliberately not committed, but it IS snapshotted (Local
+        // History's wiki badges), and gitignore can't say "don't commit but
+        // do watch".
+        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
+    }
+
+    #[test]
+    fn oxplow_dir_stays_ignored_without_a_gitignore() {
+        // No `.oxplow/.gitignore` at all (a project that predates it, or one
+        // where the user deleted it) → the safe default still holds.
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
+        assert!(f.ignore(Path::new(".oxplow/project.yaml"), false));
+        assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
+        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
     }
 
     #[tokio::test]

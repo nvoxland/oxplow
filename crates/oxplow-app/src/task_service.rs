@@ -1033,13 +1033,37 @@ impl TaskService {
         if path.is_empty() {
             return Ok(false);
         }
-        // Auto-claim only when the effort is unambiguous (exactly one open).
-        // With parallel sub-agents (two open efforts on one thread) we can't know
-        // which one edited the file, so we don't guess — the snapshot diff still
-        // observes the change, and the close reconcile surfaces it for the agent
-        // to claim (tsk263). Single open effort ⇒ same behavior as before.
-        let Some(effort) = effort_store.find_single_open_for_thread(thread).await? else {
-            return Ok(false);
+        // One open effort ⇒ unambiguous, claim it.
+        //
+        // Several open ⇒ ASK WHICH ONE rather than giving up (tsk186). This used
+        // to return early on the grounds that "we can't know which one edited
+        // the file" — but that switched claiming off in exactly the situation
+        // where attribution is hardest, and the cost compounds: run attribution
+        // scores against claimed files, so an unclaimed file also means
+        // unattributed test runs, which means a close-time reconcile the user
+        // has to do by hand.
+        //
+        // The same scoring the run auto-claim uses decides it: the edited path
+        // against each open effort's claimed files ∪ its task's named paths,
+        // strict unique winner only. A tie still declines — a WRONG claim
+        // misreports what an effort did, which is worse than a missing one the
+        // agent can add at close.
+        let effort = match effort_store.find_single_open_for_thread(thread).await? {
+            Some(e) => e,
+            None => {
+                let open = effort_store.list_open_for_thread(thread).await?;
+                match crate::attribution::resolve_by_targets(
+                    effort_store,
+                    &self.store,
+                    open,
+                    &[path.to_string()],
+                )
+                .await
+                {
+                    Some(e) => e,
+                    None => return Ok(false),
+                }
+            }
         };
         let version = self.resolve_effort_file_version(&effort).await;
         let change = classify_change(worktree_root, path);
@@ -2296,6 +2320,113 @@ mod tests {
         assert_eq!(efforts.len(), 1);
         assert!(efforts[0].ended_at.is_some());
         assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
+    }
+
+    #[tokio::test]
+    async fn claim_open_effort_file_resolves_which_effort_under_concurrency() {
+        // tsk186: with several efforts open this used to decline outright, so
+        // nothing got claimed in exactly the case where attribution is hardest —
+        // and because run scoring reads claimed files, that also left test runs
+        // unattributed and forced a close-time reconcile by hand.
+        //
+        // Now the edited path is scored against each open effort's claimed files
+        // ∪ its task's named paths. Neither task has claimed a file here, so the
+        // task text is what decides — the realistic case, since a claim happens
+        // on the FIRST edit of an effort.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        let mk = |title: &str, description: &str| {
+            let svc = svc.clone();
+            let (title, description) = (title.to_string(), description.to_string());
+            async move {
+                svc.create(
+                    Some(tid),
+                    CreateTaskInput {
+                        title,
+                        description: Some(description),
+                        status: Some(TaskStatus::InProgress),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let api = mk("api work", "Rework `[[crates/oxplow-api/src/routes.rs]]`.").await;
+        let ui = mk("ui work", "Restyle `[[apps/desktop/src/pages/Home.tsx]]`.").await;
+
+        // Both efforts are open, so the old single-open rule declines.
+        assert!(
+            effort_store
+                .find_single_open_for_thread(&tid)
+                .await
+                .unwrap()
+                .is_none(),
+            "fixture must have two open efforts"
+        );
+
+        let claimed = svc
+            .claim_open_effort_file(&effort_store, &tid, "crates/oxplow-api/src/routes.rs", None)
+            .await
+            .unwrap();
+        assert!(claimed, "the edited path names one effort's area");
+
+        let api_effort = effort_store
+            .find_open_for_task(api.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let ui_effort = effort_store
+            .find_open_for_task(ui.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let api_files = effort_store.list_files(&api_effort.id).await.unwrap();
+        let ui_files = effort_store.list_files(&ui_effort.id).await.unwrap();
+        assert_eq!(
+            api_files
+                .iter()
+                .map(|f| f.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["crates/oxplow-api/src/routes.rs"],
+            "claimed by the effort whose task names it"
+        );
+        assert!(ui_files.is_empty(), "and NOT by the other one");
+    }
+
+    #[tokio::test]
+    async fn claim_open_effort_file_declines_when_the_path_names_no_one() {
+        // The safety property: a wrong claim misreports what an effort did, so
+        // an ambiguous path must still claim nothing rather than pick.
+        let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
+        for (title, description) in [
+            ("a", "Touches `[[crates/oxplow-api/src/routes.rs]]`."),
+            ("b", "Also touches `[[crates/oxplow-api/src/routes.rs]]`."),
+        ] {
+            svc.create(
+                Some(tid),
+                CreateTaskInput {
+                    title: title.into(),
+                    description: Some(description.into()),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+        // Both name the same file → tie → decline.
+        let claimed = svc
+            .claim_open_effort_file(&effort_store, &tid, "crates/oxplow-api/src/routes.rs", None)
+            .await
+            .unwrap();
+        assert!(!claimed, "a tie must not be broken by guessing");
+
+        // A path neither names → no overlap → decline.
+        let unrelated = svc
+            .claim_open_effort_file(&effort_store, &tid, "docs/unrelated.md", None)
+            .await
+            .unwrap();
+        assert!(!unrelated, "no overlap must decline");
     }
 
     #[tokio::test]

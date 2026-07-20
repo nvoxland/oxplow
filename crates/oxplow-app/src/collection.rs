@@ -252,121 +252,6 @@ fn parse_task_token(command: &str) -> Option<TaskId> {
     TaskId::try_from_str(val).or_else(|| val.parse::<i64>().ok().map(TaskId::new))
 }
 
-/// Source-file extensions that make a bare argument a PATH target rather than a
-/// test-name filter. `cargo test -p oxplow-git symlink` names a test, not a file.
-const PATH_LIKE_EXTS: &[&str] = &[
-    ".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".java", ".clj", ".cs", ".c", ".cpp", ".h",
-];
-
-/// What a test command says it is testing — cargo package names (`-p` /
-/// `--package`) and path-ish arguments (tsk169).
-///
-/// Used to disambiguate which open effort a run belongs to when several are
-/// open and no `OXPLOW_TASK=` token pinned it. Deliberately conservative: a
-/// bare word with no `/` and no source extension is a TEST-NAME filter
-/// (`symlink`, `gauge`) and contributes nothing, because matching those against
-/// file paths invents relationships that aren't there.
-fn run_targets(command: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut toks = command.split_whitespace().peekable();
-    while let Some(tok) = toks.next() {
-        if tok == "-p" || tok == "--package" {
-            if let Some(pkg) = toks.next() {
-                let pkg = pkg.trim_matches(['"', '\'']);
-                if !pkg.is_empty() && !pkg.starts_with('-') {
-                    out.push(pkg.to_string());
-                }
-            }
-            continue;
-        }
-        if tok.starts_with('-') {
-            continue;
-        }
-        let arg = tok.trim_matches(['"', '\'']).trim_end_matches('/');
-        if arg.is_empty() {
-            continue;
-        }
-        let looks_like_path = arg.contains('/') || PATH_LIKE_EXTS.iter().any(|e| arg.ends_with(e));
-        if looks_like_path {
-            out.push(arg.to_string());
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// Whether `target` (from [`run_targets`]) refers to `path` (a file an effort
-/// claimed). A package name matches when it is a whole PATH SEGMENT — so
-/// `oxplow-git` matches `crates/oxplow-git/src/lib.rs` but not
-/// `crates/oxplow-github/…`. A path target matches on containment either way,
-/// which covers both a narrower run (`src/tabs/x.test.ts` under a claimed
-/// `apps/desktop/src/tabs/x.test.ts`) and a broader one (`src/pages/`).
-fn target_matches_path(target: &str, path: &str) -> bool {
-    if target.contains('/') || PATH_LIKE_EXTS.iter().any(|e| target.ends_with(e)) {
-        if path.contains(target) || target.contains(path) {
-            return true;
-        }
-        // Sibling fallback: editing `foo.ts` and running `foo.test.ts` is one
-        // piece of work, but neither path contains the other. Compare the
-        // containing directories instead. Still decisive in practice, because
-        // two efforts in the SAME directory tie and therefore decline.
-        fn dir(p: &str) -> &str {
-            p.rsplit_once('/').map(|(d, _)| d).unwrap_or("")
-        }
-        let (td, pd) = (dir(target), dir(path));
-        return !td.is_empty() && !pd.is_empty() && (pd.contains(td) || td.contains(pd));
-    }
-    path.split('/').any(|seg| seg == target)
-}
-
-/// How many of `targets` any of `paths` accounts for. Counting TARGETS (not
-/// path hits) keeps a broad effort from outscoring a precise one purely by
-/// having touched more files.
-fn target_overlap(targets: &[String], paths: &[String]) -> usize {
-    targets
-        .iter()
-        .filter(|t| paths.iter().any(|p| target_matches_path(t, p)))
-        .count()
-}
-
-/// The single open effort a run's targets point at, or `None` when the answer
-/// isn't unique (tsk169).
-///
-/// Attribution must never be *wrong-exact* — a mis-attributed run is worse than
-/// an unattributed one, since the agent can still claim the latter at close.
-/// So this returns a winner ONLY on a strict maximum: any tie, or no overlap at
-/// all, defers to the existing unclaimed path. A generic target like `src` that
-/// matches every candidate therefore self-neutralizes rather than guessing.
-fn unique_best_by_targets<'a, T>(
-    targets: &[String],
-    candidates: &'a [(T, Vec<String>)],
-) -> Option<&'a T> {
-    if targets.is_empty() {
-        return None;
-    }
-    let mut best: Option<(&T, usize)> = None;
-    let mut tied = false;
-    for (item, paths) in candidates {
-        let score = target_overlap(targets, paths);
-        if score == 0 {
-            continue;
-        }
-        match best {
-            Some((_, b)) if score < b => {}
-            Some((_, b)) if score == b => tied = true,
-            _ => {
-                best = Some((item, score));
-                tied = false;
-            }
-        }
-    }
-    if tied {
-        return None;
-    }
-    best.map(|(item, _)| item)
-}
-
 /// The Bash command + best-effort exit code pulled out of a PostToolUse
 /// envelope. `None` when the tool wasn't Bash or no command was present.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -506,6 +391,9 @@ pub struct CollectionService {
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     efforts: Arc<SqliteTaskEffortStore>,
+    /// Read-only, and only for run attribution: an effort's task text names the
+    /// files being worked on before snapshot capture has claimed any (tsk185).
+    tasks: Arc<oxplow_db::SqliteTaskStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
     blobs: BlobStore,
@@ -549,6 +437,7 @@ impl CollectionService {
         facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
         efforts: Arc<SqliteTaskEffortStore>,
+        tasks: Arc<oxplow_db::SqliteTaskStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
         blobs: BlobStore,
@@ -565,6 +454,7 @@ impl CollectionService {
             facts,
             nudges,
             efforts,
+            tasks,
             threads,
             snapshots,
             blobs,
@@ -954,27 +844,15 @@ impl CollectionService {
         {
             return Some(single);
         }
-        let targets = run_targets(command?);
+        let targets = crate::attribution::run_targets(command?);
         if targets.is_empty() {
             return None;
         }
         let open = self.efforts.list_open_for_thread(thread).await.ok()?;
-        if open.len() < 2 {
-            return None;
-        }
-        let mut candidates: Vec<(TaskEffort, Vec<String>)> = Vec::new();
-        for e in open {
-            let paths = self
-                .efforts
-                .list_files(&e.id)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .map(|f| f.path)
-                .collect();
-            candidates.push((e, paths));
-        }
-        unique_best_by_targets(&targets, &candidates).cloned()
+        // Same shared decision the per-file auto-claim makes (tsk186) — one
+        // implementation, so a run claim and a file claim can never disagree
+        // about which effort owns the work.
+        crate::attribution::resolve_by_targets(&self.efforts, &self.tasks, open, &targets).await
     }
 
     /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
@@ -3849,126 +3727,6 @@ mod tests {
     }
 
     #[test]
-    fn run_targets_reads_packages_and_paths_but_not_test_names() {
-        // The real commands from the session that motivated tsk169.
-        assert_eq!(
-            run_targets("cargo test -p oxplow-config gauge"),
-            vec!["oxplow-config"],
-            "`gauge` is a test-name filter, not a path"
-        );
-        assert_eq!(
-            run_targets("cargo test -p oxplow-git symlink"),
-            vec!["oxplow-git"]
-        );
-        assert_eq!(
-            run_targets("cargo test -p oxplow-app --lib metric_engine::tests::ratio_"),
-            vec!["oxplow-app"],
-            "a `--lib` flag and a module path are not targets"
-        );
-        assert_eq!(
-            run_targets("bun test src/tabs/pageRefs.test.ts"),
-            vec!["src/tabs/pageRefs.test.ts"]
-        );
-        assert_eq!(
-            run_targets("bun test src/pages/"),
-            vec!["src/pages"],
-            "a directory arg keeps working after the trailing slash is trimmed"
-        );
-        assert!(
-            run_targets("bun run test:collect").is_empty(),
-            "a whole-suite run names no target"
-        );
-    }
-
-    #[test]
-    fn target_matching_is_segment_exact_for_packages() {
-        assert!(target_matches_path(
-            "oxplow-git",
-            "crates/oxplow-git/src/smart_merge.rs"
-        ));
-        assert!(
-            !target_matches_path("oxplow-git", "crates/oxplow-github/src/lib.rs"),
-            "a package name must match a WHOLE segment, not a prefix"
-        );
-        // A narrower run under a claimed file, and a broader directory run.
-        assert!(target_matches_path(
-            "src/tabs/pageRefs.test.ts",
-            "apps/desktop/src/tabs/pageRefs.test.ts"
-        ));
-        assert!(target_matches_path(
-            "src/pages",
-            "apps/desktop/src/pages/CustomDashboardPage.tsx"
-        ));
-    }
-
-    #[test]
-    fn unique_best_picks_the_owner_across_concurrent_efforts() {
-        // The exact shape that went unattributed: several efforts open, each
-        // in a different crate, runs naming their crate.
-        let candidates = vec![
-            (
-                "eff-config",
-                vec!["crates/oxplow-config/src/lib.rs".to_string()],
-            ),
-            (
-                "eff-git",
-                vec!["crates/oxplow-git/src/smart_merge.rs".to_string()],
-            ),
-            // Note this effort claimed the SOURCE file while the run below
-            // names its test sibling — the everyday case, and the one the
-            // directory fallback in `target_matches_path` exists for.
-            (
-                "eff-tabs",
-                vec!["apps/desktop/src/tabs/pageRefs.ts".to_string()],
-            ),
-        ];
-        let pick = |cmd: &str| unique_best_by_targets(&run_targets(cmd), &candidates).copied();
-        assert_eq!(
-            pick("cargo test -p oxplow-config gauge"),
-            Some("eff-config")
-        );
-        assert_eq!(pick("cargo test -p oxplow-git symlink"), Some("eff-git"));
-        assert_eq!(pick("bun test src/tabs/pageRefs.test.ts"), Some("eff-tabs"));
-    }
-
-    #[test]
-    fn unique_best_declines_rather_than_guessing() {
-        // A mis-attributed run is worse than an unattributed one — the agent can
-        // still claim the latter at close. So every ambiguous case must decline.
-        let two_in_one_crate = vec![
-            (
-                "eff-a",
-                vec!["crates/oxplow-app/src/collection.rs".to_string()],
-            ),
-            (
-                "eff-b",
-                vec!["crates/oxplow-app/src/metric_engine.rs".to_string()],
-            ),
-        ];
-        assert_eq!(
-            unique_best_by_targets(&run_targets("cargo test -p oxplow-app"), &two_in_one_crate),
-            None,
-            "a tie must decline"
-        );
-        assert_eq!(
-            unique_best_by_targets(&run_targets("bun run test:collect"), &two_in_one_crate),
-            None,
-            "no targets at all must decline"
-        );
-        assert_eq!(
-            unique_best_by_targets(&run_targets("cargo test -p oxplow-tmux"), &two_in_one_crate),
-            None,
-            "no overlap must decline"
-        );
-        // A target generic enough to match everything self-neutralizes.
-        let generic = vec![
-            ("eff-a", vec!["apps/desktop/src/a.ts".to_string()]),
-            ("eff-b", vec!["apps/desktop/src/b.ts".to_string()]),
-        ];
-        assert_eq!(unique_best_by_targets(&["src".to_string()], &generic), None);
-    }
-
-    #[test]
     fn parse_task_token_reads_oxplow_task_prefix() {
         assert_eq!(
             parse_task_token("OXPLOW_TASK=tsk42 bun run test:collect"),
@@ -4323,6 +4081,7 @@ mod tests {
                 facts,
                 nudges.clone(),
                 efforts.clone(),
+                Arc::new(SqliteTaskStore::new(db.clone())),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
                 blobs,
@@ -6171,6 +5930,81 @@ mod tests {
                 msg.is_none(),
                 "target overlap resolved the owner — no nudge: {msg:?}"
             );
+        }
+
+        #[tokio::test]
+        async fn an_efforts_first_run_attributes_from_its_task_text() {
+            // tsk185: the exact miss this was filed for. Two efforts open,
+            // NEITHER has claimed a file yet — snapshot capture is asynchronous,
+            // so an effort seconds old has nothing attributed, which is exactly
+            // when its first red-phase run happens. Scoring on files alone had
+            // an empty list and declined; the task text names the crate.
+            let h = build(None).await;
+            let now = Timestamp::now();
+            let store = SqliteTaskStore::new(h.db.clone());
+            let mk = |title: &str, description: &str| {
+                let store = store.clone();
+                let (title, description) = (title.to_string(), description.to_string());
+                async move {
+                    store
+                        .insert(&Task {
+                            id: TaskId::placeholder(),
+                            thread_id: Some(h.thread),
+                            parent_id: None,
+                            title,
+                            description,
+                            status: TaskStatus::InProgress,
+                            priority: TaskPriority::Medium,
+                            sort_index: 0,
+                            created_by: TaskActorKind::User,
+                            created_at: now,
+                            updated_at: now,
+                            completed_at: None,
+                            deleted_at: None,
+                            note_count: 0,
+                            author: Some(TaskAuthor::User),
+                        })
+                        .await
+                        .unwrap()
+                }
+            };
+            let task_cfg = mk("config work", "Fix `[[crates/oxplow-config/src/lib.rs]]`.").await;
+            let task_git = mk(
+                "git work",
+                "Fix `[[crates/oxplow-git/src/smart_merge.rs]]`.",
+            )
+            .await;
+            let eff_cfg = h.efforts.start(task_cfg, &h.thread, None).await.unwrap();
+            let eff_git = h.efforts.start(task_git, &h.thread, None).await.unwrap();
+
+            // Precondition: neither effort has claimed anything.
+            for id in [eff_cfg.id, eff_git.id] {
+                assert!(
+                    h.efforts.list_files(&id).await.unwrap().is_empty(),
+                    "fixture must have no attributed files yet"
+                );
+            }
+
+            let owner = |cmd: &'static str| {
+                let svc = h.service.clone();
+                let thread = h.thread;
+                async move {
+                    svc.resolve_owning_effort_for_command(&thread, None, Some(cmd))
+                        .await
+                        .map(|e| e.id)
+                }
+            };
+            assert_eq!(
+                owner("cargo test -p oxplow-config gauge").await,
+                Some(eff_cfg.id),
+                "resolved from the task's text alone"
+            );
+            assert_eq!(
+                owner("cargo test -p oxplow-git symlink").await,
+                Some(eff_git.id)
+            );
+            // Still declines when nothing names an owner.
+            assert_eq!(owner("bun run test:collect").await, None);
         }
 
         #[tokio::test]

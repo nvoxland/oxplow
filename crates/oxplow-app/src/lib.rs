@@ -663,6 +663,7 @@ impl Services {
             fact_store.clone(),
             nudge_store.clone(),
             effort_store.clone(),
+            task_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
             blobs.clone(),

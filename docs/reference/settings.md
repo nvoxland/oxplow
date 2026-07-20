@@ -186,8 +186,14 @@ Entries in either list take one of two forms:
 
 Precedence, highest first:
 
-1. `.git/`, and everything under `.oxplow/` except `.oxplow/wiki/`,
-   are *always* ignored — not overridable.
+1. `.git/` is always ignored, and so is oxplow's own state under
+   `.oxplow/` — with two exceptions. `.oxplow/wiki/` is always watched
+   (your wiki pages get Local History even though they aren't
+   committed), and anything `.oxplow/.gitignore` un-ignores with a `!`
+   is watched too. That last one is why `project.yaml` shows up in
+   history and effort attribution: oxplow writes `!project.yaml` there
+   so the config is shareable. Negate another file yourself and it
+   becomes visible the same way.
 2. An `include` match is **kept**, overriding both `exclude` and
    `.gitignore`.
 3. An `exclude` match is ignored.
