@@ -1,6 +1,12 @@
 import type { CSSProperties } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import {
+  MENU_MAX_HEIGHT,
+  clampMenuPosition,
+  submenuTopOffset,
+} from "./contextMenuPosition.js";
+
 import type { MenuItem, MenuPosition } from "../menu.js";
 
 interface ContextMenuProps {
@@ -28,12 +34,13 @@ export function ContextMenu({ items, position, onClose, minWidth = 220, zIndex =
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const maxX = Math.max(8, window.innerWidth - root.offsetWidth - 8);
-    const maxY = Math.max(8, window.innerHeight - root.offsetHeight - 8);
-    setResolvedPosition({
-      x: Math.min(Math.max(8, position.x), maxX),
-      y: Math.min(Math.max(8, position.y), maxY),
-    });
+    setResolvedPosition(
+      clampMenuPosition(
+        position,
+        { width: root.offsetWidth, height: root.offsetHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+      ),
+    );
   }, [items, minWidth, position]);
 
   useEffect(() => {
@@ -154,12 +161,9 @@ function Submenu({
     const node = ref.current;
     if (!node) return;
     const rect = node.getBoundingClientRect();
-    const overflowBottom = rect.bottom - (window.innerHeight - 8);
-    if (overflowBottom > 0) {
-      setTopOffset(-overflowBottom);
-    } else {
-      setTopOffset(0);
-    }
+    setTopOffset(
+      submenuTopOffset({ top: rect.top, height: rect.height }, window.innerHeight),
+    );
   }, [items, minWidth]);
 
   return (
@@ -181,6 +185,12 @@ function Submenu({
 const menuStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
+  // A menu longer than the window scrolls in place. Without this, position
+  // alone can't save it: the root pins to the top margin and everything past
+  // the fold is unreachable, and a submenu gets lifted until its FIRST items
+  // are off the top (tsk146).
+  maxHeight: MENU_MAX_HEIGHT,
+  overflowY: "auto",
   gap: 2,
   padding: 6,
   border: "1px solid var(--border)",
