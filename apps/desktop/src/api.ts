@@ -1778,9 +1778,18 @@ export async function listMetricSamples(
   metricKey: string,
   limit?: number,
   groupBy?: string | null,
+  // Inclusive epoch-ms window (tsk202) — bounds the read to the visible range
+  // so the backend stops computing the whole history just to show a window.
+  range?: { from: number; to: number } | null,
 ): Promise<import("./tauri-bridge/index.js").SeriesPoint[]> {
   return unwrap(
-    await commands.listMetricSamples(metricKey, limit ?? null, groupBy ?? null),
+    await commands.listMetricSamples(
+      metricKey,
+      limit ?? null,
+      groupBy ?? null,
+      range?.from ?? null,
+      range?.to ?? null,
+    ),
   ) as unknown as import("./tauri-bridge/index.js").SeriesPoint[];
 }
 
@@ -2409,6 +2418,81 @@ export function subscribeOxplowEvents(
   return () => {
     stopped = true;
     void unlistenPromise.then((u) => u());
+  };
+}
+
+/** What a metric view should do with an event (tsk197). Pure — exported for tests. */
+export type MetricRefreshAction = "now" | "debounce" | "ignore";
+
+/** A metric consumer's scope: which measures it cares about, and whether a config write refreshes it. */
+export interface MetricRefreshScope {
+  /** Measure keys this view depends on. Empty/omitted = fail open (refresh on any measure event). */
+  measures?: string[];
+  /** Refresh immediately on `configChanged` (a user action). Off by default. */
+  alsoConfig?: boolean;
+}
+
+/**
+ * Route an event for a metric consumer (tsk197, measure-scoped in tsk198).
+ *
+ * `metricSamplesChanged` (the OTLP token burst, ~every 10s while an agent runs)
+ * is *debounced* — unless the event names the measures it touched AND the
+ * consumer names the measures it depends on AND they're disjoint, in which case
+ * the event can't affect this view and is *ignored*. Fail-open on either empty
+ * set: an un-migrated emit site (no event measures) or a formula/whole-page
+ * consumer (no scope) always refreshes. `configChanged` is a user action —
+ * *now*, and never measure-filtered — but only for views that opted in.
+ */
+export function metricRefreshAction(
+  event: { kind: string; measures?: string[] | null },
+  scope: MetricRefreshScope,
+): MetricRefreshAction {
+  if (event.kind === "metricSamplesChanged") {
+    const want = scope.measures ?? [];
+    const got = event.measures ?? [];
+    if (want.length > 0 && got.length > 0 && !got.some((m) => want.includes(m))) {
+      return "ignore";
+    }
+    return "debounce";
+  }
+  if (scope.alsoConfig && event.kind === "configChanged") return "now";
+  return "ignore";
+}
+
+/**
+ * Subscribe a metric view's `refresh` to the bus with the burst-coalescing
+ * discipline `RecordedMetricsPage` established (tsk91): trailing-debounce
+ * `metricSamplesChanged` so a turn's worth of token exports becomes one reload,
+ * refresh `configChanged` immediately when `alsoConfig` is set, and skip events
+ * whose measures this view doesn't depend on (`measures`, tsk198). Composes with
+ * the cube read cache (tsk196) — this cuts the *number* of reads, the cache
+ * makes each one cheap. The teardown clears any pending timer.
+ */
+export function subscribeMetricRefresh(
+  refresh: () => void,
+  opts: MetricRefreshScope & { debounceMs?: number } = {},
+): () => void {
+  const debounceMs = opts.debounceMs ?? 2_500;
+  const scope: MetricRefreshScope = { measures: opts.measures, alsoConfig: opts.alsoConfig };
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const off = subscribeOxplowEvents((e) => {
+    // `measures` lives only on the metricSamplesChanged member; narrow before reading.
+    const measures = e.kind === "metricSamplesChanged" ? e.measures : undefined;
+    switch (metricRefreshAction({ kind: e.kind, measures }, scope)) {
+      case "now":
+        refresh();
+        break;
+      case "debounce":
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(refresh, debounceMs);
+        break;
+      case "ignore":
+        break;
+    }
+  });
+  return () => {
+    off();
+    if (timer) clearTimeout(timer);
   };
 }
 

@@ -29,8 +29,13 @@ pub async fn list_metric_samples(
     metric_key: String,
     limit: Option<i64>,
     group_by: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
 ) -> Result<Vec<SeriesPoint>, IpcError> {
-    oxplow_rpc::commands::metrics::list_metric_samples(&state, metric_key, limit, group_by).await
+    oxplow_rpc::commands::metrics::list_metric_samples(
+        &state, metric_key, limit, group_by, from_ms, to_ms,
+    )
+    .await
 }
 
 /// Roll up a metric (by spec `key`) by a dimension (`"package"` or a `dims_json`
@@ -61,6 +66,9 @@ pub async fn list_metric_findings(
 
 /// Time series for a MEASURE, aggregated per capture over its atomic facts —
 /// the measure-level read (vs `list_metric_samples`'s spec ergonomics).
+// Flat positional params mirror the IPC contract (tauri-specta binds by
+// position); a bundling struct would diverge the wire shape. Same as cube_series.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 #[specta::specta]
 pub async fn metric_series(
@@ -70,6 +78,8 @@ pub async fn metric_series(
     group_by: Option<String>,
     min_value: Option<f64>,
     severity: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
 ) -> Result<Vec<SeriesPoint>, IpcError> {
     oxplow_rpc::commands::metrics::metric_series(
         &state,
@@ -78,6 +88,8 @@ pub async fn metric_series(
         group_by,
         min_value,
         severity,
+        from_ms,
+        to_ms,
     )
     .await
 }

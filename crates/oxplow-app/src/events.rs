@@ -202,9 +202,15 @@ pub enum OxplowEvent {
         effort_id: String,
     },
     /// One or more metric samples landed in `stream_id` (unified metric
-    /// substrate, tsk213). Coarse by design — the renderer refetches the
-    /// affected metric series / explorer. See `.context/metrics.md`.
-    MetricSamplesChanged { stream_id: StreamId },
+    /// substrate, tsk213). `measures` names the measure keys the write touched
+    /// so a consumer can skip an event that can't affect it (tsk198); an EMPTY
+    /// list is fail-open — "unknown, refresh anyway" — which is what the
+    /// low-frequency emit sites still send. See `.context/metrics.md`.
+    MetricSamplesChanged {
+        stream_id: StreamId,
+        #[serde(default)]
+        measures: Vec<String>,
+    },
     /// A persisted agent nudge landed (report-less-run / commit-hygiene).
     /// The renderer refetches the effort's (or thread's) nudge list. See
     /// `.context/agent-model.md` (Nudge persistence).

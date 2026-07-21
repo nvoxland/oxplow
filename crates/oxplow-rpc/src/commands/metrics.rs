@@ -4,7 +4,9 @@
 //! time-anchored typed metric model. These are the read-side cores the Tauri
 //! and remote transports share.
 
-use oxplow_app::metric_engine::{Aggregation, FactFilter, FactFinding, RollupRow, SeriesPoint};
+use oxplow_app::metric_engine::{
+    Aggregation, FactFilter, FactFinding, RollupRow, SeriesPoint, TimeWindow,
+};
 use oxplow_app::metrics_service::MetricCatalogEntry;
 use oxplow_app::Services;
 use oxplow_db::MetricSpec;
@@ -40,13 +42,18 @@ pub async fn list_metric_samples(
     metric_key: String,
     limit: Option<i64>,
     group_by: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
 ) -> Result<Vec<SeriesPoint>, IpcError> {
     let Some(spec) = svc.fact_store.get_spec(&metric_key).await? else {
         return Ok(vec![]);
     };
+    // Bound the read to the caller's visible range (tsk202) so it no longer
+    // computes the whole history just to show a window.
+    let window = TimeWindow::from_ms(from_ms, to_ms);
     let mut rows = svc
         .metric_engine
-        .series_for_spec(&spec, group_by.as_deref())
+        .series_for_spec_in_stream(&spec, group_by.as_deref(), None, window)
         .await?;
     // The engine returns oldest→newest; this read is newest-first, capped.
     rows.reverse();
@@ -97,6 +104,10 @@ pub async fn metric_dimension_rollup(
 /// ergonomics). `aggregation` is count|sum|avg|min|max|last|ratio; `group_by`
 /// slices by a conformed dimension; `min_value` keeps facts ≥ a threshold;
 /// `severity` keeps one lint severity. Empty when the measure is unknown.
+// Flat wire signature: the `rpc_dispatch!` macro destructures these as named
+// args from the request JSON, so a bundling struct would fight the transport
+// rather than clarify. Same rationale as `cube_series`.
+#[allow(clippy::too_many_arguments)]
 pub async fn metric_series(
     svc: &Services,
     measure_key: String,
@@ -104,6 +115,8 @@ pub async fn metric_series(
     group_by: Option<String>,
     min_value: Option<f64>,
     severity: Option<String>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
 ) -> Result<Vec<SeriesPoint>, IpcError> {
     let Some(agg) = Aggregation::parse(&aggregation) else {
         return Err(IpcError::invalid(
@@ -116,9 +129,17 @@ pub async fn metric_series(
         severity,
         dim_eq: None,
     };
+    let window = TimeWindow::from_ms(from_ms, to_ms);
     Ok(svc
         .metric_engine
-        .series(&measure_key, agg, &filter, group_by.as_deref())
+        .series_in_stream(
+            &measure_key,
+            agg,
+            &filter,
+            group_by.as_deref(),
+            None,
+            window,
+        )
         .await?)
 }
 

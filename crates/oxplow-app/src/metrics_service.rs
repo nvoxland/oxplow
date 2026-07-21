@@ -1832,6 +1832,7 @@ impl MetricsService {
         }
         self.events.emit(OxplowEvent::MetricSamplesChanged {
             stream_id: StreamId::new(ctx.stream_val),
+            measures: Vec::new(), // fail-open (tsk198)
         });
         count
     }

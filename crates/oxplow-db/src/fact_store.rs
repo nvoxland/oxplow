@@ -13,6 +13,9 @@
 //! move onto it, then a cleanup migration drops the old tables. Modeled on
 //! `metric_store.rs` (sync work inside `Database::call`, raw integer ids).
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -763,14 +766,62 @@ fn insert_fact(conn: &rusqlite::Connection, f: NewFact) -> rusqlite::Result<i64>
 // Store
 // ---------------------------------------------------------------------------
 
+/// The cube read cache (tsk196): the rows served for one `cube_version`.
+///
+/// Keyed by `(measure_id, stream)` because `cube_rows_for_measure` filters on
+/// `c.stream_id` — the same measure read for two streams is two answers. The
+/// whole map is dropped when the version moves rather than evicted per entry:
+/// a version change means every measure's rows may have shifted, and it bounds
+/// the map to the measures actually read within a single version.
+#[derive(Default)]
+struct CubeRowsCache {
+    version: i64,
+    entries: HashMap<(i64, Option<i64>), Arc<Vec<CubeReadRow>>>,
+}
+
+impl CubeRowsCache {
+    fn get(
+        &self,
+        version: i64,
+        measure_id: i64,
+        stream: Option<i64>,
+    ) -> Option<&Arc<Vec<CubeReadRow>>> {
+        if self.version != version {
+            return None;
+        }
+        self.entries.get(&(measure_id, stream))
+    }
+
+    fn put(
+        &mut self,
+        version: i64,
+        measure_id: i64,
+        stream: Option<i64>,
+        rows: Arc<Vec<CubeReadRow>>,
+    ) {
+        // A moved version invalidates EVERY measure, not just this one — the
+        // trigger fires for any cube row, and we can't tell which measure it
+        // belonged to. Dropping the map is both correct and what bounds it.
+        if self.version != version {
+            self.version = version;
+            self.entries.clear();
+        }
+        self.entries.insert((measure_id, stream), rows);
+    }
+}
+
 #[derive(Clone)]
 pub struct SqliteFactStore {
     db: Database,
+    cube_rows: Arc<Mutex<CubeRowsCache>>,
 }
 
 impl SqliteFactStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            cube_rows: Arc::new(Mutex::new(CubeRowsCache::default())),
+        }
     }
 
     // --- catalogs ---------------------------------------------------------
@@ -1345,6 +1396,23 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The cube's read-cache token (V72, tsk196) — bumped by trigger on EVERY
+    /// `metric_cube` insert/update/delete, cascades included.
+    ///
+    /// Distinct from [`Self::cube_epoch`], which fences concurrent WRITERS and
+    /// deliberately does not move on an ordinary fold. This moves on every
+    /// mutation, so a reader that saw version V is guaranteed the cube has not
+    /// changed while V holds. See the V72 migration for why the two can't be
+    /// one counter.
+    pub async fn cube_version(&self) -> Result<i64, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.prepare_cached("SELECT version FROM metric_cube_epoch WHERE id = 1")?
+                    .query_row([], |r| r.get(0))
+            })
+            .await
+    }
+
     /// Whether `(measure, stream, branch)` has a live-state partition yet — the
     /// existence of its `metric_cube_state` row. `false` means the branch's first
     /// capture hasn't been folded and the build must SEED the partition by
@@ -1543,7 +1611,43 @@ impl SqliteFactStore {
     /// capture's spine — the read's replacement for decoding the raw facts.
     /// `stream` bounds it to one worktree; `None` reads every stream (each row
     /// still carries its own, so an unscoped read is a UNION, never a merge).
+    ///
+    /// Cached on [`Self::cube_version`] (tsk196). The read is a full scan of the
+    /// measure's cube rows joined to `metric_capture` with a timestamp parse per
+    /// row, and the UI fires it once per mounted tile on every
+    /// `metricSamplesChanged` — so N tiles meant N identical scans. The version
+    /// is trigger-maintained, so a hit is only ever served while the cube is
+    /// provably unchanged; this trades memory for CPU, never freshness.
     pub async fn cube_rows_for_measure(
+        &self,
+        measure_id: i64,
+        stream: Option<i64>,
+    ) -> Result<Vec<CubeReadRow>, DomainError> {
+        // Read the version FIRST: the query then observes a cube at least as
+        // new as `version`. Caching newer rows under an older key is harmless
+        // (the next reader sees the moved version and misses); the reverse —
+        // caching older rows under a newer key — is what this ordering rules
+        // out.
+        let version = self.cube_version().await?;
+        let hit = {
+            let cache = self.cube_rows.lock().unwrap_or_else(|e| e.into_inner());
+            cache.get(version, measure_id, stream).cloned()
+        };
+        if let Some(rows) = hit {
+            return Ok(rows.as_ref().clone());
+        }
+
+        let rows = self
+            .cube_rows_for_measure_uncached(measure_id, stream)
+            .await?;
+        self.cube_rows
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .put(version, measure_id, stream, Arc::new(rows.clone()));
+        Ok(rows)
+    }
+
+    async fn cube_rows_for_measure_uncached(
         &self,
         measure_id: i64,
         stream: Option<i64>,
@@ -3489,6 +3593,185 @@ mod tests {
             .await
             .unwrap());
         assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+    }
+
+    /// tsk196. The cube's read cache keys on `cube_version`, so the version
+    /// must move on EVERY mutation of `metric_cube` — not just the wipes
+    /// `cube_epoch` fences. A fold that left the version parked would let the
+    /// cache serve pre-fold rows forever, i.e. metrics that silently stop
+    /// updating: strictly worse than the CPU cost the cache exists to avoid.
+    #[tokio::test]
+    async fn cube_version_advances_on_a_fold_even_though_the_epoch_does_not() {
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.tokens").await;
+        let c = store
+            .record_facts(
+                NewMetricCapture::done(1, "otel-tokens", "otel"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+
+        let epoch_before = store.cube_epoch().await.unwrap();
+        let version_before = store.cube_version().await.unwrap();
+
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                c,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![NewCubeRow {
+                    producer: "otel-tokens".into(),
+                    dims_key: "{}".into(),
+                    fact_count: 1,
+                    value_sum: 1.0,
+                    value_min: Some(1.0),
+                    value_max: Some(1.0),
+                    numerator: 0.0,
+                    denominator: 0.0,
+                }],
+                epoch_before,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            store.cube_version().await.unwrap() > version_before,
+            "the fold must advance the cache's invalidation token"
+        );
+        assert_eq!(
+            store.cube_epoch().await.unwrap(),
+            epoch_before,
+            "and must NOT advance the epoch — that would abort concurrent folds"
+        );
+    }
+
+    /// tsk196. `metric_cube.capture_id` is `ON DELETE CASCADE`, so deleting a
+    /// capture (archiving a stream, a prune) removes cube rows with NO Rust
+    /// call site involved. The version is maintained by a trigger precisely so
+    /// a path nobody remembered still invalidates the cache.
+    #[tokio::test]
+    async fn cube_version_advances_when_a_cascade_deletes_cube_rows() {
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.tokens").await;
+        let c = store
+            .record_facts(
+                NewMetricCapture::done(1, "otel-tokens", "otel"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                c,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![NewCubeRow {
+                    producer: "otel-tokens".into(),
+                    dims_key: "{}".into(),
+                    fact_count: 1,
+                    value_sum: 1.0,
+                    value_min: Some(1.0),
+                    value_max: Some(1.0),
+                    numerator: 0.0,
+                    denominator: 0.0,
+                }],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let version_before = store.cube_version().await.unwrap();
+        let db = store.db.clone();
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|conn| {
+                conn.execute("DELETE FROM metric_capture WHERE id = ?1", params![c])?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            store.cube_version().await.unwrap() > version_before,
+            "a cascade delete must still invalidate the cache"
+        );
+    }
+
+    /// tsk196. The point of the cache: repeated identical reads inside one
+    /// version agree, but a fold is visible on the very next read. Staleness
+    /// is not a permitted trade here — that's why this keys on a version
+    /// rather than a TTL.
+    #[tokio::test]
+    async fn cube_rows_are_cached_within_a_version_and_refresh_after_a_fold() {
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.tokens").await;
+        let row = |v: f64| NewCubeRow {
+            producer: "otel-tokens".into(),
+            dims_key: "{}".into(),
+            fact_count: 1,
+            value_sum: v,
+            value_min: Some(v),
+            value_max: Some(v),
+            numerator: 0.0,
+            denominator: 0.0,
+        };
+        let c1 = store
+            .record_facts(
+                NewMetricCapture::done(1, "otel-tokens", "otel"),
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                c1,
+                at("2026-06-30T10:00:00.000000Z"),
+                vec![row(1.0)],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let first = store.cube_rows_for_measure(m, Some(1)).await.unwrap();
+        let cached = store.cube_rows_for_measure(m, Some(1)).await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(cached.len(), 1, "a repeat read inside the version agrees");
+
+        // A second capture folds in — the next read must see it.
+        let c2 = store
+            .record_facts(
+                NewMetricCapture::done(1, "otel-tokens", "otel"),
+                vec![NewFact::new(m, 2.0)],
+            )
+            .await
+            .unwrap();
+        store
+            .write_cube_rows(
+                m,
+                1,
+                None,
+                c2,
+                at("2026-06-30T11:00:00.000000Z"),
+                vec![row(2.0)],
+                store.cube_epoch().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.cube_rows_for_measure(m, Some(1)).await.unwrap().len(),
+            2,
+            "the fold must be visible on the next read, not after a TTL"
+        );
     }
 
     #[tokio::test]

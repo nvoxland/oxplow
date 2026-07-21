@@ -542,7 +542,7 @@ export const commands = {
 	 *  capture over the metric's source-measure facts. `group_by` slices by a
 	 *  conformed dimension (`subject` / `branch` / `oxplow.model` / …).
 	 */
-	listMetricSamples: (metricKey: string, limit: number | null, groupBy: string | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit, groupBy })),
+	listMetricSamples: (metricKey: string, limit: number | null, groupBy: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit, groupBy, fromMs, toMs })),
 	/**
 	 *  Roll up a metric (by spec `key`) by a dimension (`"package"` or a `dims_json`
 	 *  key like `"language"`), largest first — the Metric Detail Breakdown card +
@@ -559,7 +559,7 @@ export const commands = {
 	 *  Time series for a MEASURE, aggregated per capture over its atomic facts —
 	 *  the measure-level read (vs `list_metric_samples`'s spec ergonomics).
 	 */
-	metricSeries: (measureKey: string, aggregation: string, groupBy: string | null, minValue: number | null, severity: string | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("metric_series", { measureKey, aggregation, groupBy, minValue, severity })),
+	metricSeries: (measureKey: string, aggregation: string, groupBy: string | null, minValue: number | null, severity: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("metric_series", { measureKey, aggregation, groupBy, minValue, severity, fromMs, toMs })),
 	/**
 	 *  By-dimension rollup for a MEASURE over its atomic facts — the measure-level
 	 *  breakdown (vs `metric_dimension_rollup`'s spec ergonomics).
@@ -2515,10 +2515,12 @@ detail: string | null } |
 { kind: "effortObservationsChanged"; threadId: ThreadId; effortId: string } | 
 /**
  *  One or more metric samples landed in `stream_id` (unified metric
- *  substrate, tsk213). Coarse by design — the renderer refetches the
- *  affected metric series / explorer. See `.context/metrics.md`.
+ *  substrate, tsk213). `measures` names the measure keys the write touched
+ *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
+ *  list is fail-open — "unknown, refresh anyway" — which is what the
+ *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-{ kind: "metricSamplesChanged"; streamId: StreamId } | 
+{ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
 /**
  *  A persisted agent nudge landed (report-less-run / commit-hygiene).
  *  The renderer refetches the effort's (or thread's) nudge list. See

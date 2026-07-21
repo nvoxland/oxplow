@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::model::*;
-use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
+use rmcp::{tool, tool_router, ErrorData as McpError, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -210,6 +210,12 @@ pub struct ListMetricSamplesParams {
     /// timeline. Omit for all streams.
     #[serde(default)]
     pub stream: Option<String>,
+    /// Optional inclusive `captured_at` window (epoch ms) — bounds the read to a
+    /// time range instead of the whole history (tsk202). Either bound may be omitted.
+    #[serde(default)]
+    pub from_ms: Option<i64>,
+    #[serde(default)]
+    pub to_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -739,6 +745,12 @@ pub struct MetricSeriesParams {
     /// worktree's scans. Omit for all streams.
     #[serde(default)]
     pub stream: Option<String>,
+    /// Optional inclusive `captured_at` window (epoch ms) — bounds the read to a
+    /// time range instead of the whole history (tsk202). Either bound may be omitted.
+    #[serde(default)]
+    pub from_ms: Option<i64>,
+    #[serde(default)]
+    pub to_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2107,6 +2119,8 @@ impl OxplowMcp {
             Some(s) => Some(parse_stream_id(s)?.value()),
             None => None,
         };
+        let window =
+            oxplow_app::metric_engine::TimeWindow::from_ms(params.0.from_ms, params.0.to_ms);
         let series = self
             .services
             .metric_engine
@@ -2116,6 +2130,7 @@ impl OxplowMcp {
                 &filter,
                 params.0.group_by.as_deref(),
                 stream,
+                window,
             )
             .await
             .map_err(internal)?;
@@ -2174,10 +2189,12 @@ impl OxplowMcp {
             Some(s) => Some(parse_stream_id(s)?.value()),
             None => None,
         };
+        let window =
+            oxplow_app::metric_engine::TimeWindow::from_ms(params.0.from_ms, params.0.to_ms);
         let mut series = self
             .services
             .metric_engine
-            .series_for_spec_in_stream(&spec, None, stream)
+            .series_for_spec_in_stream(&spec, None, stream, window)
             .await
             .map_err(internal)?;
         // The engine returns oldest→newest; this read is newest-first, capped.
@@ -2428,7 +2445,10 @@ impl OxplowMcp {
             .map_err(internal)?;
         self.services
             .events
-            .emit(oxplow_app::OxplowEvent::MetricSamplesChanged { stream_id: stream });
+            .emit(oxplow_app::OxplowEvent::MetricSamplesChanged {
+                stream_id: stream,
+                measures: Vec::new(), // fail-open (tsk198)
+            });
         json_result(
             &serde_json::json!({ "capture_id": capture_id, "key": p.key, "provenance": "asserted" }),
         )
@@ -2497,7 +2517,7 @@ impl OxplowMcp {
         let series = self
             .services
             .metric_engine
-            .series_for_spec_in_stream(&spec, None, stream)
+            .series_for_spec_in_stream(&spec, None, stream, None)
             .await
             .map_err(internal)?;
         // Collapse the series we already computed — headline_for_spec would
@@ -4385,7 +4405,136 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
     })
 }
 
-#[tool_handler]
+/// Tools that only READ state — annotated `read_only_hint` so a client can
+/// auto-approve them instead of prompting (tsk203). Kept as an explicit set
+/// (rather than 100 per-`#[tool]` annotations) so the read/write split lives in
+/// one reviewable place; `read_write_split_covers_every_tool` fails if a new
+/// tool isn't classified here or in [`WRITE_TOOLS`].
+const READ_ONLY_TOOLS: &[&str] = &[
+    "ping",
+    "app_version",
+    "list_streams",
+    "list_dashboards",
+    "get_dashboard",
+    "search",
+    "git_status",
+    "git_log",
+    "git_blame",
+    "git_diff",
+    "read_file_at_ref",
+    "list_branches",
+    "list_snapshots_for_stream",
+    "list_files_for_snapshot",
+    "get_snapshot",
+    "get_snapshot_stats",
+    "list_snapshot_change_entries",
+    "read_snapshot_file_content",
+    "list_code_quality_findings",
+    "list_thread_work",
+    "list_tasks",
+    "read_task_options",
+    "get_task",
+    "list_thread_notes",
+    "get_open_effort",
+    "list_effort_observations",
+    "list_metric_definitions",
+    "list_measures",
+    "list_dimensions",
+    "list_facts",
+    "metric_series",
+    "metric_rollup",
+    "list_metric_samples",
+    "metric_breakdown",
+    "list_metric_findings",
+    "get_metric_summary",
+    "list_comments",
+    "list_wiki_pages",
+    "search_wiki_pages",
+    "search_wiki_page_bodies",
+    "get_wiki_page_metadata",
+    "list_stale_wiki_pages",
+    "wiki_ref_drift",
+    "list_followups",
+    "get_thread_context",
+    "list_backlinks",
+    "list_outbound",
+    "find_wiki_pages_for_wiki_page",
+    "lsp_definition",
+    "lsp_hover",
+    "lsp_references",
+    "lsp_document_symbols",
+    "lsp_workspace_symbols",
+    "list_code_units",
+    "lsp_call_hierarchy",
+    "lsp_diagnostics",
+    "lsp_list_servers",
+];
+
+/// Tools that MUTATE state — deliberately left without a `read_only_hint` (they
+/// stay gated). Not consumed at runtime; exists so the classification test can
+/// prove every registered tool is accounted for (read XOR write).
+#[cfg(test)]
+const WRITE_TOOLS: &[&str] = &[
+    "create_dashboard",
+    "add_dashboard_item",
+    "restore_file_from_snapshot",
+    "create_comment",
+    "set_comment_intent",
+    "rename_thread",
+    "promote_thread",
+    "close_thread",
+    "reopen_thread",
+    "select_thread",
+    "switch_stream",
+    "rename_stream",
+    "reorder_tasks",
+    "upsert_task",
+    "delete_task",
+    "add_thread_note",
+    "ingest_coverage",
+    "ingest_analysis",
+    "record_test_run",
+    "run_metric",
+    "scaffold_metric",
+    "rebuild_metrics",
+    "record_metric",
+    "respond_to_comment",
+    "resolve_comment",
+    "delegate_query",
+    "record_query_finding",
+    "delete_wiki_page",
+    "add_followup",
+    "remove_followup",
+    "create_task",
+    "update_task",
+    "complete_task",
+    "amend_effort",
+    "link_tasks",
+    "transition_tasks",
+    "await_user",
+    "file_epic_with_children",
+    "dispatch_task",
+    "fork_thread",
+    "lsp_install_server",
+    "resync_wiki_page",
+    "record_wiki_page_update",
+];
+
+/// Stamp `read_only_hint = true` on tools in [`READ_ONLY_TOOLS`], leaving any
+/// existing annotation fields intact. Shared by `list_tools` and its test.
+fn stamp_read_only_hints(tools: Vec<Tool>) -> Vec<Tool> {
+    tools
+        .into_iter()
+        .map(|mut tool| {
+            if READ_ONLY_TOOLS.contains(&tool.name.as_ref()) {
+                let ann = tool.annotations.take().unwrap_or_default().read_only(true);
+                tool.annotations = Some(ann);
+            }
+            tool
+        })
+        .collect()
+}
+
 impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -4397,6 +4546,35 @@ impl ServerHandler for OxplowMcp {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
+    }
+
+    // These three methods replace what `#[tool_handler]` would generate. We
+    // hand-roll them only so `list_tools` can stamp `read_only_hint` on the
+    // read-tool family (tsk203); `call_tool`/`get_tool` are the macro's
+    // verbatim delegations to `self.tool_router`.
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult {
+            tools: stamp_read_only_hints(self.tool_router.list_all()),
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        self.tool_router.get(name).cloned()
     }
 }
 
@@ -4861,6 +5039,58 @@ mod tests {
     use oxplow_domain::task::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
     use oxplow_domain::time::Timestamp;
 
+    /// tsk203: every registered tool must be classified read XOR write, so a new
+    /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
+    /// a read left un-marked just re-introduces the permission prompt).
+    #[test]
+    fn read_write_split_covers_every_tool() {
+        use std::collections::HashSet;
+        let registered: HashSet<String> = registered_tool_names().into_iter().collect();
+        let read: HashSet<String> = READ_ONLY_TOOLS.iter().map(|s| s.to_string()).collect();
+        let write: HashSet<String> = WRITE_TOOLS.iter().map(|s| s.to_string()).collect();
+
+        let overlap: Vec<_> = read.intersection(&write).collect();
+        assert!(
+            overlap.is_empty(),
+            "tool in BOTH read and write sets: {overlap:?}"
+        );
+
+        let unclassified: Vec<_> = registered
+            .difference(&read.union(&write).cloned().collect())
+            .cloned()
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "new tool(s) not classified in READ_ONLY_TOOLS or WRITE_TOOLS: {unclassified:?}",
+        );
+
+        let stale: Vec<_> = read
+            .union(&write)
+            .filter(|t| !registered.contains(*t))
+            .cloned()
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "classified tool no longer registered: {stale:?}"
+        );
+    }
+
+    /// The stamping must produce `read_only_hint = true` for exactly the read
+    /// tools and leave writes unmarked — this is what the client keys on.
+    #[test]
+    fn stamping_marks_exactly_the_read_tools() {
+        let tools = stamp_read_only_hints(OxplowMcp::tool_router().list_all());
+        for t in &tools {
+            let is_read = READ_ONLY_TOOLS.contains(&t.name.as_ref());
+            let marked = t
+                .annotations
+                .as_ref()
+                .and_then(|a| a.read_only_hint)
+                .unwrap_or(false);
+            assert_eq!(marked, is_read, "tool {} read_only_hint mismatch", t.name);
+        }
+    }
+
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         let project = tempfile::tempdir().unwrap();
         // ensure_primary requires a real git repo.
@@ -5044,6 +5274,8 @@ mod tests {
                     min_value: None,
                     severity: None,
                     stream: None,
+                    from_ms: None,
+                    to_ms: None,
                 }))
                 .await
                 .unwrap(),
@@ -5062,6 +5294,8 @@ mod tests {
                     min_value: None,
                     severity: Some("error".into()),
                     stream: None,
+                    from_ms: None,
+                    to_ms: None,
                 }))
                 .await
                 .unwrap(),
@@ -5111,6 +5345,8 @@ mod tests {
                 min_value: None,
                 severity: None,
                 stream: None,
+                from_ms: None,
+                to_ms: None,
             }))
             .await
             .is_err());
@@ -5196,6 +5432,8 @@ mod tests {
                     metric_key: "oxplow.todos".into(),
                     limit: None,
                     stream: None,
+                    from_ms: None,
+                    to_ms: None,
                 }))
                 .await
                 .unwrap(),
@@ -5263,6 +5501,8 @@ mod tests {
                 metric_key: "nope.nope".into(),
                 limit: None,
                 stream: None,
+                from_ms: None,
+                to_ms: None,
             }))
             .await
             .is_err());

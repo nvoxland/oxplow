@@ -169,14 +169,49 @@ welded to collection.
 > `listMetricSamples` per catalogued metric, fired as ~40 concurrent blocking
 > reads, and **each walks its measure's whole history** — `oxplow.test_case` is
 > ~235k facts (+~5k per `test:collect`) and yields ~118 points, one per capture.
-> Both pages now carry the same 2.5s trailing debounce.
 >
-> ⚠️ **The debounce is mitigation, not the fix.** Ticks are ~10s apart, so it
-> only coalesces a turn's burst; one full reload per tick remains. The defect is
-> the read: **a series wants the newest N captures' facts, not the measure's
-> whole history** (`facts_for_captures` exists), and the range/branch filters are
-> applied **client-side in JS** after fetching — the same "load everything, filter
-> after" sin one layer out. `list_metric_samples` takes no range arg.
+> **The full mitigation stack (tsk191 idle-CPU profile → tsk196/197/198).** The
+> ~10s OTLP token tick was still spiking to 400%+ while "idle". Three composing
+> fixes, cheapest read to root cause:
+> - **Shared debounce helper** (`subscribeMetricRefresh` in `api.ts`, tsk197).
+>   The 2.5s trailing-debounce discipline now lives in ONE place; all five
+>   consumers (`MetricTile`×3, `MetricDetailPage`, `RecordedMetricsPage`,
+>   `EffortMetrics`) route through it instead of hand-rolling it. `configChanged`
+>   (a user action) still refreshes immediately via `{ alsoConfig: true }`.
+> - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
+>   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
+>   fence below, which deliberately does NOT move on a fold. `version` is bumped
+>   by AFTER INSERT/UPDATE/DELETE **triggers** on `metric_cube` (so FK cascades
+>   count too), giving exact, staleness-free invalidation. Collapses N-tiles →
+>   1 read per event.
+> - **Measure-scoped event** (tsk198). `MetricSamplesChanged` now carries
+>   `measures: Vec<String>` (the keys the write touched). A consumer that declares
+>   its own `source_measure` skips an event whose measures it doesn't read — so a
+>   token export stops waking a coverage tile. **Fail-open both ways:** an empty
+>   event list (the low-frequency emit sites still send `vec![]`) or an
+>   unscoped/formula consumer refreshes on anything. Only the two ~10s token emit
+>   sites in `token_usage.rs` populate it today; the other 8 sites are follow-up.
+>
+> **Bounded reads — Phase 1 (tsk202/tsk204).** The read shape is now windowable.
+> `list_metric_samples` / `metric_series` take `from_ms`/`to_ms` (IPC + MCP), and
+> a `TimeWindow` threads through `series[_for_spec]_in_stream` → `cube_series`.
+> **The cube windows safely for EVERY scope** — each cube row already carries its
+> capture's fully-folded state, so dropping out-of-window captures never changes
+> an in-window point (a per-subject 11:00 point still folds in a subject last
+> restated at an out-of-window 10:00). Complete-scope fact fallbacks window too
+> (they have no empty captures, so zero-fill can't diverge). The frontend fetches
+> the **widest preset window** (`widestPresetWindow`, ≤30d) instead of the whole
+> history, then switches among narrower presets client-side (`filterByRange`) with
+> no re-fetch. `apply_window` is the exact old client filter, moved server-side.
+>
+> ⚠️ **Phase 2 still owed — the partial-scope FACT fallback.** `oxplow.high_complexity_fns`
+> / `oxplow.long_functions` (and any per-path/per-subject measure sliced off the
+> cube) **bypass the cube** (their `min_value` threshold can't read summed cube
+> cells) and replay the full history via `tree_state_series`. Phase 1 windows their
+> OUTPUT (parity-safe) but NOT their read — a trailing window still needs the
+> from-start fold to seed pre-window state. The real fix is a **materialized
+> per-spec series** (persist each spec's per-capture points as the cube build
+> already computes them; read a windowed indexed range) — see [[tsk202]].
 >
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree
@@ -459,12 +494,21 @@ welded to collection.
 > - **`upsert_measure` on a `capture_scope` change** — the scope picks the
 >   build RULE; scoped to that one measure.
 >
-> Every invalidation also bumps **`metric_cube_epoch`** (V66): the build runs
+> Every invalidation also bumps **`metric_cube_epoch.epoch`** (V66): the build runs
 > outside these transactions, so a wipe can land mid-pass, and the builder's
 > next `write_cube_rows` — carrying the epoch it planned under — refuses and
 > abandons rather than re-planting a watermark over captures whose rows the
 > wipe deleted ("covered but rowless" would serve explicit 0s). A fenced pass
 > costs one re-fold; a fenced write costs nothing. Slow, never wrong.
+>
+> **Don't confuse `epoch` with `version` (V72, tsk196).** The same singleton row
+> also carries a `version` counter, but it is a DIFFERENT tool. `epoch` fences
+> WRITERS and moves only on wipes — a fold reads it and must NOT bump it, or
+> concurrent folds would abort each other. `version` invalidates the
+> `cube_rows_for_measure` read CACHE and must move on EVERY cube mutation, so
+> it's maintained by triggers (fold, wipe, and FK cascade alike). Reusing `epoch`
+> as the cache key would freeze the metrics UI — folds land, epoch stays put,
+> cache serves pre-fold rows forever. Two counters, opposite jobs.
 >
 > The fold's third input — the `file_snapshot` rows the per-path restated
 > sets are derived from — is **durable by construction** since tsk105:

@@ -7,7 +7,7 @@ import {
   listMetricCatalog,
   listMetricDefinitions,
   listMetricSamples,
-  subscribeOxplowEvents,
+  subscribeMetricRefresh,
 } from "../api.js";
 import {
   CollapsibleSection,
@@ -28,6 +28,7 @@ import {
   filterByBranch,
   filterByRange,
   rangeFromPreset,
+  widestPresetWindow,
 } from "./metricDetailData.js";
 import {
   DEFAULT_SHOW_MODE,
@@ -183,8 +184,12 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
           const built = await Promise.all(
             catalog.map(async (entry) => {
               const def = specs.get(entry.key) ?? null;
-              // No spec ⇒ no spec-driven reads ⇒ don't pay for the IPC.
-              const samples = def ? await listMetricSamples(entry.key, SAMPLE_LIMIT) : [];
+              // No spec ⇒ no spec-driven reads ⇒ don't pay for the IPC. Bound the
+              // read to the widest preset (tsk202) — the page filters to the
+              // selected range client-side (filterByRange), a subset of this.
+              const samples = def
+                ? await listMetricSamples(entry.key, SAMPLE_LIMIT, null, widestPresetWindow(Date.now()))
+                : [];
               return {
                 key: entry.key,
                 title: entry.title,
@@ -210,25 +215,14 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
     // ~235k facts) — ~20 CPU-seconds a go. The OTLP token ingest emits
     // metricSamplesChanged on every agent turn, so an un-debounced reload made
     // oxplow's CPU proportional to how hard the agent was working (tsk91). Same
-    // bug tsk75 fixed for `EffortMetricsBlock`, same trailing-debounce fix:
-    // coalesce a turn's burst of exports into one reload.
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const off = subscribeOxplowEvents((e) => {
-      // configChanged is user-action-rate (an enable toggle on the detail
-      // page, a scaffold create, a project.yaml edit) — refresh immediately.
-      // Only the OTLP-burst metricSamplesChanged needs the debounce.
-      if (e.kind === "configChanged") {
-        refresh();
-        return;
-      }
-      if (e.kind !== "metricSamplesChanged") return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(refresh, 2_500);
-    });
+    // bug tsk75 fixed for `EffortMetricsBlock`. This helper is where that
+    // trailing-debounce discipline now lives (tsk197): debounce the burst,
+    // refresh configChanged (an enable toggle / scaffold / project.yaml edit)
+    // immediately.
+    const off = subscribeMetricRefresh(refresh, { alsoConfig: true });
     return () => {
       cancelled = true;
       off();
-      if (timer) clearTimeout(timer);
     };
   }, []);
 

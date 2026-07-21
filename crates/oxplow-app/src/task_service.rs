@@ -884,6 +884,7 @@ impl TaskService {
                     if let Some(events) = self.events.as_ref() {
                         events.emit(OxplowEvent::MetricSamplesChanged {
                             stream_id: StreamId::new(stream_val),
+                            measures: Vec::new(), // fail-open (tsk198)
                         });
                     }
                 }

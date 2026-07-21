@@ -30,6 +30,15 @@ export function rangeFromPreset(key: string, now: number): TimeRange {
   return { from: now - preset.ms, to: now };
 }
 
+/** The widest bounded preset window ending at `now` (tsk202). Passing this to
+ *  `listMetricSamples` bounds the backend read to the largest span the UI can
+ *  show, while the client still switches between narrower presets INSTANTLY via
+ *  `filterByRange` (no re-fetch) — every preset is a subset of this window. */
+export function widestPresetWindow(now: number): TimeRange {
+  const ms = Math.max(...RANGE_PRESETS.map((p) => p.ms));
+  return { from: now - ms, to: now };
+}
+
 /** Which preset (if any) a range corresponds to: its `to` is ~now (within a
  *  minute) and its span matches a preset. Otherwise `"custom"`. */
 export function matchPresetKey(range: TimeRange, now: number): string {

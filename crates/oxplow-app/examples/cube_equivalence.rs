@@ -105,7 +105,7 @@ async fn main() {
         let scope = parse_capture_scope(measure_key, &measure.capture_scope).unwrap();
         let agg = spec_aggregation(s).unwrap();
         let filter = spec_filter(s).unwrap();
-        match cube_series(&facts, &measure, scope, agg, &filter, None, None)
+        match cube_series(&facts, &measure, scope, agg, &filter, None, None, None)
             .await
             .unwrap()
         {

@@ -8,7 +8,7 @@ import {
   type SeriesPoint,
   listMetricSamples,
   metricDimensionRollup,
-  subscribeOxplowEvents,
+  subscribeMetricRefresh,
 } from "../../api.js";
 import { formatMetricValue } from "../format.js";
 import { metricRef } from "../../tabs/pageRefs.js";
@@ -23,6 +23,7 @@ import {
   filterByRange,
   seriesPoints,
   transformSeries,
+  widestPresetWindow,
 } from "../../pages/metricDetailData.js";
 import {
   type TileOptions,
@@ -305,6 +306,20 @@ export function MetricTile({
   const viz = opts.viz ?? "line";
   const dim = opts.dim ?? "package";
 
+  // Measure scope for event filtering (tsk198): a base metric reads exactly its
+  // `source_measure`, so skip metricSamplesChanged events for other measures. A
+  // formula metric (source_measure null) stays undefined → fail-open (refreshes
+  // on any metric event), which is correct since it aggregates several measures.
+  const scopeMeasures = useMemo(
+    () => (def?.source_measure ? [def.source_measure] : undefined),
+    [def?.source_measure],
+  );
+
+  // Bound each sample fetch to the widest preset (tsk202) unless this tile shows
+  // "all" time (then it must fetch the whole history). Mirrors `resolveTileWindow`'s
+  // all-detection; the tile still filters to its effective range client-side.
+  const tileIsAll = opts.range === "all" || (!opts.range && dashboard.range === null);
+
   useEffect(() => {
     if (!metricKey) {
       setLoading(false);
@@ -312,7 +327,8 @@ export function MetricTile({
     }
     let cancelled = false;
     const refresh = () => {
-      void listMetricSamples(metricKey, SAMPLE_LIMIT).then((rows) => {
+      const win = tileIsAll ? null : widestPresetWindow(Date.now());
+      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, win).then((rows) => {
         if (cancelled) return;
         setSamples(rows);
         setLoading(false);
@@ -321,16 +337,18 @@ export function MetricTile({
       });
     };
     refresh();
-    const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
-    });
+    // Debounce the OTLP-burst metricSamplesChanged (tsk197) and skip events for
+    // measures this tile doesn't read (tsk198) — a token export no longer wakes
+    // a coverage tile. Fail-open while `def` is still loading (scope undefined).
+    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures });
     return () => {
       cancelled = true;
       off();
     };
-    // Deliberately keyed on `metricKey` alone: `onBranches` is a report-upward
-    // callback, and depending on it would re-fetch whenever the page re-renders.
-  }, [metricKey]);
+    // `onBranches` is a report-upward callback, excluded from deps on purpose;
+    // `scopeMeasures` changes at most once (null → key) as `def` loads.
+    // `tileIsAll` re-fetches when the tile crosses all↔bounded (tsk202).
+  }, [metricKey, scopeMeasures, tileIsAll]);
 
   // A `bar` tile reads the dimension roll-up rather than the time series.
   useEffect(() => {
@@ -345,14 +363,12 @@ export function MetricTile({
       });
     };
     refresh();
-    const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
-    });
+    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures }); // tsk197/198
     return () => {
       cancelled = true;
       off();
     };
-  }, [metricKey, viz, dim]);
+  }, [metricKey, viz, dim, scopeMeasures]);
 
   // Grouped samples for the dashboard's selected dimension. Fetched as soon as
   // the dimension is chosen (before any value): the distinct groups here are
@@ -368,7 +384,8 @@ export function MetricTile({
     let cancelled = false;
     setGroupsLoaded(false);
     const refresh = () => {
-      void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, groupDim).then((rows) => {
+      const win = tileIsAll ? null : widestPresetWindow(Date.now());
+      void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, groupDim, win).then((rows) => {
         if (cancelled) return;
         setGroupSamples(rows);
         const values = [...new Set(rows.map((r) => r.group).filter((g): g is string => !!g))].sort();
@@ -378,16 +395,14 @@ export function MetricTile({
       });
     };
     refresh();
-    const off = subscribeOxplowEvents((e) => {
-      if (e.kind === "metricSamplesChanged") refresh();
-    });
+    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures }); // tsk197/198
     return () => {
       cancelled = true;
       off();
     };
     // `onGroupValues` is a report-upward callback; depending on it would
     // re-fetch on every page render.
-  }, [metricKey, groupDim]);
+  }, [metricKey, groupDim, scopeMeasures, tileIsAll]);
 
   const title = opts.title ?? def?.title ?? metricKey ?? "Metric";
 

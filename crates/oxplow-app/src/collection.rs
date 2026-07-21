@@ -741,6 +741,7 @@ impl CollectionService {
                     capture_id = id;
                     self.events.emit(OxplowEvent::MetricSamplesChanged {
                         stream_id: oxplow_domain::StreamId::new(stream_val),
+                        measures: Vec::new(), // fail-open (tsk198)
                     });
                 }
                 Err(e) => {
@@ -1142,6 +1143,9 @@ impl CollectionService {
             Ok(capture_id) => {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: oxplow_domain::StreamId::new(stream_val),
+                    // Fail-open: this low-frequency site doesn't scope its
+                    // measures (tsk198) — an empty list means "refresh anyway".
+                    measures: Vec::new(),
                 });
                 capture_id
             }
@@ -1312,6 +1316,7 @@ impl CollectionService {
                     capture_id = id;
                     self.events.emit(OxplowEvent::MetricSamplesChanged {
                         stream_id: oxplow_domain::StreamId::new(stream_val),
+                        measures: Vec::new(), // fail-open (tsk198)
                     });
                 }
                 Err(e) => {
@@ -1578,6 +1583,7 @@ impl CollectionService {
             self.facts.record_facts(capture, vec![fact]).await?;
             self.events.emit(OxplowEvent::MetricSamplesChanged {
                 stream_id: thread_row.stream_id,
+                measures: Vec::new(), // fail-open (tsk198)
             });
         }
         Ok(())
@@ -1889,6 +1895,7 @@ impl CollectionService {
         match result {
             Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
                 stream_id: oxplow_domain::StreamId::new(stream_val),
+                measures: Vec::new(), // fail-open (tsk198)
             }),
             Err(e) => {
                 tracing::warn!(error = %e, "failed to project nudge into metric substrate")

@@ -8,8 +8,7 @@
 import React, { useEffect, useState } from "react";
 import { formatMetricValue } from "./format";
 
-import { type EffortMetricDelta, listEffortMetricDeltas } from "../api.js";
-import { subscribeOxplowEvents } from "../tauri-bridge/index.js";
+import { type EffortMetricDelta, listEffortMetricDeltas, subscribeMetricRefresh } from "../api.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { metricRef } from "../tabs/pageRefs.js";
 
@@ -108,7 +107,6 @@ export function EffortMetricsBlock({
 
   useEffect(() => {
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     const load = () => {
       void listEffortMetricDeltas(effortId)
         .then((rows) => {
@@ -135,15 +133,12 @@ export function EffortMetricsBlock({
         cancelled = true;
       };
     }
-    const unsub = subscribeOxplowEvents((event) => {
-      if (event.kind !== "metricSamplesChanged") return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(load, 2_500);
-    });
+    // Trailing-debounce the OTLP burst via the shared helper (tsk197). This
+    // component listens only to metricSamplesChanged, so alsoConfig stays off.
+    const unsub = subscribeMetricRefresh(load);
     return () => {
       cancelled = true;
       unsub();
-      if (timer) clearTimeout(timer);
     };
   }, [effortId, endedAt]);
 

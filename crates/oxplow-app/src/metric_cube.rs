@@ -593,6 +593,7 @@ pub async fn cube_series(
     filter: &FactFilter,
     group_by: Option<&str>,
     stream: Option<i64>,
+    window: Option<crate::metric_engine::TimeWindow>,
 ) -> Result<Option<Vec<SeriesPoint>>, DomainError> {
     // --- eligibility: can the cube answer this EXACTLY? ---
     // A value threshold (min/max) filters on each fact's OWN value, which the
@@ -729,10 +730,16 @@ pub async fn cube_series(
             });
     }
 
-    // The captures this read plots — the narrowed producers', in capture order.
+    // The captures this read plots — the narrowed producers', in capture order,
+    // and within the requested window (tsk202). Windowing here rather than after
+    // is safe: each cube row already carries its capture's fully-folded state, so
+    // dropping out-of-window captures never changes an in-window point — and the
+    // per-capture zero-fill below then only fills in-window captures, matching the
+    // renderer's old client-side range filter exactly.
     let used: Vec<&MetricCapture> = captures
         .iter()
         .filter(|c| narrowed.contains(c.producer.as_str()))
+        .filter(|c| window.map_or(true, |w| w.contains(c.captured_at)))
         .collect();
     let mut out: Vec<SeriesPoint> = Vec::new();
     for c in &used {
@@ -929,7 +936,7 @@ mod tests {
         let scope = parse_capture_scope(measure_key, &measure.capture_scope).unwrap();
         let agg = crate::metric_engine::spec_aggregation(spec).unwrap();
         let filter = crate::metric_engine::spec_filter(spec).unwrap();
-        let served = cube_series(facts, &measure, scope, agg, &filter, None, None)
+        let served = cube_series(facts, &measure, scope, agg, &filter, None, None, None)
             .await
             .unwrap()
             .expect("the cube must ANSWER this read — a None fall-through passes vacuously");
@@ -995,6 +1002,67 @@ mod tests {
         );
         assert_eq!(builder.build_measure("acme.test_case").await.unwrap(), 2);
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    #[tokio::test]
+    async fn a_windowed_cube_read_keeps_pre_window_folded_state(
+    ) -> Result<(), oxplow_domain::DomainError> {
+        // tsk202: windowing a PARTIAL cube read must drop out-of-window captures
+        // WITHOUT losing the state they contributed — each cube row already holds
+        // the fully-folded live state at its capture, so an in-window point still
+        // reflects subjects last restated before the window. This is what makes
+        // cube windowing safe where a raw-fact window would be wrong.
+        let (_engine, facts, builder) = fixture().await;
+        let m = per_subject_measure(&facts, "acme.test_case").await;
+        facts
+            .record_facts(
+                cap_in(1, "2026-06-30T10:00:00Z"),
+                vec![case(m, "t1", 1.0), case(m, "t2", 1.0)],
+            )
+            .await?;
+        facts
+            .record_facts(cap_in(1, "2026-06-30T11:00:00Z"), vec![case(m, "t1", 10.0)])
+            .await?;
+        facts
+            .record_facts(cap_in(1, "2026-06-30T12:00:00Z"), vec![case(m, "t2", 5.0)])
+            .await?;
+        let spec = spec(&facts, "acme.cases", "acme.test_case", "sum").await;
+        builder.build_measure("acme.test_case").await?;
+
+        let measure = facts.get_measure("acme.test_case").await?.unwrap();
+        let scope = parse_capture_scope("acme.test_case", &measure.capture_scope)?;
+        let agg = crate::metric_engine::spec_aggregation(&spec).unwrap();
+        let filter = crate::metric_engine::spec_filter(&spec).unwrap();
+
+        let full = cube_series(&facts, &measure, scope, agg, &filter, None, None, None)
+            .await?
+            .unwrap();
+        assert_eq!(full.len(), 3);
+
+        // 11:00 onward — the 10:00 capture is out of the window.
+        let window = crate::metric_engine::TimeWindow::from_ms(
+            Some(ts("2026-06-30T11:00:00Z").unix_ms()),
+            None,
+        );
+        let windowed = cube_series(&facts, &measure, scope, agg, &filter, None, None, window)
+            .await?
+            .unwrap();
+
+        let expected: Vec<_> = full
+            .iter()
+            .filter(|p| window.unwrap().contains(p.captured_at))
+            .cloned()
+            .collect();
+        assert_eq!(
+            windowed, expected,
+            "windowed == full filtered to the window"
+        );
+        assert_eq!(windowed.len(), 2, "the 10:00 capture is excluded");
+        assert_eq!(
+            windowed[0].value, 11.0,
+            "the 11:00 point still folds in t2=1 from the out-of-window 10:00 capture",
+        );
+        Ok(())
     }
 
     #[tokio::test]
@@ -1072,6 +1140,7 @@ mod tests {
                 Aggregation::Sum,
                 &filter,
                 None,
+                None,
                 None
             )
             .await
@@ -1120,6 +1189,7 @@ mod tests {
                 CaptureScope::PerSubject,
                 Aggregation::Count,
                 &filter,
+                None,
                 None,
                 None
             )
@@ -1848,6 +1918,7 @@ mod tests {
             Aggregation::Sum,
             &filter,
             Some("oxplow.rule"),
+            None,
             None,
         )
         .await

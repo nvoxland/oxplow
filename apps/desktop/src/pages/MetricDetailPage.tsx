@@ -19,7 +19,7 @@ import {
   setMetricEnabled,
   setMetricOverride,
   subscribeDashboardEvents,
-  subscribeOxplowEvents,
+  subscribeMetricRefresh,
 } from "../api.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
@@ -48,6 +48,7 @@ import {
   filterByBranch,
   filterByRange,
   rangeFromPreset,
+  widestPresetWindow,
   seriesPoints,
   transformSeries,
 } from "./metricDetailData.js";
@@ -254,25 +255,35 @@ export function MetricDetailPage({
       void listMetricCatalog().then((entries) => {
         if (!cancelled) setEntry(entries.find((e) => e.key === metricKey) ?? null);
       });
-      void listMetricSamples(metricKey, SAMPLE_LIMIT).then(async (rows) => {
-        if (cancelled) return;
-        setSamples(rows);
-        const captureId = rows[0]?.capture_id ?? null;
-        const fs = captureId != null ? await listMetricFindings(metricKey, captureId) : [];
-        if (!cancelled) setFindings(fs);
-      });
+      // Bound the read to the widest preset (tsk202); the chart's range dropdown
+      // still switches instantly client-side within it (filterByRange below).
+      void listMetricSamples(metricKey, SAMPLE_LIMIT, null, widestPresetWindow(Date.now())).then(
+        async (rows) => {
+          if (cancelled) return;
+          setSamples(rows);
+          const captureId = rows[0]?.capture_id ?? null;
+          const fs = captureId != null ? await listMetricFindings(metricKey, captureId) : [];
+          if (!cancelled) setFindings(fs);
+        },
+      );
     };
     refresh();
-    const off = subscribeOxplowEvents((e) => {
-      // configChanged: an enable/target write (ours or an external
-      // .oxplow/project.yaml edit) re-resolves the catalog + spec.
-      if (e.kind === "metricSamplesChanged" || e.kind === "configChanged") refresh();
+    // Debounce the OTLP-burst metricSamplesChanged and skip events for measures
+    // this metric doesn't read (tsk197/198); configChanged (an enable/target
+    // write, ours or an external .oxplow/project.yaml edit that re-resolves the
+    // catalog + spec) refreshes immediately. Scope is undefined until `def`
+    // loads → fail-open, then narrows to the metric's own measure (a formula
+    // metric stays null → fail-open, as it aggregates several).
+    const off = subscribeMetricRefresh(refresh, {
+      alsoConfig: true,
+      measures: def?.source_measure ? [def.source_measure] : undefined,
     });
     return () => {
       cancelled = true;
       off();
     };
-  }, [metricKey]);
+    // `def?.source_measure` changes at most once (null → key) as the spec loads.
+  }, [metricKey, def?.source_measure]);
 
   useEffect(() => {
     if (!effort || !metricKey) {
@@ -301,9 +312,11 @@ export function MetricDetailPage({
     }
     let cancelled = false;
     const { dim, value } = breakdownFilter;
-    void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, dim).then((all) => {
-      if (!cancelled) setGroupSamples(all.filter((p) => p.group === value));
-    });
+    void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, dim, widestPresetWindow(Date.now())).then(
+      (all) => {
+        if (!cancelled) setGroupSamples(all.filter((p) => p.group === value));
+      },
+    );
     return () => {
       cancelled = true;
     };

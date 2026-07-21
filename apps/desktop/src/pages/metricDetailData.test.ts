@@ -14,6 +14,7 @@ import {
   matchPresetKey,
   rangeFromPreset,
   seriesPoints,
+  widestPresetWindow,
   yDomain,
 } from "./metricDetailData.js";
 
@@ -45,6 +46,21 @@ test("rangeFromPreset builds a [now-span, now] window", () => {
   expect(r.from).toBe(now - 7 * 24 * 60 * 60 * 1000);
   // Unknown key falls back to the 7d preset.
   expect(rangeFromPreset("nope", now)).toEqual(r);
+});
+
+test("widestPresetWindow spans the largest preset and contains every preset", () => {
+  const now = Date.parse("2026-06-25T12:00:00Z");
+  const widest = widestPresetWindow(now);
+  expect(widest.to).toBe(now);
+  // 30d is the widest preset today.
+  expect(widest.from).toBe(now - 30 * 24 * 60 * 60 * 1000);
+  // Every preset the UI can select is a subset — so a client-side filterByRange
+  // within the fetched widest window never needs a re-fetch (tsk202).
+  for (const key of ["1d", "2d", "3d", "7d", "30d"]) {
+    const r = rangeFromPreset(key, now);
+    expect(r.from).toBeGreaterThanOrEqual(widest.from);
+    expect(r.to).toBeLessThanOrEqual(widest.to);
+  }
 });
 
 test("matchPresetKey recognizes presets and flags custom", () => {

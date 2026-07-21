@@ -280,6 +280,46 @@ pub struct SeriesPoint {
     pub source: Option<String>,
 }
 
+/// An inclusive `captured_at` window for a series read (tsk202). Bounds the
+/// series to the caller's visible range so the read cost tracks the window, not
+/// the measure's whole history. Either bound may be open. `None` (the default)
+/// reads everything.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimeWindow {
+    pub from: Option<Timestamp>,
+    pub to: Option<Timestamp>,
+}
+
+impl TimeWindow {
+    /// Build from epoch-ms bounds; `None` if neither bound is set (= no window).
+    pub fn from_ms(from_ms: Option<i64>, to_ms: Option<i64>) -> Option<Self> {
+        match (from_ms, to_ms) {
+            (None, None) => None,
+            (f, t) => Some(TimeWindow {
+                from: f.map(Timestamp::from_unix_ms),
+                to: t.map(Timestamp::from_unix_ms),
+            }),
+        }
+    }
+
+    pub fn contains(&self, at: Timestamp) -> bool {
+        self.from.map_or(true, |f| f <= at) && self.to.map_or(true, |t| at <= t)
+    }
+}
+
+/// Keep only the points inside `window` (a no-op when `window` is `None`). This
+/// is the exact filter the renderer used to apply client-side (`filterByRange`),
+/// moved server-side — parity-safe for every read path.
+fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<SeriesPoint> {
+    match window {
+        None => points,
+        Some(w) => points
+            .into_iter()
+            .filter(|p| w.contains(p.captured_at))
+            .collect(),
+    }
+}
+
 /// One row of a by-dimension rollup (the metric's "breakdown" card).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct RollupRow {
@@ -1260,13 +1300,14 @@ impl MetricEngine {
         filter: &FactFilter,
         group_by: Option<&str>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
-        self.series_in_stream(measure_key, agg, filter, group_by, None)
+        self.series_in_stream(measure_key, agg, filter, group_by, None, None)
             .await
     }
 
     /// [`Self::series`] scoped to one stream (worktree) — per-worktree scans
     /// don't interleave into one timeline (the series sibling of the tsk46
-    /// rollup scoping). `None` reads across all streams.
+    /// rollup scoping). `None` reads across all streams. `window` bounds the
+    /// series to a `captured_at` range (tsk202); `None` reads the whole history.
     pub async fn series_in_stream(
         &self,
         measure_key: &str,
@@ -1274,6 +1315,7 @@ impl MetricEngine {
         filter: &FactFilter,
         group_by: Option<&str>,
         stream: Option<i64>,
+        window: Option<TimeWindow>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure) = self.facts.get_measure(measure_key).await? else {
             return Ok(Vec::new());
@@ -1294,6 +1336,7 @@ impl MetricEngine {
             filter,
             group_by,
             stream,
+            window,
         )
         .await?
         {
@@ -1377,23 +1420,32 @@ impl MetricEngine {
                 Some(resolver) => resolver.for_captures(&captures).await,
                 None => Visibility::blind(),
             };
-            return Ok(tree_state_series(
-                &captures,
-                &facts,
-                &restated,
-                &FoldRead {
-                    agg,
-                    filter,
-                    group_by,
-                    visibility: &visibility,
-                    scope,
-                },
+            // Partial (per-path/per-subject) still folds the whole history here
+            // (Phase 2 bounds this); the window is applied to the OUTPUT so the
+            // returned series matches what the renderer used to filter to. This
+            // is the same filter, moved server-side — parity-safe.
+            return Ok(apply_window(
+                tree_state_series(
+                    &captures,
+                    &facts,
+                    &restated,
+                    &FoldRead {
+                        agg,
+                        filter,
+                        group_by,
+                        visibility: &visibility,
+                        scope,
+                    },
+                ),
+                window,
             ));
         }
 
         let points = aggregate_series(&facts, agg, filter, group_by);
-        self.zero_fill(points, producers, agg, group_by, stream)
-            .await
+        let points = self
+            .zero_fill(points, producers, agg, group_by, stream)
+            .await?;
+        Ok(apply_window(points, window))
     }
 
     /// `capture_id → the paths that capture restated` (its snapshot's file rows,
@@ -1629,16 +1681,19 @@ impl MetricEngine {
         spec: &MetricSpec,
         group_by: Option<&str>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
-        self.series_for_spec_in_stream(spec, group_by, None).await
+        self.series_for_spec_in_stream(spec, group_by, None, None)
+            .await
     }
 
     /// [`Self::series_for_spec`] scoped to one stream (worktree) — see
-    /// [`Self::series_in_stream`]. `None` reads across all streams.
+    /// [`Self::series_in_stream`]. `None` reads across all streams. `window`
+    /// bounds the series to a `captured_at` range (tsk202).
     pub async fn series_for_spec_in_stream(
         &self,
         spec: &MetricSpec,
         group_by: Option<&str>,
         stream: Option<i64>,
+        window: Option<TimeWindow>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
@@ -1646,7 +1701,7 @@ impl MetricEngine {
         let agg = spec_aggregation(spec)?;
         let filter = spec_filter(spec)?;
         let mut series = self
-            .series_in_stream(measure_key, agg, &filter, group_by, stream)
+            .series_in_stream(measure_key, agg, &filter, group_by, stream, window)
             .await?;
         let scale = spec_value_scale(spec);
         if scale != 1.0 {
@@ -1719,7 +1774,9 @@ impl MetricEngine {
         spec: &MetricSpec,
         stream: Option<i64>,
     ) -> Result<Option<f64>, DomainError> {
-        let series = self.series_for_spec_in_stream(spec, None, stream).await?;
+        let series = self
+            .series_for_spec_in_stream(spec, None, stream, None)
+            .await?;
         self.headline_from_series(spec, &series).await
     }
 
@@ -2578,6 +2635,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn windowed_series_equals_the_full_series_filtered_to_the_window() {
+        // tsk202: a windowed read must return exactly the full series filtered to
+        // the window — the same filter the renderer used to apply client-side,
+        // moved server-side. This exercises the COMPLETE fact path (no cube built).
+        let (engine, facts, complexity) = engine_fixture().await;
+        for (t, vals) in [
+            ("2026-06-30T10:00:00Z", vec![14.0, 11.0]),
+            ("2026-06-30T11:00:00Z", vec![20.0]),
+            ("2026-06-30T12:00:00Z", vec![7.0, 8.0, 9.0]),
+        ] {
+            facts
+                .record_facts(
+                    cap_at(t),
+                    vals.into_iter()
+                        .map(|v| NewFact::new(complexity, v))
+                        .collect(),
+                )
+                .await
+                .unwrap();
+        }
+        let spec = NewMetricSpec::base("acme.count", "Count", "acme.complexity", "count");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.count").await.unwrap().unwrap();
+
+        let full = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(full.len(), 3, "one point per capture");
+
+        let window = TimeWindow::from_ms(
+            Some(ts("2026-06-30T11:00:00Z").unix_ms()),
+            Some(ts("2026-06-30T12:00:00Z").unix_ms()),
+        );
+        let windowed = engine
+            .series_for_spec_in_stream(&spec, None, None, window)
+            .await
+            .unwrap();
+
+        let expected: Vec<_> = full
+            .iter()
+            .filter(|p| window.unwrap().contains(p.captured_at))
+            .cloned()
+            .collect();
+        assert_eq!(windowed, expected);
+        assert_eq!(windowed.len(), 2, "the 10:00 capture is outside the window");
+    }
+
+    #[tokio::test]
     async fn series_for_spec_counts_over_threshold_and_headline_is_last_snapshot() {
         let (engine, facts, complexity) = engine_fixture().await;
         // Capture 1 (10:00): two functions ≥10. Capture 2 (11:00): one ≥10.
@@ -2922,7 +3025,7 @@ mod tests {
         // Stream-scoped: only that worktree's timeline, and the semi-additive
         // headline is ITS last capture — not whichever worktree scanned last.
         let scoped = engine
-            .series_for_spec_in_stream(&spec, None, Some(1))
+            .series_for_spec_in_stream(&spec, None, Some(1), None)
             .await
             .unwrap();
         assert_eq!(
@@ -3074,7 +3177,7 @@ mod tests {
         for (stream, expected) in [(1, vec![2.0]), (2, vec![10.0])] {
             assert_eq!(
                 engine
-                    .series_for_spec_in_stream(&spec, None, Some(stream))
+                    .series_for_spec_in_stream(&spec, None, Some(stream), None)
                     .await
                     .unwrap()
                     .iter()
@@ -3113,7 +3216,7 @@ mod tests {
             "unscoped still zero-fills the other stream's empty scan"
         );
         let scoped = engine
-            .series_for_spec_in_stream(&spec, None, Some(1))
+            .series_for_spec_in_stream(&spec, None, Some(1), None)
             .await
             .unwrap();
         assert_eq!(
