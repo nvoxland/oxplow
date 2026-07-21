@@ -186,6 +186,12 @@ struct Inner {
     /// permit when no waiter is parked yet, so a shutdown that races
     /// ahead of the watcher's first poll is not lost.
     shutdown: tokio::sync::Notify,
+    /// Signalled by [`SnapshotCaptureService::set_workspace_filter`] so the
+    /// watcher rebuilds its registered path set (tsk206). Without this,
+    /// registration-time pruning would freeze the watch set at boot and a
+    /// `generated.include` that un-ignores a directory would never be watched
+    /// until restart — breaking `set_generated`'s "without a restart" contract.
+    refilter: tokio::sync::Notify,
     /// `true` once this stream's initial startup sweep has completed (or
     /// there was nothing to sweep). Starts `true` so a service that
     /// never runs a startup sweep (non-primary streams) never gates;
@@ -220,6 +226,7 @@ impl SnapshotCaptureService {
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
                 in_flight: Mutex::new(None),
                 shutdown: tokio::sync::Notify::new(),
+                refilter: tokio::sync::Notify::new(),
                 initial_ready: tokio::sync::watch::channel(true).0,
             }),
         }
@@ -257,6 +264,10 @@ impl SnapshotCaptureService {
             .workspace_filter
             .write()
             .unwrap_or_else(|e| e.into_inner()) = filter;
+        // The watch SET is derived from the filter (tsk206), not just the
+        // per-event check — so a swap has to re-register, or a newly-included
+        // directory would stay unwatched until restart.
+        self.inner.refilter.notify_one();
     }
 
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
@@ -437,32 +448,110 @@ impl SnapshotCaptureService {
         Ok(Some(latest_id))
     }
 
-    async fn run_watcher(self) {
-        let watcher = match FsWatcher::watch(self.inner.project_dir.clone()) {
-            Ok(w) => w,
+    /// The paths to register with the OS watcher: the project root
+    /// NON-recursively, plus each non-ignored top-level directory recursively.
+    ///
+    /// Pruning at REGISTRATION rather than per delivered event (tsk206) is the
+    /// whole point: a recursive watch on the root hands us every write under
+    /// `target/` (345k files here) and `node_modules/`, each cloned into the
+    /// broadcast and then thrown away by the same filter. Nothing is hardcoded —
+    /// `WorkspaceFilter` layers `.git`/`.oxplow` defaults, `generated.include`,
+    /// `generated.exclude`, and `.gitignore`, so those dirs are skipped because
+    /// the repo gitignores them. Same rule `workspace_watch` already applies.
+    ///
+    /// The per-event check stays: it catches nested ignores inside a watched dir
+    /// (a `.gitignore` deeper in the tree), which a top-level prune can't see.
+    fn watch_paths_for(
+        project_dir: &Path,
+        filter: &WorkspaceFilter,
+    ) -> Vec<(PathBuf, oxplow_fs_watch::RecursiveMode)> {
+        use oxplow_fs_watch::RecursiveMode;
+        let mut paths = vec![(project_dir.to_path_buf(), RecursiveMode::NonRecursive)];
+        match std::fs::read_dir(project_dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let Ok(file_type) = entry.file_type() else {
+                        continue;
+                    };
+                    if !file_type.is_dir() {
+                        continue;
+                    }
+                    let name = entry.file_name();
+                    if filter.ignore(Path::new(&name), true) {
+                        continue;
+                    }
+                    paths.push((entry.path(), RecursiveMode::Recursive));
+                }
+            }
+            // Unreadable project root: fall back to the old whole-tree watch
+            // rather than silently watching nothing.
             Err(e) => {
-                warn!(error = %e, "snapshot capture: failed to start fs-watch");
+                warn!(error = %e, "snapshot capture: cannot enumerate project dir; watching it whole");
+                return vec![(project_dir.to_path_buf(), RecursiveMode::Recursive)];
+            }
+        }
+        paths
+    }
+
+    async fn run_watcher(self) {
+        // Park on the shutdown signal ONCE, outside the re-registration loop, so
+        // a `notify_one` that fires between iterations isn't missed (the pinned
+        // future is re-polled by each `select!`).
+        let shutdown = self.inner.shutdown.notified();
+        tokio::pin!(shutdown);
+        // Outer loop = one registration generation. A `generated` config edit
+        // swaps the filter and notifies, which rebuilds the watch set so a newly
+        // INCLUDED directory starts being watched without an app restart (the
+        // `set_generated` IPC's documented contract). Events arriving in the
+        // rebuild gap are dropped; a config edit is a deliberate user action and
+        // the next sweep/event covers it.
+        loop {
+            let paths = Self::watch_paths_for(
+                &self.inner.project_dir,
+                &self
+                    .inner
+                    .workspace_filter
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
+            let watcher = match FsWatcher::watch_paths(paths) {
+                Ok(w) => w,
+                Err(e) => {
+                    warn!(error = %e, "snapshot capture: failed to start fs-watch");
+                    return;
+                }
+            };
+            if self.watch_generation(&watcher, shutdown.as_mut()).await {
+                debug!("snapshot capture: watcher shutting down");
                 return;
             }
-        };
+        }
+    }
+
+    /// Drain one registration generation. Returns `true` when the service is
+    /// shutting down (stop for good), `false` when the filter changed and the
+    /// watch set must be rebuilt.
+    async fn watch_generation(
+        &self,
+        watcher: &FsWatcher,
+        mut shutdown: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
+    ) -> bool {
+        let refilter = self.inner.refilter.notified();
+        tokio::pin!(refilter);
         // Subscribe to the raw, un-debounced stream: the dirty set must
         // be current the instant a snapshot is requested, so we mark
         // paths dirty as soon as the OS reports them rather than after
         // a debounce window. The general-purpose `WorkspaceChanged`
         // feed (workspace_watch) is the one that debounces.
         let mut rx = watcher.subscribe();
-        // Park on the shutdown signal once, before the loop, so a
-        // `notify_one` that fires between iterations isn't missed. The
-        // pinned future is re-polled by each `select!`; `notify_one`'s
-        // stored permit also covers a shutdown that races ahead of the
-        // first poll.
-        let shutdown = self.inner.shutdown.notified();
-        tokio::pin!(shutdown);
         loop {
             tokio::select! {
                 _ = &mut shutdown => {
-                    debug!("snapshot capture: watcher shutting down");
-                    break;
+                    return true;
+                }
+                _ = &mut refilter => {
+                    debug!("snapshot capture: generated filter changed, re-registering watches");
+                    return false;
                 }
                 ev = rx.recv() => match ev {
                     Ok(event) => {
@@ -482,7 +571,7 @@ impl SnapshotCaptureService {
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "snapshot capture: fs-watch lagged");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return true,
                 },
             }
         }
@@ -1519,6 +1608,80 @@ mod tests {
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].storage, SnapshotStorage::Oxplow);
         assert!(svc.inner.blobs.has(dirty[0].blob_hash.as_ref().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn the_watch_set_skips_filtered_dirs_at_registration() {
+        // tsk206: the watcher must not REGISTER ignored dirs — filtering per
+        // delivered event still hands us every write under `target/` (345k files
+        // on this repo). Deterministic: asserts the computed path set, never an
+        // fs event (see the tsk175 timing-flake lesson).
+        let project = tempdir().unwrap();
+        for d in ["src", "build", "node_modules"] {
+            std::fs::create_dir(project.path().join(d)).unwrap();
+        }
+        std::fs::write(project.path().join("README.md"), b"x").unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+
+        let names = |paths: &[(PathBuf, oxplow_fs_watch::RecursiveMode)]| {
+            paths
+                .iter()
+                .filter_map(|(p, _)| p.file_name()?.to_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        };
+
+        // Nothing is hardcoded: with a default filter `build`/`node_modules` are
+        // ordinary dirs and ARE watched.
+        let default_set = SnapshotCaptureService::watch_paths_for(
+            project.path(),
+            &svc.inner.workspace_filter.read().unwrap(),
+        );
+        assert!(names(&default_set).contains(&"build".to_string()));
+        assert!(names(&default_set).contains(&"src".to_string()));
+
+        // The project's `generated` config is what prunes them.
+        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(["build", "node_modules"]);
+        let pruned = SnapshotCaptureService::watch_paths_for(project.path(), &filter);
+        let got = names(&pruned);
+        assert!(
+            !got.contains(&"build".to_string()),
+            "filtered dir not registered"
+        );
+        assert!(!got.contains(&"node_modules".to_string()));
+        assert!(got.contains(&"src".to_string()), "normal dir still watched");
+
+        // The root itself is always registered, and NON-recursively — otherwise
+        // the prune is pointless (a recursive root re-covers everything).
+        let root = pruned
+            .iter()
+            .find(|(p, _)| p == project.path())
+            .expect("project root registered");
+        assert!(
+            matches!(root.1, oxplow_fs_watch::RecursiveMode::NonRecursive),
+            "the root must be non-recursive or the prune buys nothing",
+        );
+        // …so a root-level file change is still seen.
+        assert!(pruned.iter().any(|(p, _)| p == project.path()));
+    }
+
+    #[tokio::test]
+    async fn setting_the_filter_signals_the_watcher_to_re_register() {
+        // tsk206: pruning at registration freezes the watch set, so the
+        // `set_generated` swap MUST wake the watcher — otherwise a newly
+        // INCLUDED dir would never be watched until restart, silently breaking
+        // that IPC's "without an app restart" contract.
+        let project = tempdir().unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+
+        // A waiter parked before the swap is released by it.
+        let notified = svc.inner.refilter.notified();
+        tokio::pin!(notified);
+        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
+            "build",
+        ]));
+        tokio::time::timeout(std::time::Duration::from_secs(5), notified)
+            .await
+            .expect("set_workspace_filter must signal the watcher to re-register");
     }
 
     #[tokio::test]

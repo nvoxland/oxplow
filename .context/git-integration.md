@@ -42,14 +42,21 @@ boot to seed its cache), registration is **scoped**:
 - A non-recursive watch on the worktree root, so top-level file
   changes and the appearance/disappearance of top-level dirs still
   fire.
-- One recursive watch per top-level directory **except** the names in
-  `EXCLUDED_TOP_LEVEL` (`.git`, `.oxplow`, `target`, `node_modules`).
+- One recursive watch per top-level directory the **`WorkspaceFilter`**
+  doesn't ignore (`filter.ignore(name, true)`).
 
-`is_uninteresting` still filters events from those dirs as a
-defence-in-depth step (and to drop swap/temp files), but the meaningful
-win is at registration: we never seed cache for the dirs we never
-care about. `EXCLUDED_TOP_LEVEL` is the single source of truth for
-both pieces.
+**Nothing here is a hardcoded path list.** `WorkspaceFilter`
+(`crates/oxplow-fs-watch`) is the single source of truth and layers, in
+order: `.git` (the only hardcoded segment — `DEFAULT_IGNORED_SEGMENTS`)
+and `.oxplow` defaults → `generated.include` (forces a path back in) →
+`generated.exclude` → **`.gitignore`**, root + nested, with full
+hierarchical semantics. `target/` and `node_modules/` are skipped
+because a Rust/JS repo gitignores them, not because we name them.
+
+A per-event filter check still runs as defence-in-depth (and to drop
+swap/temp files) — it also catches *nested* ignores inside a watched
+dir, which a top-level prune can't see. But the meaningful win is at
+registration: we never seed cache for dirs we never care about.
 
 Subscribes via the **debounced** view (`subscribe_debounced(250ms)`)
 and bridges each batch onto `OxplowEvent::WorkspaceChanged`. Consumed by:
@@ -62,6 +69,22 @@ file-tree current. Note that the snapshot dirty set is **not** fed from
 here — `SnapshotCaptureService` runs its own `FsWatcher` and subscribes
 to the *raw* (immediate) stream so the dirty set never lags a snapshot
 request (see the immediate-vs-debounced note above).
+
+**The snapshot watcher prunes the same way (tsk206), plus one wrinkle.**
+`SnapshotCaptureService::watch_paths_for` builds the identical scoped set
+(root non-recursive + non-ignored top-level dirs recursive). It used to
+register ONE recursive watch on the project root and filter per delivered
+event, which meant every write under `target/` (345k files here) was
+delivered and thrown away — any `cargo` build flooded it.
+
+The wrinkle: unlike the workspace watcher, this service's filter can be
+**swapped at runtime** by the `set_generated` IPC, whose documented
+contract is that include/exclude edits apply *without an app restart*.
+Since the watch SET is now derived from the filter, `set_workspace_filter`
+also fires a `refilter` notify and the watcher rebuilds its registration —
+otherwise a `generated.include` that un-ignores a directory would stay
+unwatched until restart. Events in the rebuild gap are dropped; a config
+edit is a deliberate user action and the next sweep/event covers it.
 
 ### 2. Git root watcher
 
