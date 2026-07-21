@@ -882,9 +882,10 @@ impl TaskService {
             match dual {
                 Ok(()) => {
                     if let Some(events) = self.events.as_ref() {
+                        // This path writes only `oxplow.effort_steering` (tsk207).
                         events.emit(OxplowEvent::MetricSamplesChanged {
                             stream_id: StreamId::new(stream_val),
-                            measures: Vec::new(), // fail-open (tsk198)
+                            measures: vec!["oxplow.effort_steering".to_string()],
                         });
                     }
                 }

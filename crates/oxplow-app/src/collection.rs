@@ -741,7 +741,7 @@ impl CollectionService {
                     capture_id = id;
                     self.events.emit(OxplowEvent::MetricSamplesChanged {
                         stream_id: oxplow_domain::StreamId::new(stream_val),
-                        measures: Vec::new(), // fail-open (tsk198)
+                        measures: self.measures_of(id).await, // tsk207
                     });
                 }
                 Err(e) => {
@@ -1016,6 +1016,20 @@ impl CollectionService {
         }
     }
 
+    /// The measure keys a just-written capture touched, for scoping
+    /// `MetricSamplesChanged` (tsk207). Best-effort by design: a `None` capture
+    /// or a lookup failure yields an empty list, which the event treats as
+    /// "unknown — refresh anyway". Never fails an ingest over a hint.
+    async fn measures_of(&self, capture_id: Option<i64>) -> Vec<String> {
+        let Some(id) = capture_id else {
+            return Vec::new();
+        };
+        self.facts
+            .measure_keys_for_capture(id)
+            .await
+            .unwrap_or_default()
+    }
+
     /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
     /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
     /// `metric_capture.detail_json`. The kind discriminates the three run
@@ -1143,9 +1157,7 @@ impl CollectionService {
             Ok(capture_id) => {
                 self.events.emit(OxplowEvent::MetricSamplesChanged {
                     stream_id: oxplow_domain::StreamId::new(stream_val),
-                    // Fail-open: this low-frequency site doesn't scope its
-                    // measures (tsk198) — an empty list means "refresh anyway".
-                    measures: Vec::new(),
+                    measures: self.measures_of(capture_id).await, // tsk207
                 });
                 capture_id
             }
@@ -1316,7 +1328,7 @@ impl CollectionService {
                     capture_id = id;
                     self.events.emit(OxplowEvent::MetricSamplesChanged {
                         stream_id: oxplow_domain::StreamId::new(stream_val),
-                        measures: Vec::new(), // fail-open (tsk198)
+                        measures: self.measures_of(id).await, // tsk207
                     });
                 }
                 Err(e) => {
@@ -1581,9 +1593,10 @@ impl CollectionService {
                 ..NewFact::new(waste_measure.id, spend)
             };
             self.facts.record_facts(capture, vec![fact]).await?;
+            // Single known measure — no lookup needed (tsk207).
             self.events.emit(OxplowEvent::MetricSamplesChanged {
                 stream_id: thread_row.stream_id,
-                measures: Vec::new(), // fail-open (tsk198)
+                measures: vec![waste_measure.key.clone()],
             });
         }
         Ok(())
@@ -1893,9 +1906,13 @@ impl CollectionService {
         }
         .await;
         match result {
+            // This path only ever writes `oxplow.nudge` (tsk207). Naming it when
+            // the measure was disabled and nothing landed just costs a nudge
+            // consumer one needless refresh — cheaper than threading the write
+            // result back out.
             Ok(()) => self.events.emit(OxplowEvent::MetricSamplesChanged {
                 stream_id: oxplow_domain::StreamId::new(stream_val),
-                measures: Vec::new(), // fail-open (tsk198)
+                measures: vec!["oxplow.nudge".to_string()],
             }),
             Err(e) => {
                 tracing::warn!(error = %e, "failed to project nudge into metric substrate")

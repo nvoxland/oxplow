@@ -189,8 +189,14 @@ welded to collection.
 >   its own `source_measure` skips an event whose measures it doesn't read — so a
 >   token export stops waking a coverage tile. **Fail-open both ways:** an empty
 >   event list (the low-frequency emit sites still send `vec![]`) or an
->   unscoped/formula consumer refreshes on anything. Only the two ~10s token emit
->   sites in `token_usage.rs` populate it today; the other 8 sites are follow-up.
+>   unscoped/formula consumer refreshes on anything. **All emit sites populate it**
+>   (tsk198 did the two ~10s token sites; tsk207 the remaining eight). Sites with a
+>   single known measure name it directly; multi-measure writers (the gauge sweep,
+>   the tests/coverage/analysis ingests) ask the capture they just wrote via
+>   `measure_keys_for_capture`, so no call site has to restructure to carry
+>   measures back out. An EMPTY capture still names nothing — correctly fail-open,
+>   since a capture with no facts can still move a series (supersede / zero-fill,
+>   tsk41/tsk44) in ways the facts can't reveal.
 >
 > **Bounded reads — Phase 1 (tsk202/tsk204).** The read shape is now windowable.
 > `list_metric_samples` / `metric_series` take `from_ms`/`to_ms` (IPC + MCP), and

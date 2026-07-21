@@ -1396,6 +1396,36 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The measure keys a capture's facts touched, sorted (tsk207).
+    ///
+    /// Lets a producer name the measures its write affected when emitting
+    /// `MetricSamplesChanged`, so a consumer can skip an event that cannot
+    /// affect it. Keyed on the capture (which every emit site already has after
+    /// `record_facts`) rather than on collected fact ids, so no call site has to
+    /// restructure to carry measures back out.
+    ///
+    /// An EMPTY capture yields an empty list — correctly fail-open: a capture
+    /// that emitted no facts can still change a series (the supersede /
+    /// zero-fill paths, tsk41/tsk44), and which measures those touch isn't
+    /// derivable from facts that don't exist.
+    pub async fn measure_keys_for_capture(
+        &self,
+        capture_id: i64,
+    ) -> Result<Vec<String>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT DISTINCT m.key FROM fact f
+                       JOIN measure m ON m.id = f.measure_id
+                      WHERE f.capture_id = ?1
+                      ORDER BY m.key",
+                )?;
+                let rows = stmt.query_map(params![capture_id], |r| r.get::<_, String>(0))?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// `(capture count, newest capture id)` over `producers` — a cheap freshness
     /// token for a memoized read of those producers' series (tsk205).
     ///
@@ -3631,6 +3661,47 @@ mod tests {
             .await
             .unwrap());
         assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+    }
+
+    /// tsk207: the measure keys an emit site names when scoping
+    /// `MetricSamplesChanged` come from the capture it just wrote.
+    #[tokio::test]
+    async fn measure_keys_for_capture_names_only_that_captures_measures() {
+        let store = fixture().await;
+        let a = measure(&store, "acme.alpha").await;
+        let b = measure(&store, "acme.beta").await;
+        let c = measure(&store, "acme.gamma").await;
+
+        let cap = store
+            .record_facts(
+                NewMetricCapture::done(1, "p", "s"),
+                vec![
+                    NewFact::new(a, 1.0),
+                    NewFact::new(b, 2.0),
+                    NewFact::new(a, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+        // Distinct + sorted, and a measure this capture didn't touch is absent.
+        assert_eq!(
+            store.measure_keys_for_capture(cap).await.unwrap(),
+            vec!["acme.alpha".to_string(), "acme.beta".to_string()],
+        );
+        let _ = c;
+
+        // An EMPTY capture names nothing — fail-open, since a capture with no
+        // facts can still move a series (supersede / zero-fill) in ways the
+        // facts can't reveal.
+        let empty = store
+            .record_facts(NewMetricCapture::done(1, "p2", "s"), Vec::new())
+            .await
+            .unwrap();
+        assert!(store
+            .measure_keys_for_capture(empty)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// tsk196. The cube's read cache keys on `cube_version`, so the version

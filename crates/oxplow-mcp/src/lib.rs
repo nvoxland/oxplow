@@ -2447,7 +2447,8 @@ impl OxplowMcp {
             .events
             .emit(oxplow_app::OxplowEvent::MetricSamplesChanged {
                 stream_id: stream,
-                measures: Vec::new(), // fail-open (tsk198)
+                // `record_metric` writes exactly one measure (tsk207).
+                measures: vec![measure.key.clone()],
             });
         json_result(
             &serde_json::json!({ "capture_id": capture_id, "key": p.key, "provenance": "asserted" }),

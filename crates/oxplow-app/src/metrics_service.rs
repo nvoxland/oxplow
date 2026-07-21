@@ -1826,13 +1826,21 @@ impl MetricsService {
                 source.to_string(),
             )
         };
-        if let Err(e) = facts.record_facts(capture, rows).await {
-            tracing::warn!(key = %gauge.key, error = %e, "gauge facts: record failed");
-            return 0;
-        }
+        let capture_id = match facts.record_facts(capture, rows).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(key = %gauge.key, error = %e, "gauge facts: record failed");
+                return 0;
+            }
+        };
+        // A gauge may write several measures; ask the capture what it touched
+        // (tsk207). Best-effort — a lookup failure just falls open.
         self.events.emit(OxplowEvent::MetricSamplesChanged {
             stream_id: StreamId::new(ctx.stream_val),
-            measures: Vec::new(), // fail-open (tsk198)
+            measures: facts
+                .measure_keys_for_capture(capture_id)
+                .await
+                .unwrap_or_default(),
         });
         count
     }
@@ -2410,6 +2418,56 @@ def transform(input):
     }
 
     #[tokio::test]
+    async fn a_gauge_run_emits_an_event_scoped_to_the_measures_it_wrote() {
+        // tsk207: the low-frequency emit sites now NAME their measures, so a
+        // gauge sweep only wakes views reading those measures instead of every
+        // metric view. End-to-end through the real gauge path.
+        let (svc, _dir) = fixture().await;
+        svc.metrics.seed_catalog().await;
+        let mut rx = svc.events.subscribe();
+        let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
+        let s1 =
+            snapshot_with_files(&svc, &[("src/a.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
+        let dirty = HashMap::from([(
+            "src/a.rs".to_string(),
+            "fn a() { unsafe { x(); } }".to_string(),
+        )]);
+        svc.metrics
+            .run_one_gauge(
+                &gauge,
+                &GaugeRunContext {
+                    stream_val: 1,
+                    thread_id: None,
+                    trigger: "on-snapshot",
+                    snapshot_id: Some(s1),
+                    closest_git_version: None,
+                    git_version_exact: false,
+                    branch: None,
+                    effort_id: None,
+                    scan_kind: "delta",
+                },
+                Arc::new(dirty),
+            )
+            .await;
+
+        let measures = loop {
+            match rx.try_recv() {
+                Ok(OxplowEvent::MetricSamplesChanged { measures, .. }) => break measures,
+                Ok(_) => continue,
+                Err(e) => panic!("expected a MetricSamplesChanged: {e:?}"),
+            }
+        };
+        assert!(
+            !measures.is_empty(),
+            "the gauge emit must name its measures, not fall open",
+        );
+        assert!(
+            measures.iter().all(|m| m.starts_with("oxplow.")),
+            "got {measures:?}",
+        );
+    }
+
+    #[tokio::test]
     async fn rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero() {
         // tsk44's promise ("fixing the last offender must show") under per-path
         // capture scope (tsk41). "Fixed" is expressed by RESCANNING the file with
@@ -2418,6 +2476,7 @@ def transform(input):
         // Note the gauge still skips the zero (`if c > 0:`); the scanned set comes
         // from the SNAPSHOT, which is exactly why no zero-emission convention is
         // needed.
+        // (See also `a_gauge_run_emits_an_event_scoped_to_the_measures_it_wrote`.)
         let (svc, _dir) = fixture().await;
         svc.metrics.seed_catalog().await;
         let gauge = builtin_gauge_fixture("oxplow.rust.unsafe_blocks");
