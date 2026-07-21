@@ -848,6 +848,8 @@ mod tests {
             agent_prompt_append: String::new(),
             snapshot_retention_days: 7,
             metric_retention_days: 0,
+            metric_detail_max_per_producer: 100,
+            metric_detail_retention_days: 30,
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
             inject_session_context: true,

@@ -2357,6 +2357,23 @@ export type OxplowConfig = {
 	 */
 	metricRetentionDays: number,
 	/**
+	 *  Keep the per-run `detail_json` drill-in payload for only the newest N
+	 *  captures **per producer**; older ones are compacted (the payload is
+	 *  nulled, the capture and all its facts stay). `0` disables the cap.
+	 * 
+	 *  This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
+	 *  coverage run, so age alone never catches up with a repo that runs tests
+	 *  dozens of times a day (tsk211). Compaction never changes a metric value
+	 *  — only the effort Tests/Coverage panel's detail for old runs is lost.
+	 */
+	metricDetailMaxPerProducer: number,
+	/**
+	 *  Compact `detail_json` older than this many days. `0` disables it.
+	 *  Complements [`Self::metric_detail_max_per_producer`]: the count cap
+	 *  bounds a busy repo, this reaches a project that has gone quiet.
+	 */
+	metricDetailRetentionDays: number,
+	/**
 	 *  Extra `exclude`/`include` paths layered on top of `.gitignore`
 	 *  for fs-watch / snapshot capture / code-quality scans. `.git`,
 	 *  `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)

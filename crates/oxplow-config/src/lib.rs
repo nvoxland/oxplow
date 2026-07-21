@@ -56,6 +56,12 @@ const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
 /// what makes the fact substrate worth having, and ~420k facts read fine. The
 /// knob exists so growth can be bounded later without a code change.
 const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
+/// Detail COMPACTION, unlike capture pruning, is on by default (tsk211): it
+/// drops only the per-run drill-in payload, never a fact, so no metric value or
+/// trend point changes. ~0.5 MB per coverage run made `detail_json` 200 MB of a
+/// 795 MB database in under three weeks of heavy use.
+const DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER: u32 = 100;
+const DEFAULT_METRIC_DETAIL_RETENTION_DAYS: u32 = 30;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
@@ -551,6 +557,21 @@ pub struct OxplowConfig {
     /// flakiness horizon for bounded growth, so it is strictly opt-in.
     #[serde(rename = "metricRetentionDays")]
     pub metric_retention_days: u32,
+    /// Keep the per-run `detail_json` drill-in payload for only the newest N
+    /// captures **per producer**; older ones are compacted (the payload is
+    /// nulled, the capture and all its facts stay). `0` disables the cap.
+    ///
+    /// This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
+    /// coverage run, so age alone never catches up with a repo that runs tests
+    /// dozens of times a day (tsk211). Compaction never changes a metric value
+    /// — only the effort Tests/Coverage panel's detail for old runs is lost.
+    #[serde(rename = "metricDetailMaxPerProducer")]
+    pub metric_detail_max_per_producer: u32,
+    /// Compact `detail_json` older than this many days. `0` disables it.
+    /// Complements [`Self::metric_detail_max_per_producer`]: the count cap
+    /// bounds a busy repo, this reaches a project that has gone quiet.
+    #[serde(rename = "metricDetailRetentionDays")]
+    pub metric_detail_retention_days: u32,
     /// Extra `exclude`/`include` paths layered on top of `.gitignore`
     /// for fs-watch / snapshot capture / code-quality scans. `.git`,
     /// `.oxplow`, and everything in `.gitignore` (+ `.git/info/exclude`)
@@ -638,6 +659,10 @@ struct RawConfig {
     snapshot_retention_days: Option<f64>,
     #[serde(rename = "metricRetentionDays", default)]
     metric_retention_days: Option<f64>,
+    #[serde(rename = "metricDetailMaxPerProducer", default)]
+    metric_detail_max_per_producer: Option<f64>,
+    #[serde(rename = "metricDetailRetentionDays", default)]
+    metric_detail_retention_days: Option<f64>,
     #[serde(rename = "generated", default)]
     generated: Option<RawGenerated>,
     #[serde(rename = "snapshotMaxFileBytes", default)]
@@ -851,6 +876,18 @@ pub fn write_project_config(
         doc.insert(
             "metricRetentionDays".into(),
             config.metric_retention_days.into(),
+        );
+    }
+    if config.metric_detail_max_per_producer != DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER {
+        doc.insert(
+            "metricDetailMaxPerProducer".into(),
+            config.metric_detail_max_per_producer.into(),
+        );
+    }
+    if config.metric_detail_retention_days != DEFAULT_METRIC_DETAIL_RETENTION_DAYS {
+        doc.insert(
+            "metricDetailRetentionDays".into(),
+            config.metric_detail_retention_days.into(),
         );
     }
     if !config.generated.exclude.is_empty() || !config.generated.include.is_empty() {
@@ -1238,6 +1275,8 @@ fn default_config(project_name: String) -> OxplowConfig {
         agent_prompt_append: String::new(),
         snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
         metric_retention_days: DEFAULT_METRIC_RETENTION_DAYS,
+        metric_detail_max_per_producer: DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
+        metric_detail_retention_days: DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
@@ -1294,6 +1333,24 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         }
         Some(n) => n as u32,
         None => DEFAULT_METRIC_RETENTION_DAYS,
+    };
+    let metric_detail_max_per_producer = match raw.metric_detail_max_per_producer {
+        Some(n) if !n.is_finite() || n < 0.0 => {
+            return Err(ConfigError::Invalid(
+                "metricDetailMaxPerProducer must be a non-negative number".into(),
+            ));
+        }
+        Some(n) => n as u32,
+        None => DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
+    };
+    let metric_detail_retention_days = match raw.metric_detail_retention_days {
+        Some(n) if !n.is_finite() || n < 0.0 => {
+            return Err(ConfigError::Invalid(
+                "metricDetailRetentionDays must be a non-negative number".into(),
+            ));
+        }
+        Some(n) => n as u32,
+        None => DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
     };
 
     let generated = match raw.generated {
@@ -1386,6 +1443,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         agent_prompt_append,
         snapshot_retention_days,
         metric_retention_days,
+        metric_detail_max_per_producer,
+        metric_detail_retention_days,
         generated,
         snapshot_max_file_bytes,
         inject_session_context,

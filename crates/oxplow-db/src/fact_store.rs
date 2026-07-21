@@ -1396,6 +1396,64 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Compact old per-run drill-in payloads: `NULL` out `detail_json` for
+    /// captures beyond either retention bound. Returns the number compacted.
+    ///
+    /// **Compaction, not deletion (tsk211).** The capture row and every one of
+    /// its facts survive, so no metric value, trend point, or count changes —
+    /// only `list_effort_observations`' Tests/Coverage detail for old runs is
+    /// lost. That is why this is safe to have ON by default, unlike
+    /// `prune_aged_captures` (which deletes facts and stays opt-in).
+    ///
+    /// Two bounds, applied together — a capture is compacted if EITHER matches:
+    /// - `max_per_producer`: keep detail only for the newest N captures of each
+    ///   producer. The bound that actually holds a busy repo, where the payload
+    ///   is ~0.5 MB per coverage run and age never catches up.
+    /// - `older_than`: keep detail only for captures at/after this timestamp.
+    ///   Reaches a project that has gone quiet, which a count cap never does.
+    ///
+    /// `None` disables that bound. Dedup is unaffected: `idempotency_key` is
+    /// derived from `detail_json` at WRITE time and stored in its own column,
+    /// so a replayed report still matches after the payload is gone.
+    pub async fn compact_capture_details(
+        &self,
+        older_than: Option<Timestamp>,
+        max_per_producer: Option<u32>,
+    ) -> Result<u64, DomainError> {
+        if older_than.is_none() && max_per_producer.is_none() {
+            return Ok(0);
+        }
+        let cutoff = older_than.map(ts_to_string);
+        let keep = max_per_producer.map(|n| n as i64);
+        self.db
+            .call(move |conn| {
+                // One statement, both bounds. `ROW_NUMBER` ranks each producer's
+                // captures newest-first so the count cap is per producer rather
+                // than global — a chatty producer must not evict a quiet one's
+                // detail.
+                let n = conn.execute(
+                    "UPDATE metric_capture SET detail_json = NULL
+                      WHERE detail_json IS NOT NULL
+                        AND id IN (
+                          SELECT id FROM (
+                            SELECT id, captured_at,
+                                   ROW_NUMBER() OVER (
+                                     PARTITION BY producer
+                                     ORDER BY captured_at DESC, id DESC
+                                   ) AS rn
+                              FROM metric_capture
+                             WHERE detail_json IS NOT NULL
+                          )
+                          WHERE (?1 IS NOT NULL AND rn > ?1)
+                             OR (?2 IS NOT NULL AND captured_at < ?2)
+                        )",
+                    params![keep, cutoff],
+                )?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
     /// The measure keys a capture's facts touched, sorted (tsk207).
     ///
     /// Lets a producer name the measures its write affected when emitting
@@ -3661,6 +3719,74 @@ mod tests {
             .await
             .unwrap());
         assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+    }
+
+    /// tsk211: compaction must bound `detail_json` growth WITHOUT touching a
+    /// single metric value — that property is what lets it default to ON.
+    #[tokio::test]
+    async fn compacting_details_keeps_the_newest_per_producer_and_never_drops_a_fact() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.m").await;
+        let mut ids = Vec::new();
+        // Two producers, 4 captures each, oldest → newest.
+        for h in 0..4 {
+            for p in ["tests", "coverage"] {
+                let mut cap = NewMetricCapture::done(1, p, "s");
+                cap.captured_at = Some(at(&format!("2026-06-{:02}T10:00:00.000000Z", 10 + h)));
+                cap.detail_json = Some(format!(r#"{{"kind":"{p}-detail","h":{h}}}"#));
+                ids.push((
+                    p,
+                    h,
+                    store
+                        .record_facts(cap, vec![NewFact::new(m, 1.0)])
+                        .await
+                        .unwrap(),
+                ));
+            }
+        }
+        let facts_before = store.facts_for_measure(m).await.unwrap().len();
+
+        // Keep the newest 2 per producer: 2 of each producer's 4 are compacted.
+        let n = store.compact_capture_details(None, Some(2)).await.unwrap();
+        assert_eq!(n, 4, "2 stale captures for each of the 2 producers");
+
+        for (p, h, id) in &ids {
+            let cap = store.get_capture(*id).await.unwrap().unwrap();
+            let kept = *h >= 2; // newest two hours per producer
+            assert_eq!(
+                cap.detail_json.is_some(),
+                kept,
+                "producer {p} hour {h}: detail retention",
+            );
+            // The capture itself always survives — this is compaction.
+            assert_eq!(cap.producer, *p);
+        }
+        assert_eq!(
+            store.facts_for_measure(m).await.unwrap().len(),
+            facts_before,
+            "compaction must never delete a fact — no metric value may change",
+        );
+
+        // Re-running is a no-op (nothing left to compact at this bound).
+        assert_eq!(
+            store.compact_capture_details(None, Some(2)).await.unwrap(),
+            0
+        );
+
+        // The age bound reaches the rest.
+        let n = store
+            .compact_capture_details(Some(at("2026-06-14T00:00:00.000000Z")), None)
+            .await
+            .unwrap();
+        assert_eq!(n, 4, "the remaining 4 are all older than the cutoff");
+        assert_eq!(
+            store.facts_for_measure(m).await.unwrap().len(),
+            facts_before,
+            "still no fact lost",
+        );
+
+        // Both bounds disabled = explicit no-op, not "compact everything".
+        assert_eq!(store.compact_capture_details(None, None).await.unwrap(), 0);
     }
 
     /// tsk207: the measure keys an emit site names when scoping

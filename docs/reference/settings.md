@@ -139,6 +139,8 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `projectName` | the directory name | Display name for the project. |
 | `snapshotRetentionDays` | `7` | Days to keep snapshot *content*. `0` disables expiry entirely. |
 | `metricRetentionDays` | `0` | Days to keep raw metric facts. `0` means **keep everything** — pruning is opt-in. |
+| `metricDetailMaxPerProducer` | `100` | Keep each run's drill-in payload (`detail_json`) for only the newest N runs *per producer*. `0` disables the cap. |
+| `metricDetailRetentionDays` | `30` | Also drop drill-in payloads older than this many days. `0` disables. |
 | `snapshotMaxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
 | `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
 | `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
@@ -149,6 +151,29 @@ The four metric blocks — `measures`, `gauges`, `metrics`, and
 `dimensions` — are covered in [Metrics](../guide/metrics.md), which
 also explains why you normally let the agent write them rather than
 editing them by hand.
+
+### Metric retention vs. detail compaction
+
+These two do different things, which is why their defaults differ.
+
+`metricRetentionDays` **deletes** old captures, and their facts go with
+them — so a metric's history gets shorter. That's a real trade
+(per-test drill-down, flakiness horizon), so it defaults to `0` = keep
+everything and you opt in.
+
+`metricDetailMaxPerProducer` / `metricDetailRetentionDays` only
+**compact**: they null out a run's `detail_json` — the verbatim payload
+behind the effort Tests/Coverage panel — while the capture and every one
+of its facts stay. No metric value, trend point, or count ever changes,
+which is why compaction is on by default. All you lose is the ability to
+drill into an *old* run's per-file/per-test detail.
+
+The count cap is the one that matters on a busy repo. That payload runs
+~0.5 MB per coverage run, so a project running tests dozens of times a
+day accumulates hundreds of MB in weeks — faster than any age window
+catches up with. The age bound is the complement: it reaches a project
+that has gone quiet, which a count cap never does. Set either to `0` to
+disable it; a capture is compacted if *either* bound matches.
 
 ### Generated paths
 

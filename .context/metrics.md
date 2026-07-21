@@ -355,6 +355,26 @@ welded to collection.
   the trade is explicit: series/drill-down/flakiness history beyond the
   window is gone. Turning the knob is watching-and-deciding territory, not a
   default.
+  >
+  > **Detail COMPACTION is the on-by-default sibling (tsk211).** Distinct from
+  > the prune above: `compact_capture_details` only NULLs `metric_capture.
+  > detail_json` — the verbatim per-run payload behind `list_effort_observations`'
+  > Tests/Coverage panel. The capture row and every fact survive, so no metric
+  > value, trend point or count can change; that is exactly why it defaults ON
+  > while the fact-deleting prune stays opt-in. Dedup is unaffected —
+  > `idempotency_key` is derived from `detail_json` at WRITE time into its own
+  > column, so a replayed report still matches after the payload is gone.
+  >
+  > Two bounds, either of which compacts a capture:
+  > `metricDetailMaxPerProducer` (default 100) keeps detail for the newest N
+  > captures PER PRODUCER, and `metricDetailRetentionDays` (default 30) drops it
+  > by age. The count cap is the one that bounds a busy repo — measured here,
+  > `detail_json` was **200 MB of a 795 MB database** (`tests` 103 MB, `coverage`
+  > 97 MB at ~0.5 MB/run) accumulated in under three weeks, while **nothing was
+  > older than 30 days**. Age alone would have reclaimed zero. Both run in the
+  > same daily `boot.rs` loop as the prune, but independently of it — the loop
+  > used to be gated on `metricRetentionDays > 0`, which would have disabled
+  > compaction for everyone.
   > **Stamp `closest_git_version` on every capture you add (tsk95).** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
   > reads `git_version_exact = true`, otherwise it falls back to HEAD with

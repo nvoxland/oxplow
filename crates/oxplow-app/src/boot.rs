@@ -169,6 +169,39 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                         Err(e) => tracing::warn!(error = %e, "metric retention pass failed"),
                     }
                 }
+                // Detail compaction (tsk211) runs INDEPENDENTLY of the prune
+                // above: it is on by default, because nulling a drill-in payload
+                // can't change a metric value, whereas the prune deletes facts
+                // and stays opt-in. `detail_json` was 200 MB of a 795 MB DB here
+                // after three weeks — ~0.5 MB per coverage run.
+                let (keep, detail_days) = config
+                    .read()
+                    .map(|c| {
+                        (
+                            c.metric_detail_max_per_producer,
+                            c.metric_detail_retention_days,
+                        )
+                    })
+                    .unwrap_or((0, 0));
+                let detail_cutoff = (detail_days > 0).then(|| {
+                    oxplow_domain::Timestamp::from_unix_ms(
+                        oxplow_domain::Timestamp::now().unix_ms()
+                            - (detail_days as i64) * 86_400_000,
+                    )
+                });
+                match facts
+                    .compact_capture_details(detail_cutoff, (keep > 0).then_some(keep))
+                    .await
+                {
+                    Ok(n) if n > 0 => tracing::info!(
+                        compacted = n,
+                        keep_per_producer = keep,
+                        days = detail_days,
+                        "metric detail compaction pass"
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "metric detail compaction failed"),
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
             }
         });
