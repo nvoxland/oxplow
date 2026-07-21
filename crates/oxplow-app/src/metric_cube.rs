@@ -36,8 +36,8 @@ use tokio::sync::broadcast;
 
 use crate::events::OxplowEvent;
 use crate::metric_engine::{
-    dim_value, fold_key, parse_capture_scope, ratio_empty, splice_zero_points, Aggregation,
-    CaptureScope, Cell, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
+    dim_value_cached, fold_key, parse_capture_scope, ratio_empty, splice_zero_points, Aggregation,
+    CaptureScope, Cell, DimsCache, FactFilter, SeriesPoint, Visibility, SCALAR_SUBJECT,
 };
 
 /// Folds a measure's captures into `metric_cube`, incrementally from the
@@ -70,9 +70,13 @@ type LivePartition = HashMap<(String, String), Vec<FactRow>>;
 /// PRIMARY KEY, so an unstable field order would write the same logical bucket
 /// under two keys and double-count it on merge.
 fn dims_key(f: &FactRow, promoted: &[String]) -> String {
+    // ONE `dims_json` parse for the whole promoted set (tsk214). Most promoted
+    // dims are JSON-backed, so a cache per dim meant re-parsing the same string
+    // once per dim, per fact, per capture — the bulk of `dim_value`'s 11.5%.
+    let mut dims = DimsCache::default();
     let map: BTreeMap<&str, String> = promoted
         .iter()
-        .filter_map(|d| dim_value(f, d).map(|v| (d.as_str(), v)))
+        .filter_map(|d| dim_value_cached(f, d, &mut dims).map(|v| (d.as_str(), v)))
         .collect();
     serde_json::to_string(&map).unwrap_or_else(|_| "{}".into())
 }

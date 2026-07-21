@@ -359,6 +359,35 @@ fn package_of(path: &str) -> String {
 /// columns for those keys, `package` derived from the path, otherwise the
 /// `dims_json` entry under the (namespaced) dimension key.
 pub(crate) fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
+    dim_value_cached(f, dimension, &mut DimsCache::default())
+}
+
+/// A fact's `dims_json`, parsed **at most once** and reused across that fact's
+/// dimension lookups (tsk214).
+///
+/// Without this, resolving N JSON-backed dimensions for one fact meant N full
+/// `serde_json` parses of the same string, each allocating a map to read a
+/// single key. `dims_key` does exactly that — once per promoted dim, over every
+/// live fact, for every capture — which made `dim_value` 11.5% of on-CPU time
+/// in the tsk208 profile. Column- and spine-backed dims never touch the JSON at
+/// all, so a cache that only materializes on first JSON-backed lookup costs
+/// nothing on the cheap paths.
+#[derive(Default)]
+pub(crate) struct DimsCache(Option<Option<serde_json::Map<String, serde_json::Value>>>);
+
+impl DimsCache {
+    fn get(&mut self, f: &FactRow) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.0.get_or_insert_with(|| parse_dims(f)).as_ref()
+    }
+}
+
+/// [`dim_value`] against a caller-owned [`DimsCache`], so a caller resolving
+/// several dimensions for the SAME fact pays one parse instead of one per dim.
+pub(crate) fn dim_value_cached(
+    f: &FactRow,
+    dimension: &str,
+    dims: &mut DimsCache,
+) -> Option<String> {
     match dimension {
         "oxplow.severity" => f.severity.clone(),
         "oxplow.rule" => f.rule.clone(),
@@ -376,20 +405,20 @@ pub(crate) fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
         // before the gauge scripts namespaced their dims carry bare
         // `language` — both request forms read both fact vintages.
         "oxplow.language" | "language" => {
-            // Parse `dims_json` ONCE, then read whichever key vintage is present
-            // (conformed `oxplow.language` V43, or the pre-rename bare
-            // `language`) — was two parses of the same string (tsk17).
-            let dims = parse_dims(f)?;
-            dim_from_map(&dims, "oxplow.language").or_else(|| dim_from_map(&dims, "language"))
+            // Read whichever key vintage is present (conformed `oxplow.language`
+            // V43, or the pre-rename bare `language`) off the one parse — this
+            // was two parses of the same string before tsk17.
+            let dims = dims.get(f)?;
+            dim_from_map(dims, "oxplow.language").or_else(|| dim_from_map(dims, "language"))
         }
         "subject" => f.subject_ref.clone(),
         "oxplow.model" | "model" => match &f.subject_ref {
             Some(s) if f.subject_kind.as_deref() == Some("model") => {
                 Some(s.strip_prefix("model:").unwrap_or(s).to_string())
             }
-            _ => parse_dims(f).and_then(|d| dim_from_map(&d, "oxplow.model")),
+            _ => dims.get(f).and_then(|d| dim_from_map(d, "oxplow.model")),
         },
-        key => parse_dims(f).and_then(|d| dim_from_map(&d, key)),
+        key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
 }
 
