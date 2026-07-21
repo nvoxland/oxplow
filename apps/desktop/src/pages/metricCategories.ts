@@ -1,4 +1,4 @@
-// Shared category grouping for the metric pages (Catalog + Recorded Metrics):
+// Shared category grouping for the metric pages (Catalog + Metrics):
 // one display order + label set, and a generic group-by-category so both pages
 // organize metrics the same way. Pure — no React, unit-testable.
 
@@ -70,7 +70,7 @@ export type MetricSection<T> = {
 };
 
 /**
- * The section list Recorded Metrics renders. Sections ALPHABETICAL
+ * The section list Metrics renders. Sections ALPHABETICAL
  * by label, **except that `static-quality`** gets no section of its own: its real
  * top-level division is by language, so each language is promoted to a top-level
  * section (a peer of Tests / Coverage / Operational) and the language-agnostic

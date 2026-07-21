@@ -120,7 +120,7 @@ import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { UsagePage } from "./pages/UsagePage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
-import { RecordedMetricsPage } from "./pages/RecordedMetricsPage.js";
+import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
@@ -2774,7 +2774,7 @@ export function App() {
           id: ref.id,
           label: "Metrics",
           closable: true,
-          render: () => <RecordedMetricsPage onOpenPage={navOpen} />,
+          render: () => <MetricsPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "metric-detail") {
         // `metricRef(key, effort)` deep-links into one metric's detail page

@@ -91,7 +91,7 @@ export const CHART_MODES: Array<{ key: ChartMode; label: string }> = [
 ];
 
 /** Y-axis scaling. `auto` fits the data (+ target) with padding — the same
- *  data-relative scaling the Recorded Metrics sparkline uses, so a metric whose
+ *  data-relative scaling the Metrics sparkline uses, so a metric whose
  *  variation is small relative to its value (avg complexity ~1.96, coverage
  *  ~98%) still shows its trend instead of a flat line pinned near the top.
  *  `zero` forces the axis through 0 (honest about absolute magnitude). */

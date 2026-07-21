@@ -1,4 +1,4 @@
-// Row filtering for the Recorded Metrics page (tsk87). Pure — React-free.
+// Row filtering for the Metrics page (tsk87). Pure — React-free.
 
 import type { TabRef } from "../tabs/tabState.js";
 
@@ -26,7 +26,7 @@ export const SHOW_MODES: ReadonlyArray<{ key: ShowMode; label: string }> = [
  *  The two compose — a search never resurfaces a disabled metric while the mode
  *  is `enabled`. **`off-target` narrows the same way `enabled` does here** (only
  *  enabled rows + query): filterMetricRows can't see values, so
- *  RecordedMetricsPage applies the value-based `isOffTarget` test afterwards,
+ *  MetricsPage applies the value-based `isOffTarget` test afterwards,
  *  against each row's latest value within the selected range/branch window. */
 export function filterMetricRows<T extends { key: string; title: string; enabled: boolean }>(
   rows: readonly T[],
@@ -81,7 +81,7 @@ export function isOffTarget(def: StatusSpec | null, value: number): boolean {
  *  {@link metricStatus}. `undefined` when there's no threshold to judge by.
  *
  *  Lives here, next to the classifier, because more than one surface paints
- *  this: the Recorded Metrics rows and the dashboard tiles' off-target
+ *  this: the Metrics rows and the dashboard tiles' off-target
  *  highlight (tsk149). Keeping the mapping in one place is the same rule the
  *  classifier itself follows — a second copy would let two surfaces disagree
  *  about what "off target" looks like. */

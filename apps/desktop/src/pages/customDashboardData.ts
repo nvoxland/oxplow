@@ -214,7 +214,7 @@ export function deltaTone(delta: number, direction: string): "good" | "bad" | "n
 }
 
 // NOTE: an earlier revision defined its own `CATEGORY_ORDER` + `buildAddMetricMenu`
-// here, which grouped metrics differently from the Recorded Metrics page. Metric
+// here, which grouped metrics differently from the Metrics page. Metric
 // sectioning has exactly one home — `buildMetricSections` in
 // `pages/metricCategories.ts` — and the picker now goes through it via
 // `components/Dashboard/metricPicker.ts` (tsk145). Don't reintroduce a local

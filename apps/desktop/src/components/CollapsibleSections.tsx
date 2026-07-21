@@ -143,7 +143,7 @@ export function CollapsibleSections({
 
 /**
  * The "Expand all" / "Collapse all" pair. Rendered wherever the page wants it —
- * on Recorded Metrics that's the details rail beside the filters (tsk86) — and
+ * on Metrics that's the details rail beside the filters (tsk86) — and
  * self-hides when no sections are registered (loading / empty state), rather
  * than showing two dead buttons.
  */

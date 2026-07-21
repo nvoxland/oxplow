@@ -7,7 +7,7 @@ import {
   isOffTarget,
   metricStatus,
   metricSiblings,
-} from "./recordedMetricsRows.js";
+} from "./metricsRows.js";
 
 const row = (key: string, enabled: boolean, title = key) => ({ key, title, enabled });
 
@@ -45,7 +45,7 @@ describe("filterMetricRows", () => {
 
   it("off-target mode keeps only enabled rows, like `enabled` (the value test is the page's job)", () => {
     // filterMetricRows can't see values; it narrows to the enabled set + query,
-    // and RecordedMetricsPage then drops the on-target rows via isOffTarget.
+    // and MetricsPage then drops the on-target rows via isOffTarget.
     expect(filterMetricRows(ROWS, "off-target", "").map((r) => r.key)).toEqual([
       "oxplow.rust.unsafe_blocks",
       "oxplow.tests.failed",

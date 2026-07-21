@@ -11,7 +11,7 @@ import { type MetricSection, buildMetricSections } from "../../pages/metricCateg
  * Sectioning delegates to {@link buildMetricSections} — the project's **one**
  * metric sectioning rule (see `pages/metricCategories.ts`). An earlier revision
  * of this picker carried its own category table and consequently grouped
- * metrics differently from the Recorded Metrics page: that is exactly the drift
+ * metrics differently from the Metrics page: that is exactly the drift
  * `buildMetricSections`'s doc comment warns about, so do not reintroduce a local
  * copy here. Notably it splits `static-quality` into per-language sections,
  * which is also what keeps the list navigable.

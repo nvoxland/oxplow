@@ -12,7 +12,7 @@ const PANEL_MAX_H = 460;
  *
  * Replaces a nested context menu: ~60 metrics in submenus overflowed the
  * viewport and couldn't be searched. Sections come from the canonical
- * {@link pickerSections} (same grouping as the Recorded Metrics page).
+ * {@link pickerSections} (same grouping as the Metrics page).
  *
  * Interaction: the search input takes focus on open; ↑/↓ walk the flattened row
  * list and Enter adds the highlighted metric; Escape or a click outside closes.

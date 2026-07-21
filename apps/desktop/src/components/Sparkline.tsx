@@ -1,6 +1,6 @@
 /**
  * Bare trend line — no axes, labels, or interaction. Lifted out of
- * `RecordedMetricsPage` when dashboard tiles needed the same mark (tsk142); the
+ * `MetricsPage` when dashboard tiles needed the same mark (tsk142); the
  * 90×22 default keeps the metrics-list rows pixel-identical to before.
  *
  * `responsive` swaps the fixed width for a viewBox that scales to the

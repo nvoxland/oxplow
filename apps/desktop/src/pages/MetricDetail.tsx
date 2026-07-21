@@ -42,8 +42,8 @@ import {
 // Every number on this page goes through the SHARED formatter (tsk183) — the
 // rule in `.context/usability.md`. The local implementation this replaces did
 // `toFixed(2)` with no locale grouping, no compaction, and no `ms`/`%`
-// handling, so the same metric read one way here and another on Recorded
-// Metrics (which always used the shared one). `unit` is optional only because a
+// handling, so the same metric read one way here and another on Metrics
+// (which always used the shared one). `unit` is optional only because a
 // few call sites genuinely lack it in scope; pass it wherever you have it.
 function fmt(v: number, unit?: string | null): string {
   return formatMetricValue(v, unit);

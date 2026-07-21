@@ -32,7 +32,7 @@ import {
   resolveGroupFilter,
   resolveTileWindow,
 } from "../../pages/customDashboardData.js";
-import { metricStatus, metricStatusColor } from "../../pages/recordedMetricsRows.js";
+import { metricStatus, metricStatusColor } from "../../pages/metricsRows.js";
 import type { MenuItem } from "../../menu.js";
 import { Sparkline } from "../Sparkline.js";
 import { useContextMenu } from "../useRowContextMenu.js";
@@ -49,8 +49,8 @@ const BAR_ROWS = 6;
 
 /** Tile headline numbers go through the SHARED formatter (tsk183). The local
  *  implementation this replaces compacted at 1k where the shared one compacts
- *  at 10k, so the same metric read `1.2k` on a tile and `1,234` on Recorded
- *  Metrics — the inconsistency the one-formatter rule exists to prevent.
+ *  at 10k, so the same metric read `1.2k` on a tile and `1,234` on Metrics —
+ *  the inconsistency the one-formatter rule exists to prevent.
  *
  *  No `unit` is passed: this tile renders `def.unit` in its own span beside the
  *  number, so letting the formatter append it too would read "1.2k tokens
@@ -421,7 +421,7 @@ export function MetricTile({
 
   // Off-target highlight (tsk149). Uses the project's ONE classifier
   // (`metricStatus`) and its shared color mapping, so a tile can't disagree
-  // with the Recorded Metrics page or its Off-target filter about a verdict.
+  // with the Metrics page or its Off-target filter about a verdict.
   // Defaults on: it only fires for a metric that HAS a target and is missing
   // it, so it stays silent for the many metrics with no target at all.
   const alertEnabled = opts.alertOffTarget ?? true;

@@ -39,13 +39,13 @@ import {
   metricStatus,
   metricStatusColor,
   metricSiblings,
-} from "./recordedMetricsRows.js";
+} from "./metricsRows.js";
 import {
   DEFAULT_LINE_STAT,
   LINE_STATS,
   type LineStat,
   lineStatValue,
-} from "./recordedMetricsStat.js";
+} from "./metricsStat.js";
 
 /** One listed metric. Identity/enabled/grouping come from the **catalog** (the
  *  only source that knows about `use:`); `def` is the seeded spec, which carries
@@ -69,7 +69,7 @@ const SAMPLE_LIMIT = 200;
 /** Color a value against the metric's `target`/`fail_at` + `direction` — the
  *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). The
  *  mapping now lives beside the `metricStatus` classifier it delegates to
- *  (`recordedMetricsRows.ts`), so this page and the dashboard tiles' off-target
+ *  (`metricsRows.ts`), so this page and the dashboard tiles' off-target
  *  highlight paint the same verdict the same way (tsk149). */
 const statusColor = metricStatusColor;
 
@@ -86,7 +86,7 @@ function changeColor(def: MetricSpec | null, delta: number | null): string | und
 /** One metric row: title · trend sparkline · the rail-selected stat. A `<tr>`
  *  that adopts browser-style click via `useRouteDispatch` (plain → detail
  *  in-tab, modifier/middle/right → new tab). */
-function RecordedRow({
+function MetricRow({
   row,
   stat,
   onOpenPage,
@@ -144,7 +144,7 @@ function RecordedRow({
 const sel = { fontSize: 12, width: "100%" } as const;
 
 /**
- * Recorded Metrics — every catalogued metric as a `title · trend sparkline ·
+ * Metrics — every catalogued metric as a `title · trend sparkline ·
  * latest value` row, organized as **one table per section** under headings, via
  * the shared `buildMetricSections` (Code gauges / Tests / Coverage / then one
  * top-level section **per language** for static analysis / Operational)
@@ -166,7 +166,7 @@ const sel = { fontSize: 12, width: "100%" } as const;
  * presentation metadata (unit / direction / thresholds) and is null only for an
  * explicitly disabled metric, whose spec is pruned.
  */
-export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
+export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void } = {}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [rangeKey, setRangeKey] = useState<string>(DEFAULT_RANGE_KEY);
@@ -416,7 +416,7 @@ export function RecordedMetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef)
                   </colgroup>
                   <tbody>
                     {group.entries.map((row) => (
-                      <RecordedRow
+                      <MetricRow
                         key={row.key}
                         row={row}
                         stat={lineStat}

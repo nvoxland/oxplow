@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { DEFAULT_LINE_STAT, LINE_STATS, lineStatValue } from "./recordedMetricsStat";
+import { DEFAULT_LINE_STAT, LINE_STATS, lineStatValue } from "./metricsStat";
 
-// Samples are newest-first, as RecordedMetricsPage holds them.
+// Samples are newest-first, as MetricsPage holds them.
 const s = (...values: number[]) => values.map((value) => ({ value }));
 
 describe("lineStatValue", () => {

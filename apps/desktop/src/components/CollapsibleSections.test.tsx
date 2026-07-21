@@ -9,7 +9,7 @@ import {
 import { SECTIONS_COLLAPSED_KEY } from "./sectionCollapse.js";
 
 // Mirrors the real adoption: the controls render OUTSIDE the section stack
-// (on Recorded Metrics, in the details rail), reaching state through context.
+// (on Metrics, in the details rail), reaching state through context.
 function view(sections: Array<{ id: string; label: string }> = SECTIONS, pageKey = "p") {
   return render(
     <CollapsibleSections pageKey={pageKey} testIdPrefix="t">
@@ -99,7 +99,7 @@ describe("CollapsibleSections", () => {
   });
 
   it("keeps a section collapsed while it is filtered out of the list", () => {
-    // The search box on Recorded Metrics can drop a whole section; the
+    // The search box on Metrics can drop a whole section; the
     // remembered collapse must survive its absence (the storage read is
     // deliberately not reconciled against the rendered ids).
     const first = view();

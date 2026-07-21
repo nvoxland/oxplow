@@ -2461,7 +2461,7 @@ export function metricRefreshAction(
 
 /**
  * Subscribe a metric view's `refresh` to the bus with the burst-coalescing
- * discipline `RecordedMetricsPage` established (tsk91): trailing-debounce
+ * discipline `MetricsPage` established (tsk91): trailing-debounce
  * `metricSamplesChanged` so a turn's worth of token exports becomes one reload,
  * refresh `configChanged` immediately when `alsoConfig` is set, and skip events
  * whose measures this view doesn't depend on (`measures`, tsk198). Composes with

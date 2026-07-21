@@ -8,9 +8,7 @@
 // ./transport.ts, so neither the bindings' call sites nor the UI
 // change between modes.
 
-import { listen } from "./transport";
 import { commands, type OxplowEvent } from "./generated/bindings";
-import { EVENT_CHANNELS } from "./channels";
 
 export { commands };
 export * as oxplow from "./generated/bindings";
@@ -27,34 +25,11 @@ export type * from "./generated/bindings";
 /// list to forget (the old "camelcase trap").
 export type OxplowEventKind = OxplowEvent["kind"];
 
-/// Subscribe to all oxplow events on the cross-store bus. Returns an
-/// unlisten callback. Each event is the raw `OxplowEvent` payload —
-/// the renderer normally branches on the `kind` field and refetches
-/// the affected bucket via the matching `commands.*` call.
-export function subscribeOxplowEvents(
-  onEvent: (event: { kind: OxplowEventKind } & Record<string, unknown>) => void,
-): () => Promise<void> {
-  let cleanup: (() => void) | null = null;
-  const promise = listen<{ kind: OxplowEventKind } & Record<string, unknown>>(
-    EVENT_CHANNELS.oxplow,
-    (e) => {
-      onEvent(e.payload);
-    },
-  ).then((un) => {
-    cleanup = un;
-  });
-  return async () => {
-    await promise;
-    cleanup?.();
-  };
-}
-
-/// Filtered helper: only fire `onEvent` for events matching `kinds`.
-export function subscribeOxplowEventsOfKind(
-  kinds: OxplowEventKind[],
-  onEvent: (event: { kind: OxplowEventKind } & Record<string, unknown>) => void,
-): () => Promise<void> {
-  return subscribeOxplowEvents((event) => {
-    if (kinds.includes(event.kind)) onEvent(event);
-  });
-}
+// `subscribeOxplowEvents` lives in `api.ts` — deliberately ONE implementation
+// (tsk221). A second copy used to sit here and differed in two ways that matter:
+// it had no `stopped` guard, so a caller that didn't await its async teardown
+// could still be delivered an event after unmount; and it typed the payload as
+// `{ kind } & Record<string, unknown>`, discarding the discriminated union that
+// lets consumers narrow on `kind` (tsk198 had to hand-narrow to read `measures`
+// because of exactly that). Both are gone — add new bus helpers next to the
+// `api.ts` one, per `.context/ipc-and-stores.md`.

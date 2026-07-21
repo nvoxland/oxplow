@@ -1,5 +1,5 @@
 /**
- * The per-line stat the Recorded Metrics rail dropdown selects (tsk115): what
+ * The per-line stat the Metrics rail dropdown selects (tsk115): what
  * number terminates each `title · sparkline · value` row. Every stat is
  * computed over the SAME filtered samples the sparkline plots (newest first,
  * as the page holds them), so the number always describes the visible graph —

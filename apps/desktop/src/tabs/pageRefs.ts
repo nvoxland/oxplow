@@ -101,7 +101,7 @@ export function effortCoverageRef(effortId: string): TabRef {
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
- *  further exploration). Its own page kind (`metric-detail`); Recorded Metrics
+ *  further exploration). Its own page kind (`metric-detail`); Metrics
  *  and the dashboard tiles both navigate into it. */
 export function metricRef(
   metricKey: string,
@@ -144,9 +144,14 @@ export function metricRecordingRef(
   };
 }
 
-/** The Recorded Metrics page — the seeded definitions with latest value, trend
- *  sparkline, capture branch, sample count. */
-export function recordedMetricsRef(): TabRef {
+/** The Metrics page — every catalogued definition with latest value, trend
+ *  sparkline, capture branch, sample count.
+ *
+ *  `metricsIndexRef`, not `metricsRef`, to stay clearly distinct from
+ *  {@link metricRef} (one metric's detail page). The `metrics-recorded` kind id
+ *  it returns keeps its old spelling on purpose — it is baked into persisted tab
+ *  ids and section-collapse keys, so renaming it would drop saved tabs (tsk222). */
+export function metricsIndexRef(): TabRef {
   return indexRef("metrics-recorded");
 }
 
