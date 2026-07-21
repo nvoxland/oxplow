@@ -26,3 +26,8 @@ apps/desktop/dist/
 
 # Collection: bun JUnit test report (parsed in-place, not committed)
 apps/desktop/test-report.xml
+
+# App-level harness output (screenshots, CPU profiles) — the scripts default
+# to writing these next to themselves
+tests-e2e/*.png
+tests-e2e/*.json

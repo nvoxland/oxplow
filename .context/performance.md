@@ -94,10 +94,34 @@ optimizing the computation itself. The memo key is then usually obvious and
 provably correct: `capture_id → captured_at` is a function, so memoizing on it
 is right **regardless of row order** — ordering only affects hit rate.
 
+## The renderer is not the problem (at idle)
+
+Every measurement above is of the Rust side. The renderer had never been
+profiled at all, so its cost was pure assumption — and the assumptions were
+wrong.
+
+Profile it with `tests-e2e/profile-renderer.mjs` (real React UI in headless
+Chromium against `oxplow-daemon`; setup in `tests-e2e/README.md`). Two captures,
+20–25s each, ~150–190k samples:
+
+| state | idle/program | executing JS |
+|---|---|---|
+| empty project | 100.0% | **0.0%** |
+| 150 tasks, WORK section expanded | 100.0% | **0.0%** |
+
+The always-on timers cost `fetch` 0.01% and `setTimeout` 0.00%. **Do not
+optimize a renderer timer because it looks expensive in source.** A 2s poll
+doing a trivial thing is free; the interval is not the cost.
+
+Caveats to state whenever quoting these: it's **Chromium, not WKWebView** (good
+proxy for JS, poor one for paint/scroll/GC), and it's **idle** — interaction
+cost (typing, scrolling a large diff, metric pages against real data) is still
+unmeasured.
+
 ## Ruled out by measurement — don't redo these
 
-Negative results are the easiest knowledge to lose, and both of these were
-asserted confidently (by me) *before* measuring, and were wrong.
+Negative results are the easiest knowledge to lose, and every one of these was
+asserted confidently (by me) *before* measuring, and was wrong.
 
 - **Storing timestamps as epoch-ms integers is not worth doing for parse
   cost.** It was the headline proposal of the row-decode task. The per-capture
@@ -110,6 +134,14 @@ asserted confidently (by me) *before* measuring, and were wrong.
   disk-footprint artifact of the biggest write burst (the automatic checkpoint
   is PASSIVE — it restarts the log in place and reuses the space). The daily
   pass truncates it (tsk216), but that is housekeeping, not speed.
+- **The renderer's idle timers cost nothing.** Three suspects were filed off a
+  source read: the 2s daemon-recovery poll, a 1s agent watchdog, and
+  `BrailleSpinner`'s 80ms interval "re-rendering the task list at 12.5 Hz". The
+  first two measure at 0.01% combined. The third was wrong on inspection, not
+  measurement: `BrailleSpinner` holds its own `useState`, so the interval
+  re-renders a self-contained leaf `<span>` — it cannot re-render its parent.
+  (It stays formally unmeasured: mounting it needs `agentStatus === "working"`,
+  and no write command sets agent status.)
 
 ## Related
 

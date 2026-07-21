@@ -13,25 +13,32 @@ that:
   flows) are still readable as a behavior corpus when porting.
 - `git blame` history on the probes is not lost.
 
-## Path forward
+## Path forward — superseded, see `tests-e2e/`
 
-Tauri 2 e2e options:
+This section used to list three Tauri e2e options (`tauri-driver` +
+WebdriverIO, CDP into a dev-build webview, a hand-rolled HTTP probe
+harness) and note that none had been built. **Remote-daemon mode is a
+fourth and better one, and it now works**: point vite at
+`oxplow-daemon` via `VITE_OXPLOW_REMOTE` and the real React UI runs in
+plain headless Chromium under ordinary Playwright — no driver, no
+wdio, no CDP attach.
 
-1. **`tauri-driver` + WebdriverIO** — Tauri's official approach.
-   Spawns the bundled binary, exposes a WebDriver session via WRY's
-   embedded webview. Probe rewriting required (Playwright API → wdio).
-2. **CDP into a dev-build webview** — Tauri's WebView can be opened
-   with remote debugging in dev mode; Playwright can `chromium
-   .connectOverCDP(url)` to it. Less mature, macOS-only WebKit issues.
-3. **Hand-rolled HTTP probe harness** — for headless smoke tests
-   only; would not exercise the React UI.
+Verified 2026-07-21: boots with 0 page errors and 0 failed requests.
+See `tests-e2e/README.md` for how to bring it up.
 
-None of those have been built yet. Until one is, app-level coverage
-is **zero** and unit/integration tests in `crates/*/` carry the
-weight.
+The trade-off is that it's **Chromium, not the shipped WKWebView** — it
+exercises the app's JS, IPC and rendering logic but not WebKit-specific
+paint/scroll behaviour, and it doesn't cover the Tauri shell itself
+(windows, menus, native dialogs). For most probes here that's fine;
+they assert on UI behaviour, not on WebKit.
 
 ## Removing this directory
 
-If/when a working Tauri e2e harness exists at a new path
-(`tests-e2e/` or similar), this archive can be deleted. Do not delete
-it before the new harness exists.
+**Not yet.** A harness exists at `tests-e2e/`, but none of these 35
+probes have been ported to it — the new directory holds a boot check
+and a profiling script. Their selectors are stale (that build's DOM is
+gone), so porting means rewriting against the current `data-testid`s,
+which `tests-e2e/boot-check.mjs` dumps for you.
+
+Delete this directory once the probes worth keeping have been ported
+or consciously dropped — not merely because a harness exists.
