@@ -1457,6 +1457,28 @@ impl SqliteFactStore {
     /// `None` disables that bound. Dedup is unaffected: `idempotency_key` is
     /// derived from `detail_json` at WRITE time and stored in its own column,
     /// so a replayed report still matches after the payload is gone.
+    /// Checkpoint the WAL and truncate it back to zero (tsk216).
+    ///
+    /// The WAL grows to the high-water mark of the biggest write burst — a
+    /// metric rebuild pushed it to 169MB here — and **never shrinks on its own**:
+    /// SQLite's automatic checkpoint is PASSIVE, which copies frames into the
+    /// main database and restarts the WAL in place, reusing the space rather
+    /// than returning it. Measured on that 169MB file, only **226 frames were
+    /// live**, so this is purely a disk-footprint fix; readers index live frames,
+    /// not file bytes, so a stale WAL costs nothing to read.
+    ///
+    /// Best-effort by design: `TRUNCATE` needs every reader to have moved past
+    /// the frames it wants to reclaim, so under concurrent readers it can return
+    /// busy and reclaim nothing. That's fine — it runs again tomorrow.
+    pub async fn checkpoint_wal(&self) -> Result<(), DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
+                Ok(())
+            })
+            .await
+    }
+
     pub async fn compact_capture_details(
         &self,
         older_than: Option<Timestamp>,
@@ -3761,6 +3783,56 @@ mod tests {
             .await
             .unwrap());
         assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
+    }
+
+    /// tsk216: the WAL parks at the high-water mark of the biggest write burst
+    /// and never shrinks on its own, so the daily pass truncates it.
+    #[tokio::test]
+    async fn checkpoint_wal_truncates_the_write_ahead_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.sqlite");
+        let db = Database::open(&path).unwrap();
+        // A capture FKs to `streams`, and this test needs a FILE-backed DB (an
+        // in-memory one has no WAL), so seed the row `fixture()` would have.
+        db.call(|conn| {
+            conn.execute(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                      worktree_path, created_at, updated_at)
+                 VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'main', '/r', ?1, ?1)",
+                ["2026-06-30T00:00:00Z"],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let store = SqliteFactStore::new(db);
+        let m = store
+            .upsert_measure(NewMeasure::new("acme.m", "M"))
+            .await
+            .unwrap();
+        // Write enough to grow the WAL past its automatic-checkpoint threshold.
+        for _ in 0..40 {
+            store
+                .record_facts(
+                    NewMetricCapture::done(1, "p", "s"),
+                    (0..200).map(|i| NewFact::new(m, i as f64)).collect(),
+                )
+                .await
+                .unwrap();
+        }
+        let wal = path.with_extension("sqlite-wal");
+        let before = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+
+        store.checkpoint_wal().await.unwrap();
+
+        let after = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+        assert!(
+            after < before || before == 0,
+            "checkpoint must return the WAL's space: {before} -> {after}",
+        );
+        // And the data is still readable — a checkpoint moves frames into the
+        // main DB, it never drops them.
+        assert_eq!(store.facts_for_measure(m).await.unwrap().len(), 40 * 200);
     }
 
     /// tsk211: compaction must bound `detail_json` growth WITHOUT touching a

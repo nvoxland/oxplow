@@ -202,6 +202,15 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "metric detail compaction failed"),
                 }
+                // Return the WAL's high-water mark to the OS (tsk216). The
+                // automatic checkpoint is PASSIVE — it restarts the WAL in place
+                // and reuses the space — so after a big write burst (a metric
+                // rebuild took it to 169MB here) the file parks at that size
+                // forever. Best-effort: TRUNCATE needs readers to have moved on,
+                // and a busy result just means we retry tomorrow.
+                if let Err(e) = facts.checkpoint_wal().await {
+                    tracing::warn!(error = %e, "wal checkpoint failed");
+                }
                 tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
             }
         });
