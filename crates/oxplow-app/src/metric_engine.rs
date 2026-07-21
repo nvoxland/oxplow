@@ -25,11 +25,12 @@
 //! fold machinery shares stays `pub(crate)`.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FactRow, MetricCapture, MetricSpec, SqliteFactStore};
+use oxplow_db::{FactRow, Measure, MetricCapture, MetricSpec, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// How the subjects measured in a single capture combine into the capture's
@@ -1258,11 +1259,70 @@ pub fn evaluate_formula(left: &[RollupRow], right: &[RollupRow], op: BinaryOp) -
     out
 }
 
+/// Memoized FACT-FALLBACK series (tsk205), valid only for one `(max capture,
+/// epoch)` generation of a measure.
+///
+/// The cube path already has its own cache (tsk196); this covers the reads that
+/// BYPASS the cube — `min_value`/`max_value` threshold specs
+/// (`oxplow.high_complexity_fns`, `oxplow.long_functions`) and off-cube slices —
+/// which re-fold the measure's whole fact history on every call. With N metric
+/// views refreshing off one event that was N full folds; now it is one.
+///
+/// Keyed per MEASURE so the token is per-measure too: a token export advances
+/// `oxplow.tokens` only, and must not evict a complexity series it cannot affect
+/// (the flaw a global-version key would have had).
+/// `((capture count, newest capture id) over the measure's producers, cube epoch)`
+/// — the generation an entry was built under. See `capture_token_for_producers`
+/// for why this is capture-scoped rather than fact-scoped.
+type FoldToken = ((i64, Option<i64>), i64);
+
+#[derive(Default)]
+struct FoldMemo {
+    /// The generation this entry set was built under. Any change drops the
+    /// measure's entries.
+    token: HashMap<i64, FoldToken>,
+    /// `measure_id -> read-shape key -> the UNWINDOWED series`. Unwindowed so
+    /// every window over the same read shares one entry (windowing is a cheap
+    /// post-filter).
+    entries: HashMap<i64, HashMap<String, Arc<Vec<SeriesPoint>>>>,
+}
+
+impl FoldMemo {
+    fn get(&self, measure_id: i64, shape: &str, token: FoldToken) -> Option<Arc<Vec<SeriesPoint>>> {
+        if self.token.get(&measure_id) != Some(&token) {
+            return None;
+        }
+        self.entries.get(&measure_id)?.get(shape).cloned()
+    }
+
+    fn put(
+        &mut self,
+        measure_id: i64,
+        shape: String,
+        token: FoldToken,
+        points: Arc<Vec<SeriesPoint>>,
+    ) {
+        // A moved token means every read shape for this measure is stale — its
+        // facts changed. Scoped to the measure: another measure's entries (and
+        // the fold they cost) survive, which is the whole point of a per-measure
+        // token rather than a global one.
+        if self.token.get(&measure_id) != Some(&token) {
+            self.token.insert(measure_id, token);
+            self.entries.remove(&measure_id);
+        }
+        self.entries
+            .entry(measure_id)
+            .or_default()
+            .insert(shape, points);
+    }
+}
+
 /// The engine over a fact store: fetches the right facts and applies the pure
 /// aggregation. A metric's facts are fetched by its `source_measure`.
 #[derive(Clone)]
 pub struct MetricEngine {
     facts: SqliteFactStore,
+    fold_memo: Arc<Mutex<FoldMemo>>,
     /// The ancestry resolver for the partial fold's cross-branch rule
     /// (tsk102). `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
     /// — pre-tsk102 behavior, never an error.
@@ -1273,6 +1333,7 @@ impl MetricEngine {
     pub fn new(facts: SqliteFactStore) -> Self {
         Self {
             facts,
+            fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,
         }
     }
@@ -1343,6 +1404,65 @@ impl MetricEngine {
             return Ok(points);
         }
 
+        // --- fact fallback: the read the cube could not answer ---
+        // This is the expensive path (a full re-fold of the measure's history)
+        // and it has no cube cache, so memoize the UNWINDOWED series per
+        // (measure, read-shape) for one `(max capture, epoch)` generation. N
+        // metric views refreshing off one event now cost ONE fold, not N.
+        // The token is CAPTURE-scoped over the measure's producers, not
+        // fact-scoped: a rescan that finds a file clean emits no fact and
+        // supersedes the old count with 0 (tsk41/tsk44), so a `MAX(fact.capture_id)`
+        // token would never move while the series changed — caught by
+        // `rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero`.
+        //
+        // An EMPTY producer set means the fold derives its capture axis some other
+        // way (the `oxplow.lint_hit` clean-analyzer seed), which this token can't
+        // track — so don't memoize at all rather than risk serving a stale series.
+        let producers = self.facts.producers_for_measure(measure.id).await?;
+        let memo_key = if producers.is_empty() {
+            None
+        } else {
+            let shape = format!("{agg:?}|{filter:?}|{group_by:?}|{stream:?}");
+            let token = (
+                self.facts.capture_token_for_producers(producers).await?,
+                self.facts.cube_epoch().await?,
+            );
+            Some((shape, token))
+        };
+        if let Some((shape, token)) = &memo_key {
+            if let Some(hit) = {
+                let memo = self.fold_memo.lock().unwrap_or_else(|e| e.into_inner());
+                memo.get(measure.id, shape, *token)
+            } {
+                return Ok(apply_window(hit.as_ref().clone(), window));
+            }
+        }
+
+        let points = self
+            .fold_series(&measure, measure_key, scope, agg, filter, group_by, stream)
+            .await?;
+        if let Some((shape, token)) = memo_key {
+            self.fold_memo
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .put(measure.id, shape, token, Arc::new(points.clone()));
+        }
+        Ok(apply_window(points, window))
+    }
+
+    /// The fact-path series (UNWINDOWED) — the fold the cube could not serve.
+    /// Split out of [`Self::series_in_stream`] so its result can be memoized.
+    #[allow(clippy::too_many_arguments)]
+    async fn fold_series(
+        &self,
+        measure: &Measure,
+        measure_key: &str,
+        scope: CaptureScope,
+        agg: Aggregation,
+        filter: &FactFilter,
+        group_by: Option<&str>,
+        stream: Option<i64>,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
         // A trend legitimately reads the measure's history (one point per
         // capture) — but stream-bounded SQL-side (tsk75), never loaded whole
         // then filtered in Rust.
@@ -1420,32 +1540,26 @@ impl MetricEngine {
                 Some(resolver) => resolver.for_captures(&captures).await,
                 None => Visibility::blind(),
             };
-            // Partial (per-path/per-subject) still folds the whole history here
-            // (Phase 2 bounds this); the window is applied to the OUTPUT so the
-            // returned series matches what the renderer used to filter to. This
-            // is the same filter, moved server-side — parity-safe.
-            return Ok(apply_window(
-                tree_state_series(
-                    &captures,
-                    &facts,
-                    &restated,
-                    &FoldRead {
-                        agg,
-                        filter,
-                        group_by,
-                        visibility: &visibility,
-                        scope,
-                    },
-                ),
-                window,
+            // Partial (per-path/per-subject) folds the whole history: the value
+            // at capture N depends on every prior capture, so this cannot be
+            // bounded by a window. The caller memoizes and windows the result.
+            return Ok(tree_state_series(
+                &captures,
+                &facts,
+                &restated,
+                &FoldRead {
+                    agg,
+                    filter,
+                    group_by,
+                    visibility: &visibility,
+                    scope,
+                },
             ));
         }
 
         let points = aggregate_series(&facts, agg, filter, group_by);
-        let points = self
-            .zero_fill(points, producers, agg, group_by, stream)
-            .await?;
-        Ok(apply_window(points, window))
+        self.zero_fill(points, producers, agg, group_by, stream)
+            .await
     }
 
     /// `capture_id → the paths that capture restated` (its snapshot's file rows,
@@ -2631,6 +2745,161 @@ mod tests {
             engine.headline_for_spec(&spec).await.unwrap(),
             Some(0.0),
             "a clean analyzer run must read 0, not blank"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_fold_memo_never_serves_a_stale_series() {
+        // tsk205: the fact-fallback fold is memoized per (measure, read shape)
+        // for one (max capture, epoch) generation. The ONLY thing that must not
+        // happen is a stale read — a new capture for the measure has to be
+        // visible on the very next call.
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![
+                    NewFact::new(complexity, 14.0),
+                    NewFact::new(complexity, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+        // A min_value threshold is exactly what bypasses the cube, so this read
+        // is the expensive fold path the memo exists for.
+        let mut spec =
+            NewMetricSpec::base("acme.over", "Over threshold", "acme.complexity", "count");
+        spec.filter_json = Some(r#"{"min_value":10}"#.into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.over").await.unwrap().unwrap();
+
+        let first = engine.series_for_spec(&spec, None).await.unwrap();
+        // The memo must actually ENGAGE — without this the staleness assertions
+        // below would pass vacuously on a memo that never stored anything (the
+        // `assert_cube_answers` lesson).
+        assert!(
+            engine
+                .fold_memo
+                .lock()
+                .unwrap()
+                .entries
+                .get(&complexity)
+                .is_some_and(|shapes| !shapes.is_empty()),
+            "the fact-fallback fold must be memoized (this read bypasses the cube)",
+        );
+        // A repeat read inside the same generation agrees (memo hit).
+        assert_eq!(engine.series_for_spec(&spec, None).await.unwrap(), first);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].value, 1.0, "one fact ≥ 10");
+
+        // A NEW capture must invalidate: the next read sees two points.
+        facts
+            .record_facts(
+                cap_at("2026-06-30T11:00:00Z"),
+                vec![
+                    NewFact::new(complexity, 20.0),
+                    NewFact::new(complexity, 11.0),
+                ],
+            )
+            .await
+            .unwrap();
+        let after = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(
+            after.len(),
+            2,
+            "the new capture must be visible immediately"
+        );
+        assert_eq!(after[1].value, 2.0, "two facts ≥ 10 in the new capture");
+    }
+
+    #[tokio::test]
+    async fn the_fold_memo_is_invalidated_by_an_empty_superseding_capture() {
+        // tsk205 REGRESSION. The first cut keyed the memo on `MAX(fact.capture_id)`
+        // for the measure, which is wrong: a rescan that finds the file clean
+        // emits NO fact and supersedes the old count with 0 (tsk41/tsk44), so the
+        // fact max never moved and the memo served the pre-rescan value forever.
+        // (`rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero`
+        // caught it.) The token is capture-scoped over the producers, so an empty
+        // capture still moves it.
+        let (engine, facts, complexity) = engine_fixture().await;
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![NewFact::new(complexity, 14.0)],
+            )
+            .await
+            .unwrap();
+        let spec = NewMetricSpec::base("acme.count", "Count", "acme.complexity", "count");
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.count").await.unwrap().unwrap();
+
+        assert_eq!(engine.series_for_spec(&spec, None).await.unwrap().len(), 1);
+
+        // An EMPTY capture from the same producer: no facts at all.
+        facts
+            .record_facts(cap_at("2026-06-30T11:00:00Z"), Vec::new())
+            .await
+            .unwrap();
+        let after = engine.series_for_spec(&spec, None).await.unwrap();
+        assert_eq!(
+            after.len(),
+            2,
+            "the empty capture must invalidate the memo and zero-fill a second point",
+        );
+        assert_eq!(after[1].value, 0.0, "the 'scanned, found nothing' zero");
+    }
+
+    #[tokio::test]
+    async fn the_fold_memo_is_scoped_per_measure_not_global() {
+        // tsk205: the whole point of a per-measure token. A write to ANOTHER
+        // measure (the ~10s OTLP token export is the real case) must not
+        // invalidate this measure's memo — a global version key would have
+        // evicted it every 10s and re-folded the whole history.
+        let (engine, facts, complexity) = engine_fixture().await;
+        let other = facts
+            .upsert_measure(oxplow_db::NewMeasure::new("acme.tokens", "Tokens"))
+            .await
+            .unwrap();
+        facts
+            .record_facts(
+                cap_at("2026-06-30T10:00:00Z"),
+                vec![NewFact::new(complexity, 14.0)],
+            )
+            .await
+            .unwrap();
+        let mut spec =
+            NewMetricSpec::base("acme.over", "Over threshold", "acme.complexity", "count");
+        spec.filter_json = Some(r#"{"min_value":10}"#.into());
+        facts.upsert_spec(spec).await.unwrap();
+        let spec = facts.get_spec("acme.over").await.unwrap().unwrap();
+
+        let before = engine.series_for_spec(&spec, None).await.unwrap();
+        let token_of = |m: i64| {
+            let facts = facts.clone();
+            async move {
+                let producers = facts.producers_for_measure(m).await.unwrap();
+                facts.capture_token_for_producers(producers).await.unwrap()
+            }
+        };
+        let token_before = token_of(complexity).await;
+
+        // Write to the OTHER measure under a DIFFERENT producer — the real case
+        // is the ~10s `otel-tokens` export. The complexity token must not move.
+        let mut cap = NewMetricCapture::done(1, "otel-tokens", "otel");
+        cap.captured_at = Some(ts("2026-06-30T11:00:00Z"));
+        facts
+            .record_facts(cap, vec![NewFact::new(other, 999.0)])
+            .await
+            .unwrap();
+        assert_eq!(
+            token_of(complexity).await,
+            token_before,
+            "another producer's capture must not advance this measure's token",
+        );
+        assert_eq!(
+            engine.series_for_spec(&spec, None).await.unwrap(),
+            before,
+            "and the series is unchanged",
         );
     }
 

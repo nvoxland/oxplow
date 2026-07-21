@@ -204,14 +204,30 @@ welded to collection.
 > history, then switches among narrower presets client-side (`filterByRange`) with
 > no re-fetch. `apply_window` is the exact old client filter, moved server-side.
 >
-> ⚠️ **Phase 2 still owed — the partial-scope FACT fallback.** `oxplow.high_complexity_fns`
+> **Phase 2 (tsk205) — memoizing the FACT-FALLBACK fold.** `oxplow.high_complexity_fns`
 > / `oxplow.long_functions` (and any per-path/per-subject measure sliced off the
-> cube) **bypass the cube** (their `min_value` threshold can't read summed cube
-> cells) and replay the full history via `tree_state_series`. Phase 1 windows their
-> OUTPUT (parity-safe) but NOT their read — a trailing window still needs the
-> from-start fold to seed pre-window state. The real fix is a **materialized
-> per-spec series** (persist each spec's per-capture points as the cube build
-> already computes them; read a windowed indexed range) — see [[tsk202]].
+> cube) **bypass the cube** — their `min_value` threshold filters each fact's own
+> value, which the cube summed away — and replay the whole history via
+> `tree_state_series`. A window can't bound that read (the newest point still needs
+> the from-start fold to seed pre-window state), so instead the UNWINDOWED fold is
+> memoized per `(measure, read shape)` for one generation, and the window is a
+> post-filter. N metric views refreshing off one event now cost ONE fold, not N.
+>
+> ⚠️ **The freshness token is CAPTURE-scoped, not fact-scoped — this is the whole
+> subtlety.** The first cut keyed on `MAX(fact.capture_id)` for the measure and was
+> wrong: a rescan that finds a file clean emits **no fact** and supersedes the old
+> count with 0 (tsk41/tsk44), so the fact max never moves while the series changes.
+> `rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero` caught
+> it. `capture_token_for_producers` counts the measure's producers' captures
+> (`COUNT` + `MAX`, so a delete registers too), which sees empty captures — and
+> stays producer-scoped so the ~10s `otel-tokens` captures don't evict a complexity
+> series they cannot affect. An empty producer set (the `oxplow.lint_hit`
+> clean-analyzer seed, whose capture axis comes from elsewhere) is **not memoized at
+> all** rather than risk a stale read.
+>
+> Still open: this makes repeated reads free but the FIRST read per generation still
+> folds. Eliminating that needs per-capture points materialized during the cube
+> build (which already holds the live partition) — see [[tsk202]].
 >
 > **Gauges must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The `SandboxBudget` default (5s) is sized for a report parser over one file. A tree

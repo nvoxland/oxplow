@@ -1396,6 +1396,44 @@ impl SqliteFactStore {
             .await
     }
 
+    /// `(capture count, newest capture id)` over `producers` — a cheap freshness
+    /// token for a memoized read of those producers' series (tsk205).
+    ///
+    /// **Capture-scoped, deliberately not fact-scoped.** A fact-derived token
+    /// (`MAX(fact.capture_id)`) is WRONG here: a rescan that finds the file clean
+    /// emits NO fact and supersedes the old count with 0 (tsk41/tsk44), so the
+    /// fact max never moves while the series changes. Counting the producers'
+    /// captures sees those empty captures. `COUNT` as well as `MAX` so a delete
+    /// that lowers the count still registers.
+    ///
+    /// Producer-scoped rather than global so the ~10s OTLP token captures (a
+    /// different producer) don't invalidate a complexity/coverage series they
+    /// cannot affect.
+    pub async fn capture_token_for_producers(
+        &self,
+        producers: Vec<String>,
+    ) -> Result<(i64, Option<i64>), DomainError> {
+        if producers.is_empty() {
+            return Ok((0, None));
+        }
+        self.db
+            .call(move |conn| {
+                let placeholders = (1..=producers.len())
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT COUNT(*), MAX(id) FROM metric_capture
+                      WHERE status = 'done' AND producer IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare_cached(&sql)?;
+                stmt.query_row(rusqlite::params_from_iter(producers.iter()), |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+                })
+            })
+            .await
+    }
+
     /// The cube's read-cache token (V72, tsk196) — bumped by trigger on EVERY
     /// `metric_cube` insert/update/delete, cascades included.
     ///
