@@ -704,8 +704,50 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
      c.git_version_exact, c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, \
      c.effort_id, c.provenance, c.source, c.producer";
 
-fn row_to_fact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
-    let captured_at: String = row.get(14)?;
+/// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**
+/// (tsk215).
+///
+/// `captured_at` belongs to the fact's CAPTURE, so every fact in a capture
+/// repeats it — ~130 facts per capture here (1.78M facts over 13.4k captures).
+/// Decoding per row meant ~130 `String` allocations plus ~130 RFC3339 parses of
+/// the identical text, which made row decode the top oxplow-owned cost in the
+/// tsk208 profile once `dim_value` was fixed.
+///
+/// The memo keys on `capture_id`, and `capture_id -> captured_at` is a function,
+/// so a hit is correct **regardless of row order**. Ordering (the queries sort by
+/// `captured_at, id`) only decides the hit RATE — never correctness — so no
+/// caller has to guarantee adjacency.
+fn fact_row_mapper() -> impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
+    let mut last: Option<(i64, Timestamp)> = None;
+    move |row| {
+        let capture_id: i64 = row.get(1)?;
+        let captured_at = match last {
+            Some((id, ts)) if id == capture_id => ts,
+            _ => {
+                // `get_ref` borrows the column; the `String` allocation only
+                // happened to feed the parser.
+                let raw = row.get_ref(14)?.as_str().map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        14,
+                        rusqlite::types::Type::Text,
+                        e.into(),
+                    )
+                })?;
+                let ts = string_to_ts(raw).map_err(ts_conv_err)?;
+                last = Some((capture_id, ts));
+                ts
+            }
+        };
+        row_to_fact_row_with(row, captured_at)
+    }
+}
+
+/// The column-by-column decode, with `captured_at` supplied by the caller so it
+/// can be memoized per capture (see [`fact_row_mapper`]).
+fn row_to_fact_row_with(
+    row: &rusqlite::Row<'_>,
+    captured_at: Timestamp,
+) -> rusqlite::Result<FactRow> {
     Ok(FactRow {
         id: row.get(0)?,
         capture_id: row.get(1)?,
@@ -721,7 +763,7 @@ fn row_to_fact_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
         rule: row.get(11)?,
         detail: row.get(12)?,
         dims_json: row.get(13)?,
-        captured_at: string_to_ts(&captured_at).map_err(ts_conv_err)?,
+        captured_at,
         branch: row.get(15)?,
         closest_git_version: row.get(16)?,
         git_version_exact: row.get::<_, i64>(17)? != 0,
@@ -1262,7 +1304,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1286,7 +1328,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1591,7 +1633,7 @@ impl SqliteFactStore {
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
                 let rows =
-                    stmt.query_map(params![measure_id, stream_id, branch], row_to_fact_row)?;
+                    stmt.query_map(params![measure_id, stream_id, branch], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1837,7 +1879,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1946,7 +1988,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1980,7 +2022,7 @@ impl SqliteFactStore {
                 for id in &capture_ids {
                     binds.push(id);
                 }
-                let rows = stmt.query_map(rusqlite::params_from_iter(binds), row_to_fact_row)?;
+                let rows = stmt.query_map(rusqlite::params_from_iter(binds), fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2122,7 +2164,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2600,7 +2642,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], row_to_fact_row)?;
+                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
