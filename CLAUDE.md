@@ -79,6 +79,7 @@ or exact mechanics.
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
 | Effort-scoped collection (test-run + diff-coverage observations, the coverage parser, the `collection:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Unified metric substrate (metric_definition/run/sample/finding, dual-write producers, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
+| Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |
 | User-created dashboards (dashboard/dashboard_item stores, DashboardsChanged event, MCP authoring tools, custom-dashboard page + tile grid) | `.context/dashboards.md` |
 | Tab store, page chrome, rail HUD (in-flight IA redesign) | `.context/pages-and-tabs.md` |
 | External URL tabs, sandboxed webview, allowlist, partition policy | `.context/external-url-tabs.md` |

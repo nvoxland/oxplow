@@ -198,6 +198,11 @@ welded to collection.
 >   since a capture with no facts can still move a series (supersede / zero-fill,
 >   tsk41/tsk44) in ways the facts can't reveal.
 >
+> **Before optimizing anything in this path, read
+> [performance.md](./performance.md)** — it has the profiling harness (which
+> doubles as the correctness gate), two samply traps that silently produce a
+> wrong ranking, what is already optimized, and what measurement has ruled out.
+>
 > **Bounded reads — Phase 1 (tsk202/tsk204).** The read shape is now windowable.
 > `list_metric_samples` / `metric_series` take `from_ms`/`to_ms` (IPC + MCP), and
 > a `TimeWindow` threads through `series[_for_spec]_in_stream` → `cube_series`.

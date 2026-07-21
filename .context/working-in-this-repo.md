@@ -32,6 +32,10 @@ the matching `.context/` doc in the same commit**. Concrete triggers:
 - Added a new IPC method or event type → update `ipc-and-stores.md`.
 - Added or repurposed a CSS variable → update `theming.md`.
 - Added a new fs watcher or git operation → update `git-integration.md`.
+- Profiled something, optimized a hot path, or **ruled an optimization out** →
+  update `performance.md`. Negative results especially: "we measured X and it
+  isn't worth doing" is the first knowledge lost and the most expensive to
+  re-derive.
 - Changed how the editor pane handles models, menus, or decorations → update `editor-and-monaco.md`.
 
 Docs reference source by **path only** (no line numbers — they drift).
