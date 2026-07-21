@@ -493,6 +493,67 @@ impl SnapshotCaptureService {
         paths
     }
 
+    /// True when `dir` is a top-level directory that the current watch
+    /// generation covers nothing inside of.
+    ///
+    /// The root is registered NonRecursive and its subdirectories are
+    /// enumerated ONCE per generation ([`Self::watch_paths_for`], tsk206), so a
+    /// directory created *after* that enumeration is watched by nothing: the
+    /// root watch reports the mkdir itself and then never reports a single write
+    /// inside it. Left unhandled every file under it goes unsnapshotted until
+    /// restart — not just unattributed, absent from Local History entirely.
+    /// That is what happened to this repo's own `tests-e2e/`: 0 `file_snapshot`
+    /// rows while every pre-existing directory had hundreds (tsk227).
+    fn needs_rewatch(
+        &self,
+        registered: &[(PathBuf, oxplow_fs_watch::RecursiveMode)],
+        dir: &Path,
+    ) -> bool {
+        if !dir.is_dir() || dir.parent() != Some(self.inner.project_dir.as_path()) {
+            return false;
+        }
+        let rel = dir.strip_prefix(&self.inner.project_dir).unwrap_or(dir);
+        if self
+            .inner
+            .workspace_filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .ignore(rel, true)
+        {
+            return false;
+        }
+        // Already covered — re-registering would churn the watch set for nothing.
+        !registered.iter().any(|(p, _)| p == dir)
+    }
+
+    /// Mark every filtered-in file under `dir` dirty.
+    ///
+    /// Rebuilding the watch set is not sufficient on its own: `mkdir d && write
+    /// d/f` races the rebuild, and `watch_generation` drops events arriving in
+    /// that gap. Without this walk the fix would miss exactly the files that
+    /// motivate it. Mirrors the startup sweep's `filter_entry` idiom so one
+    /// filter decides coverage in both places.
+    pub fn mark_tree_dirty(&self, dir: &Path) {
+        let filter = self
+            .inner
+            .workspace_filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let project_dir = &self.inner.project_dir;
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_entry(|e| {
+                let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
+                !filter.ignore(rel, e.file_type().is_dir())
+            })
+            .filter_map(Result::ok)
+        {
+            if entry.file_type().is_file() {
+                self.mark_dirty(entry.path().to_path_buf(), WatchEventKind::Other);
+            }
+        }
+    }
+
     async fn run_watcher(self) {
         // Park on the shutdown signal ONCE, outside the re-registration loop, so
         // a `notify_one` that fires between iterations isn't missed (the pinned
@@ -514,14 +575,17 @@ impl SnapshotCaptureService {
                     .read()
                     .unwrap_or_else(|e| e.into_inner()),
             );
-            let watcher = match FsWatcher::watch_paths(paths) {
+            let watcher = match FsWatcher::watch_paths(paths.clone()) {
                 Ok(w) => w,
                 Err(e) => {
                     warn!(error = %e, "snapshot capture: failed to start fs-watch");
                     return;
                 }
             };
-            if self.watch_generation(&watcher, shutdown.as_mut()).await {
+            if self
+                .watch_generation(&watcher, &paths, shutdown.as_mut())
+                .await
+            {
                 debug!("snapshot capture: watcher shutting down");
                 return;
             }
@@ -529,11 +593,13 @@ impl SnapshotCaptureService {
     }
 
     /// Drain one registration generation. Returns `true` when the service is
-    /// shutting down (stop for good), `false` when the filter changed and the
-    /// watch set must be rebuilt.
+    /// shutting down (stop for good), `false` when the watch set must be
+    /// rebuilt — either the filter changed, or a top-level directory appeared
+    /// that this generation's `registered` set doesn't cover.
     async fn watch_generation(
         &self,
         watcher: &FsWatcher,
+        registered: &[(PathBuf, oxplow_fs_watch::RecursiveMode)],
         mut shutdown: std::pin::Pin<&mut impl std::future::Future<Output = ()>>,
     ) -> bool {
         let refilter = self.inner.refilter.notified();
@@ -565,6 +631,19 @@ impl SnapshotCaptureService {
                             .ignore(rel, path.is_dir())
                         {
                             continue;
+                        }
+                        // A top-level dir created after this generation was
+                        // registered is watched by nothing. Backfill BEFORE
+                        // rebuilding: writes that land inside it before the new
+                        // registration takes effect are reported by no watch at
+                        // all, so re-registering alone would still lose them.
+                        if self.needs_rewatch(registered, &path) {
+                            debug!(
+                                dir = %path.display(),
+                                "snapshot capture: new top-level dir, backfilling and re-registering"
+                            );
+                            self.mark_tree_dirty(&path);
+                            return false;
                         }
                         self.mark_dirty(path, event.kind);
                     }
@@ -1662,6 +1741,82 @@ mod tests {
         );
         // …so a root-level file change is still seen.
         assert!(pruned.iter().any(|(p, _)| p == project.path()));
+    }
+
+    #[tokio::test]
+    async fn a_top_level_dir_created_after_registration_is_backfilled_and_rewatched() {
+        // tsk227: pruning at registration (tsk206) enumerates the root's subdirs
+        // ONCE, and the root's own watch is NonRecursive — so a top-level dir
+        // created later is covered by nothing, and everything written inside it
+        // was silently never snapshotted. Measured on the live DB before the fix:
+        // `tests-e2e/` had 0 file_snapshot rows while every pre-existing dir had
+        // hundreds.
+        //
+        // Deterministic by construction: asserts the computed watch set and the
+        // dirty set, never a real fs event (the tsk175 timing-flake lesson the
+        // neighbouring tsk206 tests already follow).
+        let project = tempdir().unwrap();
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+
+        let registered = SnapshotCaptureService::watch_paths_for(
+            project.path(),
+            &svc.inner.workspace_filter.read().unwrap(),
+        );
+
+        // The dir arrives after the watch set was computed.
+        let late = project.path().join("tests-e2e");
+        std::fs::create_dir(&late).unwrap();
+        std::fs::write(late.join("probe.mjs"), b"probe").unwrap();
+        std::fs::create_dir(late.join("nested")).unwrap();
+        std::fs::write(late.join("nested/deep.txt"), b"deep").unwrap();
+
+        // 1. It must be recognized as uncovered, so the watch set gets rebuilt.
+        assert!(
+            svc.needs_rewatch(&registered, &late),
+            "a top-level dir created after registration is watched by nothing",
+        );
+        // An already-registered top-level dir must NOT churn the watch set.
+        assert!(
+            !svc.needs_rewatch(&registered, &project.path().join("src")),
+            "an already-watched dir must not trigger re-registration",
+        );
+        // Nor may a filtered-out one (it's excluded on purpose).
+        let filtered = project.path().join("build");
+        std::fs::create_dir(&filtered).unwrap();
+        svc.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
+            "build",
+        ]));
+        assert!(
+            !svc.needs_rewatch(&registered, &filtered),
+            "a filtered dir must stay out of the watch set",
+        );
+
+        // 2. Re-registration alone loses whatever was written in the gap, so the
+        //    contents must be backfilled into the dirty set.
+        svc.mark_tree_dirty(&late);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .list_for_path("tests-e2e/probe.mjs")
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "a file created in the gap must still be snapshotted",
+        );
+        assert_eq!(
+            store
+                .list_for_path("tests-e2e/nested/deep.txt")
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "the backfill must recurse, not just read the top level",
+        );
     }
 
     #[tokio::test]

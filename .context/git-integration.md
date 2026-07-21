@@ -86,6 +86,30 @@ otherwise a `generated.include` that un-ignores a directory would stay
 unwatched until restart. Events in the rebuild gap are dropped; a config
 edit is a deliberate user action and the next sweep/event covers it.
 
+**Deriving the watch set from a one-time listing has a second edge, and it
+cost real data (tsk227).** The root is non-recursive and the subdir listing
+happens once per generation, so a top-level directory created *afterwards*
+is covered by nothing: the root reports the `mkdir` itself and then never
+reports a single write inside it. Everything under it goes unsnapshotted
+until restart — absent from Local History, unrecoverable by
+`restore_file_from_snapshot`, invisible to effort attribution. It was found
+via that last symptom, and only after the differ and the review logic had
+both been wrongly accused; the giveaway was that this repo's own
+`tests-e2e/` had **0** `file_snapshot` rows while every pre-existing
+directory had hundreds.
+
+So the event loop also rebuilds when `needs_rewatch` sees a filtered-in
+directory directly under the root that the generation's registered set
+doesn't cover. Re-registering alone is **not** enough — `mkdir d && write
+d/f` races the rebuild and no watch reports the gap — so it first calls
+`mark_tree_dirty` to walk the new directory into the dirty set. If you
+touch this code, keep the backfill: without it the fix silently loses
+exactly the files that motivate it.
+
+A recursive root watch would make both edges disappear, and that is what
+this used to be. It is not worth it — see the 345k-file flood above. The
+cost of the scoped set is that *staleness must be handled explicitly*.
+
 ### 2. Git root watcher
 
 A non-recursive `FsWatcher` on `projectDir` itself, set up inline in
