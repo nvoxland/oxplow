@@ -179,17 +179,24 @@ cargo test --workspace
 bun run --cwd apps/desktop test
 ```
 
-`cargo test --workspace` is the Rust suite (≈100 tests across the
-backend crates). It also regenerates `apps/desktop/src/tauri-bridge/
-generated/bindings.ts` via the `oxplow-tauri-ipc` `export_ts_bindings`
-test — CI fails if `git diff` of that file is non-empty after the
-test run.
+`cargo test --workspace` is the Rust suite. It also regenerates
+`apps/desktop/src/tauri-bridge/generated/bindings.ts` via the
+`oxplow-tauri-ipc` `export_ts_bindings` test — CI fails if `git diff`
+of that file is non-empty after the test run.
 
 Frontend tests still use `bun test` (run from `apps/desktop/`).
+
+App-level tests live in `tests-e2e/` and drive the real React UI in
+headless Chromium against `oxplow-daemon`, over the remote-mode
+transport described under "Run headless" above — ordinary Playwright,
+no driver. Read `tests-e2e/README.md` before writing one; two things
+there will otherwise bite you (it's Chromium, not the shipped
+WKWebView; and an idle renderer profiles as ~100% `(idle)`).
+
 The original Electron-era Playwright suite lives under
-`tests-e2e.electron-archive/` and **does not** work against the
-Tauri build; see that directory's README for the path forward.
-There is no current Tauri e2e harness.
+`tests-e2e.electron-archive/`. It does **not** run against the Tauri
+build and its selectors are long dead, but the 35 probes are still a
+useful behaviour corpus when writing new ones — none have been ported.
 
 ### Coverage
 
