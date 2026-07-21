@@ -1237,6 +1237,48 @@ def transform(input):
         assert_eq!(biggest.covered.len(), 4783 - 4783 / 3);
     }
 
+    /// The first measured ratio under `limit`, or every ratio seen if
+    /// `attempts` all exceeded it.
+    ///
+    /// Retrying is sound *because* scheduler noise only ever ADDS time: a
+    /// descheduled sample inflates one attempt, while a genuine quadratic
+    /// regression sits near 16x on every attempt. Passing on any clean
+    /// attempt therefore leaves the guard exactly as strict as a
+    /// single-shot check while dropping its false-positive rate to ~0.
+    fn first_ratio_under(
+        limit: f64,
+        attempts: usize,
+        mut measure: impl FnMut() -> f64,
+    ) -> Result<f64, Vec<f64>> {
+        let mut seen = Vec::with_capacity(attempts);
+        for _ in 0..attempts {
+            let ratio = measure();
+            if ratio < limit {
+                return Ok(ratio);
+            }
+            seen.push(ratio);
+        }
+        Err(seen)
+    }
+
+    #[test]
+    fn ratio_retry_passes_when_a_spike_is_followed_by_a_clean_sample() {
+        let mut samples = [12.0, 4.1].into_iter();
+        assert_eq!(
+            first_ratio_under(8.0, 3, || samples.next().unwrap()),
+            Ok(4.1)
+        );
+    }
+
+    #[test]
+    fn ratio_retry_fails_when_every_attempt_exceeds_the_limit() {
+        let mut samples = [16.0, 15.8, 16.2].into_iter();
+        assert_eq!(
+            first_ratio_under(8.0, 3, || samples.next().unwrap()),
+            Err(vec![16.0, 15.8, 16.2]),
+        );
+    }
+
     #[test]
     fn lcov_plugin_cost_stays_linear_in_lines_per_file() {
         // The original built each file's line lists with `.instrumented += [$n]`
@@ -1249,6 +1291,14 @@ def transform(input):
         // single-shot ratio (seen twice in real runs). Noise only ever ADDS
         // time, so the minimum estimates the true cost; the hypothesis gap
         // below (linear ~4x vs quadratic ~16x) is untouched.
+        //
+        // tsk175: min-of-3 was not enough. Under `cargo llvm-cov nextest` every
+        // core is saturated by sibling test processes AND the binary is
+        // instrumented, so all three samples of a size can be descheduled
+        // together — which is how this test failed once in a full run and then
+        // refused to reproduce in isolation. So retry the whole comparison via
+        // `first_ratio_under`: a spike ruins one attempt, a real regression
+        // ruins every one.
         let time_one_file = |lines: usize| {
             let content = lcov_with_sizes(&[lines]);
             let reg = CollectorRegistry::with_builtins();
@@ -1268,14 +1318,18 @@ def transform(input):
         // linear lands near 4x, quadratic near 16x, so the 8x line has ~2x
         // margin either side. (At 2x the measured gap was 2.0 vs 3.2 against a
         // 3.0 threshold — real, but too tight to trust on a loaded box.)
-        let base = time_one_file(5_000).max(std::time::Duration::from_millis(1));
-        let quadrupled = time_one_file(20_000);
-        let ratio = quadrupled.as_secs_f64() / base.as_secs_f64();
-        assert!(
-            ratio < 8.0,
-            "4x-ing one file's lines took {ratio:.1}x ({base:?} → {quadrupled:?}); \
-             linear is ~4x and quadratic is ~16x — an accumulator copy is back",
-        );
+        let measure = || {
+            let base = time_one_file(5_000).max(std::time::Duration::from_millis(1));
+            let quadrupled = time_one_file(20_000);
+            quadrupled.as_secs_f64() / base.as_secs_f64()
+        };
+        if let Err(ratios) = first_ratio_under(8.0, 3, measure) {
+            panic!(
+                "4x-ing one file's lines took {ratios:.1?}x across {} attempts; \
+                 linear is ~4x and quadratic is ~16x — an accumulator copy is back",
+                ratios.len(),
+            );
+        }
     }
 
     #[test]

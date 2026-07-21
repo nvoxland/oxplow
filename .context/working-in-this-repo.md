@@ -123,6 +123,29 @@ Rust half needs `cargo-llvm-cov` + `cargo-nextest` installed (`cargo
 install cargo-llvm-cov cargo-nextest`) to write `target/coverage/lcov.info`.
 See `.context/collection.md`.
 
+### Timing assertions flake under `cargo cov` (tsk175)
+
+`cargo cov` runs every test as its **own process, all concurrently, on an
+instrumented binary** — so a test is 2-5x slower *and* competing with one
+sibling per core. Any assertion on elapsed wall-clock can lose whole
+scheduler quanta there while passing every time under `cargo test`, which
+threads one process. That asymmetry is why such a failure shows up once in
+a full run and then refuses to reproduce in isolation.
+
+Prefer asserting **completion under a budget** over a wall-clock number
+(`lcov_plugin_parses_a_whole_workspace_report_without_timing_out` is the
+model). When you genuinely need a timing *ratio* — a curve-shape guard —
+min-of-N sampling is **not** enough on its own, because all N samples of a
+size can be descheduled together. Retry the whole comparison and pass on
+any clean attempt (`first_ratio_under` in `oxplow-collect-plugin`): noise
+only ever ADDS time, so a spike ruins one attempt while a real regression
+ruins every one — the guard stays exactly as strict, the false positives go
+to ~0.
+
+`cargo cov` passes nextest `--no-fail-fast` so a flake **names itself** the
+first time instead of the run cancelling before it prints which test failed.
+Don't remove that flag.
+
 ### Coverage floors & pass-through crates
 
 Two CI gates enforce line coverage: a **workspace floor**
