@@ -59,6 +59,18 @@ merge commit itself, and conflict resolution would otherwise dead-
 lock against the filing rule. The `.context/` read rule still gets a
 soft pass for tiny mechanical edits — just don't skip the task.
 
+**`touched_files` declares AUTHORED work, and the same exemption
+applies.** A path listed in `generated.exclude` (`.oxplow/project.yaml`)
+is build output oxplow deliberately does not snapshot, so claiming one
+always comes back as *"you claimed these files but the worktree didn't
+change"* — the review is right and the declaration is wrong. The live
+example is `apps/desktop/src/tauri-bridge/generated/bindings.ts`: Tauri
+Specta rewrites it on nearly every build, which is exactly why it was
+excluded. Change an IPC signature or an `OxplowEvent`, regenerate it,
+commit it — but don't claim it. (Claiming it four times in one session,
+then filing a bug against the *review* for correctly saying so, is the
+mistake this note exists to prevent.)
+
 **Asking the user a question.** When your reply ends with a real
 clarifying question, A/B/C choice, or any ask where the user owns the
 next move, call `mcp__oxplow__await_user({ threadId, question })` and
