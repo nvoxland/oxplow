@@ -20,6 +20,12 @@ That makes it both the profiling harness *and* the correctness gate: any
 metric-path optimization must leave all series identical to the fact oracle.
 Use it for both. Every optimization below was verified this way.
 
+**It does not cover the effort-delta reads.** `cube_equivalence` walks specs and
+the cube; `effort_metric_deltas` (the effort panel) is a different read path with
+its own queries, and the biggest single hotspot ever measured here lived in it
+(tsk239, below) while the harness reported a clean profile. A green
+`cube_equivalence` is necessary, not sufficient — profile the live app too.
+
 ```sh
 sqlite3 .oxplow/local.sqlite "VACUUM INTO '/tmp/cube-eq.sqlite'"
 # The example asserts a PRE-BUILD cube. A copy is already at the current
@@ -73,6 +79,42 @@ Already fixed — **do not re-optimize these**:
   and now absent from the profile entirely.
 - `dim_value` 11.5% → 4.1% (tsk214).
 - `string_to_ts` 2.5% → off the board (tsk215).
+- `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
+  most calls no longer run it at all (tsk239/tsk242, below).
+
+## Zero-splice producer discovery (tsk239)
+
+The effort panel asks, per measure, "which producers emit this metric's slice"
+so a clean run zero-fills instead of reading blank. Answering it by scanning
+every fact of the measure cost 38% of live backend CPU — 917k rows scanned to
+return 277, with a temp b-tree because the slice key includes the open
+`dims_json` TEXT payload, which no index covers.
+
+**The scan is the floor, so the fix is to not scan.** Three branches now, picked
+off the spec's filter (`collection.rs`, zero-splice fallback):
+
+| filter | path | cost (917k-fact measure, warm) |
+|---|---|---|
+| unconstrained | memoized `producers_for_measure` | ~0 (memo hit) |
+| reads only `rule`/`severity`/`dims_json` | `distinct_slice_keys` | 0.41 s |
+| reads `value`, or a `package`/`branch`/`subject`/`model` dim | `representative_facts_by_slice` | 0.80 s |
+
+The middle branch works because **every fact in a slice agrees on the slice
+key**, so a predicate reading only those fields is decided by the key alone — no
+representative row needed. `FactFilter::slice_key_only` gates it and
+`dim_is_slice_key` classifies the dimensions; that classifier is the negative
+image of the match in `dim_value_cached` and nothing but
+`every_pseudo_dimension_is_classified_as_slice_key_or_not` holds the two
+together. Add a pseudo-dimension there, classify it here.
+
+Of the 25 filtered specs in this project, 22 land on the cheap branch (all the
+`dim_eq` ones — `oxplow.rule` is a column and the rest are `dims_json` keys) and
+3 on the expensive one (`min_value`/`max_value`).
+
+Still on the table: a covering index on `fact(measure_id, rule, severity,
+dims_json, capture_id)` takes the slice-key scan 0.41 s → 0.11 s, but costs
+**146 MB against a 323 MB `fact` table** plus write amplification. Filed, not
+taken — see the retention argument below.
 
 The remaining ~69% is genuine page reads of real data, so it scales with
 database size. That makes **retention the lever, not micro-optimization** —
@@ -134,6 +176,21 @@ asserted confidently (by me) *before* measuring, and was wrong.
   disk-footprint artifact of the biggest write burst (the automatic checkpoint
   is PASSIVE — it restarts the log in place and reuses the space). The daily
   pass truncates it (tsk216), but that is housekeeping, not speed.
+- **Folding `representative_facts_by_slice`'s join-back into the `GROUP BY` is
+  slower, not faster.** SQLite guarantees that with exactly one `min()`/`max()`
+  aggregate, bare columns come from the extreme row — so the group can yield the
+  whole representative and the `id IN (SELECT MIN(id) …)` join-back looks
+  redundant. Measured: **1.43 s vs 0.78 s**. Dragging 26 columns through the
+  group-by sorter costs more than 277 rowid lookups afterwards. The query keeps
+  its "redundant" shape on purpose.
+- **`SELECT DISTINCT producer, rule, severity, dims_json` is not a drop-in for
+  `representative_facts_by_slice`.** tsk239 proposed it as "semantically
+  equivalent for the caller" at 4.5×. It isn't: `FactFilter::matches` also reads
+  `value` and — through `dim_value` — `path`, `subject_ref`, `subject_kind` and
+  `branch`, none of which are in the slice tuple. It's a valid path only when
+  the filter provably stays inside the slice key, which is what
+  `slice_key_only` checks. The measured win on that guarded path is ~2×, not
+  4.5×.
 - **The renderer's idle timers cost nothing.** Three suspects were filed off a
   source read: the 2s daemon-recovery poll, a 1s agent watchdog, and
   `BrailleSpinner`'s 80ms interval "re-rendering the task list at 12.5 Hz". The

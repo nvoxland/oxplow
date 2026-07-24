@@ -3014,16 +3014,49 @@ impl CollectionService {
                 .map(|f| f.producer.clone())
                 .collect();
             if producers.is_empty() {
-                // One representative fact per (producer, rule, severity, dims)
-                // slice — bounded — instead of the measure's entire history
-                // just to learn producer names (tsk75).
-                if let Ok(reps) = self.facts.representative_facts_by_slice(measure.id).await {
-                    producers = reps
+                // Which producers emit this metric's slice, answered as cheaply
+                // as the filter allows. All three branches agree; they differ
+                // only in how much of the measure's history they have to touch,
+                // and on a 900k-fact measure that gap was 38% of backend CPU
+                // (tsk239).
+                producers = if filter.is_unconstrained() {
+                    // Nothing is filtered out, so "producers of the matching
+                    // slices" IS "producers of the measure" — memoized (tsk153),
+                    // no scan at all.
+                    self.facts
+                        .producers_for_measure(measure.id)
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect()
+                } else if filter.slice_key_only() {
+                    // The predicate reads only (rule, severity, dims_json), and
+                    // every fact of a slice agrees on those — so the slice key
+                    // decides it and no representative row is needed. Same
+                    // scan, ~half the cost: 4 columns through the sorter, no
+                    // join-back.
+                    self.facts
+                        .distinct_slice_keys(measure.id)
+                        .await
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|k| filter.matches_slice(k))
+                        .map(|k| k.producer.clone())
+                        .collect()
+                } else {
+                    // The predicate reads a column outside the slice key
+                    // (`value`, or a `package`/`branch`/`subject`/`model` dim),
+                    // so it needs a real fact: one representative — the lowest-id
+                    // member — per slice (tsk75).
+                    self.facts
+                        .representative_facts_by_slice(measure.id)
+                        .await
+                        .unwrap_or_default()
                         .iter()
                         .filter(|f| filter.matches(f))
                         .map(|f| f.producer.clone())
-                        .collect();
-                }
+                        .collect()
+                };
             }
             let have: std::collections::HashSet<i64> =
                 series.iter().map(|p| p.capture_id).collect();
@@ -5761,6 +5794,106 @@ mod tests {
             assert_eq!(analysis.baseline, Some(3.0));
             assert_eq!(analysis.current, 0.0, "the clean run reads as zero");
             assert_eq!(analysis.delta, Some(-3.0));
+        }
+
+        #[tokio::test]
+        async fn clean_only_effort_discovers_producers_from_global_history() {
+            // tsk239/tsk242: when the effort's ONLY run was clean, its own
+            // captures carry no matching facts, so the producer set that drives
+            // the zero-fill has to come from the measure's global history. Two
+            // branches serve that now — an unconstrained filter short-circuits
+            // to the memoized `producers_for_measure`, a constrained one walks
+            // one representative fact per slice — and BOTH must agree with the
+            // filter. The risk this pins down is the short-circuit leaking into
+            // the constrained case and zero-filling a metric whose slice this
+            // producer never emits.
+            let h = build(None).await;
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let now = Timestamp::now();
+
+            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
+            let m = facts
+                .upsert_measure(oxplow_db::NewMeasure::new("oxplow.lint_hit", "Lint hits"))
+                .await
+                .unwrap();
+            let spec = |key: &str, title: &str, filter: Option<&str>| {
+                let mut s = oxplow_db::NewMetricSpec::base(key, title, "oxplow.lint_hit", "count");
+                s.direction = "lower-better".into();
+                s.category = Some("static-quality".into());
+                s.display_kind = "findings".into();
+                s.filter_json = filter.map(str::to_string);
+                s
+            };
+            facts
+                .upsert_spec(spec("oxplow.lint.all", "All lint hits", None))
+                .await
+                .unwrap();
+            facts
+                .upsert_spec(spec(
+                    "oxplow.lint.errors",
+                    "Lint errors",
+                    Some(r#"{"severity":"error"}"#),
+                ))
+                .await
+                .unwrap();
+            facts
+                .upsert_spec(spec(
+                    "oxplow.lint.warnings",
+                    "Lint warnings",
+                    Some(r#"{"severity":"warning"}"#),
+                ))
+                .await
+                .unwrap();
+
+            // Global history, NOT stamped to the effort: producer `analysis`
+            // has only ever emitted WARNINGS.
+            let mut past = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
+            past.captured_at = Some(Timestamp::from_unix_ms(now.unix_ms() - 600_000));
+            facts
+                .record_facts(
+                    past,
+                    vec![
+                        oxplow_db::NewFact {
+                            severity: Some("warning".into()),
+                            ..oxplow_db::NewFact::new(m, 1.0)
+                        },
+                        oxplow_db::NewFact {
+                            severity: Some("warning".into()),
+                            ..oxplow_db::NewFact::new(m, 1.0)
+                        },
+                    ],
+                )
+                .await
+                .unwrap();
+            // The effort's own — and only — run: CLEAN, no facts at all.
+            let mut clean = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
+            clean.captured_at = Some(now);
+            clean.thread_id = Some(h.thread.value());
+            clean.effort_id = Some(eid.value());
+            facts.record_facts(clean, vec![]).await.unwrap();
+
+            let rows = h.service.effort_metric_deltas(&h.effort_id).await;
+            let row = |title: &str| rows.iter().find(|d| d.title == title);
+
+            // Unconstrained: every fact counts, so the producer is discovered
+            // and its clean capture reads as an explicit 0.
+            assert_eq!(
+                row("All lint hits").map(|d| d.current),
+                Some(0.0),
+                "the clean run zero-fills for an unfiltered spec"
+            );
+            // Constrained and matching: warnings ARE this producer's slice.
+            assert_eq!(
+                row("Lint warnings").map(|d| d.current),
+                Some(0.0),
+                "the clean run zero-fills for a filter the producer's slice matches"
+            );
+            // Constrained and NOT matching: `analysis` has never emitted an
+            // error, so "errors dropped to 0" would be a fabricated reading.
+            assert!(
+                row("Lint errors").is_none(),
+                "no zero-fill for a filter this producer's slice never matched"
+            );
         }
 
         #[tokio::test]

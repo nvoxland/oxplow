@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_db::{FactRow, Measure, MetricCapture, MetricSpec, SqliteFactStore};
+use oxplow_db::{FactRow, FactSliceKey, Measure, MetricCapture, MetricSpec, SqliteFactStore};
 use oxplow_domain::{DomainError, Timestamp};
 
 /// How the subjects measured in a single capture combine into the capture's
@@ -233,6 +233,51 @@ impl FactFilter {
         serde_json::from_str(s).map_err(|e| DomainError::Invalid(format!("bad filter_json: {e}")))
     }
 
+    /// True when the filter keeps every fact — no predicate is set. Lets a
+    /// caller skip work whose only purpose is to feed [`Self::matches`]: the
+    /// zero-splice producer discovery in `collection` answers "which producers
+    /// emit this measure's slice" with the memoized `producers_for_measure`
+    /// instead of a ~900k-row representative scan when nothing can be filtered
+    /// out anyway (tsk239).
+    pub fn is_unconstrained(&self) -> bool {
+        self.min_value.is_none()
+            && self.max_value.is_none()
+            && self.severity.is_none()
+            && self.dim_eq.is_none()
+    }
+
+    /// True when every predicate reads only fields carried by a [`FactSliceKey`],
+    /// so [`Self::matches_slice`] decides the filter without loading a fact.
+    ///
+    /// `min_value`/`max_value` read `value` and are never slice-decidable. A
+    /// `dim_eq` is decidable exactly when its dimension is (see
+    /// [`dim_is_slice_key`]).
+    pub fn slice_key_only(&self) -> bool {
+        self.min_value.is_none()
+            && self.max_value.is_none()
+            && self
+                .dim_eq
+                .as_ref()
+                .map_or(true, |(key, _)| dim_is_slice_key(key))
+    }
+
+    /// [`Self::matches`] against a slice key instead of a fact. Only meaningful
+    /// when [`Self::slice_key_only`] holds — the caller must check first; this
+    /// silently ignores the value bounds it cannot evaluate.
+    pub fn matches_slice(&self, k: &FactSliceKey) -> bool {
+        if let Some(sev) = &self.severity {
+            if k.severity.as_deref() != Some(sev.as_str()) {
+                return false;
+            }
+        }
+        if let Some((key, val)) = &self.dim_eq {
+            if slice_dim_value(k, key).as_deref() != Some(val.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn matches(&self, f: &FactRow) -> bool {
         if let Some(min) = self.min_value {
             if f.value < min {
@@ -422,10 +467,53 @@ pub(crate) fn dim_value_cached(
     }
 }
 
+/// Whether a dimension resolves entirely from a [`FactSliceKey`] — i.e. from
+/// `rule`, `severity`, or `dims_json` — rather than from a fact column outside
+/// the slice key.
+///
+/// **Keep this in lockstep with [`dim_value_cached`]:** it is the negative image
+/// of that match. Every arm there reading `path`, `subject_ref`, `subject_kind`
+/// or `branch` must be listed here, because a caller that gets `true` decides
+/// the filter from the slice alone and never loads a fact. Getting it wrong
+/// doesn't fail loudly — it silently changes which producers zero-fill. The
+/// `every_pseudo_dimension_is_classified` test walks the arms and is what
+/// actually holds the two together.
+pub(crate) fn dim_is_slice_key(dimension: &str) -> bool {
+    !matches!(
+        dimension,
+        "oxplow.package"
+            | "package"
+            | "oxplow.branch"
+            | "branch"
+            | "subject"
+            | "oxplow.model"
+            | "model"
+    )
+}
+
+/// [`dim_value_cached`] restricted to a slice key. Mirrors the arms
+/// [`dim_is_slice_key`] admits; panicking arms are unreachable because callers
+/// gate on `FactFilter::slice_key_only` first.
+pub(crate) fn slice_dim_value(k: &FactSliceKey, dimension: &str) -> Option<String> {
+    match dimension {
+        "oxplow.severity" => k.severity.clone(),
+        "oxplow.rule" => k.rule.clone(),
+        "oxplow.language" | "language" => {
+            let dims = parse_dims_str(k.dims_json.as_deref())?;
+            dim_from_map(&dims, "oxplow.language").or_else(|| dim_from_map(&dims, "language"))
+        }
+        key => parse_dims_str(k.dims_json.as_deref()).and_then(|d| dim_from_map(&d, key)),
+    }
+}
+
 /// Parse a fact's open `dims_json` into its object map — once per lookup.
 /// `None` when the fact carries no dims or the JSON isn't an object.
 fn parse_dims(f: &FactRow) -> Option<serde_json::Map<String, serde_json::Value>> {
-    match serde_json::from_str(f.dims_json.as_deref()?).ok()? {
+    parse_dims_str(f.dims_json.as_deref())
+}
+
+fn parse_dims_str(dims_json: Option<&str>) -> Option<serde_json::Map<String, serde_json::Value>> {
+    match serde_json::from_str(dims_json?).ok()? {
         serde_json::Value::Object(m) => Some(m),
         _ => None,
     }
@@ -2692,6 +2780,168 @@ mod tests {
         );
         // Malformed → surfaced error, never silently dropped.
         assert!(FactFilter::from_json("{not json").is_err());
+    }
+
+    #[test]
+    fn unconstrained_filter_is_the_one_that_keeps_every_fact() {
+        // tsk239/tsk242: callers use this to skip work a no-op filter can't
+        // change the answer of. It must be conservative — true ONLY when every
+        // predicate is absent, since a caller acting on `true` never looks at
+        // the facts at all.
+        assert!(FactFilter::default().is_unconstrained());
+        assert!(FactFilter::from_json("{}").unwrap().is_unconstrained());
+        for j in [
+            r#"{"min_value":1.0}"#,
+            r#"{"max_value":0.0}"#,
+            r#"{"severity":"error"}"#,
+            r#"{"dim_eq":["oxplow.language","rust"]}"#,
+        ] {
+            assert!(
+                !FactFilter::from_json(j).unwrap().is_unconstrained(),
+                "{j} constrains which facts are kept"
+            );
+        }
+    }
+
+    #[test]
+    fn every_pseudo_dimension_is_classified_as_slice_key_or_not() {
+        // tsk239/tsk242: `dim_is_slice_key` is the negative image of the match
+        // in `dim_value_cached`, and nothing in the compiler holds them
+        // together — a new pseudo-dimension reading `path`/`branch`/`subject`
+        // silently starts resolving off a slice key that doesn't carry it.
+        // This walks every dimension key `dim_value_cached` names and pins BOTH
+        // directions: slice-key dims must agree with the fact, and excluded
+        // dims must genuinely differ (so the exclusion list stays tight rather
+        // than defensively over-broad, which would cost the fast path).
+        let f = FactRow {
+            path: Some("src/deep/mod.rs".into()),
+            subject_kind: Some("model".into()),
+            subject_ref: Some("model:opus".into()),
+            branch: Some("feature/x".into()),
+            severity: Some("error".into()),
+            rule: Some("E1".into()),
+            dims_json: Some(
+                r#"{"oxplow.language":"rust","oxplow.status":"failed","oxplow.model":"other"}"#
+                    .into(),
+            ),
+            ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+        };
+        let k = FactSliceKey {
+            producer: f.producer.clone(),
+            rule: f.rule.clone(),
+            severity: f.severity.clone(),
+            dims_json: f.dims_json.clone(),
+        };
+
+        // Resolvable from the slice key alone.
+        for key in [
+            "oxplow.severity",
+            "oxplow.rule",
+            "oxplow.language",
+            "language",
+            // The long tail: any un-promoted `dims_json` key.
+            "oxplow.status",
+        ] {
+            assert!(dim_is_slice_key(key), "{key} resolves from dims/columns");
+            assert_eq!(
+                slice_dim_value(&k, key),
+                dim_value(&f, key),
+                "{key} must read the same off a slice key as off the fact"
+            );
+        }
+
+        // NOT resolvable — each reads a column the slice key doesn't carry.
+        for key in [
+            "oxplow.package",
+            "package",
+            "oxplow.branch",
+            "branch",
+            "subject",
+            "oxplow.model",
+            "model",
+        ] {
+            assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
+            assert_ne!(
+                slice_dim_value(&k, key),
+                dim_value(&f, key),
+                "{key} is excluded, so the slice key must NOT reproduce it"
+            );
+        }
+    }
+
+    #[test]
+    fn slice_key_only_gates_the_cheap_producer_discovery() {
+        // Value bounds always need a real fact; a dim_eq is decidable exactly
+        // when its dimension is.
+        assert!(FactFilter::default().slice_key_only());
+        assert!(FactFilter::from_json(r#"{"severity":"error"}"#)
+            .unwrap()
+            .slice_key_only());
+        assert!(
+            FactFilter::from_json(r#"{"dim_eq":["oxplow.rule","unsafe_block"]}"#)
+                .unwrap()
+                .slice_key_only()
+        );
+        assert!(
+            FactFilter::from_json(r#"{"dim_eq":["oxplow.status","failed"]}"#)
+                .unwrap()
+                .slice_key_only(),
+            "a plain dims_json key rides the slice"
+        );
+        for j in [
+            r#"{"min_value":11.0}"#,
+            r#"{"max_value":0.0}"#,
+            r#"{"dim_eq":["package","src/a"]}"#,
+            r#"{"dim_eq":["branch","main"]}"#,
+            r#"{"dim_eq":["oxplow.model","opus"]}"#,
+        ] {
+            assert!(
+                !FactFilter::from_json(j).unwrap().slice_key_only(),
+                "{j} reads outside the slice key"
+            );
+        }
+    }
+
+    #[test]
+    fn matches_slice_agrees_with_matches_for_slice_key_filters() {
+        // The two must never disagree, or the cheap branch changes results.
+        let mk = |sev: &str, rule: &str, dims: &str| {
+            let f = FactRow {
+                severity: Some(sev.into()),
+                rule: Some(rule.into()),
+                dims_json: Some(dims.into()),
+                ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+            };
+            let k = FactSliceKey {
+                producer: f.producer.clone(),
+                rule: f.rule.clone(),
+                severity: f.severity.clone(),
+                dims_json: f.dims_json.clone(),
+            };
+            (f, k)
+        };
+        let rows = [
+            mk("error", "E1", r#"{"oxplow.status":"failed"}"#),
+            mk("warning", "E1", r#"{"oxplow.status":"passed"}"#),
+            mk("error", "E2", r#"{}"#),
+        ];
+        for j in [
+            "{}",
+            r#"{"severity":"error"}"#,
+            r#"{"dim_eq":["oxplow.rule","E1"]}"#,
+            r#"{"dim_eq":["oxplow.status","failed"]}"#,
+            r#"{"severity":"error","dim_eq":["oxplow.status","failed"]}"#,
+        ] {
+            let filter = FactFilter::from_json(j).unwrap();
+            assert!(filter.slice_key_only());
+            for (f, k) in &rows {
+                assert_eq!(
+                    filter.matches_slice(k),
+                    filter.matches(f),
+                    "{j} disagreed between slice and fact"
+                );
+            }
+        }
     }
 
     // --- spec-wrapper (DB-backed) -----------------------------------------

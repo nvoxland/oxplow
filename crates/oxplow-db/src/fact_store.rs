@@ -698,6 +698,18 @@ pub struct FactRow {
     pub producer: String,
 }
 
+/// The identity of a fact SLICE: the tuple the zero-splice producer discovery
+/// groups by (`SqliteFactStore::distinct_slice_keys`, tsk239). Every fact in a
+/// slice agrees on all four fields, so a predicate reading only these is
+/// decided by the slice alone — no representative row needed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactSliceKey {
+    pub producer: String,
+    pub rule: Option<String>,
+    pub severity: Option<String>,
+    pub dims_json: Option<String>,
+}
+
 const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numerator, \
      f.denominator, f.subject_kind, f.subject_ref, f.path, f.line, f.severity, f.rule, \
      f.detail, f.dims_json, c.captured_at, c.branch, c.closest_git_version, \
@@ -1986,12 +1998,60 @@ impl SqliteFactStore {
             .await
     }
 
+    /// The distinct `(producer, rule, severity, dims_json)` slices of a measure
+    /// — the slice KEY only, no fact payload.
+    ///
+    /// This is the cheap half of [`Self::representative_facts_by_slice`]. Both
+    /// scan every fact of the measure and spill to a temp b-tree (the key
+    /// includes the open `dims_json` TEXT payload, so no index covers it), but
+    /// this one carries 4 columns through the sorter instead of 26 and skips
+    /// the rowid join-back — measured at 0.40s vs 0.78s over a 917k-fact
+    /// measure. Prefer it whenever the caller's predicate reads nothing outside
+    /// the slice key (`FactFilter::slice_key_only`, tsk239).
+    pub async fn distinct_slice_keys(
+        &self,
+        measure_id: i64,
+    ) -> Result<Vec<FactSliceKey>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT DISTINCT c.producer, f.rule, f.severity, f.dims_json
+                       FROM fact f JOIN metric_capture c ON c.id = f.capture_id
+                      WHERE f.measure_id = ?1",
+                )?;
+                let rows = stmt.query_map(params![measure_id], |r| {
+                    Ok(FactSliceKey {
+                        producer: r.get(0)?,
+                        rule: r.get(1)?,
+                        severity: r.get(2)?,
+                        dims_json: r.get(3)?,
+                    })
+                })?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
     /// One representative fact per distinct `(producer, rule, severity,
-    /// dims_json)` slice of a measure (tsk75). The zero-splice fallback in the
-    /// effort delta reads only needs to learn WHICH producers emit a metric's
-    /// slice — it loaded the measure's entire history (191k rows) to extract a
-    /// handful of distinct producer names. Slice combos are bounded (rules ×
-    /// severities × dim payloads), never fact-count-shaped.
+    /// dims_json)` slice of a measure (tsk75) — the whole `MIN(f.id)` row of
+    /// each slice. The zero-splice fallback in the effort delta only needs to
+    /// learn WHICH producers emit a metric's slice; it used to load the
+    /// measure's entire history to extract a handful of distinct producer
+    /// names. Slice combos are bounded (rules × severities × dim payloads),
+    /// never fact-count-shaped.
+    ///
+    /// **This is the expensive fallback — reach for [`Self::distinct_slice_keys`]
+    /// first.** It exists only for predicates that read a fact column *outside*
+    /// the slice key: `min_value`/`max_value` read `value`, and a `dim_eq` on
+    /// `package`/`branch`/`subject`/`model` reads `path`/`subject_ref`/
+    /// `subject_kind`/`branch`. Those need a real row, and "the row" is defined
+    /// as the slice's lowest-id member.
+    ///
+    /// The query shape below looks redundant and is not. Folding the join-back
+    /// away by projecting bare columns under `MIN(f.id)` (a documented SQLite
+    /// extension) was measured **slower** — 1.43s vs 0.78s — because it drags
+    /// all 26 columns through the group-by sorter instead of 277 rowid lookups
+    /// afterwards. Don't "simplify" it back without re-measuring (tsk239).
     pub async fn representative_facts_by_slice(
         &self,
         measure_id: i64,
@@ -2009,7 +2069,7 @@ impl SqliteFactStore {
                       )
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
-                let mut stmt = conn.prepare(&sql)?;
+                let mut stmt = conn.prepare_cached(&sql)?;
                 let rows = stmt.query_map(params![measure_id], fact_row_mapper())?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -5018,6 +5078,190 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn representative_facts_by_slice_returns_the_lowest_id_row_of_each_slice() {
+        // tsk239/tsk242: the rows this returns are FULL facts, and the caller
+        // runs a `FactFilter` over them — a filter that can read `value`,
+        // `path`, `subject_ref`, `subject_kind` and `branch`, none of which are
+        // part of the (producer, rule, severity, dims_json) slice key. So the
+        // contract is not just "one row per slice": it is "the MIN(id) row of
+        // each slice, whole". Collapsing this to a DISTINCT over the slice
+        // tuple would keep this test's LENGTH assert green and silently change
+        // which producers get zero-filled.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.lint_hit").await;
+        let hit = |sev: &str, rule: &str, value: f64, path: &str| NewFact {
+            severity: Some(sev.into()),
+            rule: Some(rule.into()),
+            path: Some(path.into()),
+            ..NewFact::new(m, value)
+        };
+        // Two producers; `alpha` emits the same slice three times with
+        // different values/paths, so the representative is unambiguous.
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "alpha", "analysis"),
+                vec![
+                    hit("error", "E1", 1.0, "src/first.rs"),
+                    hit("error", "E1", 9.0, "src/second.rs"),
+                    hit("warning", "W1", 2.0, "src/third.rs"),
+                ],
+            )
+            .await
+            .unwrap();
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "alpha", "analysis"),
+                vec![hit("error", "E1", 7.0, "src/fourth.rs")],
+            )
+            .await
+            .unwrap();
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "beta", "analysis"),
+                vec![hit("error", "E1", 5.0, "src/fifth.rs")],
+            )
+            .await
+            .unwrap();
+
+        let reps = store.representative_facts_by_slice(m).await.unwrap();
+        // Three slices: (alpha,E1,error), (alpha,W1,warning), (beta,E1,error).
+        assert_eq!(reps.len(), 3, "one representative per distinct slice");
+        let mut got: Vec<(String, String, f64, String)> = reps
+            .iter()
+            .map(|f| {
+                (
+                    f.producer.clone(),
+                    f.rule.clone().unwrap(),
+                    f.value,
+                    f.path.clone().unwrap(),
+                )
+            })
+            .collect();
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(
+            got,
+            vec![
+                // The FIRST alpha/E1/error fact — not the 9.0 one beside it in
+                // the same capture, nor the 7.0 one in the later capture.
+                (
+                    "alpha".to_string(),
+                    "E1".to_string(),
+                    1.0,
+                    "src/first.rs".to_string()
+                ),
+                (
+                    "alpha".to_string(),
+                    "W1".to_string(),
+                    2.0,
+                    "src/third.rs".to_string()
+                ),
+                (
+                    "beta".to_string(),
+                    "E1".to_string(),
+                    5.0,
+                    "src/fifth.rs".to_string()
+                ),
+            ],
+            "each row is the whole MIN(id) fact of its slice"
+        );
+    }
+
+    #[tokio::test]
+    async fn distinct_slice_keys_matches_the_representative_scans_slices() {
+        // tsk239/tsk242: the cheap producer-discovery path. It must enumerate
+        // EXACTLY the slices the expensive one does — it's chosen at runtime as
+        // a drop-in for it whenever the caller's predicate reads only the slice
+        // key, so any divergence is a silent change in which producers zero-fill.
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.test_case").await;
+        let case = |status: &str, rule: Option<&str>, value: f64| NewFact {
+            dims_json: Some(format!(r#"{{"oxplow.status":"{status}"}}"#)),
+            rule: rule.map(str::to_string),
+            ..NewFact::new(m, value)
+        };
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "tests", "junit"),
+                vec![
+                    case("passed", None, 1.0),
+                    case("passed", None, 2.0),
+                    case("failed", None, 3.0),
+                    case("failed", Some("flaky"), 4.0),
+                ],
+            )
+            .await
+            .unwrap();
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "e2e", "junit"),
+                vec![case("passed", None, 5.0)],
+            )
+            .await
+            .unwrap();
+
+        let mut keys = store.distinct_slice_keys(m).await.unwrap();
+        let mut from_reps: Vec<FactSliceKey> = store
+            .representative_facts_by_slice(m)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| FactSliceKey {
+                producer: f.producer,
+                rule: f.rule,
+                severity: f.severity,
+                dims_json: f.dims_json,
+            })
+            .collect();
+        let sort = |v: &mut Vec<FactSliceKey>| {
+            v.sort_by(|a, b| {
+                (&a.producer, &a.rule, &a.severity, &a.dims_json).cmp(&(
+                    &b.producer,
+                    &b.rule,
+                    &b.severity,
+                    &b.dims_json,
+                ))
+            })
+        };
+        sort(&mut keys);
+        sort(&mut from_reps);
+        assert_eq!(
+            keys.len(),
+            4,
+            "tests×{{passed,failed,failed+flaky}} + e2e×passed"
+        );
+        assert_eq!(keys, from_reps, "the two scans must enumerate one set");
+    }
+
+    #[tokio::test]
+    async fn representative_facts_by_slice_separates_slices_by_dims_json() {
+        // The slice key includes the open `dims_json` payload, so two facts
+        // that agree on producer/rule/severity but carry different dims are
+        // different slices (this is why the GROUP BY can't ride an index).
+        let store = fixture().await;
+        let m = measure(&store, "oxplow.complexity").await;
+        let with_dims = |dims: &str, value: f64| NewFact {
+            dims_json: Some(dims.into()),
+            ..NewFact::new(m, value)
+        };
+        store
+            .record_facts(
+                NewMetricCapture::done(1, "metrics", "builtin"),
+                vec![
+                    with_dims(r#"{"oxplow.language":"rust"}"#, 1.0),
+                    with_dims(r#"{"oxplow.language":"rust"}"#, 2.0),
+                    with_dims(r#"{"oxplow.language":"ts"}"#, 3.0),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let reps = store.representative_facts_by_slice(m).await.unwrap();
+        let mut values: Vec<f64> = reps.iter().map(|f| f.value).collect();
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(values, vec![1.0, 3.0], "one rep per distinct dims payload");
     }
 
     #[tokio::test]
