@@ -162,6 +162,7 @@ import {
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
 import { openProjectGuarded, listRecentProjects } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
+import { coalescedRefresh } from "./coalesced-refresh.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { DISK } from "./file-version.js";
@@ -1775,8 +1776,11 @@ export function App() {
     const sid = stream?.id;
     if (!sid) { setUncommittedSummary(null); return; }
     let cancelled = false;
-    const refresh = () => {
-      void Promise.all([getBranchChanges(sid, "HEAD"), getRepoConflictState(sid)])
+    // Returns the promise so `coalescedRefresh` can single-flight it: each
+    // call shells out to 4+ git subprocesses including a full
+    // `status --untracked-files=all` worktree walk (tsk238).
+    const refresh = () =>
+      Promise.all([getBranchChanges(sid, "HEAD"), getRepoConflictState(sid)])
         .then(([res, conflict]) => {
           if (cancelled) return;
           let added = 0, modified = 0, deleted = 0, additions = 0, deletions = 0;
@@ -1795,11 +1799,15 @@ export function App() {
           });
         })
         .catch(() => { if (!cancelled) setUncommittedSummary(null); });
-    };
-    refresh();
-    const offGit = subscribeGitRefsEvents(sid, () => refresh());
-    const offWs = subscribeWorkspaceEvents(sid, () => refresh());
-    return () => { cancelled = true; offGit(); offWs(); };
+    void refresh();
+    // Both streams feed one gate. The backend watchers each debounce 250ms,
+    // but nothing coalesced *across* them (a commit trips both) and nothing
+    // stopped a slow scan overlapping the next — agent edit storms drove a
+    // full rescan every 250ms.
+    const coalesced = coalescedRefresh(refresh);
+    const offGit = subscribeGitRefsEvents(sid, () => coalesced.schedule());
+    const offWs = subscribeWorkspaceEvents(sid, () => coalesced.schedule());
+    return () => { cancelled = true; coalesced.cancel(); offGit(); offWs(); };
   }, [stream?.id]);
 
   const [recentlyFinished, setRecentlyFinished] = useState<FinishedEntry[]>([]);

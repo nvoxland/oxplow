@@ -31,6 +31,27 @@ built-in debounce anymore. Consumers pick the view they need:
 
 So debounce is a per-consumer choice, not a property of the watcher.
 
+**Backend debounce doesn't coalesce across streams, and doesn't bound
+concurrency.** Each watcher debounces its own stream, so a consumer
+subscribing to *two* of them still gets two callbacks for one user action
+(a `git commit` trips both the gitRefs and workspace windows). And a
+debounce says nothing about how long the resulting work takes — if it
+outruns the window, calls overlap.
+
+That bit the branch-changes summary in `App.tsx` (tsk238): it subscribes
+to both `gitRefsChanged` and `workspaceChanged`, and each refresh runs
+`listBranchChanges` → 4+ git subprocesses including a
+`status --untracked-files=all` worktree walk. Agent edit storms drove a
+full rescan every 250ms, overlapping.
+
+It now routes both subscriptions through one `coalescedRefresh`
+(`apps/desktop/src/coalesced-refresh.ts`) — trailing debounce **plus
+single-flight**, with exactly one queued follow-up so the summary can't
+end stale. Single-flight is the part that matters: it bounds concurrent
+scans to one however slow the scan gets. Reach for it (rather than a bare
+`setTimeout` debounce) for any expensive refresh fed by more than one
+event stream.
+
 ### 1. Workspace watcher
 
 `crates/oxplow-app/src/workspace_watch.rs` — `WorkspaceWatchRegistry`.

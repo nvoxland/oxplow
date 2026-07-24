@@ -236,40 +236,61 @@ pub fn list_branch_changes(repo: &Path, base_ref: &str) -> BranchChanges {
     let mut entries = parse_name_status_z(&name_status);
     let counts = parse_numstat_z(&numstat);
 
-    for entry in entries.iter_mut() {
-        if let Some((adds, dels)) = counts.iter().find_map(|c| {
-            if c.0 == entry.path {
-                Some((c.1, c.2))
-            } else {
-                None
-            }
-        }) {
-            entry.additions = adds;
-            entry.deletions = dels;
-        }
-    }
+    apply_numstat(&mut entries, &counts);
 
     // Untracked files via status --porcelain
     if let Some(status) = run_capturing(&["status", "--porcelain", "--untracked-files=all"], repo) {
-        for line in status.lines() {
-            if let Some(rest) = line.strip_prefix("?? ") {
-                if !entries.iter().any(|e| e.path == rest) {
-                    entries.push(BranchChangeEntry {
-                        path: rest.to_string(),
-                        original_path: None,
-                        change: ChangeKind::Untracked,
-                        additions: 0,
-                        deletions: 0,
-                    });
-                }
-            }
-        }
+        append_untracked(&mut entries, &status);
     }
 
     BranchChanges {
         base_ref: base_ref.to_string(),
         merge_base,
         files: entries,
+    }
+}
+
+/// Attach `--numstat` add/delete counts to the `--name-status` entries.
+///
+/// Indexed rather than scanned per entry: this ran as a linear `find_map`
+/// over `counts` for every entry, which is O(entries × counts) on a diff
+/// where both lists are the same size (tsk238). **First occurrence of a
+/// path wins**, preserving the original scan's semantics — a plain
+/// `HashMap::insert` would flip that to last-wins.
+fn apply_numstat(entries: &mut [BranchChangeEntry], counts: &[(String, u32, u32)]) {
+    let mut by_path: std::collections::HashMap<&str, (u32, u32)> =
+        std::collections::HashMap::with_capacity(counts.len());
+    for (path, adds, dels) in counts {
+        by_path.entry(path.as_str()).or_insert((*adds, *dels));
+    }
+    for entry in entries.iter_mut() {
+        if let Some(&(adds, dels)) = by_path.get(entry.path.as_str()) {
+            entry.additions = adds;
+            entry.deletions = dels;
+        }
+    }
+}
+
+/// Append `?? ` paths from `git status --porcelain` that aren't already
+/// listed. The membership test was a linear scan of `entries` per line,
+/// which `--untracked-files=all` can make expensive on a repo with many
+/// untracked files (tsk238). Paths are added to the seen set as they're
+/// pushed, so duplicate `??` lines still collapse.
+fn append_untracked(entries: &mut Vec<BranchChangeEntry>, status: &str) {
+    let mut seen: std::collections::HashSet<String> =
+        entries.iter().map(|e| e.path.clone()).collect();
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("?? ") {
+            if seen.insert(rest.to_string()) {
+                entries.push(BranchChangeEntry {
+                    path: rest.to_string(),
+                    original_path: None,
+                    change: ChangeKind::Untracked,
+                    additions: 0,
+                    deletions: 0,
+                });
+            }
+        }
     }
 }
 
@@ -347,6 +368,86 @@ fn parse_numstat_z(raw: &str) -> Vec<(String, u32, u32)> {
         }
     }
     out
+}
+
+/// Characterization tests for the two merge steps, pinning the exact
+/// semantics of the linear scans they replaced (tsk238).
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn entry(path: &str) -> BranchChangeEntry {
+        BranchChangeEntry {
+            path: path.to_string(),
+            original_path: None,
+            change: ChangeKind::Modified,
+            additions: 0,
+            deletions: 0,
+        }
+    }
+
+    #[test]
+    fn numstat_counts_land_on_matching_entries() {
+        let mut entries = vec![entry("a.rs"), entry("b.rs")];
+        apply_numstat(
+            &mut entries,
+            &[("b.rs".into(), 3, 4), ("a.rs".into(), 1, 2)],
+        );
+        assert_eq!((entries[0].additions, entries[0].deletions), (1, 2));
+        assert_eq!((entries[1].additions, entries[1].deletions), (3, 4));
+    }
+
+    #[test]
+    fn entries_without_a_numstat_row_keep_zero_counts() {
+        let mut entries = vec![entry("a.rs")];
+        apply_numstat(&mut entries, &[("other.rs".into(), 9, 9)]);
+        assert_eq!((entries[0].additions, entries[0].deletions), (0, 0));
+    }
+
+    /// The linear `find_map` took the FIRST match. A plain
+    /// `HashMap::insert` would take the last — this pins the difference.
+    #[test]
+    fn duplicate_numstat_paths_keep_the_first_occurrence() {
+        let mut entries = vec![entry("a.rs")];
+        apply_numstat(
+            &mut entries,
+            &[("a.rs".into(), 1, 1), ("a.rs".into(), 99, 99)],
+        );
+        assert_eq!((entries[0].additions, entries[0].deletions), (1, 1));
+    }
+
+    #[test]
+    fn untracked_lines_are_appended_as_untracked_entries() {
+        let mut entries = vec![entry("a.rs")];
+        append_untracked(&mut entries, "?? new.rs\n M a.rs\n");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].path, "new.rs");
+        assert!(matches!(entries[1].change, ChangeKind::Untracked));
+    }
+
+    #[test]
+    fn untracked_does_not_duplicate_an_existing_entry() {
+        let mut entries = vec![entry("a.rs")];
+        append_untracked(&mut entries, "?? a.rs\n");
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0].change, ChangeKind::Modified));
+    }
+
+    /// The old scan re-checked `entries` as it pushed, so repeated `??`
+    /// lines collapsed; the seen-set must too.
+    #[test]
+    fn repeated_untracked_lines_collapse() {
+        let mut entries = vec![];
+        append_untracked(&mut entries, "?? dup.rs\n?? dup.rs\n");
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn non_untracked_status_lines_are_ignored() {
+        let mut entries = vec![];
+        append_untracked(&mut entries, " M a.rs\nA  b.rs\nUU c.rs\n");
+        assert!(entries.is_empty());
+    }
 }
 
 #[cfg(test)]
