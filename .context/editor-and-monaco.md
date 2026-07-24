@@ -143,7 +143,10 @@ not the buffer.
 "HEAD", path)` on file open, caches it per-path, and diffs the buffer
 against it on every content change. The line-level LCS diff runs in
 `diffLineKinds` (capped at 5000 lines per side — larger files skip
-diffing). Gutter bars render via Monaco `linesDecorationsClassName`:
+diffing), which lives in `apps/desktop/src/editor-diff.ts` — pure and
+Monaco-free so it can be unit-tested without booting an editor
+(`editor-diff.test.ts`). Gutter bars render via Monaco
+`linesDecorationsClassName`:
 
 - `oxplow-gutter-added` — green 3px inset bar (new line, no nearby delete).
 - `oxplow-gutter-modified` — blue 3px inset bar (added line next to a delete).
@@ -154,6 +157,21 @@ Classes are defined in `public/index.html`. HEAD is re-fetched when
 `filePath` changes; a subsequent commit won't invalidate the cache until
 the file is reopened. Decoration ids live in `diffDecoIdsRef` and are
 updated via `editor.deltaDecorations`.
+
+**The forward walk in `diffLineKinds` must never compare line values.**
+It runs after the LCS backtrack has already marked `added[]`/`deleted[]`,
+and its only job is to consume those marks in order. An earlier version
+short-circuited on `oldLines[oi] === newLines[nj]`, which looks like a
+harmless fast path and is not: with duplicate lines (blank lines, ```
+fences — i.e. every markdown file) it consumes a pair the backtrack had
+marked as added, drifts out of sync with the edit script, and eventually
+parks both pointers on unmarked lines that differ, where neither
+advances. `old=["a"], new=["a","a"]` is enough to trigger it — appending
+a duplicate line. Because this runs synchronously in the decoration
+effect (keyed on `[value, filePath, monacoReady]`), the symptom is the
+whole app freezing with an empty editor: the model is populated but the
+main thread never reaches paint. Every branch of that loop must advance
+at least one pointer, which bounds it at `m + n` iterations.
 
 ## Diff editor
 
