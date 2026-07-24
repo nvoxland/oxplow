@@ -42,13 +42,37 @@ pub fn config_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
 /// resolve the same location Tauri's path resolver would.
 pub const APP_IDENTIFIER: &str = "net.voxland.oxplow";
 
+/// Env var redirecting [`global_config_dir`] somewhere other than the
+/// platform location. Set it to run a dev build alongside an installed
+/// one without sharing `session.json`, recents, or global metric
+/// manifests. Inherited by spawned project windows, so one export
+/// covers every window a dev instance opens.
+pub const OXPLOW_HOME_ENV: &str = "OXPLOW_HOME";
+
 /// Global app-config dir (`<platform config dir>/net.voxland.oxplow`),
 /// where launcher-level state like `recent-projects.json` and
 /// `session.json` live. Matches Tauri's `app_config_dir()` on macOS /
-/// Linux / Windows. `None` only if the platform config dir is
-/// undiscoverable.
+/// Linux / Windows, unless [`OXPLOW_HOME_ENV`] overrides it. `None`
+/// only if the platform config dir is undiscoverable.
+///
+/// Note this moves oxplow's *own* global state only — Tauri's
+/// `app_config_dir()` path resolver (webview storage, etc.) still uses
+/// the platform location.
 pub fn global_config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join(APP_IDENTIFIER))
+    global_config_dir_from(std::env::var_os(OXPLOW_HOME_ENV))
+}
+
+/// [`global_config_dir`] with the env read lifted out, so tests exercise
+/// the path logic without mutating process-global env state.
+fn global_config_dir_from(home: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    // Used verbatim: the override names the dir itself, so a dev
+    // instance gets a self-contained home rather than one buried under
+    // another `net.voxland.oxplow`. An exported-but-empty value is
+    // treated as unset — "" would resolve relative to the cwd.
+    match home {
+        Some(h) if !h.is_empty() => Some(PathBuf::from(h)),
+        _ => dirs::config_dir().map(|d| d.join(APP_IDENTIFIER)),
+    }
 }
 
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
@@ -2473,6 +2497,39 @@ fn basename(path: &Path) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "oxplow".to_string())
+}
+
+#[cfg(test)]
+mod global_config_dir_tests {
+    use super::*;
+
+    #[test]
+    fn override_replaces_the_platform_dir() {
+        let dir = global_config_dir_from(Some("/tmp/oxplow-dev".into())).unwrap();
+        assert_eq!(dir, PathBuf::from("/tmp/oxplow-dev"));
+    }
+
+    /// The override is used verbatim — no `net.voxland.oxplow` suffix —
+    /// so `OXPLOW_HOME=<dir>` puts `session.json` directly in `<dir>`.
+    #[test]
+    fn override_is_not_suffixed_with_the_app_identifier() {
+        let dir = global_config_dir_from(Some("/tmp/oxplow-dev".into())).unwrap();
+        assert!(!dir.ends_with(APP_IDENTIFIER));
+    }
+
+    #[test]
+    fn absent_override_uses_the_platform_dir() {
+        let dir = global_config_dir_from(None).unwrap();
+        assert!(dir.ends_with(APP_IDENTIFIER));
+    }
+
+    /// An exported-but-empty `OXPLOW_HOME` must not resolve to a
+    /// relative "" and scatter global state through the cwd.
+    #[test]
+    fn empty_override_falls_back_to_the_platform_dir() {
+        let dir = global_config_dir_from(Some("".into())).unwrap();
+        assert!(dir.ends_with(APP_IDENTIFIER));
+    }
 }
 
 #[cfg(test)]

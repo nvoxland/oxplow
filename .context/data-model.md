@@ -101,7 +101,10 @@ the bare self-typed form, e.g. `[[tsk42]]`.
 Two pieces of state live **outside** any project's `.oxplow/` dir,
 because they're either global or must survive without a booted
 `Services` (see the process-per-window model in
-[architecture.md](./architecture.md)):
+[architecture.md](./architecture.md)). The app-config dir holding them
+defaults to the platform location but is overridable with `OXPLOW_HOME`
+(used verbatim; empty = unset) so a dev build can run alongside an
+installed one — see [DEV.md](../DEV.md):
 
 - **`recent-projects.json`** — the launcher's recent-projects list, in
   the app-config dir (`~/Library/Application Support/net.voxland.oxplow/`

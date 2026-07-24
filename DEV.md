@@ -127,6 +127,30 @@ Then iterate:
   iterating on Rust. Killing Vite and re-running the binary is
   what produces the empty white window.
 
+### Running a dev build alongside an installed one
+
+The per-project instance lock is *per project*, so a dev build and an
+installed build never contend as long as they hold different projects.
+What they do share is the global app-config dir — one `session.json`
+and one recents list — so dev opens land in the installed app's restore
+set and vice versa.
+
+`OXPLOW_HOME` redirects that dir:
+
+```bash
+OXPLOW_HOME=~/.oxplow-dev ./target/debug/oxplow .
+```
+
+The value is used **verbatim** (no `net.voxland.oxplow` suffix), and an
+exported-but-empty value is treated as unset. It's inherited by every
+window the instance spawns, so one export covers the whole tree. Export
+it from your shell profile and the dev build keeps its own session,
+recents, and global metric/gauge/measure/dimension manifests.
+
+Note it moves oxplow's own global state only — Tauri's
+`app_config_dir()` (webview storage, etc.) still uses the platform
+location.
+
 ## Run headless (daemon + browser)
 
 The full app also runs without the Tauri shell: `oxplow-daemon`
