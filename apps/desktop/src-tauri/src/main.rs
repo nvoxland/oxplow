@@ -134,23 +134,69 @@ async fn forward_hook(event: &str, payload: Vec<u8>) -> Result<Vec<u8>, reqwest:
     Ok(response.bytes().await?.to_vec())
 }
 
+/// The environment [`restore_session_with`] acts on, injected so the
+/// restore policy can be tested without real processes, advisory locks,
+/// or a global session file.
+struct RestoreOps<'a> {
+    /// Is this dir still an Oxplow project?
+    is_project: &'a dyn Fn(&std::path::Path) -> bool,
+    /// Does a live process already hold this project's instance lock?
+    is_locked: &'a dyn Fn(&std::path::Path) -> bool,
+    /// Raise the existing window; false if it couldn't be reached.
+    focus: &'a dyn Fn(&std::path::Path) -> bool,
+    /// Launch a fresh window process for this project.
+    spawn: &'a dyn Fn(&std::path::Path) -> std::io::Result<()>,
+}
+
 /// Reopen the project windows recorded in the global session (the set
-/// open at last exit). Spawns one process per still-valid project dir
-/// and returns whether at least one was reopened. Entries whose dir is
-/// gone or no longer an Oxplow project are skipped.
+/// open at last exit), returning whether at least one window resulted.
+/// Entries whose dir is gone or no longer an Oxplow project are
+/// skipped; entries already open in another process are focused rather
+/// than spawned.
 fn restore_session() -> bool {
     let Some(session) = session_store() else {
         return false;
     };
-    let mut spawned = 0;
-    for path in session.list() {
-        let dir = std::path::Path::new(&path);
-        if !dir.join(".oxplow").is_dir() {
+    restore_session_with(
+        &session.list(),
+        &RestoreOps {
+            is_project: &|dir| dir.join(".oxplow").is_dir(),
+            is_locked: &|dir| oxplow_app::is_project_locked(dir),
+            focus: &|dir| oxplow_app::request_focus(dir),
+            spawn: &|dir| oxplow_app::spawn_project_window(dir, true),
+        },
+    )
+}
+
+/// Restore policy over `entries`, returning whether at least one window
+/// ended up on screen. The caller shows the launcher when this is false,
+/// so "no window resulted" must never report true.
+fn restore_session_with(entries: &[String], ops: &RestoreOps<'_>) -> bool {
+    let mut restored = 0;
+    for path in entries {
+        let dir = std::path::Path::new(path);
+        if !(ops.is_project)(dir) {
             continue; // gone or never initialized — don't restore
         }
-        match oxplow_app::spawn_project_window(dir, true) {
+        // Already open in another process (commonly a dev build sharing
+        // this session file). Spawning would just hit that project's
+        // instance lock and exit, so raise the existing window instead —
+        // the same trade `open_project` makes.
+        if (ops.is_locked)(dir) {
+            if (ops.focus)(dir) {
+                restored += 1;
+                tracing::info!(project = %path, "focused already-open session window");
+            } else {
+                tracing::warn!(
+                    project = %path,
+                    "session project is open in an unreachable window; not restoring"
+                );
+            }
+            continue;
+        }
+        match (ops.spawn)(dir) {
             Ok(()) => {
-                spawned += 1;
+                restored += 1;
                 tracing::info!(project = %path, "restored session window");
             }
             Err(e) => {
@@ -158,7 +204,7 @@ fn restore_session() -> bool {
             }
         }
     }
-    spawned > 0
+    restored > 0
 }
 
 /// The global session store (`session.json` in the app-config dir),
@@ -590,4 +636,100 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+#[cfg(test)]
+mod restore_session_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// Records which projects were focused vs. spawned so each test can
+    /// assert the *route* taken, not just the return value.
+    #[derive(Default)]
+    struct Calls {
+        focused: RefCell<Vec<String>>,
+        spawned: RefCell<Vec<String>>,
+    }
+
+    fn name(dir: &std::path::Path) -> String {
+        dir.to_string_lossy().into_owned()
+    }
+
+    /// `locked` lists the dirs a live process already holds; `focusable`
+    /// lists the dirs whose focus channel answers. Every entry is a
+    /// valid project unless listed in `missing`.
+    fn run(
+        entries: &[&str],
+        locked: &[&str],
+        focusable: &[&str],
+        missing: &[&str],
+        calls: &Calls,
+    ) -> bool {
+        restore_session_with(
+            &entries.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &RestoreOps {
+                is_project: &|dir| !missing.contains(&name(dir).as_str()),
+                is_locked: &|dir| locked.contains(&name(dir).as_str()),
+                focus: &|dir| {
+                    calls.focused.borrow_mut().push(name(dir));
+                    focusable.contains(&name(dir).as_str())
+                },
+                spawn: &|dir| {
+                    calls.spawned.borrow_mut().push(name(dir));
+                    Ok(())
+                },
+            },
+        )
+    }
+
+    #[test]
+    fn unlocked_project_is_spawned() {
+        let calls = Calls::default();
+        assert!(run(&["/a"], &[], &[], &[], &calls));
+        assert_eq!(*calls.spawned.borrow(), vec!["/a"]);
+        assert!(calls.focused.borrow().is_empty());
+    }
+
+    #[test]
+    fn already_open_project_is_focused_not_spawned() {
+        let calls = Calls::default();
+        assert!(run(&["/a"], &["/a"], &["/a"], &[], &calls));
+        assert_eq!(*calls.focused.borrow(), vec!["/a"]);
+        assert!(
+            calls.spawned.borrow().is_empty(),
+            "spawning a locked project just hits the instance lock and exits"
+        );
+    }
+
+    /// The reported bug: the only session entry is already open in
+    /// another build, so no window results and the caller must fall
+    /// through to the launcher instead of exiting silently.
+    #[test]
+    fn already_open_but_unreachable_reports_no_window() {
+        let calls = Calls::default();
+        assert!(!run(&["/a"], &["/a"], &[], &[], &calls));
+        assert!(calls.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn missing_project_is_skipped() {
+        let calls = Calls::default();
+        assert!(!run(&["/a"], &[], &[], &["/a"], &calls));
+        assert!(calls.spawned.borrow().is_empty());
+        assert!(calls.focused.borrow().is_empty());
+    }
+
+    /// One dead entry must not suppress the windows that did open.
+    #[test]
+    fn one_unreachable_entry_does_not_hide_the_others() {
+        let calls = Calls::default();
+        assert!(run(&["/a", "/b"], &["/a"], &[], &[], &calls));
+        assert_eq!(*calls.spawned.borrow(), vec!["/b"]);
+    }
+
+    #[test]
+    fn empty_session_reports_no_window() {
+        let calls = Calls::default();
+        assert!(!run(&[], &[], &[], &[], &calls));
+    }
 }

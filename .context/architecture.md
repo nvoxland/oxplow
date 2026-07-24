@@ -87,10 +87,11 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs`):
   `run_project` branch); decline → `abort_setup` exits. Nothing is
   recorded into recents until setup is confirmed.
 - `None` → **session restore**: if the global session has open
-  windows from last exit, `restore_session()` spawns one process per
-  still-valid project dir and we show no launcher. Otherwise →
-  `run_launcher(ctx)`: **no `Services`** — just the recent-projects
-  surface and a launcher window.
+  windows from last exit, `restore_session()` reopens one per
+  still-valid project dir and we show no launcher. It returns whether a
+  window actually resulted, **not** whether a spawn succeeded — see
+  Session restore below. Otherwise → `run_launcher(ctx)`: **no
+  `Services`** — just the recent-projects surface and a launcher window.
 
 The renderer's `<Root>` calls `get_launch_mode` and renders
 `<Launcher>` / `<ProjectSetup>` / `<App>` accordingly.
@@ -128,6 +129,21 @@ were open last. A bare launch reopens them (skipping dirs that are gone
 / no longer have `.oxplow/`); each restore spawn carries
 `OXPLOW_RESTORING`.
 
+An entry that's **already open in another process** is focused rather
+than spawned — the same lock-probe-then-`request_focus` trade
+`open_project` makes, since spawning would only hit the instance lock
+and exit. This is routine when a dev build and an installed build share
+a session file.
+
+`restore_session()` therefore counts *windows that resulted*, not spawns
+issued: a locked-and-unreachable entry counts for nothing, and when
+**no** entry produced a window the caller falls through to
+`run_launcher`. Counting spawns instead was tsk236 — every session entry
+already open meant a silent no-op launch with no window, no launcher,
+and no error (the child `exit(0)`s, so macOS writes no crash report
+either). The policy is unit-tested through the `RestoreOps` injection
+seam in `main.rs`, which fakes the lock / focus / spawn calls.
+
 How the set is maintained:
 
 - **Fresh (non-restore) boot** re-snapshots it: `run_project` writes
@@ -152,6 +168,14 @@ How the set is maintained:
 so non-Tauri code can find it): `recent-projects.json`
 (`oxplow_config::RecentProjects`) and `session.json` — see
 [data-model.md](./data-model.md).
+
+`OXPLOW_HOME` overrides that dir (used verbatim; empty = unset), so a
+dev build can run alongside an installed one without sharing session,
+recents, or global metric manifests. It's read once in
+`global_config_dir()`, so every caller inherits it, and it's inherited
+by spawned windows because `spawn_project_window` doesn't `env_clear()`.
+It moves oxplow's own state only — Tauri's `app_config_dir()` path
+resolver still uses the platform location. See [DEV.md](../DEV.md).
 
 The workspace isolation rule below still holds, now **per process**:
 each process treats its own project dir as the workspace root.
