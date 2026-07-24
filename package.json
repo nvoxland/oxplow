@@ -20,6 +20,7 @@
     "type:coverage": "bunx type-coverage -p apps/desktop/tsconfig.json --json-output > target/type-coverage.json",
     "tauri:dev": "OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
+    "tauri:build:app": "bun run --cwd apps/desktop tauri build --bundles app",
     "e2e": "bunx playwright test"
   },
   "devDependencies": {

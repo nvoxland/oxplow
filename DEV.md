@@ -223,13 +223,111 @@ bun run tauri:build
 Runs Vite + cargo to produce platform installers in
 `target/release/bundle/`:
 
-- macOS: `.dmg` + `.app.tar.gz` (arm64 and x64)
+- macOS: `.dmg` + `.app.tar.gz`
 - Windows: `.msi` / `.exe`
 - Linux: `.deb` + `.AppImage`
 
-Builds are unsigned in CI. Add signing certs by setting Tauri's
-standard signing env vars; see Tauri docs for `TAURI_PRIVATE_KEY` and
-the per-platform keychain integration.
+Only the **host** architecture, always — nothing passes
+`--target universal-apple-darwin`, so an Apple Silicon machine
+produces an arm64 bundle and nothing else. CI is arm64-only on macOS
+for the same reason (`macos-latest` runners are Apple Silicon), which
+is why the Homebrew cask is `arm64`-gated.
+
+### Install your own macOS build
+
+The version in the filename is the workspace `version` from the root
+`Cargo.toml`:
+
+```
+target/release/bundle/dmg/Oxplow_<version>_aarch64.dmg
+target/release/bundle/macos/Oxplow.app
+```
+
+Open the `.dmg` and drag `Oxplow.app` to `/Applications` — or skip the
+disk image and copy the `.app` straight out of `bundle/macos/`. Either
+way it then shows up in Launchpad and Spotlight. A `--no-bundle` build
+(see "Run from source") won't: that produces a bare
+`target/release/oxplow` binary, and the macOS launcher only indexes
+`.app` bundles.
+
+### The DMG step fails locally — use `CI=true`
+
+`bun run tauri:build` on a dev machine dies at the end with `error
+running bundle_dmg.sh`. DMG bundling finishes by running a Finder
+AppleScript to arrange the disk-image window, and macOS TCC blocks that
+Apple event unless the process running the build has been granted
+Automation → Finder. Tauri swallows the real message; run
+`bundle_dmg.sh` by hand and you see it:
+
+```
+execution error: Not authorized to send Apple events to Finder. (-1743)
+```
+
+The fix — no permission grant needed:
+
+```
+CI=true bun run tauri:build
+```
+
+Tauri passes `--skip-jenkins` to `bundle_dmg.sh` when it detects CI,
+which skips the AppleScript entirely. The DMG is fully functional
+(`Oxplow.app` + the drag-to-`Applications` symlink); it only loses the
+cosmetic icon *positions* in the mounted window. This is also why CI has
+always built DMGs without any Automation grant. (`TAURI_BUNDLER_DMG_IGNORE_CI`
+is the inverse escape hatch — forces the AppleScript to run anyway.)
+
+If you don't want a DMG at all, build app-only — the `.app` is already
+built and signed before the DMG step, so nothing is lost:
+
+```
+bun run tauri:build:app        # == tauri build --bundles app
+```
+
+Only bother granting the permission if you want the icon layout. Note
+**System Settings → Privacy & Security → Automation has no "+" button**
+— it lists only apps that have already prompted, so the grant can't be
+added by hand; you have to make the prompt fire. Do that from
+**Terminal.app** (not an IDE, oxplow's terminal pane, or a nested build
+script — TCC attributes the request to the responsible parent process,
+which often can't surface the dialog):
+
+```
+tccutil reset AppleEvents      # clear the stored (likely denied) consent
+osascript -e 'tell application "Finder" to get bounds of window of desktop'
+```
+
+Click *Allow*, then plain `bun run tauri:build` works. Triggering it
+with that one-liner beats burning a full build to find out.
+
+Don't switch `bundle.targets` in `tauri.conf.json` off `"all"` — CI and
+the release pipeline need the `.dmg` (the Homebrew cask downloads it).
+
+Two names live inside the bundle — the app is `Oxplow.app`
+(`productName`), the executable is `Contents/MacOS/oxplow` (the cargo
+bin name). So the installed app doubles as a CLI:
+
+```
+/Applications/Oxplow.app/Contents/MacOS/oxplow ~/src/some-project
+```
+
+### Signing
+
+Bundles are ad-hoc signed (`"signingIdentity": "-"` in
+`tauri.conf.json`), never Developer-ID signed or notarized. A bundle
+you built locally opens without complaint. One *downloaded* from a
+GitHub Release carries `com.apple.quarantine` and hits the "Oxplow.app
+is damaged" wall until it's stripped:
+
+```
+xattr -d com.apple.quarantine /Applications/Oxplow.app
+```
+
+`brew install --cask oxplow` does that automatically — see
+[packaging/homebrew/README.md](./packaging/homebrew/README.md).
+
+For real signing, set Tauri's standard signing env vars; see Tauri
+docs for `TAURI_PRIVATE_KEY` and the per-platform keychain
+integration.
 
 ## Documentation site
 
