@@ -853,6 +853,7 @@ mod tests {
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
             inject_session_context: true,
+            icon_tint: None,
             collection: Default::default(),
             metrics: Default::default(),
             gauges: Default::default(),

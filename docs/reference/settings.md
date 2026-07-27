@@ -146,6 +146,24 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
 | `agentModels` | *empty* | Per-agent model override, e.g. `opencode: github-copilot/gpt-5-mini`. |
 | `lsp.servers` | *empty* | Per-project language-server pins. |
+| `iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
+
+#### `iconTint`
+
+Several oxplow windows open at once look identical in the Dock. `iconTint`
+paints a colour behind this project's icon:
+
+```yaml
+iconTint: "#c2410c"
+```
+
+Accepts `#rrggbb`, the `#rgb` shorthand, or either without the `#`. A value
+that isn't a colour is a startup error rather than a silent no-op. Omit the key
+to leave the stock icon alone.
+
+**macOS only** — it's a no-op elsewhere. It changes the Dock icon of the
+running app; it does not alter the installed `.app` on disk, so it applies
+equally to a release build and a `cargo`-built one.
 
 The four metric blocks — `measures`, `gauges`, `metrics`, and
 `dimensions` — are covered in [Metrics](../guide/metrics.md), which

@@ -2391,6 +2391,21 @@ export type OxplowConfig = {
 	 *  block into every agent prompt.
 	 */
 	injectSessionContext: boolean,
+	/**
+	 *  Hex colour composited behind this project's app icon, so concurrent
+	 *  windows are tellable apart at a glance (`#c2410c`, `#abc`, or
+	 *  unprefixed). `None` leaves the stock icon alone.
+	 * 
+	 *  Per-project rather than a dev-only flag: colour-coding *any* checkout is
+	 *  the general case, and "this is the dev build" is just one instance of
+	 *  it. Consumed on macOS only — see the desktop shell's `icon_tint`.
+	 * 
+	 *  No `skip_serializing_if`: this type is a command result, and specta
+	 *  rejects conditional omission in unified mode. Absence from the written
+	 *  YAML is handled by `write_project_config`, which builds its mapping by
+	 *  hand rather than through this derive.
+	 */
+	iconTint: string | null,
 	// Per-project collection profile (test + coverage instrumentation).
 	collection: CollectionConfig,
 	/**

@@ -34,5 +34,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
 
+# Dock-icon tinting (`icon_tint`). Same crates and versions Tauri already
+# resolves for its own `setApplicationIconImage` call, so this pins nothing new.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSImage", "NSApplication", "NSColor", "NSGraphics", "NSGraphicsContext", "block2"] }
+objc2-foundation = "0.3"
+block2 = "0.6"
+
 [lints]
 workspace = true

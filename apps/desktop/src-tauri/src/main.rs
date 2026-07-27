@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+mod icon_tint;
+
 use oxplow_app::{AppLayout, Services};
 use oxplow_tauri_ipc::{
     specta_builder, AppState, PluginRuntime, PluginRuntimeState, OXPLOW_EVENT_CHANNEL,
@@ -469,6 +471,9 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
     let services = Services::boot(layout).expect("services boot");
 
     let state: AppState = Arc::new(services);
+    // Read once here: `RunEvent::Ready` fires on the main thread and must not
+    // take the config lock, and the tint is a launch-time identity cue anyway.
+    let icon_tint = state.config.read().ok().and_then(|c| c.icon_tint.clone());
     let event_bus = state.events.clone();
     let lsp_sessions = state.lsp_sessions.clone();
     let terminal_sessions = state.terminal_sessions.clone();
@@ -542,12 +547,19 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         .manage(launch_info)
         .build(ctx)
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            // A full app quit (Cmd-Q, OS shutdown) flips QUITTING so the
-            // per-window CloseRequested handlers preserve the session set
-            // instead of dropping each window as it tears down.
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+        .run(move |_app_handle, event| {
+            match event {
+                // A full app quit (Cmd-Q, OS shutdown) flips QUITTING so the
+                // per-window CloseRequested handlers preserve the session set
+                // instead of dropping each window as it tears down.
+                tauri::RunEvent::ExitRequested { .. } => {
+                    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                // Tauri sets the dock icon while mapping its own `Ready`, so
+                // this runs strictly after it and the tint isn't overwritten
+                // (tsk246).
+                tauri::RunEvent::Ready => icon_tint::apply(icon_tint.as_deref()),
+                _ => {}
             }
         });
 }

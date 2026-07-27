@@ -611,6 +611,20 @@ pub struct OxplowConfig {
     /// block into every agent prompt.
     #[serde(rename = "injectSessionContext")]
     pub inject_session_context: bool,
+    /// Hex colour composited behind this project's app icon, so concurrent
+    /// windows are tellable apart at a glance (`#c2410c`, `#abc`, or
+    /// unprefixed). `None` leaves the stock icon alone.
+    ///
+    /// Per-project rather than a dev-only flag: colour-coding *any* checkout is
+    /// the general case, and "this is the dev build" is just one instance of
+    /// it. Consumed on macOS only — see the desktop shell's `icon_tint`.
+    ///
+    /// No `skip_serializing_if`: this type is a command result, and specta
+    /// rejects conditional omission in unified mode. Absence from the written
+    /// YAML is handled by `write_project_config`, which builds its mapping by
+    /// hand rather than through this derive.
+    #[serde(rename = "iconTint")]
+    pub icon_tint: Option<String>,
     /// Per-project collection profile (test + coverage instrumentation).
     pub collection: CollectionConfig,
     /// Project-declared metric SPECS (the `metrics:` block) — the author-able
@@ -664,6 +678,24 @@ struct RawGenerated {
     include: Vec<String>,
 }
 
+/// Split a hex colour into 8-bit RGB channels. Accepts `#rrggbb`, the
+/// `#rgb` shorthand (expanded the way CSS does, so `#abc` == `#aabbcc`), and
+/// either spelling without the leading `#`. `None` for anything else, which is
+/// what [`OxplowConfig::icon_tint`] validation rejects on.
+pub fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let hex = s.strip_prefix('#').unwrap_or(s);
+    let expanded = match hex.len() {
+        3 => hex.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => hex.to_string(),
+        _ => return None,
+    };
+    if !expanded.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(&expanded[i..i + 2], 16).ok();
+    Some((channel(0)?, channel(2)?, channel(4)?))
+}
+
 /// Internal raw shape, used to validate before promoting to
 /// `OxplowConfig`. Mirrors the TS `ParsedOxplowConfig` interface.
 #[derive(Debug, Default, Deserialize)]
@@ -693,6 +725,8 @@ struct RawConfig {
     snapshot_max_file_bytes: Option<f64>,
     #[serde(rename = "injectSessionContext", default)]
     inject_session_context: Option<bool>,
+    #[serde(rename = "iconTint", default)]
+    icon_tint: Option<String>,
     #[serde(default)]
     collection: Option<RawCollectionBlock>,
     #[serde(default)]
@@ -931,6 +965,9 @@ pub fn write_project_config(
             "injectSessionContext".into(),
             config.inject_session_context.into(),
         );
+    }
+    if let Some(tint) = &config.icon_tint {
+        doc.insert("iconTint".into(), tint.as_str().into());
     }
     if !config.lsp_servers.is_empty() {
         let mut lsp = serde_yaml::Mapping::new();
@@ -1304,6 +1341,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
+        icon_tint: None,
         collection: CollectionConfig::default(),
         metrics: Vec::new(),
         gauges: Vec::new(),
@@ -1399,6 +1437,15 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         .inject_session_context
         .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
 
+    let icon_tint = match raw.icon_tint {
+        Some(t) if parse_hex_rgb(&t).is_none() => {
+            return Err(ConfigError::Invalid(format!(
+                "iconTint must be a hex colour like \"#c2410c\" or \"#abc\"; got {t:?}"
+            )));
+        }
+        other => other,
+    };
+
     let collection = validate_collection(raw.collection)?;
     let metrics = validate_metrics(raw.metrics)?;
     let gauges = validate_gauges(raw.gauges)?;
@@ -1472,6 +1519,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         generated,
         snapshot_max_file_bytes,
         inject_session_context,
+        icon_tint,
         collection,
         metrics,
         gauges,
@@ -2939,6 +2987,61 @@ lsp:
         write_project_config(dir.path(), &cfg).unwrap();
         let loaded = load_project_config(dir.path()).unwrap();
         assert!(!loaded.inject_session_context);
+    }
+
+    #[test]
+    fn icon_tint_round_trips_and_defaults_to_unset() {
+        let dir = tempdir().unwrap();
+        assert_eq!(load_project_config(dir.path()).unwrap().icon_tint, None);
+
+        let cfg = OxplowConfig {
+            icon_tint: Some("#c2410c".into()),
+            ..default_config("test".into())
+        };
+        write_project_config(dir.path(), &cfg).unwrap();
+        let loaded = load_project_config(dir.path()).unwrap();
+        assert_eq!(loaded.icon_tint.as_deref(), Some("#c2410c"));
+    }
+
+    #[test]
+    fn icon_tint_accepts_the_common_hex_spellings() {
+        for spelling in ["#c2410c", "#C2410C", "#abc", "c2410c"] {
+            let dir = tempdir().unwrap();
+            std::fs::write(cfg_path(dir.path()), format!("iconTint: \"{spelling}\"\n")).unwrap();
+            assert_eq!(
+                load_project_config(dir.path())
+                    .unwrap()
+                    .icon_tint
+                    .as_deref(),
+                Some(spelling),
+                "{spelling} should parse"
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_icon_tint_is_a_surfaced_config_error() {
+        // Same stance as every other setting here: bad config is reported, not
+        // silently dropped — a typo'd colour that quietly did nothing would be
+        // read as "the feature is broken".
+        for bad in ["", "#12", "#12345", "nope", "#gggggg", "rgb(1,2,3)"] {
+            let dir = tempdir().unwrap();
+            std::fs::write(cfg_path(dir.path()), format!("iconTint: \"{bad}\"\n")).unwrap();
+            let err = load_project_config(dir.path()).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::Invalid(ref m) if m.contains("iconTint")),
+                "{bad:?} should be rejected naming the key, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_tint_parses_to_rgb_channels() {
+        // The shorthand expands the way CSS does, so #abc and #aabbcc agree.
+        assert_eq!(parse_hex_rgb("#c2410c"), Some((0xc2, 0x41, 0x0c)));
+        assert_eq!(parse_hex_rgb("c2410c"), Some((0xc2, 0x41, 0x0c)));
+        assert_eq!(parse_hex_rgb("#ABC"), parse_hex_rgb("#aabbcc"));
+        assert_eq!(parse_hex_rgb("#zzz"), None);
     }
 
     #[test]
