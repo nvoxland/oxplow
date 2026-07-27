@@ -692,16 +692,18 @@ export async function removeRecentProject(path: string): Promise<void> {
   unwrap(await commands.removeRecentProject(path));
 }
 
-/// Open `path` as a project. `newWindow=false` replaces the current
-/// window (this process exits once the new one is spawned);
-/// `newWindow=true` opens an additional independent window.
+/// Open an existing project at `path`. `newWindow=false` replaces the
+/// current window (this process exits once the new one is spawned);
+/// `newWindow=true` opens an additional independent window. A folder
+/// that isn't a project yet errors — use `createProject` for that.
 export async function openProject(path: string, newWindow: boolean): Promise<void> {
   unwrap(await commands.openProject(path, newWindow));
 }
 
-/// Whether `path` still needs first-run setup (has no `.oxplow/` yet).
-export async function projectNeedsSetup(path: string): Promise<boolean> {
-  return unwrap(await commands.projectNeedsSetup(path));
+/// Create a new project in `path` (initializes `.oxplow/`) and open it
+/// in a new window. Errors if `path` is already a project.
+export async function createProject(path: string): Promise<void> {
+  unwrap(await commands.createProject(path));
 }
 
 /// Create the `.oxplow/` project structure in `path` and relaunch into
@@ -713,15 +715,6 @@ export async function setupProject(path: string): Promise<void> {
 /// Decline first-run setup — closes the setup window (exits the process).
 export async function abortSetup(): Promise<void> {
   unwrap(await commands.abortSetup());
-}
-
-/// Open `path`, but route uninitialized dirs (no `.oxplow/`) to a NEW
-/// window regardless of `newWindow` — that window shows the setup
-/// confirmation, so declining it can never destroy the launcher or the
-/// caller's current project window.
-export async function openProjectGuarded(path: string, newWindow: boolean): Promise<void> {
-  const needsSetup = await projectNeedsSetup(path);
-  await openProject(path, needsSetup ? true : newWindow);
 }
 
 export async function createStream(input:

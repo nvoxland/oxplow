@@ -440,7 +440,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_recent_projects"),
     ui("remove_recent_project"),
     ui("open_project"),
-    ui("project_needs_setup"),
+    ui("create_project"),
     ui("setup_project"),
     ui("abort_setup"),
 ];

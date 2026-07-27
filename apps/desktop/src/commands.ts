@@ -18,6 +18,7 @@ export type CommandId =
   | "dashboard.new"
   | "stream.new"
   | "thread.new"
+  | "project.new"
   | "project.open"
   | "project.openNewWindow"
   // Native (responder-chain) items. Activations are dispatched by the
@@ -94,6 +95,7 @@ export interface CommandHandlers {
   pushChanges(): void;
   openProject(): void;
   openProjectNewWindow(): void;
+  newProject(): void;
 }
 
 export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[] {
@@ -102,6 +104,10 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
       id: "file",
       label: "File",
       items: [
+        // Creating and opening are separate doors: New Project… is the
+        // only command that initializes a folder, and the Open pair only
+        // ever opens a folder that already is one.
+        { id: "project.new", label: "New Project…", enabled: true },
         { id: "project.open", label: "Open Project…", enabled: true },
         { id: "project.openNewWindow", label: "Open Project in New Window…", enabled: true },
         { id: "file.save", label: "Save", shortcut: "Ctrl/Cmd+S", enabled: state.canSave },
@@ -191,6 +197,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "dashboard.new": handlers.newDashboard,
     "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
+    "project.new": handlers.newProject,
     "project.open": handlers.openProject,
     "project.openNewWindow": handlers.openProjectNewWindow,
     // Native items dispatch through the OS responder chain.

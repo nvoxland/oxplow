@@ -785,17 +785,24 @@ export const commands = {
 	// Forget a recent project (exact match on the stored path).
 	removeRecentProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_recent_project", { path })),
 	/**
-	 *  Open `path` as a project. Spawns a new oxplow process pinned to
-	 *  that directory. When `new_window` is false the current window is
-	 *  replaced — we spawn the new process and then exit this one.
+	 *  Open `path` as an existing project. Spawns a new oxplow process
+	 *  pinned to that directory. When `new_window` is false the current
+	 *  window is replaced — we spawn the new process and then exit this one.
+	 *  A folder that isn't a project yet is an error, not an implicit
+	 *  create; see `create_project`.
 	 */
 	openProject: (path: string, newWindow: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("open_project", { path, newWindow })),
 	/**
-	 *  Whether `path` still needs first-run setup — i.e. it has no
-	 *  `.oxplow/` dir yet. The launcher/app calls this before opening so a
-	 *  declined setup never replaces an existing window.
+	 *  Create a new project in `path`: initialize `.oxplow/` and open the
+	 *  result in a **new** window. Backs File ▸ New Project… and the
+	 *  launcher's New Project button — the only two ways a folder becomes a
+	 *  project from inside the app.
+	 * 
+	 *  Always a new window (never `app.exit(0)`), so creating a project can
+	 *  never close the launcher or the window the user ran the command
+	 *  from. `path` must not already be a project.
 	 */
-	projectNeedsSetup: (path: string) => typedError<boolean, IpcError>(__TAURI_INVOKE("project_needs_setup", { path })),
+	createProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("create_project", { path })),
 	/**
 	 *  Create the `.oxplow/` project structure in `path`, then relaunch
 	 *  into it. The fresh process sees `.oxplow/` present and boots the

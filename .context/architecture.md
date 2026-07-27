@@ -102,12 +102,24 @@ The renderer's `<Root>` calls `get_launch_mode` and renders
 Opening / reopening a project (IntelliJ-style) goes through the
 `open_project` IPC command, which **spawns a fresh process** of the
 current executable with `OXPLOW_PROJECT_DIR` set. "New window" = spawn;
-"replace this window" = spawn then `app.exit(0)`. The launcher and the
-in-window File ▸ Open Project commands both route here — but through
-`openProjectGuarded`, which first calls `project_needs_setup` and forces
-an **uninitialized** dir to a *new* window. That way a declined setup
-(`<ProjectSetup>` → Cancel) only closes the setup window and never
-destroys the launcher or the caller's current project window.
+"replace this window" = spawn then `app.exit(0)`. The launcher's Open
+Project button, File ▸ Open Project…/Open Project in New Window…, and
+File ▸ Open Recent all route here.
+
+**Creating and opening are separate doors** (tsk248). `open_project`
+refuses a dir with no `.oxplow/` — it never initializes one — and the
+error names File ▸ New Project…. Creating is `create_project`: it
+validates the dir is *not* already a project, creates `.oxplow/`, and
+spawns a window for it. It **always** opens a new window and never
+exits the calling process, so creating can't destroy the launcher or
+the window the command ran from. The two guards are the pure
+`resolve_open_target` / `resolve_create_target` helpers in
+`commands/launch.rs` (unit-tested there); the old
+`project_needs_setup` command and its `openProjectGuarded` wrapper are
+gone — each command now enforces its own half of the invariant.
+`<ProjectSetup>` still backs the **CLI** path below (`oxplow
+<fresh-dir>`), which is the one route that boots straight into a
+folder that isn't a project yet.
 
 A **per-project instance lock** (`.oxplow/instance.lock`, fs2 advisory
 lock acquired in `run_project`) prevents two processes from booting on

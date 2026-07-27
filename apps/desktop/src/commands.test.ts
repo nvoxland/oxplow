@@ -89,6 +89,27 @@ describe("buildMenuGroups", () => {
     expect(findCommandById(groups, "git.dashboard")?.enabled).toBe(false);
   });
 
+  test("New Project and Open Project run separate handlers", () => {
+    const calls: string[] = [];
+    const groups = buildMenuGroups(
+      {
+        hasStream: true,
+        hasSelectedFile: false,
+        canSave: false,
+        hasThread: false,
+      },
+      {
+        ...noopHandlers(),
+        newProject: () => calls.push("new"),
+        openProject: () => calls.push("open"),
+      },
+    );
+
+    findCommandById(groups, "project.new")?.run();
+    findCommandById(groups, "project.open")?.run();
+    expect(calls).toEqual(["new", "open"]);
+  });
+
   test("Git mutation commands enabled only when git is available", () => {
     const withGit = buildMenuGroups(
       {
@@ -136,6 +157,30 @@ describe("buildMenuGroupSnapshots", () => {
       "history.open",
     ]);
     expect(groups.find((group) => group.id === "file")?.items.find((item) => item.id === "file.save")?.enabled).toBe(true);
+  });
+
+  test("File menu offers New Project as its own command, ahead of the Open pair", () => {
+    const groups = buildMenuGroupSnapshots({
+      hasStream: true,
+      hasSelectedFile: false,
+      canSave: false,
+      hasThread: false,
+    });
+
+    const fileGroup = groups.find((group) => group.id === "file");
+    expect(fileGroup?.items.map((item) => item.id)).toEqual([
+      "project.new",
+      "project.open",
+      "project.openNewWindow",
+      "file.save",
+      "file.quickOpen",
+    ]);
+    // Creating a project is always available — it doesn't need a stream,
+    // and it is the *only* command that initializes a folder.
+    expect(fileGroup?.items.find((item) => item.id === "project.new")).toMatchObject({
+      label: "New Project…",
+      enabled: true,
+    });
   });
 
   test("Git menu leads with the Dashboard, then the working-tree ops", () => {
@@ -199,5 +244,6 @@ function noopHandlers() {
     pushChanges() {},
     openProject() {},
     openProjectNewWindow() {},
+    newProject() {},
   };
 }

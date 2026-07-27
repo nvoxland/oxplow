@@ -294,6 +294,15 @@ declaring *what it is* and mounting the generic layer.
   group lands there and there's no visible Quit. These items are
   OS-standard and state-free, so they stay out of the snapshot (and out
   of the off-Mac in-window `Menubar`).
+- **The File menu keeps creating and opening apart** (tsk248): `New
+  Project…` (`project.new`) is the only command that initializes a
+  folder — it picks a dir, creates `.oxplow/`, and opens it in a new
+  window. `Open Project…` / `Open Project in New Window…` / `Open
+  Recent` only ever open a folder that already is a project; an
+  uninitialized dir errors with a message pointing at New Project…
+  rather than silently running first-run setup. The `<Launcher>` mirrors
+  the pair (`launcher-new-project` accented, `launcher-open-project`
+  secondary). Don't reintroduce an "open initializes it for you" path.
 - **The View menu is tab-IA navigation**, not a view toggle: Files /
   Uncommitted Changes / Comments Dashboard / Wiki / History each open
   the matching page in the active thread's tab set (via `indexRef` /

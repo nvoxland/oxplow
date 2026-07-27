@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { listRecentProjects, openProjectGuarded, removeRecentProject } from "../api.js";
+import { createProject, listRecentProjects, openProject, removeRecentProject } from "../api.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
 import { connectRemote, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
@@ -15,9 +15,11 @@ import {
 } from "./remoteRecents.js";
 
 /// Start screen shown when oxplow launches with no project (a bare
-/// Finder/dock launch). Lists recent projects to reopen and offers an
-/// "Open Folder…" picker. Opening a project spawns a fresh process for
-/// it (process-per-window) and — for an existing project window —
+/// Finder/dock launch). Lists recent projects to reopen and offers two
+/// separate doors: "New Project…" initializes `.oxplow/` in a plain
+/// folder, "Open Project…" only opens a folder that already is a
+/// project. Opening a project spawns a fresh process for it
+/// (process-per-window) and — for an existing project window —
 /// replaces or adds a window. The launcher itself has no `Services`,
 /// so it only calls the `commands::launch` surface.
 export function Launcher() {
@@ -44,9 +46,9 @@ export function Launcher() {
     async (path: string, newWindow: boolean) => {
       setError(null);
       try {
-        await openProjectGuarded(path, newWindow);
+        await openProject(path, newWindow);
         // On a replace-open this process exits before resolving; on a
-        // new-window open (or a needs-setup dir) we stay on the launcher.
+        // new-window open we stay on the launcher.
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         setError(message);
@@ -76,6 +78,22 @@ export function Launcher() {
     }
   }, [handleOpen]);
 
+  /// Create a project in a folder that isn't one yet. Opens in a new
+  /// window (the launcher stays put), and a folder that already is a
+  /// project is refused by `create_project` rather than silently opened.
+  const handleNewProject = useCallback(async () => {
+    setError(null);
+    const selected = await pickFolder("New Project");
+    if (selected === null) return;
+    try {
+      await createProject(selected);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      logUi("warn", "launcher: create project failed", { path: selected, error: message });
+    }
+  }, []);
+
   return (
     <div data-testid="launcher" style={rootStyle}>
       <div style={cardStyle}>
@@ -90,21 +108,31 @@ export function Launcher() {
           </div>
         ) : null}
 
-        <button
-          type="button"
-          data-testid="launcher-open-folder"
-          onClick={handleOpenFolder}
-          style={openFolderButtonStyle}
-        >
-          Open Folder…
-        </button>
+        <div style={doorsStyle}>
+          <button
+            type="button"
+            data-testid="launcher-new-project"
+            onClick={handleNewProject}
+            style={newProjectButtonStyle}
+          >
+            New Project…
+          </button>
+          <button
+            type="button"
+            data-testid="launcher-open-project"
+            onClick={handleOpenFolder}
+            style={openProjectButtonStyle}
+          >
+            Open Project…
+          </button>
+        </div>
 
         <h2 style={sectionHeaderStyle}>Recent Projects</h2>
         {loading ? (
           <div style={emptyStyle}>Loading…</div>
         ) : recents.length === 0 ? (
           <div data-testid="launcher-empty" style={emptyStyle}>
-            No recent projects. Open a folder to get started.
+            No recent projects. Create a new one, or open an existing project folder.
           </div>
         ) : (
           <ul style={listStyle}>
@@ -349,16 +377,34 @@ const sectionHeaderStyle: React.CSSProperties = {
   color: "var(--text-muted)",
 };
 
-const openFolderButtonStyle: React.CSSProperties = {
-  width: "100%",
+const doorsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+};
+
+const doorButtonStyle: React.CSSProperties = {
+  flex: 1,
   padding: "10px 14px",
-  background: "var(--accent)",
-  color: "var(--accent-on-accent)",
-  border: "none",
   borderRadius: 6,
   cursor: "pointer",
   fontSize: "var(--text-sm)",
   fontWeight: "var(--weight-medium)" as unknown as number,
+};
+
+/// New Project is the accented primary — the launcher's job for a
+/// first-time user is getting a project made.
+const newProjectButtonStyle: React.CSSProperties = {
+  ...doorButtonStyle,
+  background: "var(--accent)",
+  color: "var(--accent-on-accent)",
+  border: "none",
+};
+
+const openProjectButtonStyle: React.CSSProperties = {
+  ...doorButtonStyle,
+  background: "transparent",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-subtle)",
 };
 
 const listStyle: React.CSSProperties = {

@@ -68,9 +68,54 @@ pub async fn remove_recent_project(
     Ok(())
 }
 
-/// Open `path` as a project. Spawns a new oxplow process pinned to
-/// that directory. When `new_window` is false the current window is
-/// replaced — we spawn the new process and then exit this one.
+/// Whether `dir` has been initialized as an Oxplow project — i.e. it
+/// has a `.oxplow/` **directory** (a plain `.oxplow` file doesn't count).
+fn is_project_dir(dir: &Path) -> bool {
+    dir.join(".oxplow").is_dir()
+}
+
+/// Resolve `path` for **opening**: an existing directory that is already
+/// an Oxplow project. Opening never initializes a folder — that is
+/// `create_project`'s job — so a plain folder is refused with a message
+/// naming the command that does create one.
+fn resolve_open_target(path: &str) -> Result<&Path, IpcError> {
+    let dir = Path::new(path);
+    if !dir.is_dir() {
+        return Err(IpcError::invalid(format!(
+            "project path is not a directory: {path}"
+        )));
+    }
+    if !is_project_dir(dir) {
+        return Err(IpcError::invalid(format!(
+            "\"{path}\" is not an Oxplow project (no .oxplow directory). Use File ▸ New Project… to create one."
+        )));
+    }
+    Ok(dir)
+}
+
+/// Resolve `path` for **creating**: an existing directory that is not
+/// already an Oxplow project. The mirror of [`resolve_open_target`] —
+/// creating never adopts an existing project.
+fn resolve_create_target(path: &str) -> Result<&Path, IpcError> {
+    let dir = Path::new(path);
+    if !dir.is_dir() {
+        return Err(IpcError::invalid(format!(
+            "project path is not a directory: {path}"
+        )));
+    }
+    if is_project_dir(dir) {
+        return Err(IpcError::invalid(format!(
+            "\"{path}\" is already an Oxplow project. Use File ▸ Open Project… to open it."
+        )));
+    }
+    Ok(dir)
+}
+
+/// Open `path` as an existing project. Spawns a new oxplow process
+/// pinned to that directory. When `new_window` is false the current
+/// window is replaced — we spawn the new process and then exit this one.
+/// A folder that isn't a project yet is an error, not an implicit
+/// create; see `create_project`.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_project(
@@ -79,12 +124,7 @@ pub async fn open_project(
     path: String,
     new_window: bool,
 ) -> Result<(), IpcError> {
-    let dir = Path::new(&path);
-    if !dir.is_dir() {
-        return Err(IpcError::invalid(format!(
-            "project path is not a directory: {path}"
-        )));
-    }
+    let dir = resolve_open_target(&path)?;
     // Already open in another window? Focus that window instead of
     // spawning a duplicate (which would just hit the instance lock and
     // exit). If the running instance can't be reached (stale state),
@@ -109,13 +149,21 @@ pub async fn open_project(
     Ok(())
 }
 
-/// Whether `path` still needs first-run setup — i.e. it has no
-/// `.oxplow/` dir yet. The launcher/app calls this before opening so a
-/// declined setup never replaces an existing window.
+/// Create a new project in `path`: initialize `.oxplow/` and open the
+/// result in a **new** window. Backs File ▸ New Project… and the
+/// launcher's New Project button — the only two ways a folder becomes a
+/// project from inside the app.
+///
+/// Always a new window (never `app.exit(0)`), so creating a project can
+/// never close the launcher or the window the user ran the command
+/// from. `path` must not already be a project.
 #[tauri::command]
 #[specta::specta]
-pub async fn project_needs_setup(path: String) -> Result<bool, IpcError> {
-    Ok(!Path::new(&path).join(".oxplow").is_dir())
+pub async fn create_project(path: String) -> Result<(), IpcError> {
+    let dir = resolve_create_target(&path)?;
+    oxplow_app::ensure_state_dir(&dir.join(".oxplow"))
+        .map_err(|e| IpcError::internal(format!("create .oxplow: {e}")))?;
+    spawn_project_process(dir)
 }
 
 /// Create the `.oxplow/` project structure in `path`, then relaunch
@@ -156,34 +204,67 @@ fn spawn_project_process(dir: &Path) -> Result<(), IpcError> {
 mod tests {
     use super::*;
 
-    /// A directory with no `.oxplow/` needs first-run setup; once the
-    /// dir exists, it doesn't. The launcher gates window replacement on
-    /// this, so a wrong answer either re-runs setup over a real project
-    /// or boots an un-initialized dir straight into the app shell.
-    #[tokio::test]
-    async fn project_needs_setup_tracks_oxplow_dir_presence() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().to_string_lossy().into_owned();
-
-        assert!(
-            project_needs_setup(path.clone()).await.unwrap(),
-            "fresh dir with no .oxplow should need setup"
-        );
-
-        std::fs::create_dir(tmp.path().join(".oxplow")).unwrap();
-        assert!(
-            !project_needs_setup(path).await.unwrap(),
-            "dir with .oxplow should not need setup"
-        );
-    }
-
     /// A `.oxplow` *file* (not a directory) doesn't count as an
-    /// initialized project — `is_dir()` must drive the decision.
-    #[tokio::test]
-    async fn project_needs_setup_ignores_a_non_dir_oxplow_entry() {
+    /// initialized project — `is_dir()` must drive both decisions, or
+    /// opening boots an un-initialized dir into the full app shell.
+    #[test]
+    fn a_non_dir_oxplow_entry_is_not_a_project() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(tmp.path().join(".oxplow"), b"not a dir").unwrap();
         let path = tmp.path().to_string_lossy().into_owned();
-        assert!(project_needs_setup(path).await.unwrap());
+        assert!(resolve_open_target(&path).is_err());
+        assert!(resolve_create_target(&path).is_ok());
+    }
+
+    /// Opening never creates: a plain folder is refused, and the message
+    /// names the command that *does* create one.
+    #[test]
+    fn open_refuses_a_folder_that_is_not_a_project() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let err = resolve_open_target(&tmp.path().to_string_lossy()).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("New Project"),
+            "open error should point at New Project…, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn open_accepts_an_initialized_project() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".oxplow")).unwrap();
+        assert!(resolve_open_target(&tmp.path().to_string_lossy()).is_ok());
+    }
+
+    /// Creating never adopts: a folder that is already a project is
+    /// refused, pointing at Open Project… instead.
+    #[test]
+    fn create_refuses_a_folder_that_is_already_a_project() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".oxplow")).unwrap();
+        let err = resolve_create_target(&tmp.path().to_string_lossy()).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("Open Project"),
+            "create error should point at Open Project…, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn create_accepts_a_plain_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(resolve_create_target(&tmp.path().to_string_lossy()).is_ok());
+    }
+
+    /// Both paths reject a non-directory before they get as far as the
+    /// `.oxplow/` probe.
+    #[test]
+    fn neither_path_accepts_a_missing_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = tmp.path().join("a-file");
+        std::fs::write(&file, b"x").unwrap();
+        let path = file.to_string_lossy().into_owned();
+        assert!(resolve_open_target(&path).is_err());
+        assert!(resolve_create_target(&path).is_err());
     }
 }

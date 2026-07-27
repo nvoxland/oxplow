@@ -160,7 +160,7 @@ import {
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
 import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
-import { openProjectGuarded, listRecentProjects } from "./api.js";
+import { openProject, createProject, listRecentProjects } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import { coalescedRefresh } from "./coalesced-refresh.js";
 import type { RecentProjectView } from "./tauri-bridge/generated/bindings.js";
@@ -198,18 +198,36 @@ function resolveSiblings(
   return { entries: siblings.entries, index: matchIdx };
 }
 
-/// Prompt for a folder and open it as a project. `newWindow=false`
-/// replaces the current window (this process exits once the new one
-/// spawns); `true` opens an additional independent window. Shared by
-/// the File ▸ Open Project commands and the launcher.
+/// Prompt for a folder and open it as an **existing** project.
+/// `newWindow=false` replaces the current window (this process exits
+/// once the new one spawns); `true` opens an additional independent
+/// window. A folder that isn't a project yet is refused by
+/// `open_project` — File ▸ New Project… is the door for that.
 async function pickAndOpenProject(newWindow: boolean) {
   const selected = await pickFolder(newWindow ? "Open Project in New Window" : "Open Project");
   if (selected === null) return;
   try {
-    await openProjectGuarded(selected, newWindow);
+    await openProject(selected, newWindow);
   } catch (e) {
     recordOpError({
       label: "Open project",
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/// Prompt for a folder and create a new project in it. Always opens in
+/// a new window, so creating never closes the window the command ran
+/// from; a folder that already is a project is refused by
+/// `create_project`.
+async function pickAndCreateProject() {
+  const selected = await pickFolder("New Project");
+  if (selected === null) return;
+  try {
+    await createProject(selected);
+  } catch (e) {
+    recordOpError({
+      label: "New project",
       message: e instanceof Error ? e.message : String(e),
     });
   }
@@ -1405,6 +1423,9 @@ export function App() {
     openProjectNewWindow() {
       void pickAndOpenProject(true);
     },
+    newProject() {
+      void pickAndCreateProject();
+    },
   }), [stream, selectedFilePath, workspaceContext.gitEnabled, runGitMenuOp]);
   const [recentProjects, setRecentProjects] = useState<RecentProjectView[]>([]);
   useEffect(() => {
@@ -1471,10 +1492,16 @@ export function App() {
   useEffect(() => {
     return desktopBridge().onMenuCommand((commandId: string) => {
       // Dynamic "Open Recent ▸ <project>" entries aren't in commandMap;
-      // open the trailing path in a new window.
+      // open the trailing path in a new window. A recent whose `.oxplow/`
+      // has since been deleted errors rather than re-creating it.
       if (commandId.startsWith(OPEN_RECENT_PREFIX)) {
         const path = commandId.slice(OPEN_RECENT_PREFIX.length);
-        void openProjectGuarded(path, true);
+        void openProject(path, true).catch((e) => {
+          recordOpError({
+            label: "Open project",
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
         return;
       }
       const command = commandMap.get(commandId as never);

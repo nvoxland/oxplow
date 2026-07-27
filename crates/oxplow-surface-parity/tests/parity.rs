@@ -187,11 +187,11 @@ fn surface_parity() {
 const TAURI_ONLY: &[&str] = &[
     "abort_setup",
     "clipboard_read_text",
+    "create_project",
     "get_launch_mode",
     "list_recent_projects",
     "open_external_url",
     "open_project",
-    "project_needs_setup",
     "remove_recent_project",
     "set_native_menu",
     "setup_project",

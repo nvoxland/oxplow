@@ -271,7 +271,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::launch::list_recent_projects,
             commands::launch::remove_recent_project,
             commands::launch::open_project,
-            commands::launch::project_needs_setup,
+            commands::launch::create_project,
             commands::launch::setup_project,
             commands::launch::abort_setup,
         ])
