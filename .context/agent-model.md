@@ -172,6 +172,42 @@ The command is launched in a tmux pane via `ensureAgentPane`
 (`crates/oxplow-app/src/agent_pane.rs`). Switching streams or threads doesn't kill
 existing agent sessions; tmux keeps them alive in the background.
 
+### The agent is spawned by absolute path, on purpose (tsk245)
+
+`AgentCommandOptions::program` carries the resolved absolute path to the CLI,
+from `agent_path::resolve_agent_program`. **Don't "simplify" it back to the bare
+binary name** — that is a bug that only reproduces on a GUI launch:
+
+- A **GUI-launched** app (Finder, dock, oxplow's own launcher) gets macOS's
+  minimal PATH, not the user's shell PATH. A terminal-launched app inherits the
+  shell's, and the PTY child inherits it in turn — which is the *only* reason
+  the bare name ever worked.
+- The PTY runs `sh -lc`, and `sh` is bash-in-sh-mode: even as a **login** shell
+  it reads `/etc/profile` and `~/.profile`, never `~/.zshrc` / `~/.zprofile`.
+  So `-l` does not recover a zsh user's PATH.
+
+Together those meant launching from the launcher killed every agent pane with
+`sh: claude: command not found` — with Claude Code's default install location
+(`~/.local/bin`) sitting exactly in the gap, and the message landing right under
+the stale-resume notice so it read as a session problem.
+
+`agent_path` probes PATH first (so a deliberate PATH entry always wins), then a
+fixed list of dirs agent CLIs install into. When it resolves nothing the command
+keeps the bare name — resolution is a heuristic and the shell may still win —
+but prefixes a `command -v` preflight that reports the real cause instead of the
+shell's bare `command not found`.
+
+`agent_path::base_pty_env` is the single source of the env every PTY spawns
+with (`TERM`, `COLORTERM`, and the widened `PATH`). All five spawn sites call
+it; adding a sixth that hand-rolls the env re-opens this bug for the *tools the
+agent shells out to*, which the absolute path doesn't cover.
+
+Known limit: version-manager shims (mise, nvm, volta) live under versioned
+directories that no fixed list can guess, so a GUI-launched agent can still miss
+`node`/`bun`. Fixing that needs a login-shell env capture (`$SHELL -ilc`), which
+was deliberately not taken here — it costs a subprocess per launch and can hang
+on a user's rc file.
+
 ## Plugin hook bridge
 
 Agent-specific runtime files are materialized by `oxplow-plugin` under

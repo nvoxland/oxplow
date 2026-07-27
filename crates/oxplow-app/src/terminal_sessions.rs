@@ -264,10 +264,7 @@ impl TerminalSessionRegistry {
             command: "tmux".into(),
             args: vec!["attach-session".into(), "-t".into(), pane_target.clone()],
             cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            env: vec![
-                ("TERM".into(), "xterm-256color".into()),
-                ("COLORTERM".into(), "truecolor".into()),
-            ],
+            env: crate::agent_path::base_pty_env(),
             cols,
             rows,
         };
@@ -292,10 +289,7 @@ impl TerminalSessionRegistry {
             command: "sh".into(),
             args: vec!["-lc".into(), command],
             cwd,
-            env: vec![
-                ("TERM".into(), "xterm-256color".into()),
-                ("COLORTERM".into(), "truecolor".into()),
-            ],
+            env: crate::agent_path::base_pty_env(),
             cols,
             rows,
         };

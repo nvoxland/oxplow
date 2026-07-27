@@ -9,6 +9,7 @@
 
 pub mod agent_command;
 pub mod agent_pane;
+pub mod agent_path;
 pub mod agent_prompt;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;

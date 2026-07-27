@@ -255,10 +255,7 @@ pub async fn open_terminal_session(
                     command: shell,
                     args: vec!["-l".into()],
                     cwd,
-                    env: vec![
-                        ("TERM".into(), "xterm-256color".into()),
-                        ("COLORTERM".into(), "truecolor".into()),
-                    ],
+                    env: oxplow_app::agent_path::base_pty_env(),
                     cols: c,
                     rows: r,
                 }
@@ -373,6 +370,9 @@ pub async fn open_terminal_session(
             Some(prompt)
         },
         opencode_model: config.agent_models.get(&AgentKind::Opencode).cloned(),
+        // Spawn by absolute path: a GUI-launched oxplow has macOS's minimal
+        // PATH, and `sh -l` won't recover a zsh user's (tsk245).
+        program: oxplow_app::agent_path::resolve_agent_program(agent),
         ..Default::default()
     };
     match &agent_runtime {
@@ -443,10 +443,7 @@ pub async fn open_terminal_session(
                         args: vec!["attach-session".into(), "-t".into(), target_label.clone()],
                         cwd: std::env::current_dir()
                             .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-                        env: vec![
-                            ("TERM".into(), "xterm-256color".into()),
-                            ("COLORTERM".into(), "truecolor".into()),
-                        ],
+                        env: oxplow_app::agent_path::base_pty_env(),
                         cols: c,
                         rows: r,
                     },
@@ -515,10 +512,7 @@ pub async fn open_terminal_session(
                         command: "sh".into(),
                         args: vec!["-lc".into(), command],
                         cwd,
-                        env: vec![
-                            ("TERM".into(), "xterm-256color".into()),
-                            ("COLORTERM".into(), "truecolor".into()),
-                        ],
+                        env: oxplow_app::agent_path::base_pty_env(),
                         cols: c,
                         rows: r,
                     },

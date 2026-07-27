@@ -26,6 +26,10 @@ pub struct AgentCommandOptions {
     /// [`OPENCODE_MODEL`] when set. Claude/codex launch with their
     /// own defaults and ignore this.
     pub opencode_model: Option<String>,
+    /// Absolute path to the agent CLI, from `agent_path::resolve_agent_program`
+    /// (tsk245). `None` falls back to the bare binary name plus a preflight
+    /// that explains the GUI-launch PATH gap — see [`program_and_guard`].
+    pub program: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,21 +60,26 @@ pub fn build_agent_command_for_session(
     let env_prefix = build_env_prefix(&opts.env);
 
     if matches!(agent, AgentKind::Codex) {
+        let (prog, guard) = program_and_guard(opts, "codex");
         let config_args = opts
             .codex_config_overrides
             .iter()
             .map(|c| format!(" --config {}", shell_escape(c)))
             .collect::<String>();
         let base = if resume_session_id.is_empty() {
-            format!("codex --cd {}{config_args}", shell_escape(cwd))
+            format!("{prog} --cd {}{config_args}", shell_escape(cwd))
         } else {
             format!(
-                "codex resume --cd {}{config_args} {}",
+                "{prog} resume --cd {}{config_args} {}",
                 shell_escape(cwd),
                 shell_escape(resume_session_id)
             )
         };
-        let inner = format!("cd {} && {}exec {base}", shell_escape(cwd), env_prefix);
+        let inner = format!(
+            "cd {} && {guard}{}exec {base}",
+            shell_escape(cwd),
+            env_prefix
+        );
         return format!("sh -lc {}", shell_escape(&inner));
     }
 
@@ -80,8 +89,9 @@ pub fn build_agent_command_for_session(
         // `opts.env`); the CLI itself only needs the model and an
         // optional session to resume. cwd comes from the `cd` (opencode
         // starts in the working directory).
+        let (prog, guard) = program_and_guard(opts, "opencode");
         let model = opts.opencode_model.as_deref().unwrap_or(OPENCODE_MODEL);
-        let base = format!("opencode -m {}", shell_escape(model));
+        let base = format!("{prog} -m {}", shell_escape(model));
         let fresh = format!("{env_prefix}exec {base}");
         let command = if resume_session_id.is_empty() {
             fresh.clone()
@@ -91,7 +101,7 @@ pub fn build_agent_command_for_session(
                 shell_escape(resume_session_id)
             )
         };
-        let inner = format!("cd {} && {command}", shell_escape(cwd));
+        let inner = format!("cd {} && {guard}{command}", shell_escape(cwd));
         return format!("sh -lc {}", shell_escape(&inner));
     }
 
@@ -117,7 +127,8 @@ pub fn build_agent_command_for_session(
         .map(|p| format!(" --mcp-config {} --strict-mcp-config", shell_escape(p)))
         .unwrap_or_default();
 
-    let claude_base = format!("claude{plugin_arg}{allowed_tools_arg}{prompt_arg}{mcp_arg}");
+    let (prog, guard) = program_and_guard(opts, "claude");
+    let claude_base = format!("{prog}{plugin_arg}{allowed_tools_arg}{prompt_arg}{mcp_arg}");
     let fresh_claude = format!("{env_prefix}exec {claude_base}");
     let command = if resume_session_id.is_empty() {
         fresh_claude.clone()
@@ -127,8 +138,35 @@ pub fn build_agent_command_for_session(
             shell_escape(resume_session_id)
         )
     };
-    let inner = format!("cd {} && {command}", shell_escape(cwd));
+    let inner = format!("cd {} && {guard}{command}", shell_escape(cwd));
     format!("sh -lc {}", shell_escape(&inner))
+}
+
+/// What to exec, plus a preflight to run before it.
+///
+/// With a resolved absolute path there's nothing to check — PATH is out of the
+/// picture. Without one we keep the bare name, because resolution is a
+/// heuristic and the login shell may still find it, but we first test PATH so
+/// a miss reports the actual cause. The bare `sh: claude: command not found`
+/// it replaces lands directly under the stale-resume notice, which makes a
+/// PATH problem read as a session problem (tsk245).
+fn program_and_guard(opts: &AgentCommandOptions, bin: &str) -> (String, String) {
+    match opts.program.as_deref() {
+        Some(path) => (shell_escape(path), String::new()),
+        None => {
+            let msg = format!(
+                "[oxplow] agent CLI '{bin}' not found on PATH. If oxplow was launched from the \
+                 Finder or the launcher it does not inherit your shell PATH (and `sh -l` does not \
+                 read ~/.zshrc) — install {bin} to a standard location, or launch oxplow from a \
+                 terminal. See DEV.md."
+            );
+            let guard = format!(
+                "command -v {bin} >/dev/null 2>&1 || {{ echo {} >&2; exit 127; }}; ",
+                shell_escape(&msg)
+            );
+            (bin.to_string(), guard)
+        }
+    }
 }
 
 fn build_env_prefix(env: &[(String, String)]) -> String {
@@ -285,6 +323,69 @@ mod tests {
         // Falls back to a fresh session on stale id, like claude.
         assert!(cmd.contains("stale"));
         assert!(cmd.contains("exec opencode"));
+    }
+
+    #[test]
+    fn a_resolved_program_replaces_the_bare_binary_name() {
+        // tsk245: a GUI-launched oxplow has a minimal PATH, so the agent is
+        // spawned by absolute path and PATH stops mattering. Every agent has
+        // to honour it — codex builds its command in two places (fresh and
+        // `resume`), so a partial fix is easy to miss.
+        let s = stream();
+        for (agent, bin) in [
+            (AgentKind::Claude, "claude"),
+            (AgentKind::Codex, "codex"),
+            (AgentKind::Opencode, "opencode"),
+        ] {
+            let opts = AgentCommandOptions {
+                program: Some(format!("/opt/agents/{bin}")),
+                ..Default::default()
+            };
+            for pane in [PaneKind::Working, PaneKind::Talking] {
+                let cmd = build_agent_command(agent, &s, pane, &opts);
+                assert!(
+                    cmd.contains(&format!("/opt/agents/{bin}")),
+                    "{bin} ({pane:?}) should exec the resolved path: {cmd}"
+                );
+                assert!(
+                    !cmd.contains(&format!("exec {bin}")),
+                    "{bin} ({pane:?}) should not fall back to the bare name: {cmd}"
+                );
+                assert!(
+                    !cmd.contains("command -v"),
+                    "{bin} ({pane:?}) needs no not-found guard once resolved: {cmd}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unresolved_program_keeps_the_bare_name_but_explains_the_failure() {
+        // Resolution is a heuristic (version-manager shims aren't on the
+        // list), so an unresolved agent must still get its shot at PATH —
+        // just with a legible message instead of a bare `command not found`,
+        // which reads as a session problem when it lands under the
+        // stale-resume line.
+        let s = stream();
+        for (agent, bin) in [
+            (AgentKind::Claude, "claude"),
+            (AgentKind::Codex, "codex"),
+            (AgentKind::Opencode, "opencode"),
+        ] {
+            let cmd = build_agent_command(agent, &s, PaneKind::Working, &Default::default());
+            assert!(
+                cmd.contains(&format!("command -v {bin}")),
+                "{bin} should preflight PATH: {cmd}"
+            );
+            assert!(
+                cmd.contains("launched from the"),
+                "{bin} should name the GUI-launch cause: {cmd}"
+            );
+            assert!(
+                cmd.contains(bin),
+                "{bin} still runs by bare name so PATH can win: {cmd}"
+            );
+        }
     }
 
     #[test]
