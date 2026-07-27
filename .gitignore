@@ -14,6 +14,10 @@ site/
 .venv/
 __pycache__/
 
+# Dev-only OXPLOW_HOME (global app-config dir for a dev build — see DEV.md).
+# Disposable: rm -rf to reset the dev instance's session/recents.
+.oxplow_home/
+
 # Rust
 target/
 **/target/

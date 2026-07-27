@@ -129,27 +129,64 @@ Then iterate:
 
 ### Running a dev build alongside an installed one
 
-The per-project instance lock is *per project*, so a dev build and an
-installed build never contend as long as they hold different projects.
-What they do share is the global app-config dir — one `session.json`
-and one recents list — so dev opens land in the installed app's restore
-set and vice versa.
+A dev build and an installed build share the global app-config dir —
+one `session.json` and one recents list — so dev opens land in the
+installed app's restore set and vice versa.
 
-`OXPLOW_HOME` redirects that dir:
+`OXPLOW_HOME` redirects that dir. For the usual dev loop, keep it
+**inside the checkout** so the dev state is self-contained and
+disposable (`rm -rf .oxplow_home` resets it):
 
 ```bash
-OXPLOW_HOME=~/.oxplow-dev ./target/debug/oxplow .
+OXPLOW_HOME="$PWD/.oxplow_home" ./target/debug/oxplow .
 ```
 
-The value is used **verbatim** (no `net.voxland.oxplow` suffix), and an
-exported-but-empty value is treated as unset. It's inherited by every
-window the instance spawns, so one export covers the whole tree. Export
-it from your shell profile and the dev build keeps its own session,
-recents, and global metric/gauge/measure/dimension manifests.
+`.oxplow_home/` is gitignored. Use `~/.oxplow-dev` instead if you want
+one dev home shared across several checkouts.
 
-Note it moves oxplow's own global state only — Tauri's
-`app_config_dir()` (webview storage, etc.) still uses the platform
-location.
+**Pass an absolute path — `$PWD/.oxplow_home`, not `.oxplow_home`.** The
+value is stored verbatim and re-resolved by each process that inherits
+it, and those processes do not share a cwd: `spawn_project_window` sets
+no `current_dir` (it inherits the parent's), but the agent PTY spawns
+with `cwd = <stream worktree>`. A bare relative path therefore resolves
+against whichever worktree the agent is in, so the moment you have a
+non-primary stream the app and its agent disagree about where the dev
+home is. An exported-but-empty value is treated as unset.
+
+The value is used **verbatim** (no `net.voxland.oxplow` suffix), and is
+inherited by every window the instance spawns, so one export covers the
+whole tree — the dev build keeps its own session, recents, and global
+metric/gauge/measure/dimension manifests.
+
+Two things it does **not** move:
+
+- **The project database.** Tasks, threads, and facts live in
+  `.oxplow/local.sqlite` inside the project, which is per-project and
+  untouched by `OXPLOW_HOME`. This only separates *global* state.
+- **Tauri's `app_config_dir()`** (webview storage, etc.) still uses the
+  platform location.
+
+#### The instance lock is per project, not per home
+
+`OXPLOW_HOME` separates global config; it does not let two builds hold
+the same project. The lock is `.oxplow/instance.lock` in the project
+dir, so a dev build and an installed build never contend **as long as
+they hold different projects** — but when you're dogfooding oxplow *on*
+oxplow, they want the same one.
+
+To run both against this repo, give the dev build its own worktree:
+
+```bash
+git worktree add ../oxplow-dev
+OXPLOW_HOME="$PWD/.oxplow_home" ./target/debug/oxplow ../oxplow-dev
+```
+
+#### A note on exporting from your shell profile
+
+Exporting `OXPLOW_HOME` from your shell profile works, but it stops
+being dev-only as soon as you launch the installed build from a
+terminal — a GUI launch doesn't inherit your shell env, a terminal
+launch does. Putting it on the command keeps the scoping explicit.
 
 ## Run headless (daemon + browser)
 
