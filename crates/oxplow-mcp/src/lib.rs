@@ -3218,6 +3218,11 @@ impl OxplowMcp {
                 None
             };
             let worktree = worktree_for_thread(&self.services, &tid).await;
+            // Drop claims on paths the project never snapshots (tsk249)
+            // BEFORE both the record and the review, so a generated file
+            // is neither tracked nor flagged as "claimed but not
+            // changed" — the diff could never confirm it either way.
+            let touched = self.services.tasks.claimable_paths(&tid, &touched).await;
             if let Err(err) = self
                 .services
                 .tasks
@@ -3386,10 +3391,10 @@ impl OxplowMcp {
             .get_effort(&effort_id)
             .await
             .map_err(|e| internal(e.to_string()))?;
-        let version = if let Some(effort) = effort {
+        let version = if let Some(effort) = effort.as_ref() {
             self.services
                 .tasks
-                .resolve_effort_file_version(&effort)
+                .resolve_effort_file_version(effort)
                 .await
         } else {
             oxplow_app::file_ref_version::ResolvedFileVersion {
@@ -3397,6 +3402,18 @@ impl OxplowMcp {
                 closest_git_version: None,
                 git_version_exact: false,
             }
+        };
+        // Same tsk249 filter the close-time claim uses: a path the
+        // project never snapshots is silently dropped rather than
+        // recorded as a claim nothing can ever confirm.
+        let add = match effort.as_ref() {
+            Some(e) => {
+                self.services
+                    .tasks
+                    .claimable_paths(&e.thread_id, &add)
+                    .await
+            }
+            None => add,
         };
         for path in &add {
             if path.is_empty() {
@@ -5093,7 +5110,18 @@ mod tests {
     }
 
     fn boot() -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
+        boot_with_config("")
+    }
+
+    /// `boot()` with `project_yaml` written to `.oxplow/project.yaml`
+    /// first, so the booted `Services` picks it up (e.g. a
+    /// `generated:` block that shapes the workspace filter).
+    fn boot_with_config(project_yaml: &str) -> (tempfile::TempDir, Arc<Services>, OxplowMcp) {
         let project = tempfile::tempdir().unwrap();
+        if !project_yaml.is_empty() {
+            std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
+            std::fs::write(project.path().join(".oxplow/project.yaml"), project_yaml).unwrap();
+        }
         // ensure_primary requires a real git repo.
         let repo = git2::Repository::init(project.path()).unwrap();
         let mut config = repo.config().unwrap();
@@ -5884,6 +5912,64 @@ mod tests {
         assert!(
             acks_after.is_empty(),
             "re-claiming the path should clear its acknowledgement, got {acks_after:?}",
+        );
+    }
+
+    /// tsk249: `complete_task` must silently ignore a claimed path the
+    /// workspace filter excludes (project `generated.exclude` /
+    /// `.gitignore`). Such a path is never snapshotted, so it can't be
+    /// observed as changed — recording it only guarantees a
+    /// "claimed but not changed" nudge on every close.
+    #[tokio::test]
+    async fn complete_task_ignores_claims_on_never_snapshotted_paths() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        // Boot with a real `generated.exclude` in the project config —
+        // the same route the user's `.oxplow/project.yaml` takes.
+        let (_proj, services, server) = boot_with_config(
+            "generated:\n  exclude:\n  - apps/desktop/src/generated/bindings.ts\n",
+        );
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let mut item = make_task(Some(thread.id), "codegen close");
+        let task_id = services.task_store.insert(&item).await.unwrap();
+        item.id = task_id;
+
+        server
+            .complete_task(Parameters(CompleteTaskParams {
+                id: task_id.to_string(),
+                summary: "regenerated the bindings".into(),
+                author: None,
+                touched_files: Some(vec![
+                    "src/authored.rs".into(),
+                    "apps/desktop/src/generated/bindings.ts".into(),
+                ]),
+                impacts: None,
+                claim_runs: None,
+                disclaim_runs: None,
+            }))
+            .await
+            .unwrap();
+
+        let effort = services
+            .effort_store
+            .most_recent_for_task(task_id)
+            .await
+            .unwrap()
+            .expect("close should have recorded an effort");
+        let files = services.effort_store.list_files(&effort.id).await.unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["src/authored.rs"],
+            "the generated path should be dropped from the claim, not tracked"
         );
     }
 

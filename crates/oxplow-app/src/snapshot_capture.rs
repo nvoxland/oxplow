@@ -270,6 +270,20 @@ impl SnapshotCaptureService {
         self.inner.refilter.notify_one();
     }
 
+    /// Whether this stream's workspace filter excludes `rel` (a
+    /// worktree-relative path) from capture — the project's
+    /// `generated.exclude` list or `.gitignore`. A path that answers
+    /// `true` here is never snapshotted, so nothing downstream can
+    /// observe it as changed; effort attribution uses this to leave
+    /// such paths out of a claim entirely (tsk249).
+    pub fn excluded_from_capture(&self, rel: &Path) -> bool {
+        self.inner
+            .workspace_filter
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .ignore(rel, false)
+    }
+
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
     /// Setting this to `Duration::ZERO` disables the gate and captures
     /// every newly-observed path on the next snapshot — used by tests

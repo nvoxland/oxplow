@@ -988,10 +988,14 @@ impl TaskService {
                 git_version_exact: false,
             },
         };
-        let files: Vec<(String, oxplow_db::EffortFileChange)> = touched_files
-            .iter()
-            .filter(|p| !p.is_empty())
-            .map(|p| (p.clone(), classify_change(worktree_root, p)))
+        let files: Vec<(String, oxplow_db::EffortFileChange)> = self
+            .claimable_paths(thread, touched_files)
+            .await
+            .into_iter()
+            .map(|p| {
+                let change = classify_change(worktree_root, &p);
+                (p, change)
+            })
             .collect();
         let effort_id = effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
@@ -1035,6 +1039,15 @@ impl TaskService {
         if path.is_empty() {
             return Ok(false);
         }
+        // A path the project never snapshots can't be attributed — see
+        // `claimable_paths`.
+        if self
+            .claimable_paths(thread, &[path.to_string()])
+            .await
+            .is_empty()
+        {
+            return Ok(false);
+        }
         // One open effort ⇒ unambiguous, claim it.
         //
         // Several open ⇒ ASK WHICH ONE rather than giving up (tsk186). This used
@@ -1073,6 +1086,48 @@ impl TaskService {
             .record_file(&effort.id, path, change, version.as_ref())
             .await?;
         Ok(true)
+    }
+
+    /// The subset of `paths` that effort attribution can actually own,
+    /// in input order: non-empty, and not excluded from snapshot capture
+    /// by the stream's workspace filter (the project's
+    /// `generated.exclude` list or `.gitignore`).
+    ///
+    /// tsk249: an excluded path is deliberately never snapshotted, so
+    /// the close-time diff can never confirm it. Recording a claim on
+    /// one guarantees it lands in `claimed_but_not_changed` on every
+    /// close — a nudge the agent can only ever answer with "yes, that
+    /// was right". Silently dropping it is the honest outcome: oxplow
+    /// doesn't track the file, so it doesn't ask about it either.
+    /// (The reverse direction needs no filtering — an excluded path is
+    /// absent from the diff, so it can't be `changed_but_not_claimed`.)
+    ///
+    /// Paths pass through unfiltered when no capture service is
+    /// reachable for the thread (bare TaskService in tests, a stream
+    /// with no registered capture) — filtering is a noise reduction,
+    /// never a reason to lose a claim.
+    pub async fn claimable_paths(&self, thread: &ThreadId, paths: &[String]) -> Vec<String> {
+        let named: Vec<String> = paths.iter().filter(|p| !p.is_empty()).cloned().collect();
+        if named.is_empty() {
+            return named;
+        }
+        let svc = match self.service_for_thread(thread).await {
+            Some(svc) => svc,
+            None => return named,
+        };
+        named
+            .into_iter()
+            .filter(|p| {
+                let excluded = svc.excluded_from_capture(Path::new(p));
+                if excluded {
+                    tracing::debug!(
+                        path = %p,
+                        "attribution: dropping claim on a path excluded from snapshot capture",
+                    );
+                }
+                !excluded
+            })
+            .collect()
     }
 
     pub async fn list_backlog(&self) -> Result<Vec<Task>, TaskServiceError> {
@@ -2290,6 +2345,93 @@ mod tests {
         let files = effort_store.list_files(&row.id).await.unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "src/x.rs");
+    }
+
+    /// tsk249: a path the workspace filter ignores (project
+    /// `generated.exclude`, `.gitignore`) is never snapshotted, so it can
+    /// never show up in the effort's diff — claiming one would be flagged
+    /// as "claimed but not changed" on every single close. Drop it from
+    /// the claim silently; the authored paths beside it still land.
+    #[tokio::test]
+    async fn record_effort_drops_paths_that_are_never_snapshotted() {
+        let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
+        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
+            "generated",
+        ]));
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "codegen".into(),
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        svc.record_effort(
+            &effort_store,
+            item.id,
+            &tid,
+            &[
+                "src/authored.rs".to_string(),
+                "apps/desktop/src/generated/bindings.ts".to_string(),
+            ],
+            Some("regenerated the bindings".into()),
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let files = effort_store.list_files(&efforts[0].id).await.unwrap();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["src/authored.rs"],
+            "generated path should be silently dropped, authored path kept"
+        );
+    }
+
+    /// The PostToolUse auto-claim gets the same treatment — writing a
+    /// generated file mid-effort records nothing rather than seeding a
+    /// claim the diff can never confirm.
+    #[tokio::test]
+    async fn claim_open_effort_file_skips_paths_that_are_never_snapshotted() {
+        let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
+        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
+            "generated",
+        ]));
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "codegen".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let claimed = svc
+            .claim_open_effort_file(
+                &effort_store,
+                &tid,
+                "apps/desktop/src/generated/bindings.ts",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!claimed, "a never-snapshotted path is not claimable");
+        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let files = effort_store.list_files(&efforts[0].id).await.unwrap();
+        assert!(files.is_empty(), "nothing should have been recorded");
+
+        // An authored path in the same effort still claims normally.
+        assert!(svc
+            .claim_open_effort_file(&effort_store, &tid, "src/authored.rs", None)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

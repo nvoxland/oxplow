@@ -14,7 +14,7 @@
 //! always `observed`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use serde_json::json;
@@ -2140,10 +2140,23 @@ impl CollectionService {
             .map(|f| f.path)
             .collect();
         let claim_first_active = !claimed.is_empty();
+        // Paths the project never snapshots (`generated.exclude`,
+        // `.gitignore`) are outside attribution entirely (tsk249): they
+        // can't be claimed and can't show in the effort's diff, so
+        // flagging one would be a nag with no possible resolution.
+        let capture_filter = {
+            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
+            oxplow_fs_watch::WorkspaceFilter::for_project(
+                &self.project_dir,
+                &cfg.generated.exclude,
+                &cfg.generated.include,
+            )
+        };
         let mut out_of_effort: Vec<String> = detail
             .files
             .iter()
             .map(|f| f.path.clone())
+            .filter(|path| !capture_filter.ignore(Path::new(path), false))
             .filter(|path| {
                 if claim_first_active {
                     !claimed.contains(path)
@@ -6868,6 +6881,49 @@ mod tests {
             assert!(nudge.contains("docs/blog/posts/held.md"), "{nudge}");
             assert!(nudge.contains("auto-deploys the site"), "{nudge}");
             assert!(nudge.contains(".github/workflows/docs.yml"), "{nudge}");
+        }
+
+        /// tsk249: a path in `generated.exclude` is never snapshotted and
+        /// (since the same change) never claimable — so the hygiene check
+        /// must not flag it as out-of-effort either, or regenerated build
+        /// output would nag on every commit with no way to silence it.
+        #[tokio::test]
+        async fn commit_hygiene_ignores_never_snapshotted_paths() {
+            let h = build_full(None, true, &[("gen/bindings.ts", "// generated\n")]).await;
+            h.service
+                .config
+                .write()
+                .unwrap()
+                .generated
+                .exclude
+                .push("gen/bindings.ts".into());
+            // Claim the authored file so the claim-first branch is active —
+            // the branch that would otherwise flag every unclaimed path.
+            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            h.efforts
+                .record_file(
+                    &effort_id,
+                    "src/foo.rs",
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+            git_in(h.tmp.path(), &["add", "src/foo.rs", "gen/bindings.ts"]);
+            git_commit(h.tmp.path(), "feature + regenerated bindings");
+            let result = h
+                .service
+                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
+                .await
+                .unwrap();
+            assert!(
+                result.is_none(),
+                "a generated path must not read as out-of-effort: {result:?}"
+            );
         }
 
         #[tokio::test]

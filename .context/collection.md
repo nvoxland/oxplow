@@ -377,6 +377,14 @@ fallback works for an *open* effort, where `list_changed_paths_for_effort`
 can't (it needs an end snapshot). HEAD sha + committed file list come from
 `oxplow_git::head_commit_sha` / `get_commit_detail` via `spawn_blocking`.
 
+**Never-snapshotted paths are dropped before either branch runs**
+(tsk249): the committed list is filtered through the project's
+`WorkspaceFilter` (`generated.exclude` + `.gitignore`) first. Those paths
+can't be claimed either (see `TaskService::claimable_paths` in
+[agent-model.md](./agent-model.md)), so flagging one would be a nag with
+no possible resolution — committing regenerated `bindings.ts` alongside
+the change that caused it is normal and silent.
+
 **Skips cleanly** when the commit didn't succeed (non-zero exit), there's
 no open effort, or the effort has no start snapshot yet. **Anti-nag:**
 once per commit sha, tracked in a second in-memory `HashSet`

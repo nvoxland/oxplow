@@ -816,6 +816,24 @@ intermediate `ready` step.
   discrepancy as resolved. Re-adding a previously-disclaimed path via
   `add_files` clears its acknowledgement. Persisted authorship is always
   the agent's declared list (after any amend), never the raw diff.
+- **Paths the project never snapshots are dropped from a claim, not
+  flagged** (tsk249). `TaskService::claimable_paths(thread, paths)` runs
+  every claim through the stream's `WorkspaceFilter` (the project's
+  `generated.exclude` list + `.gitignore`, via
+  `SnapshotCaptureService::excluded_from_capture`) and silently drops
+  what capture excludes. An excluded path is never in the bracket diff,
+  so claiming one guaranteed a `claimed_but_not_changed` nudge the agent
+  could only answer with "yes, that was right" — this repo's
+  `generated/bindings.ts` hit it on every close that regenerated it. All
+  three claim boundaries filter: `record_effort` (the boundary
+  `touched_files`), `claim_open_effort_file` (the PostToolUse auto-claim,
+  which returns `Ok(false)`), and `amend_effort`'s `add_files`;
+  `complete_task` filters once up front so the review sees the same list
+  it recorded. The reverse direction needs nothing — an excluded path
+  can't appear in the diff, so it is never `changed_but_not_claimed`.
+  With no capture service reachable for the thread (bare `TaskService`,
+  unregistered stream) paths pass through unfiltered: this is noise
+  reduction, never a reason to lose a claim.
 - **Files are one kind of a generic claim→reconcile mechanic.** The same
   CLAIM (agent asserts) / OBSERVE (oxplow detects independently) /
   RECONCILE (residue at close) / SURFACE (Stop directive) loop attributes
