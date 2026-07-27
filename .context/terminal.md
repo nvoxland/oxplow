@@ -5,6 +5,45 @@ session, plus the file-path link provider that turns `path:line` text
 in terminal output into clickable links that open files in oxplow's
 editor.
 
+## The CSP carve-out that keeps colour working (tsk247)
+
+`tauri.conf.json` sets
+`app.security.dangerousDisableAssetCspModification: ["style-src"]`.
+**Do not remove it** — the name oversells the risk, and dropping it breaks
+every terminal in packaged builds while dev stays fine.
+
+Tauri hardens the CSP for packaged apps in two steps: it injects
+`nonce="__TAURI_STYLE_NONCE__"` into every `<style>` at build time
+(`tauri-utils/src/html.rs`), then swaps in a real nonce and **appends
+`'nonce-…'` to `style-src`** at serve time (`tauri/src/manager/mod.rs`).
+Per CSP3, a directive carrying a nonce-source makes **`'unsafe-inline'`
+ignored** — so the `style-src 'self' 'unsafe-inline'` we declare silently
+becomes nonce-only once packaged.
+
+xterm.js builds its palette and row font rules into a `<style>` element it
+creates at runtime, which has no nonce and is therefore blocked. That single
+cause produces both halves of the symptom:
+
+- **every ANSI colour disappears** — 16-colour, 256, and truecolour alike,
+  because `.xterm-fg-*` / `.xterm-bg-*` never apply; text falls back to
+  `theme.foreground`, i.e. uniform white;
+- **the font stops being monospace**, because the same sheet sets the row
+  font-family, so rows inherit the page's proportional UI font.
+
+The rest of the app is unaffected, which is what makes this confusing to
+diagnose: React writes inline styles through the CSSOM (`el.style.x = …`),
+and CSP governs only `<style>` elements and markup `style=` attributes.
+
+The carve-out does **not** weaken the declared policy — it makes the
+*effective* policy match the one already written in `csp`. `script-src`
+keeps its nonce hardening.
+
+Ruled out by measurement during the original diagnosis; don't re-tread these
+if the symptom reappears: a `CI` env var reaching the agent (absent),
+missing `LANG`/locale (banner output byte-identical with and without),
+fonts missing from the bundle (all four woff2 are embedded in the binary),
+and an xterm font-metrics race at mount (a resize changes nothing).
+
 ## Single component
 
 `apps/desktop/src/components/TerminalPane.tsx` is the **only** xterm.js

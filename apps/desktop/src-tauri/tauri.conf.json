@@ -28,6 +28,7 @@
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "dangerousDisableAssetCspModification": ["style-src"],
       "capabilities": ["main-window", "external-url"]
     }
   },
