@@ -396,7 +396,17 @@ fn run_launcher(ctx: tauri::Context) {
             specta.mount_events(app);
             install_recent_projects(app.handle(), None);
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
-            windows::build_shell_window(app.handle(), windows::LAUNCHER_LABEL, "Oxplow")?;
+            windows::build_shell_window(
+                app.handle(),
+                windows::LAUNCHER_LABEL,
+                "Oxplow",
+                // No daemon: the launcher's few commands are shell
+                // commands, served over Tauri IPC.
+                &windows::WindowContext {
+                    base: None,
+                    kind: windows::KIND_LAUNCHER,
+                },
+            )?;
             Ok(())
         })
         .run(ctx)
@@ -424,7 +434,15 @@ fn run_setup(project_dir: std::path::PathBuf, ctx: tauri::Context) {
             specta.mount_events(app);
             install_recent_projects(app.handle(), None);
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
-            windows::build_shell_window(app.handle(), windows::SETUP_LABEL, "Oxplow")?;
+            windows::build_shell_window(
+                app.handle(),
+                windows::SETUP_LABEL,
+                "Oxplow",
+                &windows::WindowContext {
+                    base: None,
+                    kind: windows::KIND_SETUP,
+                },
+            )?;
             Ok(())
         })
         .run(ctx)
@@ -572,6 +590,13 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
                 app.handle(),
                 &label,
                 &windows::project_window_title(&project_dir_for_focus),
+                // `base: None` until the shell spawns a daemon per
+                // window (tsk259) — this process still serves the
+                // backend in-process over Tauri IPC.
+                &windows::WindowContext {
+                    base: None,
+                    kind: windows::KIND_PROJECT,
+                },
             )?;
             // Publish a focus channel so a second open of this project
             // raises this window instead of failing on the lock.

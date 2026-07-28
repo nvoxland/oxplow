@@ -177,25 +177,12 @@ fn surface_parity() {
     );
 }
 
-/// Commands that legitimately exist only as Tauri adapters and are NOT served
-/// by the headless daemon's `oxplow_rpc::dispatch` registry: they need the
-/// desktop shell itself (windowing, native menus, the OS clipboard, launching
-/// external apps, project/workspace lifecycle before a daemon is even booted).
-/// Everything else MUST be in the dispatch registry or it 404s under remote
-/// mode (`POST /ipc/:name`). Keep this list tight — adding a row here is an
-/// explicit "remote mode can't do this" decision.
-const TAURI_ONLY: &[&str] = &[
-    "abort_setup",
-    "clipboard_read_text",
-    "create_project",
-    "get_launch_mode",
-    "list_recent_projects",
-    "open_external_url",
-    "open_project",
-    "remove_recent_project",
-    "set_native_menu",
-    "setup_project",
-];
+/// The shell surface — commands that exist only as Tauri adapters. Defined in
+/// `oxplow_tauri_ipc` (the crate that owns the adapters) because the renderer's
+/// transport needs it too, generated into
+/// `apps/desktop/src/tauri-bridge/generated/shellCommands.ts`. See
+/// `shell_command_table_matches_the_rust_definition` below.
+const TAURI_ONLY: &[&str] = oxplow_tauri_ipc::SHELL_ONLY_COMMANDS;
 
 /// Every Tauri IPC command (the renderer's full surface) must be routable in
 /// remote-daemon mode — i.e. present in the shared `oxplow_rpc::dispatch`
@@ -284,5 +271,47 @@ fn event_channels_match_typescript() {
         "event-channel registries drifted — update \
          crates/oxplow-app/src/events.rs (event_channels) and \
          apps/desktop/src/tauri-bridge/channels.ts together"
+    );
+}
+
+/// The renderer's transport splits commands two ways: shell commands go to
+/// Tauri IPC, everything else to the window's daemon. That table is generated
+/// from `oxplow_tauri_ipc::SHELL_ONLY_COMMANDS` by the `export_ts_bindings`
+/// test, and this guard asserts the committed file still matches — a
+/// hand-edited or stale `shellCommands.ts` would route a command to a backend
+/// that doesn't serve it, which fails at runtime and nowhere else.
+#[test]
+fn shell_command_table_matches_the_rust_definition() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let generated = Path::new(&manifest_dir)
+        .join("../../apps/desktop/src/tauri-bridge/generated/shellCommands.ts")
+        .canonicalize()
+        .expect("shellCommands.ts exists — run `cargo test -p oxplow-tauri-ipc`");
+    let body = std::fs::read_to_string(&generated).expect("read shellCommands.ts");
+
+    let block = body
+        .split("export const SHELL_COMMANDS = [")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("SHELL_COMMANDS literal in shellCommands.ts");
+    let mut ts: Vec<String> = block
+        .lines()
+        .map(|l| l.trim().trim_end_matches(',').trim_matches('"'))
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    ts.sort();
+
+    let mut rust: Vec<String> = oxplow_tauri_ipc::SHELL_ONLY_COMMANDS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    rust.sort();
+
+    assert_eq!(
+        ts, rust,
+        "the generated shell-command table drifted from SHELL_ONLY_COMMANDS — \
+         re-run `cargo test -p oxplow-tauri-ipc export_ts_bindings` and commit \
+         apps/desktop/src/tauri-bridge/generated/shellCommands.ts"
     );
 }

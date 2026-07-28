@@ -8,6 +8,7 @@ import TsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 import { createRoot } from "react-dom/client";
 import { Root } from "./Root.js";
 import { installUiLogging, logUi } from "./logger.js";
+import { remoteBaseUrl, windowKind } from "./tauri-bridge/transport.js";
 
 self.MonacoEnvironment = {
   getWorker(_workerId: string, label: string) {
@@ -32,7 +33,13 @@ self.MonacoEnvironment = {
 };
 
 installUiLogging();
-logUi("info", "ui bootstrapping");
+// Which window this is and which backend it resolved — the first thing
+// you want when a window misbehaves, and the only visible proof that
+// the shell's injected context arrived.
+logUi("info", "ui bootstrapping", {
+  windowKind: windowKind(),
+  daemon: remoteBaseUrl(),
+});
 
 const el = document.getElementById("root")!;
 createRoot(el).render(<Root />);

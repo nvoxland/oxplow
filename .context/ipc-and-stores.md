@@ -62,11 +62,19 @@ touches roughly seven files. They sit in this order:
    **Transport switch**: the generated bindings import `invoke` from
    `apps/desktop/src/tauri-bridge/transport.ts` (the export test
    rewrites the import line post-export), and all event subscriptions
-   import `listen` from the same module. Local mode delegates to
-   `@tauri-apps/api`; remote mode (localStorage `oxplow.remoteBase` or
-   `VITE_OXPLOW_REMOTE`) fetches `POST <base>/ipc/<name>` on the
-   daemon and reads the multiplexed `/events` WebSocket. Never import
+   import `listen` from the same module. It routes **per command**:
+   shell commands (the ones step 5 says stay Tauri-only — they're
+   listed in `oxplow_tauri_ipc::SHELL_ONLY_COMMANDS` and generated into
+   `tauri-bridge/generated/shellCommands.ts`) go to `@tauri-apps/api`;
+   everything else goes to this window's daemon as `POST
+   <base>/ipc/<name>`, with events off the multiplexed `/events`
+   WebSocket. The daemon base is per window — see
+   [remote-daemon.md](./remote-daemon.md). Never import
    `@tauri-apps/api/core` or `/event` directly from UI code.
+
+   **If you add a Tauri-only command, add it to `SHELL_ONLY_COMMANDS`.**
+   Otherwise the transport sends it to the daemon, which 404s — and the
+   surface-parity test will tell you so.
 
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.

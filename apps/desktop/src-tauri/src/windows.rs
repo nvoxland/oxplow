@@ -60,15 +60,42 @@ pub fn project_window_title(project_dir: &Path) -> String {
         .unwrap_or_else(|| project_dir.to_string_lossy().into_owned())
 }
 
+/// Window kinds, as the renderer sees them in `window.__OXPLOW__.kind`.
+pub const KIND_PROJECT: &str = "project";
+pub const KIND_LAUNCHER: &str = "launcher";
+pub const KIND_SETUP: &str = "setup";
+
+/// What the shell tells a window about itself. Injected before any page
+/// script runs, so the transport can pick its backend on first call
+/// rather than asking over IPC (which would need a backend already).
+pub struct WindowContext<'a> {
+    /// Base URL of the daemon this window drives, or `None` while the
+    /// shell still serves the backend in-process over Tauri IPC.
+    pub base: Option<&'a str>,
+    /// One of the `KIND_*` constants above.
+    pub kind: &'a str,
+}
+
+/// The `initialization_script` for a window. Built through `serde_json`
+/// so a base URL can't break out of the literal.
+pub fn initialization_script(ctx: &WindowContext<'_>) -> String {
+    let payload = serde_json::json!({ "base": ctx.base, "kind": ctx.kind });
+    // Frozen: this is the shell's statement about the window, not
+    // renderer state.
+    format!("window.__OXPLOW__ = Object.freeze({payload});")
+}
+
 /// Build a shell window. Every window the shell owns has the same
-/// shape; only the label and title differ.
+/// shape; only the label, title and injected context differ.
 pub fn build_shell_window(
     app: &tauri::AppHandle,
     label: &str,
     title: &str,
+    ctx: &WindowContext<'_>,
 ) -> tauri::Result<tauri::WebviewWindow> {
     #[allow(unused_mut)]
     let mut builder = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
+        .initialization_script(initialization_script(ctx))
         .title(title)
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 500.0)
@@ -135,5 +162,54 @@ mod tests {
     #[test]
     fn project_window_title_falls_back_to_the_path() {
         assert_eq!(project_window_title(Path::new("/")), "/");
+    }
+
+    /// No daemon yet (the shell still serves the backend in-process):
+    /// the renderer must see an explicit null, not a missing key, so it
+    /// can tell "local" from "the shell forgot to inject anything".
+    #[test]
+    fn initialization_script_states_a_null_base_for_local_windows() {
+        let script = initialization_script(&WindowContext {
+            base: None,
+            kind: KIND_PROJECT,
+        });
+        assert!(script.contains("window.__OXPLOW__ ="), "{script}");
+        assert!(script.contains("\"base\":null"), "{script}");
+        assert!(script.contains("\"kind\":\"project\""), "{script}");
+    }
+
+    #[test]
+    fn initialization_script_carries_the_daemon_base() {
+        let script = initialization_script(&WindowContext {
+            base: Some("http://127.0.0.1:60331"),
+            kind: KIND_PROJECT,
+        });
+        assert!(
+            script.contains("\"base\":\"http://127.0.0.1:60331\""),
+            "{script}"
+        );
+    }
+
+    /// The base is interpolated into a page script, so it goes through
+    /// JSON encoding rather than string formatting: a quote in the URL
+    /// must not be able to close the literal and run as code.
+    #[test]
+    fn initialization_script_escapes_its_payload() {
+        let hostile = "http://x\";alert(1);//";
+        let script = initialization_script(&WindowContext {
+            base: Some(hostile),
+            kind: KIND_LAUNCHER,
+        });
+        let payload = script
+            .strip_prefix("window.__OXPLOW__ = Object.freeze(")
+            .and_then(|s| s.strip_suffix(");"))
+            .expect("script shape");
+        let parsed: serde_json::Value =
+            serde_json::from_str(payload).expect("payload is valid JSON");
+        assert_eq!(parsed["base"], hostile, "the URL survives intact");
+        assert!(
+            !payload.contains("x\";"),
+            "the quote must be escaped, not closing the literal: {payload}"
+        );
     }
 }

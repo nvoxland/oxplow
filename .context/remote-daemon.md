@@ -41,11 +41,35 @@ docs — this note is the developer-facing mechanics.
   has no ESLint; this source-scan guard delivers the invariant in the
   existing test step.)
 - **`apps/desktop/src/tauri-bridge/transport.ts`** — the frontend
-  switch. Local mode delegates to `@tauri-apps/api`; remote mode
-  (localStorage `oxplow.remoteBase`, set by the launcher's connect
-  flow; dev override `VITE_OXPLOW_REMOTE`) fetches `/ipc/:name` and
-  demuxes the `/events` WS with backoff reconnect. Mode is read once
-  at module load — switching is a window reload. Every channel
+  switch. With no daemon base it delegates to `@tauri-apps/api`; with
+  one it fetches `/ipc/:name` and demuxes the `/events` WS with backoff
+  reconnect.
+
+  **Which daemon is a per-window question** (tsk258). The shell injects
+  `window.__OXPLOW__ = { base, kind }` into every window it creates
+  (`src-tauri/src/windows.rs`, `initialization_script` — built through
+  `serde_json` so a URL can't break out of the literal), so two project
+  windows in one shell process can drive two different daemons.
+  `resolveBase` takes it from, in order: localStorage
+  `oxplow.remoteBase` (the launcher's manual connect — an explicit user
+  action outranks the default), the injected base, then
+  `VITE_OXPLOW_REMOTE` (dev override). All three are read once at module
+  load — switching is a window reload.
+
+  **Routing is per command.** `invokeRoute(name, base, tauriAvailable)`
+  sends shell commands (windowing, native menus, clipboard, project
+  lifecycle — no daemon serves them) to Tauri IPC and everything else to
+  this window's daemon. The table is
+  `generated/shellCommands.ts`, emitted from
+  `oxplow_tauri_ipc::SHELL_ONLY_COMMANDS` by the `export_ts_bindings`
+  test and asserted by the surface-parity test, so the TS side can't
+  drift from the Rust definition. One exception keeps the browser path
+  working: with **no Tauri host at all** (plain browser over a tunnel)
+  shell commands fall through to the daemon, which answers with a
+  structured "unknown command" instead of the renderer throwing on a
+  missing `__TAURI_INTERNALS__`.
+
+  Every channel
   `listen()` accepts is declared in `channels.ts`'s `CHANNEL_ROUTING`
   registry with a routing class (`multiplexed` = daemon WS in remote /
   Tauri bus locally; `shellLocal` = Tauri bus only). `listen()`'s

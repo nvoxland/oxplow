@@ -1,26 +1,34 @@
-// Transport switch: local Tauri IPC vs remote daemon over HTTP/WS.
+// Transport switch: the desktop shell (Tauri IPC) vs a daemon over
+// HTTP/WS.
 //
 // Every command in the generated bindings funnels through `invoke`
 // below (the bindings' import of `@tauri-apps/api/core` is rewritten
 // to this module at export time), and every event subscription funnels
-// through `listen`. In local mode both delegate straight to
-// `@tauri-apps/api` — byte-for-byte today's behavior. In remote mode
-// `invoke` POSTs to the daemon's `/ipc/:name` and `listen` reads the
-// multiplexed `/events` WebSocket.
+// through `listen`. With no daemon base both delegate straight to
+// `@tauri-apps/api`. With one, `invoke` POSTs to the daemon's
+// `/ipc/:name` and `listen` reads the multiplexed `/events` WebSocket.
 //
-// Remote mode is selected by a base URL in either:
-//   - localStorage "oxplow.remoteBase" (set by the connect UI), or
-//   - VITE_OXPLOW_REMOTE at build/dev time (developer override).
-// The value is read once at module load — switching modes is a
-// reload-level decision, matching the process-per-project model.
+// **Which daemon is a per-window question.** The shell injects
+// `window.__OXPLOW__ = { base, kind }` into each window it creates
+// (`src-tauri/src/windows.rs`), so two project windows in one shell
+// process can drive two different daemons. localStorage and
+// VITE_OXPLOW_REMOTE remain as overrides — see `resolveBase`. All three
+// are read once at module load; switching is a reload-level decision.
+//
+// **Routing is per command, not all-or-nothing.** Some commands only
+// exist in the shell (windowing, native menus, clipboard, project
+// lifecycle) and no daemon serves them; `SHELL_COMMANDS` is generated
+// from the Rust definition so the two can't drift. Everything else goes
+// to this window's daemon when it has one.
 //
 // Channels that are inherently local to the shell (the native menu's
-// "menu:command") use Tauri listen even in remote mode — except in a
+// "menu:command") use Tauri listen even with a daemon — except in a
 // plain-browser session (no Tauri host at all), where they're inert.
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
 import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels";
+import { SHELL_COMMANDS } from "./generated/shellCommands";
 
 /// Channels multiplexed over the daemon's /events WebSocket, keyed by
 /// the wire `channel` value in each frame. Sourced from the shared
@@ -28,16 +36,65 @@ import { CHANNEL_ROUTING, EVENT_CHANNELS, type ListenChannel } from "./channels"
 /// from what the daemon frames.
 const REMOTE_CHANNELS: Record<string, string> = EVENT_CHANNELS;
 
-function readRemoteBase(): string | null {
+/// Commands the desktop shell serves itself. Generated from
+/// `SHELL_ONLY_COMMANDS` in crates/oxplow-tauri-ipc, so this table
+/// can't drift from the Rust definition (the surface-parity test
+/// asserts the generated file still matches).
+const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
+
+/// What the shell injects into every window it creates, before any page
+/// script runs. Absent in a plain-browser session.
+export type WindowContext = { base: string | null; kind: string };
+
+function readWindowContext(): WindowContext | null {
   try {
-    const stored = window.localStorage.getItem("oxplow.remoteBase");
-    if (stored && stored.trim().length > 0) return stored.trim().replace(/\/+$/, "");
+    const injected = (globalThis as { __OXPLOW__?: WindowContext }).__OXPLOW__;
+    if (injected && typeof injected === "object") return injected;
   } catch {
-    // localStorage unavailable (tests) — fall through.
+    // No window object (bun tests) — fall through.
   }
-  const env = (import.meta as { env?: Record<string, string> }).env?.VITE_OXPLOW_REMOTE;
-  if (env && env.trim().length > 0) return env.trim().replace(/\/+$/, "");
   return null;
+}
+
+/// Which kind of window this renderer is in ("project" | "launcher" |
+/// "setup"), or null when the shell didn't create it.
+export function windowKind(): string | null {
+  return readWindowContext()?.kind ?? null;
+}
+
+function cleanBase(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/// The daemon base for this window, in precedence order:
+///
+/// 1. **localStorage** — a manual "connect to remote daemon" from the
+///    launcher. An explicit user action outranks the default.
+/// 2. **The shell's injected base** — the normal path once windows own
+///    daemons.
+/// 3. **VITE_OXPLOW_REMOTE** — build/dev-time developer override.
+///
+/// null means "no daemon": talk to the shell over Tauri IPC.
+/// Pure; exported for tests.
+export function resolveBase(sources: {
+  stored?: string | null;
+  injected?: string | null;
+  env?: string | null;
+}): string | null {
+  return cleanBase(sources.stored) ?? cleanBase(sources.injected) ?? cleanBase(sources.env) ?? null;
+}
+
+function readRemoteBase(): string | null {
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem("oxplow.remoteBase");
+  } catch {
+    // localStorage unavailable (tests) — leave it null.
+  }
+  const env = (import.meta as { env?: Record<string, string> }).env?.VITE_OXPLOW_REMOTE ?? null;
+  return resolveBase({ stored, injected: readWindowContext()?.base ?? null, env });
 }
 
 const remoteBase: string | null = readRemoteBase();
@@ -97,13 +154,32 @@ export async function probeRemoteDaemon(base: string, timeoutMs = 4000): Promise
   }
 }
 
+/// Where an `invoke(name)` goes: the desktop shell's Tauri IPC
+/// ("tauri") or this window's daemon ("http").
+///
+/// With no daemon everything is the shell's. With one, shell commands
+/// stay in the shell — unless there is no Tauri host at all (a plain
+/// browser driving a daemon), where the only reachable backend is the
+/// daemon; it answers with a structured "unknown command" rather than
+/// the renderer throwing on a missing `__TAURI_INTERNALS__`.
+/// Pure; exported for tests.
+export function invokeRoute(
+  name: string,
+  base: string | null,
+  tauriAvailable: boolean,
+): "tauri" | "http" {
+  if (base === null) return "tauri";
+  if (SHELL_COMMAND_SET.has(name) && tauriAvailable) return "tauri";
+  return "http";
+}
+
 /// Tauri-invoke-compatible entry point. The generated bindings import
 /// this as `__TAURI_INVOKE`. Resolves with the command's data and
 /// REJECTS with the IpcError object on failure — the same semantics
 /// as `@tauri-apps/api/core`'s invoke, which the bindings' typedError
 /// wrapper converts into the `{status, data|error}` envelope.
 export async function invoke<T>(name: string, args?: Record<string, unknown>): Promise<T> {
-  if (remoteBase === null) {
+  if (invokeRoute(name, remoteBase, tauriHostAvailable()) === "tauri") {
     return tauriInvoke<T>(name, args);
   }
   const resp = await fetch(`${remoteBase}/ipc/${name}`, {
