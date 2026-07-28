@@ -39,6 +39,7 @@ async-trait = { workspace = true }
 indexmap = "2.11"
 parking_lot = "0.12"
 fs2 = "0.4"
+libc = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 similar = "2"
 rayon = "1"

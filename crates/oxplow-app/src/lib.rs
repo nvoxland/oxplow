@@ -22,6 +22,7 @@ pub mod collection;
 pub mod commit_indexer;
 pub mod config_service;
 pub mod config_watch;
+pub mod daemon_supervisor;
 pub mod diagnostics;
 pub mod events;
 pub mod file_ref_version;

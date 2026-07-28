@@ -175,6 +175,16 @@ async fn main() {
         project = %project_dir.display(),
         "oxplow-daemon ready"
     );
+    // Publish the endpoint for a shell that didn't spawn us — the
+    // orphan sweep after a shell crash reads this (tsk256). The
+    // stdout line below is what a supervising shell reads at spawn.
+    let info = oxplow_app::daemon_supervisor::DaemonInfo {
+        base_url: format!("http://{}", daemon.bind_addr),
+        pid: std::process::id(),
+    };
+    if let Err(e) = oxplow_app::daemon_supervisor::write_daemon_info(&project_dir, &info) {
+        tracing::warn!(error = %e, "could not publish daemon.json");
+    }
     println!("oxplow-daemon listening on http://{}", daemon.bind_addr);
     println!(
         "  tunnel: ssh -L {0}:127.0.0.1:{0} <host>",
@@ -183,4 +193,9 @@ async fn main() {
 
     // Serve until killed.
     let _ = daemon.task.await;
+    // Only reached on a clean server exit; a SIGTERM/SIGKILL from the
+    // supervising shell leaves the file behind, which is why both
+    // `DaemonSupervisor::stop` and the boot-time orphan sweep clear it
+    // rather than trusting the daemon to.
+    oxplow_app::daemon_supervisor::clear_daemon_info(&project_dir);
 }

@@ -3723,6 +3723,7 @@ dependencies = [
  "futures",
  "git2",
  "indexmap 2.14.0",
+ "libc",
  "opentelemetry-proto",
  "oxplow-code-deps",
  "oxplow-code-dup",
