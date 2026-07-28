@@ -206,24 +206,81 @@ grammar table). Public API:
   unresolved (`std::fs`, `./Foo`, `<stdio.h>`, `foo.bar`).
 - `diff_edges(before, after) -> (added, removed)` — set diff keyed on
   `(kind, module)`.
-- `classify_zone(path) -> Zone` — path-prefix table mapping every
-  repo file to one of ~22 architectural zones (`ui`, `shell`, `ipc`,
-  `store`, `git`, `lsp`, `runtime`, `analysis`, `test`, `docs`, …).
-  Project-meta basenames (Cargo.toml, package.json) and test paths
-  override crate-zone classification.
-- `zone_for_crate_name(name) -> Option<Zone>` — workspace-crate
-  lookup for resolving Rust `use foo::*` to a zone via the synthetic
-  path `crates/foo/src/lib.rs`.
+- `ZoneRules` — the PROJECT's zone table, compiled from the `zones:`
+  block in `.oxplow/project.yaml` (`oxplow_config::ZoneRuleConfig`).
+  `classify(path) -> String` takes the first rule whose glob matches;
+  no match (and no table at all) yields `ZONE_OTHER`.
+- `zone_for_module(name) -> Option<String>` — resolves a Rust `use
+  foo::*` to a zone by looking for `foo` (or its `-`-spelled form) as a
+  path SEGMENT of some rule's pattern, so `oxplow_db` finds
+  `crates/oxplow-db/**`. The one heuristic here; it is what lets the
+  project's own table resolve first-party imports without oxplow
+  reading Cargo/npm manifests. `None` ⇒ the caller reports
+  `ZONE_EXTERNAL`.
 - `ZonedImportEdge { edge, from_zone, to_zone }` with
   `is_cross_zone()` — true only when target is in-repo, known, and
-  different from the source. `Zone::External` targets never trip
+  different from the source. `ZONE_EXTERNAL` targets never trip
   cross-zone (importing serde isn't a layer violation).
 
-Mirror TS table at
-`apps/desktop/src/components/ChangeAnalysis/zones.ts` (kept in sync
-by hand) so the UI can badge files without a backend roundtrip. The
-Rust table is the source of truth for `ZonedImportEdge` records
-crossing the IPC.
+**Oxplow ships no rule table** (tsk251). What makes a file "the store
+layer" follows from how a particular repo is laid out, and oxplow runs
+on any repo — the old built-in table hardcoded ~25 `crates/oxplow-*` /
+`apps/desktop/*` / `.context/` prefixes, so every other project's files
+fell through to `other` and these surfaces were inert. A project with no
+`zones:` block classifies everything as `other` and the zone surfaces
+stay empty rather than guessing.
+
+Zone labels are free-form strings; `other` and `external` are computed
+sentinels and are rejected as declared labels. Config shape, ordering
+semantics, and the MCP authoring tools are below.
+
+The UI has its own matcher at
+`apps/desktop/src/components/ChangeAnalysis/zones.ts` (so file badges
+need no backend roundtrip); it reads the same rules off `get_config`.
+The two glob implementations are pinned by the shared fixture
+`fixtures/zone-globs.json`, which both test suites run — that is what
+keeps them from drifting.
+
+### Declaring zones (`zones:` in `.oxplow/project.yaml`)
+
+```yaml
+zones:
+- match: ["**/Cargo.toml", "**/package.json"]   # one glob or a list
+  zone: meta
+- match: ["**/*_test.rs", "**/tests/**"]
+  zone: test
+- match: crates/oxplow-db/**
+  zone: store
+  color: "#ea580c"        # optional; else a palette entry by first use
+- match: "**/*.toml"       # catch-all — deliberately last
+  zone: meta
+```
+
+**Order is load-bearing: first match wins.** Role-by-filename rules
+(tests, docs) go above the package rules so a test file inside a crate
+reads as `test`; catch-alls go last. Globs match the full repo-relative
+path with `*` stopping at `/` — `**` is the only way to span
+directories. Bad globs, empty labels, reserved labels and malformed
+colours are config errors at load (`validate_zone_rules`), so a broken
+rule is visible rather than silently never matching.
+
+This repo's own table lives in its `.oxplow/project.yaml` and is the
+worked example.
+
+### MCP: `list_zones` / `set_zones`
+
+The agent owns this table. `list_zones` returns the rules plus what they
+actually match — a file count per zone over the worktree and a sample of
+paths that fell through to `other`, which is the signal that the table
+has gone stale as the repo grew. `set_zones { rules }` REPLACES the
+whole ordered table, validates it, writes it to `.oxplow/project.yaml`
+(committed, so a team shares one vocabulary), emits `ConfigChanged`, and
+returns the same shape so the caller can confirm the rules matched what
+it meant. Implementation: `crates/oxplow-app/src/zones_service.rs`.
+
+No IPC of its own — `zones` rides on `get_config`, and the config
+watcher hot-reloads file edits, so a `set_zones` call repaints an open
+Change-analysis view without a restart.
 
 ### `oxplow-git/co_change`
 
@@ -261,9 +318,9 @@ interface ImportDelta {
 The resolver inside the IPC is intentionally minimal:
 
 - Rust `use crate::*` / `self` / `super` → importer's own zone.
-- Rust `use foo::*` → workspace crate lookup; missing → External.
+- Rust `use foo::*` → `ZoneRules::zone_for_module`; missing → External.
 - TS `./foo` / `../foo` → lexical relative-path normalization
-  through `classify_zone`.
+  through `ZoneRules::classify`.
 - Bare specifiers (`react`, `@scope/x`, `node:fs`) → External.
 - Everything else → unresolved (`to_zone: null`); cross-zone logic
   ignores it.

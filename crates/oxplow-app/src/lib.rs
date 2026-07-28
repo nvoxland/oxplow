@@ -55,6 +55,7 @@ pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
 pub mod workspace_watch;
+pub mod zones_service;
 
 pub use agent_prompt::{
     build_session_context_block, build_session_context_block_with_role, role_change_banner,

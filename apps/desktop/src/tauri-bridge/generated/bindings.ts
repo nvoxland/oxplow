@@ -295,8 +295,9 @@ export const commands = {
 } | null, IpcError>(__TAURI_INVOKE("find_latest_code_quality_scan", { tool, treeVersion, fileFilter })),
 	/**
 	 *  Compute per-function metadata for the Change Analysis dashboard,
-	 *  for both sides of the diff. Pure in-process call: walks each
-	 *  (path, content) pair through tree-sitter.
+	 *  for both sides of the diff. Walks each (path, content) pair through
+	 *  tree-sitter; the only state it needs is the project's zone table,
+	 *  which zones the import edges (tsk251).
 	 */
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	/**
@@ -2442,6 +2443,13 @@ export type OxplowConfig = {
 	 */
 	dimensions?: DimensionEntry[],
 	/**
+	 *  Project-declared architectural zones (the `zones:` block) — an
+	 *  ORDERED table, first match wins. Empty (the default) means oxplow
+	 *  classifies nothing: every file is `other` and the Change-analysis
+	 *  zone surfaces stay empty until the project declares its own.
+	 */
+	zones?: ZoneRuleConfig[],
+	/**
 	 *  Per-agent launch model overrides, e.g.
 	 *  `agentModels: { opencode: "github-copilot/gpt-5-mini" }`.
 	 *  Only opencode consumes this today (its `-m provider/model`
@@ -3359,68 +3367,33 @@ export type WorkspaceStatusSummary = {
 };
 
 /**
- *  Architectural zone. Coarse on purpose — one chip in the UI per
- *  distinct concept. Add new variants here when a new top-level
- *  concern appears in the repo.
+ *  One row of the project's `zones:` table: the globs that select files
+ *  and the zone label they belong to.
+ * 
+ *  Zones are entirely project-defined (tsk251) — oxplow ships no rule
+ *  table of its own, because a file's architectural role follows from
+ *  how *this* project lays out its repo. Order in the table is
+ *  load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
+ *  takes the FIRST matching rule, so specific patterns must precede
+ *  catch-alls.
  */
-export type Zone = 
-/**
- *  Desktop frontend React code (`apps/desktop/src/**` outside
- *  `src-tauri`).
- */
-"ui" | 
-// Tauri shell crate (`apps/desktop/src-tauri/`).
-"shell" | 
-// `#[tauri::command]` adapters that bridge UI ↔ services.
-"ipc" | 
-// Pure-types + store traits (`oxplow-domain`).
-"domain" | 
-// rusqlite stores + migrations (`oxplow-db`).
-"store" | 
-// Git integration (`oxplow-git`).
-"git" | 
-// LSP bridge crates (`oxplow-lsp`, `oxplow-lsp-installer`).
-"lsp" | 
-// Runtime / write-guard / filing enforcement (`oxplow-runtime`).
-"runtime" | 
-// Filesystem watchers (`oxplow-fs-watch`).
-"fs_watch" | 
-// PTY + tmux subsystems.
-"terminal" | 
-// MCP server (`oxplow-mcp`).
-"mcp" | 
-// Top-level Services orchestration (`oxplow-app`).
-"app_orchestration" | 
-// Config crate.
-"config" | 
-// Session crate.
-"session" | 
-// Plugin / control-plane.
-"plugin" | 
-/**
- *  Static analysis crates (`oxplow-code-metrics`,
- *  `oxplow-code-dup`, `oxplow-code-deps`, `oxplow-tree-source`).
- */
-"analysis" | 
-// Database migrations specifically (across crates).
-"migration" | 
-// Test files (`*_test.rs`, `*.test.ts`, `tests/` directories).
-"test" | 
-// Documentation, README, `.context/`, ADRs.
-"docs" | 
-/**
- *  Project metadata (Cargo.toml, package.json, tauri.conf.json,
- *  .toml/.json config at the repo root).
- */
-"project_meta" | 
-/**
- *  Anything outside the repo (external crate / npm package /
- *  system header) — only used for import targets, never for
- *  files in the worktree.
- */
-"external" | 
-// Anything else.
-"other";
+export type ZoneRuleConfig = {
+	/**
+	 *  Globs selecting the files in this zone (any-of). In YAML `match`
+	 *  accepts a single string or a list; both land here as a list.
+	 *  Matched against the full repo-relative path with `*` stopping at
+	 *  `/` — `**` is the only way to span directories.
+	 */
+	match: string[],
+	// The zone label. Free-form; `other` and `external` are reserved.
+	zone: string,
+	/**
+	 *  Optional display colour (`#rrggbb` or `#rgb`). The first rule to
+	 *  name a label wins; labels with no colour get a palette entry
+	 *  assigned by order of first appearance.
+	 */
+	color?: string | null,
+};
 
 /**
  *  A directed edge between two zones, with the originating
@@ -3428,13 +3401,13 @@ export type Zone =
  */
 export type ZonedImportEdge = {
 	edge: ImportEdge,
-	from_zone: Zone,
+	from_zone: string,
 	/**
 	 *  The target zone if we could classify it, else None. None
-	 *  indicates a target we couldn't resolve (external package,
-	 *  path the resolver doesn't know how to walk).
+	 *  indicates a target we couldn't resolve (external package, path
+	 *  the resolver doesn't know how to walk).
 	 */
-	to_zone: Zone | null,
+	to_zone: string | null,
 };
 
 /* Tauri Specta runtime */

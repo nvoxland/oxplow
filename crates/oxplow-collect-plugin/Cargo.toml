@@ -12,7 +12,7 @@ oxplow-coverage = { workspace = true }
 # Tree-sitter AST engine behind the `ast_query` gauge host capability.
 oxplow-code-metrics = { workspace = true }
 # Glob matching for the `files(glob)` snapshot host capability.
-globset = "0.4"
+globset = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

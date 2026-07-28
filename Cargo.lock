@@ -3724,6 +3724,7 @@ dependencies = [
  "git2",
  "indexmap 2.14.0",
  "opentelemetry-proto",
+ "oxplow-code-deps",
  "oxplow-code-dup",
  "oxplow-code-metrics",
  "oxplow-collect-plugin",
@@ -3762,8 +3763,11 @@ dependencies = [
 name = "oxplow-code-deps"
 version = "0.7.0"
 dependencies = [
+ "globset",
  "oxplow-code-metrics",
+ "oxplow-config",
  "serde",
+ "serde_json",
  "specta",
  "tree-sitter",
 ]
@@ -3821,6 +3825,7 @@ version = "0.7.0"
 dependencies = [
  "dirs",
  "fs2",
+ "globset",
  "oxplow-domain",
  "serde",
  "serde_json",
@@ -4036,6 +4041,7 @@ dependencies = [
  "git2",
  "oxplow-app",
  "oxplow-code-metrics",
+ "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",

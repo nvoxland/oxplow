@@ -847,10 +847,12 @@ async fn lsp_list_reads_for_fresh_project() {
 }
 
 // ---------------------------------------------------------------------------
-// analyze_functions_at_refs — the one richly-assertable code-quality adapter.
-// It takes no `Services` (pure tree-sitter), so it runs without the harness.
-// These lock the real parse + churn-attribution behavior the Change Analysis
-// dashboard depends on, not just "doesn't panic".
+// analyze_functions — the one richly-assertable code-quality core. The Tauri
+// adapter now takes `Services` only to read the project's zone table (tsk251),
+// so these drive the core directly with an empty table: they lock the real
+// parse + churn-attribution behavior the Change Analysis dashboard depends on,
+// not just "doesn't panic". Zone classification has its own tests in
+// oxplow-rpc / oxplow-code-deps.
 // ---------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -859,11 +861,14 @@ async fn analyze_functions_detects_functions_and_churn_for_a_modified_file() {
     // head changes alpha's body AND adds beta.
     let base = "fn alpha() -> i32 {\n    1\n}\n";
     let head = "fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n";
-    let result = commands::code_quality::analyze_functions_at_refs(vec![AnalyzeFileSpec {
-        path: "src/x.rs".into(),
-        base_content: Some(base.into()),
-        head_content: Some(head.into()),
-    }])
+    let result = oxplow_rpc::commands::code_quality::analyze_functions(
+        vec![AnalyzeFileSpec {
+            path: "src/x.rs".into(),
+            base_content: Some(base.into()),
+            head_content: Some(head.into()),
+        }],
+        &[],
+    )
     .await
     .unwrap();
 
@@ -896,11 +901,14 @@ async fn analyze_functions_detects_functions_and_churn_for_a_modified_file() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn analyze_functions_added_file_has_only_head_side_and_no_churn() {
     use commands::code_quality::AnalyzeFileSpec;
-    let result = commands::code_quality::analyze_functions_at_refs(vec![AnalyzeFileSpec {
-        path: "src/new.rs".into(),
-        base_content: None,
-        head_content: Some("fn brand_new() {}\n".into()),
-    }])
+    let result = oxplow_rpc::commands::code_quality::analyze_functions(
+        vec![AnalyzeFileSpec {
+            path: "src/new.rs".into(),
+            base_content: None,
+            head_content: Some("fn brand_new() {}\n".into()),
+        }],
+        &[],
+    )
     .await
     .unwrap();
 
@@ -922,7 +930,7 @@ async fn analyze_functions_added_file_has_only_head_side_and_no_churn() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn analyze_functions_empty_input_returns_empty() {
-    let result = commands::code_quality::analyze_functions_at_refs(vec![])
+    let result = oxplow_rpc::commands::code_quality::analyze_functions(vec![], &[])
         .await
         .unwrap();
     assert!(result.sides.is_empty());

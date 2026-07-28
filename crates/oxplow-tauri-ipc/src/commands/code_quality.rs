@@ -95,12 +95,14 @@ pub async fn analyze_co_change_surprise(
 }
 
 /// Compute per-function metadata for the Change Analysis dashboard,
-/// for both sides of the diff. Pure in-process call: walks each
-/// (path, content) pair through tree-sitter.
+/// for both sides of the diff. Walks each (path, content) pair through
+/// tree-sitter; the only state it needs is the project's zone table,
+/// which zones the import edges (tsk251).
 #[tauri::command]
 #[specta::specta]
 pub async fn analyze_functions_at_refs(
+    state: tauri::State<'_, AppState>,
     files: Vec<AnalyzeFileSpec>,
 ) -> Result<AnalyzeFunctionsResult, IpcError> {
-    oxplow_rpc::commands::code_quality::analyze_functions(files).await
+    oxplow_rpc::commands::code_quality::analyze_functions_at_refs(&state, files).await
 }

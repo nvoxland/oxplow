@@ -11,6 +11,7 @@ oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-config = { workspace = true }
 oxplow-fs-watch = { workspace = true }
+oxplow-code-deps = { workspace = true }
 oxplow-git = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-runtime = { workspace = true }

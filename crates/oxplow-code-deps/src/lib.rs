@@ -23,10 +23,7 @@ use tree_sitter::{Node, Parser};
 mod extractors;
 mod zones;
 
-pub use zones::{
-    classify_zone, zone_for_crate_name, zone_for_resolved_edge, zone_for_unresolved_edge, Zone,
-    ZonedImportEdge,
-};
+pub use zones::{ZoneRules, ZonedImportEdge, ZONE_EXTERNAL, ZONE_OTHER};
 
 #[cfg(test)]
 mod tests;

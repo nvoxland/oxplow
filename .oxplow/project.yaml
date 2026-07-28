@@ -13,6 +13,78 @@ generated:
   - apps/desktop/src/tauri-bridge/generated/bindings.ts
   # Another tool's scratch database.
   - .slopp
+# Architectural zones for the Change-analysis surfaces (tsk251). Ordered:
+# the FIRST rule whose glob matches a path wins, so role-by-filename rules
+# (tests, docs) sit above the crate/app rules, and the `.toml` catch-all
+# sits last. Oxplow ships no built-in table — this IS the vocabulary.
+zones:
+- match: ["**/Cargo.toml", "**/Cargo.lock", "**/package.json", "**/bun.lockb",
+          "**/tauri.conf.json", "**/tsconfig.json"]
+  zone: meta
+  color: "#64748b"
+# A test file inside a crate is a test, not that crate's zone.
+- match: ["**/*_test.rs", "**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts",
+          "**/*.spec.tsx", "**/*_test.go", "**/tests/**", "**/__tests__/**"]
+  zone: test
+  color: "#22c55e"
+- match: "**/migrations/**"
+  zone: migration
+  color: "#b91c1c"
+- match: [".context/**", "**/*.md", "**/README"]
+  zone: docs
+  color: "#a3a3a3"
+- match: apps/desktop/src-tauri/**
+  zone: shell
+  color: "#0ea5e9"
+- match: apps/desktop/**
+  zone: ui
+  color: "#4f46e5"
+- match: crates/oxplow-tauri-ipc/**
+  zone: ipc
+  color: "#06b6d4"
+- match: crates/oxplow-domain/**
+  zone: domain
+  color: "#0891b2"
+- match: crates/oxplow-db/**
+  zone: store
+  color: "#ea580c"
+- match: crates/oxplow-git/**
+  zone: git
+  color: "#dc2626"
+- match: ["crates/oxplow-lsp/**", "crates/oxplow-lsp-installer/**"]
+  zone: lsp
+  color: "#ca8a04"
+- match: crates/oxplow-runtime/**
+  zone: runtime
+  color: "#9333ea"
+- match: crates/oxplow-fs-watch/**
+  zone: fs-watch
+  color: "#a16207"
+- match: ["crates/oxplow-tmux/**", "crates/oxplow-pty/**"]
+  zone: terminal
+  color: "#525252"
+- match: crates/oxplow-mcp/**
+  zone: mcp
+  color: "#16a34a"
+- match: crates/oxplow-app/**
+  zone: app
+  color: "#2563eb"
+- match: crates/oxplow-config/**
+  zone: config
+  color: "#737373"
+- match: crates/oxplow-session/**
+  zone: session
+  color: "#7c3aed"
+- match: ["crates/oxplow-plugin/**", "crates/oxplow-control-plane/**"]
+  zone: plugin
+  color: "#c026d3"
+- match: ["crates/oxplow-code-metrics/**", "crates/oxplow-code-dup/**",
+          "crates/oxplow-code-deps/**", "crates/oxplow-tree-source/**"]
+  zone: analysis
+  color: "#0d9488"
+# Config files outside a recognized crate/app (repo root, tooling).
+- match: "**/*.toml"
+  zone: meta
 collection:
   testCommand: bun run test:collect
   fastTestCommand: bun run test:fast

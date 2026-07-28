@@ -226,6 +226,46 @@ pub struct RunMetricParams {
     pub stream: Option<String>,
 }
 
+/// One row of the `zones:` table as the agent sends it.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct McpZoneRule {
+    /// Glob (or list of globs) selecting this zone's files, matched
+    /// against the full repo-relative path.
+    #[serde(rename = "match")]
+    pub patterns: McpStringOrList,
+    /// Zone label. Free-form; `other` / `external` are reserved.
+    pub zone: String,
+    /// Optional display colour (`#rrggbb` or `#rgb`).
+    #[serde(default)]
+    pub color: Option<String>,
+}
+
+/// A field the agent may send as one string or a list of them — the
+/// same leniency the YAML side allows, so `match: "src/**"` and
+/// `match: ["src/**"]` both work.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum McpStringOrList {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl McpStringOrList {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            McpStringOrList::One(s) => vec![s],
+            McpStringOrList::Many(v) => v,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SetZonesParams {
+    /// The WHOLE ordered table (first match wins). An empty list clears
+    /// the project's zones.
+    pub rules: Vec<McpZoneRule>,
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ScaffoldMetricParams {
     /// Namespaced metric key, e.g. `acme.todo_density` (`oxplow.` is reserved
@@ -2270,6 +2310,53 @@ impl OxplowMcp {
             .await
             .map_err(|e| McpError::invalid_params(e, None))?;
         json_result(&serde_json::json!({ "key": params.0.key, "facts_recorded": count }))
+    }
+
+    #[tool(
+        description = "List the project's architectural ZONE table (the `zones:` block in \
+            .oxplow/project.yaml) plus what it actually matches: a file count per zone across \
+            the worktree, and a sample of paths that fell through to `other`. Zones are how \
+            Change-analysis groups churn and flags cross-boundary imports. Oxplow ships NO \
+            built-in table — an empty `rules` means this project hasn't declared its zones yet \
+            and every file reads as `other`. A large `other` count or an unmatched sample full \
+            of real source is the signal the table has gone stale as the repo grew."
+    )]
+    async fn list_zones(&self) -> Result<CallToolResult, McpError> {
+        let report = oxplow_app::zones_service::zone_report(&self.services)
+            .await
+            .map_err(internal)?;
+        json_result(&report)
+    }
+
+    #[tool(
+        description = "REPLACE the project's zone table and write it to .oxplow/project.yaml \
+            (committed, so the team shares one vocabulary). Send the WHOLE ordered table — the \
+            first rule whose glob matches a path wins, so put specific patterns before \
+            catch-alls. Each rule is { match: <glob or list of globs>, zone: <label>, color?: \
+            <#rrggbb> }; globs match the full repo-relative path with `*` stopping at `/` and \
+            `**` spanning directories. Labels are free-form (`ui`, `store`, `docs`…) except \
+            `other` and `external`, which oxplow computes. Returns the same shape as \
+            `list_zones`, so check the returned distribution to confirm the rules matched what \
+            you meant. Call `list_zones` first — this overwrites."
+    )]
+    async fn set_zones(
+        &self,
+        params: Parameters<SetZonesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let rules = params
+            .0
+            .rules
+            .into_iter()
+            .map(|r| oxplow_config::ZoneRuleConfig {
+                patterns: r.patterns.into_vec(),
+                zone: r.zone,
+                color: r.color,
+            })
+            .collect();
+        let report = oxplow_app::zones_service::set_zones(&self.services, rules)
+            .await
+            .map_err(|e| McpError::invalid_params(e, None))?;
+        json_result(&report)
     }
 
     #[tool(
@@ -4456,6 +4543,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_open_effort",
     "list_effort_observations",
     "list_metric_definitions",
+    "list_zones",
     "list_measures",
     "list_dimensions",
     "list_facts",
@@ -4514,6 +4602,7 @@ const WRITE_TOOLS: &[&str] = &[
     "record_test_run",
     "run_metric",
     "scaffold_metric",
+    "set_zones",
     "rebuild_metrics",
     "record_metric",
     "respond_to_comment",
@@ -5821,6 +5910,84 @@ mod tests {
         assert!(
             msg.contains("item_id") && msg.contains("thread_id"),
             "error should name both ways to dispatch: {msg}",
+        );
+    }
+
+    /// tsk251: the zone table is project config the agent owns. An
+    /// unconfigured project reports no rules and everything as `other`;
+    /// `set_zones` writes the table to `.oxplow/project.yaml` and the
+    /// returned distribution reflects the rules it just wrote.
+    #[tokio::test]
+    async fn zones_round_trip_through_mcp_and_land_in_project_yaml() {
+        let (proj, services, server) = boot();
+        std::fs::create_dir_all(proj.path().join("src")).unwrap();
+        std::fs::write(proj.path().join("src/lib.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(proj.path().join("src/lib_test.rs"), "fn t() {}\n").unwrap();
+        std::fs::write(proj.path().join("notes.md"), "# hi\n").unwrap();
+
+        // Unconfigured: no rules, everything unmatched.
+        let before: serde_json::Value =
+            serde_json::from_str(&text_payload(server.list_zones().await.unwrap())).unwrap();
+        assert_eq!(before["rules"].as_array().unwrap().len(), 0);
+        assert!(before["distribution"]["other"].as_u64().unwrap() >= 3);
+        assert!(!before["unmatched_sample"].as_array().unwrap().is_empty());
+
+        let after: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .set_zones(Parameters(SetZonesParams {
+                    rules: vec![
+                        McpZoneRule {
+                            patterns: McpStringOrList::One("**/*_test.rs".into()),
+                            zone: "test".into(),
+                            color: None,
+                        },
+                        McpZoneRule {
+                            patterns: McpStringOrList::Many(vec!["src/**".into()]),
+                            zone: "code".into(),
+                            color: Some("#4f46e5".into()),
+                        },
+                    ],
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        // Ordering is load-bearing: lib_test.rs matches the test rule
+        // first even though `src/**` also covers it.
+        assert_eq!(after["distribution"]["test"].as_u64().unwrap(), 1);
+        assert_eq!(after["distribution"]["code"].as_u64().unwrap(), 1);
+
+        // Persisted for the team, and live in memory for this process.
+        let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
+        assert!(yaml.contains("zones:"), "{yaml}");
+        assert!(yaml.contains("**/*_test.rs"), "{yaml}");
+        assert_eq!(
+            services
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .zones
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn set_zones_rejects_a_reserved_label() {
+        let (_proj, _services, server) = boot();
+        let err = server
+            .set_zones(Parameters(SetZonesParams {
+                rules: vec![McpZoneRule {
+                    patterns: McpStringOrList::One("src/**".into()),
+                    zone: "other".into(),
+                    color: None,
+                }],
+            }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("reserved"),
+            "expected the reserved-label error, got: {err}"
         );
     }
 

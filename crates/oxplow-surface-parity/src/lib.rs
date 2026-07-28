@@ -143,6 +143,11 @@ pub const MANIFEST: &[Capability] = &[
     agent("rebuild_metrics"),
     agent("record_metric"),
     agent("scaffold_metric"),
+    // Architectural zones (tsk251) — agent-only by the same logic: the agent
+    // authors the project's `zones:` table, the renderer only READS it (it
+    // rides on `get_config`), so there is no IPC counterpart to pair with.
+    agent("list_zones"),
+    agent("set_zones"),
     agent("get_metric_summary"),
     agent("metric_breakdown"),
     // Durable fact substrate reads (epic tsk12) — agent-only for now (the

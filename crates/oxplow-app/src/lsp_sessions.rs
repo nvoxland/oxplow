@@ -859,6 +859,7 @@ mod tests {
             gauges: Default::default(),
             measures: Default::default(),
             dimensions: Default::default(),
+            zones: Default::default(),
             agent_models: Default::default(),
         }))
     }

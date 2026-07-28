@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import type { BranchChangeEntry } from "../../api-types.js";
 import type { FunctionChurnRow } from "./analysisHelpers.js";
-import { classifyZone, ZONE_COLORS, ZONE_LABELS, type Zone } from "./zones.js";
+import { classifyZone, zoneColor, zoneLabel, type Zone } from "./zones.js";
+import { useZoneRules } from "./useZoneRules.js";
 import { usePageSnapshot } from "../../tabs/usePageSnapshot.js";
 
 type TreemapView = "files" | "functions";
@@ -57,12 +58,14 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
     deps: [view, area],
   });
 
+  // Zones (and their colours) are the project's own config (tsk251).
+  const zoneRules = useZoneRules();
   const items = useMemo<ChurnItem[]>(() => {
     if (view === "files") {
       return files.map((f) => ({
         key: `file::${f.path}`,
         path: f.path,
-        zone: classifyZone(f.path),
+        zone: classifyZone(f.path, zoneRules),
         label: basename(f.path),
         fnLabel: null,
         startLine: null,
@@ -73,14 +76,14 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
     return functionChurn.map((c) => ({
       key: `fn::${c.path}::${c.containerPath.join("::")}::${c.name}`,
       path: c.path,
-      zone: classifyZone(c.path),
+      zone: classifyZone(c.path, zoneRules),
       label: c.name,
       fnLabel: c.containerPath.length > 0 ? `${c.containerPath.join("::")}::${c.name}` : c.name,
       startLine: c.startLineHead,
       added: c.addedLines,
       deleted: c.deletedLines,
     }));
-  }, [view, files, functionChurn]);
+  }, [view, files, functionChurn, zoneRules]);
 
   const layout = useMemo(
     () => layoutTreemapByZone(items, area, containerWidth, 240),
@@ -165,7 +168,7 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
                   y={cell.y}
                   width={cell.w}
                   height={cell.h}
-                  fill={ZONE_COLORS[cell.item.zone]}
+                  fill={zoneColor(cell.item.zone, zoneRules)}
                   stroke="var(--surface-card)"
                   strokeWidth={1}
                   onClick={(e) => open(cell.item, e.metaKey || e.ctrlKey)}
@@ -173,7 +176,7 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
                 >
                   <title>
                     {cell.item.fnLabel ? `${cell.item.fnLabel} — ${cell.item.path}` : cell.item.path} (
-                    {ZONE_LABELS[cell.item.zone]}) · +{cell.item.added} −{cell.item.deleted}
+                    {zoneLabel(cell.item.zone)}) · +{cell.item.added} −{cell.item.deleted}
                   </title>
                 </rect>
                 {cell.w > 60 && cell.h > 20 ? (
@@ -194,8 +197,8 @@ export function ChangeTreemapCard({ files, functionChurn, onOpenFile, onOpenFile
           <div style={legend} aria-label="Architectural zone colors">
             {layout.zones.map((z) => (
               <span key={z} style={legendItem}>
-                <span style={{ ...legendSwatch, background: ZONE_COLORS[z] }} />
-                {ZONE_LABELS[z]}
+                <span style={{ ...legendSwatch, background: zoneColor(z, zoneRules) }} />
+                {zoneLabel(z)}
               </span>
             ))}
           </div>

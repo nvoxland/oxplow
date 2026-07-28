@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Shared glob-semantics fixture for zone rules (tsk251). Read by BOTH",
+    "matchers so they cannot drift: crates/oxplow-code-deps/src/zones.rs",
+    "(globset) and apps/desktop/src/components/ChangeAnalysis/zones.ts",
+    "(globToRegExp). The supported subset is deliberately small: `**`",
+    "spans directories, `*` and `?` stop at `/`, everything else is",
+    "literal. Add a case here when either matcher changes."
+  ],
+  "cases": [
+    { "pattern": "crates/oxplow-db/**", "path": "crates/oxplow-db/src/lib.rs", "matches": true },
+    { "pattern": "crates/oxplow-db/**", "path": "crates/oxplow-db/src/deep/nested/x.rs", "matches": true },
+    { "pattern": "crates/oxplow-db/**", "path": "crates/oxplow-app/src/lib.rs", "matches": false },
+    { "pattern": "crates/oxplow-db/**", "path": "crates/oxplow-db", "matches": false },
+
+    { "pattern": "apps/desktop/src/*", "path": "apps/desktop/src/App.tsx", "matches": true },
+    { "pattern": "apps/desktop/src/*", "path": "apps/desktop/src/components/Foo.tsx", "matches": false },
+
+    { "pattern": "**/*_test.rs", "path": "crates/oxplow-db/src/store_test.rs", "matches": true },
+    { "pattern": "**/*_test.rs", "path": "store_test.rs", "matches": true },
+    { "pattern": "**/*_test.rs", "path": "crates/oxplow-db/src/store.rs", "matches": false },
+
+    { "pattern": "**/tests/**", "path": "crates/oxplow-db/tests/integration.rs", "matches": true },
+    { "pattern": "**/tests/**", "path": "tests/e2e/spec.ts", "matches": true },
+    { "pattern": "**/tests/**", "path": "crates/oxplow-db/src/tests.rs", "matches": false },
+
+    { "pattern": "**/Cargo.toml", "path": "Cargo.toml", "matches": true },
+    { "pattern": "**/Cargo.toml", "path": "crates/oxplow-db/Cargo.toml", "matches": true },
+    { "pattern": "**/Cargo.toml", "path": "Cargo.lock", "matches": false },
+
+    { "pattern": "*.md", "path": "README.md", "matches": true },
+    { "pattern": "*.md", "path": "docs/guide.md", "matches": false },
+    { "pattern": "**/*.md", "path": "docs/guide.md", "matches": true },
+
+    { "pattern": "src/v?/mod.rs", "path": "src/v1/mod.rs", "matches": true },
+    { "pattern": "src/v?/mod.rs", "path": "src/v10/mod.rs", "matches": false },
+
+    { "pattern": ".context/**", "path": ".context/architecture.md", "matches": true },
+    { "pattern": ".context/**", "path": "context/architecture.md", "matches": false }
+  ]
+}

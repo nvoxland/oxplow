@@ -370,6 +370,11 @@ export interface OxplowConfig {
    *  ignored automatically. */
   generated: { exclude: string[]; include: string[] };
   injectSessionContext: boolean;
+  /** The project's architectural zone table (`zones:` in
+   *  .oxplow/project.yaml), in evaluation order — first match wins.
+   *  Absent/empty means the project declared none, so every file
+   *  classifies as `other` (tsk251). */
+  zones?: import("./tauri-bridge/generated/bindings.js").ZoneRuleConfig[];
   /** Per-agent launch model overrides (`agentModels:` in .oxplow/project.yaml).
    *  Only opencode consumes its entry today. */
   agentModels?: Partial<Record<import("./tauri-bridge/generated/bindings.js").AgentKind, string>>;

@@ -10,6 +10,7 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-config = { workspace = true }
 oxplow-git = { workspace = true }
 # list_code_units — generic per-language unit listing (tsk325).
 oxplow-code-metrics = { workspace = true }

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { BranchChangeEntry, GitFileStatus } from "../../api.js";
-import { classifyZone, ZONE_LABELS } from "./zones.js";
+import { classifyZone, zoneLabel, ZONE_OTHER, type CompiledZoneRules } from "./zones.js";
+import { useZoneRules } from "./useZoneRules.js";
 import {
   HierarchyView,
   type HierarchyMetrics,
@@ -57,7 +58,13 @@ export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDi
     const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
     if (ctxNav) ctxNav.navigate(ref, { newTab: opts.newTab });
   };
-  const tree = useMemo(() => buildTree(files, openFile, openDir), [files, openFile, openDir]);
+  // Zone badges come from the project's own `zones:` table (tsk251);
+  // a project that declared none simply shows no badges.
+  const zoneRules = useZoneRules();
+  const tree = useMemo(
+    () => buildTree(files, openFile, openDir, zoneRules),
+    [files, openFile, openDir, zoneRules],
+  );
   const total = files.length;
   return (
     <HierarchyView
@@ -87,6 +94,7 @@ function buildTree(
   files: BranchChangeEntry[],
   openFile: (path: string, opts: { newTab: boolean }) => void,
   openDir: (path: string, opts: { newTab: boolean }) => void,
+  zoneRules: CompiledZoneRules,
 ): HierarchyNode[] {
   const root: RawDirNode = { name: "", path: "", files: [], dirs: new Map() };
   for (const file of files) {
@@ -105,7 +113,7 @@ function buildTree(
     }
     cursor.files.push({ name: fileName, entry: file });
   }
-  return materialize(root, "", openFile, openDir);
+  return materialize(root, "", openFile, openDir, zoneRules);
 }
 
 function materialize(
@@ -113,13 +121,14 @@ function materialize(
   idPrefix: string,
   openFile: (path: string, opts: { newTab: boolean }) => void,
   openDir: (path: string, opts: { newTab: boolean }) => void,
+  zoneRules: CompiledZoneRules,
 ): HierarchyNode[] {
   const out: HierarchyNode[] = [];
   // Directories first, alphabetical.
   const dirsSorted = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const d of dirsSorted) {
     const id = `${idPrefix}/dir:${d.path}`;
-    const children = materialize(d, id, openFile, openDir);
+    const children = materialize(d, id, openFile, openDir, zoneRules);
     const summary = summarize(d);
     out.push({
       id,
@@ -138,11 +147,11 @@ function materialize(
   for (const f of filesSorted) {
     const id = `${idPrefix}/file:${f.entry.path}`;
     const bucket = statusBucket(f.entry.status);
-    const zone = classifyZone(f.entry.path);
+    const zone = classifyZone(f.entry.path, zoneRules);
     // Zone badge rendered as muted detail text. `other` is the
     // catch-all so suppressing it keeps the column quiet on
-    // unclassified files.
-    const detail = zone === "other" ? undefined : `[${ZONE_LABELS[zone]}]`;
+    // unclassified files (and on projects with no zone table).
+    const detail = zone === ZONE_OTHER ? undefined : `[${zoneLabel(zone)}]`;
     out.push({
       id,
       label: f.name,
