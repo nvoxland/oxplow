@@ -1,9 +1,12 @@
 # Remote daemon mode
 
-The desktop shell can drive a backend running on another machine
-(e.g. an EC2 dev box) instead of its in-process backend. Single-user
-by design; SSH is the auth layer. User-facing setup lives in the user
-docs — this note is the developer-facing mechanics.
+Every project backend is an `oxplow-daemon`, including local ones — a
+local project window is a client talking to a daemon on 127.0.0.1 (see
+[architecture.md](./architecture.md)). "Remote mode" is therefore not a
+separate mechanism, just the same client pointed at a daemon on another
+machine (e.g. an EC2 dev box). Single-user by design; SSH is the auth
+layer. User-facing setup lives in the user docs — this note is the
+developer-facing mechanics.
 
 ## Pieces
 
@@ -46,7 +49,7 @@ docs — this note is the developer-facing mechanics.
   reconnect.
 
   **Which daemon is a per-window question** (tsk258). The shell injects
-  `window.__OXPLOW__ = { base, kind }` into every window it creates
+  `window.__OXPLOW__ = { base, kind, projectDir }` into every window it creates
   (`src-tauri/src/windows.rs`, `initialization_script` — built through
   `serde_json` so a URL can't break out of the literal), so two project
   windows in one shell process can drive two different daemons.
@@ -104,7 +107,8 @@ docs — this note is the developer-facing mechanics.
 - **Launcher connect flow** — `launcher/Launcher.tsx`
   `RemoteConnectSection` + `launcher/remoteRecents.ts`. Probes
   `/ipc/ping` before committing. `Root.tsx` renders the full app
-  shell whenever a remote base is set.
+  shell for any window without a shell-assigned `kind` — which is what a
+  plain browser over a tunnel is.
 - **`components/RemoteConnectionBanner.tsx`** — fixed top strip in
   remote mode: red "reconnecting…" while the WS is down (with
   Disconnect). Once it recovers, state auto-resyncs (see above), so the
@@ -141,6 +145,6 @@ work, agent spawn returns INVALID.
 
 - **Picking a different project** = restarting the daemon with a
   different `--project` (it's project-scoped, like the shell's
-  process-per-window model). No remote directory browser.
+  shell owns windows, daemons own projects). No remote directory browser.
 - External-URL tabs and the native menu/clipboard stay local to the
   shell in both modes.

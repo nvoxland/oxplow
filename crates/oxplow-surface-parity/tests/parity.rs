@@ -312,6 +312,10 @@ fn shell_command_table_matches_the_rust_definition() {
         ts, rust,
         "the generated shell-command table drifted from SHELL_ONLY_COMMANDS — \
          re-run `cargo test -p oxplow-tauri-ipc export_ts_bindings` and commit \
-         apps/desktop/src/tauri-bridge/generated/shellCommands.ts"
+         apps/desktop/src/tauri-bridge/generated/shellCommands.ts.\n\
+         (If you just edited SHELL_ONLY_COMMANDS: the export test regenerates \
+         the file, but the two tests run in parallel, so this one may have read \
+         the pre-edit copy. Run the suite once more — the second run is the \
+         real verdict.)"
     );
 }

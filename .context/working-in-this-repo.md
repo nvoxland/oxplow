@@ -185,7 +185,7 @@ raise it.
 
 What *is* worth testing in `oxplow-tauri-ipc`: the genuinely Tauri-only
 files that can't live in `oxplow-rpc` (`menu.rs` accelerator/separator
-parsing, `launch.rs` fs checks, `webview.rs`, `state.rs` `LaunchInfo`
+parsing, `launch.rs` fs checks, `webview.rs`, `windows.rs` labels/registry
 wire contract) and any adapter that *computes* something locally
 (e.g. `list_recent_projects`' exists-flag). The real safety net for the
 command surface is the `export_ts_bindings` test + the

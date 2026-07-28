@@ -44,7 +44,11 @@ const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
 
 /// What the shell injects into every window it creates, before any page
 /// script runs. Absent in a plain-browser session.
-export type WindowContext = { base: string | null; kind: string };
+export type WindowContext = {
+  base: string | null;
+  kind: string;
+  projectDir: string | null;
+};
 
 function readWindowContext(): WindowContext | null {
   try {
@@ -57,9 +61,16 @@ function readWindowContext(): WindowContext | null {
 }
 
 /// Which kind of window this renderer is in ("project" | "launcher" |
-/// "setup"), or null when the shell didn't create it.
+/// "setup"), or null when the shell didn't create it (a plain browser
+/// driving a daemon).
 export function windowKind(): string | null {
   return readWindowContext()?.kind ?? null;
+}
+
+/// The project this window is for: the one it has open, or — on the
+/// setup screen — the one being offered for creation.
+export function windowProjectDir(): string | null {
+  return readWindowContext()?.projectDir ?? null;
 }
 
 function cleanBase(value: string | null | undefined): string | null {

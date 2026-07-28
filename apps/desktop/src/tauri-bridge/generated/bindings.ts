@@ -778,11 +778,6 @@ export const commands = {
 	 */
 	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_native_menu", { groups })),
 	/**
-	 *  Whether this process booted into the launcher or a project, so the
-	 *  renderer can pick the right top-level screen.
-	 */
-	getLaunchMode: () => typedError<LaunchInfo, IpcError>(__TAURI_INVOKE("get_launch_mode")),
-	/**
 	 *  Recent projects, most-recently-opened first, each tagged with
 	 *  whether its directory still exists.
 	 */
@@ -790,10 +785,10 @@ export const commands = {
 	// Forget a recent project (exact match on the stored path).
 	removeRecentProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_recent_project", { path })),
 	/**
-	 *  Open `path` as an existing project. Spawns a new oxplow process
-	 *  pinned to that directory. When `new_window` is false the current
-	 *  window is replaced — we spawn the new process and then exit this one.
-	 *  A folder that isn't a project yet is an error, not an implicit
+	 *  Open `path` as an existing project: start its daemon and put a
+	 *  window in front of it, or focus the window that already has it. When
+	 *  `new_window` is false the calling window is closed once the new one
+	 *  is up. A folder that isn't a project yet is an error, not an implicit
 	 *  create; see `create_project`.
 	 */
 	openProject: (path: string, newWindow: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("open_project", { path, newWindow })),
@@ -803,18 +798,17 @@ export const commands = {
 	 *  launcher's New Project button — the only two ways a folder becomes a
 	 *  project from inside the app.
 	 * 
-	 *  Always a new window (never `app.exit(0)`), so creating a project can
-	 *  never close the launcher or the window the user ran the command
-	 *  from. `path` must not already be a project.
+	 *  Always a new window, so creating a project can never close the
+	 *  launcher or the window the user ran the command from. `path` must not
+	 *  already be a project.
 	 */
 	createProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("create_project", { path })),
 	/**
-	 *  Create the `.oxplow/` project structure in `path`, then relaunch
-	 *  into it. The fresh process sees `.oxplow/` present and boots the
-	 *  full app shell (via `run_project`); this setup window then exits.
+	 *  Confirm first-run setup: create `.oxplow/` in `path` and open it,
+	 *  replacing this setup window.
 	 */
 	setupProject: (path: string) => typedError<null, IpcError>(__TAURI_INVOKE("setup_project", { path })),
-	// Decline first-run setup: close this window by exiting the process.
+	// Decline first-run setup: close this window.
 	abortSetup: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_setup")),
 };
 
@@ -2036,18 +2030,6 @@ export type IpcError = {
 	code: string,
 	message: string,
 	cause: string | null,
-};
-
-/**
- *  Which mode the current process booted in. Managed (and returned by
- *  `get_launch_mode`) so the renderer's `<Root>` can decide between the
- *  launcher screen and the full app shell without guessing.
- */
-export type LaunchInfo = {
-	// `"launcher"` or `"project"`.
-	mode: string,
-	// The project dir when `mode == "project"`, else `None`.
-	projectDir: string | null,
 };
 
 /**

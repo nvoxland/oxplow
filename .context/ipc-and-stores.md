@@ -576,19 +576,27 @@ the wiki + tasks use, route through
 `oxplow_domain::refs::extract` rather than re-implementing the
 parser.
 
-## Exception: commands with no `Services` (launcher)
+## Exception: the shell surface
 
-Not every command follows the 7-layer flow. The launcher / multi-window
-commands in `crates/oxplow-tauri-ipc/src/commands/launch.rs`
-(`get_launch_mode`, `list_recent_projects`, `remove_recent_project`,
-`open_project`) deliberately depend on **neither** a SQLite store
-**nor** `AppState` (`Services`) — they must work in launcher mode where
-no project is booted. Instead they read managed state
-`RecentProjectsState` (`Arc<oxplow_config::RecentProjects>`, a global
-JSON file) and `LaunchInfo`, both managed by `main.rs` in *both* launch
-modes. `open_project` spawns a new process rather than mutating any
-store. When you add a command the launcher window needs, keep it on
-this no-`Services` footing; everything else uses the flow above.
+Not every command follows the 7-layer flow. The shell surface — the
+commands in `crates/oxplow-tauri-ipc/src/commands/launch.rs`,
+`menu.rs` and `webview.rs`, listed in
+`oxplow_tauri_ipc::SHELL_ONLY_COMMANDS` — depends on **neither** a
+SQLite store **nor** `AppState` (`Services`). It runs in the shell
+process, which has no project state at all; these are what happens
+*before* there is a backend, or what only the OS can do (windows,
+native menus, the clipboard).
+
+They read shell-managed state instead: `RecentProjectsState`
+(`Arc<oxplow_config::RecentProjects>`, a global JSON file) and
+`ShellWindows` (open windows + their daemons + the session set).
+`open_project` starts a daemon and creates a window rather than
+mutating a store.
+
+When you add one, put it on this no-`Services` footing **and add it to
+`SHELL_ONLY_COMMANDS`** — otherwise the renderer's transport routes it
+to the window's daemon, which doesn't serve it. Everything else uses
+the flow above.
 
 ## Comments
 

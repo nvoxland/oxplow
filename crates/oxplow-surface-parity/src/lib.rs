@@ -441,7 +441,6 @@ pub const MANIFEST: &[Capability] = &[
     // ---- ui-only: menu ----
     ui("set_native_menu"),
     // ---- ui-only: launcher / multi-window ----
-    ui("get_launch_mode"),
     ui("list_recent_projects"),
     ui("remove_recent_project"),
     ui("open_project"),

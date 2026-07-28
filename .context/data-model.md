@@ -99,9 +99,8 @@ the bare self-typed form, e.g. `[[tsk42]]`.
 ## Global state (outside `.oxplow/`)
 
 Two pieces of state live **outside** any project's `.oxplow/` dir,
-because they're either global or must survive without a booted
-`Services` (see the process-per-window model in
-[architecture.md](./architecture.md)). The app-config dir holding them
+because they're global to the shell, which has no project backend of
+its own (see [architecture.md](./architecture.md)). The app-config dir holding them
 defaults to the platform location but is overridable with `OXPLOW_HOME`
 (used verbatim; empty = unset) so a dev build can run alongside an
 installed one — see [DEV.md](../DEV.md):
@@ -113,29 +112,32 @@ installed one — see [DEV.md](../DEV.md):
   table, modeled on the LSP-installer manifest pattern. `record()`
   dedups by canonical path, bumps recency, caps at 20. The IPC layer
   resolves the path via the Tauri path resolver and manages it as
-  `RecentProjectsState` in both launch modes.
+  `RecentProjectsState` on the shell.
 - **`session.json`** — the set of project dirs open last, in the same
   app-config dir. Managed by `oxplow_config::SessionProjects`
   (`crates/oxplow-config/src/session.rs`); drives session restore on a
-  bare launch. A fresh (non-`OXPLOW_RESTORING`) boot **`replace`s** the
-  set with the live window set (self + recents whose instance lock is
-  held); restore boots just `add` themselves. Closing one window while
-  others are live **`remove`s** that project; closing the last window /
-  a full quit (`QUITTING` flag from `RunEvent::ExitRequested`) keeps the
-  set. Read-modify-writes take a cross-process `fs2` lock since many
-  processes touch it. The path is resolved by
+  bare launch. The shell **`replace`s** it with its own open project
+  windows whenever one opens or closes — it knows the set rather than
+  inferring it. Closing the last window, or a full quit
+  (`ShellWindows::begin_quit` from `RunEvent::ExitRequested`), leaves
+  the set alone so it's what comes back. Read-modify-writes still take a
+  cross-process `fs2` lock (a dev build and an installed one can share a
+  config dir). The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
-  for the life of a project process, so a second process can't boot on
-  the same `local.sqlite`. Helpers: `AppLayout::instance_lock_path` /
-  `oxplow_app::{try_acquire_instance_lock, is_project_locked}`. It lives
-  inside `.oxplow/` but is not part of the SQLite schema.
-- **`.oxplow/instance.json`** — `{ focus_port, nonce }` published by a
-  running project process so a second `open_project` of the same dir can
-  focus the existing window (a loopback ping) instead of failing on the
-  lock. Written by `oxplow_app::write_instance_info`, read/pinged by
-  `request_focus`, cleared on deliberate window close.
+  for the life of the project's `oxplow-daemon`, so a second daemon
+  can't boot on the same `local.sqlite`. Helpers:
+  `AppLayout::instance_lock_path` /
+  `oxplow_app::{try_acquire_instance_lock, is_project_locked,
+  wait_for_project_unlock}`. It lives inside `.oxplow/` but is not part
+  of the SQLite schema.
+- **`.oxplow/daemon.json`** — `{ base_url, pid }` published by a running
+  daemon. The shell that spawned it learns the endpoint from its stdout;
+  this file is for the *other* case — a daemon that outlived the shell
+  that started it, which the next open finds and kills
+  (`oxplow_app::daemon_supervisor::{write_daemon_info,
+  kill_orphan_daemon}`).
 
 ## Tables and stores
 

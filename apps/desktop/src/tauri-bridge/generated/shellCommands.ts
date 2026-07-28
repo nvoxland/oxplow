@@ -9,7 +9,6 @@ export const SHELL_COMMANDS = [
   "abort_setup",
   "clipboard_read_text",
   "create_project",
-  "get_launch_mode",
   "list_recent_projects",
   "open_external_url",
   "open_project",

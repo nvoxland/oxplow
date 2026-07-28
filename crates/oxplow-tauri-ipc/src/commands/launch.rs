@@ -1,21 +1,21 @@
 //! Launcher + project-open commands.
 //!
-//! These are the only commands the launcher window invokes. They
-//! depend on the global [`RecentProjectsState`] + [`LaunchInfo`],
-//! never on [`crate::AppState`] (`Services`), so they work whether or
-//! not this process booted a project. `open_project` implements the
-//! IntelliJ-style "process per window" model: each project window is
-//! its own OS process, so opening a project = spawning a fresh
-//! process with `OXPLOW_PROJECT_DIR` set, and "replace this window" =
-//! spawn + exit the current process.
+//! Shell surface: these run in the shell process, never against a
+//! project backend, because they are what happens *before* there is a
+//! backend. Opening a project starts an `oxplow-daemon` for it and
+//! creates a window pointed at that daemon (see
+//! [`crate::windows::ShellWindows`]); "replace this window" closes the
+//! window the command ran from once the new one exists.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tauri::Manager;
 
 use crate::error::IpcError;
-use crate::state::{LaunchInfo, RecentProjectsState};
+use crate::state::RecentProjectsState;
+use crate::windows::ShellWindows;
 
 /// A recent-projects row plus a freshness flag for the UI.
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -27,14 +27,6 @@ pub struct RecentProjectView {
     /// Whether the directory still exists on disk (drives the
     /// launcher's "missing" badge).
     pub exists: bool,
-}
-
-/// Whether this process booted into the launcher or a project, so the
-/// renderer can pick the right top-level screen.
-#[tauri::command]
-#[specta::specta]
-pub async fn get_launch_mode(launch: tauri::State<'_, LaunchInfo>) -> Result<LaunchInfo, IpcError> {
-    Ok(launch.inner().clone())
 }
 
 /// Recent projects, most-recently-opened first, each tagged with
@@ -111,42 +103,20 @@ fn resolve_create_target(path: &str) -> Result<&Path, IpcError> {
     Ok(dir)
 }
 
-/// Open `path` as an existing project. Spawns a new oxplow process
-/// pinned to that directory. When `new_window` is false the current
-/// window is replaced — we spawn the new process and then exit this one.
-/// A folder that isn't a project yet is an error, not an implicit
+/// Open `path` as an existing project: start its daemon and put a
+/// window in front of it, or focus the window that already has it. When
+/// `new_window` is false the calling window is closed once the new one
+/// is up. A folder that isn't a project yet is an error, not an implicit
 /// create; see `create_project`.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_project(
-    app: tauri::AppHandle,
-    recent: tauri::State<'_, RecentProjectsState>,
+    window: tauri::Window,
     path: String,
     new_window: bool,
 ) -> Result<(), IpcError> {
-    let dir = resolve_open_target(&path)?;
-    // Already open in another window? Focus that window instead of
-    // spawning a duplicate (which would just hit the instance lock and
-    // exit). If the running instance can't be reached (stale state),
-    // fall back to a clear error.
-    if oxplow_app::is_project_locked(dir) {
-        if oxplow_app::request_focus(dir) {
-            return Ok(());
-        }
-        return Err(IpcError::invalid(format!(
-            "\"{path}\" is already open in another oxplow window"
-        )));
-    }
-    recent.record(dir);
-    spawn_project_process(dir)?;
-
-    if !new_window {
-        // Replace this window: the freshly spawned process owns the
-        // new project; exiting ends our process (and its window). The
-        // child is already detached and survives our exit.
-        app.exit(0);
-    }
-    Ok(())
+    resolve_open_target(&path)?;
+    open_and_maybe_replace(window, PathBuf::from(&path), new_window).await
 }
 
 /// Create a new project in `path`: initialize `.oxplow/` and open the
@@ -154,24 +124,23 @@ pub async fn open_project(
 /// launcher's New Project button — the only two ways a folder becomes a
 /// project from inside the app.
 ///
-/// Always a new window (never `app.exit(0)`), so creating a project can
-/// never close the launcher or the window the user ran the command
-/// from. `path` must not already be a project.
+/// Always a new window, so creating a project can never close the
+/// launcher or the window the user ran the command from. `path` must not
+/// already be a project.
 #[tauri::command]
 #[specta::specta]
-pub async fn create_project(path: String) -> Result<(), IpcError> {
+pub async fn create_project(window: tauri::Window, path: String) -> Result<(), IpcError> {
     let dir = resolve_create_target(&path)?;
     oxplow_app::ensure_state_dir(&dir.join(".oxplow"))
         .map_err(|e| IpcError::internal(format!("create .oxplow: {e}")))?;
-    spawn_project_process(dir)
+    open_and_maybe_replace(window, PathBuf::from(&path), true).await
 }
 
-/// Create the `.oxplow/` project structure in `path`, then relaunch
-/// into it. The fresh process sees `.oxplow/` present and boots the
-/// full app shell (via `run_project`); this setup window then exits.
+/// Confirm first-run setup: create `.oxplow/` in `path` and open it,
+/// replacing this setup window.
 #[tauri::command]
 #[specta::specta]
-pub async fn setup_project(app: tauri::AppHandle, path: String) -> Result<(), IpcError> {
+pub async fn setup_project(window: tauri::Window, path: String) -> Result<(), IpcError> {
     let dir = Path::new(&path);
     if !dir.is_dir() {
         return Err(IpcError::invalid(format!(
@@ -180,24 +149,48 @@ pub async fn setup_project(app: tauri::AppHandle, path: String) -> Result<(), Ip
     }
     oxplow_app::ensure_state_dir(&dir.join(".oxplow"))
         .map_err(|e| IpcError::internal(format!("create .oxplow: {e}")))?;
-    spawn_project_process(dir)?;
-    app.exit(0);
-    Ok(())
+    open_and_maybe_replace(window, PathBuf::from(&path), false).await
 }
 
-/// Decline first-run setup: close this window by exiting the process.
+/// Decline first-run setup: close this window.
 #[tauri::command]
 #[specta::specta]
-pub async fn abort_setup(app: tauri::AppHandle) -> Result<(), IpcError> {
-    app.exit(0);
-    Ok(())
+pub async fn abort_setup(window: tauri::Window) -> Result<(), IpcError> {
+    window
+        .close()
+        .map_err(|e| IpcError::internal(format!("close window: {e}")))
 }
 
-/// Spawn a fresh oxplow process pinned to `dir` (process-per-window),
-/// mapping IO failures into the frontend error envelope.
-fn spawn_project_process(dir: &Path) -> Result<(), IpcError> {
-    oxplow_app::spawn_project_window(dir, false)
-        .map_err(|e| IpcError::internal(format!("spawn project window: {e}")))
+/// Start `dir`'s daemon, open a window on it, and — unless the caller
+/// asked for a new window — close the window the command came from.
+///
+/// The daemon runs a full boot (recovery, watchers, indexers) before it
+/// reports an endpoint, and the endpoint has to be known before the
+/// window is created, so the work happens on a blocking thread rather
+/// than tying up an async worker for seconds.
+async fn open_and_maybe_replace(
+    window: tauri::Window,
+    dir: PathBuf,
+    new_window: bool,
+) -> Result<(), IpcError> {
+    let app = window.app_handle().clone();
+    let opened = tauri::async_runtime::spawn_blocking(move || {
+        let shell = app.state::<ShellWindows>();
+        let recents = app.state::<RecentProjectsState>();
+        shell.open_project(&app, &dir, recents.inner())
+    })
+    .await
+    .map_err(|e| IpcError::internal(format!("open project: {e}")))?
+    .map_err(IpcError::invalid)?;
+
+    if !new_window && opened != window.label() {
+        // Replace the caller: the new window exists, so closing this one
+        // can't leave the user with nothing.
+        window
+            .close()
+            .map_err(|e| IpcError::internal(format!("close window: {e}")))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

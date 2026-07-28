@@ -57,18 +57,32 @@ Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it
 
 Both kinds can switch branches — either via the StreamRail "Switch branch…" context menu (routed through `Services.checkoutStreamBranch()`), or by an external `git checkout` in the worktree dir (picked up by the `GitRefsWatcherRegistry` → `maybeSyncStreamBranch()`). Git's own errors (dirty tree, missing branch, already checked out elsewhere) propagate verbatim to the UI; oxplow does no pre-flight validation.
 
-## Process-per-window & launcher
+## The shell and its daemons
 
-Oxplow is **one OS process per project window**. Each window boots its
-own `Services` (its own `.oxplow/local.sqlite`, event bus, control
-plane on an ephemeral `127.0.0.1` port, watchers, etc.). There is no
-shared in-process state across windows — windows are as isolated as two
-separate app launches. This was a deliberate choice over an in-process
-`HashMap<window, Services>` registry, which would have required
-threading window context through every IPC command and rewriting all
-event-emission paths.
+Oxplow is **one shell process owning every window**, with **one
+`oxplow-daemon` child per open project**. The shell holds no project
+state at all: no `Services`, no database, no watchers, no control plane.
+Each project window talks to its own daemon over loopback HTTP/WS (see
+[remote-daemon.md](./remote-daemon.md)); the only things the shell
+serves itself are the shell surface — windowing, native menus, the OS
+clipboard, external URLs, and the project lifecycle below.
 
-Boot flow (`apps/desktop/src-tauri/src/main.rs`):
+This replaced process-per-window (one OS process per project, each
+booting its own `Services`). That model gave every project a separate
+Dock tile and no shared window menu, and it had no idea what was
+actually open: "focus the window that already has this project" needed
+a per-project instance lock plus a loopback focus channel, and the
+session set had to be *inferred* from "recent projects whose lock is
+held". The shell now simply knows — see `WindowRegistry` in
+`crates/oxplow-tauri-ipc/src/windows.rs`. Local and remote also stopped
+being different code paths: a local project window is a remote client
+that happens to be talking to a daemon on 127.0.0.1.
+
+The trade is a process hop on every command (~3–4 ms round trip,
+measured — see [performance.md](./performance.md)) and a daemon boot
+before a window can appear.
+
+Boot flow (`apps/desktop/src-tauri/src/main.rs` — one path, no modes):
 
 - `resolve_project_dir()` → first positional CLI arg, else
   `OXPLOW_PROJECT_DIR`, else `None`. (No cwd fallback — a bare launch
@@ -78,62 +92,56 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs`):
   path-traversal guard (`resolve_workspace_path` in oxplow-git), making
   every subdirectory read false-positive as an escape and killing file
   listings.
-- `Some(dir)` with a `.oxplow/` dir → `run_project(dir, ctx)`: today's
-  full boot.
-- `Some(dir)` **without** `.oxplow/` → `run_setup(dir, ctx)`: **no
-  `Services`** — the renderer shows a "Create an Oxplow project here?"
-  confirmation (`<ProjectSetup>`). Confirm → `setup_project` creates
-  `.oxplow/` and relaunches the process (which now takes the
-  `run_project` branch); decline → `abort_setup` exits. Nothing is
-  recorded into recents until setup is confirmed.
-- `None` → **session restore**: if the global session has open
-  windows from last exit, `restore_session()` reopens one per
-  still-valid project dir and we show no launcher. It returns whether a
-  window actually resulted, **not** whether a spawn succeeded — see
-  Session restore below. Otherwise → `run_launcher(ctx)`: **no
-  `Services`** — just the recent-projects surface and a launcher window.
+- `Some(dir)` with a `.oxplow/` dir → open it (`Startup::Project`).
+- `Some(dir)` **without** `.oxplow/` → the setup window
+  (`Startup::Setup`): a "Create an Oxplow project here?" confirmation
+  (`<ProjectSetup>`). Confirm → `setup_project` creates `.oxplow/` and
+  opens it, replacing the setup window; decline → `abort_setup` closes
+  the window. Nothing is recorded into recents until setup is confirmed.
+  `--init` skips the question and creates the project.
+- `None` → **session restore** (`Startup::Restore`): reopen every
+  project the session recorded, skipping any that is no longer a project
+  on disk. If nothing opened, show the launcher.
 
-The renderer's `<Root>` calls `get_launch_mode` and renders
-`<Launcher>` / `<ProjectSetup>` / `<App>` accordingly.
-- `generate_context!()` is expanded once in `main()` and handed to
-  whichever mode runs (it embeds the Info.plist and may expand only
-  once per binary).
-
-Opening / reopening a project (IntelliJ-style) goes through the
-`open_project` IPC command, which **spawns a fresh process** of the
-current executable with `OXPLOW_PROJECT_DIR` set. "New window" = spawn;
-"replace this window" = spawn then `app.exit(0)`. The launcher's Open
-Project button, File ▸ Open Project…/Open Project in New Window…, and
-File ▸ Open Recent all route here.
+**Opening a project** (`ShellWindows::open_project`) is: focus the
+window that already has it, else sweep any orphaned daemon, start a
+daemon, wait for it to report its loopback endpoint, then create a
+window carrying that endpoint. The order is forced — the base URL is
+injected at window creation — which is why the call blocks. At startup
+that happens on the main thread (nothing is on screen yet anyway);
+`open_project` / `create_project` from the UI run it on a blocking
+thread so open windows stay responsive.
 
 **Creating and opening are separate doors** (tsk248). `open_project`
 refuses a dir with no `.oxplow/` — it never initializes one — and the
 error names File ▸ New Project…. Creating is `create_project`: it
 validates the dir is *not* already a project, creates `.oxplow/`, and
-spawns a window for it. It **always** opens a new window and never
-exits the calling process, so creating can't destroy the launcher or
-the window the command ran from. The two guards are the pure
-`resolve_open_target` / `resolve_create_target` helpers in
-`commands/launch.rs` (unit-tested there); the old
-`project_needs_setup` command and its `openProjectGuarded` wrapper are
-gone — each command now enforces its own half of the invariant.
-`<ProjectSetup>` still backs the **CLI** path below (`oxplow
-<fresh-dir>`), which is the one route that boots straight into a
-folder that isn't a project yet.
+opens it. Creating always opens a new window and never closes the
+caller's, so it can't destroy the launcher or the window the command ran
+from. The two guards are the pure `resolve_open_target` /
+`resolve_create_target` helpers in `commands/launch.rs`.
 
-A **per-project instance lock** (`.oxplow/instance.lock`, fs2 advisory
-lock acquired in `run_project`) prevents two processes from booting on
-the same project — that would double the watchers and contend on the
-single SQLite writer. `open_project` probes the lock first; if the
-project is already open it **focuses the existing window** instead of
-spawning a duplicate. Focus uses a small loopback channel: each
-`run_project` publishes `.oxplow/instance.json` (`{ focus_port, nonce }`)
-and serves a background thread that raises the window on a nonce-matching
-ping; `oxplow_app::request_focus` does the ping. If the running instance
-can't be reached (stale state), `open_project` falls back to a clear
-"already open" error. The instance lock releases on process death, so a
-crashed instance's stale focus port is never used (the lock probe sees
-the project as not-open and the second launch just opens it).
+**Which screen a window is** comes from the shell, not a command: the
+injected `window.__OXPLOW__.kind` (`project` / `launcher` / `setup`)
+that `<Root>` switches on. There is no launch-mode round trip and no
+loading flash — the context is set before any page script runs. A window
+the shell didn't create (a plain browser over a tunnel) has no context
+and gets the app shell.
+
+**Orphaned daemons.** A shell that dies without unwinding (crash,
+SIGKILL) leaves its daemons running, holding their projects' instance
+locks. Each daemon publishes `.oxplow/daemon.json` (`{base_url, pid}`),
+so the next open sweeps it: kill, wait for the project lock to come free
+(`oxplow_app::wait_for_project_unlock`), then start the replacement.
+Orphans are killed, not adopted — a backend outliving its window is a
+feature nobody has asked for, and adopting one on a guess is worse than
+a clean restart.
+
+**One instance per project** is still enforced by the lock, but now by
+the *daemon*, which is the thing that would actually collide (two
+`Services` on one `local.sqlite` = double watchers + a serialized
+SQLite writer). A second daemon for the same project exits at once, and
+the shell surfaces that as a failed open.
 
 **Windows and the native menu.** No window is declared in
 `tauri.conf.json` (`app.windows` is `[]`); every window is built at
@@ -164,43 +172,27 @@ broadcast — with two projects open, Cmd-S belongs to exactly one.
 
 **Session restore.** A global `session.json`
 (`oxplow_config::SessionProjects`) holds the set of project dirs that
-were open last. A bare launch reopens them (skipping dirs that are gone
-/ no longer have `.oxplow/`); each restore spawn carries
-`OXPLOW_RESTORING`.
+were open last. A bare launch reopens them; `ShellWindows::restorable`
+filters the list to dirs that are still projects and de-duplicates it
+(the same project twice would open one window and then fail to start a
+second daemon against its own lock). If nothing opened, the launcher
+comes up — so a launch can never end with no window, which is what
+tsk252 was.
 
-An entry that's **already open in another process** is focused rather
-than spawned — the same lock-probe-then-`request_focus` trade
-`open_project` makes, since spawning would only hit the instance lock
-and exit. This is routine when a dev build and an installed build share
-a session file.
+The set is **owned**, not inferred: the shell writes
+`session.json` = its open project windows, in open order, whenever a
+window opens or closes. Two rules on top:
 
-`restore_session()` therefore counts *windows that resulted*, not spawns
-issued: a locked-and-unreachable entry counts for nothing, and when
-**no** entry produced a window the caller falls through to
-`run_launcher`. Counting spawns instead was tsk236 — every session entry
-already open meant a silent no-op launch with no window, no launcher,
-and no error (the child `exit(0)`s, so macOS writes no crash report
-either). The policy is unit-tested through the `RestoreOps` injection
-seam in `main.rs`, which fakes the lock / focus / spawn calls.
+- **Closing one window while others are open** drops that project — you
+  are done with it, don't reopen it.
+- **Closing the last window, or quitting the whole app**, preserves the
+  set so it's what comes back. `RunEvent::ExitRequested` calls
+  `begin_quit()` first, which freezes the set so Cmd-Q with three
+  windows doesn't empty it one window at a time.
 
-How the set is maintained:
-
-- **Fresh (non-restore) boot** re-snapshots it: `run_project` writes
-  `session.json` = self + every recent project whose
-  `.oxplow/instance.lock` is still held (`live_project_dirs`). So the
-  first window of a session resets the set to what's actually live and
-  stale entries don't accumulate.
-- **Restore boot** (`OXPLOW_RESTORING` set) skips the re-snapshot and
-  just `add`s itself, so concurrent restores can't clobber the set
-  being restored.
-- **Closing one window while others are open** drops that project from
-  the set (`other_window_alive` is true → `session.remove`) — you're
-  done with it, don't reopen it.
-- **Closing the last/only window, or quitting the whole app** preserves
-  the set so it's restored. A full quit flips a `QUITTING` flag (set
-  from `RunEvent::ExitRequested`) that suppresses the per-window
-  removal, so Cmd-Q with several windows brings them all back; closing
-  the last lone window has no other live window so it's kept too.
+On macOS the last window closing does **not** exit the app: it keeps
+its menu bar, and a dock-icon click (`RunEvent::Reopen`) brings the
+launcher back.
 
 **Global app state** lives under the app-config dir
 (`net.voxland.oxplow`, resolved by `oxplow_config::global_config_dir()`
@@ -211,13 +203,14 @@ so non-Tauri code can find it): `recent-projects.json`
 `OXPLOW_HOME` overrides that dir (used verbatim; empty = unset), so a
 dev build can run alongside an installed one without sharing session,
 recents, or global metric manifests. It's read once in
-`global_config_dir()`, so every caller inherits it, and it's inherited
-by spawned windows because `spawn_project_window` doesn't `env_clear()`.
+`global_config_dir()`, so every caller inherits it — including the
+`oxplow-daemon` children, which the shell spawns without `env_clear()`.
 It moves oxplow's own state only — Tauri's `app_config_dir()` path
 resolver still uses the platform location. See [DEV.md](../DEV.md).
 
-The workspace isolation rule below still holds, now **per process**:
-each process treats its own project dir as the workspace root.
+The workspace isolation rule below is enforced **per daemon**: each
+daemon is started with one project dir and treats it as the workspace
+root. The shell has no workspace of its own.
 
 ## Workspace isolation rule
 

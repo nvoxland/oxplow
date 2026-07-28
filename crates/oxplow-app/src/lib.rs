@@ -220,6 +220,30 @@ pub fn is_project_locked(project_dir: &std::path::Path) -> bool {
     }
 }
 
+/// Wait for `project_dir`'s instance lock to come free, up to `timeout`.
+/// Returns whether it did.
+///
+/// Used after killing an orphaned daemon: the signal returns long before
+/// the process is gone, and starting a replacement while the old one
+/// still holds the lock just makes the new daemon exit. Polls the lock
+/// itself rather than the pid — the lock is the thing that has to be
+/// free, and a zombie pid would still look alive.
+pub fn wait_for_project_unlock(
+    project_dir: &std::path::Path,
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if !is_project_locked(project_dir) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 /// Focus-channel coordinates a running project process publishes so a
 /// second launch of the same project can raise its window instead of
 /// failing on the instance lock. Written to `.oxplow/instance.json`.
@@ -310,6 +334,55 @@ mod instance_lock_tests {
         let dir = tempfile::tempdir().unwrap();
         // No .oxplow/instance.lock yet.
         assert!(!is_project_locked(dir.path()));
+    }
+
+    /// The common case after killing an orphaned daemon: nothing holds
+    /// the lock, so the replacement can start at once.
+    #[test]
+    fn waiting_on_a_free_lock_returns_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        assert!(wait_for_project_unlock(
+            dir.path(),
+            std::time::Duration::from_secs(5)
+        ));
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "a free lock should not be waited on"
+        );
+    }
+
+    /// A lock that never frees has to time out rather than hang the
+    /// window that's trying to open.
+    #[test]
+    fn waiting_on_a_held_lock_gives_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = AppLayout::for_project(dir.path());
+        let _held = try_acquire_instance_lock(&layout).unwrap().unwrap();
+
+        assert!(!wait_for_project_unlock(
+            dir.path(),
+            std::time::Duration::from_millis(150)
+        ));
+    }
+
+    /// The point of the wait: a lock released while we're waiting is
+    /// picked up, not slept through.
+    #[test]
+    fn waiting_returns_as_soon_as_the_lock_is_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = AppLayout::for_project(dir.path());
+        let held = try_acquire_instance_lock(&layout).unwrap().unwrap();
+
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        assert!(wait_for_project_unlock(
+            dir.path(),
+            std::time::Duration::from_secs(5)
+        ));
+        releaser.join().unwrap();
     }
 
     #[test]

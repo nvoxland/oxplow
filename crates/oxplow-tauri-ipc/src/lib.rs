@@ -8,9 +8,10 @@
 pub mod commands;
 pub mod error;
 pub mod state;
+pub mod windows;
 
 pub use error::IpcError;
-pub use state::{AppState, LaunchInfo, PluginRuntime, PluginRuntimeState, RecentProjectsState};
+pub use state::{AppState, PluginRuntime, PluginRuntimeState, RecentProjectsState};
 
 use tauri_specta::{collect_commands, Builder};
 
@@ -43,7 +44,6 @@ pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "abort_setup",
     "clipboard_read_text",
     "create_project",
-    "get_launch_mode",
     "list_recent_projects",
     "open_external_url",
     "open_project",
@@ -322,7 +322,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // menu
             commands::menu::set_native_menu,
             // launcher / multi-window
-            commands::launch::get_launch_mode,
             commands::launch::list_recent_projects,
             commands::launch::remove_recent_project,
             commands::launch::open_project,

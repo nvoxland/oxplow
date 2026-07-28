@@ -13,7 +13,6 @@ import type {
   CommentThread,
   DiffEndpoint,
   DiffEntry,
-  LaunchInfo,
   RecentProjectView,
   SearchHit,
 } from "./tauri-bridge/generated/bindings.js";
@@ -673,13 +672,7 @@ export async function getWorkspaceContext(): Promise<WorkspaceContext> {
   return { gitEnabled: ctx.is_git_repo };
 }
 
-// ---- Launcher / multi-window (process-per-window) ----
-
-/// Whether this process booted into the launcher or a project. The
-/// `<Root>` gate calls this first to pick the top-level screen.
-export async function getLaunchMode(): Promise<LaunchInfo> {
-  return unwrap(await commands.getLaunchMode());
-}
+// ---- Launcher / multi-window ----
 
 /// Recent projects for the launcher, most-recent first, each tagged
 /// with whether its directory still exists on disk.

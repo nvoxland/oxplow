@@ -154,9 +154,9 @@ one dev home shared across several checkouts.
 
 **Pass an absolute path — `$PWD/.oxplow_home`, not `.oxplow_home`.** The
 value is stored verbatim and re-resolved by each process that inherits
-it, and those processes do not share a cwd: `spawn_project_window` sets
-no `current_dir` (it inherits the parent's), but the agent PTY spawns
-with `cwd = <stream worktree>`. A bare relative path therefore resolves
+it, and those processes do not share a cwd: the shell spawns each
+`oxplow-daemon` without a `current_dir` (it inherits the shell's), but
+the agent PTY spawns with `cwd = <stream worktree>`. A bare relative path therefore resolves
 against whichever worktree the agent is in, so the moment you have a
 non-primary stream the app and its agent disagree about where the dev
 home is. An exported-but-empty value is treated as unset.
