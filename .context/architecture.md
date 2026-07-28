@@ -135,6 +135,33 @@ can't be reached (stale state), `open_project` falls back to a clear
 crashed instance's stale focus port is never used (the lock probe sees
 the project as not-open and the second launch just opens it).
 
+**Windows and the native menu.** No window is declared in
+`tauri.conf.json` (`app.windows` is `[]`); every window is built at
+runtime by `apps/desktop/src-tauri/src/windows.rs`, which is also the
+one place their shape (size, overlay title bar, drag-drop off) is
+defined. **The label is load-bearing:**
+
+| Label | Window | Capability |
+|---|---|---|
+| `project-<n>` | a project | `capabilities/oxplow-windows.json` |
+| `launcher` | the project picker | same |
+| `setup` | "create a project here?" | same |
+| `ext-url-<uuid>` | sandboxed external URL | `capabilities/external-url.json` (empty) |
+
+`is_project_label` (strictly `project-<digits>`, tighter than the
+capability glob) gates the close handler's session bookkeeping — window
+events are builder-level and fire for *every* window, so without it an
+external-URL webview closing dropped the project from the restore set.
+
+The native menu bar is app-global (`AppHandle::set_menu`), but menu
+state is per window, so `commands/menu.rs` keeps a `MenuRegistry` of
+each window's latest snapshot and installs whichever belongs to the
+focused one. A push from a background window is recorded but not
+installed; a focus change re-installs; focusing a window with no
+snapshot (an external-URL webview) leaves the menu alone rather than
+blanking it. Activations are emitted to the focused window, not
+broadcast — with two projects open, Cmd-S belongs to exactly one.
+
 **Session restore.** A global `session.json`
 (`oxplow_config::SessionProjects`) holds the set of project dirs that
 were open last. A bare launch reopens them (skipping dirs that are gone

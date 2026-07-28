@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "main-window",
-  "description": "Capabilities granted to the primary oxplow webview. shell:default is replaced with a narrowly-scoped allowlist + open-url permission so the renderer can't spawn arbitrary processes.",
-  "windows": ["main"],
+  "identifier": "oxplow-windows",
+  "description": "Capabilities granted to the shell's own webviews — project windows (project-<n>), the launcher and the create-project confirmation. Sandboxed external-URL webviews are deliberately NOT matched here; they get the empty external-url capability instead. shell:default is replaced with a narrowly-scoped allowlist + open-url permission so the renderer can't spawn arbitrary processes.",
+  "windows": ["project-*", "launcher", "setup"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

@@ -9,27 +9,11 @@
     "beforeBuildCommand": "bun run --cwd .. build && bash scripts/stage-daemon.sh"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Oxplow",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 800,
-        "minHeight": 500,
-        "resizable": true,
-        "fullscreen": false,
-        "decorations": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "dragDropEnabled": false,
-        "transparent": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*",
       "dangerousDisableAssetCspModification": ["style-src"],
-      "capabilities": ["main-window", "external-url"]
+      "capabilities": ["oxplow-windows", "external-url"]
     }
   },
   "bundle": {

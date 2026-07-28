@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 mod icon_tint;
+mod windows;
 
 use oxplow_app::{AppLayout, Services};
 use oxplow_tauri_ipc::{
@@ -262,13 +263,29 @@ fn other_window_alive(self_dir: &std::path::Path) -> bool {
     })
 }
 
+/// Events every shell window handles the same way. Project mode layers
+/// its session bookkeeping on top (see `run_project`).
+fn handle_shell_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    match event {
+        // The native menu bar is app-global, so it has to be re-installed
+        // for whichever window the OS just handed focus to.
+        tauri::WindowEvent::Focused(true) => {
+            oxplow_tauri_ipc::commands::menu::apply_focused_menu(window)
+        }
+        tauri::WindowEvent::Destroyed => {
+            oxplow_tauri_ipc::commands::menu::forget_window_menu(window)
+        }
+        _ => {}
+    }
+}
+
 /// Publish a loopback focus channel for this project and serve it on a
-/// background thread: a nonce-matching ping raises/focuses the main
-/// window. Lets a second `open_project` of the same dir focus the
-/// existing window (see `oxplow_app::request_focus`) instead of being
-/// turned away by the instance lock. Best-effort — any failure just
-/// means the second open falls back to the "already open" error.
-fn start_focus_listener(app: &tauri::AppHandle, project_dir: std::path::PathBuf) {
+/// background thread: a nonce-matching ping raises/focuses `label`.
+/// Lets a second `open_project` of the same dir focus the existing
+/// window (see `oxplow_app::request_focus`) instead of being turned
+/// away by the instance lock. Best-effort — any failure just means the
+/// second open falls back to the "already open" error.
+fn start_focus_listener(app: &tauri::AppHandle, project_dir: std::path::PathBuf, label: String) {
     use std::io::{BufRead, BufReader};
     use tauri::Manager;
 
@@ -301,7 +318,7 @@ fn start_focus_listener(app: &tauri::AppHandle, project_dir: std::path::PathBuf)
             let Ok(conn) = conn else { continue };
             let mut line = String::new();
             if BufReader::new(conn).read_line(&mut line).is_ok() && line.trim() == nonce {
-                if let Some(win) = app.get_webview_window("main") {
+                if let Some(win) = app.get_webview_window(&label) {
                     let _ = win.unminimize();
                     let _ = win.show();
                     let _ = win.set_focus();
@@ -374,10 +391,12 @@ fn run_launcher(ctx: tauri::Context) {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
         .manage(oxplow_tauri_ipc::LaunchInfo::launcher())
+        .on_window_event(handle_shell_window_event)
         .setup(move |app| {
             specta.mount_events(app);
             install_recent_projects(app.handle(), None);
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            windows::build_shell_window(app.handle(), windows::LAUNCHER_LABEL, "Oxplow")?;
             Ok(())
         })
         .run(ctx)
@@ -400,10 +419,12 @@ fn run_setup(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
         .manage(launch_info)
+        .on_window_event(handle_shell_window_event)
         .setup(move |app| {
             specta.mount_events(app);
             install_recent_projects(app.handle(), None);
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            windows::build_shell_window(app.handle(), windows::SETUP_LABEL, "Oxplow")?;
             Ok(())
         })
         .run(ctx)
@@ -509,7 +530,13 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(specta.invoke_handler())
-        .on_window_event(move |_window, event| {
+        .on_window_event(move |window, event| {
+            handle_shell_window_event(window, event);
+            // Session bookkeeping belongs to project windows only: an
+            // external-URL webview closing is not this project closing.
+            if !windows::is_project_label(window.label()) {
+                return;
+            }
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 // Closing one window while OTHER windows are still open
                 // means "I'm done with this project" → drop it from the
@@ -533,13 +560,22 @@ fn run_project(project_dir: std::path::PathBuf, ctx: tauri::Context) {
             // launcher offers it next time, and expose the store to
             // the in-window "Open Recent" surface.
             install_recent_projects(app.handle(), Some(project_dir_for_setup));
-            // Publish a focus channel so a second open of this project
-            // raises this window instead of failing on the lock.
-            start_focus_listener(app.handle(), project_dir_for_focus.clone());
             spawn_event_bridge(app.handle().clone(), event_bus.clone());
             spawn_lsp_event_bridge(app.handle().clone(), lsp_sessions.clone());
             spawn_terminal_event_bridge(app.handle().clone(), terminal_sessions.clone());
             oxplow_tauri_ipc::commands::menu::install_menu_handler(app.handle());
+            // Last: the renderer starts calling commands the moment the
+            // window exists, so everything it can reach is in place
+            // before it loads.
+            let label = windows::next_project_label();
+            windows::build_shell_window(
+                app.handle(),
+                &label,
+                &windows::project_window_title(&project_dir_for_focus),
+            )?;
+            // Publish a focus channel so a second open of this project
+            // raises this window instead of failing on the lock.
+            start_focus_listener(app.handle(), project_dir_for_focus.clone(), label);
             Ok(())
         })
         .manage(state)

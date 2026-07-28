@@ -768,9 +768,13 @@ export const commands = {
 	 */
 	lookupTerminalSession: (threadId: ThreadId, pane: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { threadId, pane })),
 	/**
-	 *  Replace the app's native menu with the supplied snapshot. Each
-	 *  activation fires `menu:command` with `{ id: "<command-id>" }` to
-	 *  the renderer.
+	 *  Replace the native menu with the calling window's snapshot. Each
+	 *  activation fires `menu:command` with `{ id: "<command-id>" }` back
+	 *  to the window that owns the menu.
+	 * 
+	 *  The snapshot is always recorded; it is only *installed* when this
+	 *  window owns the menu bar (see [`MenuRegistry`]), so a background
+	 *  window's menu churn can't overwrite the foreground one's.
 	 */
 	setNativeMenu: (groups: MenuGroupSnapshot[]) => typedError<null, IpcError>(__TAURI_INVOKE("set_native_menu", { groups })),
 	/**

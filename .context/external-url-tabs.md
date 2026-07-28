@@ -43,7 +43,8 @@ content lives in the spawned window, isolated from the main webview.
 | Capability scope | `apps/desktop/src-tauri/capabilities/external-url.json` | `permissions: []` — no `core:default`, no plugin defaults, no oxplow commands. The window glob `ext-url-*` matches the label format `open_external_url` assigns. |
 | Capability listing | `apps/desktop/src-tauri/tauri.conf.json` `app.security.capabilities` | Capabilities are listed explicitly so a stray file in `capabilities/` cannot widen the surface — the directory's auto-enable behavior is bypassed. |
 | Window labelling | `format!("ext-url-{uuid}")` | The label namespace is fixed; the capability glob (`ext-url-*`) only matches windows the IPC command itself created. |
-| OS-browser fallback | `tauri-plugin-shell` capability `shell:allow-open` | Only the URL-open intent is granted; arbitrary `shell:execute` is restricted to the tmux/git/typescript-language-server allowlist in `main-window.json`. |
+| OS-browser fallback | `tauri-plugin-shell` capability `shell:allow-open` | Only the URL-open intent is granted; arbitrary `shell:execute` is restricted to the tmux/git/typescript-language-server allowlist in `oxplow-windows.json`. |
+| Window-event handling | `apps/desktop/src-tauri/src/main.rs` (`is_project_label`) | Window events are builder-level and fire for every window. Session bookkeeping is gated on the `project-<n>` label so closing an external-URL window isn't mistaken for closing the project. The menu registry has no snapshot for these labels, so focusing one leaves the menu bar as-is. |
 
 The intent is **isolation by separation**: the external page never
 shares a webview process or capability set with the oxplow renderer,
