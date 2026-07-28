@@ -1092,8 +1092,8 @@ the read's eligibility rules: **`.context/metrics.md`**.
 
 The persisted record of the informational **nudges** oxplow surfaces to the
 agent from the PostToolUse hook (`crates/oxplow-app/src/collection.rs`
-`on_post_tool_use`) — the report-less-test-run nudge and the commit-hygiene
-nudge. Previously fully ephemeral (returned as `additionalContext`, then
+`on_post_tool_use`) — the report-less-test-run and coverage-target nudges.
+Previously fully ephemeral (returned as `additionalContext`, then
 lost); persisting gives a reviewer/human-facing answer to "what did oxplow
 tell the agent this effort." See `.context/agent-model.md` (Nudge
 persistence).
@@ -1104,14 +1104,16 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
 `(thread_id, created_at DESC)`.
 
 - **`thread_id` NOT NULL, `effort_id` nullable**: every nudge fires within a
-  thread; today both kinds fire against the open effort, but the column is
+  thread; today every kind fires against the open effort, but the column is
   nullable so a future thread-scoped nudge (no open effort) has a home. The
   effort FK cascades with its `task_effort` when present.
-- **`kind`** is open-ended (`report-less-run` | `commit-hygiene` |
-  `configure`, …) — adding a kind needs no migration.
+- **`kind`** is open-ended (`report-less-run` | `coverage-target` |
+  `configure`, …) — adding a kind needs no migration. Retired kinds keep
+  their rows: `commit-hygiene` no longer fires (tsk250) but old rows still
+  read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
-- **One-shot dedup lives in the service** (in-memory, keyed by effort for the
-  report nudge and by commit sha for hygiene), so the table only ever sees
+- **One-shot dedup lives in the service** (in-memory, keyed by effort), so
+  the table only ever sees
   nudges that *actually fired* — a deduped nudge is never stored. No
   store-side retention prune (nudge volume per effort is tiny).
 

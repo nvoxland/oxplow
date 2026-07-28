@@ -1,11 +1,11 @@
 //! Persisted agent nudges: the informational steers oxplow surfaces to the
-//! agent from the PostToolUse hook (report-less-test-run + commit-hygiene).
+//! agent from the PostToolUse hook (report-less-test-run, coverage-target).
 //! Previously fully ephemeral — see migration `V33__agent_nudge.sql` and
 //! `.context/agent-model.md` (Nudge persistence).
 //!
 //! A thin typed read/write surface modeled on
 //! [`crate::observation_store::SqliteEffortObservationStore`]. The one-shot
-//! dedup (so a nudge fires at most once per effort/commit) lives in the
+//! dedup (so a nudge fires at most once per effort) lives in the
 //! service, so the store only ever records nudges that actually fired.
 
 use rusqlite::params;
@@ -36,7 +36,7 @@ pub struct AgentNudge {
     /// Open effort the nudge fired against, if any (some nudge kinds fire
     /// thread-scoped with no open effort).
     pub effort_id: Option<String>,
-    /// Well-known kind: `report-less-run` | `commit-hygiene` (open-ended).
+    /// Well-known kind: `report-less-run` | `coverage-target` (open-ended).
     pub kind: String,
     /// The full message text that was surfaced to the agent.
     pub message: String,
@@ -253,7 +253,7 @@ mod tests {
     async fn deleting_effort_cascades_to_nudges() {
         let (store, thread, effort) = fixture().await;
         store
-            .record(sample("commit-hygiene", Some("eff1")))
+            .record(sample("coverage-target", Some("eff1")))
             .await
             .unwrap();
         // Deleting the parent effort removes its nudges (ON DELETE CASCADE).

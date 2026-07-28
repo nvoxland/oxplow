@@ -154,7 +154,7 @@ pub async fn list_effort_metric_deltas(
         .await)
 }
 
-/// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+/// Persisted agent nudges (report-less-run / coverage-target) for an effort,
 /// newest-first. Drives the collapsed "Agent nudges" debug sub-view on the
 /// task page. See `.context/agent-model.md` (Nudge persistence).
 pub async fn list_nudges_for_effort(

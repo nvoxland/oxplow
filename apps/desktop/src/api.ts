@@ -1856,7 +1856,7 @@ export async function listEffortsInWindow(
   ) as unknown as TaskEffort[];
 }
 
-/** Persisted agent nudges (report-less-run / commit-hygiene) fired for an
+/** Persisted agent nudges (report-less-run / coverage-target) fired for an
  *  effort, newest-first. Drives the collapsed "Agent nudges" debug sub-view. */
 export async function listNudgesForEffort(
   effortId: string,

@@ -113,7 +113,7 @@ pub async fn list_effort_metric_deltas(
     oxplow_rpc::commands::effort::list_effort_metric_deltas(&state, effort_id).await
 }
 
-/// Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+/// Persisted agent nudges (report-less-run / coverage-target) for an effort,
 /// newest-first. Drives the collapsed "Agent nudges" debug sub-view on
 /// `TaskPage`.
 #[tauri::command]

@@ -908,7 +908,7 @@ export function FullCoverageView({
  * something — the run tree, or an explicit "No tests run."
  *
  * The collapsed "Agent nudges" debug sub-view renders alongside it
- * (independently — a commit-hygiene nudge can fire with no observation),
+ * (independently — a nudge can fire with no observation behind it),
  * self-hiding when the effort has no fired nudges.
  */
 export function EffortObservationsBlock({
@@ -974,7 +974,8 @@ export function EffortObservationsBlock({
 }
 
 /** Human label for a nudge kind. Open-ended — unknown kinds fall back to
- *  the raw kind string. */
+ *  the raw kind string. `commit-hygiene` no longer fires (tsk250) but keeps
+ *  its label so rows already in a project's history still read properly. */
 const NUDGE_KIND_LABEL: Record<string, string> = {
   "report-less-run": "Report-less run",
   "commit-hygiene": "Commit hygiene",

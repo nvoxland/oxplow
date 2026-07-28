@@ -533,19 +533,17 @@ Button carries `data-testid="files-commit"`; the dialog's message
 textarea is `files-commit-message` and the submit button is
 `files-commit-submit`.
 
-### Commit-hygiene nudge (PostToolUse, not a Stop directive)
+### Commits are not policed (tsk250)
 
-The Stop hook emits no commit directives, but the **PostToolUse** Bash
-hook watches commits passively: when the agent runs a successful
-`git commit`, `CollectionService::check_commit_hygiene` compares the new
-HEAD commit's files against the open effort's changed set and, if any
-fall outside it, returns a one-shot informational nudge (it never blocks
-the commit) — with a stronger warning when an out-of-effort file is
-under `docs/`, since committing `docs/` to main auto-deploys the site.
-This is the guard that would have caught the held-blog-post incident
-(tsk80). It reads HEAD via `oxplow_git::head_commit_sha` /
-`get_commit_detail`. Mechanics live in
-[collection.md](./collection.md) → "Commit-hygiene nudge".
+Neither hook comments on a commit. The Stop hook emits no commit
+directives, and the PostToolUse Bash hook watches `git commit` only to run
+the revert/token-waste leg — the **commit-hygiene nudge** that used to flag
+committed files outside the open effort's changed set was removed. It
+second-guessed a decision the committing actor had already made (nothing to
+disentangle: one commit, one actor), and it hardcoded a `docs/` warning
+about this repo's own auto-deploy workflow, which oxplow can't assume of any
+project. Rationale in [collection.md](./collection.md) → "Commits get no
+nudge of their own".
 
 ### Non-writer threads still cannot call git
 

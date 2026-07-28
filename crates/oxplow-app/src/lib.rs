@@ -440,7 +440,7 @@ pub struct Services {
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
     /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
     pub metrics: metrics_service::MetricsService,
-    /// Persisted agent nudges (report-less-run / commit-hygiene) — the
+    /// Persisted agent nudges (report-less-run / coverage-target) — the
     /// human-facing record of what oxplow steered the agent to do.
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// User-created dashboards (grids of metric tiles) — project-global (tsk138).

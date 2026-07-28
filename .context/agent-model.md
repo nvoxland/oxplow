@@ -1130,16 +1130,15 @@ nudge" section in `.context/collection.md`.
 ### Nudge persistence
 
 The PostToolUse nudges — the report-less-run nudge above and the
-commit-hygiene nudge (a `git commit` that swept in files outside the open
-effort's changed set) — are **persisted** as well as returned. The service
+coverage-target nudge — are **persisted** as well as returned. The service
 (`CollectionService::on_post_tool_use`) writes each fired nudge to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
 `.context/data-model.md`) tagged with kind (`report-less-run` /
-`commit-hygiene`), the message it surfaced, and the trigger (bash command).
+`coverage-target`), the message it surfaced, and the trigger (bash command).
 This is best-effort — a persistence error is logged and swallowed, never
 failing the hook. Persistence happens **after** the existing in-memory
-one-shot dedup gates (per-effort for the report nudge, per-commit sha for
-hygiene), so a deduped/non-fired nudge is never stored.
+per-effort one-shot dedup gate, so a deduped/non-fired nudge is never
+stored.
 
 These are surfaced UI-side only (the agent never reads them back): an
 "Agent Nudges" H2 section on the task page (after each effort's Metrics)

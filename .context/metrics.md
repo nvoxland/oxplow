@@ -980,7 +980,7 @@ measure home); new dim `oxplow.token_kind`.
 
 **Decision reversed — nudges are now IN the substrate (T-B, was tsk24).** The
 earlier call kept the advisory nudges (report-less, coverage-target,
-commit-hygiene, gauge-crossing) out of the substrate. T-B reverses it: with the
+gauge-crossing) out of the substrate. T-B reverses it: with the
 producer-spec layer in place, adding an `oxplow.nudge` event measure + one fact
 per fired nudge is cheap and makes the `agent.nudges.fired` operational metric a
 first-class spec like every other. The nudge rows in `agent_nudge` stay the
@@ -1781,7 +1781,7 @@ Feedback is **advisory — oxplow never blocks**. Two paths:
 - **Coverage-target nudge** (PostToolUse). When an effort's diff coverage lands
   below target, the ride-along fires a **one-shot** nudge ("coverage X% < 80%
   target — add tests…") via the same `persist_nudge` + `additionalContext` path
-  as the report-less / commit-hygiene nudges, deduped per-effort by an in-memory
+  as the report-less nudge, deduped per-effort by an in-memory
   `nudged_coverage` set.
 - **Effort metric deltas** (UserPromptSubmit, tsk231). `CollectionService::
   effort_metric_context(thread)` builds a "# Metric deltas (this effort)" block —

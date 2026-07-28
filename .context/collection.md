@@ -253,7 +253,7 @@ hook + MCP wiring):
 **regardless of how many efforts are open** — attribution is deferred to the
 unified `"run"` ledger, never a precondition for recording. `on_post_tool_use`
 resolves a single open effort only for the effort-RELATIVE *advisories*
-(commit-hygiene + the report-less / coverage-target nudges), which legitimately
+(the report-less / coverage-target nudges), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
 is gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of the
 old effort-start floor, so it works with no open effort. **Coverage** is
@@ -343,68 +343,37 @@ persisted — it clears on daemon restart, so the first run of a new session
 can nudge again). The *fired* nudge itself is persisted for review — see
 Nudge persistence below.
 
-## Commit-hygiene nudge (PostToolUse)
+## Commits get no nudge of their own
 
-The same `on_post_tool_use` hook also guards commits. When the Bash
-command is a successful `git commit` (`detect_git_commit` — token-aware,
-so `git -c user.email=… commit` and `git commit --amend` match, `git add`
-/ `git log --grep commit` don't), `check_commit_hygiene` compares the
-files in the new HEAD commit against the open effort's **changed set** and
-returns a one-shot nudge naming any committed file that falls *outside*
-it. Informational only — it never blocks the commit (a legitimate
-cross-cutting commit is fine; the agent just gets a conscious heads-up).
+`on_post_tool_use` detects a `git commit` (`detect_git_commit` — token-aware,
+so `git -c user.email=… commit` and `git commit --amend` match, `git add` /
+`git log --grep commit` don't) only to drive the revert/token-waste leg and to
+return early. There is **no commit-hygiene guard** (removed in tsk250): a
+post-commit "these files aren't part of this effort's changed set" advisory
+used to fire here.
 
-This came out of the tsk80 incident: a deliberately-held blog post under
-`docs/` was already `git add`ed from a prior session and rode along
-silently into a feature commit; committing `docs/` to main auto-deploys
-the site via `.github/workflows/docs.yml`, so a push would have published
-held content. When any out-of-effort file sits under `docs/`, the nudge
-appends a stronger auto-deploy warning.
-
-**"In-effort" is claim-aware** (claim-first attribution, Child 3): when
-the effort has CLAIMED files (`task_effort_file` — populated in real time
-by the PostToolUse auto-claim and at completion by `touched_files`), the
-guard prefers that set. A committed file the effort never claimed is
-out-of-effort **even if it changed during the window**, and a claimed file
-is never falsely flagged. Only when the effort is UNREVIEWED (no claims at
-all — legacy or non-structured-edit efforts) does the guard fall back to
-the raw snapshot diff: **"changed set" = start-snapshot vs working-tree**,
-the same notion diff-coverage uses (`path_changed_in_effort`, the
-path-granularity sibling of `changed_lines_for`): a path is in the changed
-set when its working-tree content differs from its effort-start-snapshot
-content (absent-side-as-empty, so adds and deletes both count). This
-fallback works for an *open* effort, where `list_changed_paths_for_effort`
-can't (it needs an end snapshot). HEAD sha + committed file list come from
-`oxplow_git::head_commit_sha` / `get_commit_detail` via `spawn_blocking`.
-
-**Never-snapshotted paths are dropped before either branch runs**
-(tsk249): the committed list is filtered through the project's
-`WorkspaceFilter` (`generated.exclude` + `.gitignore`) first. Those paths
-can't be claimed either (see `TaskService::claimable_paths` in
-[agent-model.md](./agent-model.md)), so flagging one would be a nag with
-no possible resolution — committing regenerated `bindings.ts` alongside
-the change that caused it is normal and silent.
-
-**Skips cleanly** when the commit didn't succeed (non-zero exit), there's
-no open effort, or the effort has no start snapshot yet. **Anti-nag:**
-once per commit sha, tracked in a second in-memory `HashSet`
-(`nudged_commits`) alongside `nudged_efforts`. See also
-[git-integration.md](./git-integration.md) (commits are otherwise
-user-driven; the Stop hook emits no commit directives).
+The reasoning for removing it, worth keeping: attribution nudges earn their
+keep by disentangling **concurrent** efforts — which changes belong to which
+piece of work while several are in flight. A commit has one actor that has
+already decided what to include, so there is nothing left to disentangle and
+the nudge is just oxplow getting in the way. It also carried a hardcoded
+`docs/` check that warned about *this* repo's `.github/workflows/docs.yml`
+auto-deploy — the kind of assumption about a project's layout that a
+general-purpose tool must not make (see also [[tsk251]]).
 
 ## Nudge persistence
 
-Both PostToolUse nudges (report-less-run + commit-hygiene) are **persisted**
+PostToolUse nudges (report-less-run, coverage-target) are **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
 agent this effort" after the fact — previously the nudge string was forwarded
 via `additionalContext` and then lost. When `on_post_tool_use` decides to
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`
-(`report-less-run` / `commit-hygiene`), the message, and the trigger (the
+(`report-less-run` / `coverage-target`), the message, and the trigger (the
 bash command) and emits `AgentNudgesChanged`. Persistence sits **after** the
-in-memory dedup gates (`mark_nudged` / `mark_commit_nudged`), so a
-deduped/non-fired nudge is never stored. The store
+in-memory dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
+stored. The store
 (`SqliteAgentNudgeStore`), IPC (`list_nudges_for_effort` /
 `list_nudges_for_thread`), and the collapsed "Agent nudges" task-page
 sub-view are covered in [data-model.md](./data-model.md),

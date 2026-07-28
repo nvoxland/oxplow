@@ -211,7 +211,7 @@ pub enum OxplowEvent {
         #[serde(default)]
         measures: Vec<String>,
     },
-    /// A persisted agent nudge landed (report-less-run / commit-hygiene).
+    /// A persisted agent nudge landed (report-less-run / coverage-target).
     /// The renderer refetches the effort's (or thread's) nudge list. See
     /// `.context/agent-model.md` (Nudge persistence).
     AgentNudgesChanged {

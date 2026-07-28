@@ -501,7 +501,7 @@ The collection subsystem (`.context/collection.md`) follows the same
 
 The persisted record of the informational nudges `CollectionService`
 surfaces to the agent from the PostToolUse hook (report-less-run +
-commit-hygiene). A standard 7-layer instance backed by
+coverage-target). A standard 7-layer instance backed by
 `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`;
 schema in [data-model.md](./data-model.md), migration `V33`).
 

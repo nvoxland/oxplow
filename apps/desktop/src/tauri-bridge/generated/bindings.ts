@@ -583,7 +583,7 @@ export const commands = {
 	 */
 	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
 	/**
-	 *  Persisted agent nudges (report-less-run / commit-hygiene) for an effort,
+	 *  Persisted agent nudges (report-less-run / coverage-target) for an effort,
 	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on
 	 *  `TaskPage`.
 	 */
@@ -847,7 +847,7 @@ export type AgentNudge = {
 	 *  thread-scoped with no open effort).
 	 */
 	effort_id: string | null,
-	// Well-known kind: `report-less-run` | `commit-hygiene` (open-ended).
+	// Well-known kind: `report-less-run` | `coverage-target` (open-ended).
 	kind: string,
 	// The full message text that was surfaced to the agent.
 	message: string,
@@ -2561,7 +2561,7 @@ detail: string | null } |
  */
 { kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] } | 
 /**
- *  A persisted agent nudge landed (report-less-run / commit-hygiene).
+ *  A persisted agent nudge landed (report-less-run / coverage-target).
  *  The renderer refetches the effort's (or thread's) nudge list. See
  *  `.context/agent-model.md` (Nudge persistence).
  */

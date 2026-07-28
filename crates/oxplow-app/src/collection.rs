@@ -14,7 +14,7 @@
 //! always `observed`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use serde_json::json;
@@ -414,10 +414,6 @@ pub struct CollectionService {
     /// ephemeral guidance that shouldn't be persisted or survive a restart.
     /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
     nudged_efforts: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
-    /// Commit shas already nudged about out-of-effort files. Same ephemeral
-    /// bounded in-memory dedup as `nudged_efforts`, but keyed by commit sha so
-    /// the hygiene nudge fires at most once per commit.
-    nudged_commits: Arc<std::sync::Mutex<BoundedSet<String>>>,
     /// Efforts already nudged about coverage below target (tsk220). Separate
     /// set from `nudged_efforts` so the report-less and coverage-target nudges
     /// don't suppress each other; same ephemeral bounded in-memory dedup.
@@ -464,7 +460,6 @@ impl CollectionService {
             attribution,
             metric_visibility,
             nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
-            nudged_commits: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_coverage: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
             nudged_gauge: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
         }
@@ -1632,8 +1627,8 @@ impl CollectionService {
         // OBSERVE-ALWAYS (tsk269): tests + analysis are recorded regardless of how
         // many efforts are open — attribution is deferred to the ledger, never a
         // precondition for recording. The single open effort (if any) is resolved
-        // here only for the effort-RELATIVE advisories (commit-hygiene, coverage,
-        // nudges), which legitimately no-op when ambiguous.
+        // here only for the effort-RELATIVE advisories (coverage, nudges),
+        // which legitimately no-op when ambiguous.
         let effort_opt = self.efforts.find_single_open_for_thread(thread).await?;
 
         // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
@@ -1645,18 +1640,11 @@ impl CollectionService {
                 tracing::warn!(error = %e, "token-waste leg failed");
             }
         }
-        // Commit-hygiene nudge: a successful `git commit` that swept in files
-        // outside the open effort's changed set. Effort-relative advisory — only
-        // with a single open effort. Independent of the ride-alongs below.
-        if is_commit {
-            if let Some(effort) = &effort_opt {
-                if let Some(msg) = self.check_commit_hygiene(effort, bash.exit_code).await? {
-                    self.persist_nudge(thread, Some(effort), "commit-hygiene", &msg, &bash.command)
-                        .await;
-                    return Ok(Some(msg));
-                }
-            }
-        }
+        // A commit gets no advisory of its own (tsk250). Attribution nudges
+        // exist to sort out which changes belong to which effort while several
+        // run concurrently; by commit time one actor has already decided what
+        // to include, and second-guessing that is oxplow getting in the way.
+        //
         // A pure commit/revert (not also a test/analysis run) is done.
         if (is_commit || is_revert) && !is_test && !is_analysis {
             return Ok(None);
@@ -1931,16 +1919,6 @@ impl CollectionService {
         }
     }
 
-    /// Record that commit `sha` has been nudged about. Returns `true` the
-    /// first time (caller should nudge), `false` afterwards. Mirrors
-    /// [`mark_nudged`] but keyed by commit sha.
-    fn mark_commit_nudged(&self, sha: &str) -> bool {
-        match self.nudged_commits.lock() {
-            Ok(mut set) => set.insert(sha.to_string()),
-            Err(_) => false,
-        }
-    }
-
     /// Record that `effort` has been nudged about coverage below target.
     /// Returns `true` the first time (caller should nudge), `false` after.
     fn mark_coverage_nudged(&self, effort: &EffortId) -> bool {
@@ -2074,123 +2052,6 @@ impl CollectionService {
             "# Metric deltas (this effort)\n{}\n\n(Advisory — for awareness, not gating.)",
             lines.join("\n")
         ))
-    }
-
-    /// Commit-hygiene check: after a successful `git commit`, flag any file in
-    /// the new HEAD commit that falls OUTSIDE the open effort's changed set
-    /// (start-snapshot content vs. working-tree content — the same notion of
-    /// "what this effort changed" that diff-coverage uses). Informational; the
-    /// caller surfaces the returned message to the agent without blocking.
-    /// `Ok(None)` when there's nothing to flag, no baseline yet, the commit
-    /// didn't succeed, or HEAD/commit details can't be read.
-    async fn check_commit_hygiene(
-        &self,
-        effort: &TaskEffort,
-        exit_code: Option<i64>,
-    ) -> Result<Option<String>, DomainError> {
-        // Only react to a commit that actually landed. A missing exit code is
-        // tolerated (Claude Code's Bash response doesn't always carry one).
-        if matches!(exit_code, Some(c) if c != 0) {
-            return Ok(None);
-        }
-        // No start snapshot → no baseline to compare against → skip cleanly.
-        let Some(start) = effort.start_snapshot_id else {
-            return Ok(None);
-        };
-        // Resolve HEAD + the committed file list via libgit2 off the async
-        // runtime thread (mirrors the rest of the codebase's git access).
-        let project_dir = self.project_dir.clone();
-        let sha = match tokio::task::spawn_blocking({
-            let p = project_dir.clone();
-            move || oxplow_git::head_commit_sha(&p)
-        })
-        .await
-        {
-            Ok(Some(sha)) => sha,
-            _ => return Ok(None),
-        };
-        // One-shot per commit (anti-nag, mirrors the report-nudge dedup).
-        if !self.mark_commit_nudged(&sha) {
-            return Ok(None);
-        }
-        let detail = match tokio::task::spawn_blocking({
-            let p = project_dir.clone();
-            let sha = sha.clone();
-            move || oxplow_git::get_commit_detail(&p, &sha)
-        })
-        .await
-        {
-            Ok(Some(detail)) => detail,
-            _ => return Ok(None),
-        };
-        let start_tree = self.snapshots.tree_at(start).await?;
-        // Claim-aware "in-effort" test (claim-first attribution, Child 3):
-        // when the effort has CLAIMED files, prefer that set — a committed
-        // file the effort never claimed is out-of-effort even if it changed
-        // during the window, and a claimed file is never falsely flagged.
-        // Only when the effort is UNREVIEWED (no claims at all — legacy /
-        // non-structured-edit efforts) do we fall back to the raw snapshot
-        // diff (the prior behavior).
-        let claimed: std::collections::HashSet<String> = self
-            .efforts
-            .list_files(&effort.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        let claim_first_active = !claimed.is_empty();
-        // Paths the project never snapshots (`generated.exclude`,
-        // `.gitignore`) are outside attribution entirely (tsk249): they
-        // can't be claimed and can't show in the effort's diff, so
-        // flagging one would be a nag with no possible resolution.
-        let capture_filter = {
-            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-            oxplow_fs_watch::WorkspaceFilter::for_project(
-                &self.project_dir,
-                &cfg.generated.exclude,
-                &cfg.generated.include,
-            )
-        };
-        let mut out_of_effort: Vec<String> = detail
-            .files
-            .iter()
-            .map(|f| f.path.clone())
-            .filter(|path| !capture_filter.ignore(Path::new(path), false))
-            .filter(|path| {
-                if claim_first_active {
-                    !claimed.contains(path)
-                } else {
-                    !self.path_changed_in_effort(path, &start_tree)
-                }
-            })
-            .collect();
-        if out_of_effort.is_empty() {
-            return Ok(None);
-        }
-        out_of_effort.sort();
-        out_of_effort.dedup();
-        let short = sha.get(..7).unwrap_or(&sha).to_string();
-        Ok(Some(commit_hygiene_message(&short, &out_of_effort)))
-    }
-
-    /// True when `path`'s current working-tree content differs from its
-    /// effort-start-snapshot content (treating an absent side as empty, so
-    /// adds and deletes both count as changed). This is the path-granularity
-    /// sibling of [`changed_lines_for`] and defines membership in the effort's
-    /// changed set for the commit-hygiene check.
-    fn path_changed_in_effort(&self, path: &str, start_tree: &BTreeMap<String, String>) -> bool {
-        let old = start_tree
-            .get(path)
-            .and_then(|id| {
-                crate::snapshot_content::read_tree_identity(id, &self.project_dir, &self.blobs)
-            })
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        let new = std::fs::read(self.project_dir.join(path))
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        old != new
     }
 
     /// Merge every configured test report that exists and is fresher than
@@ -3402,31 +3263,6 @@ fn coverage_target_nudge_message(pct: f64) -> String {
     )
 }
 
-/// The PostToolUse nudge shown when a `git commit` swept in files that fall
-/// outside the open effort's changed set. Informational — never blocks the
-/// commit. Names the offenders and, when any sit under `docs/`, adds the
-/// auto-deploy warning (committing `docs/` to main publishes the site via
-/// `.github/workflows/docs.yml`).
-fn commit_hygiene_message(short_sha: &str, out_of_effort: &[String]) -> String {
-    let n = out_of_effort.len();
-    let plural = if n == 1 { "file" } else { "files" };
-    let list = out_of_effort.join(", ");
-    let mut msg = format!(
-        "Commit {short_sha} includes {n} {plural} not part of this effort's changed set: \
-         {list}. If this cross-cutting commit is intentional, carry on — otherwise it may have \
-         swept in pre-staged drift; check `git show --stat HEAD` and `git commit --amend` (or \
-         reset) to drop what doesn't belong."
-    );
-    if out_of_effort.iter().any(|p| p.starts_with("docs/")) {
-        msg.push_str(
-            " ⚠️ Some of these are under docs/ — committing docs/ to main auto-deploys the site \
-             via .github/workflows/docs.yml, so don't push until you've confirmed they're meant \
-             to publish.",
-        );
-    }
-    msg
-}
-
 /// How far back a report's mtime can be and still count as "fresh" for passive
 /// ingestion (tsk269). Replaces the effort-start floor so collection works at
 /// 0/N open efforts (observe-always). A report regenerated by the command that
@@ -3865,25 +3701,6 @@ mod tests {
     }
 
     #[test]
-    fn commit_hygiene_message_lists_files_and_flags_docs() {
-        // No docs/ file → no auto-deploy warning.
-        let plain = commit_hygiene_message("abc1234", &["src/other.rs".into()]);
-        assert!(plain.contains("abc1234"), "{plain}");
-        assert!(plain.contains("src/other.rs"), "{plain}");
-        assert!(plain.contains("1 file not part"), "{plain}");
-        assert!(!plain.contains("auto-deploys"), "{plain}");
-        // A docs/ file → stronger auto-deploy warning + plural wording.
-        let docs = commit_hygiene_message(
-            "def5678",
-            &["docs/blog/posts/held.md".into(), "src/x.rs".into()],
-        );
-        assert!(docs.contains("2 files not part"), "{docs}");
-        assert!(docs.contains("docs/blog/posts/held.md"), "{docs}");
-        assert!(docs.contains("auto-deploys the site"), "{docs}");
-        assert!(docs.contains(".github/workflows/docs.yml"), "{docs}");
-    }
-
-    #[test]
     fn parse_bash_post_tool_extracts_command_and_exit() {
         let payload = r#"{
             "tool_name": "Bash",
@@ -3980,21 +3797,13 @@ mod tests {
         /// `src/foo.rs` as `a\nb\nc\n`; the working tree has `a\nB\nc\nd\n`
         /// (lines 2 changed, 4 added).
         async fn build(report_xml: Option<&str>) -> Harness {
-            build_full(report_xml, false, &[]).await
+            build_full(report_xml, false).await
         }
 
-        /// Like [`build`], plus two knobs for the commit-hygiene tests:
-        /// - `git_init`: `git init` the project and lay down a base commit
-        ///   so HEAD has a parent for `get_commit_detail`'s diff.
-        /// - `baseline_extra`: `(path, content)` files seeded into the
-        ///   effort's START snapshot AND written identically to the working
-        ///   tree, so they read as *unchanged during the effort* (the
-        ///   out-of-effort signal a stray staged file would produce).
-        async fn build_full(
-            report_xml: Option<&str>,
-            git_init: bool,
-            baseline_extra: &[(&str, &str)],
-        ) -> Harness {
+        /// Like [`build`], plus `git_init`: `git init` the project and lay
+        /// down a base commit, for tests that need a real repo (HEAD with a
+        /// parent, commit detail, revert trailers).
+        async fn build_full(report_xml: Option<&str>, git_init: bool) -> Harness {
             let tmp = tempfile::tempdir().unwrap();
             let project_dir = tmp.path().to_path_buf();
             std::fs::create_dir_all(project_dir.join(".oxplow/snapshots")).unwrap();
@@ -4084,27 +3893,6 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Seed `baseline_extra` into the SAME start snapshot so they're
-            // part of the effort baseline; the working-tree copy written
-            // below is identical → unchanged during the effort.
-            for (path, content) in baseline_extra {
-                let hash = blobs.write(content.as_bytes()).unwrap();
-                snapshots
-                    .capture(FileSnapshot {
-                        id: 0,
-                        stream_id: stream.id,
-                        path: (*path).into(),
-                        blob_hash: Some(hash),
-                        size_bytes: content.len() as i64,
-                        captured_at: now,
-                        storage: oxplow_db::SnapshotStorage::Oxplow,
-                        snapshot_id: Some(snap_id),
-                        mtime_ms: None,
-                    })
-                    .await
-                    .unwrap();
-            }
-
             let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
             let effort = efforts
                 .start(task_id, &thread.id, Some(snap_id))
@@ -4114,14 +3902,6 @@ mod tests {
             // Current working-tree content: line 2 changed, line 4 added.
             std::fs::create_dir_all(project_dir.join("src")).unwrap();
             std::fs::write(project_dir.join("src/foo.rs"), "a\nB\nc\nd\n").unwrap();
-            // Lay down each baseline_extra file identically (unchanged).
-            for (path, content) in baseline_extra {
-                let abs = project_dir.join(path);
-                if let Some(parent) = abs.parent() {
-                    std::fs::create_dir_all(parent).unwrap();
-                }
-                std::fs::write(&abs, content).unwrap();
-            }
             // Optional git repo + base commit so HEAD has a parent.
             if git_init {
                 git_in(&project_dir, &["init", "-q"]);
@@ -4300,7 +4080,7 @@ mod tests {
         #[tokio::test]
         async fn ingest_coverage_mirrors_into_metric_substrate() {
             // git_init = true so a branch is present to capture.
-            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            let h = build_full(Some(COBERTURA_50PCT), true).await;
             h.service
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
@@ -4357,7 +4137,7 @@ mod tests {
     </lines>
   </class>
 </classes></package></packages></coverage>"#;
-            let h = build_full(Some(COBERTURA_BF), true, &[]).await;
+            let h = build_full(Some(COBERTURA_BF), true).await;
             h.service
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
@@ -4509,7 +4289,7 @@ mod tests {
             // metered effort → one `oxplow.token_waste` fact (value/num = the
             // effort's spend, den = 0 — the numerator side of the wasted
             // ratio), idempotent per effort.
-            let h = build_full(None, true, &[]).await;
+            let h = build_full(None, true).await;
             let dir = h.tmp.path();
 
             // A commit inside the (still open) effort's window.
@@ -4875,7 +4655,7 @@ mod tests {
             // NOT backfillable: which commit a past run tested is unrecoverable.
             // Gauge captures got this for free via the snapshot-driven
             // `GaugeRunContext`; test runs went unstamped for 125 captures.
-            let h = build_full(None, true, &[]).await;
+            let h = build_full(None, true).await;
             h.service
                 .record_test_run(
                     &h.thread,
@@ -6640,7 +6420,7 @@ mod tests {
 
         #[tokio::test]
         async fn ingest_coverage_writes_coverage_detail_finding_to_substrate() {
-            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            let h = build_full(Some(COBERTURA_50PCT), true).await;
             h.service
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
@@ -6826,184 +6606,6 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn on_post_tool_use_nudges_on_out_of_effort_commit() {
-            // Effort changed src/foo.rs; a pre-staged held.txt is unchanged
-            // during the effort. Committing both → held.txt is flagged.
-            let h = build_full(None, true, &[("held.txt", "held\n")]).await;
-            git_in(h.tmp.path(), &["add", "src/foo.rs", "held.txt"]);
-            git_commit(h.tmp.path(), "feature work");
-            let nudge = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap()
-                .expect("out-of-effort commit nudges");
-            assert!(nudge.contains("held.txt"), "{nudge}");
-            // The in-effort file must NOT be named as drift.
-            assert!(!nudge.contains("src/foo.rs"), "{nudge}");
-            // Not a docs/ file → no auto-deploy warning.
-            assert!(!nudge.contains("auto-deploys"), "{nudge}");
-        }
-
-        #[tokio::test]
-        async fn on_post_tool_use_no_nudge_when_commit_within_effort() {
-            // Commit only the file the effort actually changed → clean.
-            let h = build_full(None, true, &[]).await;
-            git_in(h.tmp.path(), &["add", "src/foo.rs"]);
-            git_commit(h.tmp.path(), "just the effort's file");
-            let result = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap();
-            assert!(
-                result.is_none(),
-                "in-effort commit must not nudge: {result:?}"
-            );
-        }
-
-        #[tokio::test]
-        async fn on_post_tool_use_commit_nudge_flags_docs_autodeploy() {
-            // A held blog post under docs/ swept into the commit → the
-            // stronger auto-deploy warning fires (the tsk80 incident).
-            let h = build_full(None, true, &[("docs/blog/posts/held.md", "# held\n")]).await;
-            git_in(
-                h.tmp.path(),
-                &["add", "src/foo.rs", "docs/blog/posts/held.md"],
-            );
-            git_commit(h.tmp.path(), "feature + stray doc");
-            let nudge = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap()
-                .expect("out-of-effort docs commit nudges");
-            assert!(nudge.contains("docs/blog/posts/held.md"), "{nudge}");
-            assert!(nudge.contains("auto-deploys the site"), "{nudge}");
-            assert!(nudge.contains(".github/workflows/docs.yml"), "{nudge}");
-        }
-
-        /// tsk249: a path in `generated.exclude` is never snapshotted and
-        /// (since the same change) never claimable — so the hygiene check
-        /// must not flag it as out-of-effort either, or regenerated build
-        /// output would nag on every commit with no way to silence it.
-        #[tokio::test]
-        async fn commit_hygiene_ignores_never_snapshotted_paths() {
-            let h = build_full(None, true, &[("gen/bindings.ts", "// generated\n")]).await;
-            h.service
-                .config
-                .write()
-                .unwrap()
-                .generated
-                .exclude
-                .push("gen/bindings.ts".into());
-            // Claim the authored file so the claim-first branch is active —
-            // the branch that would otherwise flag every unclaimed path.
-            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            h.efforts
-                .record_file(
-                    &effort_id,
-                    "src/foo.rs",
-                    oxplow_db::EffortFileChange::Updated,
-                    oxplow_db::FileRefVersion {
-                        local_snapshot_id: 0,
-                        closest_git_version: None,
-                        git_version_exact: false,
-                    },
-                )
-                .await
-                .unwrap();
-            git_in(h.tmp.path(), &["add", "src/foo.rs", "gen/bindings.ts"]);
-            git_commit(h.tmp.path(), "feature + regenerated bindings");
-            let result = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap();
-            assert!(
-                result.is_none(),
-                "a generated path must not read as out-of-effort: {result:?}"
-            );
-        }
-
-        #[tokio::test]
-        async fn commit_hygiene_is_claim_aware() {
-            // Claim-first (Child 3): when the effort has claims, the
-            // commit-hygiene "in-effort" test prefers the CLAIMED set.
-            // - A committed file the effort never claimed is flagged EVEN
-            //   though it changed during the window (old snapshot logic
-            //   would have cleared it).
-            // - A claimed file is NOT flagged.
-            let h = build_full(None, true, &[]).await;
-            // extra.rs changed during the window (not in start snapshot)
-            // but is never claimed.
-            std::fs::write(h.tmp.path().join("extra.rs"), "x\n").unwrap();
-            // Claim only src/foo.rs onto the open effort (as the real-time
-            // auto-claim would).
-            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            h.efforts
-                .record_file(
-                    &effort_id,
-                    "src/foo.rs",
-                    oxplow_db::EffortFileChange::Updated,
-                    oxplow_db::FileRefVersion {
-                        local_snapshot_id: 0,
-                        closest_git_version: None,
-                        git_version_exact: false,
-                    },
-                )
-                .await
-                .unwrap();
-            git_in(h.tmp.path(), &["add", "src/foo.rs", "extra.rs"]);
-            git_commit(h.tmp.path(), "claimed + unclaimed");
-            let nudge = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap()
-                .expect("unclaimed committed file should nudge");
-            assert!(
-                nudge.contains("extra.rs"),
-                "a committed-but-never-claimed file must be flagged: {nudge}"
-            );
-            assert!(
-                !nudge.contains("src/foo.rs"),
-                "a claimed file must NOT be flagged: {nudge}"
-            );
-        }
-
-        #[tokio::test]
-        async fn commit_hygiene_no_nudge_when_only_claimed_file_committed() {
-            // Effort claims src/foo.rs and commits only it → clean, no nudge.
-            let h = build_full(None, true, &[]).await;
-            let effort_id = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            h.efforts
-                .record_file(
-                    &effort_id,
-                    "src/foo.rs",
-                    oxplow_db::EffortFileChange::Updated,
-                    oxplow_db::FileRefVersion {
-                        local_snapshot_id: 0,
-                        closest_git_version: None,
-                        git_version_exact: false,
-                    },
-                )
-                .await
-                .unwrap();
-            git_in(h.tmp.path(), &["add", "src/foo.rs"]);
-            git_commit(h.tmp.path(), "just the claimed file");
-            let result = h
-                .service
-                .on_post_tool_use(&h.thread, &bash_payload("git commit -m work", 0))
-                .await
-                .unwrap();
-            assert!(
-                result.is_none(),
-                "committing only the claimed file must not nudge: {result:?}"
-            );
-        }
-
-        #[tokio::test]
         async fn on_post_tool_use_nudges_on_report_less_test_run() {
             // A detected test command with no fresh report → nudge returned.
             let h = build(None).await;
@@ -7052,7 +6654,7 @@ mod tests {
             // tsk220: the 50/80 ramp lives on the definition (data), so the
             // renderer colors red/green from it and the nudge fires below target
             // — no hardcoded UI constant.
-            let h = build_full(Some(COBERTURA_50PCT), true, &[]).await;
+            let h = build_full(Some(COBERTURA_50PCT), true).await;
             h.service
                 .ingest_coverage(&h.thread, None, None, false)
                 .await
@@ -7231,37 +6833,6 @@ mod tests {
             assert!(second.is_none(), "second run deduped");
             let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
             assert_eq!(rows.len(), 1, "deduped nudge must not double-store");
-        }
-
-        #[tokio::test]
-        async fn out_of_effort_commit_persists_one_commit_hygiene_nudge() {
-            // An out-of-effort commit persists exactly one `commit-hygiene`
-            // nudge; the per-commit dedup means a repeat hook on the same
-            // commit stores nothing more.
-            let h = build_full(None, true, &[("held.txt", "held\n")]).await;
-            git_in(h.tmp.path(), &["add", "src/foo.rs", "held.txt"]);
-            git_commit(h.tmp.path(), "feature work");
-            let payload = bash_payload("git commit -m work", 0);
-            h.service
-                .on_post_tool_use(&h.thread, &payload)
-                .await
-                .unwrap()
-                .expect("out-of-effort commit nudges");
-            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
-            assert_eq!(rows.len(), 1, "exactly one commit-hygiene nudge persisted");
-            assert_eq!(rows[0].kind, "commit-hygiene");
-            assert!(rows[0].message.contains("held.txt"));
-            assert_eq!(rows[0].trigger.as_deref(), Some("git commit -m work"));
-
-            // Same commit, hook fires again → per-commit dedup, no new row.
-            let second = h
-                .service
-                .on_post_tool_use(&h.thread, &payload)
-                .await
-                .unwrap();
-            assert!(second.is_none(), "same commit deduped");
-            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
-            assert_eq!(rows.len(), 1, "deduped commit nudge must not double-store");
         }
 
         #[tokio::test]
