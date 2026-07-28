@@ -47,6 +47,14 @@ no Vite. The `tauri` CLI turns the feature on; a plain `cargo build`
 does not — so a plain `cargo build` binary, **debug _or_ `--release`,
 always needs Vite.**
 
+That also decides whether the CSP exists. Tauri applies the
+`tauri.conf.json` `security.csp` to **asset-protocol responses only**,
+so a binary loading `devUrl` serves a plain Vite page with *no*
+configured CSP. Nothing about `connect-src`, `script-src` or the rest
+can be verified from a dev binary — a change there will appear to work
+whatever you set it to. Test CSP against an embedded build (Option C
+below, or `bun run tauri:build`).
+
 ### Option A (default): tauri-cli dev
 
 ```
