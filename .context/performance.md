@@ -200,6 +200,43 @@ asserted confidently (by me) *before* measuring, and was wrong.
   (It stays formally unmeasured: mounting it needs `agentStatus === "working"`,
   and no write command sets agent status.)
 
+## Daemon transport: what a loopback HTTP hop costs (tsk255)
+
+Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real
+WKWebView** with embedded assets (the packaged path), against a local
+`oxplow-daemon`. The comparison that matters is Tauri IPC vs daemon HTTP — *not*
+"in-process vs network" — because today's local path is already JSON over
+Tauri's IPC bridge, not a function call.
+
+| call | Tauri IPC | daemon HTTP |
+|---|---|---|
+| `ping` (no work) | p50 ~0 ms, p95 1 ms | p50 4 ms, p95 5 ms |
+| `list_workspace_files` | p50 2 ms, p95 5 ms | p50 5 ms, p95 5 ms |
+| `GET /health` (no preflight) | — | p50 3 ms, p95 9 ms |
+
+So **~3–4 ms per call**, and it is *not* CORS preflight: a plain GET with no
+custom headers costs the same as a JSON POST, so the floor is the WKWebView
+networking-process hop itself. `performance.now()` in this webview quantizes to
+~1 ms, so treat these as coarse.
+
+Two things keep that from being alarming, and one that should shape the design:
+
+- The benchmark is **sequential**; a real page load issues its calls
+  concurrently, where the per-call latency overlaps rather than sums.
+- Terminal keystrokes pay it twice (input + echoed output) — ~8 ms against a
+  ~100 ms human inter-keystroke interval.
+- **The `/events` WebSocket is already open and does not pay the per-request
+  hop.** Running RPC over that socket instead of `POST /ipc/:name` is the
+  designated optimization if the HTTP floor ever bites; don't rebuild the
+  transport before measuring that it does.
+
+**CSP is load-bearing here.** With embedded assets and the shipped policy, the
+webview cannot reach the daemon at all — `fetch` → `TypeError: Load failed`, the
+WS constructor throws. Adding `http://127.0.0.1:* ws://127.0.0.1:*` to
+`connect-src` makes both work; loopback only, no ATS wrinkle on macOS. In **dev**
+the page is served by vite over http, so Tauri never applies the configured CSP
+and the restriction is invisible — a dev-mode test of this proves nothing.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two
