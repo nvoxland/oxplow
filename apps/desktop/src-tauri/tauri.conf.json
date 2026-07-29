@@ -6,7 +6,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "bun run --cwd .. dev",
-    "beforeBuildCommand": "bun run --cwd .. build && bash scripts/stage-daemon.sh"
+    "beforeBuildCommand": "bun run --cwd .. build && bash src-tauri/scripts/stage-daemon.sh"
   },
   "app": {
     "windows": [],

@@ -296,6 +296,24 @@ Runs Vite + cargo to produce platform installers in
 - Windows: `.msi` / `.exe`
 - Linux: `.deb` + `.AppImage`
 
+**The bundle carries two binaries.** Every project window is backed by
+an `oxplow-daemon` child, so the daemon ships beside the shell as a
+Tauri **sidecar** (`bundle.externalBin`): `beforeBuildCommand` runs
+`src-tauri/scripts/stage-daemon.sh`, which builds it and copies it to
+`src-tauri/binaries/oxplow-daemon-<target-triple>` (gitignored). Tauri
+then places it next to the shell — `Oxplow.app/Contents/MacOS/` on
+macOS — which is exactly where `BundledDaemon::binary_path()` looks.
+
+A bundle without it can't open any project, and the shell says so
+("no oxplow-daemon next to the app"). Note the script path is relative
+to `apps/desktop`, not `src-tauri`: that is the cwd Tauri runs
+`beforeBuildCommand` in, and getting it wrong is silent until you look
+inside the bundle (tsk263).
+
+Running from source, the daemon just needs to exist next to the binary
+you launch — `cargo build -p oxplow-daemon` puts it in `target/debug/`.
+`bun run tauri:dev` does that for you.
+
 Only the **host** architecture, always — nothing passes
 `--target universal-apple-darwin`, so an Apple Silicon machine
 produces an arm64 bundle and nothing else. CI is arm64-only on macOS
