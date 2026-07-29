@@ -20,27 +20,29 @@ export const commands = {
 	 *  renderer's devtools.
 	 */
 	logUi: (entry: UiLogEntry) => typedError<null, IpcError>(__TAURI_INVOKE("log_ui", { entry })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listStreams: () => typedError<Stream[], IpcError>(__TAURI_INVOKE("list_streams")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createWorktree: (req: CreateWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("create_worktree", { req })),
 	/**
-	 *  Register an on-disk git worktree as a new stream without
-	 *  running `git worktree add`. Source of valid paths is
-	 *  `list_adoptable_worktrees`; the renderer's New Stream form's
-	 *  "worktree" mode dispatches here.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	adoptWorktree: (req: AdoptWorktreeRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("adopt_worktree", { req })),
 	/**
-	 *  Soft-delete a stream and every thread under it via `archived_at`.
-	 *  Refuses if any thread in the stream has a pane currently in the
-	 *  `Running` state — the user must wait for the agent to settle (or
-	 *  stop it) before removing the stream. When `delete_worktree` is
-	 *  true the on-disk worktree directory is also removed.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	archiveStream: (id: StreamId, deleteWorktree: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("archive_stream", { id, deleteWorktree })),
 	/**
-	 *  Returns the primary stream — the project root. Useful for any UI
-	 *  path that needs to know "what does the user think of as 'this'
-	 *  project?" without enumerating the full list.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getPrimaryStream: () => typedError<{
 	id: StreamId,
@@ -70,7 +72,10 @@ export const commands = {
 	 */
 	archived_at: Timestamp | null,
 } | null, IpcError>(__TAURI_INVOKE("get_primary_stream")),
-	// Currently-selected stream (None falls back to primary in the UI).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getCurrentStream: () => typedError<{
 	id: StreamId,
 	kind: StreamKind,
@@ -99,17 +104,29 @@ export const commands = {
 	 */
 	archived_at: Timestamp | null,
 } | null, IpcError>(__TAURI_INVOKE("get_current_stream")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	switchStream: (id: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("switch_stream", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameStream: (req: RenameStreamRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("rename_stream", { req })),
 	/**
-	 *  Per-stream custom prompt — appended to every agent system prompt
-	 *  when this stream is active. `None` (or empty) clears it.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	setStreamPrompt: (req: SetStreamPromptRequest) => typedError<Stream, IpcError>(__TAURI_INVOKE("set_stream_prompt", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	checkoutStreamBranch: (id: StreamId, branch: string) => typedError<Stream, IpcError>(__TAURI_INVOKE("checkout_stream_branch", { id, branch })),
 	/**
-	 *  Switch the worktree's HEAD branch. Updates the stream row and runs
-	 *  `git checkout` inside the worktree.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),

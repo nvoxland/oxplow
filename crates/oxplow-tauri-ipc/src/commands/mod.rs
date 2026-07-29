@@ -16,6 +16,7 @@ pub mod config;
 pub mod dashboards;
 pub mod effort;
 pub mod followup;
+pub mod generated;
 pub mod git;
 pub mod hooks;
 pub mod launch;

@@ -56,7 +56,9 @@ async fn list_streams_returns_primary_for_fresh_project() {
     // ensure_primary so the snapshot capture singleton has a stream
     // to bind to. A fresh project therefore has exactly one stream.
     let app = TestApp::build();
-    let streams = commands::streams::list_streams(app.state()).await.unwrap();
+    let streams = commands::generated::list_streams(app.state())
+        .await
+        .unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].kind, oxplow_domain::StreamKind::Primary);
 }
@@ -464,17 +466,17 @@ async fn git_local_mutations_over_primary_worktree() {
 async fn stream_reads_and_reorder() {
     let app = TestApp::build();
     let (stream, _) = primary_and_thread(&app).await;
-    assert!(commands::streams::get_primary_stream(app.state())
+    assert!(commands::generated::get_primary_stream(app.state())
         .await
         .unwrap()
         .is_some());
-    let _ = commands::streams::get_current_stream(app.state())
+    let _ = commands::generated::get_current_stream(app.state())
         .await
         .unwrap();
-    commands::streams::switch_stream(app.state(), Some(stream.id))
+    commands::generated::switch_stream(app.state(), Some(stream.id))
         .await
         .unwrap();
-    commands::streams::reorder_streams(app.state(), vec![stream.id])
+    commands::generated::reorder_streams(app.state(), vec![stream.id])
         .await
         .unwrap();
 }
@@ -482,7 +484,7 @@ async fn stream_reads_and_reorder() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn archive_unknown_stream_errors() {
     let app = TestApp::build();
-    let _ = commands::streams::archive_stream(app.state(), StreamId::new(999999), false).await;
+    let _ = commands::generated::archive_stream(app.state(), StreamId::new(999999), false).await;
 }
 
 // ---- config commands ----
