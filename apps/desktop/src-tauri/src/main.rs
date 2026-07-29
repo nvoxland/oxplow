@@ -193,16 +193,16 @@ fn run_shell(ctx: tauri::Context) {
         .build(ctx)
         .expect("error while building tauri application")
         .run(move |app, event| match event {
-            // A full quit (Cmd-Q, OS shutdown) freezes the restore set so
+            // Every route out of the app comes through here (Cmd-Q, OS
+            // shutdown, the launcher closing). Freeze the restore set so
             // the per-window teardown doesn't empty it window by window.
-            tauri::RunEvent::ExitRequested { code, api, .. } => {
-                if code.is_none() && cfg!(target_os = "macos") {
-                    // The last window closed. macOS apps stay alive with
-                    // their menu bar; the dock icon reopens the launcher.
-                    api.prevent_exit();
-                } else {
-                    app.state::<windows::ShellWindows>().begin_quit();
-                }
+            //
+            // Nothing is prevented: closing the last *project* window
+            // already put the launcher up (see `handle_window_event`), so
+            // reaching this point means the user closed the launcher
+            // itself — which is how you quit.
+            tauri::RunEvent::ExitRequested { .. } => {
+                app.state::<windows::ShellWindows>().begin_quit();
             }
             // Dock-icon click with nothing on screen (macOS).
             tauri::RunEvent::Reopen {
@@ -321,13 +321,33 @@ fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             oxplow_tauri_ipc::commands::menu::apply_focused_menu(window)
         }
         tauri::WindowEvent::Destroyed => {
+            let app = window.app_handle().clone();
             oxplow_tauri_ipc::commands::menu::forget_window_menu(window);
-            // A no-op for anything that isn't a project window (the
+            // False for anything that isn't a project window (the
             // launcher, setup, a sandboxed external-URL webview).
-            window
-                .app_handle()
-                .state::<windows::ShellWindows>()
-                .on_window_closed(window.label());
+            let shell = app.state::<windows::ShellWindows>();
+            let was_project = shell.on_window_closed(window.label());
+            let quitting = shell.is_quitting();
+
+            // Closing your last project drops you back to the picker
+            // rather than to an app with no windows and a dead menu bar.
+            // Decided here rather than at `ExitRequested`, so a quit can
+            // never be mistaken for a last-window close — and so closing
+            // the launcher, which reaches `ExitRequested` unimpeded, is
+            // simply how you quit.
+            let remaining = app
+                .webview_windows()
+                .keys()
+                .filter(|label| label.as_str() != window.label())
+                .count();
+            if windows::ShellWindows::should_show_launcher(was_project, remaining, quitting) {
+                // Deferred to the next main-thread tick rather than built
+                // here: we're inside a window-event callback, and creating
+                // a window re-enters the window manager we were called
+                // from.
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || show_launcher(&handle));
+            }
         }
         _ => {}
     }

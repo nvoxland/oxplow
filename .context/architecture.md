@@ -103,6 +103,13 @@ Boot flow (`apps/desktop/src-tauri/src/main.rs` — one path, no modes):
   project the session recorded, skipping any that is no longer a project
   on disk. If nothing opened, show the launcher.
 
+**Closing a project window stops its daemon, and therefore its
+agents.** A deliberate choice: closing the window is the user saying
+they're done with the project, and a backend still churning behind a
+window that no longer exists is worse than a clean stop. If that ever
+needs to change, the feature is reattaching to a surviving daemon — not
+leaving one running by accident.
+
 **Opening a project** (`ShellWindows::open_project`) is: focus the
 window that already has it, else sweep any orphaned daemon, start a
 daemon, wait for it to report its loopback endpoint, then create a
@@ -190,9 +197,23 @@ window opens or closes. Two rules on top:
   `begin_quit()` first, which freezes the set so Cmd-Q with three
   windows doesn't empty it one window at a time.
 
-On macOS the last window closing does **not** exit the app: it keeps
-its menu bar, and a dock-icon click (`RunEvent::Reopen`) brings the
-launcher back.
+**Closing the last project window opens the launcher** rather than
+leaving an app with no windows — the IntelliJ/Xcode rule. Closing the
+*launcher* is how you quit.
+
+That decision is made in the window-`Destroyed` handler
+(`ShellWindows::should_show_launcher`), not at `ExitRequested`. Deciding
+it at exit time would mean inferring "was this a last-window close or a
+Cmd-Q?" from the exit code, and a wrong guess there makes the app
+unquittable. Doing it on destroy means `ExitRequested` prevents nothing:
+by the time it fires, either the launcher already replaced the window,
+or the launcher itself is what closed.
+
+The earlier shape — `prevent_exit()` on macOS, leaving zero windows and
+a dock icon to bring them back — is the letter of the macOS convention
+without its substance: the menu bar stayed on screen showing the last
+project's items, all of them dead, because the focused window they
+dispatch to was gone.
 
 **Global app state** lives under the app-config dir
 (`net.voxland.oxplow`, resolved by `oxplow_config::global_config_dir()`

@@ -318,10 +318,17 @@ impl ShellWindows {
     }
 
     /// A project window closed: forget it, stop its daemon, and update
-    /// the restore set.
-    pub fn on_window_closed(&self, label: &str) {
+    /// the restore set. Returns whether it was a project window at all
+    /// (the launcher, setup and external-URL webviews are not).
+    ///
+    /// **Stopping the daemon kills that project's agents.** Deliberate:
+    /// closing the window is the user saying they're done with the
+    /// project, and a backend still churning behind a window that no
+    /// longer exists is worse than a clean stop. Reattaching to a
+    /// surviving daemon is the feature to build if that changes.
+    pub fn on_window_closed(&self, label: &str) -> bool {
         let Some(dir) = self.registry.remove(label) else {
-            return; // not a project window (launcher, setup, ext-url)
+            return false; // not a project window (launcher, setup, ext-url)
         };
         self.supervisor.stop(&dir);
         tracing::info!(project = %dir.display(), label, "closed project window");
@@ -332,6 +339,22 @@ impl ShellWindows {
         if !self.is_quitting() && !self.registry.is_empty() {
             self.write_session();
         }
+        true
+    }
+
+    /// Whether a closing window should leave the launcher in its place.
+    ///
+    /// The IntelliJ/Xcode rule: closing your last project drops you back
+    /// to the picker rather than to an app with no windows and a dead
+    /// menu bar. Closing the *launcher* is how you quit, so it doesn't
+    /// reopen itself; and during a full quit nothing reopens at all.
+    /// Pure; exported for tests.
+    pub fn should_show_launcher(
+        was_project: bool,
+        remaining_windows: usize,
+        quitting: bool,
+    ) -> bool {
+        was_project && remaining_windows == 0 && !quitting
     }
 
     /// Session entries worth reopening, in order: still on disk, still a
@@ -357,7 +380,8 @@ impl ShellWindows {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn is_quitting(&self) -> bool {
+    /// Whether a full app quit is under way.
+    pub fn is_quitting(&self) -> bool {
         self.quitting.load(std::sync::atomic::Ordering::SeqCst)
     }
 
@@ -419,6 +443,33 @@ mod registry_tests {
         assert_eq!(reg.remove("project-1").as_deref(), Some(Path::new("/a")));
         assert!(reg.is_empty());
         assert_eq!(reg.remove("project-1"), None, "removing twice is a no-op");
+    }
+
+    #[test]
+    fn closing_your_last_project_window_brings_up_the_launcher() {
+        assert!(ShellWindows::should_show_launcher(true, 0, false));
+    }
+
+    /// Closing one of several is just closing a window — the others are
+    /// still there to work in.
+    #[test]
+    fn closing_one_of_several_project_windows_opens_nothing() {
+        assert!(!ShellWindows::should_show_launcher(true, 1, false));
+        assert!(!ShellWindows::should_show_launcher(true, 3, false));
+    }
+
+    /// Closing the launcher is how you quit. Reopening it there would
+    /// make the app unquittable by any route but Cmd-Q.
+    #[test]
+    fn closing_the_launcher_does_not_reopen_it() {
+        assert!(!ShellWindows::should_show_launcher(false, 0, false));
+    }
+
+    /// During a full quit every window is torn down in turn; the last
+    /// project window closing must not resurrect the app.
+    #[test]
+    fn quitting_never_reopens_the_launcher() {
+        assert!(!ShellWindows::should_show_launcher(true, 0, true));
     }
 
     /// A session entry whose project was deleted (or was never one)
