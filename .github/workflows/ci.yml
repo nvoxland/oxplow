@@ -208,6 +208,13 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      # Same reason as the test job: `externalBin` makes tauri-build
+      # validate the sidecar from oxplow-desktop's build script, so
+      # every job that COMPILES the workspace needs it staged first —
+      # not just the ones that bundle (tsk266).
+      - name: Stage the daemon sidecar
+        run: bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+
       # Surfaces line/region coverage per crate. Workspace floor is
       # set to 62% lines — current baseline ~65%. The thinnest
       # crates (oxplow-mcp, oxplow-tauri-ipc command adapters) drag
