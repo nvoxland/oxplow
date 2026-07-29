@@ -87,19 +87,39 @@ pub struct Database {
     gate: Arc<Semaphore>,
 }
 
+/// Per-connection setup, run by the pool for every connection it opens.
+///
+/// Everything here is connection-local and lock-free. `journal_mode` is
+/// deliberately absent: it is a property of the *file*, set once in
+/// [`Database::open`], and doing it per connection means contending for
+/// an exclusive lock with whatever else is writing (tsk262).
+fn init_connection(c: &Connection) -> rusqlite::Result<()> {
+    c.pragma_update(None, "foreign_keys", "ON")?;
+    c.pragma_update(None, "synchronous", "NORMAL")?;
+    // The hot metric store paths use `prepare_cached` (tsk112);
+    // rusqlite's default LRU is 16 statements, small enough that the
+    // build/read mix would thrash it and re-parse anyway.
+    c.set_prepared_statement_cache_capacity(128);
+    Ok(())
+}
+
 impl Database {
     /// Open (or create) the SQLite file at `path` and apply migrations.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
-        let manager = SqliteConnectionManager::file(path.as_ref()).with_init(|c| {
-            c.pragma_update(None, "journal_mode", "WAL")?;
-            c.pragma_update(None, "foreign_keys", "ON")?;
-            c.pragma_update(None, "synchronous", "NORMAL")?;
-            // The hot metric store paths use `prepare_cached` (tsk112);
-            // rusqlite's default LRU is 16 statements, small enough that the
-            // build/read mix would thrash it and re-parse anyway.
-            c.set_prepared_statement_cache_capacity(128);
-            Ok(())
-        });
+        // `journal_mode` is persisted in the file, so set it once here
+        // rather than from every pooled connection. It needs an
+        // exclusive lock and SQLite does NOT route it through
+        // `busy_timeout`, so a connection coming up while migrations
+        // hold a write transaction fails instantly — which is what made
+        // every fresh project log `ERROR database is locked` (tsk262).
+        let setup = Connection::open(path.as_ref()).map_err(DbInitError::Sqlite)?;
+        setup
+            .pragma_update(None, "journal_mode", "WAL")
+            .map_err(DbInitError::Sqlite)?;
+        drop(setup);
+
+        let manager =
+            SqliteConnectionManager::file(path.as_ref()).with_init(|c| init_connection(c));
         let pool = Pool::builder()
             .max_size(8)
             .build(manager)
@@ -368,11 +388,53 @@ pub enum DbInitError {
     Pool(r2d2::Error),
     #[error("migration: {0}")]
     Migration(String),
+    #[error("sqlite: {0}")]
+    Sqlite(rusqlite::Error),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bringing a pool connection up must never contend with a writer.
+    ///
+    /// This is the shape of first boot: r2d2 keeps filling the pool
+    /// toward `max_size` in the background while `open` is already
+    /// running migrations inside a write transaction. If the per-
+    /// connection init needs an exclusive lock, those connections fail —
+    /// and `journal_mode` is exactly such an operation, one that SQLite
+    /// does *not* route through `busy_timeout`, so it fails instantly
+    /// rather than waiting. r2d2's default error handler logged the
+    /// result as `ERROR database is locked` on every fresh project,
+    /// for something that its own retry then resolved (tsk262).
+    #[test]
+    fn connection_init_never_contends_with_a_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.sqlite");
+        // A brand-new file is still journal_mode=delete — the state the
+        // pool comes up against on first boot.
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .execute_batch("BEGIN IMMEDIATE; CREATE TABLE probe(x);")
+            .unwrap();
+
+        let late = Connection::open(&path).unwrap();
+        init_connection(&late).expect("per-connection init must not need an exclusive lock");
+    }
+
+    /// `journal_mode` moved out of the per-connection init, so pin that
+    /// opening a database still leaves it in WAL.
+    #[test]
+    fn open_leaves_the_database_in_wal_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("test.sqlite")).unwrap();
+        let mode: String = db
+            .conn()
+            .unwrap()
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+    }
 
     /// Provoke real rusqlite errors through a scratch connection and
     /// check `map_sql_err`'s classification — upper layers key retry /
