@@ -13,28 +13,3 @@
 //! and the renderer falls back to `source_id`.
 
 pub use oxplow_rpc::commands::page_refs::BacklinkEdge;
-
-use crate::error::IpcError;
-use crate::state::AppState;
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_backlinks(
-    state: tauri::State<'_, AppState>,
-    target_kind: String,
-    target_id: String,
-    limit: Option<i64>,
-) -> Result<Vec<BacklinkEdge>, IpcError> {
-    oxplow_rpc::commands::page_refs::list_backlinks(&state, target_kind, target_id, limit).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_outbound(
-    state: tauri::State<'_, AppState>,
-    source_kind: String,
-    source_id: String,
-    limit: Option<i64>,
-) -> Result<Vec<BacklinkEdge>, IpcError> {
-    oxplow_rpc::commands::page_refs::list_outbound(&state, source_kind, source_id, limit).await
-}

@@ -9,34 +9,3 @@
 //! page is still accurate.
 
 pub use oxplow_rpc::commands::wiki_freshness::WikiRefFreshness;
-
-use crate::error::IpcError;
-use crate::state::AppState;
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_wiki_freshness(
-    state: tauri::State<'_, AppState>,
-    slug: String,
-) -> Result<Vec<WikiRefFreshness>, IpcError> {
-    oxplow_rpc::commands::wiki_freshness::list_wiki_freshness(&state, slug).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn mark_wiki_ref_verified(
-    state: tauri::State<'_, AppState>,
-    slug: String,
-    path: String,
-) -> Result<(), IpcError> {
-    oxplow_rpc::commands::wiki_freshness::mark_wiki_ref_verified(&state, slug, path).await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn mark_all_wiki_refs_verified(
-    state: tauri::State<'_, AppState>,
-    slug: String,
-) -> Result<usize, IpcError> {
-    oxplow_rpc::commands::wiki_freshness::mark_all_wiki_refs_verified(&state, slug).await
-}

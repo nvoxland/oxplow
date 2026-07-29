@@ -28,6 +28,10 @@ macro_rules! tauri_adapters {
         $(
             /// Generated from the command table in `oxplow-rpc`; the
             /// implementation and its docs live on the core.
+            // Flat positional params mirror the wire contract —
+            // tauri-specta binds arguments by name, so bundling them
+            // into a struct would change the renderer's call shape.
+            #[allow(clippy::too_many_arguments)]
             #[tauri::command]
             #[specta::specta]
             pub async fn $gname(

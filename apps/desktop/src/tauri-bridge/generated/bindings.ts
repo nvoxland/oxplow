@@ -4,20 +4,19 @@ import { invoke as __TAURI_INVOKE } from "../transport";
 
 /** Commands */
 export const commands = {
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	appVersion: () => typedError<AppVersion, IpcError>(__TAURI_INVOKE("app_version")),
 	/**
-	 *  Liveness check the UI uses to verify the daemon is reachable.
-	 * 
-	 *  Takes `AppState` purely so the body can delegate to the shared
-	 *  `oxplow_rpc` core (the `State` param is injected by Tauri and is
-	 *  invisible to the generated TS binding — `ping()` stays arg-less).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	ping: () => typedError<string, IpcError>(__TAURI_INVOKE("ping")),
 	/**
-	 *  Forward a UI-side log line into the daemon's tracing pipeline.
-	 *  The renderer's logger.ts installs `console.log/warn/error`
-	 *  proxies that call this; without it those logs never leave the
-	 *  renderer's devtools.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	logUi: (entry: UiLogEntry) => typedError<null, IpcError>(__TAURI_INVOKE("log_ui", { entry })),
 	/**
@@ -129,20 +128,70 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	reorderStreams: (order: StreamId[]) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_streams", { order })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_threads", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createThread: (req: CreateThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("create_thread", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameThread: (req: RenameThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("rename_thread", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setThreadPrompt: (req: SetThreadPromptRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("set_thread_prompt", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	promoteThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("promote_thread", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	closeThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("close_thread", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	reopenThread: (id: ThreadId) => typedError<Thread, IpcError>(__TAURI_INVOKE("reopen_thread", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listClosedThreads: (streamId: StreamId) => typedError<Thread[], IpcError>(__TAURI_INVOKE("list_closed_threads", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	reorderThreadQueue: (req: ReorderThreadQueueRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_thread_queue", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	selectThread: (req: SelectThreadRequest) => typedError<null, IpcError>(__TAURI_INVOKE("select_thread", { req })),
-	// Aggregate "what threads exist on this stream and what's selected/active".
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getThreadState: (streamId: StreamId) => typedError<ThreadState, IpcError>(__TAURI_INVOKE("get_thread_state", { streamId })),
-	// Bucketed task view for the Work panel.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getThreadWorkState: (threadId: ThreadId) => typedError<ThreadWorkState, IpcError>(__TAURI_INVOKE("get_thread_work_state", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getTask: (id: TaskId) => typedError<{
 	id: TaskId,
 	// `None` when the task is on the project-wide backlog.
@@ -163,27 +212,67 @@ export const commands = {
 	author: TaskAuthor | null,
 } | null, IpcError>(__TAURI_INVOKE("get_task", { id })),
 	/**
-	 *  Insert-or-update a Task. The id field acts as the discriminator —
-	 *  `TaskId::placeholder()` (i.e. 0) means "client doesn't know an id
-	 *  yet, allocate one"; any other value means "update this row in
-	 *  place". On the update path we refetch the stored row so any
-	 *  server-side side effects (e.g. `completed_at` flips, sort_index
-	 *  rewrites a future change might add) appear in the returned shape.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	upsertTask: (item: Task) => typedError<Task, IpcError>(__TAURI_INVOKE("upsert_task", { item })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteTask: (id: TaskId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_task", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createTask: (req: CreateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("create_task", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	updateTask: (req: UpdateTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("update_task", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	reorderTasks: (req: ReorderTasksRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_tasks", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	moveTask: (req: MoveTaskRequest) => typedError<Task, IpcError>(__TAURI_INVOKE("move_task", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listDashboards: () => typedError<Dashboard[], IpcError>(__TAURI_INVOKE("list_dashboards")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getDashboard: (id: DashboardId) => typedError<{
 	dashboard: Dashboard,
 	items: DashboardItem[],
 } | null, IpcError>(__TAURI_INVOKE("get_dashboard", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createDashboard: (title: string) => typedError<Dashboard, IpcError>(__TAURI_INVOKE("create_dashboard", { title })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameDashboard: (req: RenameDashboardRequest) => typedError<null, IpcError>(__TAURI_INVOKE("rename_dashboard", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setDashboardSettings: (req: SetDashboardSettingsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("set_dashboard_settings", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	duplicateDashboard: (req: DuplicateDashboardRequest) => typedError<{
 	id: DashboardId,
 	title: string,
@@ -192,99 +281,219 @@ export const commands = {
 	created_at: Timestamp,
 	updated_at: Timestamp,
 } | null, IpcError>(__TAURI_INVOKE("duplicate_dashboard", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteDashboard: (id: DashboardId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_dashboard", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addDashboardItem: (req: AddDashboardItemRequest) => typedError<DashboardItemId, IpcError>(__TAURI_INVOKE("add_dashboard_item", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	updateDashboardItem: (req: UpdateDashboardItemRequest) => typedError<null, IpcError>(__TAURI_INVOKE("update_dashboard_item", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	removeDashboardItem: (id: DashboardItemId) => typedError<null, IpcError>(__TAURI_INVOKE("remove_dashboard_item", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	reorderDashboardItems: (req: ReorderDashboardItemsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("reorder_dashboard_items", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listBacklog: () => typedError<Task[], IpcError>(__TAURI_INVOKE("list_backlog")),
-	// Bucketed backlog view: ready/blocked/in_progress/done.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getBacklogState: () => typedError<BacklogState, IpcError>(__TAURI_INVOKE("get_backlog_state")),
 	/**
-	 *  Site-wide BM25 search across tasks, comments, notes, wiki pages, and
-	 *  per-stream file contents. `stream_id` scopes file/stream-bound hits to one
-	 *  worktree (project-global hits like wiki always included); `None` searches
-	 *  everything. `kinds` optionally restricts to a subset
-	 *  (`task|comment|note|wiki|file`). Results are ranked best-first.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	search: (query: string, streamId: string | null, kinds: string[] | null, limit: number | null) => typedError<SearchHit[], IpcError>(__TAURI_INVOKE("search", { query, streamId, kinds, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listThreadNotes: (threadId: ThreadId) => typedError<TaskNote[], IpcError>(__TAURI_INVOKE("list_thread_notes", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listTaskEvents: (itemId: string | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addCommentMessage: (commentId: CommentId, author: string, body: string) => typedError<CommentMessage, IpcError>(__TAURI_INVOKE("add_comment_message", { commentId, author, body })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listCommentsForTarget: (targetKind: string, targetId: string) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_target", { targetKind, targetId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setCommentIntent: (commentId: CommentId, intent: CommentIntent) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_intent", { commentId, intent })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setCommentStatus: (commentId: CommentId, status: CommentStatus) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_status", { commentId, status })),
 	/**
-	 *  Persist a re-resolved anchor hint (and orphan flag) after the
-	 *  renderer re-locates — or fails to re-locate — the quote in current
-	 *  content. No event: this is a passive sync, not a user mutation.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	setCommentAnchor: (commentId: CommentId, selectorsJson: string, orphaned: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_comment_anchor", { commentId, selectorsJson, orphaned })),
 	/**
-	 *  Re-attach an orphaned comment to a freshly-selected span: rewrite
-	 *  both quote + anchor and clear the orphan flag. A user mutation, so it
-	 *  emits a changed event (unlike the passive `set_comment_anchor`).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	relinkComment: (commentId: CommentId, quote: string, selectorsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("relink_comment", { commentId, quote, selectorsJson })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteComment: (commentId: CommentId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_comment", { commentId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listWikiPages: () => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("list_wiki_pages")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	upsertWikiPage: (note: WikiPage) => typedError<null, IpcError>(__TAURI_INVOKE("upsert_wiki_page", { note })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteWikiPage: (slug: string) => typedError<null, IpcError>(__TAURI_INVOKE("delete_wiki_page", { slug })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	searchWikiTitles: (query: string, limit: number) => typedError<WikiPage[], IpcError>(__TAURI_INVOKE("search_wiki_titles", { query, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	readWikiPageBody: (slug: string) => typedError<string, IpcError>(__TAURI_INVOKE("read_wiki_page_body", { slug })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	writeWikiPageBody: (slug: string, body: string) => typedError<null, IpcError>(__TAURI_INVOKE("write_wiki_page_body", { slug, body })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listOutbound: (sourceKind: string, sourceId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_outbound", { sourceKind, sourceId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listWikiFreshness: (slug: string) => typedError<WikiRefFreshness[], IpcError>(__TAURI_INVOKE("list_wiki_freshness", { slug })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	markWikiRefVerified: (slug: string, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("mark_wiki_ref_verified", { slug, path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	markAllWikiRefsVerified: (slug: string) => typedError<number, IpcError>(__TAURI_INVOKE("mark_all_wiki_refs_verified", { slug })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listRecentPageVisits: (limit: number, threadId: string | null) => typedError<PageVisit[], IpcError>(__TAURI_INVOKE("list_recent_page_visits", { limit, threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	topVisitedPages: (limit: number, threadId: string | null) => typedError<VisitedPage[], IpcError>(__TAURI_INVOKE("top_visited_pages", { limit, threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	forgetPage: (pageKind: string, pageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("forget_page", { pageKind, pageId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
-	 *  Hide the current "Finished" entries behind a cursor. Source rows
-	 *  (tasks / wiki pages) are untouched; new finishes still surface
-	 *  because their timestamp is newer than the cursor. Cursor is
-	 *  per-thread so clearing one thread's section doesn't blank another.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	clearRecentlyFinished: (threadId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("clear_recently_finished", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	recordUsage: (kind: string, payloadJson: string) => typedError<UsageEvent, IpcError>(__TAURI_INVOKE("record_usage", { kind, payloadJson })),
 	/**
-	 *  Per-key rollup of recent usage events of a single `kind`. Returns
-	 *  the most-recently-touched keys (file paths, note slugs, task
-	 *  ids, …) along with how many times each has been touched. Drives
-	 *  "recent files" / "recent notes" affordances in the renderer.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listRecentUsageRollup: (kind: string, streamId: string | null, limit: number) => typedError<UsageRollup[], IpcError>(__TAURI_INVOKE("list_recent_usage_rollup", { kind, streamId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
 	/**
-	 *  Run a duplicate-block scan against `tree_version`, scoped by
-	 *  `file_filter`. The corpus is the WHOLE tree at the requested
-	 *  version — `file_filter` defines which files findings are
-	 *  anchored to (the renderer's "side A"). A copy-paste from an
-	 *  unchanged peer file surfaces because that peer is in the corpus
-	 *  even though it's outside scope. Same-path matches (a file vs
-	 *  itself) are dropped. Persists the scan row with the version +
-	 *  filter columns so [`find_latest_done_scan`] can pick it up on
-	 *  the next page load. Returns the scan id.
-	 * 
-	 *  The renderer wires this to the "Scan now" button on the
-	 *  duplication card. There is intentionally no auto-trigger:
-	 *  scanning a commit's tree with libgit2 + tree-sitter is slow on a
-	 *  large repo, so we keep it user-initiated until that becomes
-	 *  interactive enough to make implicit.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	runDuplicationScanAt: (treeVersion: TreeVersion, fileFilter: FileFilterSpec, scope: string) => typedError<number, IpcError>(__TAURI_INVOKE("run_duplication_scan_at", { treeVersion, fileFilter, scope })),
 	/**
-	 *  Look up the most recent successful scan for `(tool, treeVersion,
-	 *  fileFilter)`. The renderer uses this to decide whether to show
-	 *  findings or a "Scan now" CTA.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	findLatestCodeQualityScan: (tool: string, treeVersion: TreeVersion, fileFilter: FileFilterSpec) => typedError<{
 	id: number,
@@ -311,43 +520,44 @@ export const commands = {
 	file_filter: string,
 } | null, IpcError>(__TAURI_INVOKE("find_latest_code_quality_scan", { tool, treeVersion, fileFilter })),
 	/**
-	 *  Compute per-function metadata for the Change Analysis dashboard,
-	 *  for both sides of the diff. Walks each (path, content) pair through
-	 *  tree-sitter; the only state it needs is the project's zone table,
-	 *  which zones the import edges (tsk251).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
 	/**
-	 *  Classify each path against the project's commit-history co-change
-	 *  patterns. Returns one [`FileSurprise`] per input path explaining
-	 *  whether the touch is `Normal`, has missing-usual-co-changers, or
-	 *  the file is `Dormant`.
-	 * 
-	 *  History is rebuilt on every call — fast enough for diff-time
-	 *  invocations (≤ 5000 commits, sub-second on oxplow-scale repos).
-	 *  Caching the [`CoChangeHistory`] per project is a runtime concern
-	 *  the caller can layer on top later.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	analyzeCoChangeSurprise: (filePaths: string[]) => typedError<FileSurprise[], IpcError>(__TAURI_INVOKE("analyze_co_change_surprise", { filePaths })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listFileSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots_for_stream", { streamId, limit })),
 	/**
-	 *  `snapshot` rows for a stream — one entry per `request_snapshot()`
-	 *  call that captured anything. Newest first.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	/**
-	 *  Every `file_snapshot` row captured under a single parent
-	 *  snapshot id (i.e. one batch of `request_snapshot()`).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	/**
-	 *  For each snapshot id in the input list, the wiki slugs whose
-	 *  body changed in that snapshot. Drives the Local History
-	 *  dashboard's wiki badges. Cheaper than fetching the full
-	 *  `file_snapshot` rows per snapshot.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listWikiSlugsForSnapshots: (snapshotIds: number[]) => typedError<([number, string])[], IpcError>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getSnapshot: (id: number) => typedError<{
 	id: number,
 	stream_id: StreamId,
@@ -380,29 +590,23 @@ export const commands = {
 	mtime_ms: number | null,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
 	/**
-	 *  Compare two captures of the same path. The renderer surfaces this
-	 *  in the snapshots panel as "what changed between then and now".
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getSnapshotPairDiff: (beforeId: number | null, afterId: number | null) => typedError<SnapshotPairDiff, IpcError>(__TAURI_INVOKE("get_snapshot_pair_diff", { beforeId, afterId })),
 	/**
-	 *  Diff two endpoints, each a snapshot id or a git commit (the live
-	 *  working tree is reserved for an in-progress effort's open end).
-	 *  `start = null` diffs `end` against the empty tree. Powers the
-	 *  effort / local-history diff view.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	diffEndpoints: (start: { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" } | null, end: DiffEndpoint) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff_endpoints", { start, end })),
 	/**
-	 *  Read each `path`'s UTF-8 content as of `endpoint` (base + head for
-	 *  the diff view's function-level analysis). `None` per path that's
-	 *  absent / binary / oversize at that endpoint.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	readEndpointFilesContent: (endpoint: DiffEndpoint, paths: string[]) => typedError<(string | null)[], IpcError>(__TAURI_INVOKE("read_endpoint_files_content", { endpoint, paths })),
 	/**
-	 *  Build a per-snapshot summary: the FileSnapshot row, the id of the
-	 *  prior capture of the same path (if any), and a one-row diff
-	 *  describing how the captured file relates to its predecessor
-	 *  (created / updated / deleted). The renderer's local-history pane
-	 *  keys off this shape.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getSnapshotSummary: (snapshotId: number) => typedError<{
 	snapshot: FileSnapshot,
@@ -411,101 +615,263 @@ export const commands = {
 	counts: SnapshotSummaryCounts,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { snapshotId })),
 	/**
-	 *  Created/modified/deleted counts for a snapshot. Powers the Local
-	 *  History dashboard's per-snapshot stats column.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getSnapshotStats: (snapshotId: number) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
 	/**
-	 *  Per-file change entries for one snapshot, in the shape the
-	 *  renderer's `useSnapshotChangeAnalysis` hook expects so it can
-	 *  feed the same SummaryCard / ChangeAnalysisPanel components the
-	 *  Git pages use.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listSnapshotChangeEntries: (snapshotId: number) => typedError<SnapshotChangeEntry[], IpcError>(__TAURI_INVOKE("list_snapshot_change_entries", { snapshotId })),
 	/**
-	 *  Read a `file_snapshot` row's blob content as a UTF-8 string.
-	 *  Returns `None` when:
-	 *  - the row id doesn't exist,
-	 *  - the row has no blob hash (deletion row or oversize-tracked),
-	 *  - the blob has been pruned from disk.
-	 * 
-	 *  Binary bytes pass through as UTF-8 lossy — the renderer's diff /
-	 *  function-analysis pipeline treats the result as text either way.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	readSnapshotFileContent: (fileSnapshotId: number) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_snapshot_file_content", { fileSnapshotId })),
 	/**
-	 *  Total on-disk size of every blob in the content-addressed store.
-	 *  Used by the Local History dashboard's Storage card.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getBlobStorageBytes: () => typedError<number, IpcError>(__TAURI_INVOKE("get_blob_storage_bytes")),
 	/**
-	 *  Restore a file's contents from a snapshot. Reads the bytes from
-	 *  the content-addressed blob store using the snapshot's `blob_hash`
-	 *  and writes them back to the snapshot's path inside the workspace.
-	 *  Errors with NOT_FOUND if the snapshot row is gone or its blob
-	 *  was pruned.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	restoreFileFromSnapshot: (snapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_from_snapshot", { snapshotId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_branches")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getDefaultBranch: () => typedError<string | null, IpcError>(__TAURI_INVOKE("get_default_branch")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameBranch: (from: string, to: string) => typedError<null, IpcError>(__TAURI_INVOKE("rename_branch", { from, to })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteBranch: (branch: string, force: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("delete_branch", { branch, force })),
-	// Filter helper for the UI that wants only locals or only remotes.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listLocalBranches: () => typedError<BranchRef[], IpcError>(__TAURI_INVOKE("list_local_branches")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getRepoConflictState: (streamId: string | null) => typedError<RepoConflictState, IpcError>(__TAURI_INVOKE("get_repo_conflict_state", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getAheadBehind: (streamId: string | null, base: string, head: string) => typedError<AheadBehind, IpcError>(__TAURI_INVOKE("get_ahead_behind", { streamId, base, head })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listStreamDivergences: (base: string | null) => typedError<StreamDivergenceReport, IpcError>(__TAURI_INVOKE("list_stream_divergences", { base })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	appendToGitignore: (streamId: string | null, entry: string) => typedError<null, IpcError>(__TAURI_INVOKE("append_to_gitignore", { streamId, entry })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	restorePath: (streamId: string | null, path: string) => typedError<null, IpcError>(__TAURI_INVOKE("restore_path", { streamId, path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitFetch: (streamId: string | null, remote: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_fetch", { streamId, remote })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitPull: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitPullRemoteIntoCurrent: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_pull_remote_into_current", { streamId, remote, branch })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitPush: (streamId: string | null) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitPushCurrentTo: (streamId: string | null, remote: string, branch: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_push_current_to", { streamId, remote, branch })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitMergeInto: (streamId: string | null, source: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_merge_into", { streamId, source })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitRebaseOnto: (streamId: string | null, onto: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_rebase_onto", { streamId, onto })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitCherryPick: (streamId: string | null, commit: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_cherry_pick", { streamId, commit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitRevert: (streamId: string | null, commit: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_revert", { streamId, commit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitCommitAll: (streamId: string | null, message: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_commit_all", { streamId, message })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitAddPath: (streamId: string | null, path: string) => typedError<GitOpResult, IpcError>(__TAURI_INVOKE("git_add_path", { streamId, path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listAllRefs: () => typedError<GroupedGitRefs, IpcError>(__TAURI_INVOKE("list_all_refs")),
 	/**
-	 *  Map commit SHAs to a single user-facing branch/tag label. Used by
-	 *  the Local History dashboard to chip each snapshot with its
-	 *  pinned commit's branch/tag name; SHAs that match no ref are absent
-	 *  from the result (caller renders a short-sha fallback).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	resolveCommitRefLabels: (shas: string[]) => typedError<{ [key in string]: CommitRefLabel[] }, IpcError>(__TAURI_INVOKE("resolve_commit_ref_labels", { shas })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listRecentRemoteBranches: (limit: number | null) => typedError<RemoteBranchEntry[], IpcError>(__TAURI_INVOKE("list_recent_remote_branches", { limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listFileCommits: (streamId: string | null, path: string, limit: number | null) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("list_file_commits", { streamId, path, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	readFileAtRef: (ref: string, path: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file_at_ref", { ref, path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	searchWorkspaceText: (streamId: string | null, query: string, limit: number | null) => typedError<TextSearchHit[], IpcError>(__TAURI_INVOKE("search_workspace_text", { streamId, query, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listAdoptableWorktrees: () => typedError<GitWorktreeEntry[], IpcError>(__TAURI_INVOKE("list_adoptable_worktrees")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	gitBlame: (streamId: string | null, path: string) => typedError<BlameLine[], IpcError>(__TAURI_INVOKE("git_blame", { streamId, path })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	localBlame: (streamId: string | null, path: string, diskText: string) => typedError<LocalBlameEntry[], IpcError>(__TAURI_INVOKE("local_blame", { streamId, path, diskText })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getBranchChanges: (streamId: string | null, baseRef: string) => typedError<BranchChanges, IpcError>(__TAURI_INVOKE("get_branch_changes", { streamId, baseRef })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getChangeScopes: (streamId: string | null) => typedError<ChangeScopes, IpcError>(__TAURI_INVOKE("get_change_scopes", { streamId })),
 	/**
-	 *  Land an envelope from the hook subprocess. Drives the agent_turn /
-	 *  agent_status state machine inside HookIngestService.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	ingestHookEvent: (envelope: HookEnvelope) => typedError<null, IpcError>(__TAURI_INVOKE("ingest_hook_event", { envelope })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listHookEvents: (threadId: string | null, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events", { threadId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listAgentStatuses: () => typedError<AgentStatus[], IpcError>(__TAURI_INVOKE("list_agent_statuses")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listOpenAgentTurns: (threadId: ThreadId) => typedError<AgentTurn[], IpcError>(__TAURI_INVOKE("list_open_agent_turns", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setAgentPromptAppend: (text: string) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_prompt_append", { text })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setAgents: (agents: AgentKind[]) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agents", { agents })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setSnapshotRetentionDays: (days: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_retention_days", { days })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setSnapshotMaxFileBytes: (bytes: number) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_snapshot_max_file_bytes", { bytes })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setGenerated: (generated: GeneratedConfig) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_generated", { generated })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setAgentModel: (agent: AgentKind, model: string | null) => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("set_agent_model", { agent, model })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getWorkspaceContext: () => typedError<WorkspaceContext, IpcError>(__TAURI_INVOKE("get_workspace_context")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getEffortFiles: (effortId: EffortId) => typedError<EffortFile[], IpcError>(__TAURI_INVOKE("get_effort_files", { effortId })),
 	/**
-	 *  One effort by id — its snapshot bracket + task id. Lets the diff
-	 *  view resolve `effortDiffRef(effortId)` into (start, end) endpoints.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	getEffort: (effortId: EffortId) => typedError<{
 	id: EffortId,
@@ -518,109 +884,135 @@ export const commands = {
 	// The effort's summary prose — the canonical text.
 	summary: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_effort", { effortId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listEffortsAtSnapshots: (snapshotIds: number[]) => typedError<EffortAtSnapshot[], IpcError>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
 	/**
-	 *  Every effort whose snapshot window overlaps the half-open range
-	 *  `(range_start, range_end]`. Drives the diff view's roster of other
-	 *  efforts that overlapped the diffed range.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listEffortsOverlappingRange: (rangeStart: number, rangeEnd: number) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
-	 *  All distinct file paths whose `file_snapshot` rows fall inside
-	 *  this effort's snapshot bracket — the "all changes during this
-	 *  effort" reference list. Returns empty when the effort has no
-	 *  start/end snapshot pin yet. Drives the reference view shown
-	 *  alongside the canonical `task_effort_file` list on
-	 *  `SnapshotDetailPage`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listChangedPathsForEffort: (effortId: EffortId) => typedError<EffortChangedPaths, IpcError>(__TAURI_INVOKE("list_changed_paths_for_effort", { effortId })),
 	/**
-	 *  Efforts whose span overlaps the given time window — the Metrics Explorer's
-	 *  effort-band overlay (tsk233).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
 	/**
-	 *  Collection observations (test-run / diff-coverage) for an effort,
-	 *  newest-first. Optional `kind` filter. Drives the effort-review
-	 *  coverage badge + tests-run list on `TaskPage`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
 	/**
-	 *  Per-metric roll-up over an effort — grouped before→after deltas for the
-	 *  task/effort page's metrics panel (attributed per family; see metrics.md).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listEffortMetricDeltas: (effortId: EffortId) => typedError<EffortMetricDelta[], IpcError>(__TAURI_INVOKE("list_effort_metric_deltas", { effortId })),
 	/**
-	 *  The metric catalog — every known metric SPEC. Optional `language` / `scope`
-	 *  filter. Drives the Catalog / Explorer measure picker.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricSpec[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
 	/**
-	 *  Time series for one metric (by spec `key`), newest-first — one point per
-	 *  capture over the metric's source-measure facts. `group_by` slices by a
-	 *  conformed dimension (`subject` / `branch` / `oxplow.model` / …).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listMetricSamples: (metricKey: string, limit: number | null, groupBy: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("list_metric_samples", { metricKey, limit, groupBy, fromMs, toMs })),
 	/**
-	 *  Roll up a metric (by spec `key`) by a dimension (`"package"` or a `dims_json`
-	 *  key like `"language"`), largest first — the Metric Detail Breakdown card +
-	 *  subject breakdown (tsk328/tsk319).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	metricDimensionRollup: (metricKey: string, dimension: string) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_dimension_rollup", { metricKey, dimension })),
 	/**
-	 *  The located items behind one metric (by spec `key`) — the read-time finding
-	 *  view over its filtered facts. `capture_id` scopes to one recording's
-	 *  drill-in (findings table / per-file coverage / per-case tests).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listMetricFindings: (metricKey: string, captureId: number | null) => typedError<FactFinding[], IpcError>(__TAURI_INVOKE("list_metric_findings", { metricKey, captureId })),
 	/**
-	 *  Time series for a MEASURE, aggregated per capture over its atomic facts —
-	 *  the measure-level read (vs `list_metric_samples`'s spec ergonomics).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	metricSeries: (measureKey: string, aggregation: string, groupBy: string | null, minValue: number | null, severity: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("metric_series", { measureKey, aggregation, groupBy, minValue, severity, fromMs, toMs })),
 	/**
-	 *  By-dimension rollup for a MEASURE over its atomic facts — the measure-level
-	 *  breakdown (vs `metric_dimension_rollup`'s spec ergonomics).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	metricRollup: (measureKey: string, dimension: string | null) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_rollup", { measureKey, dimension })),
 	/**
-	 *  The available catalog (built-in ∪ global ∪ project) + enabled flags — the
-	 *  Catalog page's browse read.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
-	// Enable/disable a metric in `.oxplow/project.yaml` (the Catalog toggle).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
 	/**
-	 *  Enable/disable many metrics in one write (the per-section Enable/Disable-all,
-	 *  tsk32).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	setMetricsEnabled: (keys: string[], enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metrics_enabled", { keys, enabled })),
 	/**
-	 *  Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
-	 *  tsk233). `trigger` is inherent to the definition, not overridable (tsk290).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
 	/**
-	 *  Persisted agent nudges (report-less-run / coverage-target) for an effort,
-	 *  newest-first. Drives the collapsed "Agent nudges" debug sub-view on
-	 *  `TaskPage`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listNudgesForEffort: (effortId: EffortId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_effort", { effortId })),
-	// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listTokenUsageForEffort: (effortId: EffortId) => typedError<AgentTokenUsage[], IpcError>(__TAURI_INVOKE("list_token_usage_for_effort", { effortId })),
-	// Summed token totals for one effort.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getEffortTokenTotals: (effortId: EffortId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_effort_token_totals", { effortId })),
-	// Summed token totals for a whole thread (Work panel running total).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getThreadTokenTotals: (threadId: ThreadId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_thread_token_totals", { threadId })),
-	// Summed token totals across every recorded turn (Token Analytics page).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	tokenTotalsOverall: () => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("token_totals_overall")),
-	// Token totals grouped by agent/harness, busiest first.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	tokenUsageByAgent: () => typedError<AgentKindTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_agent")),
-	// Token totals grouped by (agent_kind, model), busiest first.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	tokenUsageByModel: () => typedError<ModelTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_model")),
-	// Token volume bucketed by day over the last `days` days (trend chart).
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	tokenUsageByDay: (days: number) => typedError<TokenUsageByDay[], IpcError>(__TAURI_INVOKE("token_usage_by_day", { days })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getCommitDetail: (streamId: string | null, sha: string) => typedError<{
 	sha: string,
 	short_sha: string,
@@ -632,30 +1024,70 @@ export const commands = {
 	parents: string[],
 	files: CommitDetailFile[],
 } | null, IpcError>(__TAURI_INVOKE("get_commit_detail", { streamId, sha })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getCommitsAheadOf: (streamId: string | null, base: string, head: string, limit: number) => typedError<GitLogCommit[], IpcError>(__TAURI_INVOKE("get_commits_ahead_of", { streamId, base, head, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listWorkspaceEntries: (streamId: string | null, relativePath: string) => typedError<WorkspaceEntry[], IpcError>(__TAURI_INVOKE("list_workspace_entries", { streamId, relativePath })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listWorkspaceFiles: (streamId: string | null) => typedError<WorkspaceIndexedFile[], IpcError>(__TAURI_INVOKE("list_workspace_files", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	readWorkspaceFile: (streamId: string | null, relativePath: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("read_workspace_file", { streamId, relativePath })),
 	/**
-	 *  Versioned file read. Dispatches on `version`:
-	 *  - `Disk` → `read_workspace_file` (working tree, possibly dirty).
-	 *  - `Ref { ref }` → `read_file_at_ref` (committed blob).
-	 *  - `Snapshot { id }` → `snapshot_store.content_ref_for_path` + read seam.
-	 * 
-	 *  Returns `Ok(None)` if the path doesn't exist at that version.
-	 *  Callers MUST pass an explicit version — there is no implicit
-	 *  "current working tree" default. This is the chokepoint that makes
-	 *  it impossible to forget which version you're reading, the way the
-	 *  duplication-scan bug did against `readWorkspaceFile`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	readFile: (streamId: string | null, relativePath: string, version: TreeVersion) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_file", { streamId, relativePath, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	writeWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("write_workspace_file", { streamId, relativePath, content })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createWorkspaceFile: (streamId: string | null, relativePath: string, content: string) => typedError<WorkspaceFile, IpcError>(__TAURI_INVOKE("create_workspace_file", { streamId, relativePath, content })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	createWorkspaceDirectory: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("create_workspace_directory", { streamId, relativePath })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameWorkspacePath: (streamId: string | null, fromPath: string, toPath: string) => typedError<[string, string], IpcError>(__TAURI_INVOKE("rename_workspace_path", { streamId, fromPath, toPath })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	deleteWorkspacePath: (streamId: string | null, relativePath: string) => typedError<string, IpcError>(__TAURI_INVOKE("delete_workspace_path", { streamId, relativePath })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getWorkspaceStatusSummary: (streamId: string | null) => typedError<WorkspaceStatusSummary, IpcError>(__TAURI_INVOKE("get_workspace_status_summary", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listBackgroundTasks: () => typedError<BackgroundTask[], IpcError>(__TAURI_INVOKE("list_background_tasks")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getBackgroundTask: (id: string) => typedError<{
 	id: string,
 	kind: BackgroundTaskKind,
@@ -674,12 +1106,40 @@ export const commands = {
 	 */
 	result_json: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_background_task", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	startBackgroundTask: (kind: BackgroundTaskKind, label: string, detail: string | null) => typedError<BackgroundTask, IpcError>(__TAURI_INVOKE("start_background_task", { kind, label, detail })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	completeBackgroundTask: (id: string, resultJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("complete_background_task", { id, resultJson })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	failBackgroundTask: (id: string, error: string) => typedError<null, IpcError>(__TAURI_INVOKE("fail_background_task", { id, error })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	updateBackgroundTask: (id: string, label: string | null, detail: string | null, progress: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("update_background_task", { id, label, detail, progress })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listFollowups: (threadId: ThreadId) => typedError<Followup[], IpcError>(__TAURI_INVOKE("list_followups", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addFollowup: (threadId: ThreadId, body: string) => typedError<Followup, IpcError>(__TAURI_INVOKE("add_followup", { threadId, body })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	removeFollowup: (id: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_followup", { id })),
 	/**
 	 *  Open an external URL in a sandboxed `WebviewWindow`.
@@ -696,43 +1156,43 @@ export const commands = {
 	 */
 	clipboardReadText: () => typedError<string, IpcError>(__TAURI_INVOKE("clipboard_read_text")),
 	/**
-	 *  Download + install a Mason package by name, register the resulting
-	 *  binary with `LspSessionManager`, and persist it to the manifest so
-	 *  subsequent boots pick it up. Blocks for the duration of the
-	 *  download — the renderer should surface a progress affordance.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	installLspPackage: (packageName: string) => typedError<InstalledLspPackage, IpcError>(__TAURI_INVOKE("install_lsp_package", { packageName })),
-	// List all Mason packages currently installed for this project.
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listInstalledLspPackages: () => typedError<InstalledLspPackage[], IpcError>(__TAURI_INVOKE("list_installed_lsp_packages")),
 	/**
-	 *  Issue a JSON-RPC request on the shared `(stream, language)` session
-	 *  (spawned + initialized lazily) and return the raw LSP result.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	lspRequest: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<string, IpcError>(__TAURI_INVOKE("lsp_request", { streamId, languageId, method, paramsJson })),
 	/**
-	 *  Send a JSON-RPC notification on the shared `(stream, language)`
-	 *  session. Document-sync notifications also update the backend's
-	 *  document mirror (crash/restart replay).
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	lspNotify: (streamId: string, languageId: string, method: string, paramsJson: string) => typedError<null, IpcError>(__TAURI_INVOKE("lsp_notify", { streamId, languageId, method, paramsJson })),
 	/**
-	 *  All known language servers (.oxplow/project.yaml + Mason-installed), with
-	 *  binary presence and live-session metadata for the settings UI.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	listLspServers: () => typedError<LspServerListing[], IpcError>(__TAURI_INVOKE("list_lsp_servers")),
 	/**
-	 *  Tear down and respawn the `(stream, language)` session, replaying
-	 *  every mirrored open document.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	restartLspServer: (streamId: string, languageId: string) => typedError<null, IpcError>(__TAURI_INVOKE("restart_lsp_server", { streamId, languageId })),
 	/**
-	 *  Uninstall a Mason package: delete its files, manifest entry, and
-	 *  language-server registrations.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	removeLspPackage: (packageName: string) => typedError<null, IpcError>(__TAURI_INVOKE("remove_lsp_package", { packageName })),
 	/**
-	 *  Answer a server-initiated `workspace/applyEdit` forwarded to the
-	 *  renderer as an `ApplyEditRequest` event.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	respondLspApplyEdit: (token: number, applied: boolean, failureReason: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("respond_lsp_apply_edit", { token, applied, failureReason })),
 	/**
@@ -748,40 +1208,28 @@ export const commands = {
 	 */
 	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
 	/**
-	 *  Forward a terminal-input protocol message from the renderer to the
-	 *  PTY backing `session_id`. Plumbing for **human input only** (xterm
-	 *  keystrokes / paste / scroll / resize from `TerminalPane.tsx`); not an
-	 *  agent-messaging or automation API. See the no-automation invariant in
-	 *  `.context/agent-model.md`. Message shapes live in
-	 *  `oxplow_app::terminal_sessions`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	forwardTerminalInput: (sessionId: string, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("forward_terminal_input", { sessionId, message })),
 	/**
-	 *  Detach the renderer from `session_id` without killing the PTY —
-	 *  the agent keeps running in the background so the user can navigate
-	 *  away and come back. Use `terminate_terminal_session` to actually
-	 *  stop the agent.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	closeTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("close_terminal_session", { sessionId })),
 	/**
-	 *  Best-effort live working directory of a session's child process, as an
-	 *  absolute path. `None` when it can't be determined (tmux-backed pane, dead
-	 *  session, unsupported platform). The renderer uses it to resolve relative
-	 *  terminal file-path links against the shell's real cwd, falling back to the
-	 *  worktree root.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	terminalSessionCwd: (sessionId: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("terminal_session_cwd", { sessionId })),
 	/**
-	 *  Permanently kill the PTY behind `session_id`. Used when a thread
-	 *  is closed or the user explicitly terminates the agent.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	terminateTerminalSession: (sessionId: string) => typedError<null, IpcError>(__TAURI_INVOKE("terminate_terminal_session", { sessionId })),
 	/**
-	 *  Read-only lookup of the live agent session id for `thread_id`'s pane,
-	 *  **without spawning**. Returns `null` when no live session exists. Lets
-	 *  a second client resolve a thread's agent PTY to `forward_terminal_input`
-	 *  without going through the spawn-capable `open_terminal_session`. `pane`
-	 *  defaults to `"working"`.
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
 	 */
 	lookupTerminalSession: (threadId: ThreadId, pane: string | null) => typedError<string | null, IpcError>(__TAURI_INVOKE("lookup_terminal_session", { threadId, pane })),
 	/**

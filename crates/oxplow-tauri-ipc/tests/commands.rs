@@ -22,21 +22,21 @@ use oxplow_tauri_ipc::commands;
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn app_version_returns_pkg_version() {
     let app = TestApp::build();
-    let v = commands::app::app_version(app.state()).await.unwrap();
+    let v = commands::generated::app_version(app.state()).await.unwrap();
     assert!(!v.version.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn ping_returns_pong() {
     let app = TestApp::build();
-    let v = commands::app::ping(app.state()).await.unwrap();
+    let v = commands::generated::ping(app.state()).await.unwrap();
     assert_eq!(v, "pong");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn log_ui_accepts_a_record() {
     let app = TestApp::build();
-    commands::app::log_ui(
+    commands::generated::log_ui(
         app.state(),
         commands::app::UiLogEntry {
             level: "info".into(),
@@ -66,14 +66,16 @@ async fn list_streams_returns_primary_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_backlog_returns_empty_for_fresh_project() {
     let app = TestApp::build();
-    let items = commands::backlog::list_backlog(app.state()).await.unwrap();
+    let items = commands::generated::list_backlog(app.state())
+        .await
+        .unwrap();
     assert!(items.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_backlog_state_starts_at_zero() {
     let app = TestApp::build();
-    let state = commands::backlog::get_backlog_state(app.state())
+    let state = commands::generated::get_backlog_state(app.state())
         .await
         .unwrap();
     assert_eq!(state.items.len(), 0);
@@ -82,7 +84,7 @@ async fn get_backlog_state_starts_at_zero() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
-    let threads = commands::threads::list_threads(app.state(), StreamId::new(999999))
+    let threads = commands::generated::list_threads(app.state(), StreamId::new(999999))
         .await
         .unwrap();
     assert!(threads.is_empty());
@@ -91,7 +93,7 @@ async fn list_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_closed_threads_empty_for_unknown_stream() {
     let app = TestApp::build();
-    let threads = commands::threads::list_closed_threads(app.state(), StreamId::new(999999))
+    let threads = commands::generated::list_closed_threads(app.state(), StreamId::new(999999))
         .await
         .unwrap();
     assert!(threads.is_empty());
@@ -100,7 +102,7 @@ async fn list_closed_threads_empty_for_unknown_stream() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_task_missing_returns_none() {
     let app = TestApp::build();
-    let item = commands::tasks::get_task(app.state(), TaskId::new(999))
+    let item = commands::generated::get_task(app.state(), TaskId::new(999))
         .await
         .unwrap();
     assert!(item.is_none());
@@ -130,7 +132,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
         .into_iter()
         .next()
         .expect("primary stream should have a default thread");
-    let parent = commands::tasks::create_task(
+    let parent = commands::generated::create_task(
         app.state(),
         commands::tasks::CreateTaskRequest {
             thread_id: Some(thread.id),
@@ -142,7 +144,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     )
     .await
     .unwrap();
-    let _child = commands::tasks::create_task(
+    let _child = commands::generated::create_task(
         app.state(),
         commands::tasks::CreateTaskRequest {
             thread_id: Some(thread.id),
@@ -155,7 +157,7 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
     )
     .await
     .unwrap();
-    let work_state = commands::threads::get_thread_work_state(app.state(), thread.id)
+    let work_state = commands::generated::get_thread_work_state(app.state(), thread.id)
         .await
         .unwrap();
     assert!(
@@ -173,14 +175,16 @@ async fn get_thread_work_state_buckets_parents_with_children_as_epics() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_wiki_pages_empty_for_fresh_project() {
     let app = TestApp::build();
-    let notes = commands::wiki::list_wiki_pages(app.state()).await.unwrap();
+    let notes = commands::generated::list_wiki_pages(app.state())
+        .await
+        .unwrap();
     assert!(notes.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn search_wiki_titles_empty_input_returns_empty() {
     let app = TestApp::build();
-    let hits = commands::wiki::search_wiki_titles(app.state(), "".into(), 10)
+    let hits = commands::generated::search_wiki_titles(app.state(), "".into(), 10)
         .await
         .unwrap();
     assert!(hits.is_empty());
@@ -189,7 +193,7 @@ async fn search_wiki_titles_empty_input_returns_empty() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recent_page_visits_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::page_visit::list_recent_page_visits(app.state(), 10, None)
+    let v = commands::generated::list_recent_page_visits(app.state(), 10, None)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -198,7 +202,7 @@ async fn list_recent_page_visits_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn top_visited_pages_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::page_visit::top_visited_pages(app.state(), 10, None)
+    let v = commands::generated::top_visited_pages(app.state(), 10, None)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -207,7 +211,7 @@ async fn top_visited_pages_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_code_quality_findings_empty_for_unknown_scan() {
     let app = TestApp::build();
-    let v = commands::code_quality::list_code_quality_findings(app.state(), 9999)
+    let v = commands::generated::list_code_quality_findings(app.state(), 9999)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -216,7 +220,7 @@ async fn list_code_quality_findings_empty_for_unknown_scan() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_snapshots_empty_for_unknown_path() {
     let app = TestApp::build();
-    let v = commands::snapshot::list_snapshots(app.state(), "nope.txt".into())
+    let v = commands::generated::list_snapshots(app.state(), "nope.txt".into())
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -225,7 +229,7 @@ async fn list_snapshots_empty_for_unknown_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_snapshot_missing_returns_none() {
     let app = TestApp::build();
-    let v = commands::snapshot::get_snapshot(app.state(), 99999)
+    let v = commands::generated::get_snapshot(app.state(), 99999)
         .await
         .unwrap();
     assert!(v.is_none());
@@ -234,7 +238,7 @@ async fn get_snapshot_missing_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_snapshot_summary_missing_returns_none() {
     let app = TestApp::build();
-    let v = commands::snapshot::get_snapshot_summary(app.state(), 99999)
+    let v = commands::generated::get_snapshot_summary(app.state(), 99999)
         .await
         .unwrap();
     assert!(v.is_none());
@@ -243,7 +247,7 @@ async fn get_snapshot_summary_missing_returns_none() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_hook_events_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::hooks::list_hook_events(app.state(), None, Some(10))
+    let v = commands::generated::list_hook_events(app.state(), None, Some(10))
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -252,7 +256,7 @@ async fn list_hook_events_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_agent_statuses_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::hooks::list_agent_statuses(app.state())
+    let v = commands::generated::list_agent_statuses(app.state())
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -261,7 +265,7 @@ async fn list_agent_statuses_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_followups_empty_for_unknown_thread() {
     let app = TestApp::build();
-    let v = commands::followup::list_followups(app.state(), ThreadId::new(999999))
+    let v = commands::generated::list_followups(app.state(), ThreadId::new(999999))
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -270,7 +274,7 @@ async fn list_followups_empty_for_unknown_thread() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_background_tasks_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::background::list_background_tasks(app.state())
+    let v = commands::generated::list_background_tasks(app.state())
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -279,13 +283,13 @@ async fn list_background_tasks_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_config_returns_default_for_fresh_project() {
     let app = TestApp::build();
-    let _ = commands::config::get_config(app.state()).await.unwrap();
+    let _ = commands::generated::get_config(app.state()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_workspace_entries_returns_root_listing() {
     let app = TestApp::build();
-    let _entries = commands::workspace::list_workspace_entries(app.state(), None, "".into())
+    let _entries = commands::generated::list_workspace_entries(app.state(), None, "".into())
         .await
         .unwrap();
 }
@@ -293,7 +297,7 @@ async fn list_workspace_entries_returns_root_listing() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn read_workspace_file_missing_path_errors() {
     let app = TestApp::build();
-    let result = commands::workspace::read_workspace_file(
+    let result = commands::generated::read_workspace_file(
         app.state(),
         None,
         "definitely-not-there.txt".into(),
@@ -307,7 +311,7 @@ async fn read_workspace_file_missing_path_errors() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_recently_finished_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::page_visit::list_recently_finished(app.state(), None, 10)
+    let v = commands::generated::list_recently_finished(app.state(), None, 10)
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -316,7 +320,7 @@ async fn list_recently_finished_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn clear_recently_finished_no_throw_on_empty() {
     let app = TestApp::build();
-    commands::page_visit::clear_recently_finished(app.state(), None)
+    commands::generated::clear_recently_finished(app.state(), None)
         .await
         .unwrap();
 }
@@ -324,7 +328,7 @@ async fn clear_recently_finished_no_throw_on_empty() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn count_page_visits_by_day_empty_for_fresh_project() {
     let app = TestApp::build();
-    let days = commands::page_visit::count_page_visits_by_day(app.state(), 7)
+    let days = commands::generated::count_page_visits_by_day(app.state(), 7)
         .await
         .unwrap();
     assert!(days.is_empty());
@@ -337,7 +341,7 @@ async fn count_page_visits_by_day_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_task_efforts_empty_for_unknown_item() {
     let app = TestApp::build();
-    let v = commands::effort::list_task_efforts(app.state(), TaskId::new(999))
+    let v = commands::generated::list_task_efforts(app.state(), TaskId::new(999))
         .await
         .unwrap();
     assert!(v.is_empty());
@@ -377,7 +381,9 @@ async fn primary_and_thread(app: &TestApp) -> (Stream, Thread) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_branches_returns_default_branch() {
     let app = TestApp::build();
-    let branches = commands::branch::list_branches(app.state()).await.unwrap();
+    let branches = commands::generated::list_branches(app.state())
+        .await
+        .unwrap();
     assert!(
         !branches.is_empty(),
         "a repo with one commit has at least its default branch"
@@ -387,7 +393,7 @@ async fn list_branches_returns_default_branch() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_local_branches_returns_default_branch() {
     let app = TestApp::build();
-    let branches = commands::branch::list_local_branches(app.state())
+    let branches = commands::generated::list_local_branches(app.state())
         .await
         .unwrap();
     assert!(!branches.is_empty());
@@ -396,13 +402,13 @@ async fn list_local_branches_returns_default_branch() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_default_branch_does_not_panic() {
     let app = TestApp::build();
-    let _ = commands::branch::get_default_branch(app.state()).await;
+    let _ = commands::generated::get_default_branch(app.state()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn delete_unknown_branch_errors() {
     let app = TestApp::build();
-    let _ = commands::branch::delete_branch(app.state(), "no-such-branch".into(), false).await;
+    let _ = commands::generated::delete_branch(app.state(), "no-such-branch".into(), false).await;
 }
 
 // ---- git read commands ----
@@ -411,15 +417,19 @@ async fn delete_unknown_branch_errors() {
 async fn git_reads_over_primary_worktree() {
     let app = TestApp::build();
     let s = app.state();
-    let _ = commands::git::get_repo_conflict_state(s.clone(), None).await;
-    let _ = commands::git::get_ahead_behind(s.clone(), None, "HEAD".into(), "HEAD".into()).await;
-    let _ = commands::git::list_all_refs(s.clone()).await;
-    let _ = commands::git::get_change_scopes(s.clone(), None).await;
-    let _ = commands::git::get_branch_changes(s.clone(), None, "HEAD".into()).await;
-    let _ = commands::git::read_file_at_ref(s.clone(), "HEAD".into(), "nope.txt".into()).await;
-    let _ = commands::git::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
-    let _ = commands::git::git_blame(s.clone(), None, "nope.txt".into()).await;
-    let _ = commands::git::local_blame(s.clone(), None, "nope.txt".into(), "a\nb\n".into()).await;
+    let _ = commands::generated::get_repo_conflict_state(s.clone(), None).await;
+    let _ =
+        commands::generated::get_ahead_behind(s.clone(), None, "HEAD".into(), "HEAD".into()).await;
+    let _ = commands::generated::list_all_refs(s.clone()).await;
+    let _ = commands::generated::get_change_scopes(s.clone(), None).await;
+    let _ = commands::generated::get_branch_changes(s.clone(), None, "HEAD".into()).await;
+    let _ =
+        commands::generated::read_file_at_ref(s.clone(), "HEAD".into(), "nope.txt".into()).await;
+    let _ =
+        commands::generated::list_file_commits(s.clone(), None, "nope.txt".into(), Some(10)).await;
+    let _ = commands::generated::git_blame(s.clone(), None, "nope.txt".into()).await;
+    let _ =
+        commands::generated::local_blame(s.clone(), None, "nope.txt".into(), "a\nb\n".into()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -427,22 +437,24 @@ async fn git_list_commands_return_empty_for_fresh_repo() {
     let app = TestApp::build();
     let s = app.state();
     assert!(
-        commands::git::list_recent_remote_branches(s.clone(), Some(10))
+        commands::generated::list_recent_remote_branches(s.clone(), Some(10))
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::git::search_workspace_text(s.clone(), None, "needle".into(), Some(10))
+        commands::generated::search_workspace_text(s.clone(), None, "needle".into(), Some(10))
             .await
             .unwrap()
             .is_empty()
     );
-    assert!(commands::git::resolve_commit_ref_labels(s.clone(), vec![])
-        .await
-        .unwrap()
-        .is_empty());
-    let _ = commands::git::list_adoptable_worktrees(s.clone())
+    assert!(
+        commands::generated::resolve_commit_ref_labels(s.clone(), vec![])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let _ = commands::generated::list_adoptable_worktrees(s.clone())
         .await
         .unwrap();
 }
@@ -452,12 +464,12 @@ async fn git_local_mutations_over_primary_worktree() {
     let app = TestApp::build();
     let s = app.state();
     // Append a gitignore entry, stage it, commit it — all local, no remote.
-    let _ = commands::git::append_to_gitignore(s.clone(), None, "target/".into()).await;
-    let _ = commands::git::git_add_path(s.clone(), None, ".gitignore".into()).await;
-    let _ = commands::git::git_commit_all(s.clone(), None, "add gitignore".into()).await;
-    let _ = commands::git::restore_path(s.clone(), None, ".gitignore".into()).await;
-    let _ = commands::git::git_merge_into(s.clone(), None, "HEAD".into()).await;
-    let _ = commands::git::git_rebase_onto(s.clone(), None, "HEAD".into()).await;
+    let _ = commands::generated::append_to_gitignore(s.clone(), None, "target/".into()).await;
+    let _ = commands::generated::git_add_path(s.clone(), None, ".gitignore".into()).await;
+    let _ = commands::generated::git_commit_all(s.clone(), None, "add gitignore".into()).await;
+    let _ = commands::generated::restore_path(s.clone(), None, ".gitignore".into()).await;
+    let _ = commands::generated::git_merge_into(s.clone(), None, "HEAD".into()).await;
+    let _ = commands::generated::git_rebase_onto(s.clone(), None, "HEAD".into()).await;
 }
 
 // ---- stream commands ----
@@ -493,19 +505,19 @@ async fn archive_unknown_stream_errors() {
 async fn config_setters_round_trip() {
     use oxplow_config::AgentKind;
     let app = TestApp::build();
-    commands::config::set_agents(app.state(), vec![AgentKind::Claude, AgentKind::Codex])
+    commands::generated::set_agents(app.state(), vec![AgentKind::Claude, AgentKind::Codex])
         .await
         .unwrap();
-    commands::config::set_agent_prompt_append(app.state(), "be concise".into())
+    commands::generated::set_agent_prompt_append(app.state(), "be concise".into())
         .await
         .unwrap();
-    commands::config::set_snapshot_retention_days(app.state(), 30)
+    commands::generated::set_snapshot_retention_days(app.state(), 30)
         .await
         .unwrap();
-    commands::config::set_snapshot_max_file_bytes(app.state(), 1_000_000)
+    commands::generated::set_snapshot_max_file_bytes(app.state(), 1_000_000)
         .await
         .unwrap();
-    commands::config::set_generated(
+    commands::generated::set_generated(
         app.state(),
         oxplow_config::GeneratedConfig {
             exclude: vec!["generated/".into()],
@@ -514,7 +526,7 @@ async fn config_setters_round_trip() {
     )
     .await
     .unwrap();
-    let _ = commands::config::get_workspace_context(app.state()).await;
+    let _ = commands::generated::get_workspace_context(app.state()).await;
 }
 
 // ---- thread commands ----
@@ -523,11 +535,11 @@ async fn config_setters_round_trip() {
 async fn thread_reads_over_default_thread() {
     let app = TestApp::build();
     let (stream, _thread) = primary_and_thread(&app).await;
-    assert!(!commands::threads::list_threads(app.state(), stream.id)
+    assert!(!commands::generated::list_threads(app.state(), stream.id)
         .await
         .unwrap()
         .is_empty());
-    let _ = commands::threads::get_thread_state(app.state(), stream.id)
+    let _ = commands::generated::get_thread_state(app.state(), stream.id)
         .await
         .unwrap();
 }
@@ -542,13 +554,13 @@ async fn comment_lifecycle_round_trip() {
     let (stream, thread) = primary_and_thread(&app).await;
 
     assert!(
-        commands::comments::list_comments_for_stream(app.state(), stream.id)
+        commands::generated::list_comments_for_stream(app.state(), stream.id)
             .await
             .unwrap()
             .is_empty()
     );
 
-    let c = commands::comments::create_comment(
+    let c = commands::generated::create_comment(
         app.state(),
         CreateCommentRequest {
             stream_id: stream.id,
@@ -568,14 +580,14 @@ async fn comment_lifecycle_round_trip() {
     .unwrap();
 
     assert_eq!(
-        commands::comments::list_comments_for_stream(app.state(), stream.id)
+        commands::generated::list_comments_for_stream(app.state(), stream.id)
             .await
             .unwrap()
             .len(),
         1
     );
     assert_eq!(
-        commands::comments::list_comments_for_target(
+        commands::generated::list_comments_for_target(
             app.state(),
             "wiki".into(),
             "some-page".into()
@@ -586,7 +598,7 @@ async fn comment_lifecycle_round_trip() {
         1
     );
 
-    commands::comments::add_comment_message(
+    commands::generated::add_comment_message(
         app.state(),
         c.comment.id,
         "tester".into(),
@@ -594,13 +606,13 @@ async fn comment_lifecycle_round_trip() {
     )
     .await
     .unwrap();
-    commands::comments::set_comment_intent(app.state(), c.comment.id, CommentIntent::Followup)
+    commands::generated::set_comment_intent(app.state(), c.comment.id, CommentIntent::Followup)
         .await
         .unwrap();
-    commands::comments::set_comment_anchor(app.state(), c.comment.id, "{\"v\":1}".into(), true)
+    commands::generated::set_comment_anchor(app.state(), c.comment.id, "{\"v\":1}".into(), true)
         .await
         .unwrap();
-    commands::comments::relink_comment(
+    commands::generated::relink_comment(
         app.state(),
         c.comment.id,
         "new quote".into(),
@@ -608,15 +620,15 @@ async fn comment_lifecycle_round_trip() {
     )
     .await
     .unwrap();
-    commands::comments::set_comment_status(app.state(), c.comment.id, CommentStatus::Resolved)
+    commands::generated::set_comment_status(app.state(), c.comment.id, CommentStatus::Resolved)
         .await
         .unwrap();
-    commands::comments::delete_comment(app.state(), c.comment.id)
+    commands::generated::delete_comment(app.state(), c.comment.id)
         .await
         .unwrap();
 
     assert!(
-        commands::comments::list_comments_for_stream(app.state(), stream.id)
+        commands::generated::list_comments_for_stream(app.state(), stream.id)
             .await
             .unwrap()
             .is_empty()
@@ -629,22 +641,28 @@ async fn comment_lifecycle_round_trip() {
 async fn thread_note_round_trip() {
     let app = TestApp::build();
     let (_, thread) = primary_and_thread(&app).await;
-    assert!(commands::notes::list_thread_notes(app.state(), thread.id)
-        .await
-        .unwrap()
-        .is_empty());
-    let note =
-        commands::notes::add_thread_note(app.state(), thread.id, "a finding".into(), "me".into())
+    assert!(
+        commands::generated::list_thread_notes(app.state(), thread.id)
             .await
-            .unwrap();
+            .unwrap()
+            .is_empty()
+    );
+    let note = commands::generated::add_thread_note(
+        app.state(),
+        thread.id,
+        "a finding".into(),
+        "me".into(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        commands::notes::list_thread_notes(app.state(), thread.id)
+        commands::generated::list_thread_notes(app.state(), thread.id)
             .await
             .unwrap()
             .len(),
         1
     );
-    let _ = commands::notes::list_task_events(app.state(), None, Some(thread.id))
+    let _ = commands::generated::list_task_events(app.state(), None, Some(thread.id))
         .await
         .unwrap();
     let _ = note;
@@ -656,13 +674,13 @@ async fn thread_note_round_trip() {
 async fn page_ref_reads_empty_for_fresh_project() {
     let app = TestApp::build();
     assert!(
-        commands::page_refs::list_backlinks(app.state(), "wiki".into(), "slug".into(), None)
+        commands::generated::list_backlinks(app.state(), "wiki".into(), "slug".into(), None)
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::page_refs::list_outbound(app.state(), "task".into(), "1".into(), Some(10))
+        commands::generated::list_outbound(app.state(), "task".into(), "1".into(), Some(10))
             .await
             .unwrap()
             .is_empty()
@@ -673,12 +691,12 @@ async fn page_ref_reads_empty_for_fresh_project() {
 async fn search_returns_empty_for_fresh_project() {
     let app = TestApp::build();
     assert!(
-        commands::search::search(app.state(), "anything".into(), None, None, Some(10))
+        commands::generated::search(app.state(), "anything".into(), None, None, Some(10))
             .await
             .unwrap()
             .is_empty()
     );
-    assert!(commands::search::search(
+    assert!(commands::generated::search(
         app.state(),
         "anything".into(),
         None,
@@ -694,20 +712,19 @@ async fn search_returns_empty_for_fresh_project() {
 async fn wiki_freshness_reads_for_unknown_slug() {
     let app = TestApp::build();
     assert!(
-        commands::wiki_freshness::list_wiki_freshness(app.state(), "no-slug".into())
+        commands::generated::list_wiki_freshness(app.state(), "no-slug".into())
             .await
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        commands::wiki_freshness::mark_all_wiki_refs_verified(app.state(), "no-slug".into())
+        commands::generated::mark_all_wiki_refs_verified(app.state(), "no-slug".into())
             .await
             .unwrap(),
         0
     );
-    let _ =
-        commands::wiki_freshness::mark_wiki_ref_verified(app.state(), "no-slug".into(), "p".into())
-            .await;
+    let _ = commands::generated::mark_wiki_ref_verified(app.state(), "no-slug".into(), "p".into())
+        .await;
 }
 
 // ---- effort reads ----
@@ -716,26 +733,26 @@ async fn wiki_freshness_reads_for_unknown_slug() {
 async fn effort_reads_empty_for_unknown_ids() {
     let app = TestApp::build();
     assert!(
-        commands::effort::get_effort_files(app.state(), EffortId::new(999))
+        commands::generated::get_effort_files(app.state(), EffortId::new(999))
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::effort::list_efforts_at_snapshots(app.state(), vec![])
+        commands::generated::list_efforts_at_snapshots(app.state(), vec![])
             .await
             .unwrap()
             .is_empty()
     );
     {
         let split =
-            commands::effort::list_changed_paths_for_effort(app.state(), EffortId::new(999))
+            commands::generated::list_changed_paths_for_effort(app.state(), EffortId::new(999))
                 .await
                 .unwrap();
         assert!(split.claimed.is_empty() && split.unclaimed.is_empty());
     }
     assert!(
-        commands::effort::list_effort_observations(app.state(), EffortId::new(999), None)
+        commands::generated::list_effort_observations(app.state(), EffortId::new(999), None)
             .await
             .unwrap()
             .is_empty()
@@ -749,47 +766,47 @@ async fn snapshot_reads_empty_for_fresh_project() {
     let app = TestApp::build();
     let (stream, _) = primary_and_thread(&app).await;
     assert!(
-        commands::snapshot::list_file_snapshots_for_stream(app.state(), stream.id, Some(10))
+        commands::generated::list_file_snapshots_for_stream(app.state(), stream.id, Some(10))
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::snapshot::list_snapshots_for_stream(app.state(), stream.id, Some(10))
+        commands::generated::list_snapshots_for_stream(app.state(), stream.id, Some(10))
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::snapshot::list_snapshot_change_entries(app.state(), 999)
+        commands::generated::list_snapshot_change_entries(app.state(), 999)
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::snapshot::read_snapshot_file_content(app.state(), 999)
+        commands::generated::read_snapshot_file_content(app.state(), 999)
             .await
             .unwrap()
             .is_none()
     );
     assert!(
-        commands::snapshot::list_files_for_snapshot(app.state(), 999)
+        commands::generated::list_files_for_snapshot(app.state(), 999)
             .await
             .unwrap()
             .is_empty()
     );
     assert!(
-        commands::snapshot::list_wiki_slugs_for_snapshots(app.state(), vec![999])
+        commands::generated::list_wiki_slugs_for_snapshots(app.state(), vec![999])
             .await
             .unwrap()
             .is_empty()
     );
-    let _ = commands::snapshot::get_blob_storage_bytes(app.state())
+    let _ = commands::generated::get_blob_storage_bytes(app.state())
         .await
         .unwrap();
-    let _ = commands::snapshot::get_snapshot_stats(app.state(), 999).await;
-    let _ = commands::snapshot::get_snapshot_pair_diff(app.state(), None, None).await;
-    let _ = commands::snapshot::restore_file_from_snapshot(app.state(), 999).await;
+    let _ = commands::generated::get_snapshot_stats(app.state(), 999).await;
+    let _ = commands::generated::get_snapshot_pair_diff(app.state(), None, None).await;
+    let _ = commands::generated::restore_file_from_snapshot(app.state(), 999).await;
 }
 
 // ---- workspace reads + file round-trip ----
@@ -797,13 +814,13 @@ async fn snapshot_reads_empty_for_fresh_project() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn workspace_reads_and_file_round_trip() {
     let app = TestApp::build();
-    let _ = commands::workspace::list_workspace_files(app.state(), None)
+    let _ = commands::generated::list_workspace_files(app.state(), None)
         .await
         .unwrap();
-    let _ = commands::workspace::get_workspace_status_summary(app.state(), None)
+    let _ = commands::generated::get_workspace_status_summary(app.state(), None)
         .await
         .unwrap();
-    let _ = commands::workspace::read_file(
+    let _ = commands::generated::read_file(
         app.state(),
         None,
         "made-up.txt".into(),
@@ -811,7 +828,7 @@ async fn workspace_reads_and_file_round_trip() {
     )
     .await;
     // Create → read → rename → delete a file inside the worktree.
-    commands::workspace::write_workspace_file(
+    commands::generated::write_workspace_file(
         app.state(),
         None,
         "scratch.txt".into(),
@@ -819,13 +836,13 @@ async fn workspace_reads_and_file_round_trip() {
     )
     .await
     .unwrap();
-    let f = commands::workspace::read_workspace_file(app.state(), None, "scratch.txt".into())
+    let f = commands::generated::read_workspace_file(app.state(), None, "scratch.txt".into())
         .await
         .unwrap();
     assert!(f.content.contains("hello"));
     let _ =
-        commands::workspace::create_workspace_directory(app.state(), None, "subdir".into()).await;
-    let _ = commands::workspace::rename_workspace_path(
+        commands::generated::create_workspace_directory(app.state(), None, "subdir".into()).await;
+    let _ = commands::generated::rename_workspace_path(
         app.state(),
         None,
         "scratch.txt".into(),
@@ -833,7 +850,7 @@ async fn workspace_reads_and_file_round_trip() {
     )
     .await;
     let _ =
-        commands::workspace::delete_workspace_path(app.state(), None, "scratch2.txt".into()).await;
+        commands::generated::delete_workspace_path(app.state(), None, "scratch2.txt".into()).await;
 }
 
 // ---- lsp list reads ----
@@ -841,11 +858,13 @@ async fn workspace_reads_and_file_round_trip() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn lsp_list_reads_for_fresh_project() {
     let app = TestApp::build();
-    assert!(commands::lsp::list_installed_lsp_packages(app.state())
-        .await
-        .unwrap()
-        .is_empty());
-    let _ = commands::lsp::list_lsp_servers(app.state()).await;
+    assert!(
+        commands::generated::list_installed_lsp_packages(app.state())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let _ = commands::generated::list_lsp_servers(app.state()).await;
 }
 
 // ---------------------------------------------------------------------------
