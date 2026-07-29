@@ -310,9 +310,25 @@ to `apps/desktop`, not `src-tauri`: that is the cwd Tauri runs
 `beforeBuildCommand` in, and getting it wrong is silent until you look
 inside the bundle (tsk263).
 
-Running from source, the daemon just needs to exist next to the binary
-you launch — `cargo build -p oxplow-daemon` puts it in `target/debug/`.
-`bun run tauri:dev` does that for you.
+**Staging is not only a packaging step.** `externalBin` makes
+tauri-build validate the sidecar from `oxplow-desktop`'s *build
+script*, so `cargo test`, `cargo clippy --all-targets` and even a bare
+`cargo build -p oxplow-desktop` fail on a fresh clone with:
+
+```
+resource path `binaries/oxplow-daemon-<triple>` doesn't exist
+```
+
+Run it once and everything compiles (tsk266):
+
+```
+bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+```
+
+`debug` is enough to satisfy the build script and shares the dependency
+build with a debug workspace build, so it's much cheaper than the
+release staging a bundle needs. `bun run tauri:dev` and CI both do this
+for you; a bare `cargo` invocation on a fresh clone does not.
 
 Only the **host** architecture, always — nothing passes
 `--target universal-apple-darwin`, so an Apple Silicon machine

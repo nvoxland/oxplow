@@ -18,7 +18,7 @@
     "lint:collect": "cargo clippy --workspace --all-targets --message-format=json -- -D warnings > target/clippy.json",
     "lint:searchable": "python3 scripts/check-control-chars.py",
     "type:coverage": "bunx type-coverage -p apps/desktop/tsconfig.json --json-output > target/type-coverage.json",
-    "tauri:dev": "cargo build -p oxplow-daemon && OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
+    "tauri:dev": "bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug && OXPLOW_PROJECT_DIR=\"$PWD\" bun run --cwd apps/desktop tauri dev",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
     "tauri:build:app": "bun run --cwd apps/desktop tauri build --bundles app",
     "e2e": "bunx playwright test"

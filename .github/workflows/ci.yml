@@ -68,6 +68,15 @@ jobs:
         run: bun test
         working-directory: apps/desktop
 
+      # `bundle.externalBin` makes tauri-build validate the daemon sidecar
+      # from oxplow-desktop's *build script*, so anything that compiles
+      # that crate — cargo test, clippy --all-targets — needs it staged,
+      # not just `tauri build` (tsk266). Debug profile: it shares the
+      # dependency build with the test run below, so it costs almost
+      # nothing here.
+      - name: Stage the daemon sidecar
+        run: bash apps/desktop/src-tauri/scripts/stage-daemon.sh debug
+
       - name: Cargo test
         run: cargo test --workspace --all-features
 
