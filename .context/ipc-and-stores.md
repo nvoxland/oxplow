@@ -33,31 +33,50 @@ touches roughly seven files. They sit in this order:
    signature to the `OxplowApi` interface. This is the source of truth for
    what's exposed to the renderer.
 
-5. **Tauri command + binding** — add a `#[tauri::command] #[specta::specta]`
-   adapter alongside the others in
-   `crates/oxplow-tauri-ipc/src/commands/<area>.rs` and register it in
-   `specta_builder()` (`crates/oxplow-tauri-ipc/src/lib.rs`). The
-   `cargo test -p oxplow-tauri-ipc` `export_ts_bindings` test
-   regenerates `apps/desktop/src/tauri-bridge/generated/bindings.ts`;
-   CI fails on a non-empty diff after regen, so check that file in.
+5. **Command core + table row** — two things, not three.
 
-   **Shared dispatch (`oxplow-rpc`)**: the command *body* lives as a
-   plain core fn in `crates/oxplow-rpc/src/commands.rs`
-   (`async fn(svc: &Services, args…) -> Result<T, IpcError>`), and the
-   Tauri adapter is a one-line delegate to it. Register the core in the
-   `rpc_dispatch!` registry (`crates/oxplow-rpc/src/lib.rs`) under the
-   same snake_case wire name. **The registry is what actually serves the
-   command**: every project window talks to an `oxplow-daemon` over
-   `POST /ipc/:name`, local ones included, so a command that exists only
-   as a Tauri adapter is unreachable from any window — not just remote
-   ones. The adapter survives today only because it is what generates
-   that command's TS binding (tsk260 replaces it). `IpcError` (and every
-   `From<…> for IpcError` impl) lives in `oxplow-rpc::error` —
-   `oxplow-tauri-ipc::error` is a re-export. `oxplow-rpc` must stay
-   free of `tauri` deps so the headless daemon builds without a
-   webview toolchain. Commands that touch the OS shell
-   (`AppHandle`/window/clipboard/menu) stay Tauri-only and are NOT
-   registered in the dispatch.
+   Write the **core** in `crates/oxplow-rpc/src/commands/<area>.rs`:
+   `pub async fn name(svc: &Services, args…) -> Result<T, IpcError>`.
+   This is the command; its doc comment is the command's documentation.
+
+   Add one **row** to the command table (`oxplow_command_table!` in
+   `crates/oxplow-rpc/src/lib.rs`), in the `gen` section:
+
+   ```rust
+   list_streams => $crate::commands::streams::list_streams {} -> ::std::vec::Vec<::oxplow_domain::Stream>,
+   ```
+
+   The row names the core, its arguments (name + type, camelCased on the
+   wire by serde), and its return type. Paths must be **absolute**
+   (`$crate::`, `::oxplow_domain::`) because the table expands in two
+   crates with different imports. The declared return type is
+   type-checked against the core, so it cannot drift.
+
+   That one row generates both surfaces: the `dispatch` arm that serves
+   the command over `POST /ipc/:name`, and — via `tauri_adapters!` in
+   `oxplow-tauri-ipc`'s `commands::generated` — the `#[tauri::command]`
+   whose only job is to give `tauri-specta` something to derive the TS
+   binding from. **Do not hand-write adapters**; they were all deleted
+   in tsk260.
+
+   `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
+   `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a
+   non-empty diff after regen, so check that file in.
+
+   **The registry is what actually serves the command**: every project
+   window talks to an `oxplow-daemon` over `POST /ipc/:name`, local ones
+   included, so a command missing from the table is unreachable from any
+   window. `IpcError` (and every `From<…> for IpcError` impl) lives in
+   `oxplow-rpc::error` — `oxplow-tauri-ipc::error` is a re-export.
+   `oxplow-rpc` must stay free of `tauri` deps so the headless daemon
+   builds without a webview toolchain.
+
+   **The exception is the shell surface.** Commands that need the OS
+   shell itself (`AppHandle`/window/clipboard/menu, project lifecycle)
+   have no core and no table row — they are hand-written adapters in
+   `commands/{launch,menu,webview}.rs`, listed in
+   `SHELL_ONLY_COMMANDS`, and registered in `specta_builder()` by hand.
+   See "Exception: the shell surface" below.
 
 6. **UI api wrapper** — `apps/desktop/src/api.ts`. Thin wrapper around
    the typed `commands.name(...)` import from the generated bindings.
@@ -75,9 +94,9 @@ touches roughly seven files. They sit in this order:
    [remote-daemon.md](./remote-daemon.md). Never import
    `@tauri-apps/api/core` or `/event` directly from UI code.
 
-   **If you add a Tauri-only command, add it to `SHELL_ONLY_COMMANDS`.**
-   Otherwise the transport sends it to the daemon, which 404s — and the
-   surface-parity test will tell you so.
+   **If you add a shell-surface command, add it to
+   `SHELL_ONLY_COMMANDS`.** Otherwise the transport sends it to the
+   daemon, which 404s — and the surface-parity test will tell you so.
 
 The component then calls the api wrapper and (if the data is reactive)
 subscribes to the relevant `*.changed` event to refetch.

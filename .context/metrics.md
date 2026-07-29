@@ -1021,7 +1021,7 @@ resolve a `metric_spec` by key (seeded catalog) and compute over its
   read-time offenders view (args changed from `run_id`).
 
 **The IPC/Tauri counterparts are flipped too (T-C3a, tsk39)** — the four
-`oxplow-rpc` cores + Tauri adapters now return spec/fact types
+`oxplow-rpc` cores (and the adapters generated from them) now return spec/fact types
 (`MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`), `bindings.ts` is
 regenerated, and every metric frontend consumer moved with them (see the "Reads"
 table below). Two measure-level IPC reads (`metric_series`/`metric_rollup`) were
@@ -1330,7 +1330,7 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   **agent-only** (classified in the surface-parity manifest); the renderer
   drives compute via config + the runner, not ad-hoc IPC.
 - **IPC** (`crates/oxplow-rpc/src/commands/metrics.rs` cores +
-  `crates/oxplow-tauri-ipc/src/commands/metrics.rs` Tauri adapters, registered
+  the `oxplow-rpc` command table (which generates the Tauri adapters), registered
   in `collect_commands!` + the remote `rpc_dispatch!`) — **flipped onto specs +
   facts (T-C3a, tsk39)**, mirroring the MCP wiring: `list_metric_definitions` →
   `list_specs` (`MetricSpec`), `list_metric_samples(metric_key, limit, group_by?)`
@@ -1632,7 +1632,7 @@ live on `metricSamplesChanged`. A row drills into the metric's detail via
 before→after callout (+ per-file count) above the full trend.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
-`set_metric_override` (RPC cores in `commands/metrics.rs`, Tauri adapters,
+`set_metric_override` (RPC cores in `commands/metrics.rs`, adapters generated from the command table,
 `ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
 set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type —
 consumed by the Metric Detail Configure block and the Recorded Metrics rows.

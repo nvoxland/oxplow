@@ -359,7 +359,8 @@ rules). All four — `merge` / `rebase` / `cherry_pick` / `revert` — are
 now fully wired: each has an `oxplow_git` op, a `GitService` method, an
 `oxplow-rpc` core (`git_merge_into` / `git_rebase_onto` /
 `git_cherry_pick` / `git_revert`) registered in the `rpc_dispatch!`
-registry, a one-line Tauri adapter, and a generated FE binding. The
+registry (which also generates the Tauri adapter) and a generated FE
+binding. The
 cherry-pick / revert UI entry point lives on the **commit page**
 (`GitCommitPage`): two `InlineConfirm` action buttons in the commit
 metadata card (`data-testid` `commit-actions`, triggers
