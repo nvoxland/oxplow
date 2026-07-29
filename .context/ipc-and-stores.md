@@ -46,9 +46,12 @@ touches roughly seven files. They sit in this order:
    (`async fn(svc: &Services, args…) -> Result<T, IpcError>`), and the
    Tauri adapter is a one-line delegate to it. Register the core in the
    `rpc_dispatch!` registry (`crates/oxplow-rpc/src/lib.rs`) under the
-   same snake_case wire name; the registry powers the remote-daemon
-   HTTP path (`POST /ipc/:name`), so a command that exists only as a
-   Tauri adapter is invisible to remote mode. `IpcError` (and every
+   same snake_case wire name. **The registry is what actually serves the
+   command**: every project window talks to an `oxplow-daemon` over
+   `POST /ipc/:name`, local ones included, so a command that exists only
+   as a Tauri adapter is unreachable from any window — not just remote
+   ones. The adapter survives today only because it is what generates
+   that command's TS binding (tsk260 replaces it). `IpcError` (and every
    `From<…> for IpcError` impl) lives in `oxplow-rpc::error` —
    `oxplow-tauri-ipc::error` is a re-export. `oxplow-rpc` must stay
    free of `tauri` deps so the headless daemon builds without a
