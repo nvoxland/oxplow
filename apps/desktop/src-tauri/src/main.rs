@@ -204,7 +204,11 @@ fn run_shell(ctx: tauri::Context) {
             tauri::RunEvent::ExitRequested { .. } => {
                 app.state::<windows::ShellWindows>().begin_quit();
             }
-            // Dock-icon click with nothing on screen (macOS).
+            // Dock-icon click with nothing on screen. The variant only
+            // exists on macOS — there is no dock to click elsewhere —
+            // so the arm has to be compiled out rather than just left
+            // unreachable.
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
