@@ -16,6 +16,7 @@ pub use oxplow_domain::AgentKind;
 pub mod recent;
 pub use recent::{RecentProject, RecentProjects};
 
+mod atomic;
 pub mod session;
 pub use session::SessionProjects;
 

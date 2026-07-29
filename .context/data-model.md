@@ -122,7 +122,13 @@ installed one — see [DEV.md](../DEV.md):
   (`ShellWindows::begin_quit` from `RunEvent::ExitRequested`), leaves
   the set alone so it's what comes back. Read-modify-writes still take a
   cross-process `fs2` lock (a dev build and an installed one can share a
-  config dir). The path is resolved by
+  config dir) — taken on a `<name>.lock` sidecar, because the document
+  itself is replaced by `rename`. **Both global documents are written
+  atomically** (temp file + `fsync` + `rename`, `oxplow-config`'s
+  `atomic.rs`): a truncate-then-write that died midway left an
+  unparseable file, and both stores read an unparseable file as an empty
+  document — so the failure mode was silent loss of the whole restore
+  set or recents list (tsk253). The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held

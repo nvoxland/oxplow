@@ -13,6 +13,8 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+use fs2::FileExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -41,9 +43,14 @@ struct RecentDoc {
 }
 
 /// Handle to the global recent-projects JSON file. Cheap to clone via
-/// `Arc` at the call site. Reads and writes serialize through an
-/// internal mutex so concurrent IPC calls can't interleave a
-/// read-modify-write.
+/// `Arc` at the call site.
+///
+/// Two locks, for two different races. The in-process mutex stops
+/// concurrent IPC calls interleaving a read-modify-write. The `.lock`
+/// sidecar (advisory, cross-process) stops a second oxplow sharing the
+/// config dir — a dev build alongside an installed one — from doing the
+/// same; without it, two `record` calls could each read the old list and
+/// the later write would drop the other's entry (tsk253).
 #[derive(Debug)]
 pub struct RecentProjects {
     json_path: PathBuf,
@@ -72,6 +79,7 @@ impl RecentProjects {
         let now = unix_now();
 
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _x = self.lock_file();
         let mut doc = self.read();
         doc.projects.retain(|p| p.path != canonical);
         doc.projects.insert(
@@ -90,9 +98,28 @@ impl RecentProjects {
     /// canonical path).
     pub fn remove(&self, path: &str) {
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _x = self.lock_file();
         let mut doc = self.read();
         doc.projects.retain(|p| p.path != path);
         self.write(&doc);
+    }
+
+    /// Take the cross-process advisory lock for the whole
+    /// read-modify-write. Best-effort: if the sidecar can't be opened we
+    /// proceed unlocked rather than lose the user's recents entirely.
+    fn lock_file(&self) -> Option<std::fs::File> {
+        if let Some(parent) = self.json_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(crate::atomic::lock_path(&self.json_path))
+            .ok()?;
+        file.lock_exclusive().ok()?;
+        Some(file)
     }
 
     fn read(&self) -> RecentDoc {
@@ -108,7 +135,10 @@ impl RecentProjects {
         }
         match serde_json::to_vec_pretty(doc) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(&self.json_path, json) {
+                // Atomic: a truncate-then-write that died midway left an
+                // unparseable file, and an unparseable file reads as an
+                // empty list — the whole recents list, silently gone.
+                if let Err(e) = crate::atomic::write_atomic(&self.json_path, &json) {
                     tracing::warn!(error = %e, path = %self.json_path.display(), "failed to write recent-projects");
                 }
             }
@@ -144,6 +174,55 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every recorded project must survive concurrent writers.
+    ///
+    /// Each `record` is a read-modify-write of the whole document, so
+    /// two of them racing can each read the old list and the later write
+    /// drops the other's entry. The in-process mutex covers threads;
+    /// the `.lock` sidecar covers a second oxplow sharing the config
+    /// dir (tsk253).
+    #[test]
+    fn concurrent_records_do_not_lose_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(RecentProjects::new(dir.path().join("recent.json")));
+        let projects: Vec<_> = (0..8).map(|_| tempfile::tempdir().unwrap()).collect();
+
+        std::thread::scope(|s| {
+            for p in &projects {
+                let store = store.clone();
+                let path = p.path().to_path_buf();
+                s.spawn(move || store.record(&path));
+            }
+        });
+
+        assert_eq!(
+            store.list().len(),
+            projects.len(),
+            "a lost update dropped someone's entry"
+        );
+    }
+
+    /// A half-written document reads as an empty list, so the write must
+    /// never be observable in a partial state.
+    #[cfg(unix)]
+    #[test]
+    fn writes_replace_the_file_rather_than_truncating_it() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recent.json");
+        let store = RecentProjects::new(path.clone());
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+
+        store.record(a.path());
+        let first = std::fs::metadata(&path).unwrap().ino();
+        store.record(b.path());
+        let second = std::fs::metadata(&path).unwrap().ino();
+
+        assert_ne!(first, second, "an in-place rewrite keeps the inode");
+        assert_eq!(store.list().len(), 2);
+    }
     use tempfile::tempdir;
 
     fn store(dir: &tempfile::TempDir) -> RecentProjects {

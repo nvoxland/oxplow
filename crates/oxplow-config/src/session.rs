@@ -1,20 +1,18 @@
 //! Global session store: the set of project directories that
 //! currently have an open window.
 //!
-//! Oxplow is process-per-window, so there's no app-level coordinator
-//! that knows "which windows are open". Instead each project process
-//! records its own dir here on boot (`add`) and removes it when its
-//! window is deliberately closed (`remove`). On a bare launch the
-//! startup path reads `list()` and reopens whatever's still present —
-//! i.e. the windows that were open at last exit (a clean Cmd-Q / crash
-//! / shutdown leaves the entries in place; only an explicit window
-//! close removes one).
+//! The shell owns every window, so it simply knows the set and writes
+//! it here (`replace`) whenever a project window opens or closes. On a
+//! bare launch the startup path reads `list()` and reopens whatever is
+//! still a project on disk — i.e. the windows that were open at last
+//! exit. Closing the last window, or quitting, deliberately leaves the
+//! set alone so it is what comes back.
 //!
-//! Multiple project processes mutate this file concurrently, so every
-//! read-modify-write is wrapped in a cross-process `fs2` exclusive
-//! file lock.
+//! A dev build and an installed build can share one config dir, so
+//! every read-modify-write is wrapped in a cross-process `fs2`
+//! exclusive lock — taken on a `.lock` sidecar, since the document
+//! itself is replaced by `rename` (see `atomic.rs`).
 
-use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
@@ -73,25 +71,29 @@ impl SessionProjects {
         });
     }
 
-    /// Open (creating) the session file, take an exclusive cross-process
-    /// lock, read+parse the doc, run `f` (which may mutate it), and —
-    /// if mutated — write it back. Returns `f`'s result. Any IO/parse
-    /// failure degrades to a default (empty) doc so a corrupt file never
-    /// wedges window tracking.
+    /// Take the exclusive cross-process lock, read+parse the doc, run
+    /// `f` (which may mutate it), and — if mutated — write it back
+    /// atomically. Returns `f`'s result. Any IO/parse failure degrades
+    /// to a default (empty) doc so a corrupt file never wedges window
+    /// tracking.
+    ///
+    /// The lock is taken on a `.lock` sidecar rather than on the
+    /// document: the write replaces the document by `rename`, and a lock
+    /// held on a replaced inode no longer excludes anyone (see
+    /// `atomic.rs`).
     fn with_locked<R>(&self, f: impl FnOnce(&mut SessionDoc) -> R) -> std::io::Result<R> {
         if let Some(parent) = self.json_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let mut file = std::fs::OpenOptions::new()
+        let lock = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .truncate(false)
-            .open(&self.json_path)?;
-        file.lock_exclusive()?;
+            .open(crate::atomic::lock_path(&self.json_path))?;
+        lock.lock_exclusive()?;
 
-        let mut raw = String::new();
-        let _ = file.read_to_string(&mut raw);
+        let raw = std::fs::read_to_string(&self.json_path).unwrap_or_default();
         let before = raw.clone();
         let mut doc: SessionDoc = serde_json::from_str(&raw).unwrap_or_default();
 
@@ -100,12 +102,12 @@ impl SessionProjects {
         // Only rewrite when the serialized form actually changed.
         if let Ok(after) = serde_json::to_string_pretty(&doc) {
             if after != before {
-                let _ = file.set_len(0);
-                let _ = file.seek(SeekFrom::Start(0));
-                let _ = file.write_all(after.as_bytes());
+                if let Err(e) = crate::atomic::write_atomic(&self.json_path, after.as_bytes()) {
+                    tracing::warn!(error = %e, path = %self.json_path.display(), "failed to write session");
+                }
             }
         }
-        let _ = FileExt::unlock(&file);
+        let _ = FileExt::unlock(&lock);
         Ok(result)
     }
 }
