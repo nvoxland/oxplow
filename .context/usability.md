@@ -115,6 +115,22 @@ Things I keep forgetting. Read this before adding any UI.
   buffer and the unsaved draft). See `App.tsx` →
   `handleCloseOpenFile`.
 
+## Links open where you ask them to
+
+Any link that resolves to a page — wiki, task, file, directory, commit —
+supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
+it in a new tab**, plain click navigates in place. The right-click menu
+carries the same pair (Open / Open in new tab) so the gesture is
+discoverable without knowing the modifier.
+
+The rule that keeps this honest: every page-bearing link resolves
+through one `linkTarget(parsed)` and one `navigate(ref, { newTab })`
+call (`components/Wiki/MarkdownView.tsx`). Per-kind click branches are
+how it drifted before — task links honoured the modifier while file,
+directory and commit links silently ignored it (tsk265). A new link kind
+gets the behaviour by being added to `linkTarget`, not by growing
+another branch.
+
 ## Per-row actions (right-click menus)
 
 > The IA redesign briefly moved per-row actions onto visible kebab `⋯`

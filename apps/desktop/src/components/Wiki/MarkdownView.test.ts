@@ -1,5 +1,18 @@
 import { expect, test } from "bun:test";
-import { parseMarkdownLink, postprocessWikilinks, preprocessWikilinks } from "./MarkdownView.js";
+import {
+  linkTarget,
+  parseMarkdownLink,
+  postprocessWikilinks,
+  preprocessWikilinks,
+} from "./MarkdownView.js";
+import {
+  directoryRef,
+  fileRef,
+  gitCommitRef,
+  taskRef,
+  wikiPageRef,
+} from "../../tabs/pageRefs.js";
+import { DISK } from "../../file-version.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -364,4 +377,47 @@ test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]
   expect(postprocessWikilinks(preprocessWikilinks("see [[#13]] please"))).toBe(
     "see [[#13]] please",
   );
+});
+
+// Every internal link kind has to resolve to a tab the same way, or
+// "open in a new tab" works on some and silently does nothing on
+// others — which is what tsk265 found: task links honoured the caller's
+// newTab, file / directory / commit links fell through to legacy
+// single-tab callbacks and dropped it.
+
+test("linkTarget: a wiki link targets its page", () => {
+  expect(linkTarget({ kind: "internal", slug: "some-page" })).toEqual(wikiPageRef("some-page"));
+});
+
+test("linkTarget: a task link targets its task", () => {
+  expect(linkTarget({ kind: "task", id: "tsk42" })).toEqual(taskRef("tsk42"));
+});
+
+test("linkTarget: a directory link targets its directory", () => {
+  expect(linkTarget({ kind: "directory", path: "src/components" })).toEqual(
+    directoryRef("src/components"),
+  );
+});
+
+test("linkTarget: a commit link targets its commit", () => {
+  expect(linkTarget({ kind: "git-commit", sha: "abc123" })).toEqual(gitCommitRef("abc123"));
+});
+
+// A bare file wikilink means "the working tree"; one that pinned a
+// version must keep it rather than being silently substituted.
+test("linkTarget: a bare file link coerces to the working tree", () => {
+  expect(linkTarget({ kind: "file", path: "src/main.rs" })).toEqual(fileRef("src/main.rs", DISK));
+});
+
+test("linkTarget: a pinned file link keeps the version it was authored with", () => {
+  const version = { kind: "commit", sha: "deadbeef" } as const;
+  expect(linkTarget({ kind: "file", path: "src/main.rs", version })).toEqual(
+    fileRef("src/main.rs", version),
+  );
+});
+
+test("linkTarget: things that aren't pages have no target", () => {
+  expect(linkTarget({ kind: "external" })).toBeNull();
+  expect(linkTarget({ kind: "anchor" })).toBeNull();
+  expect(linkTarget({ kind: "empty" })).toBeNull();
 });

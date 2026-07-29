@@ -21,6 +21,7 @@ import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef, taskRef } from "../../tabs/pageRefs.js";
+import type { TabRef } from "../../tabs/tabState.js";
 import { DISK, type FileVersion } from "../../file-version.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
@@ -585,6 +586,36 @@ function WikiLinkSpan({
 }
 
 /**
+ * The tab a parsed link targets, or `null` when it isn't a page at all
+ * (external URLs, anchors, empty and broken refs).
+ *
+ * Every internal link kind resolves through here so they all behave the
+ * same under "open in a new tab". They didn't: `task` routed through
+ * the nav chokepoint with the caller's `newTab`, while `file`,
+ * `directory` and `git-commit` fell through to legacy single-tab
+ * callbacks and silently ignored it (tsk265).
+ */
+export function linkTarget(parsed: ParsedLink): TabRef | null {
+  switch (parsed.kind) {
+    case "file":
+      // Bare wikilinks (no `@version`) coerce to DISK; explicit versions
+      // flow through as authored. Load-bearing: a wikilink that pinned
+      // `@HEAD` must NOT be silently substituted with the working tree.
+      return fileRef(parsed.path, parsed.version ?? DISK);
+    case "directory":
+      return directoryRef(parsed.path);
+    case "git-commit":
+      return gitCommitRef(parsed.sha);
+    case "task":
+      return taskRef(parsed.id);
+    case "internal":
+      return wikiPageRef(parsed.slug);
+    default:
+      return null;
+  }
+}
+
+/**
  * A broken wikilink — an unrecognized target (`[[#13]]`) or a recognized
  * ref whose object doesn't exist. Rendered as inert text (no anchor, no
  * click handler) with a tooltip explaining why, so a reader can't click
@@ -691,63 +722,66 @@ export function MarkdownView({
       else window.open(href, "_blank", "noopener,noreferrer");
       return;
     }
+    // Cmd/Ctrl-click and middle-click mean "open it over there, keep
+    // what I'm reading" — the browser convention.
     const newTab = event.metaKey || event.ctrlKey || event.button === 1;
+
+    // Every page-bearing link goes through the nav chokepoint, so
+    // `newTab` means the same thing for all of them.
+    const target = linkTarget(parsed);
+    if (ctxNav && target) {
+      ctxNav.navigate(target, { newTab });
+      return;
+    }
+
+    // No chokepoint (task notes, and other hosts that predate it): fall
+    // back to the single-tab callbacks. `newTab` can't be honoured here —
+    // these callbacks have no notion of a second tab.
     if (parsed.kind === "file") {
-      // Bare wikilinks (no `@version`) coerce to DISK; explicit
-      // versions flow through as authored. The chokepoint here is
-      // critical: a wikilink that pinned `@HEAD` must NOT be
-      // silently substituted with the working tree.
-      const version: FileVersion = parsed.version ?? DISK;
-      if (ctxNav && !newTab) {
-        ctxNav.navigate(fileRef(parsed.path, version), { newTab: false });
-        return;
-      }
       onOpenFile?.(parsed.path, parsed.line);
       return;
     }
     if (parsed.kind === "directory") {
-      if (ctxNav && !newTab) {
-        ctxNav.navigate(directoryRef(parsed.path), { newTab: false });
-        return;
-      }
       onOpenDirectory?.(parsed.path);
       return;
     }
     if (parsed.kind === "git-commit") {
-      if (ctxNav && !newTab) {
-        ctxNav.navigate(gitCommitRef(parsed.sha), { newTab: false });
-        return;
-      }
       onOpenCommit?.(parsed.sha);
       return;
     }
     if (parsed.kind === "task") {
-      // Task links route through the page-nav chokepoint (present on wiki
-      // and task pages). No legacy callback fallback — tasks weren't a
-      // wikilink target before.
-      if (ctxNav) ctxNav.navigate(taskRef(parsed.id), { newTab });
-      return;
-    }
-    // Internal (wiki) link
-    if (ctxNav && !newTab) {
-      ctxNav.navigate(wikiPageRef(parsed.slug), { newTab: false });
-      return;
+      return; // tasks were never a wikilink target before the chokepoint
     }
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
     else if (onNavigateInternal) onNavigateInternal(parsed.slug);
     // No handlers? Silently ignore — tasks notes don't have wiki nav.
   }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
+  // Right-click parity for Cmd-click: the modifier is the fast path,
+  // the menu is the discoverable one. Both go through the same target.
+  const openItems = useCallback((parsed: ParsedLink): MenuItem[] => {
+    const target = linkTarget(parsed);
+    if (!ctxNav || !target) return [];
+    return [
+      { id: "open", label: "Open", enabled: true, run: () => ctxNav.navigate(target, { newTab: false }) },
+      { id: "open-new", label: "Open in new tab", enabled: true, run: () => ctxNav.navigate(target, { newTab: true }) },
+    ];
+  }, [ctxNav]);
+
   const buildLinkMenu = useCallback((href: string): MenuItem[] => {
     const parsed = parseMarkdownLink(href);
     if (parsed.kind === "internal") {
       const target = parsed.slug;
       const items: MenuItem[] = [];
-      if (onNavigateInternal) {
-        items.push({ id: "open", label: "Open", enabled: true, run: () => onNavigateInternal(target) });
-      }
-      if (onOpenInNewTab) {
-        items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) });
+      if (ctxNav) {
+        items.push(...openItems(parsed));
+      } else {
+        if (onNavigateInternal) {
+          items.push({ id: "open", label: "Open", enabled: true, run: () => onNavigateInternal(target) });
+        }
+        if (onOpenInNewTab) {
+          items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => onOpenInNewTab(target) });
+        }
       }
       return items;
     }
@@ -762,7 +796,9 @@ export function MarkdownView({
     }
     if (parsed.kind === "file") {
       const items: MenuItem[] = [];
-      if (onOpenFile) {
+      if (ctxNav) {
+        items.push(...openItems(parsed));
+      } else if (onOpenFile) {
         items.push({ id: "open-file", label: "Open file", enabled: true, run: () => onOpenFile(parsed.path, parsed.line) });
       }
       items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
@@ -770,7 +806,9 @@ export function MarkdownView({
     }
     if (parsed.kind === "directory") {
       const items: MenuItem[] = [];
-      if (onOpenDirectory) {
+      if (ctxNav) {
+        items.push(...openItems(parsed));
+      } else if (onOpenDirectory) {
         items.push({ id: "open-dir", label: "Open directory", enabled: true, run: () => onOpenDirectory(parsed.path) });
       }
       items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
@@ -778,7 +816,9 @@ export function MarkdownView({
     }
     if (parsed.kind === "git-commit") {
       const items: MenuItem[] = [];
-      if (onOpenCommit) {
+      if (ctxNav) {
+        items.push(...openItems(parsed));
+      } else if (onOpenCommit) {
         items.push({ id: "open-commit", label: "Open commit", enabled: true, run: () => onOpenCommit(parsed.sha) });
       }
       items.push({ id: "copy-sha", label: "Copy SHA", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.sha).catch(() => {}); } });
@@ -787,15 +827,12 @@ export function MarkdownView({
     if (parsed.kind === "task") {
       const id = parsed.id;
       const items: MenuItem[] = [];
-      if (ctxNav) {
-        items.push({ id: "open", label: "Open", enabled: true, run: () => ctxNav.navigate(taskRef(id), { newTab: false }) });
-        items.push({ id: "open-new", label: "Open in new tab", enabled: true, run: () => ctxNav.navigate(taskRef(id), { newTab: true }) });
-      }
+      items.push(...openItems(parsed));
       items.push({ id: "copy-id", label: "Copy task id", enabled: true, run: () => { void navigator.clipboard.writeText(id).catch(() => {}); } });
       return items;
     }
     return [];
-  }, [ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
+  }, [openItems, ctxNav, onNavigateInternal, onOpenInNewTab, onOpenFile, onOpenDirectory, onOpenCommit, onOpenExternalUrl]);
 
   // Mermaid rendering pass — opt-in via renderMermaid flag. Replaces
   // <pre><code class="language-mermaid">…</code></pre> blocks with SVG.
