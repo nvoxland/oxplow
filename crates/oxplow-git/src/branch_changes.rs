@@ -58,26 +58,48 @@ fn collect_working_tree_changes(repo: &Path) -> (Vec<BranchChangeEntry>, Vec<Bra
     if !crate::repo::is_git_repo(repo) {
         return (Vec::new(), Vec::new());
     }
-    let raw = match run_capturing(&["status", "--porcelain=v1", "--untracked-files=all"], repo) {
+    // `-z` is not just a separator change: it turns OFF git's C-quoting.
+    // Without it, any path needing quotes (a space, any non-ASCII byte)
+    // arrives wrapped in `"` with octal escapes, and storing that
+    // verbatim produced phantom directories like `"out` (tsk268).
+    //
+    // It is also unambiguous by construction: the only two bytes a POSIX
+    // filename cannot contain are `/` and NUL, which are exactly the
+    // component and record separators here. Nothing needs decoding, so
+    // nothing can be decoded wrong.
+    let raw = match run_capturing(
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        repo,
+    ) {
         Some(s) => s,
         None => return (Vec::new(), Vec::new()),
     };
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
-    for line in raw.lines() {
-        if line.len() < 4 {
+    let records: Vec<&str> = raw.split('\0').filter(|r| !r.is_empty()).collect();
+    let mut i = 0;
+    while i < records.len() {
+        let record = records[i];
+        i += 1;
+        if record.len() < 4 {
             continue;
         }
-        let bytes = line.as_bytes();
+        let bytes = record.as_bytes();
         let index_code = bytes[0] as char;
         let worktree_code = bytes[1] as char;
-        let rest = &line[3..];
-        // Renames in porcelain v1 read "R<sp><sp>old -> new"; we
-        // record the new path and stash the old as original_path.
-        let (path, original_path) = if let Some(idx) = rest.find(" -> ") {
-            (rest[idx + 4..].to_string(), Some(rest[..idx].to_string()))
+        let path = record[3..].to_string();
+        // Under `-z` a rename/copy has no " -> ": the source path is its
+        // own following record, and the one carrying the status codes is
+        // the destination.
+        let original_path = if matches!(index_code, 'R' | 'C') || matches!(worktree_code, 'R' | 'C')
+        {
+            let source = records.get(i).map(|s| (*s).to_string());
+            if source.is_some() {
+                i += 1;
+            }
+            source
         } else {
-            (rest.to_string(), None)
+            None
         };
         if index_code != ' ' && index_code != '?' {
             staged.push(BranchChangeEntry {
@@ -239,7 +261,10 @@ pub fn list_branch_changes(repo: &Path, base_ref: &str) -> BranchChanges {
     apply_numstat(&mut entries, &counts);
 
     // Untracked files via status --porcelain
-    if let Some(status) = run_capturing(&["status", "--porcelain", "--untracked-files=all"], repo) {
+    if let Some(status) = run_capturing(
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+        repo,
+    ) {
         append_untracked(&mut entries, &status);
     }
 
@@ -279,7 +304,7 @@ fn apply_numstat(entries: &mut [BranchChangeEntry], counts: &[(String, u32, u32)
 fn append_untracked(entries: &mut Vec<BranchChangeEntry>, status: &str) {
     let mut seen: std::collections::HashSet<String> =
         entries.iter().map(|e| e.path.clone()).collect();
-    for line in status.lines() {
+    for line in status.split('\0') {
         if let Some(rest) = line.strip_prefix("?? ") {
             if seen.insert(rest.to_string()) {
                 entries.push(BranchChangeEntry {
@@ -419,16 +444,27 @@ mod merge_tests {
     #[test]
     fn untracked_lines_are_appended_as_untracked_entries() {
         let mut entries = vec![entry("a.rs")];
-        append_untracked(&mut entries, "?? new.rs\n M a.rs\n");
+        // `-z` records: NUL-terminated, never quoted.
+        append_untracked(&mut entries, "?? new.rs\0 M a.rs\0");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].path, "new.rs");
         assert!(matches!(entries[1].change, ChangeKind::Untracked));
     }
 
+    /// The whole point of `-z`: an untracked path with a space is a
+    /// plain record, not a quoted one.
+    #[test]
+    fn untracked_paths_with_spaces_are_not_quoted() {
+        let mut entries = Vec::new();
+        append_untracked(&mut entries, "?? out/Internal Database/x.yaml\0");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "out/Internal Database/x.yaml");
+    }
+
     #[test]
     fn untracked_does_not_duplicate_an_existing_entry() {
         let mut entries = vec![entry("a.rs")];
-        append_untracked(&mut entries, "?? a.rs\n");
+        append_untracked(&mut entries, "?? a.rs\0");
         assert_eq!(entries.len(), 1);
         assert!(matches!(entries[0].change, ChangeKind::Modified));
     }
@@ -455,6 +491,87 @@ mod tests {
     use super::*;
     use std::process::Command as Cmd;
     use tempfile::tempdir;
+
+    /// `-z` changes how renames are encoded, so pin it.
+    ///
+    /// Porcelain v1 writes `R<sp><sp>old -> new` on one line; under `-z`
+    /// there is no arrow — the record carrying the status codes is the
+    /// *destination*, and the source follows as its own NUL-separated
+    /// record. Reading it the old way would take the destination as the
+    /// source and drop a record, desynchronising everything after it
+    /// (tsk268).
+    #[test]
+    fn a_staged_rename_records_both_paths_under_z() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::write(dir.path().join("before.txt"), b"x").unwrap();
+        commit(dir.path(), "base");
+
+        Cmd::new("git")
+            .args(["mv", "before.txt", "after.txt"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        // A second staged change after the rename: if the rename ate the
+        // wrong number of records, this one lands mangled or missing.
+        std::fs::write(dir.path().join("zz-later.txt"), b"y").unwrap();
+        Cmd::new("git")
+            .args(["add", "zz-later.txt"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let (staged, _unstaged) = collect_working_tree_changes(dir.path());
+        let renamed = staged
+            .iter()
+            .find(|e| e.original_path.is_some())
+            .unwrap_or_else(|| panic!("no rename recorded, got {staged:?}"));
+        assert_eq!(renamed.path, "after.txt", "destination is the entry path");
+        assert_eq!(renamed.original_path.as_deref(), Some("before.txt"));
+        assert!(
+            staged.iter().any(|e| e.path == "zz-later.txt"),
+            "the record after a rename must still parse, got {staged:?}"
+        );
+    }
+
+    /// Paths git has to quote must come back as the real path.
+    ///
+    /// `git status --porcelain=v1` C-quotes any path that needs it —
+    /// wrapping it in `"` and escaping the contents — which happens for
+    /// something as ordinary as a space, and for every non-ASCII name.
+    /// Taking the porcelain path verbatim stored the quotes and the
+    /// escapes, so `out/Internal Metabase Database/x.yaml` surfaced as a
+    /// phantom `"out` directory next to the real one, and the recorded
+    /// path pointed at nothing on disk (tsk268).
+    #[test]
+    fn paths_git_quotes_are_recorded_as_the_real_path() {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::write(dir.path().join("plain.txt"), b"x").unwrap();
+        commit(dir.path(), "base");
+
+        // A space forces quoting; a non-ASCII byte forces quoting *and*
+        // octal escaping, which a naive unquote would still get wrong.
+        std::fs::create_dir_all(dir.path().join("out/Internal Database")).unwrap();
+        std::fs::write(dir.path().join("out/Internal Database/x.yaml"), b"y").unwrap();
+        std::fs::write(dir.path().join("caf\u{e9}.txt"), b"z").unwrap();
+
+        let (_staged, unstaged) = collect_working_tree_changes(dir.path());
+        let paths: Vec<&str> = unstaged.iter().map(|e| e.path.as_str()).collect();
+
+        assert!(
+            paths.contains(&"out/Internal Database/x.yaml"),
+            "spaced path should be recorded unquoted, got {paths:?}"
+        );
+        assert!(
+            paths.contains(&"caf\u{e9}.txt"),
+            "non-ASCII path should be recorded decoded, got {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains('"')),
+            "no recorded path should carry git's quoting: {paths:?}"
+        );
+    }
 
     fn init_repo(dir: &Path) {
         Cmd::new("git")
