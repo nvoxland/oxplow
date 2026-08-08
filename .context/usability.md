@@ -131,6 +131,38 @@ directory and commit links silently ignored it (tsk265). A new link kind
 gets the behaviour by being added to `linkTarget`, not by growing
 another branch.
 
+## Hover reveals, click rearranges
+
+- **Hover must never open anything that occludes an adjacent panel.**
+  Hover is involuntary — the pointer crosses your component on its way
+  somewhere else. So it may reveal information *in place* (a tooltip, a
+  highlight, a row's hidden affordance), but expanding a surface over a
+  neighbor requires an explicit click. The Navigator learned this the
+  hard way (tsk269): its 280px panel opened on a zero-dwell `mouseEnter`
+  and covered ~92% of the rail HUD immediately to its right, so simply
+  drifting left on the way to a rail row buried the row you were aiming
+  at. A dwell delay only makes an involuntary action *slower*, not
+  voluntary — the fix was moving the expansion onto a click and leaving
+  hover with the tooltip.
+- **Never gate a control on hover alone.** Whatever hover reveals needs a
+  click/keyboard route too, and an affordance that's visible before you
+  hover. Corollary: an expandable strip needs a persistent chevron, not
+  just a clickable dead zone — dead space evaporates exactly when the
+  list is long, which is when you most need the panel.
+- **Closing on pointer-leave is a geometric test, not `mouseleave`.** An
+  absolutely-positioned panel that covers a sibling is still inside its
+  own wrapper's DOM subtree, so the wrapper's `mouseleave` never fires
+  while the pointer is over the covered region — the panel strands itself
+  open on top of the thing it's covering. Compare the pointer against the
+  panel's `getBoundingClientRect()` on a document `pointermove` instead.
+  Keep a short grace delay (~180ms) so crossing a seam doesn't snap it
+  shut.
+- **Passive closes yield to an in-flight form; explicit ones don't.**
+  Pointer-leave and background-click must not discard a rename or a
+  half-typed new-item entry. Escape, the collapse control, and a press
+  outside the surface are the user actively dismissing — those go
+  through.
+
 ## Per-row actions (right-click menus)
 
 > The IA redesign briefly moved per-row actions onto visible kebab `⋯`
@@ -433,6 +465,13 @@ declaring *what it is* and mounting the generic layer.
     (`navigator-thread-row-<id>`) all open their action menu on
     **right-click** — there are no per-row `*-kebab-<id>` testids any
     more. Right-click the row, then click `menu-item-<id>`.
+  - Navigator strip glyphs are `navigator-strip-stream-<id>` /
+    `navigator-strip-thread-<id>` (click to switch; `title` carries the
+    full name). To open the panel in a test, click `navigator-expand` —
+    **hover does not open it** (tsk269). `navigator-collapse` closes it,
+    as does a click on the `navigator-overlay` background;
+    `navigator-strip-empty` is the strip's dead-space expand target and
+    `navigator-new-thread-input` is the inline add-thread field.
   - `menu-item-<item.id>` on every button inside the shared
     `ContextMenu` / `MenuList` — the `MenuItem.id` becomes the
     testid suffix (e.g. `menu-item-task.delete`,
