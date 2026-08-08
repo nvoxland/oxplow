@@ -389,10 +389,11 @@ declaring *what it is* and mounting the generic layer.
   Shift+click ranges from the selected anchor. A plain click clears
   marks and moves the selection. Marked rows render with a yellow
   left-stripe + tint. Dragging any marked row carries every marked
-  id in `WORK_ITEM_DRAG_MIME.itemIds` so drops on BatchRail chips,
-  the backlog chip, or StreamRail move all of them at once. Drop
-  targets that handle single-item payloads still work — they fall
-  back to `itemId` when `itemIds` is absent.
+  id in `TASK_DRAG_MIME`'s `itemIds` so drops on the backlog chip, on
+  task rows / group headers in `TaskGroupList`, or on the agent
+  terminal move all of them at once. Drop targets that handle
+  single-item payloads still work — they fall back to `itemId` when
+  `itemIds` is absent.
 - **Plan pane: a selection-aware action bar appears at the top of the
   work-group region whenever ≥1 row is marked.** Component:
   `apps/desktop/src/components/Plan/SelectionActionBar.tsx`. Buttons mirror the
@@ -553,13 +554,16 @@ declaring *what it is* and mounting the generic layer.
 - **Highlight the drop target** (dashed border + accent glow) whenever
   a compatible drag enters it. Clear the highlight on leave/drop.
 - **Use a custom MIME type** for internal drags so foreign drags
-  (files, text) don't accidentally trigger app drops. Existing MIMEs:
-  `WORK_ITEM_DRAG_MIME` (task reorder) in
-  `apps/desktop/src/components/ThreadRail.tsx`, `CONTEXT_REF_MIME`
-  ("Add to agent context") in `apps/desktop/src/agent-context-dnd.ts`, and
-  `application/x-oxplow-rail-section` (RailHud section reorder) in
-  `apps/desktop/src/components/RailHud/RailHud.tsx`. Add a new MIME rather
-  than overloading an existing one.
+  (files, text) don't accidentally trigger app drops. **Every internal MIME
+  lives in `apps/desktop/src/dragMimes.ts`** — `TASK_DRAG_MIME` (task
+  reorder / multi-select moves), `CONTEXT_REF_MIME` ("Add to agent
+  context"), `RAIL_SECTION_DRAG_MIME` (RailHud section reorder). Add a new
+  MIME there rather than overloading an existing one, and rather than
+  declaring a `const` next to the component that introduced it: that was
+  the old shape, and `application/x-oxplow-task` ended up defined twice
+  with a unit test whose only job was asserting the copies hadn't drifted
+  (tsk271). The module is deliberately import-free so decoders, pure
+  helpers, and components can all reach it.
 - **Tabs in the three tabbed sections (left dock rail, center pane, bottom
   dock rail) are drag-reorderable.** DockShell rail tabs persist their order
   in the dock's `localStorage` entry (`oxplow.layout.v1.dock.<key>.order`).
@@ -656,14 +660,14 @@ context" kebab/menu action; both share one path through
   payload with `setContextRefDrag(e, ref)` from
   `apps/desktop/src/agent-context-dnd.ts`. Reuse the same helper and the same
   MIME (`application/x-oxplow-context-ref`) for any new referenceable
-  surface — separate from `WORK_ITEM_DRAG_MIME`, which carries the
+  surface — separate from `TASK_DRAG_MIME`, which carries the
   reorder payload.
 - **Multi-row task drag** is a separate path. Plan-pane
-  `WorkGroupList` drag-start enriches the `WORK_ITEM_DRAG_MIME`
+  `TaskGroupList` drag-start enriches the `TASK_DRAG_MIME`
   payload with `items: [{id,title,status}, …]` so cross-pane drop
   targets can decode resolved refs without their own task
   lookup. The TerminalPane drop handler accepts both
-  `CONTEXT_REF_MIME` (single ref) and `WORK_ITEM_DRAG_MIME`
+  `CONTEXT_REF_MIME` (single ref) and `TASK_DRAG_MIME`
   (multi-id), iterates the latter, and pastes a space-separated
   chain of mentions in one drop. Helpers:
   `decodeTaskDragRefs` / `dragHasTaskRefs` in

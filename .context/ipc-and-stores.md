@@ -397,8 +397,9 @@ state.
 - `reorderBatches(streamId, orderedBatchIds[])` — reassigns sequential
   `sort_index` values to the given thread ids (only rows belonging to
   `streamId` are updated). Emits `thread.changed` (kind: "reordered").
-  Promoting or completing a thread no longer auto-moves it to position 0;
-  the user controls order via drag-to-reorder in `BatchRail`.
+  Promoting or completing a thread no longer auto-moves it to position 0.
+  **No UI reaches it today** (tsk272) — the drag-to-reorder lived in the
+  since-deleted thread rail, and the `Navigator` didn't carry it over.
 - `reorderStreams(orderedStreamIds[])` — reassigns sequential
   `sort_index` to streams. Emits `stream.changed` (kind: "reordered").
   `listStreams` now orders by `sort_index, rowid` instead of

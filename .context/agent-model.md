@@ -1405,10 +1405,10 @@ sessions keep the prompt they launched with.
 
 After `agentPromptAppend`, `buildBatchAgentPrompt` also appends:
 - `# Stream instructions` + `stream.custom_prompt` if the stream has a
-  non-empty custom prompt (set via the StreamRail right-click Settings modal,
+  non-empty custom prompt (set on `StreamSettingsPage`,
   persisted to `streams.custom_prompt` — see data-model.md v18).
 - `# Thread instructions` + `thread.custom_prompt` if the thread has a
-  non-empty custom prompt (set via the BatchRail right-click Settings modal,
+  non-empty custom prompt (set on `ThreadSettingsPage`,
   persisted to `threads.custom_prompt` — see data-model.md v18).
 
 These are the last sections before the prompt is finalized, so they can

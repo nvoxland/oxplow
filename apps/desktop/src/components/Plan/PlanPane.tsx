@@ -15,7 +15,7 @@ import {
   removeFollowup,
   subscribeAgentTurns,
 } from "../../api.js";
-import { TASK_DRAG_MIME } from "../ThreadRail.js";
+import { TASK_DRAG_MIME } from "../../dragMimes.js";
 import { ContextMenu } from "../ContextMenu.js";
 import { showToast } from "../toastStore.js";
 import type { MenuItem } from "../../menu.js";
@@ -170,8 +170,9 @@ export function PlanPane({
   // Extra "marked" ids for multi-select beyond the primary `selectedId`. Driven
   // by Cmd/Ctrl+click (toggle) and Shift+click (range from selectedId). When a
   // drag starts on any of the effectiveMarkedIds, the drag payload carries the
-  // whole set so drop targets (ThreadRail, backlog chip, stream chip) can move
-  // them all in one gesture. Plain click clears marks.
+  // whole set so drop targets — the backlog chip, task rows and group headers
+  // in `TaskGroupList`, and the agent terminal — can move them all in one
+  // gesture. Plain click clears marks.
   const [markedIds, setMarkedIds] = useState<Set<string>>(() => new Set());
   const [kbPicker, setKbPicker] = useState<{ kind: "status" | "priority"; itemId: string; extraIds?: string[] } | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);

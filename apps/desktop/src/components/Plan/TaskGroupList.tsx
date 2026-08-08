@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AgentStatus, OpenAgentTurn, ThreadFollowup, Task, TaskPriority, TaskStatus } from "../../api.js";
-import { TASK_DRAG_MIME } from "../ThreadRail.js";
+import { TASK_DRAG_MIME } from "../../dragMimes.js";
 import {
   classifyRow,
   finalizeReorderIds,

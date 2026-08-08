@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { BranchChangeEntry, FinishedEntry, GitFileStatus, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
@@ -90,7 +91,7 @@ const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
 
 const RAIL_SECTION_ORDER_KEY = "oxplow.rail.sectionOrder";
 const RAIL_SECTION_EXPANDED_KEY = "oxplow.rail.sectionExpanded.v1";
-const RAIL_SECTION_DRAG_MIME = "application/x-oxplow-rail-section";
+
 
 /** Persisted section order, reconciled with the known set so a renamed /
  *  added / removed section id never strands the list. */

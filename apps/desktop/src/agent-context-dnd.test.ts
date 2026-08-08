@@ -1,20 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
-  WORK_ITEM_DRAG_MIME_VALUE,
   decodeTaskDragPayload,
   decodeTaskDragRefs,
   resolveTaskContextRefs,
 } from "./agent-context-dnd.js";
-import { TASK_DRAG_MIME } from "./components/ThreadRail.js";
 
-describe("WORK_ITEM_DRAG_MIME_VALUE", () => {
-  test("matches the canonical MIME string from ThreadRail", () => {
-    // Guards against drift between the constant agent-context-dnd holds
-    // (so it can decode payloads without importing the React tree) and
-    // the one ThreadRail/TaskGroupList encode with.
-    expect(WORK_ITEM_DRAG_MIME_VALUE).toBe(TASK_DRAG_MIME);
-  });
-});
+// The drift guard that used to live here (asserting this module's copy of
+// `application/x-oxplow-task` still equalled ThreadRail's) is gone with the
+// duplication itself — both sides now read one constant from
+// `dragMimes.ts`, whose own test pins the literal (tsk271).
 
 describe("decodeTaskDragPayload", () => {
   test("returns [] for null/undefined/empty", () => {

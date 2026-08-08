@@ -4,6 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import type { TerminalEvent } from "../editor-session.js";
 import { desktopBridge } from "../api.js";
 import { logUi } from "../logger.js";
+import { TASK_DRAG_MIME } from "../dragMimes.js";
 import {
   shouldHandleTerminalPageKey,
   shouldReturnTerminalToPrompt,
@@ -13,7 +14,6 @@ import {
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { TerminalCommentLayer } from "./Comments/TerminalCommentLayer.js";
 import {
-  WORK_ITEM_DRAG_MIME_VALUE,
   decodeTaskDragRefs,
   dragHasContextRef,
   dragHasTaskRefs,
@@ -233,7 +233,7 @@ export function TerminalPane({
     // and paste a space-separated chain of context mentions. This is the
     // path for "drag a marked Plan-pane row into the agent" (one or many).
     if (dragHasTaskRefs(e)) {
-      const raw = e.dataTransfer.getData(WORK_ITEM_DRAG_MIME_VALUE);
+      const raw = e.dataTransfer.getData(TASK_DRAG_MIME);
       const refs = decodeTaskDragRefs(raw);
       if (refs.length > 0) {
         e.preventDefault();

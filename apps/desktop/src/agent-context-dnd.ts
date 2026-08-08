@@ -2,6 +2,8 @@
  * Drag-and-drop transport for "Add to agent context" gestures. A
  * separate MIME from the tasks reorder DnD (`TASK_DRAG_MIME`)
  * so the existing reorder logic ignores our payload and vice versa.
+ * Both MIMEs come from `dragMimes.ts`, which is import-free precisely so
+ * this decoder can name them without pulling in the React tree.
  *
  * Drag sources call `setContextRefDrag(e, ref)` in `onDragStart`; the
  * TerminalPane drop handler calls `readContextRef(e)` in `onDragOver`
@@ -10,19 +12,11 @@
 
 import type { DragEvent as ReactDragEvent } from "react";
 import type { ContextRef } from "./agent-context-ref.js";
+import { CONTEXT_REF_MIME, TASK_DRAG_MIME } from "./dragMimes.js";
 
 type AnyDragEvent = ReactDragEvent | DragEvent;
 
-export const CONTEXT_REF_MIME = "application/x-oxplow-context-ref";
 
-/**
- * MIME type carried by the tasks reorder DnD (defined in
- * `ThreadRail.tsx`). Re-declared here as a constant so this module can
- * decode multi-payload tasks drags without pulling in the React
- * tree. The actual MIME string MUST match `TASK_DRAG_MIME` —
- * tests guard against drift.
- */
-export const WORK_ITEM_DRAG_MIME_VALUE = "application/x-oxplow-task";
 
 export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
   const dt = e.dataTransfer;
@@ -89,7 +83,7 @@ export function dragHasContextRef(e: AnyDragEvent): boolean {
  * resolves to a `tasks` context ref.
  */
 export function dragHasTaskRefs(e: AnyDragEvent): boolean {
-  return Array.from(e.dataTransfer?.types ?? []).includes(WORK_ITEM_DRAG_MIME_VALUE);
+  return Array.from(e.dataTransfer?.types ?? []).includes(TASK_DRAG_MIME);
 }
 
 /**

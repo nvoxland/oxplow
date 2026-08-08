@@ -263,7 +263,7 @@ The full IA redesign ships in phases (see plan
   marked-set and routes Change status / Change priority / Add to
   agent context / Delete through the same paths used by single-row
   kebabs. The agent terminal now accepts multi-row task drags
-  (decodes the `WORK_ITEM_DRAG_MIME` payload's `items` slice
+  (decodes the `TASK_DRAG_MIME` payload's `items` slice
   directly — see `.context/usability.md` "Add to agent context").
   Drag-to-add sources expanded: BacklinksList entries, RailHud
   active item / up-next, CodeQualityPanel file group

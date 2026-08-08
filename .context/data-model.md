@@ -171,7 +171,7 @@ Each stream owns:
   branch, branchRef)`, which emits `stream.changed` (kind:
   `"branch-changed"`). The runtime drives it from two sites:
   `Services.checkoutStreamBranch(streamId, branch)` (user-triggered
-  via "Switch branch…" in the StreamRail context menu) and
+  via the `BranchPicker` in the `StatusBar`) and
   `maybeSyncStreamBranch(streamId)` (fired by every `git-refs.changed`
   event so external `git checkout` in a worktree is picked up live).
   Git-level errors (dirty tree, missing branch, branch already checked
@@ -185,11 +185,15 @@ Each stream owns:
   history for the assigned agent)
 - a `runtime_state.current_stream_id` pointer (singleton row, id=1)
 - a `sort_index` column (migration v14) — streams are listed ordered by
-  `sort_index, rowid`; drag-to-reorder in the StreamRail calls
-  `reorderStreams(orderedStreamIds)` which reassigns sequential indexes.
-  The UI enforces **primary-first** regardless of sort_index (the
-  primary tab can't be dragged and nothing can drop before it). Emits a
-  `stream.changed` event (kind: "reordered") so the UI can refresh.
+  `sort_index, rowid`. `reorderStreams(orderedStreamIds)` reassigns
+  sequential indexes and emits a `stream.changed` event (kind:
+  "reordered"). **No UI reaches it today** (tsk272): the drag-to-reorder
+  lived in `StreamRail`, which the `Navigator` superseded without
+  carrying the gesture over; `App.handleReorderStreams` is still defined
+  but is passed to nothing. The store, IPC, and handler all work — only
+  the gesture is missing. Any replacement must keep **primary-first**
+  regardless of sort_index (the primary stream can't be dragged and
+  nothing may drop before it).
 - a `custom_prompt` column (migration V6, nullable TEXT) — per-stream
   standing instructions appended to the agent's system prompt after the
   global `agentPromptAppend` section. Set via the `set_stream_prompt`
