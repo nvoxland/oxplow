@@ -1,5 +1,7 @@
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSlideoutStrip } from "./useSlideoutStrip.js";
+import { SlideoutChevron } from "./SlideoutChevron.js";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
 import { agentLabel } from "../agentKinds.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
@@ -100,11 +102,8 @@ export function Navigator({
   onOpenThreadSettings,
   gitEnabled,
 }: NavigatorProps) {
-  const [overlayOpen, setOverlayOpen] = useState(false);
   const [pendingNewThreadFor, setPendingNewThreadFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
 
   // A rename or a new-thread entry is in flight: the user is committed to
   // an action inside the panel, so neither passive close path (pointer
@@ -112,6 +111,14 @@ export function Navigator({
   // Only an explicit dismissal — Escape, the collapse chevron, a press
   // outside the nav entirely — gets through.
   const formActive = renaming !== null || pendingNewThreadFor !== null;
+
+  // The whole open/close state machine — click-to-open, geometric
+  // pointer-leave, Escape, outside-press, background-click, and the
+  // passive-vs-explicit guard — lives in the shared hook. See
+  // `useSlideoutStrip.ts` for why each rule is the way it is; the
+  // Terminal page's tab strip runs on the same machine.
+  const strip = useSlideoutStrip({ guard: formActive });
+  const overlayOpen = strip.open;
   // Remove-stream confirm flow
   const [removeStream, setRemoveStream] = useState<Stream | null>(null);
   const [removeWorktree, setRemoveWorktree] = useState(false);
@@ -124,10 +131,10 @@ export function Navigator({
   useEffect(
     () =>
       subscribeNewThreadRequests((streamId) => {
-        setOverlayOpen(true);
+        strip.openPanel();
         setPendingNewThreadFor(streamId);
       }),
-    [],
+    [strip],
   );
 
   async function handleRemoveStream() {
@@ -144,65 +151,6 @@ export function Navigator({
     }
   }
 
-  // The panel opens on an explicit CLICK (the strip's chevron, or dead
-  // space in the strip) — never on hover. Hover's only job is the row
-  // tooltip. A zero-dwell hover-open fired whenever the pointer merely
-  // drifted left on its way to the rail HUD, and since the panel covers
-  // ~92% of that rail the accidental open swallowed the very click the
-  // user was lining up (tsk269).
-  //
-  // The close still runs through a short grace delay so crossing a small
-  // gap — into an inline menu, over a panel seam — doesn't snap it shut.
-  const cancelClose = () => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      setOverlayOpen(false);
-      closeTimerRef.current = null;
-    }, 180);
-  };
-  const closeNow = () => {
-    cancelClose();
-    setOverlayOpen(false);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  // Pointer-leave close, tested GEOMETRICALLY rather than via the
-  // wrapper's `mouseleave`. The panel is absolutely positioned over the
-  // rail HUD and lives inside the wrapper's own subtree, so the pointer
-  // never "leaves" the wrapper while it sits over the covered region —
-  // `mouseleave` simply never fires there, which is what stranded the old
-  // hover overlay open on top of the rail. Comparing the pointer against
-  // the panel's rect has no such blind spot.
-  useEffect(() => {
-    if (!overlayOpen) return;
-    const onMove = (e: PointerEvent) => {
-      if (formActive) {
-        cancelClose();
-        return;
-      }
-      const rect = panelRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const inside =
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom;
-      if (inside) cancelClose();
-      else scheduleClose();
-    };
-    document.addEventListener("pointermove", onMove);
-    return () => {
-      document.removeEventListener("pointermove", onMove);
-      cancelClose();
-    };
-  }, [overlayOpen, formActive]);
-
   const orderedStreams = useMemo(() => {
     return streams.slice().sort((a, b) => {
       if (a.kind === "primary" && b.kind !== "primary") return -1;
@@ -211,56 +159,13 @@ export function Navigator({
     });
   }, [streams]);
 
-  // Explicit dismissal while the panel is open — these two beat the
-  // form guard, because they're the user actively saying "go away":
-  //   - Escape, and
-  //   - a pointerdown anywhere outside the panel. A press on the
-  //     still-visible rail / center / tab bar collapses the panel
-  //     immediately, so the very next click lands on the rail instead of
-  //     being intercepted (tsk131). Containment is tested against the
-  //     panel rather than the wrapper: the panel covers the strip
-  //     entirely while open, so "outside the panel" and "outside the nav"
-  //     are the same region, and the panel is the element that would do
-  //     the intercepting. The inline ContextMenu renders as a descendant
-  //     of an overlay row, so `contains` already covers menu presses.
-  useEffect(() => {
-    if (!overlayOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeNow();
-    };
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node | null;
-      if (target && panelRef.current?.contains(target)) return;
-      closeNow();
-    };
-    document.addEventListener("keydown", onKey);
-    // Capture phase so we collapse before the press reaches (and is
-    // consumed by) whatever is beneath the panel.
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onPointerDown, true);
-    };
-  }, [overlayOpen]);
-
-  // A click on the panel's own dead background dismisses it. Controls —
-  // rows, buttons, the rename input, the new-thread input + agent select
-  // — must behave exactly as they normally would, so anything that
-  // resolves to an interactive element is left alone.
-  const handlePanelClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (formActive) return;
-    const el = e.target as Element | null;
-    if (el?.closest("button, input, select, textarea, a, label, [role='button']")) return;
-    closeNow();
-  };
-
   const handleSelectThread = (streamId: string, threadId: string) => {
     // App.handleSelectThread switches the stream first when streamId
     // differs from the current one, so we don't dispatch onSwitchStream
     // separately here — doing both in parallel races their thread-state
     // writes and can leave the old thread selected.
     void onSelectThread(streamId, threadId);
-    closeNow();
+    strip.closePanel();
   };
 
   // Clicking a stream glyph switches to that stream — App restores that
@@ -269,7 +174,7 @@ export function Navigator({
   // would have the two handlers fight over the thread-state write.
   const handleSwitchStream = (streamId: string) => {
     void onSwitchStream(streamId);
-    closeNow();
+    strip.closePanel();
   };
 
   // Build the list of "rows" so the strip and overlay can both walk
@@ -326,9 +231,7 @@ export function Navigator({
           // only one: once the list scrolls there is no dead space left,
           // and `+ Add stream` lives only in the panel. The chevron below
           // is the affordance that's always there.
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setOverlayOpen(true);
-          }}
+          {...strip.deadSpaceProps}
           style={{ flex: 1, overflowY: "auto", paddingTop: 0 }}
         >
           {streamGroups.map((g) => (
@@ -368,11 +271,12 @@ export function Navigator({
             </div>
           ))}
         </div>
-        <ChevronToggle
+        <SlideoutChevron
           direction="expand"
+          stripWidth={STRIP_WIDTH}
           testId="navigator-expand"
           title="Show streams and threads"
-          onClick={() => setOverlayOpen(true)}
+          onClick={strip.openPanel}
         />
       </aside>
 
@@ -382,9 +286,9 @@ export function Navigator({
           glyphs render in the same x-position before and after open. */}
       {overlayOpen ? (
         <div
-          ref={panelRef}
+          ref={strip.panelRef}
           data-testid="navigator-overlay"
-          onClick={handlePanelClick}
+          {...strip.panelProps}
           style={{
             position: "absolute",
             top: 0,
@@ -541,11 +445,12 @@ export function Navigator({
               onClick={() => onOpenNewStreamPage?.()}
             />
           </div>
-          <ChevronToggle
+          <SlideoutChevron
             direction="collapse"
+            stripWidth={STRIP_WIDTH}
             testId="navigator-collapse"
             title="Hide streams and threads"
-            onClick={closeNow}
+            onClick={strip.closePanel}
           />
         </div>
       ) : null}
@@ -915,71 +820,6 @@ function IconCell({
         </span>
       ) : null}
     </span>
-  );
-}
-
-/**
- * The expand / collapse affordance, pinned to the BOTTOM of the strip
- * (and mirrored at the bottom of the open panel). Bottom-pinned and
- * outside the scroll container on purpose: it has to stay reachable no
- * matter how many streams and threads are in the list, which is exactly
- * the case where the strip has no dead space left to click.
- */
-function ChevronToggle({
-  direction,
-  testId,
-  title,
-  onClick,
-}: {
-  direction: "expand" | "collapse";
-  testId: string;
-  title: string;
-  onClick(): void;
-}) {
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        borderTop: "1px solid var(--border-subtle)",
-        padding: "4px 0",
-        display: "flex",
-        // Left-aligned inside a strip-width box rather than centered in
-        // its container: in the strip that reads as centered (the
-        // container IS strip-width), and in the much wider panel it keeps
-        // the chevron at the same x-position, so the control doesn't jump
-        // sideways as the panel opens and closes. Same lock-step rule the
-        // glyph rows follow for their y-positions.
-        justifyContent: "flex-start",
-      }}
-    >
-      <div style={{ width: STRIP_WIDTH, display: "flex", justifyContent: "center" }}>
-        <button
-          type="button"
-          data-testid={testId}
-          onClick={onClick}
-          title={title}
-          aria-label={title}
-          aria-expanded={direction === "collapse"}
-          style={{
-            width: STRIP_WIDTH - 10,
-            height: 24,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-            color: "var(--text-secondary)",
-            border: "1px solid transparent",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: "var(--text-sm)",
-            lineHeight: 1,
-          }}
-        >
-          {direction === "expand" ? "›" : "‹"}
-        </button>
-      </div>
-    </div>
   );
 }
 

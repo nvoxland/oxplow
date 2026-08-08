@@ -133,6 +133,17 @@ another branch.
 
 ## Hover reveals, click rearranges
 
+> **These rules are enforced by code, not just written down here.** The
+> open/close state machine for a slide-out glyph strip lives in
+> `apps/desktop/src/components/useSlideoutStrip.ts`, with the shared
+> bottom-pinned toggle in `SlideoutChevron.tsx`. Both the far-left
+> `Navigator` (streams + threads) and the Terminal page's
+> `TerminalTabStrip` run on it. **A third strip adopts the hook — it does
+> not hand-roll a fourth copy of the timer, the listeners, and the guard.**
+> The terminal strip was hand-written "modeled on the far-left Navigator"
+> and inherited every one of the bugs below, which is why the behavior is
+> now shared code rather than a convention (tsk269, tsk270).
+
 - **Hover must never open anything that occludes an adjacent panel.**
   Hover is involuntary — the pointer crosses your component on its way
   somewhere else. So it may reveal information *in place* (a tooltip, a

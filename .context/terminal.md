@@ -57,9 +57,10 @@ consumer. It's mounted by two page renderers:
   one `TerminalPane` per terminal, stacked and toggled `display:none`
   (keep-warm), with a vertical initials strip
   (`components/Terminal/TerminalTabStrip.tsx`) on the left to select
-  between them. The strip mirrors the far-left `Navigator`: a thin
-  always-visible glyph column, and on hover an overlay slides out with
-  full titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
+  between them. The strip **shares its open/close state machine with the
+  far-left `Navigator`** via `components/useSlideoutStrip.ts`: a thin
+  always-visible glyph column, and a panel that slides out with full
+  titles + a per-row right-click menu (Rename… / Close terminal). Each pane's `paneTarget` is `"shell"` for the first
   (default) terminal and `shell:<id>` for the rest. The backend
   (`commands/terminal.rs`) early-branches on `pane_target == "shell" ||
   starts_with("shell:")` to spawn the user's `$SHELL -l` (fallback
@@ -167,11 +168,26 @@ output, testing the wrong direction).
 closes), `renameTerminal`, `normalizeTerminalList`, plus
 `paneTargetFor(id)` / `commentTargetFor(streamId, id)`.
 
-The strip (`TerminalTabStrip.tsx`) follows the `Navigator` hover-expand
-pattern: clicking a glyph activates; rename and close are right-click
-menu items on the hover-overlay row (rename opens an inline input in the
-overlay row; close is disabled when only one terminal remains). Close is **not**
-an inline `InlineConfirm` `×` anymore — it matches the stream/thread nav.
+The strip (`TerminalTabStrip.tsx`) runs on the shared
+`useSlideoutStrip` hook (`.context/usability.md` → "Hover reveals, click
+rearranges"), so it behaves exactly like the `Navigator`: **hovering a
+glyph shows its title as a tooltip and nothing else**; the panel expands
+only on a click (the bottom-pinned `terminal-tab-expand` chevron, or the
+strip's dead space) and closes on a background click, pointer-leave,
+Escape, or an outside press. Clicking a glyph activates that terminal;
+rename and close are right-click menu items on the panel row (rename
+opens an inline input there; close is disabled when only one terminal
+remains). Close is **not** an inline `InlineConfirm` `×` anymore — it
+matches the stream/thread nav.
+
+Two behaviors the hook fixed here (tsk270), both previously hand-rolled
+and wrong: the strip had **no outside-press dismissal at all** (only
+Escape), so the panel could sit over the xterm surface swallowing clicks;
+and its close timer cleared `renamingId` outright, so drifting the
+pointer away mid-rename **silently discarded the edit**. An open rename
+now passes the hook's `guard`, which suppresses the passive closes
+(pointer-leave, background click) while leaving the explicit ones
+(Escape, outside press, the collapse chevron) working.
 
 - **The first terminal uses the sentinel id `DEFAULT_TERMINAL_ID`
   (`"default"`)** → bare `"shell"` pane target + `stream.id` comment
@@ -333,6 +349,9 @@ each scans the same line. Examples for the future:
   `shell:<id>`) → note what the backend spawns for it.
 - Changed how the Terminal page manages its terminal list, persistence,
   or the kill-vs-detach close path → update "Multiple terminals".
+- Changed the tab strip's expand/collapse behavior → change it in
+  `components/useSlideoutStrip.ts` (shared with the `Navigator`), not
+  here; update "Multiple terminals" only if the strip stops using it.
 - Changed terminal comment anchoring (buffer serialization, the
   `TerminalBufferSelector`, or the decoration painting) → update the
   commenting section.

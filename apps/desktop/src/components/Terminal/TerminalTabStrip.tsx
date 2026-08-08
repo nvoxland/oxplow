@@ -2,26 +2,35 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { titleInitials } from "../../initials.js";
 import { useContextMenu } from "../useRowContextMenu.js";
+import { useSlideoutStrip } from "../useSlideoutStrip.js";
+import { SlideoutChevron } from "../SlideoutChevron.js";
 import type { MenuItem } from "../../menu.js";
 import type { TerminalTab } from "./terminalTabs.js";
 
 /**
- * Vertical tab strip for the Terminal page, modeled on the far-left
- * `Navigator`: a thin always-visible strip shows a two-letter initial
- * glyph per terminal (via {@link titleInitials}); hovering the strip
- * slides an overlay panel out to the right that re-renders the same
- * rows with their full titles. Glyph y-positions match between strip
- * and overlay so nothing jumps when the overlay opens. The overlay
- * closes on mouse-leave (with a short grace delay) or Escape.
+ * Vertical tab strip for the Terminal page, sharing its open/close state
+ * machine with the far-left `Navigator` via {@link useSlideoutStrip}: a
+ * thin always-visible strip shows a two-letter initial glyph per terminal
+ * (via {@link titleInitials}), and a panel slides over it re-rendering the
+ * same rows with their full titles. Glyph y-positions match between strip
+ * and panel so nothing jumps when it opens.
  *
- * Interactions (per `.context/usability.md`):
- * - Click a glyph (strip or overlay row) → activate.
+ * Interactions (per `.context/usability.md` → "Hover reveals, click
+ * rearranges"):
+ * - Hover a glyph → tooltip with the full title. Hover does NOT expand;
+ *   the panel covers the xterm surface, so an involuntary open would bury
+ *   a live click target.
+ * - Click a glyph (strip or panel row) → activate.
+ * - The bottom-pinned chevron expands / collapses; clicking the strip's
+ *   dead space expands too.
  * - Per-row actions live on the right-click menu (Menu key / Shift+F10
- *   for keyboard): Rename… opens an inline input in the overlay row
- *   (Enter commits, Escape cancels, blur commits unless Escape was
- *   pressed); Close terminal kills the shell (disabled when only one
- *   terminal remains).
+ *   for keyboard): Rename… opens an inline input in the panel row (Enter
+ *   commits, Escape cancels, blur commits unless Escape was pressed);
+ *   Close terminal kills the shell (disabled when only one remains).
  * - "+ New" appends a terminal.
+ *
+ * An open rename passes `guard`, so drifting the pointer off the panel
+ * can't discard it — that used to silently throw the edit away.
  */
 export function TerminalTabStrip({
   tabs,
@@ -38,148 +47,151 @@ export function TerminalTabStrip({
   onClose(id: string): void;
   onRename(id: string, title: string): void;
 }) {
-  const [overlayOpen, setOverlayOpen] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const closeTimerRef = useRef<number | null>(null);
   const canClose = tabs.length > 1;
   const cm = useContextMenu();
+  const strip = useSlideoutStrip({
+    guard: renamingId !== null,
+    onClose: () => setRenamingId(null),
+  });
 
-  // Hover-to-open, mirroring Navigator: open on enter, close on leave
-  // with a short grace delay so crossing into the kebab portal or
-  // overshooting doesn't snap the overlay shut.
-  const cancelClose = () => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
+  const activate = (id: string) => {
+    onActivate(id);
+    strip.closePanel();
   };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      setOverlayOpen(false);
-      setRenamingId(null);
-      closeTimerRef.current = null;
-    }, 180);
-  };
-  useEffect(() => () => cancelClose(), []);
-
-  useEffect(() => {
-    if (!overlayOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOverlayOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [overlayOpen]);
 
   return (
-    <div
-      onMouseEnter={() => {
-        cancelClose();
-        setOverlayOpen(true);
-      }}
-      onMouseLeave={scheduleClose}
-      style={{ position: "relative", display: "flex", height: "100%", flexShrink: 0 }}
-    >
+    <div style={{ position: "relative", display: "flex", height: "100%", flexShrink: 0 }}>
       {/* Always-visible strip */}
       <div data-testid="terminal-tab-strip" style={stripStyle}>
-        {tabs.map((tab) => {
-          const active = tab.id === activeId;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              data-testid={`terminal-tab-${tab.id}`}
-              title={tab.title}
-              onClick={() => onActivate(tab.id)}
-              style={glyphButtonStyle(active)}
-            >
-              {titleInitials(tab.title)}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          data-testid="terminal-tab-new"
-          title="New terminal"
-          onClick={onNew}
-          style={newButtonStyle}
+        <div
+          data-testid="terminal-tab-strip-empty"
+          style={stripScrollStyle}
+          {...strip.deadSpaceProps}
         >
-          +
-        </button>
-      </div>
-
-      {/* Hover overlay — anchored at left:0 so it covers the strip; the
-          icon column matches the strip width, so glyphs don't shift. */}
-      {overlayOpen ? (
-        <div data-testid="terminal-tab-overlay" style={overlayStyle}>
           {tabs.map((tab) => {
             const active = tab.id === activeId;
-            const renaming = renamingId === tab.id;
-            const menu: MenuItem[] = [
-              {
-                id: "terminal.rename",
-                label: "Rename…",
-                enabled: true,
-                run: () => setRenamingId(tab.id),
-              },
-              {
-                id: "terminal.close",
-                label: "Close terminal",
-                enabled: canClose,
-                run: () => onClose(tab.id),
-              },
-            ];
             return (
-              <div
+              <button
                 key={tab.id}
-                role={renaming ? undefined : "button"}
-                tabIndex={renaming ? undefined : 0}
-                onClick={renaming ? undefined : () => onActivate(tab.id)}
-                onContextMenu={renaming ? undefined : (e) => cm.open(e, menu)}
+                type="button"
+                data-testid={`terminal-tab-${tab.id}`}
                 title={tab.title}
-                style={overlayRowStyle(active)}
+                onClick={() => onActivate(tab.id)}
+                style={glyphButtonStyle(active)}
               >
-                <div style={overlayIconColStyle}>
-                  <span style={overlayGlyphStyle}>{titleInitials(tab.title)}</span>
-                </div>
-                {renaming ? (
-                  <RenameInput
-                    defaultValue={tab.title}
-                    testId={`terminal-tab-rename-input-${tab.id}`}
-                    onCommit={(next) => {
-                      setRenamingId(null);
-                      onRename(tab.id, next);
-                    }}
-                    onCancel={() => setRenamingId(null)}
-                  />
-                ) : (
-                  <span
-                    onDoubleClick={() => setRenamingId(tab.id)}
-                    style={{
-                      flex: 1,
-                      fontSize: "var(--text-sm)",
-                      color: active ? "var(--text-primary)" : "var(--text-secondary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {tab.title}
-                  </span>
-                )}
-              </div>
+                {titleInitials(tab.title)}
+              </button>
             );
           })}
           <button
             type="button"
-            data-testid="terminal-tab-new-overlay"
+            data-testid="terminal-tab-new"
             title="New terminal"
             onClick={onNew}
-            style={overlayNewButtonStyle}
+            style={newButtonStyle}
           >
-            + New terminal
+            +
           </button>
+        </div>
+        <SlideoutChevron
+          direction="expand"
+          stripWidth={STRIP_WIDTH}
+          testId="terminal-tab-expand"
+          title="Show terminals"
+          onClick={strip.openPanel}
+        />
+      </div>
+
+      {/* Slide-over panel — anchored at left:0 so it covers the strip; the
+          icon column matches the strip width, so glyphs don't shift. */}
+      {strip.open ? (
+        <div
+          ref={strip.panelRef}
+          data-testid="terminal-tab-overlay"
+          style={overlayStyle}
+          {...strip.panelProps}
+        >
+          <div style={overlayScrollStyle}>
+            {tabs.map((tab) => {
+              const active = tab.id === activeId;
+              const renaming = renamingId === tab.id;
+              const menu: MenuItem[] = [
+                {
+                  id: "terminal.rename",
+                  label: "Rename…",
+                  enabled: true,
+                  run: () => setRenamingId(tab.id),
+                },
+                {
+                  id: "terminal.close",
+                  label: "Close terminal",
+                  enabled: canClose,
+                  run: () => onClose(tab.id),
+                },
+              ];
+              return (
+                <div
+                  key={tab.id}
+                  data-testid={`terminal-tab-row-${tab.id}`}
+                  role={renaming ? undefined : "button"}
+                  tabIndex={renaming ? undefined : 0}
+                  onClick={renaming ? undefined : () => activate(tab.id)}
+                  onContextMenu={renaming ? undefined : (e) => cm.open(e, menu)}
+                  // Keyboard parity for the right-click menu — Menu key /
+                  // Shift+F10 on the focused row (`.context/usability.md`).
+                  onKeyDown={renaming ? undefined : (e) => cm.openForKey(e, menu)}
+                  title={tab.title}
+                  style={overlayRowStyle(active)}
+                >
+                  <div style={overlayIconColStyle}>
+                    <span style={overlayGlyphStyle}>{titleInitials(tab.title)}</span>
+                  </div>
+                  {renaming ? (
+                    <RenameInput
+                      defaultValue={tab.title}
+                      testId={`terminal-tab-rename-input-${tab.id}`}
+                      onCommit={(next) => {
+                        setRenamingId(null);
+                        onRename(tab.id, next);
+                      }}
+                      onCancel={() => setRenamingId(null)}
+                    />
+                  ) : (
+                    <span
+                      onDoubleClick={() => setRenamingId(tab.id)}
+                      style={{
+                        flex: 1,
+                        fontSize: "var(--text-sm)",
+                        color: active ? "var(--text-primary)" : "var(--text-secondary)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {tab.title}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              data-testid="terminal-tab-new-overlay"
+              title="New terminal"
+              onClick={onNew}
+              style={overlayNewButtonStyle}
+            >
+              + New terminal
+            </button>
+          </div>
+          <SlideoutChevron
+            direction="collapse"
+            stripWidth={STRIP_WIDTH}
+            testId="terminal-tab-collapse"
+            title="Hide terminals"
+            onClick={strip.closePanel}
+          />
         </div>
       ) : null}
       {cm.menu}
@@ -213,6 +225,8 @@ function RenameInput({
       defaultValue={defaultValue}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
+        // Keep Escape local: it cancels the rename, and must not also
+        // reach the panel's document-level dismissal listener.
         e.stopPropagation();
         if (e.key === "Enter") {
           onCommit((e.target as HTMLInputElement).value);
@@ -234,9 +248,24 @@ const STRIP_WIDTH = 52;
 const OVERLAY_WIDTH = 220;
 const ROW_HEIGHT = 40;
 
+// The strip is a column with a pinned chevron footer; only the inner
+// region scrolls, so the toggle stays reachable however long the list is.
 const stripStyle: CSSProperties = {
   width: STRIP_WIDTH,
   flexShrink: 0,
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  // A vertical control strip — neutral chrome surface (same as the
+  // Navigator strip), not the blue header tint and not the near-black
+  // content tier.
+  background: "var(--surface-chrome)",
+  borderRight: "1px solid var(--border-subtle)",
+};
+
+const stripScrollStyle: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
   display: "flex",
   flexDirection: "column",
   gap: 4,
@@ -244,12 +273,6 @@ const stripStyle: CSSProperties = {
   // right divider. A little bottom padding keeps the `+` off the floor.
   padding: "0 0 6px 0",
   overflowY: "auto",
-  // A vertical control strip — neutral chrome surface (same as the
-  // Navigator strip), not the blue header tint and not the near-black
-  // content tier.
-  background: "var(--surface-chrome)",
-  borderRight: "1px solid var(--border-subtle)",
-  minHeight: 0,
 };
 
 function glyphButtonStyle(active: boolean): CSSProperties {
@@ -295,13 +318,21 @@ const overlayStyle: CSSProperties = {
   width: STRIP_WIDTH + OVERLAY_WIDTH,
   display: "flex",
   flexDirection: "column",
-  gap: 4,
-  padding: "0 6px 6px 0",
-  overflowY: "auto",
+  minHeight: 0,
   background: "var(--surface-chrome)",
   borderRight: "1px solid var(--border-strong)",
   boxShadow: "8px 0 24px rgba(0, 0, 0, 0.45)",
   zIndex: 30,
+};
+
+const overlayScrollStyle: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  padding: "0 6px 6px 0",
+  overflowY: "auto",
 };
 
 function overlayRowStyle(active: boolean): CSSProperties {
@@ -321,7 +352,7 @@ function overlayRowStyle(active: boolean): CSSProperties {
 }
 
 // Width matches the strip so the glyph renders at the same x before and
-// after the overlay opens (minus the 3px active stripe the row owns).
+// after the panel opens (minus the 3px active stripe the row owns).
 const overlayIconColStyle: CSSProperties = {
   width: STRIP_WIDTH - 3,
   flexShrink: 0,
