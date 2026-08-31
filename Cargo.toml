@@ -49,7 +49,7 @@ unwrap_used = "warn"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.52", features = ["full"] }
+tokio = { version = "1.53", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt", "codec"] }
 futures = "0.3"
 async-trait = "0.1"
@@ -58,15 +58,21 @@ async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+# HELD at rc.24 (tsk274). The three specta crates are version-locked to each
+# other, and specta-typescript 0.0.12 forbids exporting BigInt-style ints
+# (i64/u64/usize/...) outright — it removed the global escape hatch that used
+# to render them as `number`. Ten domain fields (sort_index, timestamps,
+# counts) trip it, so moving the trio needs a decision on which migration
+# path oxplow takes, not just a version bump. Move all three together.
 specta = { version = "=2.0.0-rc.24", features = ["derive", "time", "serde_json"] }
-quick-xml = "0.39"
-regex = "1.11"
+quick-xml = "0.41"
+regex = "1.13"
 # XPath over report XML, exposed to collection plugins. Pure Rust.
 sxd-document = "0.3"
 sxd-xpath = "0.4"
 # Collection plugin transform runtimes (pure Rust, sandboxed, ship in-binary).
 # jaq = jq for JSON→JSON reshaping (primary); starlark = general/imperative tier.
-jaq-core = "3.0"
+jaq-core = "3.1"
 jaq-json = "2.0"
 jaq-std = "3.0"
 starlark = "0.14"
@@ -83,9 +89,9 @@ uuid = { version = "1.20", features = ["v4", "v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # DB
-rusqlite = { version = "0.37", features = ["bundled", "time", "uuid", "serde_json"] }
+rusqlite = { version = "0.39", features = ["bundled", "time", "uuid", "serde_json"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.31"
+r2d2_sqlite = "0.34"
 refinery = { version = "0.9", features = ["rusqlite"] }
 
 # Filesystem
@@ -97,11 +103,11 @@ globset = "0.4"
 libc = "0.2"
 
 # Git
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
 # PTY
 portable-pty = "0.9"
-bytes = "1.11"
+bytes = "1.12"
 
 # LSP / JSON-RPC
 lsp-types = "0.97"
@@ -115,7 +121,7 @@ sha2 = "0.10"
 hex = "0.4"
 
 # MCP
-rmcp = { version = "0.16", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "2.2", features = ["server", "transport-io", "macros"] }
 
 # Tauri
 tauri = { version = "2", features = [] }

@@ -53,8 +53,8 @@ pub fn list_all_refs(repo_path: &Path) -> GroupedGitRefs {
     if let Ok(refs) = repo.references() {
         for r in refs.flatten() {
             let name = match r.name() {
-                Some(n) => n.to_string(),
-                None => continue,
+                Ok(n) => n.to_string(),
+                Err(_) => continue,
             };
             if name == "HEAD" {
                 continue;
@@ -143,7 +143,7 @@ pub fn resolve_commit_ref_labels(
         }
     }
     if let Ok(tag_names) = repo.tag_names(None) {
-        for name in tag_names.iter().flatten() {
+        for name in tag_names.iter().filter_map(|n| n.ok().flatten()) {
             let full = format!("refs/tags/{name}");
             let Ok(reference) = repo.find_reference(&full) else {
                 continue;
@@ -229,7 +229,7 @@ pub fn list_file_commits(repo_path: &Path, path: &str, limit: usize) -> Vec<GitL
             author: commit.author().name().unwrap_or("").to_string(),
             email: commit.author().email().unwrap_or("").to_string(),
             timestamp_secs: commit.time().seconds(),
-            subject: commit.summary().unwrap_or("").to_string(),
+            subject: commit.summary().ok().flatten().unwrap_or("").to_string(),
             parents: commit.parent_ids().map(|p| p.to_string()).collect(),
         });
         if out.len() >= limit {
@@ -267,8 +267,8 @@ pub fn list_recent_remote_branches(repo_path: &Path, limit: usize) -> Vec<Remote
     if let Ok(refs) = repo.references_glob("refs/remotes/*/*") {
         for r in refs.flatten() {
             let name = match r.shorthand() {
-                Some(n) => n.to_string(),
-                None => continue,
+                Ok(n) => n.to_string(),
+                Err(_) => continue,
             };
             if name.ends_with("/HEAD") {
                 continue;
@@ -281,7 +281,7 @@ pub fn list_recent_remote_branches(repo_path: &Path, limit: usize) -> Vec<Remote
                 ref_name: r.name().unwrap_or("").to_string(),
                 short_name: name,
                 last_commit_at: commit.time().seconds(),
-                last_commit_subject: commit.summary().unwrap_or("").to_string(),
+                last_commit_subject: commit.summary().ok().flatten().unwrap_or("").to_string(),
             });
         }
     }

@@ -966,12 +966,12 @@ impl OxplowMcp {
 
     #[tool(description = "Liveness check: returns \"pong\".")]
     async fn ping(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text("pong")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("pong")]))
     }
 
     #[tool(description = "Get the running oxplow daemon version.")]
     async fn app_version(&self) -> Result<CallToolResult, McpError> {
-        Ok(CallToolResult::success(vec![Content::text(env!(
+        Ok(CallToolResult::success(vec![ContentBlock::text(env!(
             "CARGO_PKG_VERSION"
         ))]))
     }
@@ -1759,7 +1759,7 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         self.emit_tasks_changed(item.and_then(|i| i.thread_id));
-        Ok(CallToolResult::success(vec![Content::text("deleted")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("deleted")]))
     }
 
     // ---------- thread notes ----------
@@ -2849,7 +2849,7 @@ impl OxplowMcp {
             .delete(&id)
             .await
             .map_err(internal)?;
-        Ok(CallToolResult::success(vec![Content::text("deleted")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("deleted")]))
     }
 
     // ---------- wiki pages ----------
@@ -3039,7 +3039,7 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("remove_followup", "id", &params.0.id, ID_FOLLOWUP)?;
         self.services.followups.remove(&params.0.id);
-        Ok(CallToolResult::success(vec![Content::text("removed")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text("removed")]))
     }
 
     // ---------- task orchestration ----------
@@ -3662,7 +3662,9 @@ impl OxplowMcp {
             state: status.state,
             detail: status.detail,
         });
-        Ok(CallToolResult::success(vec![Content::text("awaiting")]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            "awaiting",
+        )]))
     }
 
     #[tool(description = "Bundle of thread state, tasks, and recent activity.")]
@@ -3700,7 +3702,7 @@ impl OxplowMcp {
             "items": items,
             "events": events,
         });
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             bundle.to_string(),
         )]))
     }
@@ -3750,7 +3752,7 @@ impl OxplowMcp {
         }
         self.emit_tasks_changed(thread);
         let bundle = serde_json::json!({ "epic": epic, "children": children_out });
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             bundle.to_string(),
         )]))
     }
@@ -3969,7 +3971,7 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -3992,7 +3994,7 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -4016,7 +4018,7 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -4043,7 +4045,7 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -4066,7 +4068,7 @@ impl OxplowMcp {
             .request("workspace/symbol", serde_json::json!({ "query": p.query }))
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -4132,7 +4134,7 @@ impl OxplowMcp {
             .await
             .map_err(|e| internal(e.to_string()))?;
         let Some(item) = prepared.as_array().and_then(|a| a.first()).cloned() else {
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "[]".to_string(),
             )]));
         };
@@ -4145,7 +4147,7 @@ impl OxplowMcp {
             .request(method, serde_json::json!({ "item": item }))
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             calls.to_string(),
         )]))
     }
@@ -4167,7 +4169,7 @@ impl OxplowMcp {
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             resp.to_string(),
         )]))
     }
@@ -4644,15 +4646,17 @@ fn stamp_read_only_hints(tools: Vec<Tool>) -> Vec<Tool> {
 
 impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
-                "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces \
-                 for managing oxplow work items and project knowledge."
-                    .into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+        // `ServerInfo` is #[non_exhaustive] as of rmcp 2.x, so it can't be
+        // built with struct-expression syntax (not even with a
+        // `..Default::default()` tail). Start from the default and assign.
+        let mut info = ServerInfo::default();
+        info.instructions = Some(
+            "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces \
+             for managing oxplow work items and project knowledge."
+                .into(),
+        );
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info
     }
 
     // These three methods replace what `#[tool_handler]` would generate. We
@@ -5126,7 +5130,7 @@ impl<T: serde::Serialize> WithLinkWarnings<T> {
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
     let json = serde_json::to_string_pretty(value).map_err(internal)?;
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
 }
 
 /// Convenience wrapper: spawn the server on stdio.

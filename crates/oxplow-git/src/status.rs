@@ -23,7 +23,7 @@ pub fn list_git_statuses(repo_path: &Path) -> HashMap<String, GitFileStatus> {
         return out;
     };
     for entry in statuses.iter() {
-        let Some(path) = entry.path().map(|s| s.to_string()) else {
+        let Ok(path) = entry.path().map(|s| s.to_string()) else {
             continue;
         };
         let s = entry.status();
@@ -83,7 +83,7 @@ pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
     // `root` is the directory prefix ending in `/` ("" at the top).
     let _ = tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         if entry.kind() == Some(git2::ObjectType::Blob) {
-            if let Some(name) = entry.name() {
+            if let Ok(name) = entry.name() {
                 out.insert(format!("{root}{name}"), entry.id().to_string());
             }
         }
@@ -103,7 +103,7 @@ pub fn clean_head_blob_oids(repo_path: &Path) -> HashMap<String, String> {
         .renames_index_to_workdir(false);
     if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
         for entry in statuses.iter() {
-            if let Some(path) = entry.path() {
+            if let Ok(path) = entry.path() {
                 out.remove(path);
             }
         }
@@ -164,7 +164,7 @@ impl GitCleanBaseline {
         let mut head_tree: HashMap<String, String> = HashMap::new();
         let _ = tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
             if entry.kind() == Some(git2::ObjectType::Blob) {
-                if let Some(name) = entry.name() {
+                if let Ok(name) = entry.name() {
                     head_tree.insert(format!("{root}{name}"), entry.id().to_string());
                 }
             }

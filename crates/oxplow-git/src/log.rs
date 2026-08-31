@@ -85,7 +85,7 @@ pub fn get_git_log(repo_path: &Path, options: GitLogOptions) -> GitLogResult {
             author: author.name().unwrap_or("").to_string(),
             email: author.email().unwrap_or("").to_string(),
             timestamp_secs: commit.time().seconds(),
-            subject: commit.summary().unwrap_or("").to_string(),
+            subject: commit.summary().ok().flatten().unwrap_or("").to_string(),
             parents: commit.parent_ids().map(|p| p.to_string()).collect(),
         });
     }
@@ -125,7 +125,7 @@ fn collect_log_refs(repo: &git2::Repository) -> (Vec<GitLogRef>, Vec<GitLogRef>)
         }
     }
     if let Ok(tag_names) = repo.tag_names(None) {
-        for name in tag_names.iter().flatten() {
+        for name in tag_names.iter().filter_map(|n| n.ok().flatten()) {
             let full = format!("refs/tags/{name}");
             let Ok(reference) = repo.find_reference(&full) else {
                 continue;
@@ -262,8 +262,8 @@ pub fn get_commit_detail(repo_path: &Path, sha: &str) -> Option<CommitDetail> {
         author: author.name().unwrap_or("").to_string(),
         email: author.email().unwrap_or("").to_string(),
         timestamp_secs: commit.time().seconds(),
-        subject: commit.summary().unwrap_or("").to_string(),
-        body: commit.body().unwrap_or("").to_string(),
+        subject: commit.summary().ok().flatten().unwrap_or("").to_string(),
+        body: commit.body().ok().flatten().unwrap_or("").to_string(),
         parents,
         files,
     })

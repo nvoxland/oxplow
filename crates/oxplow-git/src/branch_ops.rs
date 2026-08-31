@@ -63,7 +63,7 @@ pub fn detect_default_branch(repo_path: &Path) -> Option<String> {
         }
     }
     if let Ok(reference) = repo.find_reference("refs/remotes/origin/HEAD") {
-        if let Some(target) = reference.symbolic_target() {
+        if let Ok(Some(target)) = reference.symbolic_target() {
             if let Some(name) = target.strip_prefix("refs/remotes/origin/") {
                 return Some(name.to_string());
             }
@@ -158,7 +158,7 @@ pub fn get_commits_ahead_of(
             author: author.name().unwrap_or("").to_string(),
             email: author.email().unwrap_or("").to_string(),
             timestamp_secs: commit.time().seconds(),
-            subject: commit.summary().unwrap_or("").to_string(),
+            subject: commit.summary().ok().flatten().unwrap_or("").to_string(),
             parents: commit.parent_ids().map(|p| p.to_string()).collect(),
         });
     }

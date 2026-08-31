@@ -29,7 +29,7 @@ tokio-util = { workspace = true }
 tokio-stream = "0.1"
 futures = "0.3"
 bytes = "1"
-base64 = "0.22"
+base64 = "0.23"
 tracing = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -53,6 +53,12 @@ prost = "0.14"
 git2 = { workspace = true }
 
 [dev-dependencies]
+# `#[tokio::test(start_paused = true)]` in wiki_pages.rs needs the paused
+# clock, which lives behind `test-util` — NOT part of tokio's `full`. This
+# compiled for a while only because a transitive dependency happened to
+# enable the feature and cargo unified it in; a routine `cargo update`
+# removed that leak and the tests stopped building. Declare it explicitly.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

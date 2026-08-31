@@ -26,6 +26,7 @@
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
 use serde_json::{Map, Number, Value};
 
 /// Errors from a container-parse helper. Each wraps the underlying engine's
@@ -223,8 +224,13 @@ fn start_frame(e: &BytesStart) -> Result<Frame, HelperError> {
     for a in e.attributes() {
         let a = a.map_err(|er| HelperError::Xml(er.to_string()))?;
         let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
+        // quick-xml 0.41 deprecated `unescape_value()` in favour of the
+        // spec-named `normalized_value()`. `Implicit1_0` reproduces the old
+        // method exactly — its body was
+        // `normalized_value_with(Implicit1_0, 1, resolve_predefined_entity)`,
+        // which is what `normalized_value(Implicit1_0)` calls.
         let val = a
-            .unescape_value()
+            .normalized_value(XmlVersion::Implicit1_0)
             .map_err(|er| HelperError::Xml(er.to_string()))?
             .into_owned();
         attrs.insert(key, Value::String(val));

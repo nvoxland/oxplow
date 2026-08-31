@@ -215,7 +215,7 @@ mod tests {
             .unwrap()
             .shorthand()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "main".into())
+            .unwrap_or_else(|_| "main".into())
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub fn detect_current_branch(path: impl AsRef<Path>) -> Option<String> {
     if !head.is_branch() {
         return None;
     }
-    head.shorthand().map(|s| s.to_string())
+    head.shorthand().ok().map(|s| s.to_string())
 }
 
 #[cfg(test)]

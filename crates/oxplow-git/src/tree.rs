@@ -28,7 +28,7 @@ pub fn tree_at_commit(
     let mut out: BTreeMap<String, String> = BTreeMap::new();
     tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         if entry.kind() == Some(git2::ObjectType::Blob) {
-            if let Some(name) = entry.name() {
+            if let Ok(name) = entry.name() {
                 // `root` is "" at the top level, else "dir/.../".
                 out.insert(format!("{root}{name}"), entry.id().to_string());
             }
