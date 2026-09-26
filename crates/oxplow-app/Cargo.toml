@@ -36,17 +36,17 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 specta = { workspace = true }
 async-trait = { workspace = true }
-indexmap = "2.11"
+indexmap = "2.14"
 parking_lot = "0.12"
 fs2 = "0.4"
 libc = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-similar = "2"
+similar = "3"
 rayon = "1"
 uuid = { workspace = true }
 tempfile = { workspace = true }
 walkdir = "2.5"
-opentelemetry-proto = { version = "0.32.0", default-features = false, features = ["gen-tonic-messages", "metrics", "logs"] }
+opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics", "logs"] }
 prost = "0.14"
 # The metric-ancestry oracle (metric_visibility.rs) asks git two questions —
 # ancestor-of and commit-time — directly via git2; oxplow-git wraps neither.

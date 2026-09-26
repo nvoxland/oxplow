@@ -4645,11 +4645,12 @@ fn stamp_read_only_hints(tools: Vec<Tool>) -> Vec<Tool> {
 }
 
 impl ServerHandler for OxplowMcp {
-    fn get_info(&self) -> ServerInfo {
-        // `ServerInfo` is #[non_exhaustive] as of rmcp 2.x, so it can't be
-        // built with struct-expression syntax (not even with a
-        // `..Default::default()` tail). Start from the default and assign.
-        let mut info = ServerInfo::default();
+    fn get_info(&self) -> ServerConfig {
+        // `ServerConfig` (née `ServerInfo`, renamed in rmcp 3) is
+        // #[non_exhaustive], so it can't be built with struct-expression
+        // syntax (not even with a `..Default::default()` tail). Start from
+        // the default and assign.
+        let mut info = ServerConfig::default();
         info.instructions = Some(
             "Oxplow MCP server. Exposes task, note, wiki, and stream surfaces \
              for managing oxplow work items and project knowledge."
@@ -4661,17 +4662,24 @@ impl ServerHandler for OxplowMcp {
 
     // These three methods replace what `#[tool_handler]` would generate. We
     // hand-roll them only so `list_tools` can stamp `read_only_hint` on the
-    // read-tool family (tsk203); `call_tool`/`get_tool` are the macro's
-    // verbatim delegations to `self.tool_router`.
+    // read-tool family (tsk203); everything else — including rmcp 3's cache
+    // hints — mirrors the macro's output (rmcp-macros `tool_handler.rs`), so
+    // re-diff against it on an rmcp bump.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= ProtocolVersion::V_2026_07_28);
         Ok(ListToolsResult {
+            result_type: Some(ResultType::COMPLETE),
             tools: stamp_read_only_hints(self.tool_router.list_all()),
             meta: None,
             next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(CacheScope::Public),
         })
     }
 
@@ -4679,7 +4687,7 @@ impl ServerHandler for OxplowMcp {
         &self,
         request: CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> Result<CallToolResult, McpError> {
+    ) -> Result<CallToolResponse, McpError> {
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         self.tool_router.call(tcc).await
     }

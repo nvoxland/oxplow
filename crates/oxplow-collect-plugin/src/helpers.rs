@@ -158,17 +158,18 @@ pub fn parse_xml(content: &str) -> Result<Value, HelperError> {
             }
             // quick-xml 0.39 emits each `&entity;` as a separate GeneralRef
             // event, so plain Text is already literal (no unescape needed).
+            // Since quick-xml 0.42 events deref to their (already decoded)
+            // `str` content — the same raw, non-EOL-normalized text 0.41's
+            // `decode()` returned.
             Event::Text(e) => {
                 if let Some(top) = stack.last_mut() {
-                    let t = e.decode().map_err(|er| HelperError::Xml(er.to_string()))?;
-                    top.text.push_str(&t);
+                    top.text.push_str(&e);
                 }
             }
             Event::CData(e) => {
                 if let Some(top) = stack.last_mut() {
                     // CDATA is verbatim — no entity resolution.
-                    let t = e.decode().map_err(|er| HelperError::Xml(er.to_string()))?;
-                    top.text.push_str(&t);
+                    top.text.push_str(&e);
                 }
             }
             Event::GeneralRef(e) => {
@@ -182,8 +183,7 @@ pub fn parse_xml(content: &str) -> Result<Value, HelperError> {
                     } else {
                         // Named entity. Resolve the predefined five; preserve
                         // anything else verbatim rather than silently dropping.
-                        let name = e.decode().map_err(|er| HelperError::Xml(er.to_string()))?;
-                        match name.as_ref() {
+                        match &*e {
                             "lt" => top.text.push('<'),
                             "gt" => top.text.push('>'),
                             "amp" => top.text.push('&'),
@@ -219,11 +219,11 @@ struct Frame {
 }
 
 fn start_frame(e: &BytesStart) -> Result<Frame, HelperError> {
-    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    let tag = e.name().as_ref().to_owned();
     let mut attrs = Map::new();
     for a in e.attributes() {
         let a = a.map_err(|er| HelperError::Xml(er.to_string()))?;
-        let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
+        let key = a.key.as_ref().to_owned();
         // quick-xml 0.41 deprecated `unescape_value()` in favour of the
         // spec-named `normalized_value()`. `Implicit1_0` reproduces the old
         // method exactly — its body was

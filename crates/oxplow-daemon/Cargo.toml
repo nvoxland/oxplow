@@ -32,7 +32,7 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
 
 [lints]
 workspace = true

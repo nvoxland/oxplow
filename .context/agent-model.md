@@ -660,6 +660,19 @@ namespace on top, the agent calls `mcp__oxplow__create_task` —
 not the legacy `mcp__oxplow__oxplow__create_task`. The long form
 still resolves on `tools/call` for back-compat.
 
+### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
+
+`impl ServerHandler for OxplowMcp` writes out `list_tools` / `call_tool`
+/ `get_tool` instead of using `#[tool_handler]`, only so `list_tools`
+can stamp `read_only_hint` (tsk203). That means rmcp can change what
+the macro generates without our copy following: rmcp 3 added
+`result_type` / `ttl_ms` / `cache_scope` to `ListToolsResult` and made
+`call_tool` return `CallToolResponse`. On an rmcp upgrade, diff the
+three methods against `rmcp-macros/src/tool_handler.rs`.
+`crates/oxplow-control-plane/tests/mcp_wire.rs` runs a real
+Streamable-HTTP session (initialize → tools/list → tools/call) against
+`/mcp` — the only test that crosses rmcp's protocol layer.
+
 ### Param casing is lenient (camelCase aliases tolerated)
 
 Param structs are snake_case (`thread_id`, `touched_files`) and that

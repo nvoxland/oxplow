@@ -30,7 +30,6 @@ use axum::{
 };
 use base64::Engine;
 use parking_lot::Mutex;
-use rand::RngCore;
 use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, tower::StreamableHttpService,
 };
@@ -218,7 +217,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
 fn generate_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 

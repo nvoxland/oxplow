@@ -9,48 +9,17 @@
 // fns in integration-test crates).
 #![allow(clippy::unwrap_used)]
 
-use std::process::Command;
-use std::sync::Arc;
+mod common;
+
+use common::boot;
 
 use oxplow_app::Services;
-use oxplow_control_plane::{spawn, ControlPlane};
+use oxplow_control_plane::ControlPlane;
 use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
 use oxplow_domain::{
     Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
     ThreadId, ThreadStatus, Timestamp,
 };
-
-async fn boot() -> (
-    ControlPlane,
-    Arc<Services>,
-    std::path::PathBuf,
-    tempfile::TempDir,
-) {
-    let dir = tempfile::tempdir().unwrap();
-    let git = |args: &[&str]| {
-        let ok = Command::new("git")
-            .args(args)
-            .current_dir(dir.path())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "git {args:?} failed");
-    };
-    git(&["init", "-q"]);
-    git(&["config", "user.name", "test"]);
-    git(&["config", "user.email", "test@example.com"]);
-    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-    // Canonicalize: macOS tempdirs live behind the /var → /private/var
-    // symlink, and the write-guard's is-inside-project check compares
-    // literal path prefixes.
-    let root = dir.path().canonicalize().unwrap();
-    let services = Arc::new(Services::in_memory(&root).unwrap());
-    // Seed the catalog as boot does — the OTLP token producer gates collection on
-    // `measure_has_active_spec` (tsk31), so the token specs must exist.
-    services.metrics.seed_catalog().await;
-    let cp = spawn(services.clone()).await.unwrap();
-    (cp, services, root, dir)
-}
 
 /// Seed a stream + thread with the given status; returns the thread id
 /// string used in the X-Oxplow-Thread header.

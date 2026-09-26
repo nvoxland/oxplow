@@ -22,7 +22,7 @@ http-body = "1"
 http-body-util = "0.1"
 bytes = { workspace = true }
 
-rmcp = { version = "2.2", features = [
+rmcp = { version = "3.4", features = [
     "server",
     "macros",
     "transport-streamable-http-server",
@@ -35,13 +35,13 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 parking_lot = "0.12"
-rand = "0.9"
+rand = "0.10"
 base64 = "0.23"
 
 [dev-dependencies]
 tempfile = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
-opentelemetry-proto = { version = "0.32.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
+opentelemetry-proto = { version = "0.33.0", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 prost = "0.14"
 
 [lints]

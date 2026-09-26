@@ -75,7 +75,7 @@ pub fn query(
     let mut out = Vec::new();
     let mut matches = cursor.matches(&q, tree.root_node(), src);
     while let Some(m) = matches.next() {
-        for cap in m.captures {
+        for cap in m.captures() {
             let node = cap.node;
             let name = names.get(cap.index as usize).copied().unwrap_or("");
             let start = node.start_position();

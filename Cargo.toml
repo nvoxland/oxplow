@@ -65,7 +65,7 @@ serde_yaml = "0.9"
 # counts) trip it, so moving the trio needs a decision on which migration
 # path oxplow takes, not just a version bump. Move all three together.
 specta = { version = "=2.0.0-rc.24", features = ["derive", "time", "serde_json"] }
-quick-xml = "0.41"
+quick-xml = "0.42"
 regex = "1.13"
 # XPath over report XML, exposed to collection plugins. Pure Rust.
 sxd-document = "0.3"
@@ -85,7 +85,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 
 # IDs / time
-uuid = { version = "1.20", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.26", features = ["v4", "v7", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # DB
@@ -96,7 +96,7 @@ refinery = { version = "0.9", features = ["rusqlite"] }
 
 # Filesystem
 notify = "8.2"
-notify-debouncer-full = "0.6"
+notify-debouncer-full = "0.7"
 tempfile = "3.27"
 ignore = "0.4"
 globset = "0.4"
@@ -115,13 +115,13 @@ lsp-types = "0.97"
 # HTTP / archive (LSP installer)
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 flate2 = "1.1"
-zip = { version = "4.2", default-features = false, features = ["deflate"] }
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
 tar = "0.4"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 # MCP
-rmcp = { version = "2.2", features = ["server", "transport-io", "macros"] }
+rmcp = { version = "3.4", features = ["server", "transport-io", "macros"] }
 
 # Tauri
 tauri = { version = "2", features = [] }
@@ -134,7 +134,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 
 # Code metrics (tree-sitter-based)
-tree-sitter = "0.26"
+tree-sitter = "0.27"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.25"

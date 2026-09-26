@@ -15,7 +15,7 @@ oxplow-fs-watch = { workspace = true }
 # off this enum instead of declaring a duplicate. See .context/smart-merge.md.
 oxplow-code-metrics = { workspace = true }
 git2 = { workspace = true }
-similar = "2"
+similar = "3"
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
