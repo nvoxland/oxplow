@@ -325,6 +325,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	querySql: (sql: string, params: SqlCell[] | null, limit: number | null) => typedError<SqlQueryResult, IpcError>(__TAURI_INVOKE("query_sql", { sql, params, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	describeSchema: () => typedError<SchemaEntity[], IpcError>(__TAURI_INVOKE("describe_schema")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3213,6 +3223,24 @@ export type RollupRow = {
 	subject_count: number,
 };
 
+// One documented column of a semantic-layer entity.
+export type SchemaColumn = {
+	name: string,
+	// Declared SQLite type, as `PRAGMA table_info` reports it.
+	sqlType: string,
+	doc: string,
+};
+
+// One queryable entity (a `v_*` view) and its column docs.
+export type SchemaEntity = {
+	// SQL name to query, e.g. `v_task`.
+	name: string,
+	description: string,
+	// Who provides it: `core`, or an extension name.
+	owner: string,
+	columns: SchemaColumn[],
+};
+
 /**
  *  One ranked search result. `stream_id` is `None` for project-global
  *  entities (wiki pages); `score` is the BM25 score (lower = better match).
@@ -3411,6 +3439,23 @@ export type SnapshotSummaryCounts = {
 	created: number,
 	updated: number,
 	deleted: number,
+};
+
+/**
+ *  One SQL value, serialized as a plain JSON scalar (`null`, boolean,
+ *  number or string) so the TS binding is `null | boolean | number |
+ *  string` rather than serde_json's tagged-enum shape.
+ */
+export type SqlCell = null | boolean | number | string;
+
+/**
+ *  Result of a read-only SQL query. `rows` are positional, aligned with
+ *  `columns`. `truncated` is true when more rows existed than the cap.
+ */
+export type SqlQueryResult = {
+	columns: string[],
+	rows: SqlCell[][],
+	truncated: boolean,
 };
 
 export type Stream = {

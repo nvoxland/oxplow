@@ -177,6 +177,8 @@ pub const MANIFEST: &[Capability] = &[
     both("list_backlinks"),
     both("list_outbound"),
     both("search"),
+    both("query_sql"),
+    both("describe_schema"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
     agent("list_tasks"),

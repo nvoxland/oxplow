@@ -137,6 +137,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_backlog_state,
             // search
             commands::generated::search,
+            // semantic layer
+            commands::generated::query_sql,
+            commands::generated::describe_schema,
             // notes (task / thread)
             commands::generated::add_thread_note,
             commands::generated::list_thread_notes,

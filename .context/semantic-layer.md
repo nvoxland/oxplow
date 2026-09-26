@@ -5,13 +5,17 @@ sources that produce data, the dimensions that slice it, the metrics that
 aggregate it, and the read-only SQL contract (`v_*`) that views, extensions
 and agents query.
 
-> **Status: target design (epic tsk275).** Almost nothing here is
-> implemented yet. The piece that exists today is the **fact substrate**:
-> `measure`, `dimension`, `metric_spec`, `metric_capture`, `fact` and the
-> cube, documented in [metrics.md](./metrics.md). This doc generalizes that
-> substrate so it covers entities as well as facts. Build work is tracked in
-> tsk277. When a piece ships, move its description from "target" to
-> "current" here, in the same commit.
+> **Status: partly built (epic tsk275).**
+> - **Current:** the `v_*` read contract for core data, plus `query_sql` and
+>   `describe_schema` over IPC and MCP (tsk282), and the **fact substrate**
+>   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
+>   documented in [metrics.md](./metrics.md).
+> - **Target:** everything else in this doc (sources that emit entities,
+>   expression/join dimensions, entity-level metrics, extension sources, the
+>   remaining shipped sources), tracked in tsk277.
+>
+> When a piece ships, move it from "target" to "current" here, in the same
+> commit.
 
 ## Why
 
@@ -98,32 +102,76 @@ New primitives that don't exist yet:
 These exist because what a human reviewing agent work needs most is
 **exceptions and decisions**, not trends and totals.
 
-## The `v_*` contract
+## The `v_*` contract (current)
 
-Every shipped entity is exposed as a stable **read-only SQL view**:
-`v_task`, `v_effort`, `v_commit`, `v_diagnostic`, `v_fact`, and so on.
+Every shipped entity is exposed as a stable **read-only SQL view**. They
+are the **versioned contract**: lenses, extensions and agents read these,
+never the physical tables, which stay internal and free to change.
 
-- The views are the **versioned contract**. The physical tables stay
-  internal and free to change.
-- Changing a view's columns is a documented change in this doc (a column
-  table per view, added as each view ships).
-- An extension entity `<entity>` owned by extension `<ext>` is exposed as
-  `v_<ext>_<entity>`.
+**Shipped today** (migration `V73__semantic_layer_views.sql`):
 
-### Querying
+| View | What it is |
+|---|---|
+| `v_stream` | streams (worktrees) |
+| `v_thread` | threads within a stream |
+| `v_task` | tasks, excluding deleted; carries the thread's `stream_id` |
+| `v_effort` | in_progress → done spans of work on a task |
+| `v_comment` | comment threads, with first-message `body` and `message_count` |
+| `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
+| `v_snapshot` | worktree snapshots |
+| `v_measure` | fact-type catalog |
+| `v_capture` | the scan/run that produced facts |
+| `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 
-- `query_sql(sql, params?, limit?)` is available over IPC and MCP. It opens
-  a **read-only** connection (`SQLITE_OPEN_READONLY` plus `PRAGMA
-  query_only`), accepts a single `SELECT`/`WITH` statement only, and
-  enforces a timeout and a row cap.
-- `describe_schema` returns the view catalog with column docs, so an agent
-  can explore it without reading source.
+Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`,
+`v_decision`, `v_claim` and the rest of the shipped-sources table above.
+
+**Column docs live in code, not here.** `CATALOG` in
+`crates/oxplow-db/src/semantic_layer.rs` documents every column, and
+`describe_schema` serves it. The test `schema_docs_match_the_views_exactly`
+fails if a view's columns and its docs disagree, in name or in order. So
+changing a view means:
+
+1. a new migration that drops and recreates it;
+2. updating its `CATALOG` entry;
+3. noting the change here if it breaks readers (removed or renamed
+   columns).
+
+An extension entity `<entity>` owned by extension `<ext>` will be exposed
+as `v_<ext>_<entity>` (target).
+
+### Querying (current)
+
+- `query_sql(sql, params?, limit?)` over IPC (`querySql` in `api.ts`) and
+  MCP. Mechanics (`SemanticLayer` in `crates/oxplow-db/src/semantic_layer.rs`):
+  - First gate: the statement must start with `SELECT` or `WITH`, after
+    comments.
+  - Real gate: rusqlite `prepare` rejects multiple statements, and
+    `Statement::readonly()` rejects anything that writes (including
+    `WITH … DELETE`).
+  - Runs on a pooled connection under `PRAGMA query_only = ON`, which is
+    always reset afterwards. A test proves the pooled connection stays
+    writable.
+  - A 5 s interrupt timer (`InterruptHandle`) stops runaway queries.
+  - The row cap defaults to 500 and can be raised to at most 10 000.
+    `truncated: true` means more rows existed.
+  - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
+    IPC `INVALID` code, and MCP `invalid_params`.
+  - Physical tables are technically readable too, but they aren't part of
+    the contract. Lenses and extensions must use `v_*`; a missing column is
+    a reason to extend a view, not to reach around it.
+- Values are `SqlCell`: an untagged `null | boolean | number | string`,
+  so the TS binding is a plain scalar union. Blobs come back as
+  `"<blob N bytes>"`.
+- `describe_schema` returns each entity's name, description, owner
+  (`core` or an extension) and columns, with docs and SQL types taken from
+  the live schema.
 - Lenses never call models or run sources on render; they read what sources
   already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
-  appears in the same `describe_schema` / `query_sql` / `list_dimensions`
-  / `list_metrics` tools as core data. Agents never need an
-  extension-specific tool. Full agent surface:
+  will appear in the same `describe_schema` / `query_sql` /
+  `list_dimensions` / `list_metrics` tools as core data. Agents never need
+  an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
 ## User and extension sources

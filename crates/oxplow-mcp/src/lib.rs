@@ -850,6 +850,19 @@ pub struct SnapshotStreamParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct QuerySqlParams {
+    /// One read-only `SELECT` or `WITH` statement over the semantic layer's
+    /// `v_*` views (call `describe_schema` first to see them). Use `?1`,
+    /// `?2`, … for parameters.
+    pub sql: String,
+    /// Positional parameter values for `?1`, `?2`, ….
+    pub params: Option<Vec<serde_json::Value>>,
+    /// Row cap (default 500, max 10000). `truncated: true` in the result
+    /// means more rows existed.
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiteSearchParams {
     /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
     pub query: String,
@@ -1076,6 +1089,53 @@ impl OxplowMcp {
             .map_err(internal)?;
         self.services.events.emit(OxplowEvent::DashboardsChanged);
         json_result(&serde_json::json!({ "id": id }))
+    }
+
+    #[tool(
+        description = "Describe the semantic layer: every queryable entity (the read-only \
+                       `v_*` SQL views over oxplow's data: streams, threads, tasks, efforts, \
+                       comments, wiki pages, snapshots, measures, captures, facts, plus anything \
+                       extensions add) with a description, its owner (`core` or an extension), \
+                       and a doc + SQL type for every column. Call this before `query_sql`."
+    )]
+    async fn describe_schema(&self) -> Result<CallToolResult, McpError> {
+        let schema = oxplow_db::SemanticLayer::new(self.services.db.clone())
+            .describe_schema()
+            .await
+            .map_err(internal)?;
+        json_result(&schema)
+    }
+
+    #[tool(
+        description = "Run ONE read-only SQL statement (`SELECT`/`WITH`) over the semantic \
+                       layer's `v_*` views — the same data lenses and the UI read. Joins across \
+                       views are fine (e.g. v_task ⋈ v_effort ⋈ v_fact). Positional params \
+                       `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated}`; \
+                       rows are positional arrays. Writes, PRAGMA, ATTACH and multiple \
+                       statements are rejected; queries time out after 5s. See \
+                       `describe_schema` for tables and column meanings."
+    )]
+    async fn query_sql(
+        &self,
+        params: Parameters<QuerySqlParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let out = oxplow_db::SemanticLayer::new(self.services.db.clone())
+            .query_sql(
+                &p.sql,
+                p.params
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                p.limit.map(|l| l as usize),
+            )
+            .await
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+                other => internal(other),
+            })?;
+        json_result(&out)
     }
 
     #[tool(
@@ -4519,6 +4579,8 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    "describe_schema",
+    "query_sql",
     "app_version",
     "list_streams",
     "list_dashboards",
@@ -5276,6 +5338,50 @@ mod tests {
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot();
+    }
+
+    #[tokio::test]
+    async fn semantic_layer_query_and_schema_tools() {
+        let (_proj, _services, server) = boot();
+        let out: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .query_sql(Parameters(QuerySqlParams {
+                    sql: "SELECT kind FROM v_stream WHERE kind = ?1".into(),
+                    params: Some(vec![serde_json::json!("primary")]),
+                    limit: Some(5),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(out["columns"], serde_json::json!(["kind"]));
+        assert_eq!(out["rows"], serde_json::json!([["primary"]]));
+
+        let err = server
+            .query_sql(Parameters(QuerySqlParams {
+                sql: "DELETE FROM task".into(),
+                params: None,
+                limit: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("read-only") || err.message.contains("SELECT"),
+            "{err:?}"
+        );
+
+        let schema: Vec<serde_json::Value> =
+            serde_json::from_str(&text_payload(server.describe_schema().await.unwrap())).unwrap();
+        let v_task = schema
+            .iter()
+            .find(|e| e["name"] == "v_task")
+            .expect("v_task documented");
+        assert_eq!(v_task["owner"], "core");
+        assert!(v_task["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "status"));
     }
 
     #[tokio::test]

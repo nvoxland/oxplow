@@ -14,10 +14,13 @@ import type {
   DiffEndpoint,
   DiffEntry,
   RecentProjectView,
+  SchemaEntity,
   SearchHit,
+  SqlCell,
+  SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { SearchHit };
+export type { SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -451,6 +454,22 @@ export async function searchSite(
   limit = 50,
 ): Promise<SearchHit[]> {
   return unwrap(await commands.search(query, streamId, kinds, limit));
+}
+
+/// Run one read-only `SELECT`/`WITH` over the semantic layer's `v_*`
+/// views (see `.context/semantic-layer.md`). Positional `params` bind
+/// `?1`, `?2`, …; `limit` caps rows (default 500).
+export async function querySql(
+  sql: string,
+  params: SqlCell[] = [],
+  limit: number | null = null,
+): Promise<SqlQueryResult> {
+  return unwrap(await commands.querySql(sql, params, limit));
+}
+
+/// The semantic layer's queryable entities with column docs.
+export async function describeSchema(): Promise<SchemaEntity[]> {
+  return unwrap(await commands.describeSchema());
 }
 
 export async function listThreads(streamId: string): Promise<Thread[]> {

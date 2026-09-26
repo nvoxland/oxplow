@@ -36,6 +36,7 @@ pub mod notes;
 pub mod page_refs;
 pub mod page_visit;
 pub mod search;
+pub mod semantic;
 pub mod snapshot;
 pub mod streams;
 pub mod tasks;
