@@ -238,7 +238,7 @@ impl MetricCubeBuilder {
         let watermark = self.facts.cube_watermark(measure.id, stream).await?;
         Ok(caps
             .iter()
-            .filter(|c| watermark.map_or(true, |w| (c.captured_at, c.id) > w))
+            .filter(|c| watermark.is_none_or(|w| (c.captured_at, c.id) > w))
             .collect())
     }
 
@@ -640,7 +640,7 @@ pub async fn cube_series(
         .captures_for_producers(producers)
         .await?
         .into_iter()
-        .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+        .filter(|c| stream.is_none_or(|s| c.stream_id == s))
         .collect();
     if captures.is_empty() {
         return Ok(None);
@@ -743,7 +743,7 @@ pub async fn cube_series(
     let used: Vec<&MetricCapture> = captures
         .iter()
         .filter(|c| narrowed.contains(c.producer.as_str()))
-        .filter(|c| window.map_or(true, |w| w.contains(c.captured_at)))
+        .filter(|c| window.is_none_or(|w| w.contains(c.captured_at)))
         .collect();
     let mut out: Vec<SeriesPoint> = Vec::new();
     for c in &used {

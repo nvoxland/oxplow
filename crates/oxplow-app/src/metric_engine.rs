@@ -258,7 +258,7 @@ impl FactFilter {
             && self
                 .dim_eq
                 .as_ref()
-                .map_or(true, |(key, _)| dim_is_slice_key(key))
+                .is_none_or(|(key, _)| dim_is_slice_key(key))
     }
 
     /// [`Self::matches`] against a slice key instead of a fact. Only meaningful
@@ -349,7 +349,7 @@ impl TimeWindow {
     }
 
     pub fn contains(&self, at: Timestamp) -> bool {
-        self.from.map_or(true, |f| f <= at) && self.to.map_or(true, |t| at <= t)
+        self.from.is_none_or(|f| f <= at) && self.to.is_none_or(|t| at <= t)
     }
 }
 
@@ -1632,7 +1632,7 @@ impl MetricEngine {
                 .captures_for_producers(producers.into_iter().collect())
                 .await?
                 .into_iter()
-                .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+                .filter(|c| stream.is_none_or(|s| c.stream_id == s))
                 .collect::<Vec<_>>();
             let restated = match scope {
                 CaptureScope::PerPath => self.scanned_paths(&captures).await?,
@@ -1760,7 +1760,7 @@ impl MetricEngine {
                 .facts_for_measure(measure.id)
                 .await?
                 .into_iter()
-                .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+                .filter(|f| stream.is_none_or(|s| f.stream_id == s))
                 .collect()),
         }
     }
@@ -1793,7 +1793,7 @@ impl MetricEngine {
             .captures_for_producers(producers)
             .await?
             .into_iter()
-            .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+            .filter(|c| stream.is_none_or(|s| c.stream_id == s))
             .collect();
         // Newest capture per stream — `captures_for_producers` is oldest-first,
         // so the last insert wins; BTreeMap for deterministic output order.

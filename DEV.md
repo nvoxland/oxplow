@@ -2,9 +2,10 @@
 
 ## Prerequisites
 
-- **Bun 1.3.9** and **Node 22.13.1** (frontend toolchain).
-- **Rust stable (≥ 1.80)** — `rust-toolchain.toml` pins it; rustup
-  installs the right version automatically.
+- **Bun 1.4.2** and **Node 22.13.1** (frontend toolchain).
+- **Rust 1.98.1** — `mise.toml` pins the version (the workspace
+  `rust-version` floor matches); `rust-toolchain.toml` pins the channel
+  and components. rustup installs the right version automatically.
 - **Platform Tauri deps**:
   - macOS: `xcode-select --install` (Xcode CLT).
   - Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev

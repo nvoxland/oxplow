@@ -73,9 +73,9 @@ mechanism to work around.
 
 Prerequisites:
 
-- **Bun** ≥ 1.3.9 — package manager + JS runtime.
+- **Bun** ≥ 1.4.2 — package manager + JS runtime.
 - **Rust stable** — `mise.toml` pins the version the project builds
-  with (currently 1.94.1); `rust-toolchain.toml` pins the channel. rustup
+  with (currently 1.98.1); `rust-toolchain.toml` pins the channel. rustup
   installs the right toolchain automatically.
 - **Platform Tauri deps**:
     - macOS: `xcode-select --install`

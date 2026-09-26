@@ -1933,10 +1933,7 @@ impl SqliteFactStore {
                     let n = conn.execute("DELETE FROM metric_spec WHERE scope = 'project'", [])?;
                     return Ok(n as u64);
                 }
-                let placeholders = std::iter::repeat("?")
-                    .take(keep.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let placeholders = vec!["?"; keep.len()].join(", ");
                 let sql = format!(
                     "DELETE FROM metric_spec
                       WHERE scope = 'project' AND key NOT IN ({placeholders})"
@@ -1961,10 +1958,7 @@ impl SqliteFactStore {
                     let n = conn.execute("DELETE FROM measure WHERE scope = 'project'", [])?;
                     return Ok(n as u64);
                 }
-                let placeholders = std::iter::repeat("?")
-                    .take(keep.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let placeholders = vec!["?"; keep.len()].join(", ");
                 let sql = format!(
                     "DELETE FROM measure
                       WHERE scope = 'project' AND key NOT IN ({placeholders})"
@@ -2089,10 +2083,7 @@ impl SqliteFactStore {
         }
         self.db
             .call(move |conn| {
-                let placeholders = std::iter::repeat("?")
-                    .take(capture_ids.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let placeholders = vec!["?"; capture_ids.len()].join(", ");
                 let sql = format!(
                     "SELECT {FACT_ROW_COLS} FROM fact f
                        JOIN metric_capture c ON c.id = f.capture_id
@@ -2745,10 +2736,7 @@ impl SqliteFactStore {
         }
         self.db
             .call(move |conn| {
-                let placeholders = std::iter::repeat("?")
-                    .take(capture_ids.len())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let placeholders = vec!["?"; capture_ids.len()].join(", ");
                 // Mirrors `latest_tree_facts`' three scan kinds: delta = the
                 // snapshot's own paths; full = the reconstructed tree as-of the
                 // snapshot; asserted = exactly the paths it emitted facts for.

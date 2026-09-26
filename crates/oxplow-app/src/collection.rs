@@ -2643,7 +2643,7 @@ impl CollectionService {
         let kept: Vec<&oxplow_db::FactRow> = facts
             .iter()
             .filter(|f| filter.matches(f))
-            .filter(|f| stream.map_or(true, |s| f.stream_id == s))
+            .filter(|f| stream.is_none_or(|s| f.stream_id == s))
             .collect();
         if kept.is_empty() {
             return None;
@@ -2672,7 +2672,7 @@ impl CollectionService {
             .await
         {
             for c in all_caps {
-                if stream.map_or(true, |s| c.stream_id == s)
+                if stream.is_none_or(|s| c.stream_id == s)
                     && !caps.iter().any(|(id, _)| *id == c.id)
                 {
                     caps.push((c.id, c.captured_at));
@@ -2734,7 +2734,7 @@ impl CollectionService {
                 .await
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|c| stream.map_or(true, |s| c.stream_id == s))
+                .filter(|c| stream.is_none_or(|s| c.stream_id == s))
                 .collect::<Vec<_>>();
             let mut scanned: std::collections::HashMap<i64, Vec<String>> = Default::default();
             if let Ok(rows) = self
