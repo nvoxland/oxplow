@@ -120,7 +120,7 @@ function MermaidNodeView({ node, editor, getPos, selected }: NodeViewProps) {
           whiteSpace: "pre-wrap",
         }}
       >
-        <NodeViewContent as="code" />
+        <NodeViewContent<"code"> as="code" />
       </pre>
       {/* Rendered SVG host — painted imperatively by renderMermaidInto. */}
       <div
@@ -160,7 +160,7 @@ export const MermaidBlock = CodeBlock.extend({
               overflowX: "auto",
             }}
           >
-            <NodeViewContent as="code" />
+            <NodeViewContent<"code"> as="code" />
           </pre>
         </NodeViewWrapper>
       );

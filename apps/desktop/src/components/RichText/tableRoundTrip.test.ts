@@ -1,11 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Editor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { Markdown } from "tiptap-markdown";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableHeader from "@tiptap/extension-table-header";
-import TableCell from "@tiptap/extension-table-cell";
+import { getMarkdown, richTextExtensions } from "./richTextExtensions.js";
 
 // Regression: the wiki body is an always-on Tiptap editor, so a GFM table
 // must survive a markdown → editor → markdown round-trip (otherwise opening
@@ -20,18 +15,8 @@ afterEach(() => {
 });
 
 function roundTrip(md: string): string {
-  editor = new Editor({
-    extensions: [
-      StarterKit,
-      Markdown.configure({ html: false, breaks: false }),
-      Table,
-      TableRow,
-      TableHeader,
-      TableCell,
-    ],
-    content: md,
-  });
-  return editor.storage.markdown.getMarkdown();
+  editor = new Editor({ extensions: richTextExtensions(), content: md });
+  return getMarkdown(editor);
 }
 
 test("a GFM table round-trips through the editor without flattening", () => {

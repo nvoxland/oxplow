@@ -31,10 +31,20 @@ show the pencil — that's the consistent signal "this is for reading."
 
 ## What's in `apps/desktop/src/components/RichText/`
 
+- **`richTextExtensions.ts`** — the one extension list every field
+  mounts (plus `getMarkdown(editor)` and the `Storage` type augmentation
+  `tiptap-markdown` doesn't ship). Kept out of the component so tests
+  (`richTextExtensions.test.ts`, `tableRoundTrip.test.ts`) run the real
+  config rather than a copy. **Tiptap 3's `StarterKit` bundles `Link`
+  and `Underline`**: `link: false` because `InternalLink` replaces it,
+  `underline: false` because markdown has no underline syntax (with
+  `html: false` it would vanish on save). Re-check what `StarterKit`
+  bundles on every Tiptap major.
 - **`RichTextField.tsx`** — the surface component. Configures Tiptap
   with `StarterKit` + `Markdown` (round-trip) + `Placeholder` +
   `MermaidBlock` + `InternalLink` + **GFM tables**
-  (`@tiptap/extension-table` + `-row`/`-header`/`-cell`, `resizable`,
+  (`Table`/`TableRow`/`TableHeader`/`TableCell`, all from
+  `@tiptap/extension-table` since Tiptap 3, `resizable`,
   block-only so they're off when `inlineOnly`). `tiptap-markdown` ships
   the GFM table serializer and markdown-it parses tables, so adding the
   standard table nodes is all the round-trip needs — without them the
@@ -52,7 +62,12 @@ show the pencil — that's the consistent signal "this is for reading."
   `MermaidBlock` React NodeView flushes via `flushSync`, which trips
   React's "flushSync was called from inside a lifecycle method"
   warning. Deferring the first render to a post-commit effect silences
-  it; harmless here since there's no SSR.
+  it; harmless here since there's no SSR. The same rule covers **every
+  later content swap**: once mounted, Tiptap 3 creates each new React
+  NodeView under `flushSync`, so the upstream-`value` sync effect runs
+  `setContent` in a `queueMicrotask`, re-checking focus/destroyed at
+  apply time (`RichTextField.render.test.tsx`). Don't call `setContent`
+  synchronously from a React effect.
 - **`MermaidBlock.tsx`** — extends Tiptap's `CodeBlock` (same node
   name, `codeBlock`) with a React NodeView that paints rendered SVG
   via `renderMermaidInto` when the caret is outside, and a raw

@@ -2,18 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import StarterKit from "@tiptap/starter-kit";
-import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
-import TableRow from "@tiptap/extension-table-row";
-import TableHeader from "@tiptap/extension-table-header";
-import TableCell from "@tiptap/extension-table-cell";
-import { Markdown } from "tiptap-markdown";
 import { Pencil } from "lucide-react";
-import { InternalLink } from "./InternalLink.js";
-import { MermaidBlock } from "./MermaidBlock.js";
+import { getMarkdown, richTextExtensions } from "./richTextExtensions.js";
 import {
-  CommentDecorations,
   commentDecorationsKey,
   findCommentRange,
   flatten,
@@ -157,38 +148,7 @@ export function RichTextField({
     // "flushSync was called from inside a lifecycle method" warning. No
     // SSR here, so deferring to a post-commit effect is invisible.
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        // Replaced by MermaidBlock (which `extend`s CodeBlock under the
-        // same name "codeBlock"). Avoid the duplicate name warning.
-        codeBlock: false,
-        // Inline-only fields skip block features at the schema level.
-        heading: inlineOnly ? false : undefined,
-        bulletList: inlineOnly ? false : undefined,
-        orderedList: inlineOnly ? false : undefined,
-        blockquote: inlineOnly ? false : undefined,
-        horizontalRule: inlineOnly ? false : undefined,
-      }),
-      MermaidBlock,
-      InternalLink,
-      // GFM tables (block content — off for inline-only fields). tiptap-markdown
-      // ships the GFM table serializer + markdown-it parses tables, so adding
-      // the standard table nodes is all the round-trip needs. Without these the
-      // editor flattens any table in a wiki page to run-on text on autosave.
-      ...(inlineOnly
-        ? []
-        : [Table.configure({ resizable: true }), TableRow, TableHeader, TableCell]),
-      // Decorations only — opening is via the right-click menu, not click.
-      CommentDecorations.configure({ onClickComment: null }),
-      Placeholder.configure({ placeholder: placeholder ?? "" }),
-      Markdown.configure({
-        html: false,
-        linkify: false,
-        breaks: false,
-        transformPastedText: true,
-        transformCopiedText: false,
-      }),
-    ],
+    extensions: richTextExtensions({ inlineOnly, placeholder }),
     content: value,
     editorProps: {
       attributes: {
@@ -198,7 +158,7 @@ export function RichTextField({
     onUpdate({ editor }) {
       if (debounceRef.current != null) window.clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
-        const md = editor.storage.markdown?.getMarkdown?.() ?? "";
+        const md = getMarkdown(editor);
         if (md !== lastCommittedRef.current) {
           lastCommittedRef.current = md;
           onCommit(md);
@@ -210,7 +170,7 @@ export function RichTextField({
         window.clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      const md = editor.storage.markdown?.getMarkdown?.() ?? "";
+      const md = getMarkdown(editor);
       if (md !== lastCommittedRef.current) {
         lastCommittedRef.current = md;
         onCommit(md);
@@ -222,12 +182,19 @@ export function RichTextField({
   // outside (e.g. another tab edited the same task). Don't clobber
   // the user's in-progress typing — skip the sync while the editor
   // has focus.
+  //
+  // Deferred to a microtask: the new content can create React NodeViews
+  // (MermaidBlock), which Tiptap renders with flushSync — illegal while
+  // React is still committing this effect. Guards re-run at apply time
+  // since focus or the editor itself may have changed in between.
   useEffect(() => {
     if (!editor) return;
-    if (editor.isFocused) return;
-    if (value === lastCommittedRef.current) return;
-    lastCommittedRef.current = value;
-    editor.commands.setContent(value, false);
+    queueMicrotask(() => {
+      if (editor.isDestroyed || editor.isFocused) return;
+      if (value === lastCommittedRef.current) return;
+      lastCommittedRef.current = value;
+      editor.commands.setContent(value, { emitUpdate: false });
+    });
   }, [editor, value]);
 
   // On unmount, flush any pending debounce.
