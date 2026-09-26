@@ -3,9 +3,8 @@
 
 What this doc covers: the per-thread tab store, the shared `Page` chrome,
 the page-ref id format, and the rail HUD that drives navigation. This is
-the substrate the IA redesign was built on; the old dock chrome is gone
-(see "Left dock removed" / "Bottom dock removed" below) and the rail HUD
-+ pages are now THE shell.
+the substrate the (completed) IA redesign was built on; the rail HUD +
+pages are THE shell.
 
 ## Mental model
 
@@ -44,19 +43,18 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
-| `apps/desktop/src/pages/ChangeAnalysisPage.tsx` | Two-mode page: **dashboard** (no scope) shows summary + clickable file pivots (extension / directory / status); pivot rows route to a focused **drilldown** (`changeAnalysisRef(target, scope)` where `scope` is `{ kind: 'ext'\|'dir'\|'status', value }`). Drilldown reuses the same hook with the scope applied and renders the scoped summary, a semantic / file-list view toggle, an added/modified/deleted/all status filter, plus duplication + tests cards (relocated off the dashboard). Shared chrome: `ChangeAnalysisHeader` (Parent vs … / Refresh / Open commit) renders on every variant. The drilldown body lives in `components/ChangeAnalysis/ChangeAnalysisDrilldown.tsx`. All data assembled on demand via `useChangeAnalysis({ streamId, target, scope? })`; no new tables. |
+| (change analysis) | No standalone page any more. `changeAnalysisRef(target, scope)` resolves to `uncommittedChangesRef(scope)` or `gitCommitRef(sha, scope)`; the drilldown renders on that host page with the scope applied, via `useChangeAnalysis`. Slated to become `oxplow-analytics` slot views ([extensions.md](./extensions.md)). |
 | ~~`apps/desktop/src/tabs/backlinksIndex.ts`~~ | **Deleted.** The in-memory cross-kind indexer is replaced by the persisted `page_ref` table; see `data-model.md`. The `BacklinkEntry` type that renderers consume now lives in `apps/desktop/src/tabs/backlinkTypes.ts`. |
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that calls the unified `list_backlinks` IPC for a `TabRef` and maps the returned `BacklinkEdge` rows into `BacklinkEntry`s. Used by every page kind including `FilePage` (which previously rendered nothing). The sibling `usePageOutbound` hook does the same for the inverse direction. |
 | `apps/desktop/src/tabs/backlinkTypes.ts` | Renderer-side `BacklinkEntry` interface (`{ ref, label, subtitle? }`). Decoupled from the SQLite `BacklinkEdge` shape. |
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
 | `apps/desktop/src/pages/TaskPage.tsx` | Single-record page for a task — wraps `TaskDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
-| `apps/desktop/src/pages/NotePage.tsx` | Single-record page for a wiki page — wraps `NoteTab`. The `note:<slug>` center-tab is rendered through this Page wrapper so notes get the unified chrome (title from `usePageTitle`, browser-style back/forward + star, Backlinks panel). `NoteTab` no longer renders its own header — freshness badge + Edit/Save/Revert/Delete/Create live in a thin secondary toolbar inside the body. In-tab wikilink-to-note clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they participate in tab-level history. |
+| `apps/desktop/src/pages/WikiPage.tsx` | Single-record page for a wiki page (`wiki:<slug>`), rendered through `Page` so it gets the unified chrome (title via `usePageTitle`, back/forward + star, backlinks). Edit/Save/Revert/Delete live in a thin toolbar inside the body. In-tab wikilink clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they join tab history. |
 | `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `apps/desktop/src/pages/CommentsInboxPage.tsx` | Global **Comments Dashboard** (`comments` index kind, `commentsRef()`; titled "Comments Dashboard"). Lists every comment in the current stream (`listCommentsForStream`), grouped by target. The body of a **row opens that comment's full `CommentPopover` inline** (read/reply/intent/resolve/delete — triage the whole backlog from one place); a **group-header click jumps to the target page** (file/wiki/task). Each row also has a **"Go to location" button** that navigates to the target page *and* scrolls to / opens the anchored comment via `comment-reveal-bus.ts` (disabled for orphaned comments). **Defaults to unresolved threads only**; a "Show" dropdown reveals resolved threads bucketed by recency. The bucket thresholds are a tiered ladder — one per day to a week, one per week to a month, then one per month beyond — capped at the oldest actual resolved comment so the largest option reaches all of them (helpers in `comments-filter.ts`: `resolvedWindowOptions` / `visibleThreads`, keyed on `comment.resolved_at`). The holistic "review them all" surface; the agent reaches the same data via the `list_comments` MCP tool. |
 | `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards plus the **Go To** page. Variant chosen via `dashboardRef("planning"\|"review"\|"quality"\|"visits")`. The `visits` variant is the **Go To** page (titled "Go To"): a **purely navigational** hub — the user's **managed bookmarks** (open + inline scope segmented control via `bookmarks.setScope` + remove with Undo toast) and a **toggle-able Recently Visited / Most Visited list** (`VisitsBrowser`, plain link lists, no stats). It's the page the rail's combined Bookmarks pane links to; needs `threadId` (passed from `App.tsx`) to scope bookmark reads/writes. Visit analytics moved to the Usage area (below). |
 | `apps/desktop/src/pages/UsagePage.tsx` | **Usage** hub (`indexRef("usage")`): two `Card`s summarizing + linking to **Page Analytics** and **Token Analytics**. Reachable from the launcher ("Usage"). |
 | `apps/desktop/src/pages/PageAnalyticsPage.tsx` | **Page Analytics** (`indexRef("page-analytics")`): visit analytics moved off Go To — total visits, Most Visited (with counts), and a visits-per-day chart (`DailyBarChart`). |
-| `apps/desktop/src/pages/TokenAnalyticsPage.tsx` | **Token Analytics** (`indexRef("token-analytics")`): model + agent/harness token usage — overall totals (in/out/cache), by-agent rollup, by-model breakdown (models nested under harness), tokens-per-day chart. Live-refreshes on `agentTokenUsageChanged`; data from the `token_*` analytics IPCs (`.context/data-model.md`). |
 | `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`), extracted from the old Go To `DailyChart`; shared by Page Analytics (visits/day) and Token Analytics (tokens/day). |
 | `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
 | `apps/desktop/src/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
@@ -65,54 +63,59 @@ the substrate the IA redesign was built on; the old dock chrome is gone
 
 ## Page kinds
 
-`PageKind` (`tabState.ts`):
+`PageKind` (`apps/desktop/src/tabs/tabState.ts`) is the source of truth;
+this list mirrors it. Grouped by what they are for. Kinds marked **(→
+ext)** are analytics pages slated to move into the `oxplow-analytics`
+extension as `view:<slug>` pages ([extensions.md](./extensions.md), epic
+tsk275) — don't grow them; new instruments should be views once the
+extension host lands.
 
-```
-"agent" | "file" | "diff" | "diff-view" | "duplicate-block" | "note" | "task" | "finding"
-| "tasks" | "done-work" | "backlog" | "archived"
-| "wiki-index" | "files" | "comments" | "code-quality" | "terminal"
-| "local-history" | "git-history" | "git-dashboard" | "git-commit"
-| "uncommitted-changes" | "change-analysis" | "hook-events"
-| "settings" | "start" | "dashboard"
-| "new-stream" | "new-task"
-| "stream-settings" | "thread-settings"
-| "op-error"
-| "external-url"
-| "usage" | "metrics" | "metrics-recorded" | "metric-detail" | "metric-recording"
-| "custom-dashboard" | "dashboards"
-| "page-analytics" | "token-analytics"
-```
+- **Agent & work:** `agent`, `task`, `tasks`, `done-work`, `backlog`,
+  `archived`, `new-task`, `new-stream`, `stream-settings`,
+  `thread-settings`, `closed-threads`, `comments`, `hook-events`,
+  `op-error`
+- **Code & review:** `file`, `directory`, `files`, `diff`, `diff-view`,
+  `uncommitted-changes`, `git-commit`, `git-history`, `git-dashboard`,
+  `local-history`, `local-history-full`, `local-history-by-commit-full`,
+  `terminal`
+- **Knowledge:** `wiki`, `wiki-index`, `wiki-freshness`
+- **System:** `settings`, `external-url`, `dashboard` (the `visits`
+  variant is the Go To hub, which stays core)
+- **Analytics (→ ext):** `metrics`, `metrics-recorded`, `metric-detail`,
+  `metric-recording`, `custom-dashboard`, `dashboards`, `usage`,
+  `page-analytics`, `effort-coverage`, `finding`, `duplicate-block`,
+  `dashboard` (`planning` / `review` / `quality` variants)
 
-`agent` is implicit per thread. The `*-index` kinds are full-page
-versions of what today are left-rail or bottom-drawer panels.
+`agent` is implicit per thread. There is no standalone
+`change-analysis` kind any more: change-analysis drilldowns are a
+`scope` folded into the `uncommitted-changes` / `git-commit` ref.
 
 ## Tab id format
+
+Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
+hand-format an id.
 
 | Kind | Id format | Example |
 |---|---|---|
 | agent | `agent` | `agent` |
-| file | `file:<path>` | `file:crates/oxplow-app/src/lib.rs` |
-| diff | `diff:<path>\|<from>\|<to>\|<labelOverride>` | `diff:src/a.ts\|abc\|def\|` |
-| diff-view | `diff-view:effort:<effortId>` or `diff-view:endpoints:<start>..<end>` (each endpoint token: `s<snapshotId>` / `c<sha>` / `w` / `none`) | `diff-view:effort:eff42`, `diff-view:endpoints:s3..s9` |
-| duplicate-block | `dup:<leftPath>:<lstart>-<lend>::<rightPath>:<rstart>-<rend>` | `dup:src/a.ts:10-40::src/b.ts:55-85` |
-| note | `note:<slug>` | `note:how-stop-hook-fires` |
-| task | `wi:<id>` | `wi:wi-142` |
+| file | `file:<path>` (plus a version suffix for non-disk versions) | `file:crates/oxplow-app/src/lib.rs` |
+| directory | `dir:<path>` | `dir:crates/oxplow-app` |
+| diff | `diff:<key>` | `diff:src/a.ts\|abc\|def\|` |
+| diff-view | `diff-view:effort:<effortId>` or `diff-view:endpoints:<start>..<end>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `diff-view:effort:eff42` |
+| wiki / wiki-freshness | `wiki:<slug>` / `wiki-freshness:<slug>` | `wiki:how-stop-hook-fires` |
+| task | `task:<id>` | `task:tsk142` |
 | finding | `finding:<id>` | `finding:f-7` |
-| `*-index` | the kind name | `code-quality`, `comments`, `start`, `settings` |
+| effort-coverage | `effort-coverage:<effortId>` | `effort-coverage:eff42` |
+| index kinds | the kind name | `tasks`, `comments`, `settings`, `dashboards` |
+| uncommitted-changes | `uncommitted-changes` or `uncommitted-changes:<scopeKind>:<scopeValue>` | `uncommitted-changes:ext:rs` |
+| git-commit | `git-commit:<sha>` or `git-commit:<sha>:<scopeKind>:<scopeValue>` | `git-commit:abc1234` |
 | git-dashboard | `git-dashboard` | `git-dashboard` |
-| git-commit | `git-commit:<sha>` | `git-commit:abc1234567890` |
-| uncommitted-changes | `uncommitted-changes` | `uncommitted-changes` |
-| change-analysis | `change-analysis:<target>` (dashboard) or `change-analysis:<target>:<scopeKind>:<scopeValue>` (drilldown — `scopeKind` is `ext` / `dir` / `status`) | `change-analysis:working`, `change-analysis:abc1234:ext:rs` |
-| dashboard | `dashboard:<variant>` | `dashboard:planning` |
-| usage / metrics / metrics-recorded / page-analytics / token-analytics | the kind name (index pages) | `usage`, `metrics`, `metrics-recorded`, `page-analytics`, `token-analytics` |
+| dashboard | `dashboard:<variant>` | `dashboard:visits` |
 | metric-detail | `metric-detail:<key>` | `metric-detail:oxplow.coverage.abs_pct` |
 | metric-recording | `metric-recording:<runId>` | `metric-recording:42` |
 | custom-dashboard | `custom-dashboard:<dashboardId>` | `custom-dashboard:dsh3` |
-| dashboards | the kind name (index page) | `dashboards` |
-| new-stream | `new-stream` | `new-stream` |
-| new-task | `new-task` | `new-task` |
-| stream-settings | `stream-settings:<streamId>` | `stream-settings:s-7` |
-| thread-settings | `thread-settings:<threadId>` | `thread-settings:t-3` |
+| stream-settings / thread-settings | `stream-settings:<id>` / `thread-settings:<id>` | `thread-settings:t-3` |
+| closed-threads / new-stream / new-task | the kind name | `new-task` |
 | op-error | `op-error:<errorId>` | `op-error:oe-abc123` |
 | external-url | `external-url:<url>` | `external-url:https://example.com/path` |
 
@@ -200,105 +203,21 @@ zone grouping); each appears only when it has content:
    state reads like a start menu. The ↗ opens the **Go To** page
    (`dashboardRef("visits")`) for the full hub + bookmark management.
 
-## Migration status
+## History: the IA redesign (complete)
 
-The full IA redesign ships in phases (see plan
-`/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`):
+The web/Linear-style IA redesign shipped in full: theme foundation, tab
+store + page chrome + refs, rail HUD, every dock panel migrated to a
+page, record pages + backlinks, modals replaced by inline edits /
+slideovers / page forms, the selection action bar, and density polish.
+Both the left and bottom docks are **gone** — the rail HUD is the only
+left chrome and pages are the only center surface. One reversal stuck:
+per-row actions are **right-click only** (the kebab `⋯` migration was
+undone in tsk168; see [usability.md](./usability.md) → "Per-row actions").
+Git history has the phase-by-phase detail if you need it.
 
-- ✅ Phase 0 — Theme foundation (`.context/theming.md`).
-- ✅ Phase 1 — Tab store + page chrome + page refs (this doc).
-- ✅ Phase 2 — Rail HUD shell (this doc).
-- ✅ Phase 3 — Page migration: every rail HUD "Pages" entry now opens
-  a Page-wrapped renderer in `apps/desktop/src/pages/`:
-  Start, Settings, Code quality, Local history, Git history, Files,
-  Notes, All work. Both docks have since been removed
-  — the rail HUD is THE left chrome and pages are THE center surface
-  (see "Left dock removed" / "Bottom dock removed" notes below).
-- ✅ Phase 4 — New pages + backlinks indexer:
-  `TaskPage`, `NotePage`, `FindingPage`, three `DashboardPage`
-  variants (Planning / Review / Quality), and the
-  `computeBacklinks(target, ctx)` indexer. `FilePage` and `DiffPage`
-  were intentionally skipped: file and diff tabs already render via
-  `centerTabs` with their own chrome (Monaco editor, diff editor) and
-  wrapping them in Page chrome would double-up the header. The
-  legacy `note:` tab path now renders through `NotePage` so wiki
-  notes get a Backlinks panel; modal-based task edits still work
-  alongside `TaskPage` for callers that want the modal flow.
-- ↩️ **Reversal (tsk168, 2026-06):** phase 5c's kebab `⋯` migration was
-  undone — per-row actions are **right-click only** again (right-click is
-  discoverable enough and the kebab ate row space). `Kebab.tsx` is
-  deleted; the shared hook is now `useRowContextMenu.tsx`
-  (`useRowContextMenu(items)` / `useContextMenu()`). The global
-  suppressor in `context-menu.ts` stays as a backstop; editing surfaces
-  keep their native/own menus. See `.context/usability.md` →
-  "Per-row actions (right-click menus)". The 5c log below is historical.
-- ✅ Phase 5 — Web-style interactions sweep (kill modals + right-click
-  menus). 5a (`InlineConfirm` + `UndoToast` queue) and 5b (`InlineEdit`
-  + `InlinePromptStrip` for new-X flows) shipped: `ConfirmDialog.tsx`
-  and `PromptDialog.tsx` are deleted. 5c (Kebab popovers) shipped on
-  the high-traffic surfaces (StreamRail, ThreadRail, CenterTabs,
-  WorkGroupList rows, Notes pane rows, FileTree rows) plus the
-  remaining holdouts: BranchPicker manage rows (chevron-led row click,
-  no `onContextMenu`), EditorPane git-blame margin (hover-revealed
-  per-row kebab), MarkdownView links (inline hover-revealed kebab
-  next to each link), WikiActivityBar entry pills + overflow rows
-  (per-row kebab), TerminalPane (xterm `contextmenu` listener
-  removed; header-bar kebab with Copy/Paste/Clear). 5d landed the
-  `Slideover` primitive (`apps/desktop/src/components/Slideover.tsx`) plus the
-  BranchPicker rename Slideover, ProjectPanel commit-dialog
-  Slideover, and the cross-page detail wrappers
-  `SnapshotDetailSlideover` (`apps/desktop/src/components/Snapshots/SnapshotDetailSlideover.tsx`)
-  and `CommitDetailSlideover` (`apps/desktop/src/components/History/CommitDetailSlideover.tsx`).
-  5e landed the per-stream and per-thread settings as
-  `StreamSettingsPage` and `ThreadSettingsPage`, the inline-new-row
-  that retired `CreateThreadModal`, and the new-stream / new-work-
-  item page-form replacements (`NewStreamPage`, `NewTaskPage` —
-  routed via `newStreamRef()` / `newTaskRef({...})`). The
-  `PlanPane` `NewTaskModal` only backs the edit-double-click
-  flow now; new flows route through pages.
-- ✅ Phase 6 — Selection action bar + drag-to-add-context polish.
-  `SelectionActionBar` (`apps/desktop/src/components/Plan/SelectionActionBar.tsx`)
-  appears at the top of `PlanPane`'s work-group region whenever ≥1
-  rows are marked. It owns no state; PlanPane reads its existing
-  marked-set and routes Change status / Change priority / Add to
-  agent context / Delete through the same paths used by single-row
-  kebabs. The agent terminal now accepts multi-row task drags
-  (decodes the `TASK_DRAG_MIME` payload's `items` slice
-  directly — see `.context/usability.md` "Add to agent context").
-  Drag-to-add sources expanded: BacklinksList entries, RailHud
-  active item / up-next, CodeQualityPanel file group
-  rows, plus a "Add to agent context" item on every task kebab
-  (single-row and group menus).
-- ✅ Phase 7 — Density + visual polish. Body font bumped to 14px;
-  list rows (Plan / Files / Notes / Code quality / Snapshots /
-  History) raised from ~24–28px to ~36–40px; section headers use
-  `--surface-app` + 10px padding; CenterTabs strip is 36px min-height;
-  Page chrome header is 56px with a 17px / 600-weight title; legacy
-  unknown `--color-*` fallback hexes (NotesPane, NoteTab,
-  WikiActivityBar, MarkdownView, TerminalPane drag overlay) migrated
-  to the semantic tokens; selection/marked rows use a 3px stripe +
-  `--accent-soft-bg`. Monaco editors are pinned to `vs-dark` (oxplow
-  is dark-only). See `.context/theming.md` Density section.
-
-Phase 3 is shipped: rail HUD "Pages" entries open as full center-area
-tabs. (The rail "Pages" section itself was later removed — see
-"One Search" below — but the underlying page-as-tab routing is unchanged;
-the launcher and Bookmarks now drive navigation instead.)
-
-**Left dock removed.** The left-side `DockShell` that previously
-carried four toolwindows (HUD / Work / Files / Notes) is gone.
-`<RailHud>` is now mounted directly as a 260px-wide left aside in
-`App.tsx` — the component owns its own width / `borderRight` /
-`var(--surface-rail)` background, so no host wrapper is needed. The
-rail HUD is THE persistent left chrome; the legacy `Plan` / `Project` /
-`Notes` left-rail tabs were duplicates of the existing
-the work pages (`TasksPage` / `DoneWorkPage` / `BacklogPage` /
-`ArchivedPage`) / `FilesPage` / `NotesIndexPage` content and have
-been deleted along with the `leftDockActivate` plumbing. Menu
-commands that used to flip the dock (`commitFiles`, edit-task)
-now route through `handleOpenPage(indexRef("files"))` /
-`handleOpenPage(indexRef("tasks"))`. The harness startup gate
-(`waitForOxplowReady`) polls for `rail-hud`.
+The next structural change is not an IA change but a scope change:
+analytics pages move out of core into the `oxplow-analytics` extension as
+`view:<slug>` pages mounted through slots ([extensions.md](./extensions.md)).
 
 ## One Search — the single discovery surface
 
@@ -395,22 +314,7 @@ Named ref helpers — `tasksRef()`, `doneWorkRef()`,
 (`gitDashboardRef`, `uncommittedChangesRef`). `planWorkRef()`
 remains as a deprecated alias of `tasksRef()`.
 
-**Bottom dock removed.** The bottom-drawer `DockShell` that previously
-hosted Hook events / Git history / Local history / Code quality is
-gone. Every panel it carried has a Page equivalent
-(`HookEventsPage`, `GitHistoryPage`, `LocalHistoryPage`,
-`CodeQualityPage`); menu commands like "Open history" / "Open
-snapshots", and the cross-pane "show in history" reveal hooks
-(`handleRevealCommit`, `handleShowSnapshotInHistory`), all route
-through `handleOpenPage(indexRef("git-history"))` /
-`indexRef("local-history")`. The `StatusBar` (background-task
-indicator + branch chip) used to live as the bottom dock's `railExtra`;
-it's now mounted directly at the bottom of `App.tsx` inside its own
-status-bar wrapper. The `BottomPanel`, `HistoryPanel`, `SnapshotsPanel`,
-and `CodeQualityPanel` modules are no longer imported from `App.tsx` —
-the only callers left are inside their own page wrappers.
-
-## Browser-style tab navigation (Phase 1)
+## Browser-style tab navigation
 
 Page tabs now carry **per-tab back/forward history**. `App.tsx` keeps
 a parallel `threadPageHistory: Record<threadId, Record<tabId, { back; forward }>>`
@@ -576,7 +480,7 @@ each thread's last active tab.
 ## Unified tab list — every tab holds a Page
 
 Every per-thread tab lives in `threadPageTabs[threadId]` as a
-`TabRef`, regardless of kind (`note`, `file`, `diff`, `task`,
+`TabRef`, regardless of kind (`wiki`, `file`, `diff`, `task`,
 `change-analysis`, `git-commit`, etc.). The page-tab loop in
 `centerTabs` builds the renderer by switching on `ref.kind` and
 wrapping each tab in a `PageNavigationContext` so in-tab navigation,
@@ -621,7 +525,7 @@ kinds slot in without re-discovering the layout.
 - **`threadPageTabs: Record<string, TabRef[]>`** — per-thread tab
   list, keyed by `threadId`. The single source of truth for "what
   tabs exist in this thread, in what order." Every tab kind
-  (`file`, `diff`, `note`, `task`, `change-analysis`,
+  (`file`, `diff`, `wiki`, `task`, `uncommitted-changes`,
   `git-commit`, `tasks`, `git-history`, …) lives here. Mutated by
   `handleOpenPage`, `handleOpenFile`, `handleOpenDiff`,
   `handleNavigateInTab`, `handleStepSibling`, `closePageTab`. Read

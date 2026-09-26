@@ -5,6 +5,11 @@ assembles to view a handful of metrics at a glance. Complements the per-metric
 **detail** page (`.context/metrics.md`) and the **Recorded Metrics** list.
 Epic **tsk138**.
 
+> **Direction (epic tsk275):** custom dashboards are slated to become
+> `grid` views in the `oxplow-analytics` extension
+> ([extensions.md](./extensions.md)), and the `dashboard` tables retired
+> once migrated. Maintain; don't extend.
+
 **Scope: project-global.** Metrics are project-scoped, so dashboards are too —
 one set per project, reachable from any stream/thread. The `dashboard` table has
 **no `stream_id`** (the DB is already per-project).

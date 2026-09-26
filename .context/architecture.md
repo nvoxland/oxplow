@@ -36,6 +36,56 @@ invariant, guarded by tests — the mechanics and the human-input
 transport (`forward_terminal_input`) live in
 [agent-model.md](./agent-model.md#no-synthesized-agent-terminal-input-no-automation).
 
+### Scoped exceptions (target design, not yet built)
+
+Two planned features send model input. Neither breaks the rule's
+principle, which is that oxplow steers and never drives a doing-agent.
+Until they ship (epic tsk275), the invariant above is unchanged and
+has no exceptions.
+
+- **AI functions** ([ai-providers.md](./ai-providers.md)): oxplow calls a
+  model over its API to classify, score or summarize data for the semantic
+  layer. That is oxplow's own computation. It never prompts the agent doing
+  the work and never touches an agent terminal.
+- **ACP agents** (tsk281): an agent spoken to over the Agent Client
+  Protocol receives a prompt **only** when a human types one into oxplow's
+  UI. Stop-hook directives are shown to the human; they are never sent
+  automatically. The same source-scan test that guards terminal input will
+  guard ACP prompts.
+
+## Skeleton + semantic layer (target direction)
+
+> **Status: target design (epic tsk275), recorded 2026-09.** Today's
+> app still ships analytics pages in core. This section is the direction
+> future decisions follow.
+
+The core app is a **skeleton**: the controls you steer with, plus a data
+layer everything else builds on.
+
+- **Controls in core, instruments in extensions.** Core keeps streams,
+  threads, tasks and efforts, agent surfaces (terminal harnesses, and
+  later ACP agents), comments, wiki, diff and file drill-down, and the
+  page graph (rail, launcher, tabs). Anything that **measures or
+  visualizes** is an extension ([extensions.md](./extensions.md)).
+- **All data goes through the [semantic layer](./semantic-layer.md).**
+  Sources produce entities and facts, dimensions slice them, metrics
+  aggregate them, and read-only `v_*` SQL views are the contract. Core
+  ships common sources (work, wiki, git, LSP, tests, agent sessions…);
+  users and their agents add more (GitHub, Linear…) and build views on
+  top.
+- **One extension format for first- and third-party.** Oxplow's own
+  analytics become the bundled `oxplow-analytics` example extension,
+  written the same way a user would write one.
+- **Declarative and scripted, no in-app user code.** See
+  [extensions.md](./extensions.md) for why.
+- **Exceptions over trends.** Humans reviewing agent work act on
+  decisions and deviations, not on totals. Shipped views are live
+  exception lists at the effort boundary, not dashboards.
+- **Stop investing in commodity surfaces.** Session lists, worktree per
+  session and diff review now ship free with every major agent vendor's
+  app. Maintain them; put new effort into the semantic layer and
+  verification.
+
 ## Current app shape
 
 - Custom React shell for layout and UI state
@@ -440,4 +490,6 @@ Until explicitly changed, the default architecture stance is:
 > understands agent-driven work. Keep Monaco + LSP as a drill-down
 > editor/viewer for reading code and making manual changes — because in
 > the end the code is the reality — but do not organize the product
-> around an editor, and do not import the full VS Code workbench.**
+> around an editor, and do not import the full VS Code workbench.
+> Keep core a skeleton of controls; put every instrument in an extension
+> over the semantic layer (see "Skeleton + semantic layer" above).**

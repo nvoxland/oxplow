@@ -20,6 +20,12 @@ substrate (`CollectionService::effort_observations_from_metrics`); the
 > the sole metric store. Sections below that describe V38 mechanics are
 > historical context for why the model looks the way it does.
 
+> **Direction (epic tsk275):** this fact substrate becomes the "facts"
+> half of the [semantic layer](./semantic-layer.md), which adds entities,
+> expression/join dimensions and a read-only `v_*` SQL contract. The
+> Metrics pages move into the `oxplow-analytics` extension
+> ([extensions.md](./extensions.md)); the substrate and engine stay core.
+
 ## The fact substrate (epic tsk12 — the inversion, in flight)
 
 **The defect being fixed.** V38 has facts and metrics *inverted*. `metric_sample`
