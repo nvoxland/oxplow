@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { loadSvgPanZoom } from "./MarkdownView.js";
+import { loadSvgPanZoom } from "./mermaidRender.js";
 
 export type LightboxContent =
   | { kind: "image"; src: string; alt?: string }

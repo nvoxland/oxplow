@@ -25,149 +25,11 @@ import type { TabRef } from "../../tabs/tabState.js";
 import { DISK, type FileVersion } from "../../file-version.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
+import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 
-// Mermaid is loaded lazily so this module is safe to import in
-// non-DOM test environments (parseMarkdownLink is the main reason
-// to import without mounting the component).
-let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
-function loadMermaid() {
-  if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then((mod) => {
-      mod.default.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
-      return mod.default;
-    });
-  }
-  return mermaidPromise;
-}
-
-// svg-pan-zoom uses CommonJS-style `export = svgPanZoom`, so the
-// runtime default-import gives us the callable instance directly.
-type SvgPanZoomFn = (typeof import("svg-pan-zoom"));
-let svgPanZoomPromise: Promise<SvgPanZoomFn> | null = null;
-export function loadSvgPanZoom() {
-  if (!svgPanZoomPromise) {
-    svgPanZoomPromise = import("svg-pan-zoom").then((mod) => {
-      // Vite's CJS interop wraps the export under `.default`; native
-      // ESM gives the function directly. Handle both shapes.
-      const m = mod as unknown as { default?: SvgPanZoomFn };
-      return (m.default ?? (mod as unknown as SvgPanZoomFn));
-    });
-  }
-  return svgPanZoomPromise;
-}
-
-/**
- * Wrap a freshly rendered Mermaid host in svg-pan-zoom and inject a
- * small overlay toolbar (+ / − / Reset). Returns a cleanup that tears
- * the pan-zoom instance down — important so the React effect can
- * dispose stale instances when the body re-renders.
- *
- * Mermaid emits an `<svg>` whose width/height come from the diagram's
- * intrinsic size; svg-pan-zoom needs an explicit fixed size on the
- * element so the viewport math works. We give the wrapper a fixed
- * height and let the SVG fill it.
- */
-/**
- * Wait for the host to have a non-zero layout box. b775f12 mounts
- * back/forward history tabs as `display:none` siblings, so this
- * effect can fire while the host is laid out at 0×0; svg-pan-zoom
- * then calls `getCTM().inverse()` on a zero-size SVG and throws
- * `InvalidStateError: Matrix is not invertible`, leaving the diagram
- * permanently blank. IntersectionObserver fires when the host first
- * intersects the viewport; until then we defer init.
- */
-function waitForVisible(host: HTMLElement): Promise<void> {
-  if (host.offsetWidth > 0 && host.offsetHeight > 0) return Promise.resolve();
-  return new Promise((resolve) => {
-    const obs = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting && host.offsetWidth > 0 && host.offsetHeight > 0) {
-          obs.disconnect();
-          resolve();
-          return;
-        }
-      }
-    });
-    obs.observe(host);
-  });
-}
-
-async function attachPanZoom(host: HTMLElement, onExpand?: () => void): Promise<(() => void) | null> {
-  const svg = host.querySelector<SVGSVGElement>("svg");
-  if (!svg) return null;
-  // svg-pan-zoom requires the SVG to have a width/height set.
-  svg.removeAttribute("style");
-  svg.setAttribute("width", "100%");
-  svg.setAttribute("height", "100%");
-  host.style.position = "relative";
-  host.style.height = "480px";
-  host.style.maxHeight = "70vh";
-  host.style.border = "1px solid var(--border-subtle)";
-  host.style.borderRadius = "6px";
-  host.style.overflow = "hidden";
-  // Block until the host has real dimensions — see waitForVisible
-  // comment for the b775f12 hidden-tab interaction.
-  await waitForVisible(host);
-  const svgPanZoom = await loadSvgPanZoom();
-  const instance = svgPanZoom(svg, {
-    zoomEnabled: true,
-    // Mouse-wheel zoom is hostile inside a scrollable wiki page —
-    // users expect the wheel to scroll the article, not silently
-    // resize the diagram. The +/− toolbar buttons drive zoom.
-    mouseWheelZoomEnabled: false,
-    panEnabled: true,
-    controlIconsEnabled: false,
-    fit: true,
-    center: true,
-    minZoom: 0.2,
-    maxZoom: 20,
-    contain: false,
-  });
-  const toolbar = document.createElement("div");
-  toolbar.className = "mermaid-pz-toolbar";
-  toolbar.style.cssText = [
-    "position: absolute",
-    "top: 6px",
-    "right: 6px",
-    "display: flex",
-    "gap: 2px",
-    "background: var(--surface-card)",
-    "border: 1px solid var(--border-subtle)",
-    "border-radius: 4px",
-    "padding: 2px",
-    "font-size: 12px",
-    "z-index: 1",
-  ].join(";");
-  const makeBtn = (label: string, title: string, onClick: () => void) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = label;
-    btn.title = title;
-    btn.style.cssText = [
-      "background: transparent",
-      "border: none",
-      "color: var(--text-primary)",
-      "cursor: pointer",
-      "padding: 2px 6px",
-      "font-size: 12px",
-      "line-height: 1",
-      "min-width: 20px",
-    ].join(";");
-    btn.addEventListener("click", (e) => { e.preventDefault(); onClick(); });
-    return btn;
-  };
-  toolbar.appendChild(makeBtn("−", "Zoom out", () => instance.zoomOut()));
-  toolbar.appendChild(makeBtn("+", "Zoom in", () => instance.zoomIn()));
-  toolbar.appendChild(makeBtn("Reset", "Reset view", () => { instance.resetZoom(); instance.center(); instance.fit(); }));
-  if (onExpand) {
-    toolbar.appendChild(makeBtn("⛶", "Open in lightbox", () => onExpand()));
-  }
-  host.appendChild(toolbar);
-  return () => {
-    try { instance.destroy(); } catch { /* ignore */ }
-    toolbar.remove();
-  };
-}
+// Mermaid + svg-pan-zoom load lazily inside mermaidRender, so this module
+// stays safe to import in non-DOM test environments (parseMarkdownLink is
+// the main reason to import without mounting the component).
 
 export type ParsedLink =
   | { kind: "empty" }
@@ -896,8 +758,8 @@ export function MarkdownView({
           });
         }
         sweepStrayMermaidNodes();
-        const cleanup = await attachPanZoom(host, () => {
-          openLightboxRef.current({ kind: "svg", html: svg });
+        const cleanup = await attachPanZoom(host, svg, (html) => {
+          openLightboxRef.current({ kind: "svg", html });
         });
         if (cancelled) {
           cleanup?.();

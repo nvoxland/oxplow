@@ -86,13 +86,18 @@ show the pencil — that's the consistent signal "this is for reading."
 ## What's in `apps/desktop/src/components/Wiki/mermaidRender.ts`
 
 Shared mermaid rendering pipeline used by `MermaidBlock` (editor
-NodeView). `MarkdownView` still has its own inline copy of the same
-logic; consolidating them is a small follow-up. Exports
+NodeView), `MarkdownView` (read-only bodies — it keeps its own
+parse/render/stray-sweep loop but loads mermaid and pan-zoom from
+here) and `MediaLightbox`. The one `mermaid.initialize` lives in
+`loadMermaid`; it pins `layout: "dagre"` because Mermaid 12 switched
+the default to ELK, which would re-lay-out every existing diagram.
+Exports
 `loadMermaid`, `loadSvgPanZoom`, `attachPanZoom`,
 `renderMermaidInto`. Lazy-loads mermaid + svg-pan-zoom on first use;
 waits for the host element to have a non-zero layout box before
 initializing pan-zoom (otherwise `getCTM().inverse()` throws on
-zero-size SVGs — see `MarkdownView.tsx` for the original guard).
+zero-size SVGs — the `waitForVisible` guard, originally from
+`MarkdownView`).
 
 ## Storage model
 

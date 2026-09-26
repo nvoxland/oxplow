@@ -15,7 +15,14 @@ let mermaidPromise: Promise<typeof import("mermaid").default> | null = null;
 export function loadMermaid() {
   if (!mermaidPromise) {
     mermaidPromise = import("mermaid").then((mod) => {
-      mod.default.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
+      mod.default.initialize({
+        startOnLoad: false,
+        theme: "dark",
+        securityLevel: "loose",
+        // Mermaid 12 made ELK the default layout; pin dagre so existing
+        // wiki diagrams keep the layout they were written against.
+        layout: "dagre",
+      });
       return mod.default;
     });
   }
@@ -57,6 +64,7 @@ export async function attachPanZoom(
 ): Promise<(() => void) | null> {
   const svg = host.querySelector<SVGSVGElement>("svg");
   if (!svg) return null;
+  // svg-pan-zoom requires the SVG to have a width/height set.
   svg.removeAttribute("style");
   svg.setAttribute("width", "100%");
   svg.setAttribute("height", "100%");
@@ -66,10 +74,15 @@ export async function attachPanZoom(
   host.style.border = "1px solid var(--border-subtle)";
   host.style.borderRadius = "6px";
   host.style.overflow = "hidden";
+  // Block until the host has real dimensions — see waitForVisible
+  // comment for the b775f12 hidden-tab interaction.
   await waitForVisible(host);
   const svgPanZoom = await loadSvgPanZoom();
   const instance = svgPanZoom(svg, {
     zoomEnabled: true,
+    // Mouse-wheel zoom is hostile inside a scrollable wiki page —
+    // users expect the wheel to scroll the article, not silently
+    // resize the diagram. The +/− toolbar buttons drive zoom.
     mouseWheelZoomEnabled: false,
     panEnabled: true,
     controlIconsEnabled: false,
