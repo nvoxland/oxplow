@@ -71,7 +71,7 @@ layer everything else builds on.
   Sources produce entities and facts, dimensions slice them, metrics
   aggregate them, and read-only `v_*` SQL views are the contract. Core
   ships common sources (work, wiki, git, LSP, tests, agent sessions…);
-  users and their agents add more (GitHub, Linear…) and build views on
+  users and their agents add more (GitHub, Linear…) and build **lenses** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
   analytics become the bundled `oxplow-analytics` example extension,
@@ -79,7 +79,7 @@ layer everything else builds on.
 - **Declarative and scripted, no in-app user code.** See
   [extensions.md](./extensions.md) for why.
 - **Exceptions over trends.** Humans reviewing agent work act on
-  decisions and deviations, not on totals. Shipped views are live
+  decisions and deviations, not on totals. Shipped lenses are live
   exception lists at the effort boundary, not dashboards.
 - **Stop investing in commodity surfaces.** Session lists, worktree per
   session and diff review now ship free with every major agent vendor's

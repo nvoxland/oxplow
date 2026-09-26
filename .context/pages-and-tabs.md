@@ -43,7 +43,7 @@ pages are THE shell.
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
 | `apps/desktop/src/pages/UncommittedChangesPage.tsx` | Stats-focused view of working-tree changes: M/A/D/R/U + total +/-, collapsible folder tree with per-folder rollup of files / +/-, Commit-all action. Distinct from `FilesPage` which is the full project file tree. Routed via `uncommittedChangesRef()`. |
-| (change analysis) | No standalone page any more. `changeAnalysisRef(target, scope)` resolves to `uncommittedChangesRef(scope)` or `gitCommitRef(sha, scope)`; the drilldown renders on that host page with the scope applied, via `useChangeAnalysis`. Slated to become `oxplow-analytics` slot views ([extensions.md](./extensions.md)). |
+| (change analysis) | No standalone page any more. `changeAnalysisRef(target, scope)` resolves to `uncommittedChangesRef(scope)` or `gitCommitRef(sha, scope)`; the drilldown renders on that host page with the scope applied, via `useChangeAnalysis`. Slated to become `oxplow-analytics` slot lenses ([extensions.md](./extensions.md)). |
 | ~~`apps/desktop/src/tabs/backlinksIndex.ts`~~ | **Deleted.** The in-memory cross-kind indexer is replaced by the persisted `page_ref` table; see `data-model.md`. The `BacklinkEntry` type that renderers consume now lives in `apps/desktop/src/tabs/backlinkTypes.ts`. |
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that calls the unified `list_backlinks` IPC for a `TabRef` and maps the returned `BacklinkEdge` rows into `BacklinkEntry`s. Used by every page kind including `FilePage` (which previously rendered nothing). The sibling `usePageOutbound` hook does the same for the inverse direction. |
 | `apps/desktop/src/tabs/backlinkTypes.ts` | Renderer-side `BacklinkEntry` interface (`{ ref, label, subtitle? }`). Decoupled from the SQLite `BacklinkEdge` shape. |
@@ -66,8 +66,8 @@ pages are THE shell.
 `PageKind` (`apps/desktop/src/tabs/tabState.ts`) is the source of truth;
 this list mirrors it. Grouped by what they are for. Kinds marked **(→
 ext)** are analytics pages slated to move into the `oxplow-analytics`
-extension as `view:<slug>` pages ([extensions.md](./extensions.md), epic
-tsk275) — don't grow them; new instruments should be views once the
+extension as `lens:<slug>` pages ([extensions.md](./extensions.md), epic
+tsk275) — don't grow them; new instruments should be lenses once the
 extension host lands.
 
 - **Agent & work:** `agent`, `task`, `tasks`, `done-work`, `backlog`,
@@ -217,7 +217,7 @@ Git history has the phase-by-phase detail if you need it.
 
 The next structural change is not an IA change but a scope change:
 analytics pages move out of core into the `oxplow-analytics` extension as
-`view:<slug>` pages mounted through slots ([extensions.md](./extensions.md)).
+`lens:<slug>` pages mounted through slots ([extensions.md](./extensions.md)).
 
 ## One Search — the single discovery surface
 

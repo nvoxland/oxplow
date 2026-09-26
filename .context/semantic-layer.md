@@ -22,10 +22,10 @@ of what matters. The direction ([architecture.md](./architecture.md) →
 
 - ship **the data** as a stable, queryable layer;
 - ship **common sources** of that data;
-- let users and their agents build the views they actually want
+- let users and their agents build the **lenses** they actually want
   ([extensions.md](./extensions.md)).
 
-A view can only be as good as the data it can reach. So **nothing may be
+A lens can only be as good as the data it can reach. So **nothing may be
 reachable only through a bespoke IPC**. If core has it, the semantic layer
 exposes it.
 
@@ -118,8 +118,13 @@ Every shipped entity is exposed as a stable **read-only SQL view**:
   enforces a timeout and a row cap.
 - `describe_schema` returns the view catalog with column docs, so an agent
   can explore it without reading source.
-- Views never call models or run sources on render; they read what sources
+- Lenses never call models or run sources on render; they read what sources
   already produced.
+- Everything an extension adds (entities, relations, dimensions, metrics)
+  appears in the same `describe_schema` / `query_sql` / `list_dimensions`
+  / `list_metrics` tools as core data. Agents never need an
+  extension-specific tool. Full agent surface:
+  [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
 ## User and extension sources
 
@@ -173,9 +178,9 @@ Rules:
 
 - [metrics.md](./metrics.md): the fact substrate this generalizes. Still
   authoritative for facts, captures, the cube and gauges.
-- [extensions.md](./extensions.md): how views and extensions consume this
+- [extensions.md](./extensions.md): how lenses and extensions consume this
   layer.
-- [ai-providers.md](./ai-providers.md): the AI functions sources and views
+- [ai-providers.md](./ai-providers.md): the AI functions sources and lenses
   can use.
 - [collection.md](./collection.md): test-run and coverage ingest, which
   becomes the tests & coverage source.

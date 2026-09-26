@@ -1,7 +1,7 @@
 # Extensions
 
 This doc covers how anything that **measures or visualizes** is added to
-oxplow: the `extension.yaml` format, views, slots, actions and alerts, and
+oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 the bundled `oxplow-analytics` example extension.
 
 > **Status: target design (epic tsk275).** Nothing here is implemented
@@ -22,13 +22,13 @@ the bundled `oxplow-analytics` example extension.
   capability is added to core for everyone and logged under "Added for
   extraction" below. No private backdoors.
 - **Declarative and scripted only.** An extension is YAML, SQL,
-  Starlark/jq/exec sources and declarative views. No user-authored code
+  Starlark/jq/exec sources and declarative lenses. No user-authored code
   runs in the app window. Reason: the daemon's `/ipc` is unauthenticated
   and includes `forward_terminal_input`, so agent-written JS in the window
   could drive the agent. Revisit only after a scoped, read-only IPC
   capability exists ([remote-daemon.md](./remote-daemon.md) names the
   extension point).
-- **Exceptions over trends.** Shipped views are live exception lists at the
+- **Exceptions over trends.** Shipped lenses are live exception lists at the
   effort boundary (rows disappear when addressed), not dashboards of
   totals.
 
@@ -56,17 +56,19 @@ derived:             # named read-only SQL over v_*
   - {name: hotspot, sql: sql/hotspot.sql}
 ai:                  # AI-function usages by role, cached as facts
   - {id: effort-risk, role: decide, over: v_effort, questions: …, measure: ext.effort_risk}
-views: [views/*.yaml]
-slots:               # mount views into core pages
-  - {slot: effort-review, view: read-this-first, order: 20}
-  - {slot: task-detail,  view: token-usage}
-  - {slot: rail,         view: waiting-on-me, as: badge}
-  - {slot: launcher,     view: metrics-explorer, category: Analytics}
+lenses: [lenses/*.yaml]
+slots:               # mount lenses into core pages
+  - {slot: effort-review, lens: read-this-first, order: 20}
+  - {slot: task-detail,  lens: token-usage}
+  - {slot: rail,         lens: waiting-on-me, as: badge}
+  - {slot: launcher,     lens: metrics-explorer, category: Analytics}
 ```
 
-## Views
+## Lenses
 
-A view is a declarative data app: a query plus how to show it.
+A **lens** is a user- or agent-built way of looking at your work: a
+query over the semantic layer plus how to show it. (Not "view", which is
+taken by the SQL `v_*` views; not "data app".)
 
 - `title`, `description`, `params` (typed, with defaults such as `stream`,
   `effort`, `range`).
@@ -75,7 +77,7 @@ A view is a declarative data app: a query plus how to show it.
 - `viz`: `table`, `list`, `number`, `line`, `bar`, `markdown`, `treemap`,
   `hunks` (an ordered file/range list with badge columns that opens the
   diff at the range), `steps` (a guided walkthrough) or `grid` (child
-  views).
+  lenses).
 - `columns`: label, format, and `link:` to a core ref (task, file, effort
   diff, wiki page, decision), so rows are page-graph links.
 - `actions`: from a fixed registry only: add-to-context, followup-comment,
@@ -83,10 +85,10 @@ A view is a declarative data app: a query plus how to show it.
 - `alert`: a row-count or threshold condition that shows a rail badge and
   can be marked `nudge: true` (see below).
 
-Views render through one core `ViewPage` / `ViewSlot` in oxplow's design
-system, as a `view:<slug>` page kind. Bookmarks, backlinks, the launcher
-and sibling navigation work unchanged. Every view has an "Improve with
-agent" action that pastes `[oxplow view <slug>]` and its params into the
+Lenses render through one core `LensPage` / `LensSlot` in oxplow's design
+system, as a `lens:<slug>` page kind. Bookmarks, backlinks, the launcher
+and sibling navigation work unchanged. Every lens has an "Improve with
+agent" action that pastes `[oxplow lens <slug>]` and its params into the
 agent's context through the existing add-to-context path; oxplow never
 types into the agent.
 
@@ -115,13 +117,57 @@ core keeps only a generic **nudge primitive**: an extension `alert` marked
 `inject: prompt` is added on UserPromptSubmit. The threshold logic lives in
 the extension.
 
-## MCP surface
+## Agents: the MCP surface
 
-Generic tools only. Extensions never add MCP tools; the agent reaches
-everything through: `list_extensions`, `list_views`, `run_view`,
-`query_sql`, `describe_schema`, `run_source`, `scaffold_extension`,
-`scaffold_view`. An `oxplow-extension` skill (shipped in
-`crates/oxplow-plugin/assets`) teaches the agent the format.
+Everything a human can see or build, an agent can see or build too, over
+MCP. That includes whatever **extensions** add: an extension's sources,
+entities, dimensions, metrics and lenses show up in the same generic tools
+as core's. Extensions never add their own MCP tools. That keeps the agent's
+tool list stable no matter how many extensions are installed.
+
+**Understanding the semantic layer**
+
+- `describe_schema`: every entity (core `v_*` and extension
+  `v_<ext>_<entity>`) with column docs, declared relations (joins), and the
+  owning source/extension.
+- `list_dimensions`, `list_metrics`: including extension-declared ones,
+  each marked with its owner.
+- `query_sql`: read-only SQL across everything above.
+- `get_metric(key, dims?, range?)`: a metric's value or series, sliced by
+  any applicable dimension.
+
+**Working with lenses**
+
+- `list_lenses`: every lens with its extension, params, slots and alert
+  state.
+- `get_lens(slug)`: the lens definition (YAML) and its resolved query.
+- `run_lens(slug, params?)`: the **same rows, columns and alert state the
+  UI shows** for those params, so the agent sees exactly what the human
+  sees.
+- `get_open_lens(thread_id)`: which lens (slug + params) the human
+  currently has open in that thread, if any. This is what lets "look at
+  what I'm looking at" work.
+- `run_lens_action(slug, action, row_key)`: trigger one of the lens's
+  registered actions. The same fixed registry as the UI, so an agent can
+  never do more through a lens than a human could.
+
+**Building**
+
+- Agents author extensions and lenses **by editing files** under
+  `.oxplow/extensions/<name>/` with their normal Edit tool, under the usual
+  filing guard. The loader hot-reloads.
+- `scaffold_extension(name)` and `scaffold_lens(ext, slug, query?)` write a
+  valid starting point.
+- `validate_extension(name)` returns load errors, schema errors and a dry
+  run of every lens query, so the agent can check its work without the UI.
+- `list_extensions`, `run_source(id)`.
+
+**Teaching the agent**
+
+An `oxplow-extension` skill (shipped in `crates/oxplow-plugin/assets`)
+teaches the format, the `v_*` contract and the loop "scaffold → edit →
+validate → run_lens". "Improve with agent" on a lens pastes
+`[oxplow lens <slug>]` plus its params into the agent's context.
 
 ## The `oxplow-analytics` example extension
 
@@ -129,15 +175,15 @@ What moves out of core, and what it becomes:
 
 | Today (core) | Becomes |
 |---|---|
-| Metrics / MetricDetail / Recording pages | `metrics-explorer`, `metric-detail` views |
-| Custom dashboards; Planning / Review / Quality dashboards | `grid` views; `dashboard` tables retired after migration |
-| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | exec source + `findings` / `duplicates` views |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot views |
+| Metrics / MetricDetail / Recording pages | `metrics-explorer`, `metric-detail` lenses |
+| Custom dashboards; Planning / Review / Quality dashboards | `grid` lenses; `dashboard` tables retired after migration |
+| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | exec source + `findings` / `duplicates` lenses |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot lenses |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
 | Gauge-threshold nudges | extension alerts → core nudge primitive |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | views + `task-detail` / `rail` slot views |
-| Local history dashboard | view over `v_snapshot` |
-| Effort metrics block, effort coverage page | `effort-review` slot views |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | lenses + `task-detail` / `rail` slot lenses |
+| Local history dashboard | lens over `v_snapshot` |
+| Effort metrics block, effort coverage page | `effort-review` slot lenses |
 
 **Stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
@@ -146,7 +192,7 @@ dashboard. diff-view shrinks to title + file list + diff + the
 `effort-review` slot; TaskPage keeps the `task-detail` slot.
 
 New in the extension: the **effort review packet**, all live exception
-views:
+lenses:
 
 - Waiting on me
 - What deviated (files outside the task's stated area)
@@ -160,7 +206,7 @@ views:
   pastes it)
 
 **Done when** core boots and is usable with `oxplow-analytics` disabled,
-and enabling it restores the old pages' behavior as views.
+and enabling it restores the old pages' behavior as lenses.
 
 ## Added for extraction
 

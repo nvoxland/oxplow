@@ -2,7 +2,7 @@
 
 This doc covers oxplow's own access to models over their APIs: the
 providers you configure, the roles that decide which model does what, the
-`ai_*` functions sources and views call, and how spend is tracked.
+`ai_*` functions sources and lenses call, and how spend is tracked.
 
 > **Status: target design (epic tsk275).** Nothing here is implemented
 > yet; oxplow makes **no** direct model API calls today. The build is
@@ -67,11 +67,11 @@ them in `.oxplow/project.yaml`.
 
 ## `ai_*` functions
 
-Sources and views use `ai_decide(role, input, questions)`, `ai_score`,
+Sources and lenses use `ai_decide(role, input, questions)`, `ai_score`,
 `ai_summarize` and `ai_embed`.
 
-Results are **cached as facts, keyed by a hash of the input**. Views never
-call a model when they render; they read cached results. This keeps views
+Results are **cached as facts, keyed by a hash of the input**. Lenses never
+call a model when they render; they read cached results. This keeps lenses
 fast, deterministic and cheap.
 
 MCP exposes `list_ai_roles` and `ai_decide`, so the doing-agent can ask a

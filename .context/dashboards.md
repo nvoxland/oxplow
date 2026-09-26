@@ -6,7 +6,7 @@ assembles to view a handful of metrics at a glance. Complements the per-metric
 Epic **tsk138**.
 
 > **Direction (epic tsk275):** custom dashboards are slated to become
-> `grid` views in the `oxplow-analytics` extension
+> `grid` lenses in the `oxplow-analytics` extension
 > ([extensions.md](./extensions.md)), and the `dashboard` tables retired
 > once migrated. Maintain; don't extend.
 
