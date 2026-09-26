@@ -113,6 +113,9 @@ The component owns:
   so the gutter reads as the terminal's own padding.
 - A custom keydown handler (Cmd+V paste, Shift+Enter, PageUp/Down
   routing for tmux history mode, Escape interrupt detection).
+- Fast scroll is **Alt**+wheel (`fastScrollSensitivity: 4`). xterm 6
+  dropped the `fastScrollModifier` option and hardwired Alt, so it is
+  no longer configurable (it was Shift before the v6 upgrade).
 - A custom wheel handler (mousewheel → tmux history scrolling when
   appropriate).
 - The PTY session lifecycle via `desktopBridge().openTerminalSession`

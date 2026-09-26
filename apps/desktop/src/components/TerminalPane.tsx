@@ -274,7 +274,6 @@ export function TerminalPane({
       scrollback: 5000,
       cursorBlink: true,
       scrollSensitivity: 2,
-      fastScrollModifier: "shift",
       fastScrollSensitivity: 4,
       scrollOnUserInput: true,
     });

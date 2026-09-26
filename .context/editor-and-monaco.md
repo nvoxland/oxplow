@@ -336,6 +336,13 @@ or MonacoEnvironment.getWorker" and runs language services on the main
 thread, blocking input during heavy parsing. New Monaco language
 contributions need a matching `case` here.
 
+Since 0.57 `monaco-editor` ships an `exports` map that exposes only
+`esm/vs/*` — so deep imports are written **without** the `esm/vs/`
+prefix (`monaco-editor/editor/editor.worker?worker`), and the `min/`
+build is unreachable. Don't import `min/vs/editor/editor.main.css`:
+the ESM modules import their own CSS, which Vite bundles alongside the
+lazily-loaded editor chunk.
+
 ## Editor focus tracking
 
 `EditorPane` pushes the user's current file/selection/caret to the

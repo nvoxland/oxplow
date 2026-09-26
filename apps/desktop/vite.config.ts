@@ -19,6 +19,6 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: !!process.env.TAURI_DEBUG,
-    minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
+    minify: !process.env.TAURI_DEBUG,
   },
 });
