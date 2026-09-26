@@ -40,7 +40,7 @@ jobs:
   check-tag:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Verify tag matches Cargo.toml workspace version
         if: github.ref_type == 'tag'
         run: |
@@ -69,7 +69,7 @@ jobs:
     needs: check-tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -85,7 +85,7 @@ jobs:
             build-essential \
             tmux
       - name: Cache Cargo registry + target
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -114,7 +114,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -130,7 +130,7 @@ jobs:
             patchelf \
             build-essential
       - name: Cache Cargo registry + target
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -147,7 +147,7 @@ jobs:
       # creates the draft; the rest attach to it. Still unsigned —
       # users will see OS "unsigned developer" warnings.
       - name: Build + publish Tauri bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # vite build under bun spawns Node for some plugins and the
@@ -184,7 +184,7 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Bump cask in tap repo
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -246,7 +246,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Generate notes and publish the release

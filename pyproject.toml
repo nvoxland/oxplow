@@ -17,7 +17,7 @@ optional = true
 click = "<8.3.0"
 mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.0"
-pymdown-extensions = "^10.12.0"
+pymdown-extensions = "^12.1"
 mkdocs-awesome-pages-plugin = "^2.10.1"
 mkdocs-autorefs = "^1.4.0"
 
