@@ -11,7 +11,7 @@ Open it with ++cmd+p++.
 ++cmd+p++ is the only entry point. It does four jobs at once:
 
 - **Files** in the active stream's worktree, fuzzy-matched.
-- **Pages** — Tasks, Backlog, Local History, Change Analysis, Git,
+- **Pages** — Tasks, Backlog, Local History, Uncommitted, Git,
   Metrics, Dashboards, and the rest.
 - **Commands** — the small set of actions that aren't pages, like
   `New Dashboard…`.

@@ -1,108 +1,65 @@
 # Change Analysis
 
-Change Analysis is the page you go to when you want to
-*understand* a diff, not just look at it. Open it against any
-pair of refs — a feature branch vs. its parent, two arbitrary
-commits, working tree vs. `HEAD` — and it answers the question
-**"which files should I look at first, and why?"**
+Change Analysis answers "which files in this change should I look at
+first, and why?" It shows up on three pages:
 
-## Opening it
+- a **commit** page (the commit vs. its first parent),
+- **Uncommitted Changes** (the working tree vs. `HEAD`),
+- an **effort's diff** (what an agent effort changed, start snapshot to
+  end, or to the working tree while it's still open).
 
-From the launcher (++cmd+p++) → **Change Analysis**, or by
-following a Change Analysis link from the Git dashboard / a work
-item / a commit page. The page chrome carries Parent vs … /
-Refresh / Open commit so you can rebase the comparison without
-leaving the tab.
+Each of those pages shows the change's files. Below that sits the
+**Change Analysis** section, a grid of lenses from the bundled
+`oxplow-analytics` extension. Turn the extension off and the pages
+keep just their file lists (see [Lenses](lenses.md)).
 
-## The dashboard view
+## What's in it
 
-The default view (no scope applied) is a single-screen summary
-of the whole change:
+- **Summary.** Files added / modified / deleted, total +/-, how many
+  test files changed, and the test-to-code line ratio.
+- **Look Here First.** The files ranked by a review-priority score,
+  each with its reasons ("complexity +14 across 3 fns", "212 lines
+  touched"). The score multiplies its factors, so one hot signal
+  (a long new function, a complexity spike) puts a file at the top.
+- **Churn.** A treemap of changed lines per file, grouped by
+  architectural zone. A 40-file branch reads as "mostly the store
+  layer, one config edit" instead of a wall of paths. Zones come from
+  the `zones:` block in `.oxplow/project.yaml`; ask your agent to set
+  them up (`set_zones`).
+- **Function Changes.** Functions added, deleted, or modified outside
+  tests, with the complexity and length deltas and how many lines
+  changed inside each. Click one to open the diff at that function.
+- **Test Changes.** The test files the change touched.
+- **Co-change Surprises.** Files that usually change together with
+  others that didn't change here, and files that had been untouched
+  for a long time. Both are worth a second look before review.
+- **Duplication.** Blocks in the changed files that duplicate code
+  elsewhere. Click one to see the two copies side by side. This scan
+  runs in the background, so it can show up a few seconds after the
+  rest.
+- **New Cross-zone Imports.** Imports the change added from one zone
+  into another -- the "is this reaching into the wrong layer?" check.
 
-- **Look here first.** A ranked list of files by *interestingness*
-  — a CRAP-flavored multiplicative score that combines churn,
-  complexity, tests-missing signal, and duplication. Multiplicative
-  on purpose: a single hot factor (e.g. a 200-line churn delta on
-  a previously untested file) dominates the ranking, so the top
-  three are genuinely the three you should open first.
-- **Summary cards.** Files added / modified / deleted, total +/-,
-  net complexity delta, duplication added, tests touched.
-- **Change treemap.** Cells are scaled by churn and grouped by
-  architectural zone (backend / frontend / config / docs / tests
-  / build) — a 40-file branch reads as "mostly frontend, one
-  config edit" instead of a wall of paths.
-- **Import deltas.** Per-file added / removed import edges,
-  classified as resolved (target exists in the tree) or
-  unresolved (dangling).
-- **Co-change surprise.** Files that historically changed
-  together but didn't here, and files that changed here but
-  historically don't co-change with the rest of the diff. Both
-  rank in a "surprise" view so you can spot a missed peer
-  before review catches it.
-- **Pivots.** Click a row in the file-extension, directory, or
-  status pivot tables to drill down into just that slice.
+Every file and function links to its diff between the change's two
+sides.
 
-## Drilldown view
+## Where the numbers come from
 
-Click a pivot value (e.g. `.ts` files, or just the `crates/`
-directory, or only the `added` files) and the dashboard
-re-renders as a focused drilldown over that slice — same hook,
-scope applied. The drilldown carries:
+oxplow analyzes the change once and stores the result: tree-sitter
+metrics on both sides of every changed file, line churn per function,
+import changes, co-change history from `git log`, and a duplicate-block
+scan. Commits and closed efforts are computed once. The working tree
+and open efforts recompute when files change.
 
-- A **Semantic / File-list view toggle** for switching between a
-  function-level and a file-level breakdown.
-- A status filter (added / modified / deleted / all).
-- Duplication and tests cards relocated from the main dashboard
-  so they're closer to the file list.
-- The shared header so you can re-pivot without going back.
-
-## Per-function metrics
-
-The Function Churn card uses the IPC command
-`analyze_functions_at_refs` to walk *both sides* of the diff and
-bucket every function into:
-
-- **Added** — present at head, not at base.
-- **Deleted** — present at base, not at head.
-- **Signature changed** — same name + same file, different
-  arguments or return type.
-- **Body changed** — same signature, different cyclomatic
-  complexity or line count.
-
-Each row shows the cyclomatic complexity at base and head, so a
-function that went from 4 → 19 stands out next to one that went
-from 4 → 5. Tiebreaks use a per-function variant of the same
-interestingness score.
-
-## Sibling-aware diff opens
-
-Clicking through to the actual unified diff brings the *sibling
-page list* with it — every other file in the same change, plus a
-jump-to dropdown — so reviewing a 40-file branch isn't a
-back-button pilgrimage. The diff page also carries capped
-navigation (next / prev) for the current change.
-
-## What feeds the cards
-
-All numbers come from oxplow's in-process code-quality scanners:
-complexity and duplication run as Rust tree-sitter scanners
-against the worktree, with findings persisted in the project's
-SQLite store. The Change Analysis cards read from those findings
-directly — no external `lizard` / `jscpd` invocation, no parallel
-state to keep in sync.
+The results live in the `v_change*` views, so you and your agent can
+query them directly (`ensure_change`, then `query_sql`), or build your
+own lens on them.
 
 ## When to use it
 
-- **Before a self-review.** Glance at *Look here first* before
-  you read your own diff. The score is honest about which file
-  is the riskiest part of the change.
-- **Before a code review.** Open Change Analysis against the PR's
-  base. Read the top three files. Then read the diff with the
-  ranking in mind.
-- **After an agent effort.** When the agent says it shipped
-  something, Change Analysis from before-effort to head shows
-  whether the touched surface matches the task's intent.
-
-The pitch is small but specific: the first screen of a review
-shouldn't be a flat file list. It should tell you which three
-files to look at first and why.
+- **Before a self-review.** Read Look Here First before you read your
+  own diff.
+- **Before a code review.** Open the commit, read the top three files,
+  then read the rest with that ranking in mind.
+- **After an agent effort.** The effort's diff shows whether the
+  touched surface matches what the task asked for.

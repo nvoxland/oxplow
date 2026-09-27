@@ -4,7 +4,7 @@ This doc covers how anything that **measures or visualizes** is added to
 oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 the bundled `oxplow-analytics` example extension.
 
-> **Status: partly built (epic tsk275).**
+> **Status: mostly built (epic tsk275).**
 > - **Current:**
 >   - loading project extensions and their lenses from
 >     `oxplow/extensions/` (see "What works today" below);
@@ -22,9 +22,13 @@ the bundled `oxplow-analytics` example extension.
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
 >     sources", and a tested example is in `examples/extensions/github/`.
-> - **Target:** everything else here, including sources, dimensions,
->   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
->   (tsk278 / tsk280).
+>   - **slots** (`effort-review`, `commit`, `uncommitted`, `task-detail`,
+>     `thread`), **advisories**, per-project **disabling**, and the
+>     **`oxplow-analytics` extraction** (tsk280): every analytics page and
+>     widget is now a lens in that bundled extension, and core works with
+>     it disabled (checked headless, 2026-09-27).
+> - **Target:** extension-declared measures / metrics / gauges (tsk311),
+>   dimensions, actions and alerts (tsk278).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -422,10 +426,10 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort-review` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
-| Gauge-threshold nudges | extension alerts → core nudge primitive |
+| Gauges (`oxplow/gauges/*.star`, idiom `.star`) | not yet: extension-declared gauges are tsk311; the built-in catalog stays core until then |
+| Gauge-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`task-detail` slot) and `thread-tokens` (`thread` slot) |
-| Local history dashboard | lens over `v_snapshot` |
+| Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort-review` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 
 **Stays in core, deliberately simple:** a basic **metrics explorer** and

@@ -24,7 +24,7 @@ export interface DashboardPageProps {
  */
 export function DashboardPage({ stream, threadId = null, onOpenPage }: DashboardPageProps) {
   return (
-    <Page testId="page-dashboard-visits" title="Visits">
+    <Page testId="page-dashboard-visits" title="Go To">
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 960 }}>
         <VisitsSections stream={stream} threadId={threadId} onOpenPage={onOpenPage} />
       </div>

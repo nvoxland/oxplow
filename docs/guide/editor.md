@@ -104,22 +104,18 @@ servers as the editor, so answers stay consistent.
 
 ## Change Analysis
 
-A separate top-level page (++cmd+p++ → **Change Analysis**)
-for understanding diffs. Ranks files by interestingness, supports
-drilldown by extension / directory / status, and shows per-function
+A section on the commit, Uncommitted, and effort diff pages that
+ranks a change's files by review priority and shows per-function
 before/after metrics. See [Change Analysis](change-analysis.md).
 
 ## Duplication findings
 
-Duplicate-block detection runs as a Rust tree-sitter scanner
-against the worktree, persisted in the project SQLite store. It
-surfaces inside [Change Analysis](change-analysis.md) — on the
-diff view, Uncommitted, and commit pages — rather than as a
-standalone index; an individual block opens as its own page with
-a *Jump to source* action.
-
-Complexity and other per-function metrics feed the Change
-Analysis cards directly. There is no separate Code quality page.
+Duplicate-block detection runs as a Rust tree-sitter scanner in the
+background for each change oxplow analyzes, and the results are stored
+in the project database. It shows up in
+[Change Analysis](change-analysis.md) on the effort diff, Uncommitted,
+and commit pages. The Quality lens lists recent duplicate blocks too.
+An individual block opens side by side with its copy.
 
 ## What's deliberately missing
 

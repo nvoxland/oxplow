@@ -41,14 +41,13 @@ you brief the agent actually reduced the back-and-forth.
 
 ## The pages
 
-- **Recorded Metrics** -- the catalog, and the way in. Every metric oxplow knows
-  about, grouped into sections, with an Enabled / All / Off-target
-  filter. This is where you turn metrics on and set targets.
-- **Metric detail** -- one metric: the chart over time, a breakdown
-  by any dimension the metric declares (package and language for
-  code metrics, model and agent for token metrics), the recordings
-  table, and its settings. Click a recording to drill into the
-  individual facts behind it.
+- **Metrics** -- the catalog, and the way in. Every metric oxplow knows
+  about, grouped into sections, each with a sparkline and its latest
+  value, colored against its target. Filter by name, Enabled / All,
+  range, and branch.
+- **Metric detail** -- one metric: the chart over time, the recordings
+  table, what the metric is (unit, direction, thresholds), an Enabled
+  toggle, and Add to dashboard.
 - **Dashboards** -- your own arrangements of metric tiles. See
   [Dashboards](dashboards.md).
 
@@ -58,10 +57,14 @@ Open any of them from the launcher (++cmd+p++) -- they're under
 ## Setting a target
 
 A metric with a target gets a direction (higher-better,
-lower-better, or neutral) and a line on its chart. The Recorded
-Metrics page can then filter to **Off target**, which is the short
-list worth looking at. Targets live in `.oxplow/project.yaml`, so
-they're shared with the project rather than local to you.
+lower-better, or neutral) and a line on its chart, and the Metrics page
+colors its value green, amber, or red against it. Targets live in
+`.oxplow/project.yaml`, so they're shared with the project rather than
+local to you; ask your agent to set one.
+
+Breakdowns (a metric by package, language, or model) aren't on the
+detail page. Ask your agent: it has `metric_breakdown` over MCP, and it
+can build a [lens](lenses.md) if you want to keep the view.
 
 ## Where the numbers come from
 
@@ -99,10 +102,13 @@ hand.
 ## Collection
 
 Test and coverage numbers are scoped to the **effort** that produced
-them, so a task's page shows which tests ran and what the diff
-coverage was for that specific piece of work. Configure it once with
+them, so you can see which tests ran and what the diff coverage was for
+that specific piece of work. Configure it once with
 `/oxplow:configure`, which wires each test stack in the project to
 emit reports oxplow can parse.
+
+An effort's tests, coverage, metric changes, and agent nudges show on
+its diff page, from the bundled `oxplow-analytics` extension.
 
 The catch worth knowing: only test runs oxplow can see get recorded.
 If your project's configured command is `bun run test:collect`, a

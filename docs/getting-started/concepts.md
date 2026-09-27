@@ -88,15 +88,11 @@ the chat reply.
 
 ## Change Analysis
 
-A **change** is any pair of refs you want to compare — typically
-a feature branch against its parent, or your working tree against
-`HEAD`. The Change Analysis dashboard turns a change into a
-ranked summary: *which files should I look at first, and why*.
-Files are scored by a multiplicative interestingness score
-(churn × complexity × tests-missing × duplication), with pivots
-to drill into a slice (one extension, one directory, only the
-added files), and per-function before/after metrics so you can
-see exactly which functions grew, shrank, or changed shape. See
+A **change** is a commit, your working tree against `HEAD`, or what
+an agent effort changed. oxplow analyzes each one and shows a ranked
+summary on its page: *which files should I look at first, and why*,
+plus which functions grew, shrank, or changed shape, co-change
+surprises, duplication, and new cross-zone imports. See
 [Change Analysis](../guide/change-analysis.md).
 
 ## Effort and snapshot
