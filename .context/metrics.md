@@ -822,6 +822,85 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   own different `dim_eq` is refused (`FactFilter` holds one pair). Buckets are
   applied before the spec's value scale, so ratios re-divide raw parts.
 
+### Entity metrics and entity dimensions (tsk322)
+
+A metric can aggregate a semantic-layer view instead of a measure's facts.
+
+**Config.** A `metrics:` `key:` entry with `entity: v_task` plus:
+
+- `where` — which rows count;
+- `time` — optional; makes it an event metric;
+- `value` — needed unless the aggregation is `count`;
+- `aggregation` — `count` (default), `count_distinct`, `sum`, `avg`, `min`,
+  `max`, `median` or `p90`.
+
+A `dimensions:` entry with `entity`, `expr` and an optional `join` is an
+entity dimension. `EntitySpec` / `EntityDimensionSpec` live in
+`oxplow-config`. A `use:` can't set the entity fields, and an entity metric
+can't also set `sourceMeasure`, `formula` or `filter`. SQL fragments see
+the view aliased `e`.
+
+**Storage.** V88 ADD COLUMNs `entity_json` on `metric_spec` and
+`dimension`; no table rebuild. The entity's own aggregation lives in
+`entity_json`. The stored `aggregation` says how the series' points
+combine, which is what the fact path and the detail page's range stat read:
+
+- `last` for a state metric;
+- `sum` for an additive event metric (count / count_distinct / sum);
+- `avg` otherwise.
+
+The UI shows the entity aggregation (`specAggregation`).
+
+**Seeding** (`metrics_service::prepare_entity_spec` / `seed_dimension`):
+
+- Each fragment is compiled with `SemanticLayer::check_sql` (prepare
+  only, read-only guard). One that doesn't compile is pruned with a
+  warning.
+- `sliceable_dims` gets every entity dimension over the same view.
+- A state metric gets a synthesized measure of its own key
+  (`semi-additive`, `complete`), which the project-measure prune keeps.
+- The built-ins:
+  - `work.tasks_completed` (event, `v_task.completed_at`);
+  - `work.open_tasks` (state);
+  - the dimension `work.priority`.
+
+  They are listed in the catalog from code, so a disabled one can be
+  re-enabled.
+
+**Reads** (`entity_metrics.rs`):
+
+- **One SQL per read.** Everything aggregates in SQLite and one row per
+  (bucket, group) comes back, so the 10k row cap can't truncate.
+  - The metric's `where`/`time`/`value` are evaluated in an inner query
+    over the view alone. Only a dimension's `expr` sees its `join`, so a
+    bare column in `where` can't turn ambiguous.
+  - Buckets use `date()`: Monday weeks via `'-6 days', 'weekday 1'`, and
+    `start of month`.
+  - Median and p90 use `ROW_NUMBER()` windows; p90 is nearest-rank,
+    `rn = (9·n+9)/10`.
+- **Event metrics** are computed live, daily unless `bucket` says
+  otherwise. An ungrouped additive one is zero-filled across the window.
+  The headline is the total (additive) or the latest bucket.
+- **State metrics** read their captured facts. Their grouped reads and
+  breakdowns are live, current value only.
+- **Dispatch.** `series_for_spec_read`, `headline_from_series` and
+  `rollup_for_spec_in_stream` route entity specs to this module. Grouping
+  by a non-entity dimension, or `dim_eq`, is refused with an error naming
+  the metric's entity dims. Stream scoping doesn't apply (entities are
+  project-wide).
+- **Effort deltas** skip entity specs (`collection.rs`).
+
+**The `entity-metric` producer** (`MetricsService::capture_entity_states`):
+
+- **When it runs.** Forced at boot, on `ConfigChanged` and on an
+  extension manifest change. Throttled, at most once per 10 minutes per
+  metric, on `TasksChanged`, `SourceSynced` and snapshot batches.
+- **What it writes.** One fact with the current value on the primary
+  stream.
+- **When it skips.** When the value equals the last capture: the
+  in-memory value, or on a fresh process the latest stored fact. A level
+  carries forward, so a restart doesn't pile up duplicates.
+
 ### Producers — facts on the capture spine (the ONLY write since T-E2)
 
 Each producer writes atomic facts through `record_facts` (a capture + the

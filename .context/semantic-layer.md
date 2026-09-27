@@ -16,9 +16,13 @@ and agents query.
 >   `record_decision` / `record_claim`), the agent-activity views, stored
 >   change analysis (`v_change*`), and extension-declared measures,
 >   metrics and gauges (tsk311, see extensions.md).
-> - **Target:** expression/join dimensions, entity-level metrics, the
->   remaining shipped sources (git, LSP, tests as entities); tracked in
->   tsk277.
+> - **Current (tsk277):** git, LSP-diagnostic and test-run views
+>   (`v_commit*`, `v_branch`, `v_diagnostic`, `v_test_run`, `v_test_case`);
+>   spine dimensions and time buckets on fact metrics; entity metrics and
+>   entity (expression/join) dimensions (tsk322, see "Entity metrics" in
+>   metrics.md).
+> - **Target:** starlark/jq derived sources and incremental sync, the
+>   exec network allowlist, Settings → Data; tracked in tsk277.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -65,9 +69,12 @@ project config, any extension). It applies to every metric whose entity has
 the columns it needs. So an extension can add a dimension over data that a
 different source owns.
 
-Today dimensions are ad hoc keys in `fact.dims_json`, resolved in
-`metric_engine.rs::dim_value_cached`. That model survives for facts;
-expression/join dimensions are added for entities.
+Fact dimensions are keys in `fact.dims_json` (plus the capture-spine
+dims), resolved in `metric_engine.rs::dim_value_cached`. **Entity
+dimensions** (current, tsk322) are `dimensions:` entries with `entity`,
+`expr` and an optional `join`. They slice entity metrics over the same view.
+Today a dimension applies to metrics over its own view only, not to every
+entity that has the columns.
 
 ### 3. Metrics aggregate data
 
@@ -78,7 +85,12 @@ dimensions:
 - `median(v_github_pr.merged_at - opened_at)`
 - `avg(fact oxplow.coverage)`
 
-This generalizes today's `metric_spec`, which aggregates facts only.
+Current (tsk322): a `metrics:` entry with `entity` (plus `where`, `time`,
+`value`, `aggregation`) aggregates a view. `time` makes it an event metric,
+computed live. Without `time` it is a state metric, captured as facts. Both
+kinds go through the same `metric_spec` catalog and read paths (Metrics
+page, Metric Detail, dashboards, MCP). Mechanics: "Entity metrics" in
+metrics.md.
 
 ## Shipped sources (core)
 

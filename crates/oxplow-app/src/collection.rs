@@ -2393,6 +2393,11 @@ impl CollectionService {
         > = std::collections::HashMap::new();
         let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
         for spec in &specs {
+            // Entity metrics (tsk322) measure the project's data, not an
+            // effort's work; they have no effort-scoped delta.
+            if spec.entity_json.is_some() {
+                continue;
+            }
             // One classifier (in `attribution.rs`, beside the write-side
             // `AttributionKind` each family maps to) decides the family; this match
             // is the only place each family's read computation is named (tsk274).

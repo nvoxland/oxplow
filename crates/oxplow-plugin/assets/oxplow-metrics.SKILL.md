@@ -200,6 +200,39 @@ is `{ metric_key, group_by: "oxplow.task", bucket: "week" }`.
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
 `record_metric { key, value, subject?, dims? }` (stored `asserted`, lower-trust).
 
+## Metrics over data (entity metrics)
+
+When the number is about records oxplow already has (tasks, commits, test
+runs, an extension's synced entities), skip the gauge. Aggregate the view
+directly (see `describe_schema` for the views):
+
+```yaml
+metrics:
+  - key: repo.tasks_done
+    title: Tasks completed
+    entity: v_task
+    where: "status = 'done'"
+    time: completed_at        # optional: an event metric, bucketed by this time
+    aggregation: count        # count | count_distinct | sum | avg | min | max | median | p90
+    # value: "e.sort_index"   # the expression aggregated (not needed for count)
+dimensions:
+  - key: repo.priority
+    entity: v_task
+    expr: "e.priority"
+    # join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
+```
+
+- **Event vs. state.** With `time` it is an event metric, computed live and
+  bucketed by day, week or month. Without it, it is a state metric (a
+  current level): oxplow captures it over time, so its history starts when
+  you add it.
+- **Fragments.** They are SQL over the view, aliased `e`. Only a
+  dimension's `expr` sees its `join`. A fragment that doesn't compile keeps
+  the metric out of the catalog; check the log.
+- **Slicing.** Group by the entity dimensions over the same view
+  (`list_metric_samples { metric_key, group_by: "repo.priority" }`), or
+  break down with `metric_breakdown`.
+
 ## Gotchas
 
 - **Gauges emit facts, metrics aggregate them.** The trio splits producer

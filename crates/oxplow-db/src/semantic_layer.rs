@@ -160,6 +160,25 @@ impl SemanticLayer {
         self.run(sql, binding, limit, DEFAULT_TIMEOUT).await
     }
 
+    /// Check that `sql` would be accepted — a read-only `SELECT`/`WITH` that
+    /// compiles against the current schema — without running it. Metric and
+    /// dimension config uses this to reject a bad SQL fragment up front.
+    pub async fn check_sql(&self, sql: &str) -> Result<(), DomainError> {
+        check_leading_keyword(sql)?;
+        let sql = sql.to_string();
+        self.db
+            .call(move |conn| {
+                Ok(match conn.prepare(&sql) {
+                    Err(e) => Err(DomainError::Invalid(format!("query_sql: {e}"))),
+                    Ok(stmt) if !stmt.readonly() => Err(DomainError::Invalid(
+                        "query_sql accepts read-only statements only".into(),
+                    )),
+                    Ok(_) => Ok(()),
+                })
+            })
+            .await?
+    }
+
     async fn run(
         &self,
         sql: &str,
@@ -1132,6 +1151,22 @@ mod tests {
                 [41, "app", "a::tests", "ok", "passed", 12]
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn check_sql_compiles_without_running_and_refuses_writes() {
+        let (_db, sl) = seeded().await;
+        sl.check_sql("SELECT count(*) FROM v_task e WHERE e.status = 'done'")
+            .await
+            .unwrap();
+        let err = |sql: &'static str| {
+            let sl = sl.clone();
+            async move { sl.check_sql(sql).await.unwrap_err().to_string() }
+        };
+        assert!(err("SELECT nope FROM v_task")
+            .await
+            .contains("no such column"));
+        assert!(err("DELETE FROM task").await.contains("SELECT"));
     }
 
     #[test]

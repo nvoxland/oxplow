@@ -278,6 +278,21 @@ pub struct MetricEntry {
     pub warn_at: Option<f64>,
     #[serde(rename = "failAt", default)]
     pub fail_at: Option<f64>,
+    /// Entity metric (tsk322): the `v_*` view it aggregates, instead of a
+    /// measure's facts. Fragments below are SQL over that view, aliased `e`.
+    #[serde(default)]
+    pub entity: Option<String>,
+    /// Entity metric: which rows count (a SQL condition).
+    #[serde(rename = "where", default)]
+    pub where_: Option<String>,
+    /// Entity metric: the timestamp column/expression that makes it an EVENT
+    /// metric (rows bucketed by when they happened). Without it the metric is
+    /// a STATE metric: its current value, captured over time.
+    #[serde(default)]
+    pub time: Option<String>,
+    /// Entity metric: the value expression aggregated (not needed for `count`).
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 /// A fully-resolved metric SPEC — the flat form the runner (oxplow-app) seeds
@@ -309,6 +324,33 @@ pub struct ResolvedSpec {
     /// can list it as an unchecked toggle), but `seed_catalog` prunes it from the
     /// `metric_spec` table so all spec-driven reads + producer collection stop.
     pub enabled: bool,
+    /// Set for an entity metric (tsk322); `aggregation` is then one of
+    /// [`ENTITY_METRIC_AGGS`].
+    pub entity: Option<EntitySpec>,
+}
+
+/// The entity half of an entity metric: SQL over one `v_*` view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntitySpec {
+    pub view: String,
+    #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
+    pub where_: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// One of [`ENTITY_METRIC_AGGS`].
+    pub aggregation: String,
+}
+
+/// The dimension half of an entity dimension: a SQL expression over one
+/// `v_*` view (aliased `e`), with an optional join.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityDimensionSpec {
+    pub view: String,
+    pub expr: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<String>,
 }
 
 /// One entry in the top-level `gauges:` block — a **fact PRODUCER** (epic tsk12,
@@ -447,6 +489,17 @@ pub struct DimensionEntry {
     /// `dims_json`, promoted only when hot.
     #[serde(default)]
     pub promote: bool,
+    /// Entity dimension (tsk322): the `v_*` view it slices, for entity
+    /// metrics over the same view.
+    #[serde(default)]
+    pub entity: Option<String>,
+    /// Entity dimension: the SQL expression (over the view, aliased `e`).
+    #[serde(default)]
+    pub expr: Option<String>,
+    /// Entity dimension: an optional join, e.g.
+    /// `LEFT JOIN v_thread t ON t.id = e.thread_id`.
+    #[serde(default)]
+    pub join: Option<String>,
 }
 
 /// A fully-resolved dimension — the flat form the boot seeder upserts into the
@@ -462,6 +515,7 @@ pub struct ResolvedDimension {
     /// `global` | `project` (built-ins are the migration seed, not config).
     pub scope: String,
     pub promote: bool,
+    pub entity: Option<EntityDimensionSpec>,
 }
 
 /// Per-project collection profile (the `collection:` block). Written by
@@ -1836,6 +1890,25 @@ const METRIC_DIRECTIONS: &[&str] = &["higher-better", "lower-better", "neutral"]
 /// Metric aggregations (mirror the engine's `Aggregation`): combine facts within
 /// a capture.
 const METRIC_AGGS: &[&str] = &["last", "sum", "avg", "min", "max", "count", "ratio"];
+/// Aggregations an entity metric may declare (computed in SQL over its rows).
+pub const ENTITY_METRIC_AGGS: &[&str] = &[
+    "count",
+    "count_distinct",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "median",
+    "p90",
+];
+
+/// An entity name an entity metric / dimension may name: a `v_*` view.
+fn is_entity_name(s: &str) -> bool {
+    s.len() > 2
+        && s.starts_with("v_")
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
 /// Formula binary ops a `metrics:` spec may declare (`ratio` aliases `div`).
 const METRIC_FORMULA_OPS: &[&str] = &["add", "sub", "mul", "div", "ratio"];
 /// Catalog groupings a `metrics:` spec may declare.
@@ -1927,8 +2000,18 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             }
         }
         let aggregation = opt(e.aggregation);
+        let entity = opt(e.entity);
+        let where_ = opt(e.where_);
+        let time = opt(e.time);
+        let value = opt(e.value);
         if let Some(a) = &aggregation {
-            if !METRIC_AGGS.contains(&a.as_str()) {
+            if entity.is_some() {
+                if !ENTITY_METRIC_AGGS.contains(&a.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "metrics[{i}] entity aggregation must be one of {ENTITY_METRIC_AGGS:?} (got \"{a}\")"
+                    )));
+                }
+            } else if !METRIC_AGGS.contains(&a.as_str()) {
                 return Err(ConfigError::Invalid(format!(
                     "metrics[{i}] aggregation must be one of {METRIC_AGGS:?} (got \"{a}\")"
                 )));
@@ -1960,7 +2043,11 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             && (source_measure.is_some()
                 || aggregation.is_some()
                 || filter.is_some()
-                || formula.is_some())
+                || formula.is_some()
+                || entity.is_some()
+                || where_.is_some()
+                || time.is_some()
+                || value.is_some())
         {
             return Err(ConfigError::Invalid(format!(
                 "metrics[{i}] is a `use:` entry; it may only override target/warnAt/failAt, \
@@ -1969,7 +2056,30 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
         }
         // A `key:` metric is either a measure aggregation OR a formula, never both,
         // never neither.
-        if is_define {
+        if entity.is_none() && (where_.is_some() || time.is_some() || value.is_some()) {
+            return Err(ConfigError::Invalid(format!(
+                "metrics[{i}] sets `where`/`time`/`value` without `entity`"
+            )));
+        }
+        if let Some(view) = &entity {
+            if !is_entity_name(view) {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] entity must name a `v_*` view (got \"{view}\")"
+                )));
+            }
+            if source_measure.is_some() || formula.is_some() || filter.is_some() {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] is an entity metric; it can't also set \
+                     `sourceMeasure`, `formula` or `filter` (use `where`)"
+                )));
+            }
+            let agg = aggregation.as_deref().unwrap_or("count");
+            if agg != "count" && value.is_none() {
+                return Err(ConfigError::Invalid(format!(
+                    "metrics[{i}] entity aggregation `{agg}` needs a `value` expression"
+                )));
+            }
+        } else if is_define {
             match (source_measure.is_some(), formula.is_some()) {
                 (true, true) => {
                     return Err(ConfigError::Invalid(format!(
@@ -2015,6 +2125,10 @@ pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry
             target: e.target,
             warn_at: e.warn_at,
             fail_at: e.fail_at,
+            entity,
+            where_,
+            time,
+            value,
         });
     }
     Ok(out)
@@ -2305,6 +2419,13 @@ fn resolve_one(
         // The `enabled` flag lives on the acting (project) entry — the `use:`
         // override for a use'd metric, else the `key:` definition. Default on.
         enabled: over.and_then(|o| o.enabled).or(def.enabled).unwrap_or(true),
+        entity: def.entity.clone().map(|view| EntitySpec {
+            view,
+            where_: def.where_.clone(),
+            time: def.time.clone(),
+            value: def.value.clone(),
+            aggregation: def.aggregation.clone().unwrap_or_else(|| "count".into()),
+        }),
     }
 }
 
@@ -2553,6 +2674,34 @@ fn validate_dimensions(
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
             .collect();
+        let entity = opt(e.entity);
+        let expr = opt(e.expr);
+        let join = opt(e.join);
+        match &entity {
+            Some(view) => {
+                if !is_entity_name(view) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] entity must name a `v_*` view (got \"{view}\")"
+                    )));
+                }
+                if expr.is_none() {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] is an entity dimension; it needs an `expr`"
+                    )));
+                }
+                if e.promote {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] is an entity dimension; `promote` applies to fact dimensions only"
+                    )));
+                }
+            }
+            None if expr.is_some() || join.is_some() => {
+                return Err(ConfigError::Invalid(format!(
+                    "dimensions[{i}] sets `expr`/`join` without `entity`"
+                )))
+            }
+            None => {}
+        }
         out.push(DimensionEntry {
             key: Some(key),
             label: opt(e.label),
@@ -2560,6 +2709,9 @@ fn validate_dimensions(
             subject_kind: opt(e.subject_kind),
             vocabulary,
             promote: e.promote,
+            entity,
+            expr,
+            join,
         });
     }
     Ok(out)
@@ -2630,6 +2782,11 @@ pub fn resolve_dimensions(
                 vocabulary: e.vocabulary.clone(),
                 scope: scope.to_string(),
                 promote: e.promote,
+                entity: e.entity.clone().map(|view| EntityDimensionSpec {
+                    view,
+                    expr: e.expr.clone().unwrap_or_default(),
+                    join: e.join.clone(),
+                }),
             };
             match pos.get(key) {
                 Some(&i) => out[i] = resolved,
@@ -2908,6 +3065,81 @@ mod global_config_dir_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entity_metrics_and_dimensions_validate_and_resolve() {
+        let yaml = r#"
+metrics:
+  - key: work.done
+    title: Tasks completed
+    entity: v_task
+    where: "status = 'done'"
+    time: completed_at
+  - key: work.median_prio
+    entity: v_task
+    aggregation: median
+    value: "e.sort_index"
+dimensions:
+  - key: work.prio
+    entity: v_task
+    expr: "e.priority"
+    join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
+"#;
+        #[derive(Deserialize)]
+        struct Doc {
+            metrics: Option<Vec<MetricEntry>>,
+            dimensions: Option<Vec<DimensionEntry>>,
+        }
+        let doc: Doc = serde_yaml::from_str(yaml).unwrap();
+        let metrics = validate_metrics(doc.metrics).unwrap();
+        let resolved = resolve_metrics(&[], &[], &[], &metrics);
+        assert_eq!(
+            resolved[0].entity,
+            Some(EntitySpec {
+                view: "v_task".into(),
+                where_: Some("status = 'done'".into()),
+                time: Some("completed_at".into()),
+                value: None,
+                aggregation: "count".into(),
+            })
+        );
+        assert_eq!(resolved[1].entity.as_ref().unwrap().aggregation, "median");
+        let dims = validate_dimensions(doc.dimensions).unwrap();
+        let rd = resolve_dimensions(&[], &dims);
+        assert_eq!(
+            rd[0].entity,
+            Some(EntityDimensionSpec {
+                view: "v_task".into(),
+                expr: "e.priority".into(),
+                join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn entity_metric_mistakes_are_refused() {
+        let bad = |yaml: &str| {
+            let e: Vec<MetricEntry> = serde_yaml::from_str(yaml).unwrap();
+            validate_metrics(Some(e)).unwrap_err().to_string()
+        };
+        assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
+        assert!(bad("[{key: a.b, entity: v_task, aggregation: sum}]").contains("needs a `value`"));
+        assert!(
+            bad("[{key: a.b, entity: v_task, aggregation: ratio, value: x}]")
+                .contains("entity aggregation")
+        );
+        assert!(bad("[{key: a.b, entity: v_task, sourceMeasure: m}]").contains("can't also set"));
+        assert!(bad("[{key: a.b, sourceMeasure: m, where: x}]").contains("without `entity`"));
+        assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
+        let dim = |yaml: &str| {
+            let e: Vec<DimensionEntry> = serde_yaml::from_str(yaml).unwrap();
+            validate_dimensions(Some(e)).unwrap_err().to_string()
+        };
+        assert!(dim("[{key: a.b, entity: v_task}]").contains("needs an `expr`"));
+        assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
+        assert!(dim("[{key: a.b, entity: v_task, expr: x, promote: true}]")
+            .contains("fact dimensions only"));
+    }
     use tempfile::tempdir;
 
     /// Resolve the project config path under `<dir>/.oxplow/`, creating the

@@ -164,6 +164,8 @@ pub struct Dimension {
     pub scope: String,
     /// Whether a generated column + expression index exists on `fact` for this dim.
     pub promoted: bool,
+    /// Set for an entity dimension: `{view, expr, join?}` (V88).
+    pub entity_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +181,8 @@ pub struct NewDimension {
     /// is a cube REBUILD, gated on measured cardinality; see
     /// `.context/metrics.md`.
     pub promoted: bool,
+    /// Set for an entity dimension: `{view, expr, join?}` (V88).
+    pub entity_json: Option<String>,
 }
 
 impl NewDimension {
@@ -192,11 +196,13 @@ impl NewDimension {
             vocabulary_json: None,
             scope: "built-in".into(),
             promoted: false,
+            entity_json: None,
         }
     }
 }
 
-const DIM_COLS: &str = "key, label, value_type, subject_kind, vocabulary_json, scope, promoted";
+const DIM_COLS: &str =
+    "key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json";
 
 fn row_to_dimension(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dimension> {
     Ok(Dimension {
@@ -207,6 +213,7 @@ fn row_to_dimension(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dimension> {
         vocabulary_json: row.get(4)?,
         scope: row.get(5)?,
         promoted: row.get::<_, i64>(6)? != 0,
+        entity_json: row.get(7)?,
     })
 }
 
@@ -246,6 +253,9 @@ pub struct MetricSpec {
     pub scope: String,
     /// Read-time presentation: `gauge` | `findings` | `test` | `coverage` | `event`.
     pub display_kind: String,
+    /// Set for an entity metric: `{view, where?, time?, value?, aggregation}`
+    /// (V88). Its `aggregation` column is then `sum` (one value per capture).
+    pub entity_json: Option<String>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -271,6 +281,7 @@ pub struct NewMetricSpec {
     pub language: Option<String>,
     pub scope: String,
     pub display_kind: String,
+    pub entity_json: Option<String>,
 }
 
 impl NewMetricSpec {
@@ -301,13 +312,14 @@ impl NewMetricSpec {
             language: None,
             scope: "built-in".into(),
             display_kind: "gauge".into(),
+            entity_json: None,
         }
     }
 }
 
 const SPEC_COLS: &str = "id, key, title, unit, source_measure, aggregation, filter_json, \
      formula, sliceable_dims_json, direction, target, warn_at, fail_at, description, \
-     category, language, scope, display_kind, created_at, updated_at, extension";
+     category, language, scope, display_kind, created_at, updated_at, extension, entity_json";
 
 fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
     let created_at: String = row.get(18)?;
@@ -331,6 +343,7 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
         language: row.get(15)?,
         scope: read_scope(row.get(16)?, row.get(20)?),
         display_kind: row.get(17)?,
+        entity_json: row.get(21)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
     })
@@ -903,6 +916,12 @@ pub struct SqliteFactStore {
 }
 
 impl SqliteFactStore {
+    /// The database this store reads, for reads that go through the
+    /// semantic layer instead (entity metrics, tsk322).
+    pub fn database(&self) -> Database {
+        self.db.clone()
+    }
+
     pub fn new(db: Database) -> Self {
         Self {
             db,
@@ -1034,14 +1053,14 @@ impl SqliteFactStore {
                     .optional()
                     .map_err(map_sql_err)?;
                 tx.execute(
-                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(key) DO UPDATE SET
                         label=excluded.label, value_type=excluded.value_type,
                         subject_kind=excluded.subject_kind,
                         vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
-                        promoted=excluded.promoted",
-                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope, d.promoted],
+                        promoted=excluded.promoted, entity_json=excluded.entity_json",
+                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope, d.promoted, d.entity_json],
                 )
                 .map_err(map_sql_err)?;
                 let grain_changed = match prior {
@@ -1087,9 +1106,10 @@ impl SqliteFactStore {
                     "INSERT INTO metric_spec
                        (key, title, unit, source_measure, aggregation, filter_json, formula,
                         sliceable_dims_json, direction, target, warn_at, fail_at, description,
-                        category, language, scope, display_kind, created_at, updated_at, extension)
+                        category, language, scope, display_kind, created_at, updated_at, extension,
+                        entity_json)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17, ?18, ?18, ?19)
+                             ?16, ?17, ?18, ?18, ?19, ?20)
                      ON CONFLICT(key) DO UPDATE SET
                         title=excluded.title, unit=excluded.unit,
                         source_measure=excluded.source_measure, aggregation=excluded.aggregation,
@@ -1099,7 +1119,7 @@ impl SqliteFactStore {
                         warn_at=excluded.warn_at, fail_at=excluded.fail_at,
                         description=excluded.description, category=excluded.category,
                         language=excluded.language, scope=excluded.scope,
-                        extension=excluded.extension,
+                        extension=excluded.extension, entity_json=excluded.entity_json,
                         display_kind=excluded.display_kind, updated_at=excluded.updated_at",
                     params![
                         s.key,
@@ -1121,6 +1141,7 @@ impl SqliteFactStore {
                         s.display_kind,
                         now,
                         extension,
+                        s.entity_json,
                     ],
                 )?;
                 conn.query_row(

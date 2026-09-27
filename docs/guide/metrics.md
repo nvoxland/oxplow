@@ -84,6 +84,20 @@ Test results and coverage arrive separately, through
 [collection](#collection) -- oxplow watches the test commands you
 run and parses the reports they produce, per effort.
 
+## Metrics over your data
+
+Not every metric needs a scanner. A metric can count or average records
+oxplow already keeps, such as tasks, commits and test runs, or data an
+extension syncs in. Two ship built in:
+
+- **Tasks completed**: tasks marked done, by the day they finished.
+- **Open tasks**: how many tasks are ready, in progress or blocked,
+  recorded over time.
+
+Both can be split by priority. Ask your agent for more, for example
+"median time from a PR opening to merging, per week" over an extension's
+pull requests.
+
 ## Letting the agent write them
 
 Metrics are authored by the agent, not through a form. Ask for what

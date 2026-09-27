@@ -175,6 +175,21 @@ export function deltaVsFirst(samples: SeriesPoint[]): number | null {
  *  - `avg` → "Avg in range" (mean);
  *  - anything else (`last`/`count` level gauges) → "Δ in range" (last − first),
  *    the signed change. `null` when there's nothing to show. */
+/** The aggregation to show for a metric: an entity metric's own (count,
+ *  median, …) from its `entity_json`, else the spec's. The stored
+ *  `aggregation` of an entity metric only says how its points combine. */
+export function specAggregation(def: { aggregation: string; entity_json: string | null }): string {
+  if (def.entity_json) {
+    try {
+      const agg = (JSON.parse(def.entity_json) as { aggregation?: unknown }).aggregation;
+      if (typeof agg === "string") return agg;
+    } catch {
+      // Not JSON: fall back to the stored aggregation.
+    }
+  }
+  return def.aggregation;
+}
+
 export function inRangeStat(
   samples: SeriesPoint[],
   aggregation: string,

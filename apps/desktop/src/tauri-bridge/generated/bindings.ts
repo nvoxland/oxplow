@@ -1821,6 +1821,18 @@ export type DimensionEntry = {
 	 *  `dims_json`, promoted only when hot.
 	 */
 	promote?: boolean,
+	/**
+	 *  Entity dimension (tsk322): the `v_*` view it slices, for entity
+	 *  metrics over the same view.
+	 */
+	entity?: string | null,
+	// Entity dimension: the SQL expression (over the view, aliased `e`).
+	expr?: string | null,
+	/**
+	 *  Entity dimension: an optional join, e.g.
+	 *  `LEFT JOIN v_thread t ON t.id = e.thread_id`.
+	 */
+	join?: string | null,
 };
 
 /**
@@ -2647,6 +2659,21 @@ export type MetricEntry = {
 	target?: number | null,
 	warnAt?: number | null,
 	failAt?: number | null,
+	/**
+	 *  Entity metric (tsk322): the `v_*` view it aggregates, instead of a
+	 *  measure's facts. Fragments below are SQL over that view, aliased `e`.
+	 */
+	entity?: string | null,
+	// Entity metric: which rows count (a SQL condition).
+	where?: string | null,
+	/**
+	 *  Entity metric: the timestamp column/expression that makes it an EVENT
+	 *  metric (rows bucketed by when they happened). Without it the metric is
+	 *  a STATE metric: its current value, captured over time.
+	 */
+	time?: string | null,
+	// Entity metric: the value expression aggregated (not needed for `count`).
+	value?: string | null,
 };
 
 export type MetricSpec = {
@@ -2679,6 +2706,11 @@ export type MetricSpec = {
 	scope: string,
 	// Read-time presentation: `gauge` | `findings` | `test` | `coverage` | `event`.
 	display_kind: string,
+	/**
+	 *  Set for an entity metric: `{view, where?, time?, value?, aggregation}`
+	 *  (V88). Its `aggregation` column is then `sum` (one value per capture).
+	 */
+	entity_json: string | null,
 	created_at: Timestamp,
 	updated_at: Timestamp,
 };

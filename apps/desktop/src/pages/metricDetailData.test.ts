@@ -9,6 +9,7 @@ import {
   filterByBranch,
   fromLocalInput,
   inRangeStat,
+  specAggregation,
   transformSeries,
   matchPresetKey,
   rangeFromPreset,
@@ -186,3 +187,11 @@ test("yDomain auto pads a flat series so it isn't on an edge", () => {
 // group is empty) while hiding `model` and `agent`, which they do carry.
 // `package` is not special: `oxplow.package` is a registered dimension like
 // `oxplow.model`, and `dim_value` resolves both.
+
+test("specAggregation shows an entity metric's own aggregation", () => {
+  expect(specAggregation({ aggregation: "sum", entity_json: null })).toBe("sum");
+  expect(
+    specAggregation({ aggregation: "sum", entity_json: '{"view":"v_task","aggregation":"count"}' }),
+  ).toBe("count");
+  expect(specAggregation({ aggregation: "last", entity_json: "not json" })).toBe("last");
+});

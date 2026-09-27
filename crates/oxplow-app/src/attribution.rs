@@ -446,6 +446,7 @@ mod tests {
             language: None,
             scope: "project".into(),
             display_kind: display_kind.into(),
+            entity_json: None,
             created_at: Timestamp::now(),
             updated_at: Timestamp::now(),
         }

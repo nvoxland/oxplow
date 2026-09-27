@@ -7,6 +7,7 @@ import {
   type TimeRange,
   fromLocalInput,
   inRangeStat,
+  specAggregation,
   matchPresetKey,
   rangeFromPreset,
   toLocalInput,
@@ -243,7 +244,7 @@ export function MetricStatsRail({ def, samples }: { def: MetricSpec; samples: Se
         <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.key}</code>
       </Stat>
       <Stat label="Type">{def.display_kind}</Stat>
-      <Stat label="Aggregation">{def.aggregation}</Stat>
+      <Stat label="Aggregation">{specAggregation(def)}</Stat>
       {def.source_measure ? (
         <Stat label="Measure">
           <code style={{ fontSize: 11, wordBreak: "break-all" }}>{def.source_measure}</code>

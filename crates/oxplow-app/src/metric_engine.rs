@@ -1481,11 +1481,14 @@ pub struct MetricEngine {
     /// (tsk102). `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
     /// — pre-tsk102 behavior, never an error.
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
+    /// Entity metrics read through the semantic layer (tsk322).
+    layer: oxplow_db::SemanticLayer,
 }
 
 impl MetricEngine {
     pub fn new(facts: SqliteFactStore) -> Self {
         Self {
+            layer: oxplow_db::SemanticLayer::new(facts.database()),
             facts,
             fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,
@@ -1982,6 +1985,13 @@ impl MetricEngine {
         spec: &MetricSpec,
         read: &SeriesRead,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
+        if let Some(entity) = crate::entity_metrics::entity_of(spec) {
+            // An event metric is always live; a state metric only when grouped
+            // (its history is the captured facts, read below).
+            if entity.time.is_some() || read.group_by.is_some() {
+                return self.entity_series(spec, &entity, read).await;
+            }
+        }
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
         };
@@ -2024,6 +2034,93 @@ impl MetricEngine {
         Ok(series)
     }
 
+    /// The entity dimension `key` over `view`, or an error naming what can
+    /// slice it.
+    async fn entity_dimension(
+        &self,
+        spec: &MetricSpec,
+        view: &str,
+        key: &str,
+    ) -> Result<oxplow_config::EntityDimensionSpec, DomainError> {
+        let dims = self.facts.list_dimensions().await?;
+        let over: Vec<(String, oxplow_config::EntityDimensionSpec)> = dims
+            .iter()
+            .filter_map(|d| crate::entity_metrics::entity_dim_of(d).map(|e| (d.key.clone(), e)))
+            .filter(|(_, e)| e.view == view)
+            .collect();
+        over.iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, e)| e.clone())
+            .ok_or_else(|| {
+                let names: Vec<&str> = over.iter().map(|(k, _)| k.as_str()).collect();
+                DomainError::Invalid(format!(
+                    "metric `{}` is over {view}; it can be grouped by its entity dimensions {names:?}, not `{key}`",
+                    spec.key
+                ))
+            })
+    }
+
+    /// An entity metric's series (tsk322): an event metric bucketed by its
+    /// `time` (daily unless asked otherwise), or a state metric's current value
+    /// per group, stamped now.
+    async fn entity_series(
+        &self,
+        spec: &MetricSpec,
+        entity: &oxplow_config::EntitySpec,
+        read: &SeriesRead,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
+        if read.dim_eq.is_some() {
+            return Err(DomainError::Invalid(format!(
+                "metric `{}` is an entity metric; filter it with its `where`, not dim_eq",
+                spec.key
+            )));
+        }
+        let dim = match read.group_by.as_deref() {
+            Some(g) => Some(self.entity_dimension(spec, &entity.view, g).await?),
+            None => None,
+        };
+        if entity.time.is_some() {
+            let bucket = read.bucket.unwrap_or(crate::metric_bucket::TimeBucket::Day);
+            return crate::entity_metrics::series(
+                &self.layer,
+                entity,
+                dim.as_ref(),
+                bucket,
+                read.window,
+            )
+            .await;
+        }
+        let now = Timestamp::now();
+        Ok(
+            crate::entity_metrics::current(&self.layer, entity, dim.as_ref())
+                .await?
+                .into_iter()
+                .map(|r| SeriesPoint {
+                    capture_id: 0,
+                    captured_at: now,
+                    value: r.value.unwrap_or(0.0),
+                    numerator: None,
+                    denominator: None,
+                    group: r.group,
+                    branch: None,
+                    provenance: Some("observed".into()),
+                    git_version: None,
+                    source: Some("entity".into()),
+                })
+                .collect(),
+        )
+    }
+
+    /// A state entity metric's value right now (what the `entity-metric`
+    /// producer captures). `None` for anything else.
+    pub async fn entity_current(&self, spec: &MetricSpec) -> Result<Option<f64>, DomainError> {
+        let Some(entity) = crate::entity_metrics::entity_of(spec) else {
+            return Ok(None);
+        };
+        let rows = crate::entity_metrics::current(&self.layer, &entity, None).await?;
+        Ok(Some(rows.first().and_then(|r| r.value).unwrap_or(0.0)))
+    }
+
     /// Collapse a measure's series into calendar buckets by its temporal rule
     /// (see [`crate::metric_bucket`]).
     pub async fn bucket(
@@ -2063,6 +2160,11 @@ impl MetricEngine {
         dimension: &str,
         stream: Option<i64>,
     ) -> Result<Vec<RollupRow>, DomainError> {
+        if let Some(entity) = crate::entity_metrics::entity_of(spec) {
+            // Computed live over the entity as it stands (tsk322).
+            let dim = self.entity_dimension(spec, &entity.view, dimension).await?;
+            return crate::entity_metrics::rollup(&self.layer, &entity, &dim).await;
+        }
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
         };
@@ -2117,6 +2219,17 @@ impl MetricEngine {
         spec: &MetricSpec,
         series: &[SeriesPoint],
     ) -> Result<Option<f64>, DomainError> {
+        if let Some(entity) = crate::entity_metrics::entity_of(spec) {
+            if entity.time.is_some() {
+                // An event metric: the total over the range for counts and
+                // sums, else its latest bucket.
+                return Ok(if crate::entity_metrics::additive(&entity.aggregation) {
+                    (!series.is_empty()).then(|| series.iter().map(|p| p.value).sum())
+                } else {
+                    series.last().map(|p| p.value)
+                });
+            }
+        }
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(None);
         };

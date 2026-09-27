@@ -352,6 +352,11 @@ mounted, the page is plain.
 `oxplow_config::validate_*` functions, plus:
 
 - Metrics must be `key:` definitions; `use:` belongs to the project.
+- Entity metrics (`entity:` + `where` / `time` / `value`, tsk322) work
+  here too, usually over the extension's own source views. Their fragments
+  are checked at seed time, so one over a view whose source hasn't synced
+  yet stays out of the catalog until the next reseed. An extension can't
+  declare dimensions yet (tsk278).
 - Gauges run `starlark` / `jaq` only. `exec` is refused: nothing from an
   extension runs a program without the user's approval, which is what
   (approved) sources are for. `entryFile` must exist in the extension.

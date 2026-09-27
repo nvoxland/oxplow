@@ -33,6 +33,7 @@ pub mod diagnostics;
 pub mod duplication_scan;
 pub mod effort_evidence;
 pub mod endpoint_diff;
+pub mod entity_metrics;
 pub mod events;
 pub mod extension_sources;
 pub mod extensions;

@@ -112,7 +112,13 @@ pub struct MetricsService {
     /// before, minus the per-event disk read). `Arc` so clones of the service
     /// share one cache (and its invalidations).
     global_catalog: Arc<std::sync::Mutex<Option<GlobalCatalog>>>,
+    /// Per state entity metric: when it was last captured and the value
+    /// (tsk322), for the throttle and the unchanged-value skip.
+    entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
 }
+
+/// How often a state entity metric may be re-captured.
+const ENTITY_CAPTURE_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
 /// the Catalog UI (tsk219, P4): what the metric is + whether the project has it
@@ -203,6 +209,7 @@ impl MetricsService {
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
+            entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -379,6 +386,7 @@ impl MetricsService {
             self.with_global_catalog(|g| (g.measures.clone(), g.dimensions.clone()));
 
         let ext = self.extension_catalog();
+        let layer = oxplow_db::SemanticLayer::new(facts.database());
         let mut m = 0;
         for rm in resolve_measures(&global_measures, &ext.measures, &project_measures) {
             // `rm.component_role` is intentionally not forwarded — the measure
@@ -411,12 +419,30 @@ impl MetricsService {
                 vocabulary_json,
                 scope: rd.scope,
                 promoted: rd.promote,
+                entity_json: rd
+                    .entity
+                    .as_ref()
+                    .and_then(|e| serde_json::to_string(e).ok()),
             };
-            match facts.upsert_dimension(nd).await {
-                Ok(()) => d += 1,
-                Err(e) => tracing::warn!(key = %rd.key, error = %e, "failed to seed dimension"),
+            if seed_dimension(facts, &layer, nd).await {
+                d += 1;
             }
         }
+        // Built-ins aren't config-declared, so they don't count toward `d`.
+        for nd in builtin_entity_dimensions() {
+            seed_dimension(facts, &layer, nd).await;
+        }
+        // Entity dimensions by the view they slice, for entity metrics'
+        // sliceable dims.
+        let entity_dims: Vec<(String, String)> = facts
+            .list_dimensions()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|d| {
+                crate::entity_metrics::entity_dim_of(d).map(|e| (e.view, d.key.clone()))
+            })
+            .collect();
         // Metric SPECS — RECONCILE the `metric_spec` table down to exactly the
         // *enabled* set (tsk31). Because reads treat a missing spec as empty and
         // producers gate collection on `measure_has_active_spec`, pruning a
@@ -463,13 +489,17 @@ impl MetricsService {
             }
             ok
         };
-        for spec in builtin_metric_specs()
+        for mut spec in builtin_metric_specs()
             .into_iter()
             .chain(builtin_ast_specs())
             .chain(crate::producer_metrics::builtin_producer_specs())
+            .chain(builtin_entity_specs())
         {
             let key = spec.key.clone();
-            let res = if config_state(&key) != Some(false) && computable(&spec) {
+            let res = if config_state(&key) != Some(false)
+                && computable(&spec)
+                && prepare_entity_spec(facts, &layer, &mut spec, &entity_dims).await
+            {
                 facts.upsert_spec(spec).await.map(|_| ())
             } else {
                 facts.delete_spec(&key).await
@@ -487,8 +517,11 @@ impl MetricsService {
         // disabled entry (`enabled: false`) is pruned instead of seeded.
         let resolved = self.resolved_specs();
         for s in &resolved {
-            let spec = spec_to_new_spec(s);
-            let res = if s.enabled && computable(&spec) {
+            let mut spec = spec_to_new_spec(s);
+            let res = if s.enabled
+                && computable(&spec)
+                && prepare_entity_spec(facts, &layer, &mut spec, &entity_dims).await
+            {
                 facts.upsert_spec(spec).await.map(|_| ())
             } else {
                 facts.delete_spec(&s.key).await
@@ -539,6 +572,14 @@ impl MetricsService {
                 .into_iter()
                 .filter(|rm| rm.scope == "project")
                 .map(|rm| rm.key)
+                // A project state entity metric's synthesized measure.
+                .chain(
+                    resolved
+                        .iter()
+                        .filter(|s| s.scope == "project")
+                        .filter(|s| s.entity.as_ref().is_some_and(|e| e.time.is_none()))
+                        .map(|s| s.key.clone()),
+                )
                 .collect();
         match facts.delete_project_measures_not_in(keep_measures).await {
             Ok(n) if n > 0 => {
@@ -645,6 +686,24 @@ impl MetricsService {
                     trigger: "auto".to_string(),
                     toggleable: true,
                     category: Some(p.category.to_string()),
+                });
+            }
+        }
+        // Built-in entity metrics (tsk322): default-ON like the producers, and
+        // listed from code so a disabled one (its spec pruned) can come back.
+        for e in builtin_entity_specs() {
+            if seen.insert(e.key.clone()) {
+                out.push(MetricCatalogEntry {
+                    enabled: config_state(&e.key) != Some(false),
+                    key: e.key,
+                    title: e.title,
+                    kind: e.display_kind,
+                    language: None,
+                    scope: "built-in".to_string(),
+                    target: e.target,
+                    trigger: "auto".to_string(),
+                    toggleable: true,
+                    category: e.category,
                 });
             }
         }
@@ -1157,6 +1216,7 @@ impl MetricsService {
             subject_kind: None,
             vocabulary: vec![],
             promote: false,
+            ..DimensionEntry::default()
         };
         if matches!(scope.as_deref(), Some("global")) {
             let gdir = self
@@ -1199,15 +1259,29 @@ impl MetricsService {
     /// `EffortFinished`. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
         self.seed_catalog().await;
+        self.capture_entity_states(true).await;
         loop {
-            match rx.recv().await {
+            let event = rx.recv().await;
+            // Anything that may move an entity's rows: re-capture state
+            // entity metrics, throttled per metric.
+            if matches!(
+                event,
+                Ok(OxplowEvent::TasksChanged { .. }
+                    | OxplowEvent::SourceSynced { .. }
+                    | OxplowEvent::FileSnapshotsBatchCreated { .. })
+            ) {
+                self.capture_entity_states(false).await;
+            }
+            match event {
                 Ok(OxplowEvent::ConfigChanged) => {
                     self.seed_catalog().await;
+                    self.capture_entity_states(true).await;
                 }
                 // An extension's manifest can add or drop measures, metrics
                 // and gauges.
                 Ok(OxplowEvent::WorkspaceChanged { path, .. }) if is_extension_manifest(&path) => {
                     self.seed_catalog().await;
+                    self.capture_entity_states(true).await;
                 }
                 Ok(OxplowEvent::FileSnapshotsBatchCreated {
                     stream_id: Some(stream_id),
@@ -1242,6 +1316,91 @@ impl MetricsService {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
+    }
+
+    /// Capture each state entity metric's current value as a fact on its
+    /// synthesized measure (producer `entity-metric`, tsk322), so it has
+    /// history. At most once per [`ENTITY_CAPTURE_EVERY`] per metric unless
+    /// `force`d, and never when the value hasn't moved since the last capture
+    /// (a level carries forward). Recorded against the primary stream.
+    /// Returns how many were captured.
+    pub async fn capture_entity_states(&self, force: bool) -> usize {
+        let Some(facts) = self.fact_store.as_ref() else {
+            return 0;
+        };
+        let Ok(specs) = facts.list_specs().await else {
+            return 0;
+        };
+        let layer = oxplow_db::SemanticLayer::new(facts.database());
+        let mut stream: Option<i64> = None;
+        let mut captured = 0;
+        for spec in specs {
+            let Some(entity) = crate::entity_metrics::entity_of(&spec) else {
+                continue;
+            };
+            if entity.time.is_some() {
+                continue;
+            }
+            let last = self
+                .entity_captures
+                .lock()
+                .ok()
+                .and_then(|m| m.get(&spec.key).copied());
+            if !force && last.is_some_and(|(at, _)| at.elapsed() < ENTITY_CAPTURE_EVERY) {
+                continue;
+            }
+            let value = match crate::entity_metrics::current(&layer, &entity, None).await {
+                Ok(rows) => rows.first().and_then(|r| r.value).unwrap_or(0.0),
+                Err(e) => {
+                    tracing::warn!(key = %spec.key, error = %e, "entity metric: read failed");
+                    continue;
+                }
+            };
+            let now = std::time::Instant::now();
+            let Ok(Some(measure)) = facts.get_measure(&spec.key).await else {
+                continue;
+            };
+            // Nothing in memory (a fresh process): the latest stored capture
+            // is what the level currently reads.
+            let previous = match last {
+                Some((_, v)) => Some(v),
+                None => facts
+                    .facts_for_measure(measure.id)
+                    .await
+                    .ok()
+                    .and_then(|fs| fs.into_iter().max_by_key(|f| f.capture_id))
+                    .map(|f| f.value),
+            };
+            if previous == Some(value) {
+                if let Ok(mut m) = self.entity_captures.lock() {
+                    m.insert(spec.key.clone(), (now, value));
+                }
+                continue;
+            }
+            if stream.is_none() {
+                stream = primary_stream(&layer).await;
+            }
+            let Some(stream_id) = stream else {
+                return captured;
+            };
+            let capture = oxplow_db::NewMetricCapture::done(stream_id, "entity-metric", "entity");
+            if let Err(e) = facts
+                .record_facts(capture, vec![oxplow_db::NewFact::new(measure.id, value)])
+                .await
+            {
+                tracing::warn!(key = %spec.key, error = %e, "entity metric: record failed");
+                continue;
+            }
+            if let Ok(mut m) = self.entity_captures.lock() {
+                m.insert(spec.key.clone(), (now, value));
+            }
+            captured += 1;
+            self.events.emit(OxplowEvent::MetricSamplesChanged {
+                stream_id: StreamId::new(stream_id),
+                measures: vec![spec.key.clone()],
+            });
+        }
+        captured
     }
 
     /// Run every enabled `on-snapshot` gauge against the just-captured snapshot.
@@ -1896,7 +2055,7 @@ impl MetricsService {
 /// Map a resolved `ResolvedSpec` to a `metric_spec` write (for config-declared
 /// metrics). A formula metric has no `source_measure`.
 fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
-    NewMetricSpec {
+    let spec = NewMetricSpec {
         key: s.key.clone(),
         title: s.title.clone(),
         unit: s.unit.clone(),
@@ -1915,7 +2074,184 @@ fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
         language: s.language.clone(),
         scope: s.scope.clone(),
         display_kind: s.display_kind.clone(),
+        entity_json: None,
+    };
+    match &s.entity {
+        Some(entity) => as_entity_spec(spec, entity),
+        None => spec,
     }
+}
+
+/// Make `spec` an entity metric over `entity` (tsk322). An event metric (with
+/// `time`) has no source measure: it's computed live. A state metric reads a
+/// synthesized measure of its own key, which the `entity-metric` producer
+/// feeds. The entity's own aggregation lives in `entity_json`; the stored
+/// `aggregation` says how the series' points combine, which is what the fact
+/// path and a range total read: `last` for a state metric (one fact per
+/// capture, a level), `sum` for an event metric that adds up (count / sum),
+/// else `avg`.
+fn as_entity_spec(mut spec: NewMetricSpec, entity: &oxplow_config::EntitySpec) -> NewMetricSpec {
+    spec.source_measure = entity.time.is_none().then(|| spec.key.clone());
+    spec.aggregation = if entity.time.is_none() {
+        "last"
+    } else if crate::entity_metrics::additive(&entity.aggregation) {
+        "sum"
+    } else {
+        "avg"
+    }
+    .into();
+    spec.filter_json = None;
+    spec.formula = None;
+    spec.entity_json = serde_json::to_string(entity).ok();
+    if entity.time.is_some() && spec.display_kind == "gauge" {
+        spec.display_kind = "event".into();
+    }
+    spec
+}
+
+/// Seed one dimension; an entity dimension whose SQL doesn't compile is
+/// skipped with a warning instead of reaching the catalog.
+async fn seed_dimension(
+    facts: &SqliteFactStore,
+    layer: &oxplow_db::SemanticLayer,
+    nd: NewDimension,
+) -> bool {
+    let entity = nd
+        .entity_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<oxplow_config::EntityDimensionSpec>(j).ok());
+    if let Some(dim) = &entity {
+        let probe = oxplow_config::EntitySpec {
+            view: dim.view.clone(),
+            where_: None,
+            time: None,
+            value: None,
+            aggregation: "count".into(),
+        };
+        if let Err(e) = crate::entity_metrics::check(layer, &probe, Some(dim)).await {
+            tracing::warn!(key = %nd.key, error = %e, "entity dimension doesn't compile; skipping");
+            return false;
+        }
+    }
+    match facts.upsert_dimension(nd.clone()).await {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(key = %nd.key, error = %e, "failed to seed dimension");
+            false
+        }
+    }
+}
+
+/// Ready an entity spec for the catalog: its SQL must compile, its sliceable
+/// dims are the entity dimensions over its view, and a state metric gets its
+/// synthesized measure. `false` (with a warning) keeps it out. A non-entity
+/// spec passes through untouched.
+async fn prepare_entity_spec(
+    facts: &SqliteFactStore,
+    layer: &oxplow_db::SemanticLayer,
+    spec: &mut NewMetricSpec,
+    entity_dims: &[(String, String)],
+) -> bool {
+    let Some(entity) = spec
+        .entity_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str::<oxplow_config::EntitySpec>(j).ok())
+    else {
+        return true;
+    };
+    if let Err(e) = crate::entity_metrics::check(layer, &entity, None).await {
+        tracing::warn!(key = %spec.key, error = %e, "entity metric doesn't compile; skipping");
+        return false;
+    }
+    let mut dims: Vec<String> = spec
+        .sliceable_dims_json
+        .as_deref()
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    for (view, key) in entity_dims {
+        if *view == entity.view && !dims.contains(key) {
+            dims.push(key.clone());
+        }
+    }
+    spec.sliceable_dims_json =
+        (!dims.is_empty()).then(|| serde_json::to_string(&dims).unwrap_or_default());
+    if entity.time.is_none() {
+        let measure = NewMeasure {
+            key: spec.key.clone(),
+            title: spec.title.clone(),
+            unit: spec.unit.clone(),
+            subject_kind: None,
+            temporal_semantics: "semi-additive".into(),
+            capture_scope: "complete".into(),
+            scope: spec.scope.clone(),
+            description: spec.description.clone(),
+        };
+        if let Err(e) = facts.upsert_measure(measure).await {
+            tracing::warn!(key = %spec.key, error = %e, "failed to seed entity metric measure");
+            return false;
+        }
+    }
+    true
+}
+
+/// The primary stream's id, which project-wide captures are recorded against.
+async fn primary_stream(layer: &oxplow_db::SemanticLayer) -> Option<i64> {
+    let out = layer
+        .query_sql(
+            "SELECT id FROM v_stream WHERE kind = 'primary'",
+            vec![],
+            Some(1),
+        )
+        .await
+        .ok()?;
+    match out.rows.first()?.first()? {
+        oxplow_db::SqlCell::Int(id) => Some(*id),
+        _ => None,
+    }
+}
+
+/// Built-in entity dimensions (tsk322).
+fn builtin_entity_dimensions() -> Vec<NewDimension> {
+    let mut priority = NewDimension::categorical("work.priority", "Priority");
+    priority.entity_json = Some(r#"{"view":"v_task","expr":"e.priority"}"#.into());
+    vec![priority]
+}
+
+/// Built-in entity metrics over core views (tsk322).
+fn builtin_entity_specs() -> Vec<NewMetricSpec> {
+    let make = |key: &str, title: &str, description: &str, entity: oxplow_config::EntitySpec| {
+        let mut s = NewMetricSpec::base(key, title, key, "sum");
+        s.unit = Some("tasks".into());
+        s.description = Some(description.into());
+        s.category = Some("operational".into());
+        as_entity_spec(s, &entity)
+    };
+    vec![
+        make(
+            "work.tasks_completed",
+            "Tasks completed",
+            "Tasks marked done, by the day they were completed.",
+            oxplow_config::EntitySpec {
+                view: "v_task".into(),
+                where_: Some("status = 'done'".into()),
+                time: Some("completed_at".into()),
+                value: None,
+                aggregation: "count".into(),
+            },
+        ),
+        make(
+            "work.open_tasks",
+            "Open tasks",
+            "Tasks ready, in progress or blocked, captured over time.",
+            oxplow_config::EntitySpec {
+                view: "v_task".into(),
+                where_: Some("status IN ('ready', 'in_progress', 'blocked')".into()),
+                time: None,
+                value: None,
+                aggregation: "count".into(),
+            },
+        ),
+    ]
 }
 
 /// Serialize a config `FilterConfig` to the engine's `filter_json` shape
@@ -3750,6 +4086,95 @@ def transform(input):
                 assert_eq!(spec.language, None, "{key} is language-agnostic");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn entity_metrics_seed_read_live_and_capture_state() {
+        let (svc, dir) = fixture().await;
+        svc.db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at, completed_at) VALUES
+                       ((SELECT min(id) FROM threads), 'a', 'done', 'high', 'agent', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
+                       ((SELECT min(id) FROM threads), 'b', 'done', 'low', 'agent', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
+                       ((SELECT min(id) FROM threads), 'c', 'ready', 'high', 'agent', '2026-09-01', '2026-09-01', NULL),
+                       ((SELECT min(id) FROM threads), 'd', 'blocked', 'low', 'agent', '2026-09-01', '2026-09-01', NULL),
+                       ((SELECT min(id) FROM threads), 'e', 'ready', 'high', 'agent', '2026-09-01', '2026-09-01', NULL);",
+                )
+                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
+            })
+            .await
+            .unwrap();
+        // A project entity metric with a typo'd column never reaches the catalog.
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "metrics:\n  - key: repo.bad\n    entity: v_task\n    where: \"no_such_col = 1\"\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        let f = &svc.fact_store;
+        assert!(f.get_spec("repo.bad").await.unwrap().is_none());
+
+        // An event metric: computed live, daily, sliceable by its entity dims.
+        let done = f.get_spec("work.tasks_completed").await.unwrap().unwrap();
+        assert_eq!(done.source_measure, None);
+        assert_eq!(done.display_kind, "event");
+        assert_eq!(
+            done.sliceable_dims_json.as_deref(),
+            Some(r#"["work.priority"]"#)
+        );
+        let e = &svc.metric_engine;
+        let series = e
+            .series_for_spec_in_stream(&done, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            series.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![1.0, 0.0, 1.0]
+        );
+        assert_eq!(
+            e.headline_from_series(&done, &series).await.unwrap(),
+            Some(2.0)
+        );
+        let by_prio = e
+            .series_for_spec_in_stream(&done, Some("work.priority"), None, None)
+            .await
+            .unwrap();
+        assert_eq!(by_prio.len(), 2);
+        assert!(e
+            .series_for_spec_in_stream(&done, Some("oxplow.package"), None, None)
+            .await
+            .is_err());
+
+        // A state metric: captured as a fact, so its series is its history.
+        let open = f.get_spec("work.open_tasks").await.unwrap().unwrap();
+        assert_eq!(open.source_measure.as_deref(), Some("work.open_tasks"));
+        assert_eq!(svc.metrics.capture_entity_states(true).await, 1);
+        // Unchanged since the last capture: nothing new is written — not even
+        // by a fresh process, which reads the last stored value.
+        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
+        svc.metrics.entity_captures.lock().unwrap().clear();
+        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
+        let hist = e
+            .series_for_spec_in_stream(&open, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(hist.iter().map(|p| p.value).collect::<Vec<_>>(), vec![3.0]);
+        assert_eq!(e.headline_for_spec(&open).await.unwrap(), Some(3.0));
+        // Grouped reads and breakdowns are live.
+        let rows = e.rollup_for_spec(&open, "work.priority").await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.key.as_str(), r.value))
+                .collect::<Vec<_>>(),
+            vec![("high", 2.0), ("low", 1.0)]
+        );
+        // Entity metrics are in the catalog like any other.
+        let catalog = svc.metrics.catalog().await;
+        assert!(catalog
+            .iter()
+            .any(|c| c.key == "work.open_tasks" && c.enabled));
     }
 
     #[tokio::test]
