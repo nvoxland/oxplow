@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -296,24 +297,33 @@ impl DaemonSupervisor {
                 );
                 Ok(base_url)
             }
-            Err(_) => {
-                // Either the daemon exited (the sender dropped with the
-                // stdout EOF) or it is simply too slow. Distinguish them
-                // for the caller — "already open in another process" is
-                // an exit, and says something very different from a hang.
-                let exited = matches!(child.try_wait(), Ok(Some(_)));
+            Err(why) => {
+                // `Disconnected` means stdout closed without a handshake:
+                // the daemon exited ("already open in another process") or
+                // shut its output. That's the signal to go by. A process
+                // closes its pipes a moment before it can be reaped, so
+                // asking `try_wait` here races (tsk326); give it a short
+                // grace to learn which. `Timeout` is a daemon that is simply
+                // too slow, which says something very different.
+                let message = match why {
+                    RecvTimeoutError::Disconnected => {
+                        if wait_for_exit(&mut child, Duration::from_secs(2)) {
+                            "oxplow-daemon exited before reporting an endpoint".to_string()
+                        } else {
+                            "oxplow-daemon closed its output before reporting an endpoint"
+                                .to_string()
+                        }
+                    }
+                    RecvTimeoutError::Timeout => format!(
+                        "oxplow-daemon timed out after {:?} without reporting an endpoint",
+                        self.startup_timeout
+                    ),
+                };
                 hard_kill(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 clear_daemon_info(&canonical(project_dir));
-                Err(std::io::Error::other(if exited {
-                    "oxplow-daemon exited before reporting an endpoint".to_string()
-                } else {
-                    format!(
-                        "oxplow-daemon timed out after {:?} without reporting an endpoint",
-                        self.startup_timeout
-                    )
-                }))
+                Err(std::io::Error::other(message))
             }
         }
     }
@@ -477,6 +487,25 @@ mod tests {
             "error should say the daemon exited, got: {err}"
         );
         assert_eq!(sup.running_count(), 0, "a failed start registers nothing");
+    }
+
+    /// Closing stdout is what ends the handshake wait, and it happens a
+    /// moment before the process is reaped. The error must come from that
+    /// signal, not from racing `try_wait` (tsk326): this daemon closes its
+    /// output and lingers, which used to report a 5s timeout instantly.
+    #[test]
+    fn a_daemon_that_closes_its_output_is_not_reported_as_a_timeout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sup = supervisor("exec >&-; sleep 30");
+        let started = std::time::Instant::now();
+        let err = sup.start(tmp.path()).unwrap_err().to_string();
+        assert!(!err.contains("timed out"), "got: {err}");
+        assert!(err.contains("closed its output"), "got: {err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "no waiting out the startup timeout"
+        );
+        assert_eq!(sup.running_count(), 0);
     }
 
     #[test]
