@@ -1,3 +1,5 @@
+import { LensSlots } from "../lens/LensSlots.js";
+import { useChange } from "../lens/useChange.js";
 import { useCallback, useState } from "react";
 import type { BranchChangeEntry, Stream } from "../api.js";
 import { gitCommitAll } from "../api.js";
@@ -43,6 +45,7 @@ export function UncommittedChangesPage({
   onOpenDiffInTab,
 }: UncommittedChangesPageProps) {
   const streamId = stream?.id ?? null;
+  const { change } = useChange(streamId ? { kind: "working", streamId } : null);
   const analysis = useChangeAnalysis({ streamId, target: "working", scope });
   const [committing, setCommitting] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
@@ -172,16 +175,24 @@ export function UncommittedChangesPage({
             </button>
           </div>
         ) : (
-          <ChangeAnalysisPanel
-            analysis={analysis}
-            target="working"
-            scope={scope}
-            showHeader={false}
-            onOpenPage={onOpenPage}
-            onOpenFile={onOpenFile}
-            onOpenDiff={onOpenDiff}
-            onOpenDiffInTab={onOpenDiffInTab}
-          />
+          <>
+            <ChangeAnalysisPanel
+              analysis={analysis}
+              target="working"
+              scope={scope}
+              showHeader={false}
+              onOpenPage={onOpenPage}
+              onOpenFile={onOpenFile}
+              onOpenDiff={onOpenDiff}
+              onOpenDiffInTab={onOpenDiffInTab}
+            />
+            <LensSlots
+              slot="uncommitted"
+              params={change ? { change_id: change.id } : null}
+              streamId={streamId}
+              onOpenPage={(ref) => onOpenPage(ref)}
+            />
+          </>
         )}
       </div>
     </Page>

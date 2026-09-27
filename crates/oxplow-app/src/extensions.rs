@@ -116,6 +116,14 @@ pub enum LensLinkKind {
     Commit,
     /// A metric's page; the value is a metric key.
     Metric,
+    /// A file's diff within a change: the value is the path; `line`,
+    /// `base` and `head` name the columns holding the line and the
+    /// change's `base_label` / `head_label` (join `v_change`).
+    DiffAt,
+    /// Two line ranges side by side: the value is
+    /// `path:start-end|peer:start-end`; `head` names a column with the
+    /// version to read (a change's `head_label`; the working tree if absent).
+    Compare,
 }
 
 /// Makes a column's cells link to a page.
@@ -126,9 +134,15 @@ pub struct LensLink {
     /// Result column holding the target id. Defaults to the column itself.
     #[serde(default)]
     pub from: Option<String>,
-    /// For `file`: result column holding a line number to open at.
+    /// For `file` / `diff-at`: result column holding a line number to open at.
     #[serde(default)]
     pub line: Option<String>,
+    /// For `diff-at`: column holding the older side's label.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// For `diff-at` / `compare`: column holding the newer side's label.
+    #[serde(default)]
+    pub head: Option<String>,
 }
 
 /// How one result column is shown.
@@ -269,12 +283,15 @@ struct SlotFile {
     lens: String,
 }
 
-/// Places in core pages an extension can mount a lens, and the params
-/// each binds. A mounted lens must declare every one of them.
+/// Places in core pages an extension can mount a lens, and the params each
+/// offers (`change_id` = the page's `v_change` row). A mounted lens gets
+/// the ones it declares and must declare at least one.
 pub const SLOTS: &[(&str, &[&str])] = &[
-    ("effort-review", &["effort_id"]),
+    ("effort-review", &["effort_id", "change_id"]),
     ("task-detail", &["task_id"]),
     ("thread", &["thread_id"]),
+    ("commit", &["change_id"]),
+    ("uncommitted", &["change_id"]),
 ];
 
 /// A lens an extension mounts into a core page.
@@ -282,8 +299,8 @@ pub const SLOTS: &[(&str, &[&str])] = &[
 #[serde(rename_all = "camelCase")]
 pub struct LensSlot {
     /// Which page, from [`SLOTS`]: `effort-review` (an effort's diff
-    /// view, binds `:effort_id`), `task-detail` (`:task_id`) or `thread`
-    /// (`:thread_id`).
+    /// view: `:effort_id`, `:change_id`), `task-detail` (`:task_id`),
+    /// `thread` (`:thread_id`), `commit` or `uncommitted` (`:change_id`).
     pub slot: String,
     pub lens_id: String,
 }
@@ -606,12 +623,16 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     for s in slot_files {
         let slot_params = SLOTS.iter().find(|(n, _)| *n == s.slot).map(|(_, p)| *p);
         let lens = ext.lenses.iter().find(|l| l.slug == s.lens);
+        // A slot offers params; a mounted lens takes the ones it declares
+        // and must declare at least one, or it can't relate to the page.
         let missing: Vec<&str> = match (slot_params, lens) {
-            (Some(params), Some(l)) => params
-                .iter()
-                .filter(|p| !l.params.iter().any(|lp| lp.name == **p))
-                .copied()
-                .collect(),
+            (Some(params), Some(l))
+                if !params
+                    .iter()
+                    .any(|p| l.params.iter().any(|lp| lp.name == *p)) =>
+            {
+                params.to_vec()
+            }
             _ => vec![],
         };
         if slot_params.is_none() {
@@ -622,7 +643,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ));
         } else if !missing.is_empty() {
             ext.errors.push(format!(
-                "{rel}/extension.yaml: slot `{}` passes {}, which lens `{}` doesn't declare in `params`",
+                "{rel}/extension.yaml: slot `{}` passes {}; lens `{}` must declare at least one in `params`",
                 s.slot,
                 missing.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "),
                 s.lens
@@ -891,6 +912,8 @@ pub async fn validate_extension(
                     if let Some(link) = c.link.as_ref() {
                         keys.extend(link.from.iter());
                         keys.extend(link.line.iter());
+                        keys.extend(link.base.iter());
+                        keys.extend(link.head.iter());
                     }
                     for k in keys {
                         if !cols.contains(k) {
@@ -1215,6 +1238,8 @@ empty: No tasks.
                 kind: LensLinkKind::Task,
                 from: Some("id".into()),
                 line: None,
+                base: None,
+                head: None,
             })
         );
     }
@@ -2008,6 +2033,55 @@ empty: No tasks.
         assert!(errs.contains("nokey") && errs.contains("`key`"), "{errs}");
         assert!(
             !errs.contains("low-coverage") && !errs.contains("crossings"),
+            "{errs}"
+        );
+    }
+
+    #[test]
+    fn change_links_and_slots() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "files",
+                    "title: F\nparams: [{ name: change_id }]\nquery: SELECT 1\ncolumns:\n  - { key: path, link: { kind: diff-at, line: ln, base: b, head: h } }\n  - { key: dup, link: { kind: compare, head: h } }\n",
+                ),
+                ("both", "title: B\nparams: [{ name: effort_id }]\nquery: SELECT 1\n"),
+                ("none", "title: N\nparams: [{ name: other }]\nquery: SELECT 1\n"),
+            ],
+            "slots:\n  - { slot: commit, lens: files }\n  - { slot: uncommitted, lens: files }\n  - { slot: effort-review, lens: files }\n  - { slot: effort-review, lens: both }\n  - { slot: commit, lens: none }\n",
+        );
+        let link = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "files")
+            .unwrap()
+            .columns[0]
+            .link
+            .clone()
+            .unwrap();
+        assert_eq!(link.kind, LensLinkKind::DiffAt);
+        assert_eq!(
+            (link.base.as_deref(), link.head.as_deref()),
+            (Some("b"), Some("h"))
+        );
+        let mounted: Vec<(&str, &str)> = ext
+            .slots
+            .iter()
+            .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
+            .collect();
+        assert_eq!(
+            mounted,
+            vec![
+                ("commit", "x/files"),
+                ("uncommitted", "x/files"),
+                ("effort-review", "x/files"),
+                ("effort-review", "x/both")
+            ],
+            "a slot lens needs at least one of the slot's params"
+        );
+        let errs = ext.errors.join("\n");
+        assert!(
+            errs.contains("none") && errs.contains("change_id"),
             "{errs}"
         );
     }

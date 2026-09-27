@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId } from "./lensModel.js";
+import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -32,13 +32,13 @@ describe("displayColumns", () => {
   test("declared columns set order, labels and links, and skip keys the result lacks", () => {
     const l = lens({
       columns: [
-        { key: "title", label: "Task", link: { kind: "task", from: "id", line: null } },
+        { key: "title", label: "Task", link: { kind: "task", from: "id", line: null, base: null, head: null } },
         { key: "missing", label: null, link: null },
         { key: "id", label: null, link: null },
       ],
     });
     expect(displayColumns(l, ["id", "title"])).toEqual([
-      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null } },
+      { key: "title", label: "Task", index: 1, link: { kind: "task", from: "id", line: null, base: null, head: null } },
       { key: "id", label: "id", index: 0, link: null },
     ]);
   });
@@ -49,16 +49,16 @@ describe("cellLinkRef", () => {
   const row = [42, "Fix it", "src/a.ts", "auth-flow", 7];
 
   test("task link reads the id from `from`", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null }, "title", row, cols)?.id).toBe("task:tsk42");
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)?.id).toBe("task:tsk42");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
-    expect(cellLinkRef({ kind: "file", from: null, line: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
-    expect(cellLinkRef({ kind: "wiki", from: null, line: null }, "slug", row, cols)?.id).toBe("wiki:auth-flow");
-    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null }, "effort", row, cols)?.id).toBe("diff-view:effort:7");
+    expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
+    expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("wiki:auth-flow");
+    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("diff-view:effort:7");
   });
   test("null or missing target gives no link", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
-    expect(cellLinkRef({ kind: "task", from: "nope", line: null }, "title", row, cols)).toBeNull();
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
+    expect(cellLinkRef({ kind: "task", from: "nope", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
   });
 });
 
@@ -177,17 +177,17 @@ describe("links added for extraction", () => {
   const cols = ["id", "path", "ln", "sha", "key"];
   const row = [42, "src/a.rs", 7, "abc123", "oxplow.complexity"];
   test("a task link from a v_task integer id opens tsk<id>", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null }, "id", row, cols)?.id).toBe("task:tsk42");
-    expect(cellLinkRef({ kind: "task", from: null, line: null }, "t", ["tsk9"], ["t"])?.id).toBe("task:tsk9");
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "id", row, cols)?.id).toBe("task:tsk42");
+    expect(cellLinkRef({ kind: "task", from: null, line: null, base: null, head: null }, "t", ["tsk9"], ["t"])?.id).toBe("task:tsk9");
   });
   test("file links can carry a line", () => {
-    const ref = cellLinkRef({ kind: "file", from: "path", line: "ln" }, "path", row, cols);
+    const ref = cellLinkRef({ kind: "file", from: "path", line: "ln", base: null, head: null }, "path", row, cols);
     expect(ref?.id).toBe("file:src/a.rs");
     expect((ref?.payload as { line?: number }).line).toBe(7);
   });
   test("commit and metric links", () => {
-    expect(cellLinkRef({ kind: "commit", from: "sha", line: null }, "sha", row, cols)?.kind).toBe("git-commit");
-    expect(cellLinkRef({ kind: "metric", from: "key", line: null }, "key", row, cols)?.id).toBe(
+    expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("git-commit");
+    expect(cellLinkRef({ kind: "metric", from: "key", line: null, base: null, head: null }, "key", row, cols)?.id).toBe(
       "metric-detail:oxplow.complexity",
     );
   });
@@ -274,4 +274,64 @@ test("mergeDirectory slots lens entries into their categories, keeping category 
     [e("usage", "Activity"), e("mine", "Lenses"), e("plan", "Work")],
   );
   expect(merged.map((m: { id: string }) => m.id)).toEqual(["tasks", "plan", "git", "usage", "mine", "settings"]);
+});
+
+describe("change links", () => {
+  const cols = ["path", "ln", "base", "head", "dup"];
+  test("diff-at opens the file's diff between the change's two sides, at the line", () => {
+    const ref = cellLinkRef(
+      { kind: "diff-at", from: "path", line: "ln", base: "base", head: "head" },
+      "path",
+      ["src/a.rs", 12, "abc1234", "def5678", null],
+      cols,
+    )!;
+    expect(ref.kind).toBe("diff");
+    const p = ref.payload as { path: string; leftVersion: unknown; rightVersion: unknown; revealLine?: number };
+    expect(p.path).toBe("src/a.rs");
+    expect(p.leftVersion).toEqual({ kind: "ref", ref: "abc1234" });
+    expect(p.rightVersion).toEqual({ kind: "ref", ref: "def5678" });
+    expect(p.revealLine).toBe(12);
+    const working = cellLinkRef(
+      { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
+      "path",
+      ["src/a.rs", null, "HEAD", "working tree", null],
+      cols,
+    )!;
+    expect((working.payload as { rightVersion: unknown }).rightVersion).toEqual({ kind: "disk" });
+    expect(
+      cellLinkRef({ kind: "diff-at", from: "path", line: null, base: "base", head: "head" }, "path", ["a", null, "snapshot 3", "snapshot 4", null], cols),
+    ).toBeNull();
+  });
+  test("compare opens both ranges side by side at the change's version", () => {
+    const ref = cellLinkRef(
+      { kind: "compare", from: "dup", line: null, base: null, head: "head" },
+      "dup",
+      ["x", null, null, "def5678", "src/b.rs:3-12|src/a.rs:40-49"],
+      cols,
+    )!;
+    expect(ref.kind).toBe("duplicate-block");
+    expect(ref.payload).toEqual({
+      leftPath: "src/b.rs",
+      leftStart: 3,
+      leftEnd: 12,
+      leftVersion: { kind: "ref", ref: "def5678" },
+      rightPath: "src/a.rs",
+      rightStart: 40,
+      rightEnd: 49,
+      rightVersion: { kind: "ref", ref: "def5678" },
+    });
+    expect(cellLinkRef({ kind: "compare", from: "dup", line: null, base: null, head: null }, "dup", ["x", null, null, null, "garbage"], cols)).toBeNull();
+  });
+});
+
+test("slot lenses get only the slot params they declare", () => {
+  const exts = [
+    {
+      name: "x",
+      enabled: true,
+      slots: [{ slot: "effort-review", lensId: "x/a" }],
+      lenses: [lens({ id: "x/a", params: [{ name: "effort_id", label: null, default: null }] })],
+    },
+  ] as unknown as Extension[];
+  expect(slotRuns(exts, "effort-review", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
 });

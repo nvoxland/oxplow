@@ -1952,6 +1952,7 @@ export function App() {
       case "page-analytics":
       case "lens":
       case "explore-data":
+      case "duplicate-block":
       case "op-error": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
@@ -1964,9 +1965,18 @@ export function App() {
         }
         return;
       }
+      case "diff": {
+        // A diff built from its spec (e.g. a lens `diff-at` link).
+        const spec = ref.payload as DiffSpec | null;
+        if (spec?.path && spec.leftVersion && spec.rightVersion) handleOpenDiff(spec);
+        return;
+      }
       default:
         return;
     }
+    // handleOpenDiff is a plain function over state setters and
+    // selectedThreadId, which is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleOpenFile, handleOpenWiki, selectedThreadId, selectedThreadWork, setCenterActive, stream?.id]);
 
   /** Navigate to a unified-search hit. Shared by the search palette and
@@ -2021,7 +2031,11 @@ export function App() {
       return;
     }
     if (ref.kind === "file") {
-      const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+      const payload = ref.payload as {
+        path?: string;
+        version?: import("./file-version.js").FileVersion;
+        line?: number;
+      } | null;
       // Only the disk version needs to populate the fileSessions
       // dirty-state cache + LSP wiring. Non-disk versions render
       // through FileViewerPage which loads content directly via
@@ -2030,6 +2044,22 @@ export function App() {
       // for.
       const isDisk = !payload?.version || payload.version.kind === "disk";
       if (payload?.path && isDisk) void handleOpenFile(payload.path);
+      // A line on the ref (lens `file` links with `line:`) reveals it.
+      if (payload?.path && isDisk && payload.line && payload.line > 0) {
+        setEditorNavigationTarget({ path: payload.path, line: payload.line, column: 1 });
+      }
+    }
+    if (ref.kind === "diff") {
+      // A diff ref that carries its whole spec (lens `diff-at` links)
+      // registers it here, since no handleOpenDiffInTab ran first.
+      const spec = ref.payload as DiffSpec | null;
+      if (spec?.path && spec.leftVersion && spec.rightVersion) {
+        setDiffTabs((prev) =>
+          prev.some((t) => t.id === ref.id)
+            ? prev.map((t) => (t.id === ref.id ? { id: ref.id, spec } : t))
+            : [...prev, { id: ref.id, spec }],
+        );
+      }
     }
     const oldRef = existing[idx]!;
     setThreadPageTabs((prev) => {

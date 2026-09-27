@@ -45,7 +45,12 @@ empty: Nothing is blocked.
 
 - `params` become inputs on the page and bind as `:name`.
 - `link.kind` is `task`, `file` (add `line: <column>` to open at a line),
-  `wiki`, `effort-diff`, `commit` or `metric`.
+  `wiki`, `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
+  - `diff-at` opens a file's diff within a change:
+    `{ kind: diff-at, line: start_line, base: base_label, head: head_label }`
+    (join `v_change` for the labels).
+  - `compare` opens two line ranges side by side; the column holds
+    `path:start-end|peer:start-end`, and `head:` names a version column.
 - Unknown keys are errors, so typos show up instead of being ignored.
 
 Charts name the columns they draw:
@@ -75,9 +80,16 @@ page's id as a param, so it must declare it:
 
 | Slot | Page | Param |
 |---|---|---|
-| `effort-review` | an effort's diff view | `effort_id` |
+| `effort-review` | an effort's diff view | `effort_id`, `change_id` |
 | `task-detail` | a task's page | `task_id` |
 | `thread` | the Work panel (compact) | `thread_id` |
+| `commit` | a commit's page | `change_id` |
+| `uncommitted` | Uncommitted Changes | `change_id` |
+
+A lens declares the params it wants (at least one). `change_id` points at
+the page's change in `v_change`, with its analysis in `v_change_file`,
+`v_change_function`, `v_change_import`, `v_change_co_change` and
+`v_change_duplicate`.
 
 ```yaml
 slots:

@@ -151,16 +151,31 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       shadows the bundled one;
     - `install_extension` refuses the name;
     - `save_lens` refuses to write into a bundled extension.
-- **Slots (current: `effort-review`, `task-detail`, `thread`).**
+- **Slots (current: `effort-review`, `task-detail`, `thread`, `commit`,
+  `uncommitted`).**
   - `extension.yaml` declares `slots: [{slot, lens}]`. `SLOTS` in
-    `extensions.rs` names each slot and the params it binds; a mounted
-    lens must declare them all, or the mount is an error. Loaded as
-    `Extension.slots`.
+    `extensions.rs` names each slot and the params it **offers**; a
+    mounted lens gets the ones it declares and must declare at least one,
+    or the mount is an error. Loaded as `Extension.slots`.
   - `src/lens/LensSlots.tsx` renders a slot: every mounted lens, run with
-    the slot's params, re-run on data events. DiffViewPage binds
-    `effort_id`, TaskPage `task_id`, PlanPane `thread_id` (the compact
-    `strip` variant, which hides lenses with no rows). Numeric ids come
-    from `numericRowId` (`tsk42` → 42).
+    the slot params it declares (`slotRuns`), re-run on data events.
+    DiffViewPage offers `effort_id` and `change_id`, TaskPage `task_id`,
+    PlanPane `thread_id` (the compact `strip` variant, which hides lenses
+    with no rows), GitCommitPage and UncommittedChangesPage `change_id`.
+    Numeric ids come from `numericRowId` (`tsk42` → 42).
+  - `change_id` comes from `src/lens/useChange.ts`: it calls
+    `ensure_change` on mount, again on `ChangeStale` for its stream
+    (working tree / effort targets) and on `ChangeAnalyzed` for its
+    change (`shouldReensure`).
+- **Change links.** `diff-at` (`from` path, optional `line`, `base` and
+  `head` columns holding the change's labels; join `v_change`) opens that
+  file's diff between the two sides (commit shas / `HEAD` → git refs,
+  `working tree` → disk; snapshot sides give no link yet). `compare` takes
+  a `path:start-end|peer:start-end` value (build it in SQL) plus an
+  optional `head` version column and opens the side-by-side
+  `duplicate-block` page, which is now the general core compare page.
+  Both refs carry their whole spec, so App's `handleOpenPage` and
+  in-tab navigation register them directly.
 - **Disabling.** `extensions: { disabled: [name] }` in
   `.oxplow/project.yaml` (bundled extensions included). `load_extensions`
   reads the list with `oxplow_config::disabled_extensions` (just that key,

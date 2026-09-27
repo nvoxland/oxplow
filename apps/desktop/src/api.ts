@@ -8,6 +8,8 @@ import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
+  ChangeRow,
+  ChangeTarget,
   CommentIntent,
   CommentMessage,
   CommentStatus,
@@ -530,6 +532,12 @@ export async function listSources(): Promise<SourceListing[]> {
 /// current script first (only the UI may pass it).
 export async function runSource(extension: string, sourceId: string, approve: boolean): Promise<SourceRunReport> {
   return unwrap(await commands.runSource(extension, sourceId, approve));
+}
+
+/// Analyze a change (a commit, an effort, or a stream's working tree) if
+/// needed and return its `v_change` row. See `.context/semantic-layer.md`.
+export async function ensureChange(target: ChangeTarget): Promise<ChangeRow> {
+  return unwrap(await commands.ensureChange(target));
 }
 
 /// Set (or clear with null) a credential an extension's source declares.

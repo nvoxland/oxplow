@@ -1,3 +1,5 @@
+import { LensSlots } from "../lens/LensSlots.js";
+import { useChange } from "../lens/useChange.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CommitDetail, Stream, ThreadWorkState } from "../api.js";
 import { getCommitDetail, gitCherryPick, gitRevert } from "../api.js";
@@ -75,6 +77,7 @@ export function GitCommitPage({
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const analysis = useChangeAnalysis({ streamId: stream?.id ?? null, target: sha, scope });
+  const { change } = useChange(sha ? { kind: "commit", sha, streamId: stream?.id ?? null } : null);
   // Measure the SummaryCard so the CommitMeta on its left collapses
   // to the same height — the meta panel is content-driven and would
   // otherwise either be much shorter (1-line message) or much taller
@@ -219,6 +222,12 @@ export function GitCommitPage({
             onOpenDiffInTab={onOpenDiffInTab}
           />
         ) : null}
+        <LensSlots
+          slot="commit"
+          params={change ? { change_id: change.id } : null}
+          streamId={stream?.id ?? null}
+          onOpenPage={(ref) => onOpenPage(ref)}
+        />
       </div>
     </Page>
   );

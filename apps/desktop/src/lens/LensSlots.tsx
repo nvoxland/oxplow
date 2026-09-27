@@ -4,7 +4,7 @@ import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import { LensResultView } from "./LensResultView.js";
-import { shouldRerunLens, slotMounts } from "./lensModel.js";
+import { shouldRerunLens, slotRuns } from "./lensModel.js";
 
 const MAX_ROWS = 25;
 
@@ -41,11 +41,11 @@ export function LensSlots({
   const refresh = useCallback(async () => {
     if (params === null) return;
     try {
-      const ids = slotMounts(await listExtensions(streamId), slot);
+      const mounts = slotRuns(await listExtensions(streamId), slot, params);
       const next = await Promise.all(
-        ids.map(async (id) => {
+        mounts.map(async ({ id, params: lensParams }) => {
           try {
-            return { id, run: await runLens(id, params, streamId), error: null };
+            return { id, run: await runLens(id, lensParams, streamId), error: null };
           } catch (e) {
             return { id, run: null, error: e instanceof Error ? e.message : String(e) };
           }

@@ -2787,8 +2787,12 @@ export type LensLink = {
 	kind: LensLinkKind,
 	// Result column holding the target id. Defaults to the column itself.
 	from?: string | null,
-	// For `file`: result column holding a line number to open at.
+	// For `file` / `diff-at`: result column holding a line number to open at.
 	line?: string | null,
+	// For `diff-at`: column holding the older side's label.
+	base?: string | null,
+	// For `diff-at` / `compare`: column holding the newer side's label.
+	head?: string | null,
 };
 
 // A page a column value can link to.
@@ -2804,7 +2808,19 @@ export type LensLinkKind =
 // A git commit; the value is a sha.
 "commit" | 
 // A metric's page; the value is a metric key.
-"metric";
+"metric" | 
+/**
+ *  A file's diff within a change: the value is the path; `line`,
+ *  `base` and `head` name the columns holding the line and the
+ *  change's `base_label` / `head_label` (join `v_change`).
+ */
+"diff-at" | 
+/**
+ *  Two line ranges side by side: the value is
+ *  `path:start-end|peer:start-end`; `head` names a column with the
+ *  version to read (a change's `head_label`; the working tree if absent).
+ */
+"compare";
 
 /**
  *  A value the viewer (or an agent) can set when running the lens,
@@ -2829,8 +2845,8 @@ export type LensRun = {
 export type LensSlot = {
 	/**
 	 *  Which page, from [`SLOTS`]: `effort-review` (an effort's diff
-	 *  view, binds `:effort_id`), `task-detail` (`:task_id`) or `thread`
-	 *  (`:thread_id`).
+	 *  view: `:effort_id`, `:change_id`), `task-detail` (`:task_id`),
+	 *  `thread` (`:thread_id`), `commit` or `uncommitted` (`:change_id`).
 	 */
 	slot: string,
 	lensId: string,

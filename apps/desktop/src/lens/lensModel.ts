@@ -6,8 +6,9 @@
  */
 import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
-import { DISK } from "../file-version.js";
+import { duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { DISK, refVersion, type FileVersion } from "../file-version.js";
+import { computeDiffId } from "../diff-id.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export interface DisplayColumn {
@@ -62,11 +63,62 @@ export function cellLinkRef(
       return gitCommitRef(s);
     case "metric":
       return metricRef(s);
+    case "diff-at": {
+      const at = (col: string | null) => {
+        const i = col ? resultColumns.indexOf(col) : -1;
+        return i === -1 ? null : (row[i] ?? null);
+      };
+      const base = labelToVersion(at(link.base));
+      const head = labelToVersion(at(link.head));
+      if (!base || !head) return null;
+      const line = Number(at(link.line));
+      const spec = {
+        path: s,
+        leftVersion: base,
+        rightVersion: head,
+        baseLabel: String(at(link.base)),
+        labelOverride: `${shortLabel(at(link.base))}..${shortLabel(at(link.head))}`,
+        revealLine: line > 0 ? line : undefined,
+      };
+      return { id: computeDiffId(spec), kind: "diff", payload: spec };
+    }
+    case "compare": {
+      const m = /^(.+):(\d+)-(\d+)\|(.+):(\d+)-(\d+)$/.exec(s);
+      if (!m) return null;
+      const headIdx = link.head ? resultColumns.indexOf(link.head) : -1;
+      const version = headIdx === -1 ? DISK : (labelToVersion(row[headIdx] ?? null) ?? DISK);
+      return duplicateBlockRef({
+        leftPath: m[1]!,
+        leftStart: Number(m[2]),
+        leftEnd: Number(m[3]),
+        leftVersion: version,
+        rightPath: m[4]!,
+        rightStart: Number(m[5]),
+        rightEnd: Number(m[6]),
+        rightVersion: version,
+      });
+    }
     case "wiki":
       return wikiPageRef(s);
     case "effort-diff":
       return effortDiffRef(s);
   }
+}
+
+/** A change side's label (`v_change.base_label` / `head_label`) as a file
+ *  version: a sha or `HEAD` is a git ref, `working tree` is disk. Snapshot
+ *  sides can't be opened as a file version, so they give null. */
+export function labelToVersion(label: SqlCell): FileVersion | null {
+  if (label === null || label === "") return null;
+  const s = String(label);
+  if (s === "working tree") return DISK;
+  if (s.startsWith("snapshot ")) return null;
+  return refVersion(s);
+}
+
+function shortLabel(label: SqlCell): string {
+  const s = String(label ?? "");
+  return /^[0-9a-f]{40}$/.test(s) ? s.slice(0, 7) : s;
 }
 
 /** Plain-text rendering of one cell. */
@@ -199,6 +251,26 @@ export function adHocLens(query: string, viz: LensViz): Lens {
 export function rowMention(lensId: string, columns: string[], row: SqlCell[]): string {
   const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
   return `[oxplow lens ${lensId} row: ${fields}] `;
+}
+
+/** What a slot runs: each mounted lens with the slot params it declares
+ *  (a slot offers several, e.g. effort-review's `effort_id` and
+ *  `change_id`; `run_lens` rejects undeclared ones). */
+export function slotRuns(
+  extensions: Extension[],
+  slot: string,
+  params: Record<string, SqlCell>,
+): { id: string; params: Record<string, SqlCell> }[] {
+  const out: { id: string; params: Record<string, SqlCell> }[] = [];
+  for (const ext of extensions) {
+    if (!ext.enabled) continue;
+    for (const s of ext.slots) {
+      if (s.slot !== slot) continue;
+      const lens = ext.lenses.find((l) => l.id === s.lensId);
+      if (lens) out.push({ id: s.lensId, params: childParams(lens, params) });
+    }
+  }
+  return out;
 }
 
 /** Lens ids extensions mount into `slot` (e.g. `effort-review`), in

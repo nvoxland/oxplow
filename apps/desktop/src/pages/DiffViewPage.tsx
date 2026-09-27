@@ -47,6 +47,7 @@ import { AgentNudgesBlock, TestsRun } from "../components/EffortObservations.js"
 import { EffortMetricsBlock } from "../components/EffortMetrics.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
+import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
@@ -416,6 +417,9 @@ function ResolvedEndpointDiff({
     );
   }, [effortPassed, effortRows, startSnapId, endSnapId]);
   const primaryEffortId = effortPassed ? effortId : linedUpEffort?.effort.effortId ?? null;
+  // The effort's stored change analysis, for effort-review lenses that
+  // read v_change* (none when the effort has no start snapshot).
+  const { change: effortChange } = useChange(primaryEffortId ? { kind: "effort", effortId: primaryEffortId } : null);
   const effortTitle = effortPassed ? taskTitle : linedUpEffort?.taskTitle ?? null;
   // Start/end window of the effort the diff is for — feeds the Metrics
   // section (its drill-in scopes the metric detail to this window).
@@ -718,7 +722,11 @@ function ResolvedEndpointDiff({
       {primaryEffortId ? (
         <LensSlots
           slot="effort-review"
-          params={effortRowId(primaryEffortId) === null ? null : { effort_id: effortRowId(primaryEffortId) }}
+          params={
+            effortRowId(primaryEffortId) === null
+              ? null
+              : { effort_id: effortRowId(primaryEffortId), ...(effortChange ? { change_id: effortChange.id } : {}) }
+          }
           streamId={stream?.id ?? null}
           onOpenPage={(ref) => onOpenPage(ref)}
           h2Style={h2Style}
