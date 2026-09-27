@@ -365,6 +365,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	saveLens: (extension: string, slug: string, lens: NewLens, streamId: string | null) => typedError<Lens, IpcError>(__TAURI_INVOKE("save_lens", { extension, slug, lens, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2934,6 +2939,14 @@ export type MoveTaskRequest = {
 	id: TaskId,
 	// Destination thread, or `None` to move onto the backlog.
 	threadId: ThreadId | null,
+};
+
+// What the Explore Data page saves as a new lens.
+export type NewLens = {
+	title: string,
+	description?: string,
+	query: string,
+	viz: LensViz,
 };
 
 export type NoteId = string;

@@ -306,3 +306,9 @@ describe("buildAddToDashboardMenu", () => {
     expect(menu.map((m) => m.label)).toEqual(["New dashboard…"]);
   });
 });
+
+describe("parseTileOptions lens tiles", () => {
+  it("keeps a lens tile's lensId", () => {
+    expect(parseTileOptions('{"lensId":"mine/threads","size":"wide"}')).toEqual({ lensId: "mine/threads", size: "wide" });
+  });
+});

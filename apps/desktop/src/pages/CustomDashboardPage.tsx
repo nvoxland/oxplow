@@ -20,6 +20,7 @@ import {
 import { MetricPickerPanel } from "../components/Dashboard/MetricPickerPanel.js";
 import { MetricTile } from "../components/Dashboard/MetricTile.js";
 import { TextTile } from "../components/Dashboard/TextTile.js";
+import { LensTile } from "../components/Dashboard/LensTile.js";
 import { moveToIndex } from "../components/CenterTabs/centerTabsReorder.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { InlineEdit } from "../components/InlineEdit.js";
@@ -675,7 +676,15 @@ export function CustomDashboardPage({
                       }}
                     />
                   ) : null}
-                  {it.kind === "text" ? (
+                  {it.kind === "lens" ? (
+                    <LensTile
+                      item={it}
+                      opts={opts}
+                      onOpenPage={onOpenPage ? (ref) => onOpenPage(ref) : undefined}
+                      onRemove={() => void removeTile(it.id)}
+                      onConfigure={(next) => configureTile(it.id, it.metric_key, opts, next)}
+                    />
+                  ) : it.kind === "text" ? (
                     <TextTile
                       item={it}
                       opts={opts}

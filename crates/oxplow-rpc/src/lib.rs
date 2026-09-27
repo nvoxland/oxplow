@@ -301,6 +301,7 @@ macro_rules! oxplow_command_table {
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 install_extension => $crate::commands::extensions::install_extension { git_url: String, git_ref: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 update_extension => $crate::commands::extensions::update_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
+                save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments
                 create_comment => $crate::commands::comments::create_comment { req: $crate::commands::comments::CreateCommentRequest } -> ::oxplow_domain::CommentThread,
                 add_comment_message => $crate::commands::comments::add_comment_message { comment_id: ::oxplow_domain::CommentId, author: String, body: String } -> ::oxplow_domain::CommentMessage,

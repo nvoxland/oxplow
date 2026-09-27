@@ -18,7 +18,7 @@ import {
  * Sections the launcher's "start menu" empty state groups pages under.
  * `PAGE_CATEGORY_ORDER` is the render order for those headings.
  */
-export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Lenses" | "System";
+export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
 
 export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Work",
@@ -26,6 +26,7 @@ export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Git",
   "Activity",
   "Knowledge",
+  "Data",
   "Lenses",
   "System",
 ];
@@ -79,9 +80,10 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "dashboard-quality", label: "Quality", ref: dashboardRef("quality"), category: "Activity" },
     { id: "dashboard-visits", label: "Go To", ref: dashboardRef("visits"), category: "Activity" },
     { id: "usage", label: "Usage", ref: indexRef("usage"), category: "Activity" },
-    { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Activity", keywords: "recorded catalog" },
-    { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Activity", keywords: "custom metric tiles" },
     { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },
+    { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
+    { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },
+    { id: "dashboards", label: "Dashboards", ref: dashboardsRef(), category: "Data", keywords: "custom metric tiles lens" },
     { id: "terminal", label: "Terminal", ref: indexRef("terminal"), category: "System" },
     { id: "closed-threads", label: "Closed Threads", ref: closedThreadsRef(), category: "System" },
     { id: "settings", label: "Settings", ref: indexRef("settings"), category: "System" },

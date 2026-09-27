@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens } from "./lensModel.js";
+import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -110,5 +110,32 @@ describe("shouldRerunLens", () => {
     expect(shouldRerunLens({ kind: "usageRecorded" })).toBe(false);
     expect(shouldRerunLens({ kind: "workspaceChanged", path: "src/main.rs" })).toBe(false);
     expect(shouldRerunLens({ kind: "workspaceChanged", path: "oxplow/extensions/review/lenses/a.yaml" })).toBe(true);
+  });
+});
+
+describe("limitRows", () => {
+  test("caps rows for compact views and marks the result truncated", () => {
+    const r = { columns: ["n"], rows: [[1], [2], [3]], truncated: false };
+    expect(limitRows(r, 2)).toEqual({ columns: ["n"], rows: [[1], [2]], truncated: true });
+    expect(limitRows(r, 5)).toBe(r);
+    expect(limitRows(r, undefined)).toBe(r);
+  });
+});
+
+describe("slugify", () => {
+  test("titles become lowercase-dash slugs valid for lens files", () => {
+    expect(slugify("Open Tasks by Thread")).toBe("open-tasks-by-thread");
+    expect(slugify("  What's  waiting?? ")).toBe("what-s-waiting");
+    expect(slugify("---")).toBe("lens");
+  });
+});
+
+describe("adHocLens", () => {
+  test("wraps an Explore Data query as an unsaved lens for rendering", () => {
+    const l = adHocLens("SELECT 1", "number");
+    expect(l.query).toBe("SELECT 1");
+    expect(l.viz).toBe("number");
+    expect(l.columns).toEqual([]);
+    expect(l.id).toBe("explore/ad-hoc");
   });
 });

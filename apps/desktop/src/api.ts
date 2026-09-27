@@ -16,6 +16,8 @@ import type {
   Extension,
   Lens,
   LensRun,
+  LensViz,
+  NewLens,
   RecentProjectView,
   SchemaEntity,
   SearchHit,
@@ -23,7 +25,7 @@ import type {
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { Extension, Lens, LensRun, SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -493,6 +495,16 @@ export async function runLens(
 /// Load an extension and dry-run every lens, returning all problems.
 export async function validateExtension(name: string, streamId: string | null): Promise<Extension> {
   return unwrap(await commands.validateExtension(name, streamId));
+}
+
+/// Save a query as a new lens file (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
+export async function saveLens(
+  extension: string,
+  slug: string,
+  lens: NewLens,
+  streamId: string | null,
+): Promise<Lens> {
+  return unwrap(await commands.saveLens(extension, slug, lens, streamId));
 }
 
 /// Install an extension from a git repo into the stream's worktree.

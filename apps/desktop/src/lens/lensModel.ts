@@ -4,7 +4,7 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
-import type { Extension, Lens, LensLink, SqlCell } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import type { PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { effortDiffRef, fileRef, lensRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -121,4 +121,40 @@ export function shouldRerunLens(event: { kind: string; path?: unknown }): boolea
     return typeof event.path === "string" && event.path.startsWith("oxplow/extensions/");
   }
   return true;
+}
+
+/** Cap a result's rows for a compact view (a dashboard tile), marking it
+ *  truncated when rows were dropped. Returns the input unchanged when it
+ *  already fits. */
+export function limitRows(result: SqlQueryResult, max: number | undefined): SqlQueryResult {
+  if (max === undefined || result.rows.length <= max) return result;
+  return { ...result, rows: result.rows.slice(0, max), truncated: true };
+}
+
+/** A title as a lens slug: lowercase letters, digits and single dashes
+ *  (what `save_lens` accepts). Falls back to `lens` when nothing's left. */
+export function slugify(title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "lens";
+}
+
+/** An unsaved query from Explore Data, shaped as a lens so the shared
+ *  `LensResultView` can render it. */
+export function adHocLens(query: string, viz: LensViz): Lens {
+  return {
+    id: "explore/ad-hoc",
+    extension: "explore",
+    slug: "ad-hoc",
+    title: "Query",
+    description: "",
+    query,
+    viz,
+    params: [],
+    columns: [],
+    empty: "No rows.",
+    path: "",
+  };
 }

@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Page, pageH1Style } from "../tabs/Page.js";
-import { RouteLink } from "../tabs/RouteLink.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Stream } from "../tauri-bridge/index.js";
-import { runLens, subscribeOxplowEvents, type LensRun, type SqlCell } from "../api.js";
+import {
+  addDashboardItem,
+  createDashboard,
+  listDashboards,
+  runLens,
+  subscribeOxplowEvents,
+  type Dashboard,
+  type LensRun,
+  type SqlCell,
+} from "../api.js";
+import { showToast } from "../components/toastStore.js";
+import { recordOpError } from "../components/opErrorsStore.js";
+import { customDashboardRef } from "../tabs/pageRefs.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
-import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
-import { MarkdownView } from "../components/Wiki/MarkdownView.js";
-import {
-  cellLinkRef,
-  changedParams,
-  displayColumns,
-  formatCell,
-  type DisplayColumn,
-  parseParamInput,
-  shouldRerunLens,
-} from "../lens/lensModel.js";
+import { changedParams, parseParamInput, shouldRerunLens } from "../lens/lensModel.js";
+import { LensResultView } from "../lens/LensResultView.js";
 
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
@@ -83,6 +85,7 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
       <button type="button" data-testid="lens-refresh" onClick={() => void refresh()}>
         Refresh
       </button>
+      <PinToDashboard lensId={lensId} onOpenPage={onOpenPage} />
       <button
         type="button"
         data-testid="lens-improve-with-agent"
@@ -127,7 +130,7 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
           </div>
         </div>
       ) : null}
-      {run ? <LensBody run={run} onOpenPage={onOpenPage} /> : error ? null : <p>Loading…</p>}
+      {run ? <LensResultView run={run} onOpenPage={onOpenPage} /> : error ? null : <p>Loading…</p>}
       {lens ? (
         <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)", marginTop: 24 }}>
           {lens.path}
@@ -137,121 +140,90 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
   );
 }
 
-type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
+/** "Pin to Dashboard": adds a `lens` tile to a chosen dashboard (or a new
+ *  "My Dashboard" when there are none), then offers to open it. */
+function PinToDashboard({ lensId, onOpenPage }: { lensId: string; onOpenPage(ref: TabRef): void }) {
+  const [dashboards, setDashboards] = useState<Dashboard[] | null>(null);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const isOpen = dashboards !== null;
 
-function LensBody({ run, onOpenPage }: { run: LensRun; onOpenPage(ref: TabRef): void }) {
-  const { lens, result } = run;
-  if (result.rows.length === 0) {
-    return (
-      <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
-        {lens.empty ?? "No rows."}
-      </p>
-    );
+  // Close on an outside press or Escape, like the app's other popovers.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setDashboards(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDashboards(null);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [isOpen]);
+
+  async function pin(dashboardId: string, title: string) {
+    setDashboards(null);
+    try {
+      await addDashboardItem({
+        dashboardId,
+        kind: "lens",
+        optionsJson: JSON.stringify({ lensId, size: "wide" }),
+      });
+      showToast({ message: `Pinned to ${title}.` });
+      onOpenPage(customDashboardRef(dashboardId));
+    } catch (e) {
+      recordOpError({ label: "Pin lens to dashboard", message: String(e) });
+    }
   }
-  const cols = displayColumns(lens, result.columns);
-  const cell: CellRenderer = (row, c) => {
-    const text = formatCell(row[c.index] ?? null);
-    const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
-    if (!ref) return text;
-    return (
-      <RouteLink to={ref} onNavigate={() => onOpenPage(ref)} style={linkStyle}>
-        {text}
-      </RouteLink>
-    );
-  };
-  const first = result.rows[0]?.[0] ?? null;
-  switch (lens.viz) {
-    case "number":
-      return <NumberViz value={first} />;
-    case "markdown":
-      return <MarkdownView body={first === null ? "" : String(first)} />;
-    case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
-    case "table":
-    default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
+
+  async function toggle() {
+    if (dashboards) {
+      setDashboards(null);
+      return;
+    }
+    try {
+      setDashboards(await listDashboards());
+    } catch (e) {
+      recordOpError({ label: "List dashboards", message: String(e) });
+    }
   }
-}
 
-function NumberViz({ value }: { value: SqlCell }) {
+  async function pinToNew() {
+    try {
+      const d = await createDashboard("My Dashboard");
+      await pin(d.id, d.title);
+    } catch (e) {
+      recordOpError({ label: "Create dashboard", message: String(e) });
+    }
+  }
+
   return (
-    <div
-      data-testid="lens-number"
-      title={typeof value === "number" ? formatMetricValueExact(value) : undefined}
-      style={{ fontSize: 48, fontWeight: 600, margin: "16px 0" }}
-    >
-      {typeof value === "number" ? formatMetricValue(value) : formatCell(value)}
-    </div>
-  );
-}
-
-interface RowsVizProps {
-  rows: SqlCell[][];
-  cols: DisplayColumn[];
-  cell: CellRenderer;
-  truncated: boolean;
-}
-
-function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
-  if (!truncated) return null;
-  return (
-    <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Showing the first {rows} rows.</p>
-  );
-}
-
-function ListViz({ rows, cols, cell, truncated }: RowsVizProps) {
-  const [head, ...rest] = cols;
-  return (
-    <>
-      <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {rows.map((row, i) => (
-          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle}>
-            <div>{head ? cell(row, head) : null}</div>
-            {rest.length > 0 ? (
-              <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                {rest.map((c, j) => (
-                  <span key={c.key}>
-                    {j > 0 ? " · " : null}
-                    {cell(row, c)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <TruncatedNote rows={rows.length} truncated={truncated} />
-    </>
-  );
-}
-
-function TableViz({ rows, cols, cell, truncated }: RowsVizProps) {
-  return (
-    <>
-      <table data-testid="lens-table" style={tableStyle}>
-        <thead>
-          <tr>
-            {cols.map((c) => (
-              <th key={c.key} style={thStyle}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => (
-            <tr key={i} data-testid={`lens-row-${i}`}>
-              {cols.map((c) => (
-                <td key={c.key} style={tdStyle}>
-                  {cell(row, c)}
-                </td>
-              ))}
-            </tr>
+    <span ref={wrapRef} style={{ position: "relative" }}>
+      <button type="button" data-testid="lens-pin" onClick={() => void toggle()}>
+        Pin to Dashboard
+      </button>
+      {dashboards ? (
+        <div data-testid="lens-pin-menu" style={pinMenuStyle}>
+          {dashboards.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              data-testid={`lens-pin-to-${d.id}`}
+              style={pinItemStyle}
+              onClick={() => void pin(d.id, d.title)}
+            >
+              {d.title}
+            </button>
           ))}
-        </tbody>
-      </table>
-      <TruncatedNote rows={rows.length} truncated={truncated} />
-    </>
+          <button type="button" data-testid="lens-pin-new" style={pinItemStyle} onClick={() => void pinToNew()}>
+            New Dashboard…
+          </button>
+        </div>
+      ) : null}
+    </span>
   );
 }
 
@@ -307,24 +279,28 @@ function ParamInput({
   );
 }
 
-const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", fontSize: "var(--text-sm)" };
-const thStyle: CSSProperties = {
-  textAlign: "left",
-  padding: "6px 8px",
-  borderBottom: "1px solid var(--border-subtle)",
-  color: "var(--text-secondary)",
-  fontWeight: 600,
+const pinMenuStyle: CSSProperties = {
+  position: "absolute",
+  top: "100%",
+  right: 0,
+  zIndex: 10,
+  marginTop: 4,
+  minWidth: 200,
+  display: "flex",
+  flexDirection: "column",
+  background: "var(--surface-card)",
+  border: "1px solid var(--border-subtle)",
+  borderRadius: 6,
+  padding: 4,
 };
-const tdStyle: CSSProperties = { padding: "6px 8px", borderBottom: "1px solid var(--border-subtle)", verticalAlign: "top" };
-const listRowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)" };
-const linkStyle: CSSProperties = {
+const pinItemStyle: CSSProperties = {
   background: "none",
   border: "none",
-  padding: 0,
-  color: "var(--text-link, var(--accent))",
-  cursor: "pointer",
   textAlign: "left",
+  padding: "6px 8px",
   font: "inherit",
+  color: "var(--text-primary)",
+  cursor: "pointer",
 };
 const errorStyle: CSSProperties = {
   border: "1px solid var(--border-subtle)",

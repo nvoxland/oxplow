@@ -37,6 +37,8 @@ export interface TileOptions {
   dim?: string;
   /** Heading text for a `text` tile. Plain text, not markdown — see `TextTile`. */
   text?: string;
+  /** Lens id (`<extension>/<slug>`) for a `lens` tile — see `LensTile`. */
+  lensId?: string;
   /** Per-tile time-range override: a {@link RANGE_PRESETS} key, or `all` for no
    *  window. Absent → inherit the dashboard's filter. */
   range?: string;
@@ -83,6 +85,7 @@ export function parseTileOptions(json: string | null | undefined): TileOptions {
   }
   if (typeof obj.dim === "string") out.dim = obj.dim;
   if (typeof obj.text === "string") out.text = obj.text;
+  if (typeof obj.lensId === "string") out.lensId = obj.lensId;
   if (typeof obj.range === "string") out.range = obj.range;
   if (typeof obj.branch === "string") out.branch = obj.branch;
   if (typeof obj.alertOffTarget === "boolean") out.alertOffTarget = obj.alertOffTarget;

@@ -124,6 +124,7 @@ import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
+import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
@@ -1923,6 +1924,7 @@ export function App() {
       case "dashboards":
       case "page-analytics":
       case "lens":
+      case "explore-data":
       case "op-error": {
         // Open as a per-thread page tab.
         if (selectedThreadId) {
@@ -2864,6 +2866,13 @@ export function App() {
           label: "Dashboards",
           closable: true,
           render: () => <DashboardsIndexPage onOpenPage={navOpen} />,
+        });
+      } else if (ref.kind === "explore-data") {
+        tabs.push({
+          id: ref.id,
+          label: "Explore Data",
+          closable: true,
+          render: () => <ExploreDataPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "lens") {
         const lensId = (ref.payload as { lensId?: string } | null)?.lensId ?? ref.id.replace(/^lens:/, "");

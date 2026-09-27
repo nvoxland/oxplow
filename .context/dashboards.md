@@ -5,10 +5,12 @@ assembles to view a handful of metrics at a glance. Complements the per-metric
 **detail** page (`.context/metrics.md`) and the **Recorded Metrics** list.
 Epic **tsk138**.
 
-> **Direction (epic tsk275):** custom dashboards are slated to become
-> `grid` lenses in the `oxplow-analytics` extension
-> ([extensions.md](./extensions.md)), and the `dashboard` tables retired
-> once migrated. Maintain; don't extend.
+> **Direction (epic tsk275, revised 2026-09-27):** custom dashboards
+> **stay in core** as the simple starting point, alongside the Metrics
+> pages and Explore Data. Tiles can now be `metric`, `text` or **`lens`**.
+> A `lens` tile keeps its `lensId` in `options_json`,
+> `parseTileOptions` passes it through, and it renders via `LensTile`.
+> See [extensions.md](./extensions.md) → "Core explorer".
 
 **Scope: project-global.** Metrics are project-scoped, so dashboards are too —
 one set per project, reachable from any stream/thread. The `dashboard` table has

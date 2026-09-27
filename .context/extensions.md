@@ -12,7 +12,9 @@ the bundled `oxplow-analytics` example extension.
 >   - the `oxplow-extension` agent skill;
 >   - the lens page and the launcher's "Lenses" section;
 >   - sharing: team via the repo, world via `install_extension` /
->     `update_extension` and Settings → Extensions.
+>     `update_extension` and Settings → Extensions;
+>   - the core explorer: the Explore Data page (with Save as Lens) and
+>     lens tiles on dashboards.
 > - **Target:** everything else here, including sources, dimensions,
 >   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
 >   (tsk278 / tsk280).
@@ -97,6 +99,24 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Installed extensions are declarative (SQL lenses), so nothing
     executable runs. Exec sources will need explicit consent when they
     land.
+- **Core explorer (stays in core, deliberately simple).**
+  - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
+    - Lists every entity from `describe_schema`, with column docs.
+    - Picking one runs `SELECT * … LIMIT 50`; the SQL box then accepts
+      any read-only query (Cmd/Ctrl+Enter runs it).
+    - "Show as" switches the viz.
+    - **Save as Lens** writes the file through the UI-only `save_lens`
+      IPC, then opens the new lens. It creates the extension if missing,
+      refuses to overwrite a lens, and refuses git-installed extensions.
+  - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
+    Dashboard" on a lens page, or MCP `add_dashboard_item(kind: "lens",
+    lens_id)`.
+    - The tile is kind `lens`, with `lensId` stored in `options_json`.
+    - `LensTile` renders it with the shared `LensResultView`, capped at 8
+      rows, against the primary stream, since dashboards are
+      project-global.
+    - The launcher's new **Data** category holds Explore Data, Metrics
+      and Dashboards.
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.

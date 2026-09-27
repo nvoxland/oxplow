@@ -83,8 +83,8 @@ extension host lands.
   `oxplow/extensions/`; see [extensions.md](./extensions.md))
 - **System:** `settings`, `external-url`, `dashboard` (the `visits`
   variant is the Go To hub, which stays core)
-- **Metrics explorer + dashboards (stay core, to be simplified):**
-  `metrics`, `metrics-recorded`, `metric-detail`, `metric-recording`,
+- **Data (the core explorer; stays core):** `explore-data`, `metrics`,
+  `metrics-recorded`, `metric-detail`, `metric-recording`,
   `custom-dashboard`, `dashboards`
 - **Analytics (→ ext):** `usage`, `page-analytics`, `effort-coverage`,
   `finding`, `duplicate-block`, `dashboard` (`planning` / `review` /

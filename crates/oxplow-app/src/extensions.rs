@@ -539,6 +539,76 @@ fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// What the Explore Data page saves as a new lens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct NewLens {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub query: String,
+    pub viz: LensViz,
+}
+
+/// Write a new lens file `oxplow/extensions/<extension>/lenses/<slug>.yaml`,
+/// creating the extension (with a minimal `extension.yaml`) if needed.
+/// Refuses to overwrite a lens, and refuses git-installed extensions
+/// (their files are replaced on update).
+pub fn save_lens(
+    root: &Path,
+    extension: &str,
+    slug: &str,
+    lens: NewLens,
+) -> Result<Lens, DomainError> {
+    let invalid = |m: String| DomainError::Invalid(m);
+    let storage = |e: std::io::Error| DomainError::Storage(format!("save lens: {e}"));
+    if !is_valid_name(extension) {
+        return Err(invalid(format!(
+            "extension name `{extension}` must be lowercase letters, digits and single dashes"
+        )));
+    }
+    if !is_valid_name(slug) {
+        return Err(invalid(format!(
+            "lens slug `{slug}` must be lowercase letters, digits and single dashes"
+        )));
+    }
+    let dir = root.join(EXTENSIONS_DIR).join(extension);
+    if dir.join(SOURCE_FILE).exists() {
+        return Err(invalid(format!(
+            "`{extension}` is an installed extension (its files are replaced on update); save to another extension"
+        )));
+    }
+    let file = dir.join("lenses").join(format!("{slug}.yaml"));
+    if file.exists() {
+        return Err(invalid(format!("lens `{extension}/{slug}` already exists")));
+    }
+    std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
+    let manifest = dir.join("extension.yaml");
+    if !manifest.exists() {
+        std::fs::write(&manifest, format!("name: {extension}\ndescription: \"\"\n"))
+            .map_err(storage)?;
+    }
+    let body = serde_yaml::to_string(&SavedLensFile {
+        title: &lens.title,
+        description: &lens.description,
+        query: &lens.query,
+        viz: lens.viz,
+    })
+    .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
+    std::fs::write(&file, body).map_err(storage)?;
+    find_lens(root, &format!("{extension}/{slug}"))
+}
+
+/// The on-disk shape [`save_lens`] writes (a subset of [`LensFile`]).
+#[derive(Serialize)]
+struct SavedLensFile<'a> {
+    title: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    description: &'a str,
+    query: &'a str,
+    viz: LensViz,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -933,6 +1003,68 @@ empty: No tasks.
             install_extension(project.path(), &repo.path().to_string_lossy(), None).unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("name")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn save_lens_creates_the_extension_and_refuses_overwrites() {
+        let project = tempfile::tempdir().unwrap();
+        let new = || NewLens {
+            title: "Open Tasks".into(),
+            description: "From Explore Data".into(),
+            query: "SELECT id, title FROM v_task".into(),
+            viz: LensViz::Table,
+        };
+        let lens = save_lens(project.path(), "mine", "open-tasks", new()).unwrap();
+        assert_eq!(lens.id, "mine/open-tasks");
+        assert_eq!(lens.title, "Open Tasks");
+        assert!(project
+            .path()
+            .join("oxplow/extensions/mine/extension.yaml")
+            .is_file());
+        let ext = &load_extensions(project.path())[0];
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+
+        let err = save_lens(project.path(), "mine", "open-tasks", new()).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("already exists")),
+            "{err:?}"
+        );
+        let err = save_lens(project.path(), "mine", "Bad Slug", new()).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("slug")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn save_lens_refuses_installed_extensions() {
+        let project = tempfile::tempdir().unwrap();
+        write(
+            project.path(),
+            "oxplow/extensions/shared/extension.yaml",
+            "name: shared\n",
+        );
+        write(
+            project.path(),
+            "oxplow/extensions/shared/source.yaml",
+            "git: x\ngitRef: null\nsha: abc\n",
+        );
+        let err = save_lens(
+            project.path(),
+            "shared",
+            "x",
+            NewLens {
+                title: "X".into(),
+                description: String::new(),
+                query: "SELECT 1".into(),
+                viz: LensViz::Number,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("installed")),
             "{err:?}"
         );
     }

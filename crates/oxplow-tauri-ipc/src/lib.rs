@@ -147,6 +147,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::validate_extension,
             commands::generated::install_extension,
             commands::generated::update_extension,
+            commands::generated::save_lens,
             // notes (task / thread)
             commands::generated::add_thread_note,
             commands::generated::list_thread_notes,

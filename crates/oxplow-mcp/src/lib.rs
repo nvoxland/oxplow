@@ -305,10 +305,13 @@ pub struct GetDashboardParams {
 pub struct AddDashboardItemParams {
     /// Dashboard id (`dsh<n>`) to add the tile to.
     pub dashboard_id: String,
-    /// `metric` (charts one metric) | `text` (a heading / markdown note).
+    /// `metric` (charts one metric) | `text` (a heading / markdown note) |
+    /// `lens` (shows a lens's current result; see `list_lenses`).
     pub kind: String,
     /// Metric spec key for a `metric` tile (see `list_metric_definitions`).
     pub metric_key: Option<String>,
+    /// Lens id (`<extension>/<slug>`) for a `lens` tile.
+    pub lens_id: Option<String>,
     /// Optional per-tile options JSON (viz/mode/scale/size/title; or, for a
     /// `text` tile, `{"text":"…"}`).
     pub options_json: Option<String>,
@@ -1120,6 +1123,33 @@ impl OxplowMcp {
         let p = params.0;
         let dash = oxplow_domain::DashboardId::try_from_str(&p.dashboard_id)
             .ok_or_else(|| McpError::invalid_params("expected a dashboard id (dsh…)", None))?;
+        let options_json = match p.kind.as_str() {
+            "metric" | "text" => p.options_json,
+            "lens" => {
+                let lens_id = p.lens_id.ok_or_else(|| {
+                    McpError::invalid_params(
+                        "a `lens` tile needs lens_id (`<extension>/<slug>`)",
+                        None,
+                    )
+                })?;
+                // The lens id rides in the opaque per-tile options blob.
+                let mut opts: serde_json::Map<String, serde_json::Value> =
+                    match p.options_json.as_deref() {
+                        Some(raw) => serde_json::from_str(raw).map_err(|e| {
+                            McpError::invalid_params(format!("options_json: {e}"), None)
+                        })?,
+                        None => serde_json::Map::new(),
+                    };
+                opts.insert("lensId".into(), serde_json::Value::String(lens_id));
+                Some(serde_json::Value::Object(opts).to_string())
+            }
+            other => {
+                return Err(McpError::invalid_params(
+                    format!("unknown tile kind `{other}` (metric | text | lens)"),
+                    None,
+                ))
+            }
+        };
         let id = self
             .services
             .dashboard_store
@@ -1128,7 +1158,7 @@ impl OxplowMcp {
                 oxplow_db::NewDashboardItem {
                     kind: p.kind,
                     metric_key: p.metric_key,
-                    options_json: p.options_json,
+                    options_json,
                 },
             )
             .await
@@ -7813,6 +7843,7 @@ mod tests {
                     dashboard_id: dash_id.clone(),
                     kind: "metric".into(),
                     metric_key: Some("oxplow.coverage.line_pct".into()),
+                    lens_id: None,
                     options_json: Some(r#"{"viz":"line"}"#.into()),
                 }))
                 .await
@@ -7845,6 +7876,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn add_dashboard_item_accepts_lens_tiles() {
+        let (_project, services, server) = boot();
+        let dash_id = services
+            .dashboard_store
+            .create("Mine".into())
+            .await
+            .unwrap();
+        let did = dash_id.to_string();
+        server
+            .add_dashboard_item(Parameters(AddDashboardItemParams {
+                dashboard_id: did.clone(),
+                kind: "lens".into(),
+                metric_key: None,
+                lens_id: Some("review/waiting".into()),
+                options_json: Some(r#"{"size":"wide"}"#.into()),
+            }))
+            .await
+            .unwrap();
+        let got = services
+            .dashboard_store
+            .get(dash_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let item = &got.items[0];
+        assert_eq!(item.kind, "lens");
+        let opts: serde_json::Value =
+            serde_json::from_str(item.options_json.as_deref().unwrap()).unwrap();
+        assert_eq!(opts["lensId"], "review/waiting");
+        assert_eq!(opts["size"], "wide");
+
+        let err = server
+            .add_dashboard_item(Parameters(AddDashboardItemParams {
+                dashboard_id: did.clone(),
+                kind: "lens".into(),
+                metric_key: None,
+                lens_id: None,
+                options_json: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("lens_id"), "{err:?}");
+        let err = server
+            .add_dashboard_item(Parameters(AddDashboardItemParams {
+                dashboard_id: did,
+                kind: "chart".into(),
+                metric_key: None,
+                lens_id: None,
+                options_json: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("kind"), "{err:?}");
+    }
+
+    #[tokio::test]
     async fn add_dashboard_item_rejects_a_bad_dashboard_id() {
         let (_project, _services, server) = boot();
         let result = server
@@ -7852,6 +7939,7 @@ mod tests {
                 dashboard_id: "not-an-id".into(),
                 kind: "metric".into(),
                 metric_key: None,
+                lens_id: None,
                 options_json: None,
             }))
             .await;

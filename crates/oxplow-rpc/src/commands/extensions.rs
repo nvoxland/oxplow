@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_app::extensions::{self, Extension, Lens, LensRun};
+use oxplow_app::extensions::{self, Extension, Lens, LensRun, NewLens};
 use oxplow_app::Services;
 use oxplow_db::{SemanticLayer, SqlCell};
 
@@ -92,6 +92,19 @@ pub async fn update_extension(
         .await
         .map_err(|e| IpcError::internal(format!("update task panicked: {e}")))??;
     Ok(ext)
+}
+
+/// Save a query from Explore Data as a new lens file in this stream's
+/// worktree. UI-only: agents write lens files with their Edit tool.
+pub async fn save_lens(
+    svc: &Services,
+    extension: String,
+    slug: String,
+    lens: NewLens,
+    stream_id: Option<String>,
+) -> Result<Lens, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    Ok(extensions::save_lens(&root, &extension, &slug, lens)?)
 }
 
 #[cfg(test)]
@@ -216,5 +229,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ext["lenses"][0]["title"], "One v2");
+    }
+
+    #[tokio::test]
+    async fn save_lens_writes_a_runnable_lens() {
+        let (svc, _dir) = crate::test_support::services();
+        let lens = crate::dispatch(
+            "save_lens",
+            json!({
+                "extension": "mine",
+                "slug": "streams",
+                "lens": { "title": "Streams", "query": "SELECT kind FROM v_stream", "viz": "table" }
+            }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(lens["id"], "mine/streams");
+        let run = crate::dispatch("run_lens", json!({ "id": "mine/streams" }), &svc)
+            .await
+            .unwrap();
+        assert_eq!(run["result"]["rows"], json!([["primary"]]));
     }
 }

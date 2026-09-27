@@ -32,6 +32,7 @@ import {
   GitCompare,
   GitMerge,
   Glasses,
+  Database,
   History,
   Inbox,
   LayoutDashboard,
@@ -98,6 +99,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Activity;
     case "lens":
       return Glasses;
+    case "explore-data":
+      return Database;
 
     // Literal-id index pages (kind === id).
     case "agent":
@@ -201,6 +204,8 @@ export function pageKindLabel(kind: string): string {
       return "threads";
     case "lens":
       return "lens";
+    case "explore-data":
+      return "explore data";
     case "wiki-index":
       return "wiki";
     case "done-work":
@@ -275,6 +280,7 @@ const INDEX_KINDS = new Set<string>([
   "metrics-recorded",
   "dashboards",
   "page-analytics",
+  "explore-data",
 ]);
 
 /**

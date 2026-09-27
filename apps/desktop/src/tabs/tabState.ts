@@ -55,6 +55,7 @@ export type PageKind =
   | "dashboards"
   | "page-analytics"
   | "lens"
+  | "explore-data"
 
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
