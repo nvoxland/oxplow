@@ -343,6 +343,14 @@ struct ExtensionFile {
     /// Parsed one by one so a bad advisory doesn't fail the manifest.
     #[serde(default)]
     advisories: Vec<serde_yaml::Value>,
+    /// Same schema as `.oxplow/project.yaml`; validated per block so a bad
+    /// one doesn't fail the manifest.
+    #[serde(default)]
+    measures: Option<serde_yaml::Value>,
+    #[serde(default)]
+    metrics: Option<serde_yaml::Value>,
+    #[serde(default)]
+    gauges: Option<serde_yaml::Value>,
 }
 
 /// When core runs an advisory.
@@ -491,6 +499,13 @@ pub struct Extension {
     pub enabled: bool,
     /// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
     pub advisories: Vec<Advisory>,
+    /// Measures, metrics and gauges it contributes to the metric catalog
+    /// (the `project.yaml` schema). Metrics are `key:` definitions and are
+    /// on while the extension is enabled; gauges are `starlark`/`jaq` only,
+    /// with their `entryFile` inside the extension.
+    pub measures: Vec<oxplow_config::MeasureEntry>,
+    pub metrics: Vec<oxplow_config::MetricEntry>,
+    pub gauges: Vec<oxplow_config::GaugeEntry>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -564,6 +579,29 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
         .collect()
 }
 
+/// A `measures:` / `metrics:` / `gauges:` block as typed entries.
+fn parse_block<T: serde::de::DeserializeOwned>(
+    v: Option<serde_yaml::Value>,
+) -> Result<Option<Vec<T>>, String> {
+    v.map(|v| serde_yaml::from_value(v).map_err(|e| e.to_string()))
+        .transpose()
+}
+
+/// A file inside extension `name` (bundled or in `oxplow/extensions/`),
+/// e.g. a gauge's script. `None` when there's no such extension or file.
+pub fn read_extension_file(root: &Path, name: &str, rel: &str) -> Option<String> {
+    if rel.split('/').any(|seg| seg == "..") {
+        return None;
+    }
+    if let Some(b) = crate::bundled_extensions::BUNDLED
+        .iter()
+        .find(|b| b.name == name)
+    {
+        return Embedded(b).read(rel);
+    }
+    Disk(root.join(EXTENSIONS_DIR).join(name)).read(rel)
+}
+
 /// Where an extension's files come from.
 trait ExtensionFiles {
     /// Contents of a file, by path inside the extension folder.
@@ -625,6 +663,9 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         slots: Vec::new(),
         enabled: true,
         advisories: Vec::new(),
+        measures: Vec::new(),
+        metrics: Vec::new(),
+        gauges: Vec::new(),
     }
 }
 
@@ -679,6 +720,54 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     Ok(a) => ext.advisories.push(a),
                     Err(e) => ext.errors.push(format!("{rel}/extension.yaml: advisory: {e}")),
                 }
+            }
+            let err = |e: String| format!("{rel}/extension.yaml: {e}");
+            match parse_block(m.measures)
+                .and_then(|v| oxplow_config::validate_measures(v).map_err(|e| e.to_string()))
+            {
+                Ok(v) => ext.measures = v,
+                Err(e) => ext.errors.push(err(e)),
+            }
+            match parse_block(m.metrics)
+                .and_then(|v| oxplow_config::validate_metrics(v).map_err(|e| e.to_string()))
+            {
+                Ok(v) => {
+                    for e in v {
+                        if e.key.is_some() {
+                            ext.metrics.push(e);
+                        } else {
+                            ext.errors.push(err(format!(
+                                "metrics: `use: {}` belongs in .oxplow/project.yaml; an extension defines metrics with `key:`",
+                                e.use_key.unwrap_or_default()
+                            )));
+                        }
+                    }
+                }
+                Err(e) => ext.errors.push(err(e)),
+            }
+            match parse_block(m.gauges)
+                .and_then(|v| oxplow_config::validate_gauges(v).map_err(|e| e.to_string()))
+            {
+                Ok(v) => {
+                    for g in v {
+                        let key = g.key.clone().unwrap_or_default();
+                        let compute = g.compute.clone().unwrap_or_default();
+                        let entry = compute.entry_file.clone().unwrap_or_default();
+                        if !matches!(compute.runtime.as_str(), "starlark" | "jaq") {
+                            ext.errors.push(err(format!(
+                                "gauge `{key}`: extension gauges run `starlark` or `jaq` only, not `{}` (a program belongs in a source, which needs your approval)",
+                                compute.runtime
+                            )));
+                        } else if files.read(&entry).is_none() {
+                            ext.errors.push(err(format!(
+                                "gauge `{key}`: entryFile `{entry}` isn't in the extension"
+                            )));
+                        } else {
+                            ext.gauges.push(g);
+                        }
+                    }
+                }
+                Err(e) => ext.errors.push(err(e)),
             }
             m.slots
         }
@@ -863,6 +952,9 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.slots.clear();
         ext.sources.clear();
         ext.advisories.clear();
+        ext.measures.clear();
+        ext.metrics.clear();
+        ext.gauges.clear();
     }
     ext
 }
@@ -2097,6 +2189,71 @@ empty: No tasks.
         assert_eq!(mounted, vec![("task-detail", "x/t"), ("thread", "x/th")]);
         let errs = ext.errors.join("\n");
         assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+    }
+
+    #[test]
+    fn extensions_declare_measures_metrics_and_gauges() {
+        let manifest = [
+            "measures:",
+            "  - { key: acme.todo, title: TODOs }",
+            "metrics:",
+            "  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }",
+            "  - { use: oxplow.rust.unsafe_blocks }",
+            "gauges:",
+            "  - key: acme.missing",
+            "    emits: [acme.todo]",
+            "    compute: { runtime: starlark, entryFile: gauges/nope.star }",
+            "  - key: acme.shell",
+            "    emits: [acme.todo]",
+            "    compute: { runtime: exec, entryFile: gauges/todo.star }",
+            "",
+        ]
+        .join("\n");
+        let (_d, ext) = load_x(&[], &manifest);
+        assert_eq!(ext.measures.len(), 1, "{:?}", ext.errors);
+        assert_eq!(ext.metrics.len(), 1, "{:?}", ext.errors);
+        // A missing script and an `exec` gauge are refused; so is a `use:`,
+        // which only a project can write.
+        assert!(ext.gauges.is_empty());
+        for (needle, also) in [
+            ("acme.missing", "gauges/nope.star"),
+            ("acme.shell", "exec"),
+            ("use: oxplow.rust.unsafe_blocks", "project.yaml"),
+        ] {
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.contains(needle) && e.contains(also)),
+                "{needle}: {:?}",
+                ext.errors
+            );
+        }
+    }
+
+    #[test]
+    fn an_extension_gauge_runs_its_own_script() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/x/extension.yaml",
+            "name: x\ngauges:\n  - key: acme.todo_scan\n    emits: [acme.todo]\n    compute: { runtime: starlark, entryFile: gauges/todo.star }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/x/gauges/todo.star",
+            "def run(ctx):\n    return []\n",
+        );
+        let ext = project_extensions(dir.path()).remove(0);
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.gauges.len(), 1);
+        assert_eq!(
+            read_extension_file(dir.path(), "x", "gauges/todo.star").as_deref(),
+            Some("def run(ctx):\n    return []\n")
+        );
+        assert_eq!(
+            read_extension_file(dir.path(), "x", "gauges/none.star"),
+            None
+        );
     }
 
     #[test]

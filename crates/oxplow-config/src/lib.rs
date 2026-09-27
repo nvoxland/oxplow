@@ -1874,7 +1874,7 @@ const DIMENSION_VALUE_TYPES: &[&str] = &["categorical", "numeric", "temporal", "
 /// project-relative `entryFile`, known runtime/kind/trigger. Each entry must be
 /// exactly one of the `use:` or `key:` forms. Returns the cleaned entries (the
 /// three-scope resolution happens later in [`resolve_metrics`]).
-fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, ConfigError> {
+pub fn validate_metrics(raw: Option<Vec<MetricEntry>>) -> Result<Vec<MetricEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     // Each metric key may appear at most once in the project block. Two entries
@@ -2071,7 +2071,7 @@ fn validate_formula(i: usize, f: FormulaConfig) -> Result<FormulaConfig, ConfigE
 /// `oxplow.*` reserved for built-ins, a known trigger, a non-empty `emits`
 /// (declare-to-collect), and a valid `compute:` block. Definition-only (no
 /// `use:`/`key:` split — a gauge is always declared).
-fn validate_gauges(raw: Option<Vec<GaugeEntry>>) -> Result<Vec<GaugeEntry>, ConfigError> {
+pub fn validate_gauges(raw: Option<Vec<GaugeEntry>>) -> Result<Vec<GaugeEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -2178,19 +2178,16 @@ fn validate_gauge_compute(
 pub fn resolve_metrics(
     builtin: &[MetricEntry],
     global: &[MetricEntry],
+    extensions: &[ExtensionLayer<MetricEntry>],
     project: &[MetricEntry],
 ) -> Vec<ResolvedSpec> {
     // Catalog of definitions by key, with the scope each came from.
-    let mut catalog: std::collections::HashMap<String, (&'static str, &MetricEntry)> =
+    let mut catalog: std::collections::HashMap<String, (String, &MetricEntry)> =
         std::collections::HashMap::new();
-    for (scope, entries) in [
-        ("built-in", builtin),
-        ("global", global),
-        ("project", project),
-    ] {
+    for (scope, entries) in scoped_layers(builtin, global, extensions, project) {
         for e in entries {
             if let Some(k) = e.key.as_deref() {
-                catalog.insert(k.to_string(), (scope, e));
+                catalog.insert(k.to_string(), (scope.clone(), e));
             }
         }
     }
@@ -2216,6 +2213,61 @@ pub fn resolve_metrics(
             }
         }
     }
+    // An enabled extension's own definitions are active unless the project
+    // mentions the key (a `use:` override or disable marker, or its own
+    // definition, all handled above).
+    let mentioned: std::collections::HashSet<&str> = project
+        .iter()
+        .filter_map(|e| e.key.as_deref().or(e.use_key.as_deref()))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    for (name, entries) in extensions {
+        for e in entries {
+            let Some(k) = e.key.as_deref() else { continue };
+            if mentioned.contains(k) || !seen.insert(k.to_string()) {
+                continue;
+            }
+            if let Some((scope, def)) = catalog.get(k) {
+                if *scope == extension_scope(name) {
+                    out.push(resolve_one(k, scope, def, None));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Entries one extension declares: `(extension name, entries)`.
+pub type ExtensionLayer<T> = (String, Vec<T>);
+
+/// The scope string for an extension's entries.
+pub fn extension_scope(name: &str) -> String {
+    format!("extension:{name}")
+}
+
+/// The extension name in an `extension:<name>` scope.
+pub fn scope_extension(scope: &str) -> Option<&str> {
+    scope.strip_prefix("extension:")
+}
+
+/// Scopes in precedence order (later wins): built-in, global, each
+/// extension, project.
+fn scoped_layers<'a, T>(
+    builtin: &'a [T],
+    global: &'a [T],
+    extensions: &'a [ExtensionLayer<T>],
+    project: &'a [T],
+) -> Vec<(String, &'a [T])> {
+    let mut out = vec![
+        ("built-in".to_string(), builtin),
+        ("global".to_string(), global),
+    ];
+    out.extend(
+        extensions
+            .iter()
+            .map(|(n, e)| (extension_scope(n), e.as_slice())),
+    );
+    out.push(("project".to_string(), project));
     out
 }
 
@@ -2261,10 +2313,14 @@ fn resolve_one(
 /// gauge is declared, never "enabled"); a project entry with the same key as a
 /// global one wins (precedence project > global). First-seen order is preserved.
 /// Built-in gauges live in code and never flow through here.
-pub fn resolve_gauges(global: &[GaugeEntry], project: &[GaugeEntry]) -> Vec<ResolvedGauge> {
+pub fn resolve_gauges(
+    global: &[GaugeEntry],
+    extensions: &[ExtensionLayer<GaugeEntry>],
+    project: &[GaugeEntry],
+) -> Vec<ResolvedGauge> {
     let mut out: Vec<ResolvedGauge> = Vec::new();
     let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in [("global", global), ("project", project)] {
+    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
         for e in entries {
             let Some(key) = e.key.as_deref() else {
                 continue;
@@ -2275,7 +2331,7 @@ pub fn resolve_gauges(global: &[GaugeEntry], project: &[GaugeEntry]) -> Vec<Reso
                 trigger: e.trigger.clone().unwrap_or_else(|| "on-snapshot".into()),
                 emits: e.emits.clone(),
                 compute: e.compute.clone().unwrap_or_default(),
-                scope: scope.to_string(),
+                scope: scope.clone(),
             };
             match pos.get(key) {
                 Some(&i) => out[i] = resolved,
@@ -2413,7 +2469,7 @@ fn validate_catalog_key(
 /// Validate the top-level `measures:` block. Mirrors [`validate_metrics`]:
 /// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known
 /// temporalSemantics/componentRole enums. Definition-only (no `use:` form).
-fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>, ConfigError> {
+pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -2515,10 +2571,14 @@ fn validate_dimensions(
 /// project entry with the same key as a global one wins (precedence project >
 /// global). First-seen order is preserved. The `oxplow.*` built-ins are the
 /// migration seed and never flow through here.
-pub fn resolve_measures(global: &[MeasureEntry], project: &[MeasureEntry]) -> Vec<ResolvedMeasure> {
+pub fn resolve_measures(
+    global: &[MeasureEntry],
+    extensions: &[ExtensionLayer<MeasureEntry>],
+    project: &[MeasureEntry],
+) -> Vec<ResolvedMeasure> {
     let mut out: Vec<ResolvedMeasure> = Vec::new();
     let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in [("global", global), ("project", project)] {
+    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
         for e in entries {
             let Some(key) = e.key.as_deref() else {
                 continue;
@@ -2534,7 +2594,7 @@ pub fn resolve_measures(global: &[MeasureEntry], project: &[MeasureEntry]) -> Ve
                     .unwrap_or_else(|| "semi-additive".into()),
                 capture_scope: e.capture_scope.clone().unwrap_or_else(|| "complete".into()),
                 component_role: e.component_role.clone().unwrap_or_else(|| "none".into()),
-                scope: scope.to_string(),
+                scope: scope.clone(),
                 description: e.description.clone(),
             };
             match pos.get(key) {
@@ -3833,7 +3893,7 @@ metrics:
             target: Some(7.0),
             ..Default::default()
         }];
-        let resolved = resolve_metrics(&builtin, &global, &project);
+        let resolved = resolve_metrics(&builtin, &global, &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].key, "oxplow.unsafe");
         // The definition resolves at global scope (global > built-in), but the
@@ -3847,7 +3907,7 @@ metrics:
     #[test]
     fn resolve_project_definition_is_active_and_scoped() {
         let project = vec![define("acme.loc", None)];
-        let resolved = resolve_metrics(&[], &[], &project);
+        let resolved = resolve_metrics(&[], &[], &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].scope, "project");
         assert_eq!(resolved[0].display_kind, "gauge");
@@ -3866,7 +3926,7 @@ metrics:
             description: Some("a project override that should be ignored".into()),
             ..Default::default()
         }];
-        let resolved = resolve_metrics(&[], &global, &project);
+        let resolved = resolve_metrics(&[], &global, &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(
             resolved[0].description.as_deref(),
@@ -3880,13 +3940,13 @@ metrics:
             use_key: Some("nope.missing".into()),
             ..Default::default()
         }];
-        assert!(resolve_metrics(&[], &[], &project).is_empty());
+        assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
     }
 
     #[test]
     fn resolve_defaults_enabled_true() {
         let project = vec![define("acme.loc", None)];
-        let resolved = resolve_metrics(&[], &[], &project);
+        let resolved = resolve_metrics(&[], &[], &[], &project);
         assert!(resolved[0].enabled, "a bare definition is active");
     }
 
@@ -3901,7 +3961,7 @@ metrics:
             enabled: Some(false),
             ..Default::default()
         }];
-        let resolved = resolve_metrics(&builtin, &[], &project);
+        let resolved = resolve_metrics(&builtin, &[], &[], &project);
         assert_eq!(resolved.len(), 1);
         assert!(!resolved[0].enabled);
     }
@@ -3911,7 +3971,7 @@ metrics:
         // Disabling a config-DEFINED metric keeps its definition but flags it off.
         let mut def = define("acme.loc", None);
         def.enabled = Some(false);
-        let resolved = resolve_metrics(&[], &[], &[def]);
+        let resolved = resolve_metrics(&[], &[], &[], &[def]);
         assert_eq!(resolved.len(), 1);
         assert!(!resolved[0].enabled);
     }
@@ -3925,7 +3985,7 @@ metrics:
             enabled: Some(false),
             ..Default::default()
         }];
-        assert!(resolve_metrics(&[], &[], &project).is_empty());
+        assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
     }
 
     #[test]
@@ -4053,7 +4113,7 @@ gauges:
         };
         let global = vec![g("acme.scan", "global.star")];
         let project = vec![g("acme.scan", "project.star")];
-        let resolved = resolve_gauges(&global, &project);
+        let resolved = resolve_gauges(&global, &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].scope, "project");
         assert_eq!(
@@ -4062,6 +4122,105 @@ gauges:
         );
         // Default trigger when unset.
         assert_eq!(resolved[0].trigger, "on-snapshot");
+    }
+
+    #[test]
+    fn extension_definitions_are_active_between_global_and_project() {
+        let ext = vec![(
+            "acme".to_string(),
+            vec![
+                define("acme.todos", Some(5.0)),
+                define("acme.shared", Some(1.0)),
+            ],
+        )];
+        // No project entries: the extension's metrics are on, scoped to it.
+        let resolved = resolve_metrics(&[], &[], &ext, &[]);
+        let keys: Vec<(&str, &str)> = resolved
+            .iter()
+            .map(|r| (r.key.as_str(), r.scope.as_str()))
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                ("acme.todos", "extension:acme"),
+                ("acme.shared", "extension:acme")
+            ]
+        );
+        assert!(resolved.iter().all(|r| r.enabled));
+
+        // The project can turn one off, override another's target, or
+        // define its own under the same key (project wins).
+        let project = vec![
+            MetricEntry {
+                use_key: Some("acme.todos".into()),
+                enabled: Some(false),
+                ..Default::default()
+            },
+            define("acme.shared", Some(9.0)),
+        ];
+        let resolved = resolve_metrics(&[], &[], &ext, &project);
+        let todos = resolved.iter().find(|r| r.key == "acme.todos").unwrap();
+        assert_eq!(
+            (todos.scope.as_str(), todos.enabled),
+            ("extension:acme", false)
+        );
+        let shared: Vec<_> = resolved.iter().filter(|r| r.key == "acme.shared").collect();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(
+            (shared[0].scope.as_str(), shared[0].target),
+            ("project", Some(9.0))
+        );
+    }
+
+    #[test]
+    fn extension_gauges_and_measures_sit_between_global_and_project() {
+        let g = |key: &str, file: &str| GaugeEntry {
+            key: Some(key.into()),
+            emits: vec!["acme.m".into()],
+            compute: Some(GaugeComputeConfig {
+                runtime: "starlark".into(),
+                entry_file: Some(file.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let ext = vec![(
+            "acme".to_string(),
+            vec![g("acme.scan", "ext.star"), g("acme.other", "o.star")],
+        )];
+        let resolved = resolve_gauges(
+            &[g("acme.scan", "global.star")],
+            &ext,
+            &[g("acme.other", "p.star")],
+        );
+        let got: Vec<(&str, &str, Option<&str>)> = resolved
+            .iter()
+            .map(|r| {
+                (
+                    r.key.as_str(),
+                    r.scope.as_str(),
+                    r.compute.entry_file.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("acme.scan", "extension:acme", Some("ext.star")),
+                ("acme.other", "project", Some("p.star")),
+            ]
+        );
+        let m = |key: &str, title: &str| MeasureEntry {
+            key: Some(key.into()),
+            title: Some(title.into()),
+            ..Default::default()
+        };
+        let ext = vec![("acme".to_string(), vec![m("acme.m", "From ext")])];
+        let resolved = resolve_measures(&[m("acme.m", "From global")], &ext, &[]);
+        assert_eq!(
+            (resolved[0].title.as_str(), resolved[0].scope.as_str()),
+            ("From ext", "extension:acme")
+        );
     }
 
     #[test]
@@ -4157,11 +4316,11 @@ dimensions:
             load_from_yaml("measures:\n  - key: acme.x\n    captureScope: per-path\n").unwrap();
         assert_eq!(cfg.measures[0].capture_scope.as_deref(), Some("per-path"));
         // Default is `complete` — a capture restates the whole population.
-        let resolved = resolve_measures(&[], &cfg.measures);
+        let resolved = resolve_measures(&[], &[], &cfg.measures);
         assert_eq!(resolved[0].capture_scope, "per-path");
         let plain = load_from_yaml("measures:\n  - key: acme.y\n").unwrap();
         assert_eq!(
-            resolve_measures(&[], &plain.measures)[0].capture_scope,
+            resolve_measures(&[], &[], &plain.measures)[0].capture_scope,
             "complete"
         );
         // Duplicate key.
@@ -4204,7 +4363,7 @@ dimensions:
                 ..Default::default()
             },
         ];
-        let resolved = resolve_measures(&global, &project);
+        let resolved = resolve_measures(&global, &[], &project);
         assert_eq!(resolved.len(), 2, "same key merges, distinct key adds");
         let loc = resolved.iter().find(|m| m.key == "acme.loc").unwrap();
         assert_eq!(loc.title, "Project LOC", "project wins over global");

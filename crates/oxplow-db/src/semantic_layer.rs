@@ -708,8 +708,9 @@ const CATALOG: &[CatalogView] = &[
             ("description", "What it measures."),
             ("category", "Grouping on the Metrics page."),
             ("language", "Language it applies to, if language-specific."),
-            ("scope", "`built-in`, `global` or `project`."),
+            ("scope", "`built-in`, `global`, `project` or `extension`."),
             ("display_kind", "`gauge`, `findings`, `test`, `coverage` or `event`."),
+            ("extension", "The extension that declares it, when `scope` is `extension`."),
         ],
     },
     CatalogView {

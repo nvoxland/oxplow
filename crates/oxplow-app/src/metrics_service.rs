@@ -164,6 +164,22 @@ struct GaugeRunContext {
     scan_kind: &'static str,
 }
 
+/// Whether a workspace path is an extension's manifest
+/// (`oxplow/extensions/<name>/extension.yaml`).
+fn is_extension_manifest(path: &str) -> bool {
+    path.strip_prefix("oxplow/extensions/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(name, file)| !name.is_empty() && file == "extension.yaml")
+}
+
+/// Measures, metrics and gauges from enabled extensions, per extension.
+#[derive(Default)]
+struct ExtensionCatalog {
+    measures: Vec<oxplow_config::ExtensionLayer<oxplow_config::MeasureEntry>>,
+    metrics: Vec<oxplow_config::ExtensionLayer<oxplow_config::MetricEntry>>,
+    gauges: Vec<oxplow_config::ExtensionLayer<oxplow_config::GaugeEntry>>,
+}
+
 impl MetricsService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -253,9 +269,32 @@ impl MetricsService {
             .unwrap_or_else(|p| p.into_inner()) = None;
     }
 
+    /// What enabled extensions contribute to the metric catalog, per
+    /// extension (read from the project's primary worktree).
+    fn extension_catalog(&self) -> ExtensionCatalog {
+        let mut out = ExtensionCatalog::default();
+        for e in crate::extensions::load_extensions(&self.project_dir) {
+            if !e.enabled {
+                continue;
+            }
+            if !e.measures.is_empty() {
+                out.measures.push((e.name.clone(), e.measures));
+            }
+            if !e.metrics.is_empty() {
+                out.metrics.push((e.name.clone(), e.metrics));
+            }
+            if !e.gauges.is_empty() {
+                out.gauges.push((e.name.clone(), e.gauges));
+            }
+        }
+        out
+    }
+
     /// Base dir a gauge's `compute.entryFile` / `report` resolves against:
     /// `<global>/gauges` for a global-scope gauge, else the project dir. Falls
-    /// back to the project dir if no global dir is available.
+    /// back to the project dir if no global dir is available. (An extension
+    /// gauge's script is read through the extension instead — see
+    /// [`gauge_script_text`] — and its `report` resolves against the project.)
     fn script_base_dir(&self, gauge: &ResolvedGauge) -> PathBuf {
         if gauge.scope == "global" {
             if let Some(g) = self.effective_global_dir() {
@@ -278,7 +317,8 @@ impl MetricsService {
             .unwrap_or_default();
         let global = self.with_global_catalog(|g| g.metrics.clone());
         let builtin = builtin_spec_entries();
-        resolve_metrics(&builtin, &global, &project)
+        let ext = self.extension_catalog();
+        resolve_metrics(&builtin, &global, &ext.metrics, &project)
     }
 
     /// The active, resolved GAUGES (fact producers) for this project: config
@@ -292,7 +332,8 @@ impl MetricsService {
             .map(|c| c.gauges.clone())
             .unwrap_or_default();
         let global = self.with_global_catalog(|g| g.gauges.clone());
-        let mut out = resolve_gauges(&global, &project);
+        let ext = self.extension_catalog();
+        let mut out = resolve_gauges(&global, &ext.gauges, &project);
         // Built-in gauges run only when their metric is enabled (`metrics: use:`)
         // AND not disabled by a marker — a disabled gauge must not compute.
         let enabled: std::collections::HashSet<String> = self
@@ -337,8 +378,9 @@ impl MetricsService {
         let (global_measures, global_dims) =
             self.with_global_catalog(|g| (g.measures.clone(), g.dimensions.clone()));
 
+        let ext = self.extension_catalog();
         let mut m = 0;
-        for rm in resolve_measures(&global_measures, &project_measures) {
+        for rm in resolve_measures(&global_measures, &ext.measures, &project_measures) {
             // `rm.component_role` is intentionally not forwarded — the measure
             // row's `component_role` is a dead column (tsk15).
             let nm = NewMeasure {
@@ -472,11 +514,32 @@ impl MetricsService {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "seed: project spec reconciliation failed"),
         }
-        let keep_measures: Vec<String> = resolve_measures(&global_measures, &project_measures)
-            .into_iter()
-            .filter(|rm| rm.scope == "project")
-            .map(|rm| rm.key)
+        // Same for extension-declared specs: a disabled or removed extension's
+        // metrics leave the catalog (their measures and facts stay).
+        let keep_extension_specs: Vec<String> = resolved
+            .iter()
+            .filter(|s| oxplow_config::scope_extension(&s.scope).is_some())
+            .map(|s| s.key.clone())
             .collect();
+        match facts
+            .delete_extension_specs_not_in(keep_extension_specs)
+            .await
+        {
+            Ok(n) if n > 0 => {
+                tracing::info!(
+                    pruned = n,
+                    "seed: dropped specs of disabled or removed extensions"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "seed: extension spec reconciliation failed"),
+        }
+        let keep_measures: Vec<String> =
+            resolve_measures(&global_measures, &ext.measures, &project_measures)
+                .into_iter()
+                .filter(|rm| rm.scope == "project")
+                .map(|rm| rm.key)
+                .collect();
         match facts.delete_project_measures_not_in(keep_measures).await {
             Ok(n) if n > 0 => {
                 tracing::info!(pruned = n, "seed: dropped undeclared project measures");
@@ -957,7 +1020,7 @@ impl MetricsService {
             // Fingerprint-scoped when the script is hashable; any-version
             // otherwise (an unfingerprintable gauge can't detect staleness,
             // so one full capture ever is the best we can require).
-            let fp = gauge_fingerprint(&gauge, &self.script_base_dir(&gauge));
+            let fp = gauge_fingerprint(&gauge, &self.script_base_dir(&gauge), &self.project_dir);
             let baselined = facts
                 .has_full_capture(&gauge.key, stream_id, fp.as_deref())
                 .await
@@ -979,7 +1042,9 @@ impl MetricsService {
         let Some(facts) = self.fact_store.as_ref() else {
             return false;
         };
-        let Some(current) = gauge_fingerprint(gauge, &self.script_base_dir(gauge)) else {
+        let Some(current) =
+            gauge_fingerprint(gauge, &self.script_base_dir(gauge), &self.project_dir)
+        else {
             return false;
         };
         let recorded = match facts.latest_producer_version(&gauge.key, stream_id).await {
@@ -1139,6 +1204,11 @@ impl MetricsService {
                 Ok(OxplowEvent::ConfigChanged) => {
                     self.seed_catalog().await;
                 }
+                // An extension's manifest can add or drop measures, metrics
+                // and gauges.
+                Ok(OxplowEvent::WorkspaceChanged { path, .. }) if is_extension_manifest(&path) => {
+                    self.seed_catalog().await;
+                }
                 Ok(OxplowEvent::FileSnapshotsBatchCreated {
                     stream_id: Some(stream_id),
                     snapshot_id,
@@ -1294,7 +1364,7 @@ impl MetricsService {
         for g in gauges {
             let already = match (ctx.snapshot_id, self.fact_store.as_ref()) {
                 (Some(snap), Some(facts)) => {
-                    let fp = gauge_fingerprint(g, &self.script_base_dir(g));
+                    let fp = gauge_fingerprint(g, &self.script_base_dir(g), &self.project_dir);
                     facts
                         .gauge_done_for_snapshot(&g.key, snap, fp.as_deref(), ctx.scan_kind)
                         .await
@@ -1586,7 +1656,7 @@ impl MetricsService {
             // A global gauge's script lives under the global config dir, not the
             // project; project gauges resolve against the project dir.
             let base = self.script_base_dir(gauge);
-            match compute_to_collector(gauge, &base) {
+            match compute_to_collector(gauge, &base, &self.project_dir) {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(key = %gauge.key, error = %e, "gauge: bad compute");
@@ -1692,7 +1762,8 @@ impl MetricsService {
         capture.closest_git_version = ctx.closest_git_version.clone();
         capture.git_version_exact = ctx.git_version_exact;
         capture.branch = ctx.branch.clone();
-        capture.producer_version = gauge_fingerprint(gauge, &self.script_base_dir(gauge));
+        capture.producer_version =
+            gauge_fingerprint(gauge, &self.script_base_dir(gauge), &self.project_dir);
         capture.scan_kind = ctx.scan_kind.into();
         if let Err(e) = facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(key = %gauge.key, error = %e, "gauge: failure record write failed");
@@ -1790,7 +1861,11 @@ impl MetricsService {
             branch: ctx.branch.clone(),
             // Record WHICH LOGIC produced these facts, so a later script change is
             // detectable and can re-baseline instead of silently no-opping (tsk45).
-            producer_version: gauge_fingerprint(gauge, &self.script_base_dir(gauge)),
+            producer_version: gauge_fingerprint(
+                gauge,
+                &self.script_base_dir(gauge),
+                &self.project_dir,
+            ),
             scan_kind: ctx.scan_kind.into(),
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
@@ -2146,7 +2221,11 @@ fn starter_gauge_script(key: &str, measure: &str, glob: &str, language: Option<&
 
 /// Build a gauge [`Collector`] from a gauge's `compute:` block (mirrors
 /// `collection.rs::plugin_to_collector`, but always `Gauge` kind).
-fn compute_to_collector(gauge: &ResolvedGauge, project_dir: &Path) -> Result<Collector, String> {
+fn compute_to_collector(
+    gauge: &ResolvedGauge,
+    project_dir: &Path,
+    root: &Path,
+) -> Result<Collector, String> {
     let c: &GaugeComputeConfig = &gauge.compute;
     let input = match c.input.as_deref().unwrap_or("text") {
         "text" => CollectorInput::Text,
@@ -2165,8 +2244,8 @@ fn compute_to_collector(gauge: &ResolvedGauge, project_dir: &Path) -> Result<Col
     let formats = [gauge.key.clone()];
     Ok(match c.runtime.as_str() {
         "jaq" | "starlark" => {
-            let script = std::fs::read_to_string(&abs)
-                .map_err(|e| format!("read entryFile \"{entry_file}\": {e}"))?;
+            let script = gauge_script_text(gauge, project_dir, root)
+                .ok_or_else(|| format!("read entryFile \"{entry_file}\": not found"))?;
             if c.runtime == "jaq" {
                 Collector::jaq(name, CollectorKind::Gauge, formats, input, script)
             } else {
@@ -2185,7 +2264,7 @@ fn compute_to_collector(gauge: &ResolvedGauge, project_dir: &Path) -> Result<Col
 /// The script a gauge runs — the embedded text for a built-in, the `entryFile`'s
 /// contents for a global/project one. `None` when it can't be read (an `exec` gauge
 /// with no readable script, or a missing file).
-fn gauge_script_text(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
+fn gauge_script_text(gauge: &ResolvedGauge, base: &Path, root: &Path) -> Option<String> {
     if gauge.scope == "built-in" {
         return builtin_metrics()
             .iter()
@@ -2193,6 +2272,9 @@ fn gauge_script_text(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
             .map(|m| m.script.to_string());
     }
     let entry = gauge.compute.entry_file.as_deref()?;
+    if let Some(ext) = oxplow_config::scope_extension(&gauge.scope) {
+        return crate::extensions::read_extension_file(root, ext, entry);
+    }
     std::fs::read_to_string(base.join(entry)).ok()
 }
 
@@ -2208,8 +2290,8 @@ fn gauge_script_text(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
 ///
 /// `None` when the script can't be read — better to skip the check than to
 /// re-baseline the whole tree on every boot over an unreadable file.
-fn gauge_fingerprint(gauge: &ResolvedGauge, base: &Path) -> Option<String> {
-    let script = gauge_script_text(gauge, base)?;
+fn gauge_fingerprint(gauge: &ResolvedGauge, base: &Path, root: &Path) -> Option<String> {
+    let script = gauge_script_text(gauge, base, root)?;
     let c = &gauge.compute;
     // Everything that can change what the gauge produces. `emits` matters because a
     // measure dropped from the allow-list silently stops being recorded.
@@ -4026,6 +4108,98 @@ def transform(input):
             .await
             .unwrap();
         assert_eq!(count, 0, "empty snapshot → no facts, runs without error");
+    }
+
+    #[test]
+    fn extension_manifests_are_recognized() {
+        assert!(is_extension_manifest(
+            "oxplow/extensions/acme/extension.yaml"
+        ));
+        assert!(!is_extension_manifest(
+            "oxplow/extensions/acme/lenses/a.yaml"
+        ));
+        assert!(!is_extension_manifest("oxplow/extensions/extension.yaml"));
+        assert!(!is_extension_manifest("src/extension.yaml"));
+    }
+
+    #[tokio::test]
+    async fn an_extension_contributes_measures_metrics_and_gauges() {
+        let (svc, dir) = fixture().await;
+        let ext = dir.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(ext.join("gauges")).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: acme\n\
+             measures:\n  - { key: acme.todo, title: TODOs }\n\
+             metrics:\n  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum }\n\
+             gauges:\n  - key: acme.todo_scan\n    trigger: manual\n    emits: [acme.todo]\n    compute: { runtime: starlark, entryFile: gauges/todo.star }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("gauges/todo.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.todo\", \"value\": 3}]}\n",
+        )
+        .unwrap();
+
+        svc.metrics.seed_catalog().await;
+        let spec = svc
+            .fact_store
+            .get_spec("acme.todos")
+            .await
+            .unwrap()
+            .expect("seeded");
+        assert_eq!(spec.scope, "extension:acme");
+        let measure = svc
+            .fact_store
+            .get_measure("acme.todo")
+            .await
+            .unwrap()
+            .expect("measure");
+        assert_eq!(measure.scope, "extension:acme");
+        let entry = svc
+            .metrics
+            .catalog()
+            .await
+            .into_iter()
+            .find(|e| e.key == "acme.todos")
+            .expect("in the catalog");
+        assert!(entry.enabled);
+
+        // Its gauge runs its own script, read through the extension.
+        let n = svc
+            .metrics
+            .run_metric_by_key("acme.todo_scan", None)
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+
+        // Disabling the extension takes its metric out of the catalog; the
+        // measure (and its facts) stay for when it's turned back on.
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "extensions:\n  disabled: [acme]\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        assert!(svc
+            .fact_store
+            .get_spec("acme.todos")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(svc
+            .fact_store
+            .get_measure("acme.todo")
+            .await
+            .unwrap()
+            .is_some());
+        assert!(svc
+            .metrics
+            .run_metric_by_key("acme.todo_scan", None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

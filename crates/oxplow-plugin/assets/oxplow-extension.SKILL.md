@@ -92,9 +92,21 @@ empty: Nothing is waiting on you.
   System; default Lenses). **`hidden: true`** keeps it out of the
   launcher, for lenses only a slot shows.
 - **Slots** mount a lens into a core page (`slots: [{ slot, lens }]` in
-  `extension.yaml`). The lens must declare the params the slot binds:
-  `effort-review` (effort diff view) → `effort_id`; `task-detail` (task
-  page) → `task_id`; `thread` (the Work panel, compact) → `thread_id`.
+  `extension.yaml`). The lens must declare at least one param the slot
+  binds, and gets only the ones it declares:
+  - `effort-review` (an effort's diff) → `effort_id`, `change_id`;
+  - `commit` (a commit page) and `uncommitted` (the working tree) →
+    `change_id` (the `v_change*` analysis);
+  - `task-detail` (task page) → `task_id`;
+  - `thread` (the Work panel, compact) → `thread_id`;
+  - `rail` → no params; the lens must have an `alert`, and shows in the
+    rail's Alerts section while it fires.
+- **`alert:`** says when a lens needs attention: `{ min_rows: 1 }` (the
+  run returned at least that many rows) or `{ column: pct, below: 80 }` /
+  `above:` (the first row's value), with an optional `label`. `run_lens`
+  returns the alert state.
+- **`copy: true`** on a `markdown` lens adds a Copy button (for a lens
+  that builds text to paste elsewhere, like a prompt).
 - **Unknown keys are errors.** Only the keys shown above exist today.
 
 ## 3. Check it
@@ -130,6 +142,33 @@ file or pick up a task before editing, and list the files in
   2. Read the definition with `get_lens`.
   3. Change the file.
   4. Validate and run it again.
+
+## Contributing metrics
+
+An extension can add to the metric catalog with `measures:`, `metrics:`
+and `gauges:` in `extension.yaml`, in exactly the `.oxplow/project.yaml`
+schema (the `oxplow-metrics` skill and `/oxplow:new-metric` cover it).
+
+```yaml
+measures:
+  - { key: acme.todo, title: TODO comments }
+metrics:
+  - { key: acme.todos, title: TODOs, sourceMeasure: acme.todo, aggregation: sum, direction: lower-better }
+gauges:
+  - key: acme.todo_scan
+    emits: [acme.todo]
+    compute: { runtime: starlark, entryFile: gauges/todo.star }
+```
+
+- `entryFile` is inside the extension folder.
+- Gauges run `starlark` or `jaq` only. `exec` is refused: running a
+  program needs the user's approval, which is what sources are for.
+- Metrics are `key:` definitions and are on while the extension is
+  enabled. A project can still turn one off or change its target with a
+  `use:` entry in `.oxplow/project.yaml`. `use:` isn't allowed in an
+  extension.
+- Disabling the extension drops its metrics from the catalog; its
+  measures and their history stay.
 
 ## Bringing in outside data (sources)
 

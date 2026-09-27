@@ -110,7 +110,26 @@ impl NewMeasure {
 // from the read cols + upsert: it's never read, can't be safely `DROP COLUMN`d
 // (a CHECK + the fact→measure CASCADE), and defaults to 'none' on insert.
 const MEASURE_COLS: &str = "id, key, title, unit, subject_kind, temporal_semantics, \
-     capture_scope, scope, description, created_at, updated_at";
+     capture_scope, scope, description, created_at, updated_at, extension";
+
+/// How a scope is stored: an extension's `extension:<name>` is kept as
+/// `scope = 'global'` plus the `extension` column (V84), because the scope
+/// CHECK can't be widened without rebuilding tables whose rows facts
+/// cascade from.
+fn stored_scope(scope: &str) -> (&str, Option<&str>) {
+    match scope.strip_prefix("extension:") {
+        Some(name) => ("global", Some(name)),
+        None => (scope, None),
+    }
+}
+
+/// The inverse of [`stored_scope`].
+fn read_scope(scope: String, extension: Option<String>) -> String {
+    match extension {
+        Some(name) => format!("extension:{name}"),
+        None => scope,
+    }
+}
 
 fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
     let created_at: String = row.get(9)?;
@@ -123,7 +142,7 @@ fn row_to_measure(row: &rusqlite::Row<'_>) -> rusqlite::Result<Measure> {
         subject_kind: row.get(4)?,
         temporal_semantics: row.get(5)?,
         capture_scope: row.get(6)?,
-        scope: row.get(7)?,
+        scope: read_scope(row.get(7)?, row.get(11)?),
         description: row.get(8)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
@@ -288,7 +307,7 @@ impl NewMetricSpec {
 
 const SPEC_COLS: &str = "id, key, title, unit, source_measure, aggregation, filter_json, \
      formula, sliceable_dims_json, direction, target, warn_at, fail_at, description, \
-     category, language, scope, display_kind, created_at, updated_at";
+     category, language, scope, display_kind, created_at, updated_at, extension";
 
 fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
     let created_at: String = row.get(18)?;
@@ -310,7 +329,7 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
         description: row.get(13)?,
         category: row.get(14)?,
         language: row.get(15)?,
-        scope: row.get(16)?,
+        scope: read_scope(row.get(16)?, row.get(20)?),
         display_kind: row.get(17)?,
         created_at: string_to_ts(&created_at).map_err(ts_conv_err)?,
         updated_at: string_to_ts(&updated_at).map_err(ts_conv_err)?,
@@ -903,17 +922,18 @@ impl SqliteFactStore {
                 let now = ts_to_string(Timestamp::now());
                 // `component_role` is omitted — it defaults to 'none' and is
                 // never read (dead V43 column, tsk15).
+                let (scope, extension) = stored_scope(&m.scope);
                 tx.execute(
                     "INSERT INTO measure
                        (key, title, unit, subject_kind, temporal_semantics, capture_scope,
-                        scope, description, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+                        scope, description, created_at, updated_at, extension)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
                      ON CONFLICT(key) DO UPDATE SET
                         title=excluded.title, unit=excluded.unit,
                         subject_kind=excluded.subject_kind,
                         temporal_semantics=excluded.temporal_semantics,
                         capture_scope=excluded.capture_scope,
-                        scope=excluded.scope,
+                        scope=excluded.scope, extension=excluded.extension,
                         description=excluded.description, updated_at=excluded.updated_at",
                     params![
                         m.key,
@@ -922,9 +942,10 @@ impl SqliteFactStore {
                         m.subject_kind,
                         m.temporal_semantics,
                         m.capture_scope,
-                        m.scope,
+                        scope,
                         m.description,
                         now,
+                        extension,
                     ],
                 )
                 .map_err(map_sql_err)?;
@@ -1048,13 +1069,14 @@ impl SqliteFactStore {
         self.db
             .call(move |conn| {
                 let now = ts_to_string(Timestamp::now());
+                let (scope, extension) = stored_scope(&s.scope);
                 conn.execute(
                     "INSERT INTO metric_spec
                        (key, title, unit, source_measure, aggregation, filter_json, formula,
                         sliceable_dims_json, direction, target, warn_at, fail_at, description,
-                        category, language, scope, display_kind, created_at, updated_at)
+                        category, language, scope, display_kind, created_at, updated_at, extension)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                             ?16, ?17, ?18, ?18)
+                             ?16, ?17, ?18, ?18, ?19)
                      ON CONFLICT(key) DO UPDATE SET
                         title=excluded.title, unit=excluded.unit,
                         source_measure=excluded.source_measure, aggregation=excluded.aggregation,
@@ -1064,6 +1086,7 @@ impl SqliteFactStore {
                         warn_at=excluded.warn_at, fail_at=excluded.fail_at,
                         description=excluded.description, category=excluded.category,
                         language=excluded.language, scope=excluded.scope,
+                        extension=excluded.extension,
                         display_kind=excluded.display_kind, updated_at=excluded.updated_at",
                     params![
                         s.key,
@@ -1081,9 +1104,10 @@ impl SqliteFactStore {
                         s.description,
                         s.category,
                         s.language,
-                        s.scope,
+                        scope,
                         s.display_kind,
                         now,
+                        extension,
                     ],
                 )?;
                 conn.query_row(
@@ -1944,6 +1968,32 @@ impl SqliteFactStore {
             .await
     }
 
+    /// Delete extension-declared specs whose key is not in `keep` — what a
+    /// disabled or removed extension leaves behind. Its measures are kept:
+    /// dropping one would cascade away its facts, and re-enabling the
+    /// extension should find its history.
+    pub async fn delete_extension_specs_not_in(
+        &self,
+        keep: Vec<String>,
+    ) -> Result<u64, DomainError> {
+        self.db
+            .call(move |conn| {
+                if keep.is_empty() {
+                    let n =
+                        conn.execute("DELETE FROM metric_spec WHERE extension IS NOT NULL", [])?;
+                    return Ok(n as u64);
+                }
+                let placeholders = vec!["?"; keep.len()].join(", ");
+                let sql = format!(
+                    "DELETE FROM metric_spec
+                      WHERE extension IS NOT NULL AND key NOT IN ({placeholders})"
+                );
+                let n = conn.execute(&sql, rusqlite::params_from_iter(keep.iter()))?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
     /// Delete PROJECT-scope measures whose key is not in `keep` (tsk61) — the
     /// measure-side of the same reconciliation. Facts CASCADE via
     /// `fact.measure_id`: a measure the user removed from config is retired,
@@ -2795,6 +2845,48 @@ mod tests {
 
     /// stream(1) + thread(1) + task + effort so capture FKs resolve and the
     /// effort-GC test has a real effort to delete.
+    #[tokio::test]
+    async fn extension_scoped_specs_and_measures_round_trip_and_prune() {
+        let store = fixture().await;
+        let mut m = NewMeasure::new("acme.todo", "TODOs");
+        m.scope = "extension:acme".into();
+        store.upsert_measure(m).await.unwrap();
+        assert_eq!(
+            store.get_measure("acme.todo").await.unwrap().unwrap().scope,
+            "extension:acme"
+        );
+        for key in ["acme.todos", "acme.gone"] {
+            let mut s = NewMetricSpec::base(key, key, "acme.todo", "sum");
+            s.scope = "extension:acme".into();
+            store.upsert_spec(s).await.unwrap();
+        }
+        let mut p = NewMetricSpec::base("proj.x", "X", "acme.todo", "sum");
+        p.scope = "project".into();
+        store.upsert_spec(p).await.unwrap();
+        assert_eq!(
+            store.get_spec("acme.todos").await.unwrap().unwrap().scope,
+            "extension:acme"
+        );
+
+        // Only extension specs that are no longer declared go; project ones
+        // (and measures, which would take their facts with them) stay.
+        let n = store
+            .delete_extension_specs_not_in(vec!["acme.todos".into()])
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        let keys: Vec<String> = store
+            .list_specs()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.key)
+            .collect();
+        assert!(keys.contains(&"acme.todos".to_string()) && keys.contains(&"proj.x".to_string()));
+        assert!(!keys.contains(&"acme.gone".to_string()));
+        assert!(store.get_measure("acme.todo").await.unwrap().is_some());
+    }
+
     async fn fixture() -> SqliteFactStore {
         let db = Database::in_memory();
         let db2 = db.clone();

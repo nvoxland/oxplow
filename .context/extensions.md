@@ -27,9 +27,9 @@ the bundled `oxplow-analytics` example extension.
 >     **`oxplow-analytics` extraction** (tsk280): every analytics page and
 >     widget is now a lens in that bundled extension, and core works with
 >     it disabled (checked headless, 2026-09-27).
-> - **Target:** extension-declared measures / metrics / gauges (tsk311),
->   dimensions and declarative actions (tsk278). Lens alerts and the
->   `rail` slot are current (tsk316).
+>   - lens alerts and the `rail` slot (tsk316), and extension-declared
+>     measures, metrics and gauges (tsk311; see "Contributing metrics").
+> - **Target:** extension dimensions and declarative actions (tsk278).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -345,6 +345,35 @@ mounted, the page is plain.
 | `launcher` | Cmd+P launcher entries |
 | `settings` | Settings |
 
+## Contributing metrics (current)
+
+`extension.yaml` takes `measures:`, `metrics:` and `gauges:` in the
+`.oxplow/project.yaml` schema, checked with the same
+`oxplow_config::validate_*` functions, plus:
+
+- Metrics must be `key:` definitions; `use:` belongs to the project.
+- Gauges run `starlark` / `jaq` only. `exec` is refused: nothing from an
+  extension runs a program without the user's approval, which is what
+  (approved) sources are for. `entryFile` must exist in the extension.
+- Precedence is built-in < global < each extension < project
+  (`oxplow_config::resolve_{metrics,gauges,measures}` take an
+  `extensions` layer; scope `extension:<name>`). An enabled extension's
+  metrics are **on** unless the project mentions the key (a `use:`
+  override or disable marker, or its own definition).
+- `MetricsService::extension_catalog` loads enabled extensions from the
+  primary worktree on each resolve; gauge scripts are read through
+  `extensions::read_extension_file` (bundled or disk), and a gauge's
+  `report` still resolves against the project.
+- Storage: the scope CHECK only allows built-in / global / project, and
+  rebuilding `measure` / `metric_spec` would cascade-delete facts (V54),
+  so the store writes `extension:<name>` as `scope = 'global'` plus the
+  `extension` column (V84) and reads it back. `v_metric_spec` shows
+  `scope = 'extension'` and the `extension` name.
+- `seed_catalog` prunes extension specs no longer declared (a disabled or
+  removed extension) with `delete_extension_specs_not_in`; its measures
+  stay, since deleting one would take its facts. It reseeds when an
+  `oxplow/extensions/*/extension.yaml` changes (`WorkspaceChanged`).
+
 ## Advisories
 
 An extension gives the coding agent guidance with **advisories** in
@@ -454,7 +483,7 @@ What moves out of core, and what it becomes:
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort-review` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
-| Gauges (`oxplow/gauges/*.star`, idiom `.star`) | not yet: extension-declared gauges are tsk311; the built-in catalog stays core until then |
+| Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extensions can declare gauges now (tsk311); the built-in catalog stays core as the opt-in standard library |
 | Gauge-threshold nudges | **done:** the `threshold-crossed` advisory (with `coverage-target` and `metric-deltas`) |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`task-detail` slot) and `thread-tokens` (`thread` slot) |
 | Local history dashboard | stays core (snapshots are substrate); the `recent-snapshots` lens in `review` covers the at-a-glance view |

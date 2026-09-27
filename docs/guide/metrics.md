@@ -99,6 +99,13 @@ This is deliberate: a metric is a small program, and describing what
 you want counted is faster than filling in four config blocks by
 hand.
 
+An [extension](lenses.md) can ship metrics too: the same `measures`,
+`metrics` and `gauges` blocks in its `extension.yaml`, with the gauge
+script inside the extension. They're on while the extension is enabled,
+and your `.oxplow/project.yaml` can still turn one off or change its
+target. Extension gauges run Starlark or jq only, never an external
+program.
+
 ## Collection
 
 Test and coverage numbers are scoped to the **effort** that produced

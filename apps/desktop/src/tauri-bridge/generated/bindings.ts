@@ -1907,6 +1907,15 @@ export type Extension = {
 	enabled: boolean,
 	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
 	advisories: Advisory[],
+	/**
+	 *  Measures, metrics and gauges it contributes to the metric catalog
+	 *  (the `project.yaml` schema). Metrics are `key:` definitions and are
+	 *  on while the extension is enabled; gauges are `starlark`/`jaq` only,
+	 *  with their `entryFile` inside the extension.
+	 */
+	measures: MeasureEntry[],
+	metrics: MetricEntry[],
+	gauges: GaugeEntry[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
