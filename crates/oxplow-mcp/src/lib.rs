@@ -850,6 +850,41 @@ pub struct SnapshotStreamParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct StreamScopeParams {
+    /// Stream whose worktree to read `oxplow/extensions/` from. Omit for
+    /// the primary stream. Pass your own stream when working in a
+    /// worktree stream, since extensions you just wrote live there.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LensIdParams {
+    /// Lens id: `<extension>/<slug>` (see `list_lenses`).
+    pub id: String,
+    /// Stream whose worktree to read from; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunLensParams {
+    /// Lens id: `<extension>/<slug>`.
+    pub id: String,
+    /// Param overrides by name (see the lens's `params`); the rest use
+    /// their defaults. Unknown names are rejected.
+    pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    /// Stream whose worktree to read from; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ValidateExtensionParams {
+    /// Extension folder name under `oxplow/extensions/`.
+    pub name: String,
+    /// Stream whose worktree to read from; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct QuerySqlParams {
     /// One read-only `SELECT` or `WITH` statement over the semantic layer's
     /// `v_*` views (call `describe_schema` first to see them). Use `?1`,
@@ -1089,6 +1124,136 @@ impl OxplowMcp {
             .map_err(internal)?;
         self.services.events.emit(OxplowEvent::DashboardsChanged);
         json_result(&serde_json::json!({ "id": id }))
+    }
+
+    #[tool(
+        description = "List the project's extensions (folders under `oxplow/extensions/` in a \
+                       stream's worktree) with their lenses and any load errors. A lens is a \
+                       saved query over the semantic layer plus how to show it; the human sees \
+                       each one as a page. To build one, write \
+                       `oxplow/extensions/<name>/extension.yaml` and `lenses/<slug>.yaml` with \
+                       your normal file tools (see the oxplow-extension skill), then call \
+                       `validate_extension`."
+    )]
+    async fn list_extensions(
+        &self,
+        params: Parameters<StreamScopeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("list_extensions", params.0.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(params.0.stream_id.as_deref())
+            .await;
+        json_result(&oxplow_app::extensions::load_extensions(&root))
+    }
+
+    #[tool(
+        description = "List every lens across the project's extensions (id `<extension>/<slug>`, \
+                       title, description, viz, params). Use `run_lens` to see exactly the rows \
+                       the human sees on that lens's page."
+    )]
+    async fn list_lenses(
+        &self,
+        params: Parameters<StreamScopeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        check_optional_stream("list_lenses", params.0.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(params.0.stream_id.as_deref())
+            .await;
+        let lenses: Vec<oxplow_app::extensions::Lens> =
+            oxplow_app::extensions::load_extensions(&root)
+                .into_iter()
+                .flat_map(|e| e.lenses)
+                .collect();
+        json_result(&lenses)
+    }
+
+    #[tool(
+        description = "Get one lens's full definition: its SQL query, params with defaults, viz \
+                       and column/link settings, and the file it lives in."
+    )]
+    async fn get_lens(&self, params: Parameters<LensIdParams>) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("get_lens", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let lens =
+            oxplow_app::extensions::find_lens(&root, &p.id).map_err(|e| lens_error(&p.id, e))?;
+        json_result(&lens)
+    }
+
+    #[tool(
+        description = "Run a lens and return the same rows, columns and resolved params the \
+                       human sees on its page. Override params by name; the rest use defaults."
+    )]
+    async fn run_lens(
+        &self,
+        params: Parameters<RunLensParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("run_lens", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let overrides = p
+            .params
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
+            .collect();
+        let run = oxplow_app::extensions::run_lens(
+            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &root,
+            &p.id,
+            overrides,
+        )
+        .await
+        .map_err(|e| lens_error(&p.id, e))?;
+        json_result(&run)
+    }
+
+    #[tool(
+        description = "Check an extension after editing it: load errors (bad YAML, unknown \
+                       keys, name/folder mismatch) plus a dry run of every lens with its \
+                       default params (SQL errors, `columns` keys the query doesn't return). \
+                       An empty `errors` list means it works."
+    )]
+    async fn validate_extension(
+        &self,
+        params: Parameters<ValidateExtensionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("validate_extension", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let ext = oxplow_app::extensions::validate_extension(
+            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &root,
+            &p.name,
+        )
+        .await
+        .map_err(|e| match e {
+            oxplow_domain::DomainError::NotFound => McpError::invalid_params(
+                format!(
+                    "no extension `{}` under oxplow/extensions/ in that stream",
+                    p.name
+                ),
+                None,
+            ),
+            other => internal(other),
+        })?;
+        json_result(&ext)
     }
 
     #[tool(
@@ -4579,6 +4744,11 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    "list_extensions",
+    "list_lenses",
+    "get_lens",
+    "run_lens",
+    "validate_extension",
     "describe_schema",
     "query_sql",
     "app_version",
@@ -4838,6 +5008,18 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
 
 /// Validate an optional `stream_id`: enforce the `s-` prefix when present,
 /// and accept `None` (resolves to the current/primary worktree downstream).
+/// Map a lens lookup/run error to an MCP error an agent can act on.
+fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
+    match e {
+        oxplow_domain::DomainError::NotFound => McpError::invalid_params(
+            format!("no lens `{id}` (ids are `<extension>/<slug>`; see list_lenses)"),
+            None,
+        ),
+        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+        other => internal(other),
+    }
+}
+
 fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpError> {
     match stream_id {
         Some(id) => expect_id_kind(tool, "stream_id", id, ID_STREAM),
@@ -5338,6 +5520,103 @@ mod tests {
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot();
+    }
+
+    #[tokio::test]
+    async fn extension_and_lens_tools() {
+        let (proj, _services, server) = boot();
+        let root = proj.path();
+        let w = |rel: &str, body: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        w("oxplow/extensions/demo/extension.yaml", "name: demo\n");
+        w(
+            "oxplow/extensions/demo/lenses/streams.yaml",
+            "title: Streams\nparams:\n  - { name: kind, default: primary }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
+        );
+        w(
+            "oxplow/extensions/demo/lenses/broken.yaml",
+            "title: Broken\nquery: SELECT x FROM v_nope\n",
+        );
+
+        let exts: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .list_extensions(Parameters(StreamScopeParams { stream_id: None }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(exts[0]["name"], "demo");
+
+        let lenses: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .list_lenses(Parameters(StreamScopeParams { stream_id: None }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        let ids: Vec<&str> = lenses
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["demo/broken", "demo/streams"]);
+
+        let lens: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .get_lens(Parameters(LensIdParams {
+                    id: "demo/streams".into(),
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(lens["query"].as_str().unwrap().contains("v_stream"));
+
+        let run: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .run_lens(Parameters(RunLensParams {
+                    id: "demo/streams".into(),
+                    params: Some(
+                        [("kind".to_string(), serde_json::json!("primary"))]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(run["result"]["rows"], serde_json::json!([["primary"]]));
+
+        let err = server
+            .get_lens(Parameters(LensIdParams {
+                id: "demo/nope".into(),
+                stream_id: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("demo/nope"), "{err:?}");
+
+        let v: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .validate_extension(Parameters(ValidateExtensionParams {
+                    name: "demo".into(),
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert!(
+            v["errors"][0].as_str().unwrap().contains("demo/broken"),
+            "{v}"
+        );
     }
 
     #[tokio::test]

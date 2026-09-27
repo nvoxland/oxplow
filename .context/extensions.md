@@ -4,10 +4,59 @@ This doc covers how anything that **measures or visualizes** is added to
 oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 the bundled `oxplow-analytics` example extension.
 
-> **Status: target design (epic tsk275).** Nothing here is implemented
-> yet. The extension host is tsk278; extracting today's analytics UI
-> into `oxplow-analytics` is tsk280. When a piece ships, move it from
-> "target" to "current" here, in the same commit.
+> **Status: partly built (epic tsk275).**
+> - **Current:**
+>   - loading project extensions and their lenses from
+>     `oxplow/extensions/` (see "What works today" below);
+>   - running and validating lenses over IPC and MCP;
+>   - the `oxplow-extension` agent skill.
+> - **In progress:** the lens page UI (tsk283).
+> - **Target:** everything else here, including sources, dimensions,
+>   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
+>   (tsk278 / tsk280).
+>
+> When a piece ships, move it from "target" to "current" here, in the
+> same commit.
+
+## What works today
+
+Code: `crates/oxplow-app/src/extensions.rs` (the loader, lens runs and
+validation), `crates/oxplow-rpc/src/commands/extensions.rs` (IPC), and the
+lens tools in `crates/oxplow-mcp/src/lib.rs`.
+
+- **Files.**
+  - `oxplow/extensions/<name>/extension.yaml` contains `name` (must equal
+    the folder) and `description`.
+  - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
+    (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
+    `default`), `columns` (`key`, `label`, `link: {kind: task | file |
+    wiki | effort-diff, from}`) and `empty`.
+  - Unknown keys are errors, so typos surface instead of being ignored.
+- **Ids.** A lens id is `<extension>/<slug>`.
+- **Reading.** Everything is read from the **stream's worktree** on every
+  call. There's no cache yet, so an edit shows up on the next call.
+- **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
+  Supplied values override defaults. An unknown param name is an `Invalid`
+  error, so a typo can't silently fall back to a default. A param with no
+  default and no value binds NULL.
+- **Errors never cascade.** A missing or bad `extension.yaml`, or a folder
+  name mismatch, marks that extension's `errors` and skips its lenses. A
+  bad lens file is listed in `errors` and skipped; the other lenses still
+  load.
+- **`validate_extension`** also dry-runs every lens with its defaults. It
+  reports SQL errors, and `columns` / `link.from` keys that the query
+  doesn't return.
+- **Surfaces.**
+  - IPC and MCP: `list_extensions`, `get_lens`, `run_lens`,
+    `validate_extension`.
+  - MCP only: `list_lenses`.
+  - All take an optional `stream_id`; the default is the primary stream.
+  - `scaffold_*`, `get_open_lens` and `run_lens_action` are still target.
+    Agents write lens files with their normal Edit tool, under the filing
+    guard, taught by the `oxplow-extension` skill.
+- **One skill list.** Every agent runtime writes its skills from the single
+  `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
+  skill takes one row.
 
 ## The rules
 
@@ -35,11 +84,25 @@ the bundled `oxplow-analytics` example extension.
 ## Where extensions live
 
 - `extensions/<name>/`: bundled with the app, read-only.
-- `.oxplow/extensions/<name>/`: project extensions, authored by the user
-  or their agent, committed with the repo.
+- `oxplow/extensions/<name>/`: project extensions, authored by the user or
+  their agent and **committed with the repo**. This is how a team shares
+  them.
 
-Each is enabled or disabled per project in `.oxplow/project.yaml`. Loading
-respects the workspace isolation rule
+**Why `oxplow/` and not `.oxplow/`:** `.oxplow/` is oxplow's *local
+state*. Its `.gitignore` ignores everything except `project.yaml`, and the
+fs watcher prunes its subdirectories wholesale, so files there are neither
+committed nor snapshotted nor attributed to efforts. Project-authored
+oxplow content already lives in `oxplow/` at the repo root (for example
+`oxplow/gauges/*.star`). Extensions follow that convention, so they are
+ordinary project files: visible in the file tree, diffed, reviewed and
+merged like code.
+
+**Per stream.** Extensions are read from the **stream's worktree**. An
+agent building a lens in a worktree stream sees it there immediately.
+Other streams see it once it's merged, just like any other code change.
+
+Each extension is enabled or disabled per project in
+`.oxplow/project.yaml`. Loading respects the workspace isolation rule
 ([architecture.md](./architecture.md)). A malformed extension shows an
 error for that extension only; it never breaks the others or core.
 
@@ -154,7 +217,7 @@ tool list stable no matter how many extensions are installed.
 **Building**
 
 - Agents author extensions and lenses **by editing files** under
-  `.oxplow/extensions/<name>/` with their normal Edit tool, under the usual
+  `oxplow/extensions/<name>/` with their normal Edit tool, under the usual
   filing guard. The loader hot-reloads.
 - `scaffold_extension(name)` and `scaffold_lens(ext, slug, query?)` write a
   valid starting point.

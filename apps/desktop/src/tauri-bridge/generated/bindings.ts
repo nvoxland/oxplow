@@ -335,6 +335,26 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listExtensions: (streamId: string | null) => typedError<Extension[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	getLens: (id: string, streamId: string | null) => typedError<Lens, IpcError>(__TAURI_INVOKE("get_lens", { id, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	runLens: (id: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensRun, IpcError>(__TAURI_INVOKE("run_lens", { id, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	validateExtension: (name: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2109,6 +2129,20 @@ export type EffortObservation = {
 	created_at: Timestamp,
 };
 
+// A loaded extension and anything wrong with it.
+export type Extension = {
+	name: string,
+	description: string,
+	// Repo-relative path of the extension folder.
+	path: string,
+	/**
+	 *  Problems found while loading; empty when healthy. A lens that
+	 *  failed to load is listed here and missing from `lenses`.
+	 */
+	errors: string[],
+	lenses: Lens[],
+};
+
 /**
  *  A located item behind a metric — the read-time "finding" view over a spec's
  *  filtered facts (the offenders drill-in), replacing the baked `metric_finding`
@@ -2506,6 +2540,86 @@ export type IpcError = {
 	message: string,
 	cause: string | null,
 };
+
+// A loaded lens.
+export type Lens = {
+	/**
+	 *  `<extension>/<slug>`: the stable id used by `lens:` page refs,
+	 *  `run_lens` and `get_lens`.
+	 */
+	id: string,
+	extension: string,
+	slug: string,
+	title: string,
+	description: string,
+	query: string,
+	viz: LensViz,
+	params: LensParam[],
+	columns: LensColumn[],
+	empty: string | null,
+	// Repo-relative path of the lens file.
+	path: string,
+};
+
+// How one result column is shown.
+export type LensColumn = {
+	// Result column name.
+	key: string,
+	// Header text; defaults to `key`.
+	label?: string | null,
+	link?: LensLink | null,
+};
+
+// Makes a column's cells link to a page.
+export type LensLink = {
+	kind: LensLinkKind,
+	// Result column holding the target id. Defaults to the column itself.
+	from?: string | null,
+};
+
+// A page a column value can link to.
+export type LensLinkKind = 
+// `task:<id>`; the value is a task id.
+"task" | 
+// `file:<path>`; the value is a repo-relative path.
+"file" | 
+// `wiki:<slug>`.
+"wiki" | 
+// The effort's diff view; the value is an effort id.
+"effort-diff";
+
+/**
+ *  A value the viewer (or an agent) can set when running the lens,
+ *  bound into the query as `:name`.
+ */
+export type LensParam = {
+	name: string,
+	label?: string | null,
+	// Used when the caller doesn't supply the param.
+	default?: SqlCell | null,
+};
+
+// The result of running a lens.
+export type LensRun = {
+	lens: Lens,
+	// The parameter values actually used (supplied or default).
+	params: { [key in string]: SqlCell },
+	result: SqlQueryResult,
+};
+
+// How a lens renders its rows.
+export type LensViz = 
+// Rows and columns.
+"table" | 
+/**
+ *  One line per row: the first column (or the first `columns` entry)
+ *  is the headline, the rest are secondary.
+ */
+"list" | 
+// A single value: the first column of the first row.
+"number" | 
+// The first column of the first row, rendered as markdown.
+"markdown";
 
 /**
  *  Per-line attribution combining git blame with a local "this line was

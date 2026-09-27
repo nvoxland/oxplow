@@ -183,6 +183,18 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
     })
 }
 
+/// Write every skill in [`OXPLOW_SKILLS`] as `<skills_dir>/<name>/SKILL.md`.
+/// The one place a runtime's skill set comes from, so adding a skill is
+/// one row in that list.
+fn write_oxplow_skills(skills_dir: &Path) -> Result<(), PluginError> {
+    for (name, body) in OXPLOW_SKILLS {
+        let dir = skills_dir.join(name);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("SKILL.md"), body)?;
+    }
+    Ok(())
+}
+
 /// The oxplow skills every agent runtime ships, as `(dir_name, SKILL.md body)`
 /// pairs. The dir name must match the frontmatter `name:` — both Claude and
 /// opencode key discovery on it.
@@ -210,6 +222,10 @@ const OXPLOW_SKILLS: &[(&str, &str)] = &[
     (
         "oxplow-metrics",
         include_str!("../assets/oxplow-metrics.SKILL.md"),
+    ),
+    (
+        "oxplow-extension",
+        include_str!("../assets/oxplow-extension.SKILL.md"),
     ),
 ];
 
@@ -280,12 +296,6 @@ pub fn write_plugin(
     fs::create_dir_all(&manifest_dir)?;
     fs::create_dir_all(&hooks_dir)?;
     fs::create_dir_all(&commands_dir)?;
-    fs::create_dir_all(skills_dir.join("oxplow-runtime"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-subagent-work-protocol"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-metrics"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     let manifest_body = json!({
@@ -306,43 +316,14 @@ pub fn write_plugin(
     let agent_guide = plugin_dir.join("AGENT_GUIDE.md");
     fs::write(&agent_guide, include_str!("../assets/AGENT_GUIDE.md"))?;
 
+    write_oxplow_skills(&skills_dir)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
-    fs::write(
-        &runtime_skill,
-        include_str!("../assets/oxplow-runtime.SKILL.md"),
-    )?;
-
     let subagent_skill = skills_dir
         .join("oxplow-subagent-work-protocol")
         .join("SKILL.md");
-    fs::write(
-        &subagent_skill,
-        include_str!("../assets/oxplow-subagent.SKILL.md"),
-    )?;
-
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
-    fs::write(
-        &wiki_capture_skill,
-        include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
-    )?;
-
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
-    fs::write(
-        &mermaid_skill,
-        include_str!("../assets/oxplow-mermaid.SKILL.md"),
-    )?;
-
     let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
-    fs::write(
-        &collection_skill,
-        include_str!("../assets/oxplow-collection.SKILL.md"),
-    )?;
-    // oxplow-metrics has no named PluginPaths field (the original five do, for
-    // tests); it's materialized for all three agents via OXPLOW_SKILLS + here.
-    fs::write(
-        skills_dir.join("oxplow-metrics").join("SKILL.md"),
-        include_str!("../assets/oxplow-metrics.SKILL.md"),
-    )?;
 
     let work_next_command = commands_dir.join("work-next.md");
     fs::write(&work_next_command, include_str!("../assets/work-next.md"))?;
@@ -446,12 +427,6 @@ pub fn write_codex_runtime(
 
     fs::create_dir_all(&manifest_dir)?;
     fs::create_dir_all(&hooks_dir)?;
-    fs::create_dir_all(skills_dir.join("oxplow-runtime"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-subagent-work-protocol"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-wiki-capture"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-mermaid"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-collection"))?;
-    fs::create_dir_all(skills_dir.join("oxplow-metrics"))?;
 
     let manifest = manifest_dir.join("plugin.json");
     write_json(
@@ -476,43 +451,14 @@ pub fn write_codex_runtime(
     let mcp_config = runtime_dir.join("mcp-config.toml");
     fs::write(&mcp_config, build_codex_mcp_config(mcp_endpoint_url))?;
 
+    write_oxplow_skills(&skills_dir)?;
     let runtime_skill = skills_dir.join("oxplow-runtime").join("SKILL.md");
-    fs::write(
-        &runtime_skill,
-        include_str!("../assets/oxplow-runtime.SKILL.md"),
-    )?;
-
     let subagent_skill = skills_dir
         .join("oxplow-subagent-work-protocol")
         .join("SKILL.md");
-    fs::write(
-        &subagent_skill,
-        include_str!("../assets/oxplow-subagent.SKILL.md"),
-    )?;
-
     let wiki_capture_skill = skills_dir.join("oxplow-wiki-capture").join("SKILL.md");
-    fs::write(
-        &wiki_capture_skill,
-        include_str!("../assets/oxplow-wiki-capture.SKILL.md"),
-    )?;
-
     let mermaid_skill = skills_dir.join("oxplow-mermaid").join("SKILL.md");
-    fs::write(
-        &mermaid_skill,
-        include_str!("../assets/oxplow-mermaid.SKILL.md"),
-    )?;
-
     let collection_skill = skills_dir.join("oxplow-collection").join("SKILL.md");
-    fs::write(
-        &collection_skill,
-        include_str!("../assets/oxplow-collection.SKILL.md"),
-    )?;
-    // oxplow-metrics has no named PluginPaths field (the original five do, for
-    // tests); it's materialized for all three agents via OXPLOW_SKILLS + here.
-    fs::write(
-        skills_dir.join("oxplow-metrics").join("SKILL.md"),
-        include_str!("../assets/oxplow-metrics.SKILL.md"),
-    )?;
 
     Ok(CodexRuntimePaths {
         runtime_dir,
@@ -611,6 +557,17 @@ mod tests {
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.collection_skill.exists());
+        for (name, _) in OXPLOW_SKILLS {
+            let skill = paths
+                .runtime_skill
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(name)
+                .join("SKILL.md");
+            assert!(skill.exists(), "claude plugin missing skill {name}");
+        }
         assert!(paths.work_next_command.exists());
         assert!(paths.review_comments_command.exists());
         assert!(paths.configure_command.exists());
@@ -714,6 +671,17 @@ mod tests {
         assert!(paths.wiki_capture_skill.exists());
         assert!(paths.mermaid_skill.exists());
         assert!(paths.collection_skill.exists());
+        for (name, _) in OXPLOW_SKILLS {
+            let skill = paths
+                .runtime_skill
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(name)
+                .join("SKILL.md");
+            assert!(skill.exists(), "codex runtime missing skill {name}");
+        }
     }
 
     #[test]
@@ -749,6 +717,7 @@ mod tests {
             "oxplow-mermaid",
             "oxplow-collection",
             "oxplow-metrics",
+            "oxplow-extension",
         ] {
             let skill = paths.skills_dir.join(name).join("SKILL.md");
             let body = fs::read_to_string(&skill).unwrap_or_else(|_| panic!("missing {name}"));

@@ -123,12 +123,40 @@ impl SemanticLayer {
         limit: Option<usize>,
         timeout: Duration,
     ) -> Result<SqlQueryResult, DomainError> {
+        let binding = Binding::Positional(params.iter().map(SqlCell::to_sql).collect());
+        self.run(sql, binding, limit, timeout).await
+    }
+
+    /// Like [`Self::query_sql`] but binds `:name` parameters. Names the
+    /// statement doesn't reference are ignored, so a caller can pass a
+    /// fixed parameter set to queries that use only some of it.
+    pub async fn query_sql_named(
+        &self,
+        sql: &str,
+        params: Vec<(String, SqlCell)>,
+        limit: Option<usize>,
+    ) -> Result<SqlQueryResult, DomainError> {
+        let binding = Binding::Named(
+            params
+                .into_iter()
+                .map(|(name, v)| (name, v.to_sql()))
+                .collect(),
+        );
+        self.run(sql, binding, limit, DEFAULT_TIMEOUT).await
+    }
+
+    async fn run(
+        &self,
+        sql: &str,
+        binding: Binding,
+        limit: Option<usize>,
+        timeout: Duration,
+    ) -> Result<SqlQueryResult, DomainError> {
         check_leading_keyword(sql)?;
         let sql = sql.to_string();
         let cap = limit.unwrap_or(DEFAULT_ROW_LIMIT).clamp(1, MAX_ROW_LIMIT);
-        let params: Vec<rusqlite::types::Value> = params.iter().map(SqlCell::to_sql).collect();
         self.db
-            .call(move |conn| Ok(run_read_only(conn, &sql, &params, cap, timeout)))
+            .call(move |conn| Ok(run_read_only(conn, &sql, &binding, cap, timeout)))
             .await?
     }
 
@@ -198,6 +226,34 @@ fn check_leading_keyword(sql: &str) -> Result<(), DomainError> {
     }
 }
 
+/// How a query's parameters are supplied.
+enum Binding {
+    /// `?1`, `?2`, … in order.
+    Positional(Vec<rusqlite::types::Value>),
+    /// `:name` → value; names the statement doesn't use are skipped.
+    Named(Vec<(String, rusqlite::types::Value)>),
+}
+
+impl Binding {
+    fn apply(&self, stmt: &mut rusqlite::Statement<'_>) -> rusqlite::Result<()> {
+        match self {
+            Binding::Positional(vals) => {
+                for (i, v) in vals.iter().enumerate() {
+                    stmt.raw_bind_parameter(i + 1, v)?;
+                }
+            }
+            Binding::Named(vals) => {
+                for (name, v) in vals {
+                    if let Some(idx) = stmt.parameter_index(&format!(":{name}"))? {
+                        stmt.raw_bind_parameter(idx, v)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 fn cell(v: rusqlite::types::ValueRef<'_>) -> SqlCell {
     use rusqlite::types::ValueRef;
     match v {
@@ -214,7 +270,7 @@ fn cell(v: rusqlite::types::ValueRef<'_>) -> SqlCell {
 fn run_read_only(
     conn: &rusqlite::Connection,
     sql: &str,
-    params: &[rusqlite::types::Value],
+    binding: &Binding,
     cap: usize,
     timeout: Duration,
 ) -> Result<SqlQueryResult, DomainError> {
@@ -244,7 +300,8 @@ fn run_read_only(
             .collect();
         let mut rows_out = Vec::new();
         let mut truncated = false;
-        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+        binding.apply(&mut stmt)?;
+        let mut rows = stmt.raw_query();
         while let Some(row) = rows.next()? {
             if rows_out.len() == cap {
                 truncated = true;
@@ -503,6 +560,27 @@ mod tests {
         assert_eq!(
             SqlCell::from(json!({"a": 1})),
             SqlCell::Text("{\"a\":1}".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn binds_named_params_ignoring_ones_the_query_does_not_use() {
+        let (_db, sl) = seeded().await;
+        let out = sl
+            .query_sql_named(
+                "SELECT title FROM v_task WHERE status = :status AND id >= :min_id",
+                vec![
+                    ("status".into(), SqlCell::Text("in_progress".into())),
+                    ("min_id".into(), SqlCell::Int(1)),
+                    ("unused".into(), SqlCell::Int(9)),
+                ],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["Live task"]])
         );
     }
 

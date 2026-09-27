@@ -179,6 +179,11 @@ pub const MANIFEST: &[Capability] = &[
     both("search"),
     both("query_sql"),
     both("describe_schema"),
+    both("list_extensions"),
+    both("get_lens"),
+    both("run_lens"),
+    both("validate_extension"),
+    agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),
     agent("list_tasks"),
