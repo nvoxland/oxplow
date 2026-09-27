@@ -244,6 +244,9 @@ pub enum OxplowEvent {
     /// An effort closed (its task left `in_progress`). Background work
     /// that reviews a finished effort (inferred decisions) keys off this.
     EffortFinished { thread_id: ThreadId, effort_id: i64 },
+    /// An effort's stored metric deltas / observations were recomputed
+    /// (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.
+    EffortEvidenceChanged { effort_id: i64 },
     /// Decisions or claims changed for `effort_id` (inferred decisions
     /// stored after an effort closed). Review-packet lenses re-run.
     ReasoningChanged { effort_id: Option<i64> },

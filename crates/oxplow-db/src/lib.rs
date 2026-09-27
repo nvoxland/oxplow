@@ -12,6 +12,7 @@ pub mod attribution_store;
 pub mod comment_store;
 pub mod dashboard_store;
 mod database;
+pub mod effort_evidence_store;
 pub mod effort_store;
 pub mod ext_source_store;
 pub mod fact_store;
@@ -47,6 +48,7 @@ pub use dashboard_store::{
     Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,
 };
 pub use database::{Database, DbInitError};
+pub use effort_evidence_store::SqliteEffortEvidenceStore;
 pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,

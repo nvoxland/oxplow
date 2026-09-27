@@ -26,6 +26,7 @@ pub mod config_service;
 pub mod config_watch;
 pub mod daemon_supervisor;
 pub mod diagnostics;
+pub mod effort_evidence;
 pub mod events;
 pub mod extension_sources;
 pub mod extensions;
@@ -425,6 +426,8 @@ pub struct Services {
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
+    /// Per-effort metric deltas / observations for lenses (see `effort_evidence`).
+    pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
     /// extension-source credentials. Values never go to the UI or agents.
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
@@ -530,6 +533,7 @@ impl Services {
         let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
+        let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -732,6 +736,7 @@ impl Services {
             tool_call_store,
             ai,
             secrets: ai_env.secrets,
+            effort_evidence_store,
             collection,
             token_usage_store,
             token_usage,

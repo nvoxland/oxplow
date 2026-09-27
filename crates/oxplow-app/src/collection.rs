@@ -2502,6 +2502,23 @@ impl CollectionService {
     ///
     /// Returns only metrics the effort moved/touched, grouped code-health →
     /// coverage → tests → operational, then by title.
+    /// Recompute `effort_id`'s metric deltas and observations and store them
+    /// (`v_effort_metric_delta`, `v_effort_observation`), so lenses can read
+    /// what only the engine can compute.
+    pub async fn refresh_effort_evidence(
+        &self,
+        effort_id: &str,
+        store: &oxplow_db::SqliteEffortEvidenceStore,
+    ) -> Result<(), DomainError> {
+        let row_id = EffortId::try_from_str(effort_id)
+            .ok_or_else(|| DomainError::Invalid(format!("not an effort id: {effort_id}")))?
+            .value();
+        let deltas = self.effort_metric_deltas(effort_id).await;
+        let observations = self.effort_observations_from_metrics(effort_id, None).await;
+        store.replace_metric_deltas(row_id, deltas).await?;
+        store.replace_observations(row_id, observations).await
+    }
+
     pub async fn effort_metric_deltas(&self, effort_id: &str) -> Vec<oxplow_db::EffortMetricDelta> {
         let Some(eid) = EffortId::try_from_str(effort_id) else {
             return vec![];
@@ -5253,6 +5270,38 @@ mod tests {
             assert_eq!(d.delta, Some(1.0));
             assert!(d.changed);
             assert_eq!(d.attributed_files, Some(2));
+        }
+
+        #[tokio::test]
+        async fn refreshing_effort_evidence_stores_deltas_for_lenses() {
+            let h = build(None).await;
+            let start = effort_start(&h, &h.effort_id).await;
+            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
+            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
+            claim(&h, &h.effort_id, "src/a.rs").await;
+            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
+            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 5.0)]).await;
+
+            let store = oxplow_db::SqliteEffortEvidenceStore::new(h.db.clone());
+            h.service
+                .refresh_effort_evidence(&h.effort_id, &store)
+                .await
+                .unwrap();
+
+            let out = oxplow_db::SemanticLayer::new(h.db.clone())
+                .query_sql(
+                    "SELECT key, baseline, current, delta FROM v_effort_metric_delta",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&out.rows).unwrap(),
+                serde_json::json!([["oxplow.rust.unsafe_blocks", 2.0, 5.0, 3.0]])
+            );
         }
 
         #[tokio::test]
