@@ -55,7 +55,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     `validate_extension`.
   - MCP only: `list_lenses`.
   - All take an optional `stream_id`; the default is the primary stream.
-  - `scaffold_*`, `get_open_lens` and `run_lens_action` are still target.
+  - `get_open_page` (MCP) plus `report_open_page` (UI) are current; see
+    "Agents: the MCP surface".
     Agents write lens files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
 - **UI.**
@@ -270,20 +271,31 @@ tool list stable no matter how many extensions are installed.
 - `run_lens(slug, params?)`: the **same rows, columns and alert state the
   UI shows** for those params, so the agent sees exactly what the human
   sees.
-- `get_open_lens(thread_id)`: which lens (slug + params) the human
-  currently has open in that thread, if any. This is what lets "look at
-  what I'm looking at" work.
-- `run_lens_action(slug, action, row_key)`: trigger one of the lens's
-  registered actions. The same fixed registry as the UI, so an agent can
-  never do more through a lens than a human could.
+- `get_open_page(thread_id)` **(current)**: what the human has open in
+  that thread, for any page kind (`task:42`, `file:…`, `lens:…`). For a
+  lens it adds `lensRun`, the lens re-run with the human's *current*
+  params, so "look at what I'm looking at" works.
+  - The UI reports the active page (`report_open_page`, UI-only) together
+    with whatever that page published to `tabs/openPageDetail.ts`. The
+    lens page publishes `{lensId, params}`.
+  - The state is held in memory on the thread runtime
+    (`ThreadRuntimeRegistry::open_page`).
+  - A hidden-but-mounted page can't overwrite the report, because only
+    the active page's detail is sent.
+- **Row actions (current):** right-click a lens row → "Add Row to Agent
+  Context", which inserts `[oxplow lens <id> row: col=value, …]`.
+- **Deferred:** a declarative `actions:` registry and
+  `run_lens_action`, until a concrete need appears. Agents already act on
+  what a lens shows through the ordinary MCP tools.
 
 **Building**
 
 - Agents author extensions and lenses **by editing files** under
   `oxplow/extensions/<name>/` with their normal Edit tool, under the usual
   filing guard. The loader hot-reloads.
-- `scaffold_extension(name)` and `scaffold_lens(ext, slug, query?)` write a
-  valid starting point.
+- **No scaffold tools (decided).** A scaffold tool would write project
+  files outside the filing guard. The skill carries the templates
+  instead, and humans have Save as Lens in Explore Data.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `run_source(id)`.
@@ -291,8 +303,8 @@ tool list stable no matter how many extensions are installed.
 **Teaching the agent**
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-plugin/assets`)
-teaches the format, the `v_*` contract and the loop "scaffold → edit →
-validate → run_lens". "Improve with agent" on a lens pastes
+teaches the format, the `v_*` contract and the loop "describe_schema →
+query_sql → write files → validate_extension → run_lens". "Improve with agent" on a lens pastes
 `[oxplow lens <slug>]` plus its params into the agent's context.
 
 ## The `oxplow-analytics` example extension

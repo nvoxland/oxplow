@@ -1168,6 +1168,69 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "What the human is looking at right now in a thread: the open page's id \
+                       (`task:42`, `file:src/a.rs`, `lens:review/waiting`, …), its kind and \
+                       page detail. When it's a lens, `lensRun` is that lens re-run with the \
+                       human's current params, i.e. exactly the rows on their screen. Use it when \
+                       the user says \"this\", \"what I'm looking at\" or \"this lens\". \
+                       `open` is null when nothing has been reported."
+    )]
+    async fn get_open_page(
+        &self,
+        params: Parameters<ThreadIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let tid = &params.0.thread_id;
+        expect_id_kind("get_open_page", "thread_id", tid, ID_THREAD)?;
+        let thread = oxplow_domain::ThreadId::try_from_str(tid)
+            .ok_or_else(|| McpError::invalid_params("expected a thread id (thr…)", None))?;
+        let Some(page) = self.services.thread_runtime.open_page(&thread) else {
+            return json_result(&serde_json::json!({ "open": null }));
+        };
+        let detail: serde_json::Value = page
+            .detail_json
+            .as_deref()
+            .and_then(|d| serde_json::from_str(d).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let mut lens_run = serde_json::Value::Null;
+        if page.kind == "lens" {
+            if let (Some(lens_id), Some(root)) = (
+                page.page_id.strip_prefix("lens:"),
+                worktree_for_thread(&self.services, &thread).await,
+            ) {
+                let lens_params = detail
+                    .get("params")
+                    .and_then(|p| p.as_object())
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| (k.clone(), oxplow_db::SqlCell::from(v.clone())))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                lens_run = match oxplow_app::extensions::run_lens(
+                    &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+                    &root,
+                    lens_id,
+                    lens_params,
+                )
+                .await
+                {
+                    Ok(run) => serde_json::to_value(run).map_err(internal)?,
+                    Err(e) => serde_json::json!({ "error": e.to_string() }),
+                };
+            }
+        }
+        json_result(&serde_json::json!({
+            "open": {
+                "pageId": page.page_id,
+                "kind": page.kind,
+                "detail": detail,
+                "reportedAt": page.reported_at,
+            },
+            "lensRun": lens_run,
+        }))
+    }
+
+    #[tool(
         description = "Install a published extension from a git repo (its root holds \
                        `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's \
                        worktree, recording the source URL, ref and commit. Only do this when \
@@ -4848,6 +4911,7 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    "get_open_page",
     "list_extensions",
     "list_lenses",
     "get_lens",
@@ -5709,6 +5773,67 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(ext["lenses"][0]["title"], "One v2");
+    }
+
+    #[tokio::test]
+    async fn get_open_page_reports_what_the_human_sees() {
+        use oxplow_domain::stores::ThreadStore;
+        let (proj, services, server) = boot();
+        let stream = services.streams.list_streams().await.unwrap()[0].clone();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()[0]
+            .id;
+        let tid = thread.to_string();
+
+        let none: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .get_open_page(Parameters(ThreadIdParams {
+                    thread_id: tid.clone(),
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(none["open"], serde_json::Value::Null);
+
+        let p = proj.path().join("oxplow/extensions/demo/lenses");
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(
+            proj.path().join("oxplow/extensions/demo/extension.yaml"),
+            "name: demo\n",
+        )
+        .unwrap();
+        std::fs::write(
+            p.join("kinds.yaml"),
+            "title: Kinds\nparams:\n  - { name: kind, default: worktree }\nquery: SELECT kind FROM v_stream WHERE kind = :kind\n",
+        )
+        .unwrap();
+        services.thread_runtime.set_open_page(
+            &thread,
+            Some(oxplow_app::thread_runtime::OpenPage {
+                page_id: "lens:demo/kinds".into(),
+                kind: "lens".into(),
+                detail_json: Some(r#"{"lensId":"demo/kinds","params":{"kind":"primary"}}"#.into()),
+                reported_at: oxplow_domain::Timestamp::now(),
+            }),
+        );
+        let open: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .get_open_page(Parameters(ThreadIdParams { thread_id: tid }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(open["open"]["pageId"], "lens:demo/kinds");
+        assert_eq!(open["open"]["detail"]["params"]["kind"], "primary");
+        // The lens is re-run with the human's params, not the defaults.
+        assert_eq!(
+            open["lensRun"]["result"]["rows"],
+            serde_json::json!([["primary"]])
+        );
     }
 
     #[tokio::test]

@@ -16,6 +16,7 @@ import {
 import { showToast } from "../components/toastStore.js";
 import { recordOpError } from "../components/opErrorsStore.js";
 import { customDashboardRef } from "../tabs/pageRefs.js";
+import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { changedParams, parseParamInput, shouldRerunLens } from "../lens/lensModel.js";
@@ -74,6 +75,16 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
   const lens = run?.lens ?? null;
   const title = lens?.title ?? lensId;
   usePageTitle(title);
+
+  // Publish this lens's live params so an agent asking "what am I looking
+  // at" (`get_open_page`) re-runs it with exactly these values.
+  const runParams = run?.params;
+  useEffect(() => {
+    const store = getPageDetailStore();
+    const pageId = `lens:${lensId}`;
+    store.publish(pageId, { lensId, params: runParams ?? {} });
+    return () => store.publish(pageId, null);
+  }, [lensId, runParams]);
 
   const improveWithAgent = () => {
     const params = lens ? changedParams(lens, run?.params ?? {}) : {};

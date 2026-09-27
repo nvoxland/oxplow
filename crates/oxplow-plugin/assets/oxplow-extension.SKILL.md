@@ -104,8 +104,13 @@ file or pick up a task before editing, and list the files in
 
 - `list_lenses` / `get_lens` show what already exists. Prefer improving an
   existing lens over adding a near-duplicate.
-- When the user says "this lens" or pastes `[oxplow lens <id>]`, read it
-  with `get_lens`, change the file, then validate and run it again.
+- When the user says "this lens", "what I'm looking at" or pastes
+  `[oxplow lens <id>]`:
+  1. Call `get_open_page(thread_id)`. Its `lensRun` holds the rows on
+     their screen, with their current params.
+  2. Read the definition with `get_lens`.
+  3. Change the file.
+  4. Validate and run it again.
 
 ## Sharing and installing
 

@@ -4,7 +4,9 @@ import { formatMetricValue, formatMetricValueExact } from "../components/format.
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { cellLinkRef, displayColumns, formatCell, limitRows, type DisplayColumn } from "./lensModel.js";
+import { cellLinkRef, displayColumns, formatCell, limitRows, rowMention, type DisplayColumn } from "./lensModel.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
+import { useContextMenu } from "../components/useRowContextMenu.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
@@ -23,6 +25,7 @@ export function LensResultView({
 }) {
   const lens = run.lens;
   const result = limitRows(run.result, maxRows);
+  const ctxMenu = useContextMenu();
   if (result.rows.length === 0) {
     return (
       <p data-testid="lens-empty" style={{ color: "var(--text-secondary)" }}>
@@ -42,16 +45,35 @@ export function LensResultView({
     );
   };
   const first = result.rows[0]?.[0] ?? null;
+  const onRowMenu = (e: React.MouseEvent, row: SqlCell[]) =>
+    ctxMenu.open(e, [
+      {
+        id: "add-row-to-agent",
+        label: "Add Row to Agent Context",
+        enabled: true,
+        run: () => insertIntoAgent(rowMention(lens.id, result.columns, row)),
+      },
+    ]);
   switch (lens.viz) {
     case "number":
       return <NumberViz value={first} />;
     case "markdown":
       return <MarkdownView body={first === null ? "" : String(first)} />;
     case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
+      return (
+        <>
+          <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} onRowMenu={onRowMenu} />
+          {ctxMenu.menu}
+        </>
+      );
     case "table":
     default:
-      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
+      return (
+        <>
+          <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} onRowMenu={onRowMenu} />
+          {ctxMenu.menu}
+        </>
+      );
   }
 }
 
@@ -72,6 +94,8 @@ interface RowsVizProps {
   cols: DisplayColumn[];
   cell: CellRenderer;
   truncated: boolean;
+  /** Right-click on a row (per-row actions are right-click only). */
+  onRowMenu(e: React.MouseEvent, row: SqlCell[]): void;
 }
 
 function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
@@ -81,13 +105,13 @@ function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }
   );
 }
 
-function ListViz({ rows, cols, cell, truncated }: RowsVizProps) {
+function ListViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
   const [head, ...rest] = cols;
   return (
     <>
       <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {rows.map((row, i) => (
-          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle}>
+          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle} onContextMenu={(e) => onRowMenu(e, row)}>
             <div>{head ? cell(row, head) : null}</div>
             {rest.length > 0 ? (
               <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
@@ -107,7 +131,7 @@ function ListViz({ rows, cols, cell, truncated }: RowsVizProps) {
   );
 }
 
-function TableViz({ rows, cols, cell, truncated }: RowsVizProps) {
+function TableViz({ rows, cols, cell, truncated, onRowMenu }: RowsVizProps) {
   return (
     <>
       <table data-testid="lens-table" style={tableStyle}>
@@ -122,7 +146,7 @@ function TableViz({ rows, cols, cell, truncated }: RowsVizProps) {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} data-testid={`lens-row-${i}`}>
+            <tr key={i} data-testid={`lens-row-${i}`} onContextMenu={(e) => onRowMenu(e, row)}>
               {cols.map((c) => (
                 <td key={c.key} style={tdStyle}>
                   {cell(row, c)}

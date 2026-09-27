@@ -186,6 +186,8 @@ pub const MANIFEST: &[Capability] = &[
     both("install_extension"),
     both("update_extension"),
     ui("save_lens"),
+    ui("report_open_page"),
+    agent("get_open_page"),
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----
     both_named("thread.list", "list_threads", "list_thread_work"),

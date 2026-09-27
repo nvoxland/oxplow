@@ -158,3 +158,10 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     path: "",
   };
 }
+
+/** One lens row as an add-to-agent-context mention:
+ *  `[oxplow lens <id> row: col=value, …] `. */
+export function rowMention(lensId: string, columns: string[], row: SqlCell[]): string {
+  const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
+  return `[oxplow lens ${lensId} row: ${fields}] `;
+}

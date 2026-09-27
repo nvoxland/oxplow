@@ -497,6 +497,17 @@ export async function validateExtension(name: string, streamId: string | null): 
   return unwrap(await commands.validateExtension(name, streamId));
 }
 
+/// Tell the backend which page the human has open in a thread (for the
+/// agent's `get_open_page`). `pageId` null = nothing open.
+export async function reportOpenPage(
+  threadId: string,
+  pageId: string | null,
+  kind: string | null,
+  detailJson: string | null,
+): Promise<void> {
+  unwrap(await commands.reportOpenPage(threadId, pageId, kind, detailJson));
+}
+
 /// Save a query as a new lens file (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
 export async function saveLens(
   extension: string,

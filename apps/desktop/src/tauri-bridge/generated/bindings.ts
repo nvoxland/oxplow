@@ -370,6 +370,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	reportOpenPage: (threadId: string, pageId: string | null, kind: string | null, detailJson: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("report_open_page", { threadId, pageId, kind, detailJson })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

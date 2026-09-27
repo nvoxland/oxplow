@@ -124,6 +124,7 @@ import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
+import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
@@ -161,7 +162,7 @@ import {
   writePersistedCenterActive,
   writePersistedFileSessionPaths,
 } from "./tabs/pageTabsPersistence.js";
-import { forgetPage, recordPageVisit, recordUserInterrupt } from "./api.js";
+import { forgetPage, recordPageVisit, recordUserInterrupt, reportOpenPage } from "./api.js";
 import { openProject, createProject, listRecentProjects } from "./api.js";
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import { coalescedRefresh } from "./coalesced-refresh.js";
@@ -1599,6 +1600,24 @@ export function App() {
     }, 250);
     return () => clearTimeout(timer);
   }, [effectiveCenterActive, selectedThreadId]);
+
+  // Report the page the human has open (plus its published detail, e.g. a
+  // lens's params) so an agent's `get_open_page` sees what they see.
+  // Best-effort and debounced; see tabs/openPageDetail.ts.
+  const [pageDetailTick, setPageDetailTick] = useState(0);
+  useEffect(() => getPageDetailStore().subscribe(() => setPageDetailTick((t) => t + 1)), []);
+  useEffect(() => {
+    if (!selectedThreadId) return;
+    const timer = setTimeout(() => {
+      const ctx = visitContextRef.current;
+      const ref = resolveActiveTabRef(effectiveCenterActive, ctx.pageTabs, ctx.openOrder);
+      const pageId = ref?.id ?? effectiveCenterActive;
+      const kind = ref?.kind ?? effectiveCenterActive;
+      const detail = getPageDetailStore().get(pageId);
+      void reportOpenPage(selectedThreadId, pageId, kind, detail ? JSON.stringify(detail) : null).catch(() => {});
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [effectiveCenterActive, selectedThreadId, pageDetailTick]);
 
   const handleOpenDiff = (request: DiffSpec) => {
     const id = computeDiffId(request);

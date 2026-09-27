@@ -34,6 +34,7 @@ pub mod log;
 pub mod lsp;
 pub mod metrics;
 pub mod notes;
+pub mod open_page;
 pub mod page_refs;
 pub mod page_visit;
 pub mod search;

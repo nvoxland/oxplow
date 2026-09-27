@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens } from "./lensModel.js";
+import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -137,5 +137,13 @@ describe("adHocLens", () => {
     expect(l.viz).toBe("number");
     expect(l.columns).toEqual([]);
     expect(l.id).toBe("explore/ad-hoc");
+  });
+});
+
+describe("rowMention", () => {
+  test("a lens row as a one-line agent context mention", () => {
+    expect(rowMention("review/waiting", ["id", "title", "note"], [42, "Fix it", null])).toBe(
+      '[oxplow lens review/waiting row: id=42, title="Fix it", note=null] ',
+    );
   });
 });
