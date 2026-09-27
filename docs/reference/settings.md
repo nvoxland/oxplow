@@ -145,6 +145,7 @@ Everything else `.oxplow/project.yaml` accepts, with its default:
 | `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
 | `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
 | `agentModels` | *empty* | Per-agent model override, e.g. `opencode: github-copilot/gpt-5-mini`. |
+| `ai.roles` | *empty* | This project's [AI role](../guide/ai-models.md) assignments, over your own, e.g. `summarize: { provider: openrouter, model: openai/gpt-5-mini }`. |
 | `lsp.servers` | *empty* | Per-project language-server pins. |
 | `iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
 

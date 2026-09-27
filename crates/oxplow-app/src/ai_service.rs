@@ -16,7 +16,6 @@ use oxplow_ai::config::AiConfig;
 pub use oxplow_ai::config::{ProviderConfig, ProviderKind, Role, RoleBinding};
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{NewAiCall, SqliteAiCallStore};
-use parking_lot::RwLock;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AiServiceError {
@@ -65,8 +64,13 @@ pub struct AiService {
     /// Where `ai.yaml` lives; `None` when there's no config dir, which
     /// leaves every role unconfigured.
     config_dir: Option<PathBuf>,
-    overrides: RwLock<BTreeMap<Role, RoleBinding>>,
+    /// The project's role assignments, read on every resolve so edits to
+    /// `project.yaml` apply without syncing anything.
+    overrides: OverridesSource,
 }
+
+/// Where project role overrides come from (the live project config).
+pub type OverridesSource = Arc<dyn Fn() -> BTreeMap<Role, RoleBinding> + Send + Sync>;
 
 impl AiService {
     pub fn new(
@@ -80,15 +84,21 @@ impl AiService {
             secrets,
             calls,
             config_dir,
-            overrides: RwLock::default(),
+            overrides: Arc::new(BTreeMap::new),
         }
+    }
+
+    /// Layer `source`'s role assignments (the project's) over `ai.yaml`.
+    pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
+        self.overrides = source;
+        self
     }
 
     /// Providers (with whether each has a key; never the key) and every
     /// role with its binding. What Settings → AI and `list_ai_roles` show.
     pub fn settings(&self) -> Result<AiSettings, AiServiceError> {
         let config = self.config()?;
-        let overrides = self.overrides.read();
+        let overrides = (self.overrides)();
         let providers = config
             .providers
             .iter()
@@ -236,18 +246,13 @@ impl AiService {
         Ok(c.text.trim().to_string())
     }
 
-    /// Replace the project's role overrides.
-    pub fn set_overrides(&self, overrides: BTreeMap<Role, RoleBinding>) {
-        *self.overrides.write() = overrides;
-    }
-
     /// The effective configuration: global `ai.yaml` plus project overrides.
     pub fn config(&self) -> Result<AiConfig, AiServiceError> {
         let global = match &self.config_dir {
             Some(dir) => AiConfig::load(dir).map_err(|e| AiServiceError::Config(e.to_string()))?,
             None => AiConfig::default(),
         };
-        Ok(global.with_overrides(&self.overrides.read()))
+        Ok(global.with_overrides(&(self.overrides)()))
     }
 
     /// Generate text with the model `role` is bound to. `caller` names who
@@ -367,6 +372,26 @@ impl AiService {
     }
 }
 
+/// `project.yaml`'s `ai.roles` as role bindings. Names were validated on
+/// load; anything unrecognized is skipped.
+pub fn project_overrides(
+    roles: &BTreeMap<String, oxplow_config::AiRoleOverride>,
+) -> BTreeMap<Role, RoleBinding> {
+    roles
+        .iter()
+        .filter_map(|(name, o)| {
+            let role: Role = serde_json::from_value(serde_json::json!(name)).ok()?;
+            Some((
+                role,
+                RoleBinding {
+                    provider: o.provider.clone(),
+                    model: o.model.clone(),
+                },
+            ))
+        })
+        .collect()
+}
+
 /// The role's name as `ai.yaml` and `v_ai_call` spell it.
 fn role_name(role: Role) -> String {
     serde_json::to_value(role)
@@ -463,13 +488,15 @@ mod tests {
         let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service(&base, &dir);
-        svc.set_overrides(BTreeMap::from([(
-            Role::Main,
-            RoleBinding {
-                provider: "or".into(),
-                model: "big".into(),
-            },
-        )]));
+        let svc = svc.with_project_overrides(Arc::new(|| {
+            BTreeMap::from([(
+                Role::Main,
+                RoleBinding {
+                    provider: "or".into(),
+                    model: "big".into(),
+                },
+            )])
+        }));
         svc.complete(Role::Main, "core", None, "hi", false)
             .await
             .unwrap();
@@ -620,13 +647,15 @@ mod tests {
     async fn overridden_roles_are_marked() {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
-        svc.set_overrides(BTreeMap::from([(
-            Role::Fast,
-            RoleBinding {
-                provider: "or".into(),
-                model: "small".into(),
-            },
-        )]));
+        let svc = svc.with_project_overrides(Arc::new(|| {
+            BTreeMap::from([(
+                Role::Fast,
+                RoleBinding {
+                    provider: "or".into(),
+                    model: "small".into(),
+                },
+            )])
+        }));
         let st = svc.settings().unwrap();
         let fast = st.roles.iter().find(|r| r.role == Role::Fast).unwrap();
         assert!(fast.overridden);
@@ -678,5 +707,46 @@ mod tests {
             recorded(&db).await,
             json!([["summarize", "mcp:ai_summarize", 1, 0, 10]])
         );
+    }
+
+    #[test]
+    fn project_config_role_names_match_the_roles() {
+        let names: Vec<String> = Role::ALL.iter().map(|r| role_name(*r)).collect();
+        assert_eq!(names, oxplow_config::AI_ROLE_NAMES.to_vec());
+    }
+
+    #[tokio::test]
+    async fn project_yaml_roles_apply_and_follow_reloads() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let yaml = |model: &str| {
+            std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+            std::fs::write(
+                dir.path().join(".oxplow/project.yaml"),
+                format!("ai:\n  roles:\n    fast: {{ provider: or, model: {model} }}\n"),
+            )
+            .unwrap();
+        };
+        yaml("small");
+        let svc = crate::Services::in_memory(dir.path()).unwrap();
+        svc.ai
+            .save_provider(
+                ProviderConfig {
+                    id: "or".into(),
+                    kind: ProviderKind::Openrouter,
+                    base_url: None,
+                },
+                None,
+            )
+            .unwrap();
+        let fast = |svc: &crate::Services| {
+            let st = svc.ai.settings().unwrap();
+            let r = st.roles.into_iter().find(|r| r.role == Role::Fast).unwrap();
+            (r.overridden, r.binding.map(|b| b.model))
+        };
+        assert_eq!(fast(&svc), (true, Some("small".to_string())));
+        yaml("tiny");
+        svc.reload_config_from_disk().unwrap();
+        assert_eq!(fast(&svc), (true, Some("tiny".to_string())));
     }
 }

@@ -695,6 +695,30 @@ pub struct OxplowConfig {
     /// entries fall back to the built-in constant.
     #[serde(rename = "agentModels")]
     pub agent_models: std::collections::BTreeMap<AgentKind, String>,
+    /// This project's AI role assignments (`ai: { roles: … }`), layered
+    /// over the user-global `ai.yaml`. Keyed by role name (one of
+    /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
+    #[serde(rename = "aiRoles")]
+    pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
+}
+
+/// Role names `ai.roles` accepts. Must match `oxplow_ai::config::Role`
+/// (a test in oxplow-app checks).
+pub const AI_ROLE_NAMES: [&str; 6] = ["main", "fast", "summarize", "embed", "decide", "review"];
+
+/// One `ai.roles` entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(deny_unknown_fields)]
+pub struct AiRoleOverride {
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAiBlock {
+    #[serde(default)]
+    roles: std::collections::BTreeMap<String, AiRoleOverride>,
 }
 
 #[derive(Debug, Error)]
@@ -810,6 +834,8 @@ struct RawConfig {
     zones: Option<Vec<RawZoneRule>>,
     #[serde(rename = "agentModels", default)]
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
+    #[serde(default)]
+    ai: Option<RawAiBlock>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -960,6 +986,7 @@ pub fn write_project_config(
         "dimensions",
         "zones",
         "agentModels",
+        "ai",
     ];
 
     let existing_extras: serde_yaml::Mapping = if path.exists() {
@@ -1180,6 +1207,15 @@ pub fn write_project_config(
             "agentModels".into(),
             serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
         );
+    }
+
+    if !config.ai_roles.is_empty() {
+        let mut ai = serde_yaml::Mapping::new();
+        ai.insert(
+            "roles".into(),
+            serde_yaml::to_value(&config.ai_roles).expect("ai roles serialize"),
+        );
+        doc.insert("ai".into(), serde_yaml::Value::Mapping(ai));
     }
 
     // Carry forward any unknown top-level keys the user (or a
@@ -1428,6 +1464,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         dimensions: Vec::new(),
         zones: Vec::new(),
         agent_models: Default::default(),
+        ai_roles: Default::default(),
     }
 }
 
@@ -1609,7 +1646,29 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         dimensions,
         zones,
         agent_models,
+        ai_roles: validate_ai_roles(raw.ai)?,
     })
+}
+
+/// Validate `ai.roles`: known role names, non-empty provider and model.
+fn validate_ai_roles(
+    raw: Option<RawAiBlock>,
+) -> Result<std::collections::BTreeMap<String, AiRoleOverride>, ConfigError> {
+    let roles = raw.map(|b| b.roles).unwrap_or_default();
+    for (role, o) in &roles {
+        if !AI_ROLE_NAMES.contains(&role.as_str()) {
+            return Err(ConfigError::Invalid(format!(
+                "ai.roles.{role}: unknown role (use one of {})",
+                AI_ROLE_NAMES.join(", ")
+            )));
+        }
+        if o.provider.trim().is_empty() || o.model.trim().is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "ai.roles.{role} needs a provider and a model"
+            )));
+        }
+    }
+    Ok(roles)
 }
 
 /// Validate the `zones:` table. Each row needs at least one non-empty,
@@ -3203,6 +3262,42 @@ lsp:
             raw.contains("opencode: github-copilot/gpt-5-mini"),
             "got:\n{raw}"
         );
+    }
+
+    #[test]
+    fn ai_roles_round_trip_and_reject_unknown_roles() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(
+            cfg.ai_roles.get("summarize"),
+            Some(&AiRoleOverride {
+                provider: "openrouter".into(),
+                model: "openai/gpt-5-mini".into()
+            })
+        );
+        write_project_config(dir.path(), &cfg).unwrap();
+        let again = load_project_config(dir.path()).unwrap();
+        assert_eq!(again.ai_roles, cfg.ai_roles, "written back unchanged");
+
+        for (yaml, needle) in [
+            (
+                "ai:\n  roles:\n    thinker: { provider: p, model: m }\n",
+                "thinker",
+            ),
+            (
+                "ai:\n  roles:\n    main: { provider: p, model: \"\" }\n",
+                "main",
+            ),
+        ] {
+            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            let err = load_project_config(dir.path()).unwrap_err().to_string();
+            assert!(err.contains(needle), "{err}");
+        }
     }
 
     #[test]

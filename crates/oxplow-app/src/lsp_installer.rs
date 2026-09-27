@@ -252,6 +252,7 @@ mod tests {
             dimensions: Default::default(),
             zones: Default::default(),
             agent_models: Default::default(),
+            ai_roles: Default::default(),
         }));
         LspSessionManager::new(cfg)
     }

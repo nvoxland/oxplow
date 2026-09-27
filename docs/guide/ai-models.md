@@ -39,6 +39,17 @@ Oxplow and extensions ask for a role, not a model:
 A role with no model assigned just isn't available. Anything that needs it
 says so.
 
+A project can set roles for everyone working on it in `.oxplow/project.yaml`:
+
+```yaml
+ai:
+  roles:
+    summarize: { provider: openrouter, model: openai/gpt-5-mini }
+```
+
+The provider name refers to each person's own providers, so everyone needs
+one with that name. Settings → AI marks these roles "Set by this project".
+
 ## What oxplow uses them for
 
 - **Decisions Oxplow Noticed.** When an effort closes, the `summarize` model

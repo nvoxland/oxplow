@@ -332,7 +332,13 @@ function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role
           {row.usedFor}
           {row.note ? ` · ${row.note}` : ""}
         </span>
-        <select data-testid={`ai-role-provider-${role}`} value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <select
+          data-testid={`ai-role-provider-${role}`}
+          value={provider}
+          disabled={!row.editable}
+          title={row.lockedReason ?? undefined}
+          onChange={(e) => setProvider(e.target.value)}
+        >
           <option value="">Not assigned</option>
           {settings.providers.map((p) => (
             <option key={p.id} value={p.id}>
@@ -344,12 +350,13 @@ function RoleRowEditor({ settings, role, onSaved }: { settings: AiSettings; role
         <input
           data-testid={`ai-role-model-${role}`}
           value={model}
-          disabled={!provider}
+          disabled={!provider || !row.editable}
+          title={row.lockedReason ?? undefined}
           placeholder={provider ? "Model, e.g. openai/gpt-5-mini" : ""}
           onChange={(e) => setModel(e.target.value)}
           style={{ width: 220 }}
         />
-        <button type="submit" data-testid={`ai-role-save-${role}`} disabled={!dirty || !valid || saving}>
+        <button type="submit" data-testid={`ai-role-save-${role}`} disabled={!row.editable || !dirty || !valid || saving}>
           {saving ? "Saving…" : "Save"}
         </button>
       </form>

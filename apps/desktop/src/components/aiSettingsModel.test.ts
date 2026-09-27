@@ -57,6 +57,9 @@ describe("roleRows", () => {
     const decide = roleRows(settings).find((r) => r.role === "decide")!;
     expect(decide.problem).toBe("Provider gone isn't set up.");
     expect(decide.note).toBe("Set by this project");
+    expect(decide.editable).toBe(false);
+    expect(decide.lockedReason).toContain(".oxplow/project.yaml");
+    expect(roleRows(settings).find((r) => r.role === "summarize")!.editable).toBe(true);
   });
 });
 

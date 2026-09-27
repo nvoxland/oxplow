@@ -530,12 +530,6 @@ impl Services {
         let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
-        let ai = Arc::new(ai_service::AiService::new(
-            oxplow_ai::client::Client::default(),
-            ai_env.secrets.clone(),
-            Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-            ai_env.config_dir,
-        ));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -563,6 +557,24 @@ impl Services {
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
+        let project_config = config_arc.clone();
+        let ai = Arc::new(
+            ai_service::AiService::new(
+                oxplow_ai::client::Client::default(),
+                ai_env.secrets.clone(),
+                Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+                ai_env.config_dir,
+            )
+            // Read live, so project.yaml edits and reloads apply at once.
+            .with_project_overrides(Arc::new(move || {
+                ai_service::project_overrides(
+                    &project_config
+                        .read()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .ai_roles,
+                )
+            })),
+        );
         let lsp = lsp_sessions::LspSessionManager::new(config_arc.clone());
         let lsp_installer_svc =
             lsp_installer::LspInstallerService::new(&layout.state_dir, lsp.clone());

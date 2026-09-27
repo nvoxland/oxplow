@@ -1491,6 +1491,12 @@ export type AheadBehind = {
 	behind: number,
 };
 
+// One `ai.roles` entry.
+export type AiRoleOverride = {
+	provider: string,
+	model: string,
+};
+
 export type AiSettings = {
 	providers: ProviderStatus[],
 	// Every role, in `Role::ALL` order.
@@ -3154,6 +3160,12 @@ export type OxplowConfig = {
 	 *  entries fall back to the built-in constant.
 	 */
 	agentModels: Partial<{ [key in AgentKind]: string }>,
+	/**
+	 *  This project's AI role assignments (`ai: { roles: … }`), layered
+	 *  over the user-global `ai.yaml`. Keyed by role name (one of
+	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
+	 */
+	aiRoles: { [key in string]: AiRoleOverride },
 };
 
 /**

@@ -7,9 +7,9 @@ providers you configure, the roles that decide which model does what, the
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
-> `ai_summarize` MCP tools, and inferred decisions. **Not yet:** project role overrides from
-> `project.yaml` (`AiService::set_overrides` exists, nothing calls it yet),
-> the `ai_*` functions for sources and lenses, and a models.dev catalog.
+> `ai_summarize` MCP tools, inferred decisions, and project role
+> overrides. **Not yet:** the `ai_*` functions for sources and lenses, and
+> a models.dev catalog.
 > Sections below say which parts are target design.
 
 ## Why
@@ -62,8 +62,25 @@ What can be called, as of 2026-09:
 ## Roles
 
 Extensions and core refer to **roles, never to models**. Each role maps to
-`{provider, model}`. Defaults are global; a project will be
-able to override them (target: in `.oxplow/project.yaml`).
+`{provider, model}`. Defaults are global (`ai.yaml`); a project overrides
+any of them in `.oxplow/project.yaml`, which is committed, so the team
+shares them:
+
+```yaml
+ai:
+  roles:
+    summarize: { provider: openrouter, model: openai/gpt-5-mini }
+```
+
+- Provider ids refer to each person's own `ai.yaml`; a role naming a
+  provider someone hasn't set up shows "Provider X isn't set up" for them.
+- `OxplowConfig.ai_roles` holds them (validated against
+  `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to `Role::ALL`).
+- `AiService` gets an `OverridesSource` closure that reads the live config
+  on every resolve, so edits and `reload_config_from_disk` apply with
+  nothing to sync. Settings → AI shows such roles read-only
+  ("Set by this project", hover says where to change them): its editor
+  writes the global file, which the project value would override anyway.
 
 | Role | Used for |
 |---|---|

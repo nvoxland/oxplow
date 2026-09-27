@@ -47,6 +47,11 @@ export type RoleRow = {
   assigned: string | null;
   problem: string | null;
   note: string | null;
+  /// False when the project sets this role: editing the global value here
+  /// wouldn't change what's used.
+  editable: boolean;
+  /// Hover text explaining why it's read-only, when it is.
+  lockedReason: string | null;
 };
 
 export function roleRows(settings: AiSettings): RoleRow[] {
@@ -57,6 +62,8 @@ export function roleRows(settings: AiSettings): RoleRow[] {
     assigned: r.binding ? `${r.binding.provider} · ${r.binding.model}` : null,
     problem: r.binding && !ids.has(r.binding.provider) ? `Provider ${r.binding.provider} isn't set up.` : null,
     note: r.overridden ? "Set by this project" : null,
+    editable: !r.overridden,
+    lockedReason: r.overridden ? "This project sets this role in .oxplow/project.yaml (ai.roles); change it there." : null,
   }));
 }
 
