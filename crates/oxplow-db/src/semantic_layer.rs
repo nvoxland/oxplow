@@ -869,6 +869,40 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
+        name: "v_test_run",
+        description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts.",
+        columns: &[
+            ("id", "Run id; `run:<id>` is how claims and decisions cite it."),
+            ("stream_id", "Stream it ran in (v_stream.id)."),
+            ("thread_id", "Thread whose agent ran it, if known."),
+            ("effort_id", "Effort it belongs to: the one that claimed it, else the one open when it ran."),
+            ("command", "The command that was run."),
+            ("exit_code", "Its exit code, if known."),
+            ("passed", "Tests passed (NULL when not reported)."),
+            ("failed", "Tests failed (NULL when not reported)."),
+            ("skipped", "Tests skipped (NULL when not reported)."),
+            ("total", "Tests run in total (NULL when not reported)."),
+            ("duration_ms", "Wall-clock duration, if known."),
+            ("provenance", "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."),
+            ("source", "What recorded it (`hook`, `mcp`, …)."),
+            ("branch", "Branch checked out when it ran."),
+            ("closest_git_version", "Commit the tested tree was at or nearest to."),
+            ("captured_at", "When it was recorded (RFC 3339)."),
+        ],
+    },
+    CatalogView {
+        name: "v_test_case",
+        description: "Each test case in a run that produced a report (runs with only counts have none).",
+        columns: &[
+            ("run_id", "The run (v_test_run.id)."),
+            ("suite", "Report suite name."),
+            ("classname", "Grouping path (module path, file·class, describe path)."),
+            ("name", "Test name."),
+            ("status", "`passed`, `failed` or `skipped`."),
+            ("time_ms", "Its duration, when the report gave one."),
+        ],
+    },
+    CatalogView {
         name: "v_diagnostic",
         description: "Errors and warnings the language servers have published for open or indexed files, right now (cleared when a server restarts).",
         columns: &[
@@ -1037,6 +1071,67 @@ mod tests {
         .unwrap();
         let sl = SemanticLayer::new(db.clone());
         (db, sl)
+    }
+
+    #[tokio::test]
+    async fn test_runs_and_their_cases_read_from_the_run_capture() {
+        let (db, sl) = seeded().await;
+        let payload = json!({"kind": "test-detail", "payload": {
+            "command": "bun run test:collect", "exitCode": 1, "durationMs": 4200,
+            "passed": 1, "failed": 1, "skipped": 1, "total": 3,
+            "suites": [{"name": "app", "cases": [
+                {"classname": "a::tests", "name": "ok", "status": "passed", "timeMs": 12},
+                {"classname": "a::tests", "name": "bad", "status": "failed"},
+                {"classname": "b", "name": "later", "status": "skipped"}
+            ]}]
+        }})
+        .to_string();
+        let counts_only = json!({"kind": "test-detail", "payload": {
+            "command": "cargo test", "passed": 5, "failed": 0, "total": 5
+        }})
+        .to_string();
+        db.call(move |c| {
+            c.execute_batch(
+                "INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at) VALUES (7, 1, 1, '2026-01-01', '2026-01-02');
+                 INSERT INTO task_effort (id, task_id, thread_id, started_at) VALUES (8, 1, 1, '2026-01-01');
+                 INSERT INTO metric_capture (id, stream_id, effort_id, producer, provenance, source, captured_at)
+                   VALUES (40, 1, 7, 'coverage', 'observed', 'hook', '2026-01-01T00:00:00Z');",
+            )?;
+            c.execute(
+                "INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, detail_json)
+                 VALUES (41, 1, 1, 7, 'tests', 'observed', 'hook', '2026-01-02T00:00:00Z', ?1),
+                        (42, 1, 1, NULL, 'test-run', 'asserted', 'mcp', '2026-01-03T00:00:00Z', ?2)",
+                [&payload, &counts_only],
+            )?;
+            // Run 42 was claimed by effort 8 at close.
+            c.execute_batch(
+                "INSERT INTO effort_attribution (effort_id, kind, ref, state, recorded_at)
+                   VALUES (8, 'run', 'run:42', 'claimed', '2026-01-03');",
+            )
+        })
+        .await
+        .unwrap();
+        let rows = |sql: &'static str| {
+            let sl = sl.clone();
+            async move {
+                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
+            }
+        };
+        assert_eq!(
+            rows("SELECT id, stream_id, thread_id, effort_id, command, exit_code, passed, failed, skipped, total, duration_ms, provenance FROM v_test_run ORDER BY id").await,
+            json!([
+                [41, 1, 1, 7, "bun run test:collect", 1, 1, 1, 1, 3, 4200, "observed"],
+                [42, 1, 1, 8, "cargo test", null, 5, 0, null, 5, null, "asserted"]
+            ])
+        );
+        assert_eq!(
+            rows("SELECT run_id, suite, classname, name, status, time_ms FROM v_test_case ORDER BY name").await,
+            json!([
+                [41, "app", "a::tests", "bad", "failed", null],
+                [41, "app", "b", "later", "skipped", null],
+                [41, "app", "a::tests", "ok", "passed", 12]
+            ])
+        );
     }
 
     #[test]

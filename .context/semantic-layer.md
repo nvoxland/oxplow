@@ -149,10 +149,10 @@ never the physical tables, which stay internal and free to change.
 | `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its claimed captures; refreshed the same way (V80) |
 | `v_change`, `v_change_file`, `v_change_function`, `v_change_import`, `v_change_co_change`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 | `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch` | git history and branches (V85). The commit indexer (`commit_indexer.rs`, run at boot and on `GitRefsChanged`) stores the last 500 commits reachable from the **primary** worktree's HEAD with their files (first-parent diff) as it projects them into `page_ref`; `v_commit_task` reads the indexer's task-mention edges. `refresh_branches` restates `v_branch` from `list_branches` (heads included) and maps each local branch to the stream checked out on it. The old `task_commit` table is unused |
+| `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` is the effort whose ledger claims `run:<id>` (kind `run`), else the capture's own. A run that only reported counts (MCP `record_test_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A `DiagnosticsChanged` event goes out at most every 500 ms per stream, from the first change, so a server that publishes continuously can't starve it |
 
-Still target: `v_test_run` and the rest of the
-shipped-sources table above.
+Still target: the rest of the shipped-sources table above.
 
 **Column docs live in code, not here.** `CATALOG` in
 `crates/oxplow-db/src/semantic_layer.rs` documents every column, and
