@@ -25,8 +25,11 @@ export function LensSlots({
   h2Style,
   h2ClassName,
   variant = "section",
+  extension,
 }: {
   slot: string;
+  /** Only this extension's mounts. */
+  extension?: string;
   params: Record<string, SqlCell> | null;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
@@ -43,7 +46,7 @@ export function LensSlots({
   const refresh = useCallback(async () => {
     if (params === null) return;
     try {
-      const mounts = slotRuns(await listExtensions(streamId), slot, params);
+      const mounts = slotRuns(await listExtensions(streamId), slot, params, extension);
       const next = await Promise.all(
         mounts.map(async ({ id, params: lensParams }) => {
           try {
@@ -59,7 +62,7 @@ export function LensSlots({
     }
     // paramsKey stands in for `params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, paramsKey, streamId]);
+  }, [slot, paramsKey, streamId, extension]);
 
   useEffect(() => {
     void refresh();

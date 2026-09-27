@@ -14,6 +14,7 @@ import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { DataSection } from "../components/DataSection.js";
+import { SettingsSlotSections } from "../lens/SettingsSlotSections.js";
 import { AiSection } from "../components/AiSection.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
@@ -236,6 +237,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
           </Hint>
           <DataSection />
         </Section>
+
+        <SettingsSlotSections section={(title, body) => <Section title={title}>{body}</Section>} />
 
         <Section title="AI">
           <Hint>

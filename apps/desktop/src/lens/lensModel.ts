@@ -265,10 +265,13 @@ export function slotRuns(
   extensions: Extension[],
   slot: string,
   params: Record<string, SqlCell>,
+  /** Only this extension's mounts (the settings slot's per-extension sections). */
+  extension?: string,
 ): { id: string; params: Record<string, SqlCell> }[] {
   const out: { id: string; params: Record<string, SqlCell> }[] = [];
   for (const ext of extensions) {
     if (!ext.enabled) continue;
+    if (extension !== undefined && ext.name !== extension) continue;
     for (const s of ext.slots) {
       if (s.slot !== slot) continue;
       const lens = ext.lenses.find((l) => l.id === s.lensId);
@@ -276,6 +279,11 @@ export function slotRuns(
     }
   }
   return out;
+}
+
+/** Enabled extensions that mount something into `slot`, in order. */
+export function slotExtensions(extensions: Extension[], slot: string): string[] {
+  return extensions.filter((e) => e.enabled && e.slots.some((s) => s.slot === slot)).map((e) => e.name);
 }
 
 /** Lens ids extensions mount into `slot` (e.g. `effort-review`), in

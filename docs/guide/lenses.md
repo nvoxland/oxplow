@@ -114,8 +114,9 @@ page's id as a param, so it must declare it:
 | `thread` | the Work panel (compact) | `thread_id` |
 | `commit` | a commit's page | `change_id` |
 | `uncommitted` | Uncommitted Changes | `change_id` |
+| `settings` | Settings, in a section named after the extension | none |
 
-A lens declares the params it wants (at least one). `change_id` points at
+A lens declares the params its slot passes (a `settings` lens needs none). `change_id` points at
 the page's change in `v_change`, with its analysis in `v_change_file`,
 `v_change_function`, `v_change_import`, `v_change_co_change` and
 `v_change_duplicate`.

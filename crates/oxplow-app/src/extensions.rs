@@ -526,6 +526,9 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     // The rail: no params; mounted lenses must declare an `alert` and show
     // as a badge while it fires.
     ("rail", &[]),
+    // Settings: a section per extension with the lenses it mounts (its
+    // own status or configuration views). No params.
+    ("settings", &[]),
 ];
 
 /// A lens an extension mounts into a core page.
@@ -2201,6 +2204,27 @@ empty: No tasks.
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
         assert!(e.errors.iter().any(|m| m.contains("nope")));
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
+    }
+
+    #[test]
+    fn the_settings_slot_takes_parameterless_lenses() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/mine/extension.yaml",
+            "name: mine\nslots:\n  - { slot: settings, lens: status }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/mine/lenses/status.yaml",
+            "title: Status\nquery: SELECT 1\n",
+        );
+        let e = load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "mine")
+            .unwrap();
+        assert!(e.errors.is_empty(), "{:?}", e.errors);
+        assert_eq!(e.slots[0].slot, "settings");
     }
 
     /// The documented examples in `examples/extensions/` load cleanly, so

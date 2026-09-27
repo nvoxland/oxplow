@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts } from "./lensModel.js";
+import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts, slotExtensions } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -340,6 +340,17 @@ test("slot lenses get only the slot params they declare", () => {
     },
   ] as unknown as Extension[];
   expect(slotRuns(exts, "effort-review", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
+});
+
+test("a slot can be narrowed to one extension, and lists who mounts there", () => {
+  const exts = [
+    { name: "a", enabled: true, slots: [{ slot: "settings", lensId: "a/x" }], lenses: [lens({ id: "a/x" })] },
+    { name: "b", enabled: true, slots: [{ slot: "settings", lensId: "b/y" }], lenses: [lens({ id: "b/y" })] },
+    { name: "c", enabled: false, slots: [{ slot: "settings", lensId: "c/z" }], lenses: [lens({ id: "c/z" })] },
+    { name: "d", enabled: true, slots: [{ slot: "rail", lensId: "d/w" }], lenses: [lens({ id: "d/w" })] },
+  ] as unknown as Extension[];
+  expect(slotRuns(exts, "settings", {}, "b")).toEqual([{ id: "b/y", params: {} }]);
+  expect(slotExtensions(exts, "settings")).toEqual(["a", "b"]);
 });
 
 test("page links open any oxplow page by its tab id", () => {

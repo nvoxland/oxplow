@@ -30,8 +30,8 @@ the bundled `oxplow-analytics` example extension.
 >   - lens alerts and the `rail` slot (tsk316), and extension-declared
 >     measures, metrics and gauges (tsk311; see "Contributing metrics").
 > - **Current:** extension-declared dimensions (tsk328).
-> - **Current:** lens action buttons (tsk329).
-> - **Target:** the `settings` slot (tsk330).
+> - **Current:** lens action buttons (tsk329) and the `settings` slot
+>   (tsk330).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -364,8 +364,8 @@ mounted, the page is plain.
 | `commit` | GitCommitPage |
 | `uncommitted` | UncommittedChangesPage |
 | `rail` | rail HUD Alerts section (current) |
-| `launcher` | Cmd+P launcher entries |
-| `settings` | Settings |
+| `launcher` | Cmd+P launcher entries (as a lens's `launcher.category`, not a slot) |
+| `settings` | Settings: a section per mounting extension, titled with its name, before AI (current, tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`). No params. Slots render in declaration order; there is no `order` field |
 
 ## Contributing metrics (current)
 

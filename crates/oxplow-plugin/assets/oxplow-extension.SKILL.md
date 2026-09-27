@@ -100,7 +100,9 @@ empty: Nothing is waiting on you.
   - `task-detail` (task page) → `task_id`;
   - `thread` (the Work panel, compact) → `thread_id`;
   - `rail` → no params; the lens must have an `alert`, and shows in the
-    rail's Alerts section while it fires.
+    rail's Alerts section while it fires;
+  - `settings` → no params; Settings shows a section named after the
+    extension with its mounted lenses (its status or setup views).
 - **`alert:`** says when a lens needs attention: `{ min_rows: 1 }` (the
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`
