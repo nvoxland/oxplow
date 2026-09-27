@@ -164,9 +164,8 @@ welded to collection.
 > bounded SQL-side now (`facts_for_measure_in_stream`, `pathless_scalar_facts`,
 > `representative_facts_by_slice`, pinned findings via `facts_for_captures`) —
 > never "load the whole measure history and filter in Rust" on a hot path — and
-> the `EffortMetricsBlock` refetch is debounced (closed-long-ago efforts stop
-> listening entirely; the OTLP token tick fires `MetricSamplesChanged` every
-> ~10s while an agent runs).
+> `v_effort_metric_delta` refreshes are debounced (the OTLP token tick fires
+> `MetricSamplesChanged` every ~10s while an agent runs).
 >
 > **Every `metricSamplesChanged` listener needs that debounce — it bit twice
 > (tsk91).** `RecordedMetricsPage` + `MetricsExplorerPage` reloaded un-debounced,
@@ -1630,13 +1629,14 @@ The mechanics behind those controls (unchanged by tsk117):
   dir).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
-task/effort page renders an `EffortMetricsBlock` (`components/EffortMetrics.tsx`)
-under each effort — the metrics whose facts the effort touched, as compact
-before→after rows **grouped by type** (`metricGroup`), self-hiding when empty and
-live on `metricSamplesChanged`. A row drills into the metric's detail via
-`metricRef(key, {effortId,start,end})` → `MetricDetailPage` (`metricKey` /
-`effort` props) renders `MetricDetail` with an **"In this effort"**
-before→after callout (+ per-file count) above the full trend.
+effort review (`DiffViewPage`'s `effort-review` slot) shows the oxplow-analytics
+`effort-metric-deltas` lens — the metrics the effort moved, before→after with
+Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
+(tests, coverage, analysis, tokens and nudges have their own lenses and are
+left out). A row links to the metric's detail page. `MetricDetailPage`
+(`effort` prop) still renders an **"In this effort"** before→after callout
+when opened with an effort window; the formatting helpers live in
+`components/EffortMetrics.tsx`.
 
 Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
 `set_metric_override` (RPC cores in `commands/metrics.rs`, adapters generated from the command table,

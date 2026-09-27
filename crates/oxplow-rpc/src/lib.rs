@@ -247,9 +247,7 @@ macro_rules! oxplow_command_table {
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::TaskEffort>,
                 list_changed_paths_for_effort => $crate::commands::effort::list_changed_paths_for_effort { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::EffortChangedPaths,
-                list_effort_observations => $crate::commands::effort::list_effort_observations { effort_id: ::oxplow_domain::EffortId, kind: Option<String> } -> Vec<::oxplow_db::EffortObservation>,
                 list_effort_metric_deltas => $crate::commands::effort::list_effort_metric_deltas { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortMetricDelta>,
-                list_nudges_for_effort => $crate::commands::effort::list_nudges_for_effort { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::AgentNudge>,
                 list_token_usage_for_effort => $crate::commands::effort::list_token_usage_for_effort { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::AgentTokenUsage>,
                 // metrics (unified substrate, tsk213)
                 list_metric_definitions => $crate::commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> } -> Vec<::oxplow_db::MetricSpec>,

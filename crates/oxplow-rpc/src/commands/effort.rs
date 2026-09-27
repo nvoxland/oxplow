@@ -5,8 +5,8 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    AgentNudge, AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile,
-    EffortMetricDelta, EffortObservation, TaskEffort, TaskEffortStore as _, TokenUsageTotals,
+    AgentTokenUsage, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortMetricDelta,
+    TaskEffort, TaskEffortStore as _, TokenUsageTotals,
 };
 use oxplow_domain::{EffortId, TaskId, ThreadId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -122,23 +122,6 @@ pub async fn list_changed_paths_for_effort(
     })
 }
 
-/// Collection observations (test-run / diff-coverage) for an effort,
-/// newest-first. Optional `kind` filter. Drives the effort-review
-/// coverage badge + tests-run list on `TaskPage`.
-pub async fn list_effort_observations(
-    svc: &Services,
-    effort_id: EffortId,
-    kind: Option<String>,
-) -> Result<Vec<EffortObservation>, IpcError> {
-    // Reads from the metric SUBSTRATE, not the legacy `effort_observation` table
-    // (tsk215) — coverage/test/analysis samples in the effort window + their
-    // verbatim detail payloads, shaped as the panel's observation rows.
-    Ok(svc
-        .collection
-        .effort_observations_from_metrics(&effort_id.to_string(), kind.as_deref())
-        .await)
-}
-
 /// Per-metric roll-up over an effort — grouped before→after deltas for the
 /// task/effort page's metrics panel. Attributed per family (see metrics.md):
 /// per-file gauges by the effort's claimed files, operational by thread,
@@ -151,19 +134,6 @@ pub async fn list_effort_metric_deltas(
         .collection
         .effort_metric_deltas(&effort_id.to_string())
         .await)
-}
-
-/// Persisted agent nudges (report-less-run / coverage-target) for an effort,
-/// newest-first. Drives the collapsed "Agent nudges" debug sub-view on the
-/// task page. See `.context/agent-model.md` (Nudge persistence).
-pub async fn list_nudges_for_effort(
-    svc: &Services,
-    effort_id: EffortId,
-) -> Result<Vec<AgentNudge>, IpcError> {
-    Ok(svc
-        .nudge_store
-        .list_for_effort(&effort_id.to_string())
-        .await?)
 }
 
 /// Per-turn agent token-usage rows for an effort, newest-first (tsk104).
@@ -229,37 +199,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_effort_observations_dispatches_with_optional_kind() {
-        let (svc, _dir) = crate::test_support::services();
-        // `kind` omitted → None.
-        let out = crate::dispatch(
-            "list_effort_observations",
-            serde_json::json!({"effortId": "eff999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-    }
-
-    #[tokio::test]
     async fn list_effort_metric_deltas_dispatches() {
         let (svc, _dir) = crate::test_support::services();
         let out = crate::dispatch(
             "list_effort_metric_deltas",
-            serde_json::json!({"effortId": "eff999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
-    }
-
-    #[tokio::test]
-    async fn list_nudges_for_effort_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_nudges_for_effort",
             serde_json::json!({"effortId": "eff999999"}),
             &svc,
         )

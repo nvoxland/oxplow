@@ -57,6 +57,7 @@ import {
   type ThreadWorkState,
   type ThreadState,
   type AgentKind,
+  type SqlCell,
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
@@ -129,7 +130,6 @@ import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
-import { EffortCoveragePage } from "./pages/EffortCoveragePage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
@@ -1938,7 +1938,6 @@ export function App() {
       case "new-task":
       case "closed-threads":
       case "external-url":
-      case "effort-coverage":
       case "metrics-recorded":
       case "metric-detail":
       case "metric-recording":
@@ -2919,12 +2918,15 @@ export function App() {
           render: () => <ExploreDataPage stream={stream} onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "lens") {
-        const lensId = (ref.payload as { lensId?: string } | null)?.lensId ?? ref.id.replace(/^lens:/, "");
+        const payload = ref.payload as { lensId?: string; params?: Record<string, SqlCell> } | null;
+        const lensId = payload?.lensId ?? ref.id.replace(/^lens:/, "");
         tabs.push({
           id: ref.id,
           label: lensId,
           closable: true,
-          render: () => <LensPage lensId={lensId} stream={stream} onOpenPage={navOpen} />,
+          render: () => (
+            <LensPage lensId={lensId} initialParams={payload?.params} stream={stream} onOpenPage={navOpen} />
+          ),
         });
       } else if (
         ref.kind === "tasks"
@@ -3094,19 +3096,6 @@ export function App() {
               onOpenFile={(p) => navOpenFile(p)}
               onShowEffortDiff={(effortId) => navOpen(effortDiffRef(effortId))}
               onOpenDiff={navOpenDiff}
-            />
-          ),
-        });
-      } else if (ref.kind === "effort-coverage") {
-        const effortId = (ref.payload as { effortId?: string } | null)?.effortId ?? "";
-        tabs.push({
-          id: ref.id,
-          label: "Coverage & tests",
-          closable: true,
-          render: () => (
-            <EffortCoveragePage
-              effortId={effortId}
-              onOpenFile={(p) => navOpenFile(p)}
             />
           ),
         });

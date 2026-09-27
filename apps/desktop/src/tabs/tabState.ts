@@ -44,7 +44,6 @@ export type PageKind =
   | "closed-threads"
   | "op-error"
   | "external-url"
-  | "effort-coverage"
   | "metrics-recorded"
   | "metric-detail"
   | "metric-recording"

@@ -5,37 +5,9 @@ import {
   deltaColor,
   deltaSummary,
   fmtSigned,
-  hasDedicatedPanel,
-  metricGroup,
 } from "./EffortMetrics.js";
 
 const d = (o: Partial<EffortMetricDelta>) => o as unknown as EffortMetricDelta;
-
-test("hasDedicatedPanel hides metrics shown in a dedicated panel", () => {
-  // Covered by Coverage / Tests / Static analysis / Token / Nudge panels.
-  expect(hasDedicatedPanel(d({ category: "testing", key: "oxplow.tests.total" }))).toBe(true);
-  expect(hasDedicatedPanel(d({ category: "coverage", key: "oxplow.coverage.abs_pct" }))).toBe(true);
-  expect(hasDedicatedPanel(d({ category: "static-quality", key: "oxplow.analysis.errors" }))).toBe(true);
-  expect(hasDedicatedPanel(d({ category: "operational", key: "agent.tokens.total" }))).toBe(true);
-  expect(hasDedicatedPanel(d({ category: "operational", key: "agent.nudges.fired" }))).toBe(true);
-  // Code-health gauges + panel-less operational metrics stay in the block.
-  expect(hasDedicatedPanel(d({ category: null, key: "oxplow.rust.unsafe_blocks" }))).toBe(false);
-  expect(hasDedicatedPanel(d({ category: "operational", key: "effort.cycle_time_ms" }))).toBe(false);
-});
-
-test("metricGroup buckets code-health gauges by language, producers by category", () => {
-  expect(metricGroup(d({ category: null, language: "rust" })).label).toBe(
-    "Rust code health",
-  );
-  expect(metricGroup(d({ category: null, language: "typescript" })).label).toBe(
-    "Typescript code health",
-  );
-  expect(metricGroup(d({ category: "coverage" })).label).toBe("Coverage");
-  expect(metricGroup(d({ category: "testing" })).order).toBe(2);
-  expect(metricGroup(d({ category: "operational" })).order).toBe(4);
-  // Code-health gauges sort before producer categories.
-  expect(metricGroup(d({ category: null, language: "rust" })).order).toBe(0);
-});
 
 test("deltaSummary shows before→after only when changed", () => {
   expect(

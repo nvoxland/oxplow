@@ -5,7 +5,7 @@
 
 import type { TabRef } from "./tabState.js";
 import { DISK, type FileVersion, versionIdFragment } from "../file-version.js";
-import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
+import type { DiffEndpoint, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { redirectLegacyRef } from "./legacyRedirects.js";
 
 export function agentRef(): TabRef {
@@ -90,10 +90,6 @@ export function wikiFreshnessRef(slug: string): TabRef {
 
 export function taskRef(itemId: string): TabRef {
   return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
-}
-
-export function effortCoverageRef(effortId: string): TabRef {
-  return { id: `effort-coverage:${effortId}`, kind: "effort-coverage", payload: { effortId } };
 }
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
@@ -373,8 +369,26 @@ export function threadSettingsRef(threadId: string): TabRef {
 
 /** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
  *  over the semantic layer from `oxplow/extensions/`. */
-export function lensRef(lensId: string): TabRef {
-  return { id: `lens:${lensId}`, kind: "lens", payload: { lensId } };
+/** A lens page. `params` (e.g. a slot's `{ effort_id }`) ride in the id
+ *  as a sorted query string, so the tab, its history and bookmarks reopen
+ *  the lens with the same values. */
+export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
+  const keys = Object.keys(params ?? {}).sort();
+  if (!params || keys.length === 0) return { id: `lens:${lensId}`, kind: "lens", payload: { lensId } };
+  const qs = new URLSearchParams(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])).toString();
+  return { id: `lens:${lensId}?${qs}`, kind: "lens", payload: { lensId, params } };
+}
+
+/** Parse a lens tab id's `<lensId>?k=v` tail back into a ref. Numeric
+ *  values come back as numbers, as the params form reads them. */
+function lensRefFromTail(tail: string): TabRef {
+  const q = tail.indexOf("?");
+  if (q === -1) return lensRef(tail);
+  const params: Record<string, SqlCell> = {};
+  for (const [k, v] of new URLSearchParams(tail.slice(q + 1))) {
+    params[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
+  }
+  return lensRef(tail.slice(0, q), params);
 }
 
 export function closedThreadsRef(): TabRef {
@@ -433,7 +447,7 @@ function parseTabId(id: string): TabRef {
     case "wiki":
       return wikiPageRef(rest);
     case "lens":
-      return lensRef(rest);
+      return lensRefFromTail(rest);
     case "wiki-freshness":
       return wikiFreshnessRef(rest);
     case "task":

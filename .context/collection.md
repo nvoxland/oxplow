@@ -297,12 +297,11 @@ stays `observed` vs `asserted`.
 The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
 errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
 error+warning count (**lower is better**, unlike coverage where higher is
-better). The effort-review UI (`EffortObservations.tsx`) shows a *Static
-analysis* section next to *Coverage & tests*: the analyzer label + a high-level
-headline (e.g. `clippy: 0 errors, 3 warnings`, green clean / amber
-warnings-only / rose on any error) with a findings drill-in grouped by file
-(`path:line — rule — message`), each row opening the file. The analysis
-ride-along has **no nudge** — the report-less nudge is test-specific.
+better). The effort review shows the latest run's findings in the
+oxplow-analytics *Static Analysis* lens (part of its `effort-tests` grid,
+mounted in the `effort-review` slot), each row opening the file at the line.
+The analysis ride-along has **no nudge** — the report-less nudge is
+test-specific.
 
 **The task-page effort section never shows Coverage & tests.** On the task
 page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
@@ -312,12 +311,12 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   fetches.
 - A **completed** effort (`ActivityEffortSection`) shows the summary, the
   **Modified Files** tree, and **token usage** (`EffortTokenUsageBlock`) — but
-  **not** the `EffortObservationsBlock` (coverage + test-runs + static-analysis).
-  That test/coverage/analysis breakdown was deliberately removed from the task
-  page to keep it focused on *what changed*; it lives only on the standalone
-  effort **diff view** (`DiffViewPage`), which is the effort-review surface.
-  `EffortObservationsBlock` itself is unchanged — only the TaskDetail call site
-  was dropped.
+  **not** coverage, test runs or static analysis. Those live only on the
+  effort **diff view** (`DiffViewPage`, the effort-review surface), as the
+  oxplow-analytics `effort-tests` lens grid in its `effort-review` slot:
+  diff coverage, most-untested files, test runs, tests that failed (with
+  their latest status, so a red→green loop reads plainly) and analyzer
+  findings, all SQL over `v_effort_observation`'s payloads.
 
 ## Report-less-run nudge (PostToolUse)
 
@@ -375,9 +374,9 @@ records a row in the `agent_nudge` table tagged with `kind`
 bash command) and emits `AgentNudgesChanged`. Persistence sits **after** the
 in-memory dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store
-(`SqliteAgentNudgeStore`), IPC (`list_nudges_for_effort` /
-`list_nudges_for_thread`), and the collapsed "Agent nudges" task-page
-sub-view are covered in [data-model.md](./data-model.md),
+(`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
+`v_agent_nudge` view and the oxplow-analytics `effort-nudges` lens are
+covered in [data-model.md](./data-model.md),
 [ipc-and-stores.md](./ipc-and-stores.md), and
 [agent-model.md](./agent-model.md) (Nudge persistence).
 

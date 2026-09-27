@@ -1,0 +1,33 @@
+title: Tests That Failed
+description: Every test that failed in any of the effort's runs, with its status in the latest run that included it — a red→green TDD loop reads as failed runs with a latest pass.
+params: [{ name: effort_id }]
+query: |
+  WITH cases AS (
+    SELECT o.seq,
+           json_extract(s.value, '$.name') AS suite,
+           json_extract(c.value, '$.classname') AS classname,
+           json_extract(c.value, '$.name') AS name,
+           json_extract(c.value, '$.status') AS status
+    FROM v_effort_observation o,
+         json_each(o.payload_json, '$.suites') s,
+         json_each(s.value, '$.cases') c
+    WHERE o.effort_id = :effort_id AND o.kind = 'test-run'
+  ),
+  failing AS (
+    SELECT suite, classname, name, sum(status = 'failed') AS failed_runs, max(seq) AS last_seq
+    FROM cases
+    GROUP BY suite, classname, name
+    HAVING failed_runs > 0
+  )
+  SELECT f.suite, f.classname || ' › ' || f.name AS test, f.failed_runs,
+         (SELECT c.status FROM cases c
+          WHERE c.suite = f.suite AND c.classname = f.classname AND c.name = f.name AND c.seq = f.last_seq) AS latest
+  FROM failing f
+  ORDER BY latest = 'passed', f.failed_runs DESC, f.suite, test
+columns:
+  - { key: test, label: Test }
+  - { key: suite, label: Suite }
+  - { key: failed_runs, label: Failed runs }
+  - { key: latest, label: Latest }
+empty: No test failed in this effort's runs.
+hidden: true

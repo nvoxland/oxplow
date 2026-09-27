@@ -232,4 +232,12 @@ describe("refFromTabId", () => {
     expect(r).toEqual({ id: "lens:review/waiting", kind: "lens", payload: { lensId: "review/waiting" } });
     expect(refFromTabId(r.id)).toEqual(r);
   });
+
+  test("lensRef carries params in the id, sorted, and round-trips them", () => {
+    const r = lensRef("x/effort-tests", { effort_id: 12, label: "a b" });
+    expect(r.id).toBe("lens:x/effort-tests?effort_id=12&label=a+b");
+    expect(r.payload).toEqual({ lensId: "x/effort-tests", params: { effort_id: 12, label: "a b" } });
+    expect(refFromTabId(r.id)).toEqual(r);
+    expect(lensRef("x/y", {}).id).toBe("lens:x/y");
+  });
 });

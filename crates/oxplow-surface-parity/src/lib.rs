@@ -116,7 +116,7 @@ pub const MANIFEST: &[Capability] = &[
     both("reorder_tasks"),
     both("add_thread_note"),
     both("list_thread_notes"),
-    both("list_effort_observations"),
+    agent("list_effort_observations"),
     // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
     // agent gets the same numbers as prompt text via oxplow-analytics'
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
@@ -163,7 +163,6 @@ pub const MANIFEST: &[Capability] = &[
     // Explorer/Detail pages compute over IPC.
     both("metric_series"),
     both("metric_rollup"),
-    ui("list_nudges_for_effort"),
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),
     ui("get_thread_token_totals"),

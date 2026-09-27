@@ -17,3 +17,10 @@ test("everything else passes through untouched", () => {
   const ref = { id: "task:tsk1", kind: "task" as const, payload: { itemId: "tsk1" } };
   expect(redirectLegacyRef(ref, table)).toBe(ref);
 });
+
+test("a redirect with a param carries the old id's row id into the lens", () => {
+  const t = { "effort-coverage": { lens: "oxplow-analytics/effort-tests", param: "effort_id" } };
+  expect(redirectLegacyRef({ id: "effort-coverage:eff12", kind: "effort-coverage" as never, payload: null }, t).id).toBe(
+    "lens:oxplow-analytics/effort-tests?effort_id=12",
+  );
+});

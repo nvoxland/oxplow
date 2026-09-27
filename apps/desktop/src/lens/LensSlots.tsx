@@ -35,7 +35,9 @@ export function LensSlots({
   h2ClassName?: string;
   variant?: "section" | "strip";
 }) {
-  const [runs, setRuns] = useState<{ id: string; run: LensRun | null; error: string | null }[]>([]);
+  const [runs, setRuns] = useState<
+    { id: string; params: Record<string, SqlCell>; run: LensRun | null; error: string | null }[]
+  >([]);
   const paramsKey = JSON.stringify(params);
 
   const refresh = useCallback(async () => {
@@ -45,9 +47,9 @@ export function LensSlots({
       const next = await Promise.all(
         mounts.map(async ({ id, params: lensParams }) => {
           try {
-            return { id, run: await runLens(id, lensParams, streamId), error: null };
+            return { id, params: lensParams, run: await runLens(id, lensParams, streamId), error: null };
           } catch (e) {
-            return { id, run: null, error: e instanceof Error ? e.message : String(e) };
+            return { id, params: lensParams, run: null, error: e instanceof Error ? e.message : String(e) };
           }
         }),
       );
@@ -90,12 +92,12 @@ export function LensSlots({
   }
   return (
     <>
-      {runs.map(({ id, run, error }) => (
+      {runs.map(({ id, params: lensParams, run, error }) => (
         <section key={id} data-testid={`${slot}-${id}`}>
           <h2 style={h2Style} className={h2ClassName}>
             <RouteLink
-              to={lensRef(id)}
-              onNavigate={onOpenPage ? () => onOpenPage(lensRef(id)) : undefined}
+              to={lensRef(id, lensParams)}
+              onNavigate={onOpenPage ? () => onOpenPage(lensRef(id, lensParams)) : undefined}
               style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "inherit", cursor: "pointer" }}
             >
               {run?.lens.title ?? id}

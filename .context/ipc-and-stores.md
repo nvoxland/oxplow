@@ -536,8 +536,9 @@ coverage-target). A standard 7-layer instance backed by
 `SqliteAgentNudgeStore` (`crates/oxplow-db/src/agent_nudge_store.rs`;
 schema in [data-model.md](./data-model.md), migration `V33`).
 
-- **IPC** (UI-only — the agent never reads nudges back): two read methods,
-  `list_nudges_for_effort(effortId)` and `list_nudges_for_thread(threadId)`
+- **IPC** (UI-only — the agent never reads nudges back):
+  `list_nudges_for_thread(threadId)`. Per-effort nudges are read through
+  `v_agent_nudge` (the oxplow-analytics `effort-nudges` lens)
   (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
   `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
   `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
@@ -546,9 +547,7 @@ schema in [data-model.md](./data-model.md), migration `V33`).
   never fails the hook).
 - **Event**: `AgentNudgesChanged { threadId, effortId: Option<String> }`
   (wire kind `agentNudgesChanged`) emitted by the service after a successful
-  record. The renderer's collapsed "Agent nudges" debug sub-view
-  (`EffortObservations.tsx` → `AgentNudgesBlock`) subscribes and refetches
-  per effort, alongside the coverage/tests block. Persistence happens AFTER
+  record; lenses re-run on it like any data event. Persistence happens AFTER
   the existing one-shot dedup gates, so a deduped nudge is never stored or
   re-emitted.
 

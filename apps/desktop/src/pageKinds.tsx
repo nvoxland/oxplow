@@ -93,8 +93,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     case "uncommitted-changes":
       return GitBranch;
 
-    case "effort-coverage":
-      return Activity;
     case "lens":
       return Glasses;
     case "explore-data":

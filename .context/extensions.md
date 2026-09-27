@@ -72,6 +72,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     Linked cells go through `RouteLink`, so plain-click navigates in the
     tab.
   - Params sit in the right rail: Enter or blur applies, Escape reverts.
+    A tab id may carry starting values (`lens:<ext>/<slug>?effort_id=12`).
   - A run failure shows the error inline, with a nudge to use "Improve
     with Agent".
   - The page re-runs, debounced, on data events and on edits under
@@ -424,7 +425,7 @@ What moves out of core, and what it becomes:
 | Gauge-threshold nudges | extension alerts → core nudge primitive |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | lenses + `task-detail` / `thread` slot lenses (**done** for Usage / Page Analytics: the `usage` grid) |
 | Local history dashboard | lens over `v_snapshot` |
-| Effort metrics block, effort coverage page | `effort-review` slot lenses |
+| Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort-review` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 
 **Stays in core, deliberately simple:** a basic **metrics explorer** and
 **simple dashboards** (Nathan, 2026-09-27). The base version must let
@@ -472,4 +473,8 @@ available to every extension:
 - Advisories: the generic nudge primitive (see "Advisories").
 - `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,
   bookmarks and history for a page kind that moved to a lens open the
-  lens.
+  lens. A `{ lens, param }` entry carries the old id's row id into a lens
+  param (`effort-coverage:eff12` → `effort_id=12`).
+- Lens tabs carry params: `lens:<ext>/<slug>?k=v` (`lensRef(id, params)`),
+  so a slot lens's heading opens its page with the slot's values, and
+  history and bookmarks keep them.

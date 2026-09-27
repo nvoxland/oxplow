@@ -1,0 +1,24 @@
+title: Static Analysis
+description: Findings from the effort's latest analyzer run.
+params: [{ name: effort_id }]
+query: |
+  WITH a AS (
+    SELECT payload_json FROM v_effort_observation
+    WHERE effort_id = :effort_id AND kind = 'static-analysis'
+    ORDER BY seq DESC LIMIT 1
+  )
+  SELECT json_extract(f.value, '$.severity') AS severity,
+         json_extract(f.value, '$.path') AS path,
+         json_extract(f.value, '$.line') AS line,
+         json_extract(f.value, '$.rule') AS rule,
+         json_extract(f.value, '$.message') AS message
+  FROM a, json_each(a.payload_json, '$.findings') f
+  ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END, path, line
+columns:
+  - { key: severity, label: Severity }
+  - { key: path, label: File, link: { kind: file, line: line } }
+  - { key: line, label: Line }
+  - { key: rule, label: Rule }
+  - { key: message, label: Message }
+empty: No analyzer findings for this effort.
+hidden: true

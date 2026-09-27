@@ -1791,20 +1791,6 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   });
 }
 
-export type { EffortObservation } from "./tauri-bridge/index.js";
-export type { AgentNudge } from "./tauri-bridge/index.js";
-
-/** Collection observations (test-run / diff-coverage) for an effort,
- *  newest-first. Optional `kind` filter. */
-export async function listEffortObservations(
-  effortId: string,
-  kind?: string,
-): Promise<import("./tauri-bridge/index.js").EffortObservation[]> {
-  return unwrap(
-    await commands.listEffortObservations(effortId, kind ?? null),
-  ) as unknown as import("./tauri-bridge/index.js").EffortObservation[];
-}
-
 export type { EffortMetricDelta } from "./tauri-bridge/index.js";
 
 /** Per-metric roll-up over an effort — grouped before→after deltas for the
@@ -1998,15 +1984,6 @@ export async function listEffortsInWindow(
   ) as unknown as TaskEffort[];
 }
 
-/** Persisted agent nudges (report-less-run / coverage-target) fired for an
- *  effort, newest-first. Drives the collapsed "Agent nudges" debug sub-view. */
-export async function listNudgesForEffort(
-  effortId: string,
-): Promise<import("./tauri-bridge/index.js").AgentNudge[]> {
-  return unwrap(
-    await commands.listNudgesForEffort(effortId),
-  ) as unknown as import("./tauri-bridge/index.js").AgentNudge[];
-}
 
 export type { AgentTokenUsage, TokenUsageTotals } from "./tauri-bridge/index.js";
 

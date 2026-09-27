@@ -1,0 +1,15 @@
+title: Agent Nudges
+description: What oxplow told the agent during this effort.
+params: [{ name: effort_id }]
+query: |
+  SELECT created_at AS at, kind, message, trigger
+  FROM v_agent_nudge
+  WHERE effort_id = :effort_id
+  ORDER BY created_at
+columns:
+  - { key: at, label: When }
+  - { key: kind, label: Kind }
+  - { key: message, label: Message }
+  - { key: trigger, label: Trigger }
+empty: No nudges fired.
+hidden: true

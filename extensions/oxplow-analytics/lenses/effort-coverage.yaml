@@ -1,0 +1,14 @@
+title: Diff Coverage
+params: [{ name: effort_id }]
+query: |
+  SELECT printf('**%d%%** of changed lines covered · %d/%d',
+                CAST(round(json_extract(payload_json, '$.summaryPct')) AS INTEGER),
+                json_extract(payload_json, '$.coveredLines'),
+                json_extract(payload_json, '$.changedLines')) AS summary
+  FROM v_effort_observation
+  WHERE effort_id = :effort_id AND kind = 'diff-coverage'
+  ORDER BY seq DESC
+  LIMIT 1
+viz: markdown
+empty: No coverage recorded for this effort.
+hidden: true

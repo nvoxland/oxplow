@@ -1,0 +1,24 @@
+title: Test Runs
+description: Every test run the effort made, newest first.
+params: [{ name: effort_id }]
+query: |
+  SELECT created_at AS at,
+         json_extract(payload_json, '$.passed') AS passed,
+         json_extract(payload_json, '$.failed') AS failed,
+         json_extract(payload_json, '$.skipped') AS skipped,
+         json_extract(payload_json, '$.exitCode') AS exit_code,
+         round(json_extract(payload_json, '$.durationMs') / 1000.0, 1) AS seconds,
+         json_extract(payload_json, '$.command') AS command
+  FROM v_effort_observation
+  WHERE effort_id = :effort_id AND kind = 'test-run'
+  ORDER BY seq DESC
+columns:
+  - { key: at, label: When }
+  - { key: passed, label: Passed }
+  - { key: failed, label: Failed }
+  - { key: skipped, label: Skipped }
+  - { key: exit_code, label: Exit }
+  - { key: seconds, label: Seconds }
+  - { key: command, label: Command }
+empty: No test runs recorded for this effort.
+hidden: true

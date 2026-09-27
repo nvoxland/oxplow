@@ -1,0 +1,7 @@
+title: Coverage and Tests
+description: Diff coverage on the effort's changed lines, the test runs it made, and what failed.
+params: [{ name: effort_id }]
+query: SELECT 1
+viz: grid
+children: [effort-coverage, effort-untested-files, effort-test-runs, effort-failed-tests, effort-analysis-findings]
+hidden: true

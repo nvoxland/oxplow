@@ -742,12 +742,6 @@ async fn effort_reads_empty_for_unknown_ids() {
                 .unwrap();
         assert!(split.claimed.is_empty() && split.unclaimed.is_empty());
     }
-    assert!(
-        commands::generated::list_effort_observations(app.state(), EffortId::new(999), None)
-            .await
-            .unwrap()
-            .is_empty()
-    );
 }
 
 // ---- snapshot reads ----

@@ -15,7 +15,7 @@ import {
 } from "../api.js";
 import { showToast } from "../components/toastStore.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { customDashboardRef } from "../tabs/pageRefs.js";
+import { customDashboardRef, lensRef } from "../tabs/pageRefs.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
@@ -25,6 +25,9 @@ import { LensResultView } from "../lens/LensResultView.js";
 export interface LensPageProps {
   /** `<extension>/<slug>`. */
   lensId: string;
+  /** Param values the tab opened with (from its id), e.g. a slot's
+   *  `{ effort_id }`; the params form edits on top of them. */
+  initialParams?: Record<string, SqlCell>;
   stream: Stream | null;
   onOpenPage(ref: TabRef): void;
 }
@@ -37,11 +40,11 @@ const RERUN_DEBOUNCE_MS = 750;
  * Re-runs when oxplow data changes, so it stays live. Params are edited
  * in the right rail (Enter applies). See `.context/extensions.md`.
  */
-export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
+export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPageProps) {
   const streamId = stream?.id ?? null;
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Record<string, SqlCell>>({});
+  const [overrides, setOverrides] = useState<Record<string, SqlCell>>(initialParams ?? {});
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
 
@@ -81,10 +84,10 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
   const runParams = run?.params;
   useEffect(() => {
     const store = getPageDetailStore();
-    const pageId = `lens:${lensId}`;
+    const pageId = lensRef(lensId, initialParams).id;
     store.publish(pageId, { lensId, params: runParams ?? {} });
     return () => store.publish(pageId, null);
-  }, [lensId, runParams]);
+  }, [lensId, initialParams, runParams]);
 
   const improveWithAgent = () => {
     const params = lens ? changedParams(lens, run?.params ?? {}) : {};

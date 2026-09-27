@@ -1,0 +1,34 @@
+title: Metrics
+description: How the effort moved the metrics oxplow tracks. Tests, coverage, analysis, tokens and nudges have their own sections and are left out.
+params: [{ name: effort_id }]
+query: |
+  SELECT key, title,
+         CASE category
+           WHEN 'operational' THEN 'Activity'
+           WHEN 'custom' THEN 'Custom'
+           ELSE coalesce(upper(substr(language, 1, 1)) || substr(language, 2) || ' code health', 'Code health')
+         END AS area,
+         CASE WHEN agg = 'sum' THEN NULL ELSE baseline END AS before,
+         current AS after,
+         delta,
+         CASE
+           WHEN delta IS NULL OR delta = 0 OR direction = 'neutral' THEN NULL
+           WHEN (direction = 'lower-better') = (delta < 0) THEN 'better'
+           ELSE 'worse'
+         END AS move,
+         crossing
+  FROM v_effort_metric_delta
+  WHERE effort_id = :effort_id
+    AND coalesce(category, '') NOT IN ('coverage', 'testing', 'static-quality')
+    AND key NOT LIKE 'agent.tokens.%' AND key NOT LIKE 'agent.nudges.%'
+  ORDER BY area = 'Activity', area, changed DESC, title
+columns:
+  - { key: title, label: Metric, link: { kind: metric, from: key } }
+  - { key: area, label: Area }
+  - { key: before, label: Before }
+  - { key: after, label: After }
+  - { key: delta, label: Δ }
+  - { key: move, label: Move }
+  - { key: crossing, label: Threshold }
+empty: No metrics collected for this effort.
+hidden: true

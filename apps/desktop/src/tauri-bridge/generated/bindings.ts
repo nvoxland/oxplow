@@ -1002,11 +1002,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortObservations: (effortId: EffortId, kind: string | null) => typedError<EffortObservation[], IpcError>(__TAURI_INVOKE("list_effort_observations", { effortId, kind })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listEffortMetricDeltas: (effortId: EffortId) => typedError<EffortMetricDelta[], IpcError>(__TAURI_INVOKE("list_effort_metric_deltas", { effortId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1058,11 +1053,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listNudgesForEffort: (effortId: EffortId) => typedError<AgentNudge[], IpcError>(__TAURI_INVOKE("list_nudges_for_effort", { effortId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1399,24 +1389,6 @@ export type AdvisoryOncePer =
 "turn";
 
 export type AgentKind = "claude" | "codex" | "opencode";
-
-// One persisted nudge row.
-export type AgentNudge = {
-	id: number,
-	thread_id: string,
-	/**
-	 *  Open effort the nudge fired against, if any (some nudge kinds fire
-	 *  thread-scoped with no open effort).
-	 */
-	effort_id: string | null,
-	// Well-known kind: `report-less-run` | `coverage-target` (open-ended).
-	kind: string,
-	// The full message text that was surfaced to the agent.
-	message: string,
-	// What caused it — the bash command (or commit sha).
-	trigger: string | null,
-	created_at: Timestamp,
-};
 
 export type AgentStatus = {
 	thread_id: ThreadId,
@@ -2220,31 +2192,6 @@ export type EffortMetricDelta = {
 	 *  the findings drill-in. Field name kept for wire compatibility.
 	 */
 	latest_run_id: number | null,
-};
-
-// One effort-review observation row (reconstructed from the metric substrate).
-export type EffortObservation = {
-	id: number,
-	stream_id: string,
-	effort_id: string,
-	/**
-	 *  Well-known kind: `test-run` | `diff-coverage` | `static-analysis`
-	 *  (open-ended).
-	 */
-	kind: string,
-	// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
-	provenance: string,
-	// Free-form origin tag, e.g. `post-tool-bash` / `agent`.
-	source: string,
-	// Headline numeric (e.g. coverage %); kind-specific, nullable.
-	metric_value: number | null,
-	// Kind-specific structured payload (parsed by the UI, opaque to Rust).
-	payload_json: string | null,
-	// Freshness pin — the snapshot this was captured against.
-	local_snapshot_id: number | null,
-	closest_git_version: string | null,
-	git_version_exact: boolean,
-	created_at: Timestamp,
 };
 
 // A loaded extension and anything wrong with it.

@@ -1,5 +1,9 @@
 name: oxplow-analytics
 description: Oxplow's own instruments, built as an ordinary extension. Metric movement, coverage and threshold guidance for the agent; usage, dashboards, code quality and change analysis lenses.
+slots:
+  - { slot: effort-review, lens: effort-tests }
+  - { slot: effort-review, lens: effort-metric-deltas }
+  - { slot: effort-review, lens: effort-nudges }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after

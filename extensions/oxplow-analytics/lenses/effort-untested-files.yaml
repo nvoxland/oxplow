@@ -1,0 +1,22 @@
+title: Most Untested Changes
+description: Changed files ranked by how many of their changed lines no test covers.
+params: [{ name: effort_id }]
+query: |
+  WITH cov AS (
+    SELECT payload_json FROM v_effort_observation
+    WHERE effort_id = :effort_id AND kind = 'diff-coverage'
+    ORDER BY seq DESC LIMIT 1
+  )
+  SELECT json_extract(f.value, '$.path') AS path,
+         json_array_length(f.value, '$.uncoveredChangedLines') AS uncovered,
+         json_extract(f.value, '$.uncoveredChangedLines[0]') AS first_line,
+         (SELECT group_concat(l.value, ', ') FROM json_each(f.value, '$.uncoveredChangedLines') l) AS lines
+  FROM cov, json_each(cov.payload_json, '$.files') f
+  WHERE json_array_length(f.value, '$.uncoveredChangedLines') > 0
+  ORDER BY uncovered DESC, path
+columns:
+  - { key: path, label: File, link: { kind: file, line: first_line } }
+  - { key: uncovered, label: Uncovered }
+  - { key: lines, label: Lines }
+empty: Every changed line is covered.
+hidden: true

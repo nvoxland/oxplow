@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { BranchChangeEntry, EffortAtSnapshot, EffortObservation, Snapshot, Stream } from "../api.js";
+import type { BranchChangeEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
   getEffort,
   getTask,
   getTaskSummaries,
   listEffortFiles,
-  listEffortObservations,
   listEffortsOverlappingRange,
   listSnapshots,
-  subscribeOxplowEvents,
 } from "../api.js";
 import {
   pickerBranch,
@@ -29,7 +27,6 @@ import { Page, pageH1Style } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
 import {
-  effortCoverageRef,
   effortDiffRef,
   endpointDiffRef,
   snapshotRef,
@@ -43,8 +40,6 @@ import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCar
 import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
 import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
 import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelpers.js";
-import { AgentNudgesBlock, TestsRun } from "../components/EffortObservations.js";
-import { EffortMetricsBlock } from "../components/EffortMetrics.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
@@ -98,10 +93,6 @@ interface ResolvedDiff {
   /** Effort id when the diff was opened *for* an effort (effort mode).
    *  Drives the claimed-files filter; null otherwise. */
   effortId: string | null;
-  /** The opened-for effort's start/end timestamps (effort mode) — for the
-   *  Metrics section's drill-in window. Null otherwise. */
-  effortStartedAt: string | null;
-  effortEndedAt: string | null;
 }
 
 /**
@@ -158,8 +149,6 @@ function DiffBody({
         inProgress: spec.end.kind === "working",
         taskId: null,
         effortId: null,
-        effortStartedAt: null,
-        effortEndedAt: null,
       });
       return;
     }
@@ -176,8 +165,6 @@ function DiffBody({
             ...resolveEffortEndpoints(effort),
             taskId: effort.taskId,
             effortId: effort.effortId,
-            effortStartedAt: effort.startedAt,
-            effortEndedAt: effort.endedAt,
           });
         })
         .catch((err) => {
@@ -206,8 +193,6 @@ function DiffBody({
           ...resolveSnapshotEndpoints(snapshotId, prev),
           taskId: null,
           effortId: null,
-          effortStartedAt: null,
-          effortEndedAt: null,
         });
       })
       .catch((err) => {
@@ -276,7 +261,7 @@ function ResolvedEndpointDiff({
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
 }) {
-  const { start, end, inProgress, taskId, effortId, effortStartedAt, effortEndedAt } = resolved;
+  const { start, end, inProgress, taskId, effortId } = resolved;
   const effortPassed = effortId != null;
 
   // Snapshot id → its capture time + pinned git commit, for the title's
@@ -363,7 +348,6 @@ function ResolvedEndpointDiff({
               completedHere: o.endSnapshotId === range.rangeEnd,
             },
             taskTitle: titleByTask.get(o.taskId) ?? `task ${o.taskId}`,
-            startedAt: o.startedAt,
             endedAt: o.endedAt,
           })),
         );
@@ -421,10 +405,6 @@ function ResolvedEndpointDiff({
   // read v_change* (none when the effort has no start snapshot).
   const { change: effortChange } = useChange(primaryEffortId ? { kind: "effort", effortId: primaryEffortId } : null);
   const effortTitle = effortPassed ? taskTitle : linedUpEffort?.taskTitle ?? null;
-  // Start/end window of the effort the diff is for — feeds the Metrics
-  // section (its drill-in scopes the metric detail to this window).
-  const primaryEffortStartedAt = effortPassed ? effortStartedAt : linedUpEffort?.startedAt ?? null;
-  const primaryEffortEndedAt = effortPassed ? effortEndedAt : linedUpEffort?.endedAt ?? null;
   const primaryTaskId = effortPassed ? taskId : linedUpEffort?.effort.tasksId ?? null;
 
   // The effort's task description, rendered at the top when the diff is for
@@ -564,44 +544,6 @@ function ResolvedEndpointDiff({
       ratio: productionLines > 0 ? testLines / productionLines : 0,
     };
   }, [analysis.files]);
-
-  // Test RUNS recorded during the range — the times tests were executed,
-  // unioned across the effort(s) overlapping it (the primary effort in
-  // effort mode, plus any concurrent ones). Independent of whether test
-  // files changed: tests can be run without editing them.
-  const runEffortIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (effortId) ids.add(effortId);
-    for (const r of effortRows) ids.add(r.effort.effortId);
-    return [...ids];
-  }, [effortId, effortRows]);
-  const runEffortKey = runEffortIds.join(",");
-  const [testRuns, setTestRuns] = useState<EffortObservation[]>([]);
-  useEffect(() => {
-    if (runEffortIds.length === 0) {
-      setTestRuns([]);
-      return;
-    }
-    let cancelled = false;
-    const load = () => {
-      void Promise.all(
-        runEffortIds.map((id) =>
-          listEffortObservations(id, "test-run").catch(() => [] as EffortObservation[]),
-        ),
-      ).then((lists) => {
-        if (!cancelled) setTestRuns(lists.flat());
-      });
-    };
-    load();
-    const unsub = subscribeOxplowEvents((event) => {
-      if (event.kind === "effortObservationsChanged") load();
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runEffortKey]);
 
   // Open a file's diff in the current tab (revealing `line`), mirroring the
   // drilldown. Used by both the Files tree and the Functions rows.
@@ -812,35 +754,26 @@ function ResolvedEndpointDiff({
         <h2 style={h2Style}>Tests</h2>
         {filesLoading && analysis.files.length === 0 ? (
           <div style={muted}>Loading…</div>
-        ) : testFiles.length === 0 && testRuns.length === 0 ? (
-          <div style={muted}>No test changes or test runs in this range.</div>
+        ) : testFiles.length === 0 ? (
+          <div style={muted}>No test changes in this range.</div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {testRuns.length > 0 ? (
-              <TestsRun effortId={effortPassed && effortId ? effortId : undefined} runs={testRuns} />
-            ) : (
-              <div style={muted}>No test runs recorded in this range.</div>
-            )}
-            {testFiles.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {testStats.productionLines > 0 ? (
-                  <div
-                    style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}
-                    data-testid="diff-view-tests-ratio"
-                  >
-                    Test/code line ratio: {(testStats.ratio * 100).toFixed(0)}%
-                  </div>
-                ) : null}
-                {onOpenFile ? (
-                  <ChangeAnalysisFileTree
-                    files={testFiles}
-                    target={tabKey}
-                    onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
-                    onOpenFileDiff={(path) => openDiffAt(path, 1)}
-                    showFileCount={false}
-                  />
-                ) : null}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {testStats.productionLines > 0 ? (
+              <div
+                style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}
+                data-testid="diff-view-tests-ratio"
+              >
+                Test/code line ratio: {(testStats.ratio * 100).toFixed(0)}%
               </div>
+            ) : null}
+            {onOpenFile ? (
+              <ChangeAnalysisFileTree
+                files={testFiles}
+                target={tabKey}
+                onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
+                onOpenFileDiff={(path) => openDiffAt(path, 1)}
+                showFileCount={false}
+              />
             ) : null}
           </div>
         )}
@@ -858,19 +791,6 @@ function ResolvedEndpointDiff({
             onOpenFunctionDiff={(path, line) => openDiffAt(path, line)}
           />
         </section>
-      ) : null}
-
-      {/* Metrics oxplow collected during the effort this diff is for —
-          code-health/activity deltas (before→after). Always present for an
-          effort (showWhenEmpty → "No metrics collected" when nothing moved);
-          only absent for a non-effort range. */}
-      {primaryEffortId && primaryEffortStartedAt ? (
-        <EffortMetricsBlock
-          effortId={primaryEffortId}
-          startedAt={primaryEffortStartedAt}
-          endedAt={primaryEffortEndedAt}
-          showWhenEmpty
-        />
       ) : null}
 
       {/* "The rest" of the change analysis — co-change, churn, code smells,
@@ -892,9 +812,6 @@ function ResolvedEndpointDiff({
         />
       ) : null}
 
-      {/* Agent nudges oxplow fired during this effort (moved here from the
-          task effort activity). Self-hides when none fired. */}
-      {primaryEffortId ? <AgentNudgesBlock effortId={primaryEffortId} /> : null}
     </div>
     </Page>
   );
@@ -904,9 +821,6 @@ function ResolvedEndpointDiff({
 interface EffortRow {
   effort: EffortAtSnapshot;
   taskTitle: string;
-  /** When the effort started (ISO) — feeds the Metrics drill-in window
-   *  when this effort is the one the diff lines up with. */
-  startedAt: string;
   /** When the effort ended (ISO), or null if still open. Used to drop
    *  long-ended efforts from the concurrent list. */
   endedAt: string | null;
