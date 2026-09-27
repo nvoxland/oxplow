@@ -197,8 +197,12 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Struggled Here (`v_struggle`)
   - Context Read (`v_context_read`)
 
-  It also has a Waiting on Me lens (blocked tasks plus open notes) that's
-  reachable from the launcher. Each empty state says what's *good*, e.g.
+  It also has a Waiting on Me lens, reachable from the launcher:
+  questions agents are waiting on you to answer (the latest `await_user`
+  call per thread, with the question in `v_tool_call.detail`, when no
+  turn started after it), blocked tasks, and open notes. Agent status
+  itself is in memory only (V2 dropped `agent_status`), so this reads
+  the durable tool-call log instead. Each empty state says what's *good*, e.g.
   "Every claim for this effort is backed by evidence."
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a

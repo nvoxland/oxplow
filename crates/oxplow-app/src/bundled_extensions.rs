@@ -195,17 +195,24 @@ mod tests {
         param: &str,
         value: i64,
     ) -> serde_json::Value {
+        run_bundled_lens(f, &format!("oxplow-analytics/{slug}"), &[(param, value)]).await
+    }
+
+    /// Run any bundled lens (`<extension>/<slug>`) with integer params; its
+    /// rows as JSON.
+    async fn run_bundled_lens(
+        f: &crate::test_fixtures::EffortFixture,
+        id: &str,
+        params: &[(&str, i64)],
+    ) -> serde_json::Value {
         let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
-        let mut params = std::collections::BTreeMap::new();
-        params.insert(param.to_string(), oxplow_db::SqlCell::Int(value));
-        let run = crate::extensions::run_lens(
-            &layer,
-            f._dir.path(),
-            &format!("oxplow-analytics/{slug}"),
-            params,
-        )
-        .await
-        .unwrap();
+        let params = params
+            .iter()
+            .map(|(k, v)| (k.to_string(), oxplow_db::SqlCell::Int(*v)))
+            .collect();
+        let run = crate::extensions::run_lens(&layer, f._dir.path(), id, params)
+            .await
+            .unwrap();
         serde_json::to_value(&run.result.rows).unwrap()
     }
 
@@ -302,5 +309,64 @@ mod tests {
         assert_eq!(functions[0][3], serde_json::json!("signature"));
         let tests = run_analytics_lens(&f, "change-test-files", "change_id", change.id).await;
         assert_eq!(tests[0][0], serde_json::json!("tests/it.rs"));
+    }
+
+    /// Waiting on Me lists threads whose agent asked the user a question
+    /// (`await_user`) that no later prompt has answered.
+    #[tokio::test]
+    async fn waiting_on_me_lists_unanswered_questions() {
+        use oxplow_domain::stores::AgentTurnStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let turn = |at: oxplow_domain::Timestamp| oxplow_domain::AgentTurn {
+            id: oxplow_domain::AgentTurnId::placeholder(),
+            thread_id: f.thread,
+            task_id: None,
+            prompt: "do it".into(),
+            answer: None,
+            session_id: None,
+            started_at: at,
+            ended_at: None,
+        };
+        let now = oxplow_domain::Timestamp::now();
+        f.svc
+            .agent_turn_store
+            .open(&turn(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() - 60_000,
+            )))
+            .await
+            .unwrap();
+        f.svc
+            .tool_call_store
+            .record(oxplow_db::NewToolCall {
+                thread_id: f.thread.value(),
+                effort_id: None,
+                tool: "mcp__oxplow__await_user".into(),
+                path: None,
+                detail: Some("Pick A or B?".into()),
+                ok: Some(true),
+            })
+            .await
+            .unwrap();
+        let waiting = |rows: serde_json::Value| {
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r[0] == "Waiting for your answer")
+                .map(|r| r[1].clone())
+                .collect::<Vec<_>>()
+        };
+        let rows = run_bundled_lens(&f, "oxplow-review/waiting-on-me", &[]).await;
+        assert_eq!(waiting(rows), vec![serde_json::json!("Pick A or B?")]);
+
+        // The user answers: a new turn starts after the question.
+        f.svc
+            .agent_turn_store
+            .open(&turn(oxplow_domain::Timestamp::from_unix_ms(
+                now.unix_ms() + 60_000,
+            )))
+            .await
+            .unwrap();
+        let rows = run_bundled_lens(&f, "oxplow-review/waiting-on-me", &[]).await;
+        assert!(waiting(rows).is_empty());
     }
 }

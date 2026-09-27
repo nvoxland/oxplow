@@ -665,7 +665,7 @@ const CATALOG: &[CatalogView] = &[
             ("effort_id", "Effort open at the time, if any."),
             ("tool", "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."),
             ("path", "File it touched, repo-relative when inside the project."),
-            ("detail", "Short context: the Bash command (truncated), a search pattern, …"),
+            ("detail", "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …"),
             ("ok", "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)."),
             ("at", "RFC 3339 timestamp."),
         ],
