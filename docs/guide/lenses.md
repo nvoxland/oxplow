@@ -180,7 +180,7 @@ The script prints:
 Column types are `text`, `int`, `real`, `bool` and `time` (an ISO timestamp).
 
 A source runs code, so **nothing runs until you approve it** in Settings →
-Extensions → **Approve & Run**. Approval is per machine and per version of the
+Data → **Approve & Run**. Approval is per machine and per version of the
 script: a teammate who pulls it approves it themselves, and a changed script
 needs approving again. Agents can run approved sources but can't approve
 them.

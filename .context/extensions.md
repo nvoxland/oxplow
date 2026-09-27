@@ -155,8 +155,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       and Dashboards.
 - **Sources.** Declared under `sources:` in `extension.yaml` and parsed
   into `Extension.sources`. A bad source is reported in `errors` without
-  hiding the extension's lenses. Settings → Extensions shows each source
-  (schedule, row counts or failure, Approve & Run / Sync Now).
+  hiding the extension's lenses. Settings → Data shows each source
+  (runtime, schedule, row counts or failure, Approve & Run / Sync Now);
+  Settings → Extensions keeps each extension's source credentials.
 - **Bundled extensions.**
   - Their sources live in the repo at `extensions/<name>/`. They're
     compiled into the binary by `crates/oxplow-app/src/bundled_extensions.rs`

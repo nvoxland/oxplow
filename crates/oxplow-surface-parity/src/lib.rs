@@ -168,6 +168,8 @@ pub const MANIFEST: &[Capability] = &[
     both("search"),
     both("query_sql"),
     both("describe_schema"),
+    // Settings → Data's counts; an agent counts with query_sql.
+    ui("semantic_row_counts"),
     both("list_extensions"),
     both("get_lens"),
     both("run_lens"),

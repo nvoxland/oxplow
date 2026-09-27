@@ -197,7 +197,7 @@ Rules:
   pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
   the proxy or a connection failure.
 - **You can't approve a source.** Tell the user to approve it in
-  Settings → Extensions → Approve & Run. After that, `run_source`
+  Settings → Data → Approve & Run. After that, `run_source`
   (MCP) re-runs it.
 - `list_sources` shows each source's status and last error.
 - `describe_schema` lists declared entities with `available: false`

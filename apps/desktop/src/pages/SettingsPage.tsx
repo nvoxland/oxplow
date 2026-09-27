@@ -13,6 +13,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
+import { DataSection } from "../components/DataSection.js";
 import { AiSection } from "../components/AiSection.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
@@ -226,6 +227,14 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             team. Installing and updating apply immediately; no Save needed.
           </Hint>
           <ExtensionsSection />
+        </Section>
+
+        <Section title="Data">
+          <Hint>
+            What oxplow can query: its own data and what extension sources bring in, with row counts. Lenses,
+            metrics and agents read these through SQL. Sources run here; set their credentials under Extensions.
+          </Hint>
+          <DataSection />
         </Section>
 
         <Section title="AI">

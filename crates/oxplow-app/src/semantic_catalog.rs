@@ -86,10 +86,80 @@ async fn existing_views(
         .collect())
 }
 
+/// Rows in one entity right now.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityRowCount {
+    pub name: String,
+    /// `None` for a declared entity that hasn't synced (no view yet).
+    pub rows: Option<i64>,
+}
+
+/// Row counts for every entity in [`describe_schema`] (Settings → Data).
+pub async fn row_counts(
+    layer: &SemanticLayer,
+    root: &Path,
+) -> Result<Vec<EntityRowCount>, DomainError> {
+    let mut out = Vec::new();
+    for e in describe_schema(layer, root).await? {
+        let rows = if e.available {
+            // Names come from the catalog (core views and validated
+            // `v_<ext>_<entity>` names), never from user input.
+            let r = layer
+                .query_sql(&format!("SELECT count(*) FROM {}", e.name), vec![], Some(1))
+                .await?;
+            match r.rows.first().and_then(|row| row.first()) {
+                Some(SqlCell::Int(n)) => Some(*n),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        out.push(EntityRowCount { name: e.name, rows });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use oxplow_db::{Database, EntityTable, SqliteExtSourceStore, StoredType};
+
+    #[tokio::test]
+    async fn row_counts_cover_every_entity_and_skip_unsynced_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let ext = root.path().join("oxplow/extensions/my-gh");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        )
+        .unwrap();
+        let db = Database::in_memory();
+        let layer = SemanticLayer::new(db.clone());
+        let counts = row_counts(&layer, root.path()).await.unwrap();
+        let get = |n: &str| counts.iter().find(|c| c.name == n).map(|c| c.rows);
+        assert_eq!(get("v_task"), Some(Some(0)));
+        assert_eq!(get("v_my_gh_pr"), Some(None), "not synced: no count");
+        SqliteExtSourceStore::new(db)
+            .replace_rows(vec![(
+                EntityTable {
+                    extension: "my-gh".into(),
+                    entity: "pr".into(),
+                    view: "v_my_gh_pr".into(),
+                    key: "number".into(),
+                    columns: vec![("number".into(), StoredType::Integer)],
+                },
+                vec![vec![SqlCell::Int(1)], vec![SqlCell::Int(2)]],
+            )])
+            .await
+            .unwrap();
+        let counts = row_counts(&layer, root.path()).await.unwrap();
+        assert_eq!(
+            counts.iter().find(|c| c.name == "v_my_gh_pr").unwrap().rows,
+            Some(2)
+        );
+    }
 
     #[tokio::test]
     async fn includes_declared_extension_entities_and_tracks_availability() {

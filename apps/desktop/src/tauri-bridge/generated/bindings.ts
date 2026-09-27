@@ -318,6 +318,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	semanticRowCounts: () => typedError<EntityRowCount[], IpcError>(__TAURI_INVOKE("semantic_row_counts")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listExtensions: (streamId: string | null) => typedError<Extension[], IpcError>(__TAURI_INVOKE("list_extensions", { streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1887,6 +1892,13 @@ export type EffortFile = {
 export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
+
+// Rows in one entity right now.
+export type EntityRowCount = {
+	name: string,
+	// `None` for a declared entity that hasn't synced (no view yet).
+	rows: number | null,
+};
 
 // A loaded extension and anything wrong with it.
 export type Extension = {

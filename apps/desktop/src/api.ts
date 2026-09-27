@@ -28,13 +28,14 @@ import type {
   SourceListing,
   SourceRunReport,
   SchemaEntity,
+  EntityRowCount,
   SearchHit,
   SqlCell,
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
 export type { AiSettings, ProviderConfig, Role, RoleBinding };
-export type { Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { EntityRowCount, Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -600,6 +601,11 @@ export async function updateExtension(name: string, streamId: string | null): Pr
 /// The semantic layer's queryable entities with column docs.
 export async function describeSchema(): Promise<SchemaEntity[]> {
   return unwrap(await commands.describeSchema());
+}
+
+/// Rows in every entity right now (Settings → Data).
+export async function semanticRowCounts(): Promise<EntityRowCount[]> {
+  return unwrap(await commands.semanticRowCounts());
 }
 
 export async function listThreads(streamId: string): Promise<Thread[]> {

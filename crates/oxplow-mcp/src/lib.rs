@@ -1376,7 +1376,7 @@ impl OxplowMcp {
     #[tool(
         description = "Run an approved extension source now, refreshing its entities \
                        (`v_<extension>_<entity>`). You cannot approve a source: running code the \
-                       human hasn't approved fails, so ask them to use Settings → Extensions → \
+                       human hasn't approved fails, so ask them to use Settings → Data → \
                        Approve & Run. Returns row counts per entity."
     )]
     async fn run_source(

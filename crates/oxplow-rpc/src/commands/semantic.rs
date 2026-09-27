@@ -30,8 +30,35 @@ pub async fn describe_schema(svc: &Services) -> Result<Vec<SchemaEntity>, IpcErr
     )
 }
 
+/// Rows in every entity right now, for Settings → Data. UI-only: an agent
+/// counts with `query_sql`.
+pub async fn semantic_row_counts(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::semantic_catalog::EntityRowCount>, IpcError> {
+    let root = svc.git.resolve_repo_dir(None).await;
+    Ok(
+        oxplow_app::semantic_catalog::row_counts(&SemanticLayer::new(svc.db.clone()), &root)
+            .await?,
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn semantic_row_counts_dispatches() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch("semantic_row_counts", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        let task = out
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "v_task")
+            .unwrap();
+        assert!(task["rows"].is_number());
+    }
+
     use serde_json::json;
 
     #[tokio::test]

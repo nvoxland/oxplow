@@ -25,7 +25,8 @@ and agents query.
 >   with tombstones.
 > - **Current (tsk324):** the exec-source `network` allowlist, enforced
 >   on macOS.
-> - **Target:** Settings → Data; tracked in tsk277.
+> - **Current (tsk325):** Settings → Data: every entity with provider and
+>   row count (IPC `semantic_row_counts`, UI-only), and the source rows.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -295,7 +296,9 @@ entities from data already in the semantic layer:
 | Combined catalog for `describe_schema` | `crates/oxplow-app/src/semantic_catalog.rs` |
 | IPC `list_sources` / `run_source(approve?)` | `crates/oxplow-rpc/src/commands/sources.rs` |
 | MCP `list_sources` / `run_source` (never approves) | `crates/oxplow-mcp/src/lib.rs` |
-| UI: Settings → Extensions source rows | `apps/desktop/src/components/ExtensionsSection.tsx` |
+| UI: Settings → Data (entities + counts, source rows, Run) | `apps/desktop/src/components/DataSection.tsx` |
+| UI: credentials per extension | `apps/desktop/src/components/ExtensionsSection.tsx` |
+| Row counts (`semantic_row_counts`) | `crates/oxplow-app/src/semantic_catalog.rs::row_counts` |
 
 **Decisions (epic tsk289, 2026-09-27).**
 

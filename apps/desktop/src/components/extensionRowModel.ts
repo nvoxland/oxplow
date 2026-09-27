@@ -95,6 +95,20 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
       ? `Run ${l.spec.entry} now`
       : `Runs ${l.extension}/${l.spec.entry} on this machine${env}.${network} Approve only if you trust this extension; a changed script or host list needs approval again.`,
     credentials: l.credentials,
-    missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it below).` : null,
+    missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it under Extensions).` : null,
   };
+}
+
+/// The credentials an extension's sources declare, each once, with whether
+/// it has a value (Settings → Extensions; values live in the keychain).
+export function extensionCredentials(
+  listings: SourceListing[],
+  extension: string,
+): { name: string; set: boolean }[] {
+  const out = new Map<string, boolean>();
+  for (const l of listings) {
+    if (l.extension !== extension) continue;
+    for (const c of l.credentials) out.set(c.name, (out.get(c.name) ?? false) || c.set);
+  }
+  return [...out].map(([name, set]) => ({ name, set })).sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -619,7 +619,7 @@ pub async fn run_source(
     } else if !is_approved(state_dir, extension, source_id, &hash) {
         return Err(RunSourceError::NeedsApproval(format!(
             "source `{extension}/{source_id}` runs `{}` and needs a person's approval first \
-             (Settings → Extensions → Approve & Run). Approval is per machine and per script version.",
+             (Settings → Data → Approve & Run). Approval is per machine and per script version.",
             spec.entry
         )));
     }

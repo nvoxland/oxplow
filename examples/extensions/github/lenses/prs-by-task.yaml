@@ -15,4 +15,4 @@ columns:
   - { key: state, label: State }
   - { key: author, label: Author }
   - { key: task, label: Task, link: { kind: task, from: task_id } }
-empty: No pull requests synced yet. Approve & run the `prs` source in Settings → Extensions.
+empty: No pull requests synced yet. Approve & run the `github/prs` source in Settings → Data.

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, SourceListing } from "../tauri-bridge/generated/bindings.js";
-import { extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
+import { extensionCredentials, extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
 
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
@@ -133,7 +133,25 @@ describe("sourceRowModel", () => {
       { name: "GH_PAT", set: true },
       { name: "OTHER", set: false },
     ]);
-    expect(m.missingCredentials).toBe("Needs OTHER (set it below).");
+    expect(m.missingCredentials).toBe("Needs OTHER (set it under Extensions).");
     expect(m.actionTitle).toContain("GH_PAT");
   });
+});
+
+test("extensionCredentials lists each declared credential once per extension", () => {
+  const l = (extension: string, creds: { name: string; set: boolean }[]) =>
+    ({ extension, credentials: creds }) as unknown as SourceListing;
+  expect(
+    extensionCredentials(
+      [
+        l("gh", [{ name: "TOKEN", set: true }]),
+        l("gh", [{ name: "TOKEN", set: true }, { name: "APP", set: false }]),
+        l("other", [{ name: "X", set: false }]),
+      ],
+      "gh",
+    ),
+  ).toEqual([
+    { name: "APP", set: false },
+    { name: "TOKEN", set: true },
+  ]);
 });
