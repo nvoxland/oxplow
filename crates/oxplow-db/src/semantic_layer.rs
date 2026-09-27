@@ -43,7 +43,7 @@ pub enum SqlCell {
 }
 
 impl SqlCell {
-    fn to_sql(&self) -> rusqlite::types::Value {
+    pub(crate) fn to_sql(&self) -> rusqlite::types::Value {
         use rusqlite::types::Value;
         match self {
             SqlCell::Null(()) => Value::Null,

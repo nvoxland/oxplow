@@ -12,6 +12,7 @@ pub mod comment_store;
 pub mod dashboard_store;
 mod database;
 pub mod effort_store;
+pub mod ext_source_store;
 pub mod fact_store;
 pub mod observation_store;
 pub mod page_ref_projections;
@@ -46,6 +47,7 @@ pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
+pub use ext_source_store::{EntityTable, SourceState, SqliteExtSourceStore, StoredType};
 pub use fact_store::{
     BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
