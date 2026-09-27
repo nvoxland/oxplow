@@ -302,6 +302,12 @@ macro_rules! oxplow_command_table {
                 install_extension => $crate::commands::extensions::install_extension { git_url: String, git_ref: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 update_extension => $crate::commands::extensions::update_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 list_sources => $crate::commands::sources::list_sources {} -> Vec<::oxplow_app::source_runner::SourceListing>,
+                // ai (Settings → AI)
+                ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
+                save_ai_provider => $crate::commands::ai::save_ai_provider { provider: ::oxplow_app::ai_service::ProviderConfig, key: Option<String> } -> ::oxplow_app::ai_service::AiSettings,
+                remove_ai_provider => $crate::commands::ai::remove_ai_provider { id: String } -> ::oxplow_app::ai_service::AiSettings,
+                set_ai_role => $crate::commands::ai::set_ai_role { role: ::oxplow_app::ai_service::Role, binding: Option<::oxplow_app::ai_service::RoleBinding> } -> ::oxplow_app::ai_service::AiSettings,
+                test_ai_provider => $crate::commands::ai::test_ai_provider { id: String, model: String } -> String,
                 run_source => $crate::commands::sources::run_source { extension: String, source_id: String, approve: Option<bool> } -> ::oxplow_app::source_runner::SourceRunReport,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
                 save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,

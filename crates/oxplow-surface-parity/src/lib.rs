@@ -191,6 +191,13 @@ pub const MANIFEST: &[Capability] = &[
     agent("record_decision"),
     agent("record_claim"),
     both("run_source"),
+    both_named("ai.settings", "ai_settings", "list_ai_roles"),
+    ui("save_ai_provider"),
+    ui("remove_ai_provider"),
+    ui("set_ai_role"),
+    ui("test_ai_provider"),
+    agent("ai_decide"),
+    agent("ai_summarize"),
     agent("get_open_page"),
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----

@@ -25,6 +25,7 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+oxplow-ai = { workspace = true, features = ["test-support"] }
 git2 = { workspace = true }
 
 [lints]

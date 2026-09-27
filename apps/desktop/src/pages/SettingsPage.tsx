@@ -13,6 +13,7 @@ import {
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
 import { ExtensionsSection } from "../components/ExtensionsSection.js";
+import { AiSection } from "../components/AiSection.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
 export interface SettingsPageProps {
@@ -225,6 +226,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             team. Installing and updating apply immediately; no Save needed.
           </Hint>
           <ExtensionsSection />
+        </Section>
+
+        <Section title="AI">
+          <Hint>
+            Models oxplow itself can call: for summaries, typed questions, and extensions. Your coding agents
+            are separate. Providers and roles are saved for all your projects; keys go to your OS keychain,
+            never to a file. Changes apply immediately; no Save needed.
+          </Hint>
+          <AiSection />
         </Section>
 
         <div style={actionsRowStyle}>

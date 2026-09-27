@@ -4,13 +4,13 @@ This doc covers oxplow's own access to models over their APIs: the
 providers you configure, the roles that decide which model does what, the
 `ai_*` functions sources and lenses call, and how calls are recorded.
 
-> **Status (epic tsk275):** the core is built: providers, keychain keys,
-> roles, the client and call records (`oxplow-ai`,
-> `oxplow-app/src/ai_service.rs`, `v_ai_call`). **Not yet:** the Settings → AI
-> page, IPC and MCP tools (tsk300), project role overrides from
+> **Status (epic tsk275):** built: providers, keychain keys, roles, the
+> client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
+> `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
+> `ai_summarize` MCP tools. **Not yet:** project role overrides from
 > `project.yaml` (`AiService::set_overrides` exists, nothing calls it yet),
-> the `ai_*` functions with fact caching, and a models.dev catalog. Sections
-> below say which parts are target design.
+> the `ai_*` functions for sources and lenses, and a models.dev catalog.
+> Sections below say which parts are target design.
 
 ## Why
 
@@ -104,7 +104,12 @@ able to override them (target: in `.oxplow/project.yaml`).
   (role, provider, model, caller, tokens, latency, ok, error), so AI
   usage is itself queryable in the [semantic layer](./semantic-layer.md).
 - Tests use `oxplow_ai::testing::mock` (feature `test-support`), a local
-  axum server standing in for a provider.
+  axum server standing in for a provider. `Services::in_memory` gets
+  `MemorySecrets` and a config dir under the test project's `.oxplow/`, so
+  rpc/mcp tests never touch the real keychain or `ai.yaml`.
+- `oxplow_app::ai_service` re-exports the `oxplow-ai` types the adapters
+  need (`Role`, `ProviderConfig`, `Question`, …), so `oxplow-rpc`,
+  `oxplow-tauri-ipc` and `oxplow-mcp` depend only on `oxplow-app`.
 
 ## `ai_*` functions (target)
 
@@ -115,13 +120,27 @@ Results are **cached as facts, keyed by a hash of the input**. Lenses never
 call a model when they render; they read cached results. This keeps lenses
 fast, deterministic and cheap.
 
-MCP exposes `list_ai_roles` and `ai_decide`, so the doing-agent can ask a
-cheap model a typed question.
+## MCP (current)
 
-## Settings → AI (target)
+- `list_ai_roles`: providers (with `keySet`, never keys) and every role's
+  binding.
+- `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
+  text, on the `decide` role unless another is named.
+- `ai_summarize`: text through the `summarize` role, with an optional focus.
 
-One page answers "which model is used for what":
+Agents can't change providers, roles or keys: those IPC commands are
+UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.
 
-- providers (connect, test);
-- roles (assign a model);
-- recent calls, per role and caller.
+## Settings → AI (current)
+
+`apps/desktop/src/components/AiSection.tsx` (+ pure `aiSettingsModel.ts`),
+a section of the Settings page. IPC: `ai_settings`, `save_ai_provider`,
+`remove_ai_provider`, `set_ai_role`, `test_ai_provider`.
+
+- Providers: add or update by name (kind, base URL, key). A blank key keeps
+  the saved one. Remove is refused while a role uses the provider, and
+  deletes its key. Test makes one small call with a model you name (a
+  `decide` question for Jev); it isn't recorded in `ai_call`.
+- Roles: pick a provider and model per role; "Not assigned" clears it.
+- Recent Calls: the last 7 days of `v_ai_call` by role and caller, read
+  with `query_sql`, the same path lenses use.

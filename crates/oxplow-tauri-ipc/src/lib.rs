@@ -151,6 +151,11 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::report_open_page,
             commands::generated::list_sources,
             commands::generated::run_source,
+            commands::generated::ai_settings,
+            commands::generated::save_ai_provider,
+            commands::generated::remove_ai_provider,
+            commands::generated::set_ai_role,
+            commands::generated::test_ai_provider,
             // notes (task / thread)
             commands::generated::add_thread_note,
             commands::generated::list_thread_notes,

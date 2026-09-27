@@ -340,6 +340,13 @@ mod instance_lock_tests {
     }
 }
 
+/// Where [`ai_service::AiService`] keeps keys and `ai.yaml`: the OS keychain
+/// and global config dir in the app, stand-ins in [`Services::in_memory`].
+struct AiEnv {
+    secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+    config_dir: Option<PathBuf>,
+}
+
 /// All the long-lived services oxplow needs to serve a UI.
 ///
 /// Registered with Tauri as `tauri::State<Arc<Services>>`, so the
@@ -466,7 +473,11 @@ impl Services {
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
-        Self::build(layout, config, db)
+        let ai = AiEnv {
+            secrets: Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            config_dir: oxplow_config::global_config_dir(),
+        };
+        Self::build(layout, config, db, ai)
     }
 
     /// Shared construction core for [`Self::boot`] and
@@ -474,7 +485,12 @@ impl Services {
     /// wired here, in dependency order, exactly once. The two
     /// entrypoints differ only in how they resolve the layout,
     /// config, and `Database` handle.
-    fn build(layout: AppLayout, config: OxplowConfig, db: Database) -> Result<Self, AppInitError> {
+    fn build(
+        layout: AppLayout,
+        config: OxplowConfig,
+        db: Database,
+        ai_env: AiEnv,
+    ) -> Result<Self, AppInitError> {
         let stream_store = Arc::new(SqliteStreamStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
@@ -510,9 +526,9 @@ impl Services {
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let ai = Arc::new(ai_service::AiService::new(
             oxplow_ai::client::Client::default(),
-            Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            ai_env.secrets,
             Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
-            oxplow_config::global_config_dir(),
+            ai_env.config_dir,
         ));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
@@ -734,7 +750,12 @@ impl Services {
             state_db_path: state_dir.join("local.sqlite"),
         };
         let config = oxplow_config::load_project_config(&project_dir)?;
-        Self::build(layout, config, Database::in_memory())
+        // Tests never touch the real keychain or the user's ai.yaml.
+        let ai = AiEnv {
+            secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            config_dir: Some(state_dir.join("global-config")),
+        };
+        Self::build(layout, config, Database::in_memory(), ai)
     }
 
     /// Reload `.oxplow/project.yaml` from disk into the in-memory config, re-apply

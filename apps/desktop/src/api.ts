@@ -7,6 +7,7 @@ import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { ipcErrorMessage } from "./ipc-error.js";
 import type {
+  AiSettings,
   CommentIntent,
   CommentMessage,
   CommentStatus,
@@ -18,7 +19,10 @@ import type {
   LensRun,
   LensViz,
   NewLens,
+  ProviderConfig,
   RecentProjectView,
+  Role,
+  RoleBinding,
   SourceListing,
   SourceRunReport,
   SchemaEntity,
@@ -27,6 +31,7 @@ import type {
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
+export type { AiSettings, ProviderConfig, Role, RoleBinding };
 export type { Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -519,6 +524,33 @@ export async function listSources(): Promise<SourceListing[]> {
 /// current script first (only the UI may pass it).
 export async function runSource(extension: string, sourceId: string, approve: boolean): Promise<SourceRunReport> {
   return unwrap(await commands.runSource(extension, sourceId, approve));
+}
+
+/// Settings → AI: providers (whether each has a key, never the key) and
+/// every role's assignment. See `.context/ai-providers.md`.
+export async function aiSettings(): Promise<AiSettings> {
+  return unwrap(await commands.aiSettings());
+}
+
+/// Add or replace a provider. A non-empty `key` goes to the OS keychain;
+/// null keeps the stored one.
+export async function saveAiProvider(provider: ProviderConfig, key: string | null): Promise<AiSettings> {
+  return unwrap(await commands.saveAiProvider(provider, key));
+}
+
+/// Remove a provider and its key (refused while a role uses it).
+export async function removeAiProvider(id: string): Promise<AiSettings> {
+  return unwrap(await commands.removeAiProvider(id));
+}
+
+/// Assign a role to a provider + model, or unassign it with null.
+export async function setAiRole(role: Role, binding: RoleBinding | null): Promise<AiSettings> {
+  return unwrap(await commands.setAiRole(role, binding));
+}
+
+/// One small call to check a provider's key, URL and model; returns the reply.
+export async function testAiProvider(id: string, model: string): Promise<string> {
+  return unwrap(await commands.testAiProvider(id, model));
 }
 
 /// Save a query as a new lens file (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).

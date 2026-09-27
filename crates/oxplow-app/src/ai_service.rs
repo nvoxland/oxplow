@@ -9,8 +9,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use oxplow_ai::client::{AiError, Client, Completion, Decision, Question};
-use oxplow_ai::config::{AiConfig, ProviderConfig, Role, RoleBinding};
+use oxplow_ai::client::{AiError, Client};
+/// Re-exported so the IPC and MCP adapters need only `oxplow-app`.
+pub use oxplow_ai::client::{Answer, Completion, Decision, Question};
+use oxplow_ai::config::AiConfig;
+pub use oxplow_ai::config::{ProviderConfig, ProviderKind, Role, RoleBinding};
 use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{NewAiCall, SqliteAiCallStore};
 use parking_lot::RwLock;
@@ -25,6 +28,34 @@ pub enum AiServiceError {
     Secret(String),
     #[error(transparent)]
     Call(#[from] AiError),
+}
+
+/// A provider as the UI and agents see it: never its key.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderStatus {
+    pub id: String,
+    pub kind: ProviderKind,
+    pub base_url: Option<String>,
+    pub key_set: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleStatus {
+    pub role: Role,
+    /// `None` when the role has no model.
+    pub binding: Option<RoleBinding>,
+    /// The binding comes from the project, not the global `ai.yaml`.
+    pub overridden: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+    pub providers: Vec<ProviderStatus>,
+    /// Every role, in `Role::ALL` order.
+    pub roles: Vec<RoleStatus>,
 }
 
 pub struct AiService {
@@ -51,6 +82,158 @@ impl AiService {
             config_dir,
             overrides: RwLock::default(),
         }
+    }
+
+    /// Providers (with whether each has a key; never the key) and every
+    /// role with its binding. What Settings → AI and `list_ai_roles` show.
+    pub fn settings(&self) -> Result<AiSettings, AiServiceError> {
+        let config = self.config()?;
+        let overrides = self.overrides.read();
+        let providers = config
+            .providers
+            .iter()
+            .map(|p| {
+                Ok(ProviderStatus {
+                    id: p.id.clone(),
+                    kind: p.kind,
+                    base_url: p.base_url.clone(),
+                    key_set: self.key(&p.id)?.is_some(),
+                })
+            })
+            .collect::<Result<_, AiServiceError>>()?;
+        let roles = Role::ALL
+            .iter()
+            .map(|r| RoleStatus {
+                role: *r,
+                binding: config.roles.get(r).cloned(),
+                overridden: overrides.contains_key(r),
+            })
+            .collect();
+        Ok(AiSettings { providers, roles })
+    }
+
+    /// Add or replace a provider in the global `ai.yaml`. A non-empty `key`
+    /// is stored in the keychain; `None` leaves any stored key alone.
+    pub fn save_provider(
+        &self,
+        provider: ProviderConfig,
+        key: Option<String>,
+    ) -> Result<(), AiServiceError> {
+        let mut global = self.global()?;
+        let id = provider.id.trim().to_string();
+        let provider = ProviderConfig {
+            id: id.clone(),
+            ..provider
+        };
+        match global.providers.iter_mut().find(|p| p.id == id) {
+            Some(existing) => *existing = provider,
+            None => global.providers.push(provider),
+        }
+        self.save_global(&global)?;
+        if let Some(key) = key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+            self.secrets
+                .set(&id, key)
+                .map_err(|e| AiServiceError::Secret(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Remove a provider and its key. Refused while a role still uses it.
+    pub fn remove_provider(&self, id: &str) -> Result<(), AiServiceError> {
+        let mut global = self.global()?;
+        let users: Vec<String> = global
+            .roles
+            .iter()
+            .filter(|(_, b)| b.provider == id)
+            .map(|(r, _)| role_name(*r))
+            .collect();
+        if !users.is_empty() {
+            return Err(AiServiceError::Config(format!(
+                "`{id}` is used by {}; assign those roles elsewhere first",
+                users.join(", ")
+            )));
+        }
+        global.providers.retain(|p| p.id != id);
+        self.save_global(&global)?;
+        self.secrets
+            .delete(id)
+            .map_err(|e| AiServiceError::Secret(e.to_string()))
+    }
+
+    /// Assign a role to a provider + model in the global `ai.yaml`, or
+    /// unassign it with `None`.
+    pub fn set_role(&self, role: Role, binding: Option<RoleBinding>) -> Result<(), AiServiceError> {
+        let mut global = self.global()?;
+        match binding {
+            Some(b) => global.roles.insert(role, b),
+            None => global.roles.remove(&role),
+        };
+        self.save_global(&global)
+    }
+
+    /// Make one small call to `model` on provider `id` to check the key,
+    /// URL and model name. Returns the model's reply. Not recorded: it
+    /// isn't a role's work.
+    pub async fn test_provider(&self, id: &str, model: &str) -> Result<String, AiServiceError> {
+        let provider = self
+            .config()?
+            .providers
+            .into_iter()
+            .find(|p| p.id == id)
+            .ok_or_else(|| AiServiceError::Config(format!("no provider `{id}`")))?;
+        let key = self.key(id)?;
+        if provider.kind == ProviderKind::Typesafe {
+            let q = BTreeMap::from([(
+                "ok".to_string(),
+                Question::Noul {
+                    instructions: "Is this a connection test?".into(),
+                },
+            )]);
+            let d = self
+                .client
+                .decide(&provider, key.as_deref(), model, "A connection test.", &q)
+                .await?;
+            return Ok(match d.answers.get("ok") {
+                Some(Answer::Noul { probability }) => {
+                    format!("Answered (yes: {:.0}%)", probability * 100.0)
+                }
+                _ => "Answered".to_string(),
+            });
+        }
+        let c = self
+            .client
+            .complete(
+                &provider,
+                key.as_deref(),
+                model,
+                None,
+                "Reply with the single word OK.",
+                false,
+            )
+            .await?;
+        Ok(c.text.trim().chars().take(200).collect())
+    }
+
+    /// Summarize `text` with the `summarize` role. `instructions` say what
+    /// to focus on.
+    pub async fn summarize(
+        &self,
+        caller: &str,
+        text: &str,
+        instructions: Option<&str>,
+    ) -> Result<String, AiServiceError> {
+        let mut system = String::from(
+            "Summarize the text you're given for a software developer. Be brief and concrete; \
+             keep names, numbers and file paths exact. Reply with the summary only.",
+        );
+        if let Some(i) = instructions.map(str::trim).filter(|i| !i.is_empty()) {
+            system.push_str("\n\nFocus: ");
+            system.push_str(i);
+        }
+        let c = self
+            .complete(Role::Summarize, caller, Some(&system), text, false)
+            .await?;
+        Ok(c.text.trim().to_string())
     }
 
     /// Replace the project's role overrides.
@@ -128,11 +311,32 @@ impl AiService {
             .resolve(role)
             .map(|(p, b)| (p.clone(), b.clone()))
             .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))?;
-        let key = self
-            .secrets
-            .get(&provider.id)
-            .map_err(|e| AiServiceError::Secret(e.to_string()))?;
+        let key = self.key(&provider.id)?;
         Ok((provider, binding, key))
+    }
+
+    fn key(&self, provider_id: &str) -> Result<Option<String>, AiServiceError> {
+        self.secrets
+            .get(provider_id)
+            .map_err(|e| AiServiceError::Secret(e.to_string()))
+    }
+
+    fn config_dir(&self) -> Result<&std::path::Path, AiServiceError> {
+        self.config_dir.as_deref().ok_or_else(|| {
+            AiServiceError::Config("there's no config directory to save ai.yaml in".into())
+        })
+    }
+
+    /// The global `ai.yaml` alone, without project overrides: what the
+    /// settings writers edit.
+    fn global(&self) -> Result<AiConfig, AiServiceError> {
+        AiConfig::load(self.config_dir()?).map_err(|e| AiServiceError::Config(e.to_string()))
+    }
+
+    fn save_global(&self, config: &AiConfig) -> Result<(), AiServiceError> {
+        config
+            .save(self.config_dir()?)
+            .map_err(|e| AiServiceError::Config(e.to_string()))
     }
 
     async fn record(
@@ -174,8 +378,6 @@ fn role_name(role: Role) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_ai::client::Answer;
-    use oxplow_ai::config::ProviderKind;
     use oxplow_ai::secrets::MemorySecrets;
     use oxplow_ai::testing::mock;
     use oxplow_db::Database;
@@ -309,5 +511,172 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(d.answers["ok"], Answer::Noul { probability: 0.9 });
+    }
+
+    #[tokio::test]
+    async fn settings_list_every_role_and_whether_keys_are_set_never_the_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://x", &dir);
+        let st = svc.settings().unwrap();
+        assert_eq!(st.providers.len(), 1);
+        assert!(st.providers[0].key_set);
+        assert!(!serde_json::to_string(&st).unwrap().contains("sk-1"));
+        assert_eq!(st.roles.len(), Role::ALL.len());
+        let summarize = st.roles.iter().find(|r| r.role == Role::Summarize).unwrap();
+        assert_eq!(summarize.binding.as_ref().unwrap().model, "m");
+        assert!(st
+            .roles
+            .iter()
+            .find(|r| r.role == Role::Main)
+            .unwrap()
+            .binding
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn providers_and_roles_are_saved_to_ai_yaml_and_keys_to_the_keychain() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://x", &dir);
+        svc.save_provider(
+            ProviderConfig {
+                id: "ts".into(),
+                kind: ProviderKind::Typesafe,
+                base_url: None,
+            },
+            Some("tk-9".into()),
+        )
+        .unwrap();
+        svc.set_role(
+            Role::Decide,
+            Some(RoleBinding {
+                provider: "ts".into(),
+                model: "jev".into(),
+            }),
+        )
+        .unwrap();
+        let yaml = std::fs::read_to_string(dir.path().join("ai.yaml")).unwrap();
+        assert!(yaml.contains("jev") && !yaml.contains("tk-9"), "{yaml}");
+        assert_eq!(svc.secrets.get("ts").unwrap().as_deref(), Some("tk-9"));
+
+        // Saving again without a key keeps the stored one.
+        svc.save_provider(
+            ProviderConfig {
+                id: "ts".into(),
+                kind: ProviderKind::Typesafe,
+                base_url: Some("http://y".into()),
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(svc.secrets.get("ts").unwrap().as_deref(), Some("tk-9"));
+        assert_eq!(svc.settings().unwrap().providers.len(), 2);
+
+        // A provider in use can't be removed; once unassigned, it and its key go.
+        let err = svc.remove_provider("ts").unwrap_err();
+        assert!(err.to_string().contains("decide"), "{err}");
+        svc.set_role(Role::Decide, None).unwrap();
+        svc.remove_provider("ts").unwrap();
+        assert_eq!(svc.secrets.get("ts").unwrap(), None);
+        assert_eq!(svc.settings().unwrap().providers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn invalid_settings_are_refused_and_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://x", &dir);
+        let err = svc
+            .set_role(
+                Role::Main,
+                Some(RoleBinding {
+                    provider: "nope".into(),
+                    model: "m".into(),
+                }),
+            )
+            .unwrap_err();
+        assert!(matches!(err, AiServiceError::Config(_)), "{err:?}");
+        assert!(svc
+            .settings()
+            .unwrap()
+            .roles
+            .iter()
+            .all(|r| r.role != Role::Main || r.binding.is_none()));
+    }
+
+    #[tokio::test]
+    async fn testing_a_provider_makes_one_unrecorded_call() {
+        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, db) = service(&base, &dir);
+        assert_eq!(
+            svc.test_provider("or", "other-model").await.unwrap(),
+            "hello"
+        );
+        assert_eq!(seen.lock().unwrap()[0].2["model"], "other-model");
+        assert_eq!(recorded(&db).await, json!([]));
+        assert!(svc.test_provider("missing", "m").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn overridden_roles_are_marked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://x", &dir);
+        svc.set_overrides(BTreeMap::from([(
+            Role::Fast,
+            RoleBinding {
+                provider: "or".into(),
+                model: "small".into(),
+            },
+        )]));
+        let st = svc.settings().unwrap();
+        let fast = st.roles.iter().find(|r| r.role == Role::Fast).unwrap();
+        assert!(fast.overridden);
+        assert_eq!(fast.binding.as_ref().unwrap().model, "small");
+    }
+
+    #[tokio::test]
+    async fn testing_a_jev_provider_asks_a_typed_question() {
+        let (base, _) = mock(
+            "/v1/systemone",
+            200,
+            json!({"answers": {"ok": {"type": "noul", "noul": 0.93}}, "usage": {"input_tokens": 3, "output_tokens": 0}}),
+        )
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _) = service("http://x", &dir);
+        svc.save_provider(
+            ProviderConfig {
+                id: "ts".into(),
+                kind: ProviderKind::Typesafe,
+                base_url: Some(base),
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            svc.test_provider("ts", "jev").await.unwrap(),
+            "Answered (yes: 93%)"
+        );
+    }
+
+    #[tokio::test]
+    async fn summarize_uses_the_summarize_role_with_instructions() {
+        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, db) = service(&base, &dir);
+        let out = svc
+            .summarize("mcp:ai_summarize", "long text", Some("focus on risks"))
+            .await
+            .unwrap();
+        assert_eq!(out, "hello");
+        let body = seen.lock().unwrap()[0].2.clone();
+        let messages = body["messages"].to_string();
+        assert!(
+            messages.contains("long text") && messages.contains("focus on risks"),
+            "{messages}"
+        );
+        assert_eq!(
+            recorded(&db).await,
+            json!([["summarize", "mcp:ai_summarize", 1, 0, 10]])
+        );
     }
 }

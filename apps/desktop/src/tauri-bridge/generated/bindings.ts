@@ -385,6 +385,35 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	aiSettings: () => typedError<AiSettings, IpcError>(__TAURI_INVOKE("ai_settings")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	saveAiProvider: (provider: ProviderConfig, key: string | null) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("save_ai_provider", { provider, key })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	removeAiProvider: (id: string) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("remove_ai_provider", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	setAiRole: (role: Role, binding: {
+	// A provider `id`.
+	provider: string,
+	model: string,
+} | null) => typedError<AiSettings, IpcError>(__TAURI_INVOKE("set_ai_role", { role, binding })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	testAiProvider: (id: string, model: string) => typedError<string, IpcError>(__TAURI_INVOKE("test_ai_provider", { id, model })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1455,6 +1484,12 @@ export type AgentTurnId = string;
 export type AheadBehind = {
 	ahead: number,
 	behind: number,
+};
+
+export type AiSettings = {
+	providers: ProviderStatus[],
+	// Every role, in `Role::ALL` order.
+	roles: RoleStatus[],
 };
 
 /**
@@ -3335,6 +3370,38 @@ export type PluginConfig = {
 	args?: string[],
 };
 
+export type ProviderConfig = {
+	/**
+	 *  Your name for it, e.g. `anthropic` or `local-ollama`. Also the
+	 *  keychain entry name for its key.
+	 */
+	id: string,
+	kind: ProviderKind,
+	// Required for `openai-compatible`; optional override for others.
+	baseUrl?: string | null,
+};
+
+// Kinds of provider oxplow can talk to.
+export type ProviderKind = 
+// Anthropic Messages API.
+"anthropic" | 
+// OpenAI Chat Completions.
+"openai" | 
+// OpenRouter (OpenAI-compatible, one key for many models).
+"openrouter" | 
+// Any OpenAI-compatible server (Ollama, LM Studio, vLLM, LiteLLM); needs `base_url`.
+"openai-compatible" | 
+// TypeSafe (Jev decision model).
+"typesafe";
+
+// A provider as the UI and agents see it: never its key.
+export type ProviderStatus = {
+	id: string,
+	kind: ProviderKind,
+	baseUrl: string | null,
+	keySet: boolean,
+};
+
 // A recent-projects row plus a freshness flag for the UI.
 export type RecentProjectView = {
 	path: string,
@@ -3411,6 +3478,26 @@ export type RepoConflictState = {
 export type ReportConfig = {
 	path: string,
 	format: string,
+};
+
+/**
+ *  Jobs oxplow gives models. Extensions and features refer to roles,
+ *  never to models.
+ */
+export type Role = "main" | "fast" | "summarize" | "embed" | "decide" | "review";
+
+export type RoleBinding = {
+	// A provider `id`.
+	provider: string,
+	model: string,
+};
+
+export type RoleStatus = {
+	role: Role,
+	// `None` when the role has no model.
+	binding: RoleBinding | null,
+	// The binding comes from the project, not the global `ai.yaml`.
+	overridden: boolean,
 };
 
 // One row of a by-dimension rollup (the metric's "breakdown" card).

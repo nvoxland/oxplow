@@ -910,6 +910,37 @@ pub struct RecordClaimParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiQuestionParam {
+    /// `noul` (yes/no: returns the probability of yes), `choice` (pick one
+    /// of `options`) or `score` (place it on the ordered `levels`).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The question, e.g. "Does this change alter public behavior?".
+    pub instructions: String,
+    /// For `choice`: the options.
+    pub options: Option<Vec<String>>,
+    /// For `score`: the levels, lowest first.
+    pub levels: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiDecideParams {
+    /// What the questions are about: a diff, a description, some text.
+    pub state: String,
+    /// Questions by a short name you choose (e.g. `risky`).
+    pub questions: std::collections::BTreeMap<String, AiQuestionParam>,
+    /// Role to use; defaults to `decide`.
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AiSummarizeParams {
+    pub text: String,
+    /// What to focus on, e.g. "risks" or "what changed for users".
+    pub focus: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunSourceParams {
     /// Extension folder name under `oxplow/extensions/`.
     pub extension: String,
@@ -1328,6 +1359,92 @@ impl OxplowMcp {
             oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
         })?;
         json_result(&report)
+    }
+
+    #[tool(
+        description = "List oxplow's AI roles (main, fast, summarize, embed, decide, review): \
+                       which provider and model each uses, or none, plus the configured \
+                       providers and whether each has a key. Keys are never shown. The person \
+                       manages these in Settings → AI."
+    )]
+    async fn list_ai_roles(&self) -> Result<CallToolResult, McpError> {
+        json_result(&self.services.ai.settings().map_err(ai_error)?)
+    }
+
+    #[tool(
+        description = "Ask a model a typed question about some text, cheaply: yes/no (`noul`, \
+                       returns the probability of yes), `choice` among options, or `score` on \
+                       ordered levels, each with probabilities. Uses the `decide` role (e.g. \
+                       TypeSafe Jev) unless you name another. Good for second opinions like \
+                       \"is this diff risky?\". Fails if the role has no model; the person \
+                       assigns one in Settings → AI."
+    )]
+    async fn ai_decide(
+        &self,
+        params: Parameters<AiDecideParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::ai_service::{Question, Role};
+        let p = params.0;
+        let role: Role = match p.role.as_deref() {
+            None => Role::Decide,
+            Some(r) => serde_json::from_value(serde_json::json!(r)).map_err(|_| {
+                McpError::invalid_params(
+                    format!("unknown role `{r}` (main, fast, summarize, embed, decide, review)"),
+                    None,
+                )
+            })?,
+        };
+        let mut questions = std::collections::BTreeMap::new();
+        for (name, q) in p.questions {
+            let bad = |m: &str| McpError::invalid_params(format!("question `{name}`: {m}"), None);
+            let question = match q.kind.as_str() {
+                "noul" => Question::Noul {
+                    instructions: q.instructions,
+                },
+                "choice" => Question::Choice {
+                    instructions: q.instructions,
+                    options: q
+                        .options
+                        .filter(|o| !o.is_empty())
+                        .ok_or_else(|| bad("a choice needs options"))?,
+                },
+                "score" => Question::Score {
+                    instructions: q.instructions,
+                    levels: q
+                        .levels
+                        .filter(|l| !l.is_empty())
+                        .ok_or_else(|| bad("a score needs levels"))?,
+                },
+                other => return Err(bad(&format!("type `{other}` isn't noul, choice or score"))),
+            };
+            questions.insert(name, question);
+        }
+        let decision = self
+            .services
+            .ai
+            .decide(role, "mcp:ai_decide", &p.state, &questions)
+            .await
+            .map_err(ai_error)?;
+        json_result(&decision)
+    }
+
+    #[tool(
+        description = "Summarize text with oxplow's `summarize` role (a model the person \
+                       configured in Settings → AI), optionally with a focus. Useful for long \
+                       logs or documents you don't need verbatim."
+    )]
+    async fn ai_summarize(
+        &self,
+        params: Parameters<AiSummarizeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let summary = self
+            .services
+            .ai
+            .summarize("mcp:ai_summarize", &p.text, p.focus.as_deref())
+            .await
+            .map_err(ai_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(summary)]))
     }
 
     #[tool(
@@ -5102,6 +5219,7 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
     "list_sources",
+    "list_ai_roles",
     "get_open_page",
     "list_extensions",
     "list_lenses",
@@ -5174,6 +5292,9 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    // Call an outside model provider and record an `ai_call` row.
+    "ai_decide",
+    "ai_summarize",
     "record_decision",
     "record_claim",
     "run_source",
@@ -5305,6 +5426,15 @@ pub fn registered_tool_names() -> Vec<String> {
         .into_iter()
         .map(|t| t.name.into_owned())
         .collect()
+}
+
+/// AI failures the agent can act on (no model assigned, bad key, provider
+/// error) are invalid-params with the explanation; keychain trouble is internal.
+fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
+    match e {
+        oxplow_app::ai_service::AiServiceError::Secret(_) => internal(e),
+        _ => McpError::invalid_params(e.to_string(), None),
+    }
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
@@ -8484,5 +8614,119 @@ mod tests {
             }))
             .await;
         assert!(result.is_err(), "a malformed dashboard id must be rejected");
+    }
+
+    /// Point the in-memory services' `role` at a mock provider at `base`.
+    fn assign_mock_role(services: &Services, base: String, role: &str) {
+        use oxplow_app::ai_service::{ProviderConfig, ProviderKind, Role, RoleBinding};
+        services
+            .ai
+            .save_provider(
+                ProviderConfig {
+                    id: "mock".into(),
+                    kind: ProviderKind::OpenaiCompatible,
+                    base_url: Some(base),
+                },
+                None,
+            )
+            .unwrap();
+        let role: Role = serde_json::from_value(serde_json::json!(role)).unwrap();
+        services
+            .ai
+            .set_role(
+                role,
+                Some(RoleBinding {
+                    provider: "mock".into(),
+                    model: "m".into(),
+                }),
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ai_tools_list_roles_decide_and_summarize() {
+        let (_proj, services, server) = boot();
+        let roles: serde_json::Value =
+            serde_json::from_str(&text_payload(server.list_ai_roles().await.unwrap())).unwrap();
+        assert_eq!(roles["roles"].as_array().unwrap().len(), 6);
+        assert_eq!(roles["roles"][0]["binding"], serde_json::Value::Null);
+
+        // Unassigned role: a clear error, not a crash.
+        let err = server
+            .ai_summarize(Parameters(AiSummarizeParams {
+                text: "t".into(),
+                focus: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("summarize"), "{}", err.message);
+
+        let answer = serde_json::json!({"answers": {"risky": {"type": "choice", "choice": "yes", "probabilities": {"yes": 0.7, "no": 0.3}}}});
+        let (base, seen) = oxplow_ai::testing::mock(
+            "/chat/completions",
+            200,
+            serde_json::json!({"choices": [{"message": {"content": answer.to_string()}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+        )
+        .await;
+        assign_mock_role(&services, base.clone(), "decide");
+        let out: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .ai_decide(Parameters(AiDecideParams {
+                    state: "a diff".into(),
+                    questions: std::collections::BTreeMap::from([(
+                        "risky".to_string(),
+                        AiQuestionParam {
+                            kind: "choice".into(),
+                            instructions: "Is it risky?".into(),
+                            options: Some(vec!["yes".into(), "no".into()]),
+                            levels: None,
+                        },
+                    )]),
+                    role: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(out["answers"]["risky"]["choice"], "yes");
+        assert!(seen.lock().unwrap()[0].2["messages"]
+            .to_string()
+            .contains("Is it risky?"));
+
+        let err = server
+            .ai_decide(Parameters(AiDecideParams {
+                state: "s".into(),
+                questions: std::collections::BTreeMap::from([(
+                    "x".to_string(),
+                    AiQuestionParam {
+                        kind: "maybe".into(),
+                        instructions: "?".into(),
+                        options: None,
+                        levels: None,
+                    },
+                )]),
+                role: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("maybe"), "{}", err.message);
+
+        let (base, _) = oxplow_ai::testing::mock(
+            "/chat/completions",
+            200,
+            serde_json::json!({"choices": [{"message": {"content": " short "}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+        )
+        .await;
+        assign_mock_role(&services, base, "summarize");
+        let out = text_payload(
+            server
+                .ai_summarize(Parameters(AiSummarizeParams {
+                    text: "long".into(),
+                    focus: Some("risks".into()),
+                }))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(out, "short");
     }
 }
