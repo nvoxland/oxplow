@@ -168,7 +168,7 @@ never the physical tables, which stay internal and free to change.
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` is the effort whose ledger claims `run:<id>` (kind `run`), else the capture's own. A run that only reported counts (MCP `record_test_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A `DiagnosticsChanged` event goes out at most every 500 ms per stream, from the first change, so a server that publishes continuously can't starve it |
 
-Still target: the rest of the shipped-sources table above.
+Still target: the rest of the shipped-sources table above (tsk327).
 
 **Column docs live in code, not here.** `CATALOG` in
 `crates/oxplow-db/src/semantic_layer.rs` documents every column, and
@@ -181,8 +181,8 @@ changing a view means:
 3. noting the change here if it breaks readers (removed or renamed
    columns).
 
-An extension entity `<entity>` owned by extension `<ext>` will be exposed
-as `v_<ext>_<entity>` (target).
+An extension entity `<entity>` owned by extension `<ext>` is exposed as
+`v_<ext>_<entity>` (see "User and extension sources").
 
 ### Querying (current)
 
