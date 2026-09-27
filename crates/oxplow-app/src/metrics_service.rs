@@ -184,6 +184,7 @@ struct ExtensionCatalog {
     measures: Vec<oxplow_config::ExtensionLayer<oxplow_config::MeasureEntry>>,
     metrics: Vec<oxplow_config::ExtensionLayer<oxplow_config::MetricEntry>>,
     gauges: Vec<oxplow_config::ExtensionLayer<oxplow_config::GaugeEntry>>,
+    dimensions: Vec<oxplow_config::ExtensionLayer<oxplow_config::DimensionEntry>>,
 }
 
 impl MetricsService {
@@ -292,6 +293,9 @@ impl MetricsService {
             }
             if !e.gauges.is_empty() {
                 out.gauges.push((e.name.clone(), e.gauges));
+            }
+            if !e.dimensions.is_empty() {
+                out.dimensions.push((e.name.clone(), e.dimensions));
             }
         }
         out
@@ -407,7 +411,20 @@ impl MetricsService {
             }
         }
         let mut d = 0;
-        for rd in resolve_dimensions(&global_dims, &project_dims) {
+        let resolved_dims = resolve_dimensions(&global_dims, &ext.dimensions, &project_dims);
+        // A disabled or removed extension's dimensions leave the catalog.
+        let keep_ext_dims: Vec<String> = resolved_dims
+            .iter()
+            .filter(|d| oxplow_config::scope_extension(&d.scope).is_some())
+            .map(|d| d.key.clone())
+            .collect();
+        if let Err(e) = facts
+            .delete_extension_dimensions_not_in(keep_ext_dims)
+            .await
+        {
+            tracing::warn!(error = %e, "seed: extension dimension reconciliation failed");
+        }
+        for rd in resolved_dims {
             let vocabulary_json = (!rd.vocabulary.is_empty())
                 .then(|| serde_json::to_string(&rd.vocabulary).ok())
                 .flatten();
@@ -4625,6 +4642,55 @@ def transform(input):
             .run_metric_by_key("acme.todo_scan", None)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn an_extension_contributes_dimensions_that_slice_its_entity_metrics() {
+        let (svc, dir) = fixture().await;
+        let ext = dir.path().join("oxplow/extensions/acme");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: acme\n\
+             dimensions:\n  - { key: acme.status, label: Status, entity: v_task, expr: e.status }\n\
+             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_task }\n",
+        )
+        .unwrap();
+        svc.metrics.seed_catalog().await;
+        let dims = svc.fact_store.list_dimensions().await.unwrap();
+        let d = dims
+            .iter()
+            .find(|d| d.key == "acme.status")
+            .expect("seeded");
+        assert_eq!(d.scope, "extension:acme");
+        let spec = svc
+            .fact_store
+            .get_spec("acme.tasks")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            spec.sliceable_dims_json
+                .unwrap_or_default()
+                .contains("acme.status"),
+            "an extension entity metric picks up its entity dimension"
+        );
+        // Disabling the extension removes its dimension too.
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "extensions:\n  disabled: [acme]\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        assert!(!svc
+            .fact_store
+            .list_dimensions()
+            .await
+            .unwrap()
+            .iter()
+            .any(|d| d.key == "acme.status"));
     }
 
     #[tokio::test]

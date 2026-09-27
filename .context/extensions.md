@@ -29,7 +29,9 @@ the bundled `oxplow-analytics` example extension.
 >     it disabled (checked headless, 2026-09-27).
 >   - lens alerts and the `rail` slot (tsk316), and extension-declared
 >     measures, metrics and gauges (tsk311; see "Contributing metrics").
-> - **Target:** extension dimensions and declarative actions (tsk278).
+> - **Current:** extension-declared dimensions (tsk328).
+> - **Target:** declarative lens actions (tsk329) and the `settings` slot
+>   (tsk330).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -348,7 +350,7 @@ mounted, the page is plain.
 
 ## Contributing metrics (current)
 
-`extension.yaml` takes `measures:`, `metrics:` and `gauges:` in the
+`extension.yaml` takes `measures:`, `metrics:`, `gauges:` and `dimensions:` in the
 `.oxplow/project.yaml` schema, checked with the same
 `oxplow_config::validate_*` functions, plus:
 
@@ -356,8 +358,16 @@ mounted, the page is plain.
 - Entity metrics (`entity:` + `where` / `time` / `value`, tsk322) work
   here too, usually over the extension's own source views. Their fragments
   are checked at seed time, so one over a view whose source hasn't synced
-  yet stays out of the catalog until the next reseed. An extension can't
-  declare dimensions yet (tsk278).
+  yet stays out of the catalog until the next reseed.
+- Dimensions (tsk328), fact or entity (`entity` / `expr` / `join`), layer
+  like metrics (`resolve_dimensions` takes an `extensions` layer) and slice
+  an extension's entity metrics over the same view. They are stored as
+  `scope = 'global'` plus the `extension` column (V89).
+  - `promote` is refused: toggling the extension would rebuild the
+    metric cube each time, so promoting stays a project decision.
+  - A disabled or removed extension's dimensions are deleted
+    (`delete_extension_dimensions_not_in`, never a promoted one). Facts
+    don't reference dimension rows, so nothing else is lost.
 - Gauges run `starlark` / `jaq` only. `exec` is refused: nothing from an
   extension runs a program without the user's approval, which is what
   (approved) sources are for. `entryFile` must exist in the extension.

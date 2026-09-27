@@ -145,8 +145,8 @@ file or pick up a task before editing, and list the files in
 
 ## Contributing metrics
 
-An extension can add to the metric catalog with `measures:`, `metrics:`
-and `gauges:` in `extension.yaml`, in exactly the `.oxplow/project.yaml`
+An extension can add to the metric catalog with `measures:`, `metrics:`,
+`gauges:` and `dimensions:` in `extension.yaml`, in exactly the `.oxplow/project.yaml`
 schema (the `oxplow-metrics` skill and `/oxplow:new-metric` cover it).
 
 ```yaml
@@ -169,6 +169,10 @@ gauges:
   extension.
 - Disabling the extension drops its metrics from the catalog; its
   measures and their history stay.
+- `dimensions:` work the same, including entity dimensions
+  (`{ key: acme.team, entity: v_acme_issue, expr: e.team }`), which
+  slice entity metrics over the same view. `promote:` isn't allowed in an
+  extension.
 
 ## Bringing in outside data (sources)
 

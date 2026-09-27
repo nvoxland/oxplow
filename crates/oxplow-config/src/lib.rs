@@ -2648,7 +2648,7 @@ pub fn validate_measures(raw: Option<Vec<MeasureEntry>>) -> Result<Vec<MeasureEn
 
 /// Validate the top-level `dimensions:` block. Mirrors [`validate_measures`]:
 /// namespaced keys, `oxplow.*` reserved, per-key uniqueness, known valueType.
-fn validate_dimensions(
+pub fn validate_dimensions(
     raw: Option<Vec<DimensionEntry>>,
 ) -> Result<Vec<DimensionEntry>, ConfigError> {
     let opt = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
@@ -2765,11 +2765,12 @@ pub fn resolve_measures(
 /// global), analogous to [`resolve_measures`].
 pub fn resolve_dimensions(
     global: &[DimensionEntry],
+    extensions: &[ExtensionLayer<DimensionEntry>],
     project: &[DimensionEntry],
 ) -> Vec<ResolvedDimension> {
     let mut out: Vec<ResolvedDimension> = Vec::new();
     let mut pos: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for (scope, entries) in [("global", global), ("project", project)] {
+    for (scope, entries) in scoped_layers(&[], global, extensions, project) {
         for e in entries {
             let Some(key) = e.key.as_deref() else {
                 continue;
@@ -3105,7 +3106,7 @@ dimensions:
         );
         assert_eq!(resolved[1].entity.as_ref().unwrap().aggregation, "median");
         let dims = validate_dimensions(doc.dimensions).unwrap();
-        let rd = resolve_dimensions(&[], &dims);
+        let rd = resolve_dimensions(&[], &[], &dims);
         assert_eq!(
             rd[0].entity,
             Some(EntityDimensionSpec {
@@ -4622,7 +4623,7 @@ dimensions:
             promote: true,
             ..Default::default()
         }];
-        let resolved = resolve_dimensions(&global, &project);
+        let resolved = resolve_dimensions(&global, &[], &project);
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].label, "License", "project wins");
         assert_eq!(resolved[0].scope, "project");

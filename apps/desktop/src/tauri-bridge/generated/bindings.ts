@@ -1942,6 +1942,11 @@ export type Extension = {
 	measures: MeasureEntry[],
 	metrics: MetricEntry[],
 	gauges: GaugeEntry[],
+	/**
+	 *  Dimensions it contributes (fact or entity), never promoted: an
+	 *  extension toggling would rebuild the metric cube each time.
+	 */
+	dimensions: DimensionEntry[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.

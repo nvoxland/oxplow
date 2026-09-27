@@ -201,8 +201,8 @@ impl NewDimension {
     }
 }
 
-const DIM_COLS: &str =
-    "key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json";
+const DIM_COLS: &str = "key, label, value_type, subject_kind, vocabulary_json, scope, promoted, \
+     entity_json, extension";
 
 fn row_to_dimension(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dimension> {
     Ok(Dimension {
@@ -211,7 +211,7 @@ fn row_to_dimension(row: &rusqlite::Row<'_>) -> rusqlite::Result<Dimension> {
         value_type: row.get(2)?,
         subject_kind: row.get(3)?,
         vocabulary_json: row.get(4)?,
-        scope: row.get(5)?,
+        scope: read_scope(row.get(5)?, row.get(8)?),
         promoted: row.get::<_, i64>(6)? != 0,
         entity_json: row.get(7)?,
     })
@@ -1043,6 +1043,7 @@ impl SqliteFactStore {
     pub async fn upsert_dimension(&self, d: NewDimension) -> Result<(), DomainError> {
         self.db
             .call_mut(move |conn| {
+                let (scope, extension) = stored_scope(&d.scope);
                 let tx = conn.transaction().map_err(map_sql_err)?;
                 let prior: Option<bool> = tx
                     .query_row(
@@ -1053,14 +1054,15 @@ impl SqliteFactStore {
                     .optional()
                     .map_err(map_sql_err)?;
                 tx.execute(
-                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    "INSERT INTO dimension (key, label, value_type, subject_kind, vocabulary_json, scope, promoted, entity_json, extension)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                      ON CONFLICT(key) DO UPDATE SET
                         label=excluded.label, value_type=excluded.value_type,
                         subject_kind=excluded.subject_kind,
                         vocabulary_json=excluded.vocabulary_json, scope=excluded.scope,
-                        promoted=excluded.promoted, entity_json=excluded.entity_json",
-                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, d.scope, d.promoted, d.entity_json],
+                        promoted=excluded.promoted, entity_json=excluded.entity_json,
+                        extension=excluded.extension",
+                    params![d.key, d.label, d.value_type, d.subject_kind, d.vocabulary_json, scope, d.promoted, d.entity_json, extension],
                 )
                 .map_err(map_sql_err)?;
                 let grain_changed = match prior {
@@ -2025,6 +2027,33 @@ impl SqliteFactStore {
                 let sql = format!(
                     "DELETE FROM metric_spec
                       WHERE extension IS NOT NULL AND key NOT IN ({placeholders})"
+                );
+                let n = conn.execute(&sql, rusqlite::params_from_iter(keep.iter()))?;
+                Ok(n as u64)
+            })
+            .await
+    }
+
+    /// Delete extension-declared dimensions whose key is not in `keep` — a
+    /// disabled or removed extension's. Extension dimensions are never
+    /// promoted, so this never touches the cube's grain.
+    pub async fn delete_extension_dimensions_not_in(
+        &self,
+        keep: Vec<String>,
+    ) -> Result<u64, DomainError> {
+        self.db
+            .call(move |conn| {
+                if keep.is_empty() {
+                    let n = conn.execute(
+                        "DELETE FROM dimension WHERE extension IS NOT NULL AND promoted = 0",
+                        [],
+                    )?;
+                    return Ok(n as u64);
+                }
+                let placeholders = vec!["?"; keep.len()].join(", ");
+                let sql = format!(
+                    "DELETE FROM dimension
+                      WHERE extension IS NOT NULL AND promoted = 0 AND key NOT IN ({placeholders})"
                 );
                 let n = conn.execute(&sql, rusqlite::params_from_iter(keep.iter()))?;
                 Ok(n as u64)

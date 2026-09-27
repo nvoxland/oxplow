@@ -443,9 +443,9 @@ Deleted / skipped tests and removed assertions are `v_change_function`
 oxplow-review Tests Weakened lens. Missing co-change is
 `v_change_co_change`.
 
-**Still target:** network enforcement off macOS; `dimensions` declared
-by extensions (entity metrics from extensions are current, see
-extensions.md); AI-role columns.
+**Still target:** network enforcement off macOS; AI-role columns.
+(Extension-declared metrics and dimensions, fact and entity, are current:
+see extensions.md.)
 
 ## Relation to other docs
 

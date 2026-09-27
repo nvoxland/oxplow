@@ -351,6 +351,8 @@ struct ExtensionFile {
     metrics: Option<serde_yaml::Value>,
     #[serde(default)]
     gauges: Option<serde_yaml::Value>,
+    #[serde(default)]
+    dimensions: Option<serde_yaml::Value>,
 }
 
 /// When core runs an advisory.
@@ -506,6 +508,9 @@ pub struct Extension {
     pub measures: Vec<oxplow_config::MeasureEntry>,
     pub metrics: Vec<oxplow_config::MetricEntry>,
     pub gauges: Vec<oxplow_config::GaugeEntry>,
+    /// Dimensions it contributes (fact or entity), never promoted: an
+    /// extension toggling would rebuild the metric cube each time.
+    pub dimensions: Vec<oxplow_config::DimensionEntry>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -664,6 +669,7 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         enabled: true,
         advisories: Vec::new(),
         measures: Vec::new(),
+        dimensions: Vec::new(),
         metrics: Vec::new(),
         gauges: Vec::new(),
     }
@@ -726,6 +732,23 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 .and_then(|v| oxplow_config::validate_measures(v).map_err(|e| e.to_string()))
             {
                 Ok(v) => ext.measures = v,
+                Err(e) => ext.errors.push(err(e)),
+            }
+            match parse_block(m.dimensions)
+                .and_then(|v| oxplow_config::validate_dimensions(v).map_err(|e| e.to_string()))
+            {
+                Ok(v) => {
+                    for d in v {
+                        if d.promote {
+                            ext.errors.push(err(format!(
+                                "dimension `{}`: `promote` belongs in .oxplow/project.yaml (it rebuilds the metric cube)",
+                                d.key.clone().unwrap_or_default()
+                            )));
+                        } else {
+                            ext.dimensions.push(d);
+                        }
+                    }
+                }
                 Err(e) => ext.errors.push(err(e)),
             }
             match parse_block(m.metrics)
@@ -953,6 +976,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.sources.clear();
         ext.advisories.clear();
         ext.measures.clear();
+        ext.dimensions.clear();
         ext.metrics.clear();
         ext.gauges.clear();
     }
@@ -2228,6 +2252,32 @@ empty: No tasks.
                 ext.errors
             );
         }
+    }
+
+    #[test]
+    fn extensions_declare_dimensions_but_not_promoted_ones() {
+        let manifest = [
+            "dimensions:",
+            "  - { key: acme.team, label: Team }",
+            "  - { key: acme.prio, entity: v_task, expr: e.priority }",
+            "  - { key: acme.hot, promote: true }",
+            "",
+        ]
+        .join("\n");
+        let (_d, ext) = load_x(&[], &manifest);
+        let keys: Vec<_> = ext
+            .dimensions
+            .iter()
+            .filter_map(|d| d.key.clone())
+            .collect();
+        assert_eq!(keys, vec!["acme.team", "acme.prio"], "{:?}", ext.errors);
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("acme.hot") && e.contains("promote")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     #[test]
