@@ -48,7 +48,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
     setError(null);
     try {
       const result = await querySql(query, [], null);
-      setRun({ lens: adHocLens(query, as), params: {}, result });
+      setRun({ lens: adHocLens(query, as), params: {}, result, alert: null });
     } catch (e) {
       setRun(null);
       setError(e instanceof Error ? e.message : String(e));

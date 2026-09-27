@@ -33,3 +33,4 @@ columns:
   - { key: thread, label: Thread }
   - { key: since, label: Since }
 empty: Nothing is waiting on you.
+alert: { min_rows: 1, label: Waiting on you }

@@ -21,6 +21,7 @@ const base: Lens = {
   launcherCategory: null,
   hidden: false,
   copy: false,
+  alert: null,
   path: "",
 };
 const chart = { x: null, y: null, series: null, label: null, size: null, group: null };

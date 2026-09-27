@@ -4,7 +4,7 @@
  * entries for loaded lenses. React-free so it's unit-tested directly.
  * See `.context/extensions.md`.
  */
-import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, Lens, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { DISK, refVersion, snapshotVersion, type FileVersion } from "../file-version.js";
@@ -246,6 +246,7 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     launcherCategory: null,
     hidden: false,
     copy: false,
+    alert: null,
     path: "",
   };
 }
@@ -370,4 +371,14 @@ export function childParams(child: Lens, params: Record<string, SqlCell>): Recor
     if (p.name in params) out[p.name] = params[p.name] ?? null;
   }
   return out;
+}
+
+/** The rail badges: each mounted rail lens whose alert fires, with the
+ *  alert's message. Lenses that failed to run, or have no alert, drop out. */
+export function firingAlerts(
+  runs: { id: string; run: LensRun | null }[],
+): { id: string; title: string; message: string }[] {
+  return runs.flatMap(({ id, run }) =>
+    run?.alert?.firing ? [{ id, title: run.lens.title, message: run.alert.message }] : [],
+  );
 }

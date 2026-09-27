@@ -75,6 +75,25 @@ heading; `hidden: true` leaves it out (for lenses only a slot shows).
 `copy: true` on a `markdown` lens adds a Copy button, handy for a lens
 that builds a prompt you paste somewhere else.
 
+### Alerts
+
+A lens can say when it needs your attention:
+
+```yaml
+alert: { min_rows: 1, label: Waiting on you }   # any rows at all
+# or
+alert: { column: pct, below: 80, label: Coverage low }   # the first row's value
+```
+
+Mount it in the `rail` slot and it shows under **Alerts** in the rail
+while it fires; click it to open the lens. Agents see the same alert
+state when they run the lens.
+
+```yaml
+slots:
+  - { slot: rail, lens: waiting-on-me }
+```
+
 ### Showing a lens on a core page
 
 `slots:` in `extension.yaml` mounts a lens into a page. The lens gets the

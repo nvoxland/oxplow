@@ -45,6 +45,121 @@ pub enum LensViz {
     Grid,
 }
 
+/// When a lens needs attention: its row count reaches `min_rows`, or the
+/// first row's `column` goes `above` / `below` a threshold. Shown as a rail
+/// badge when the lens is mounted in the `rail` slot.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensAlert {
+    pub min_rows: Option<i64>,
+    pub column: Option<String>,
+    pub above: Option<f64>,
+    pub below: Option<f64>,
+    /// Badge text; else the row count or the column's name.
+    pub label: Option<String>,
+}
+
+/// `alert:` as written in a lens file (snake_case keys).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AlertFile {
+    min_rows: Option<i64>,
+    column: Option<String>,
+    above: Option<f64>,
+    below: Option<f64>,
+    label: Option<String>,
+}
+
+impl AlertFile {
+    fn into_alert(self) -> Result<LensAlert, String> {
+        match (&self.min_rows, &self.column) {
+            (Some(_), Some(_)) => {
+                return Err("`alert` takes `min_rows` or `column`, not both".into())
+            }
+            (None, None) => return Err("`alert` needs `min_rows` or `column`".into()),
+            (Some(n), None) if *n < 1 => return Err("`alert.min_rows` must be at least 1".into()),
+            (None, Some(_)) if self.above.is_none() && self.below.is_none() => {
+                return Err("`alert.column` needs `above` or `below`".into())
+            }
+            _ => {}
+        }
+        Ok(LensAlert {
+            min_rows: self.min_rows,
+            column: self.column,
+            above: self.above,
+            below: self.below,
+            label: self.label,
+        })
+    }
+}
+
+/// A lens's alert, evaluated on one run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertState {
+    pub firing: bool,
+    /// Rows the run returned.
+    pub count: i64,
+    /// The watched column's value, for a threshold alert.
+    pub value: Option<f64>,
+    /// What the badge says, e.g. `3 rows` or `Coverage low: 72`.
+    pub message: String,
+}
+
+fn cell_number(c: &SqlCell) -> Option<f64> {
+    match c {
+        SqlCell::Int(i) => Some(*i as f64),
+        SqlCell::Real(r) => Some(*r),
+        SqlCell::Text(t) => t.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn fmt_number(v: f64) -> String {
+    if v.fract() == 0.0 && v.abs() < 1e15 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v:.2}")
+    }
+}
+
+/// Evaluate `alert` against a run's result.
+fn evaluate_alert(alert: &LensAlert, result: &SqlQueryResult) -> AlertState {
+    let count = result.rows.len() as i64;
+    if let Some(min) = alert.min_rows {
+        let message = match &alert.label {
+            Some(l) => format!("{l}: {count}"),
+            None => format!("{count} {}", if count == 1 { "row" } else { "rows" }),
+        };
+        return AlertState {
+            firing: count >= min,
+            count,
+            value: None,
+            message,
+        };
+    }
+    let column = alert.column.clone().unwrap_or_default();
+    let value = result
+        .columns
+        .iter()
+        .position(|c| *c == column)
+        .and_then(|i| result.rows.first().and_then(|r| r.get(i)))
+        .and_then(cell_number);
+    let firing = value
+        .is_some_and(|v| alert.above.is_some_and(|a| v > a) || alert.below.is_some_and(|b| v < b));
+    let name = alert.label.clone().unwrap_or(column);
+    let message = match value {
+        Some(v) => format!("{name}: {}", fmt_number(v)),
+        None => name,
+    };
+    AlertState {
+        firing,
+        count,
+        value,
+        message,
+    }
+}
+
 /// Which result columns a chart viz draws from.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +319,8 @@ struct LensFile {
     /// Show a Copy button for the rendered text (markdown lenses only).
     #[serde(default)]
     copy: bool,
+    #[serde(default)]
+    alert: Option<AlertFile>,
 }
 
 fn default_viz() -> LensViz {
@@ -298,6 +415,9 @@ pub const SLOTS: &[(&str, &[&str])] = &[
     ("thread", &["thread_id"]),
     ("commit", &["change_id"]),
     ("uncommitted", &["change_id"]),
+    // The rail: no params; mounted lenses must declare an `alert` and show
+    // as a badge while it fires.
+    ("rail", &[]),
 ];
 
 /// A lens an extension mounts into a core page.
@@ -338,6 +458,8 @@ pub struct Lens {
     /// A Copy button copies the rendered markdown (e.g. a prompt to paste
     /// into another tool).
     pub copy: bool,
+    /// When the lens needs attention (a rail badge when mounted in `rail`).
+    pub alert: Option<LensAlert>,
     /// Repo-relative path of the lens file.
     pub path: String,
 }
@@ -394,6 +516,8 @@ pub struct LensRun {
     /// The parameter values actually used (supplied or default).
     pub params: BTreeMap<String, SqlCell>,
     pub result: SqlQueryResult,
+    /// The lens's alert on this result, if it declares one.
+    pub alert: Option<AlertState>,
 }
 
 /// Load bundled extensions plus every project extension under
@@ -592,9 +716,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 } else {
                     Ok(l)
                 }
+            })
+            .and_then(|mut l| {
+                let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
+                Ok((l, alert))
             });
         match parsed {
-            Ok(l) => ext.lenses.push(Lens {
+            Ok((l, alert)) => ext.lenses.push(Lens {
                 id: format!("{name}/{slug}"),
                 extension: name.to_string(),
                 slug,
@@ -620,6 +748,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
                 copy: l.copy,
+                alert,
                 path: lens_rel,
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
@@ -669,6 +798,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.push(format!(
                 "{rel}/extension.yaml: slot `{}` mounts lens `{}`, which isn't in lenses/",
                 s.slot, s.lens
+            ));
+        } else if s.slot == "rail" && lens.is_some_and(|l| l.alert.is_none()) {
+            ext.errors.push(format!(
+                "{rel}/extension.yaml: the `rail` slot shows alerts; lens `{}` declares no `alert`",
+                s.lens
             ));
         } else {
             ext.slots.push(LensSlot {
@@ -854,10 +988,12 @@ async fn execute(
             DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
             other => other,
         })?;
+    let alert = lens.alert.as_ref().map(|a| evaluate_alert(a, &result));
     Ok(LensRun {
         lens,
         params,
         result,
+        alert,
     })
 }
 
@@ -1961,6 +2097,109 @@ empty: No tasks.
         assert_eq!(mounted, vec![("task-detail", "x/t"), ("thread", "x/th")]);
         let errs = ext.errors.join("\n");
         assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+    }
+
+    #[test]
+    fn alerts_take_a_row_count_or_a_value_threshold() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "rows",
+                    "title: R\nquery: SELECT 1\nalert: { min_rows: 2, label: Too many }\n",
+                ),
+                (
+                    "value",
+                    "title: V\nquery: SELECT 1 AS n\nalert: { column: n, above: 5 }\n",
+                ),
+                (
+                    "both",
+                    "title: B\nquery: SELECT 1 AS n\nalert: { min_rows: 1, column: n, above: 5 }\n",
+                ),
+                (
+                    "nothing",
+                    "title: N\nquery: SELECT 1 AS n\nalert: { column: n }\n",
+                ),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        let rows = lens("rows").unwrap().alert.clone().unwrap();
+        assert_eq!(
+            (rows.min_rows, rows.label.as_deref()),
+            (Some(2), Some("Too many"))
+        );
+        let value = lens("value").unwrap().alert.clone().unwrap();
+        assert_eq!(
+            (value.column.as_deref(), value.above),
+            (Some("n"), Some(5.0))
+        );
+        assert!(lens("both").is_none() && lens("nothing").is_none());
+        assert_eq!(
+            ext.errors.iter().filter(|e| e.contains("alert")).count(),
+            2,
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn a_run_carries_its_alert_state() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/rows.yaml",
+            "title: Rows\nparams: [{ name: n, default: 0 }]\nquery: SELECT value FROM json_each('[1,2,3]') WHERE value <= :n\nalert: { min_rows: 2 }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/cov.yaml",
+            "title: Cov\nparams: [{ name: v, default: 90 }]\nquery: SELECT :v AS pct\nalert: { column: pct, below: 80, label: Coverage low }\n",
+        );
+        let sl = layer().await;
+        let run = |id: &'static str, k: &'static str, v: i64| {
+            let sl = &sl;
+            let root = dir.path().to_path_buf();
+            async move {
+                let mut p = BTreeMap::new();
+                p.insert(k.to_string(), SqlCell::Int(v));
+                run_lens(sl, &root, id, p).await.unwrap().alert.unwrap()
+            }
+        };
+        let a = run("review/rows", "n", 1).await;
+        assert!(!a.firing);
+        let a = run("review/rows", "n", 3).await;
+        assert!(a.firing);
+        assert_eq!(a.message, "3 rows");
+        let a = run("review/cov", "v", 72).await;
+        assert!(a.firing);
+        assert_eq!(a.message, "Coverage low: 72");
+        assert!(!run("review/cov", "v", 91).await.firing);
+    }
+
+    #[test]
+    fn rail_lenses_must_declare_an_alert() {
+        let (_d, ext) = load_x(
+            &[
+                ("ok", "title: A\nquery: SELECT 1\nalert: { min_rows: 1 }\n"),
+                ("quiet", "title: Q\nquery: SELECT 1\n"),
+            ],
+            "slots:\n  - { slot: rail, lens: ok }\n  - { slot: rail, lens: quiet }\n",
+        );
+        assert_eq!(
+            ext.slots
+                .iter()
+                .map(|s| s.lens_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["x/ok"]
+        );
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("rail") && e.contains("quiet") && e.contains("alert")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     #[test]

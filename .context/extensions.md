@@ -28,7 +28,8 @@ the bundled `oxplow-analytics` example extension.
 >     widget is now a lens in that bundled extension, and core works with
 >     it disabled (checked headless, 2026-09-27).
 > - **Target:** extension-declared measures / metrics / gauges (tsk311),
->   dimensions, actions and alerts (tsk278).
+>   dimensions and declarative actions (tsk278). Lens alerts and the
+>   `rail` slot are current (tsk316).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -88,6 +89,16 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     time it opens and lists them under their `launcher.category`
     (default **Lenses**; `hidden` ones not at all), merged into the
     static directory by category order (`mergeDirectory`).
+  - `alert:` marks when a lens needs attention: `{ min_rows: N }` (the
+    run returned at least N rows) or `{ column: c, above: X }` /
+    `below: X` (the first row's value), with an optional `label`. The
+    loader refuses one with both or neither condition. Every `LensRun`
+    (IPC and MCP `run_lens`) carries `alert: {firing, count, value,
+    message}`; the message is `label: count`, `N rows`, or `label: value`.
+  - The `rail` slot (no params) takes only lenses with an `alert`; the
+    rail's **Alerts** section (`AlertsSection` in `RailHud.tsx`, first by
+    default) runs them and lists each firing one, opening the lens.
+    oxplow-review mounts Waiting on Me there.
   - `copy: true` on a `markdown` lens adds a Copy button that copies the
     raw text (the loader refuses it on other viz). The review packet's
     Review Prompt uses it.
@@ -308,8 +319,8 @@ taken by the SQL `v_*` views; not "data app".)
   diff, wiki page, decision), so rows are page-graph links.
 - `actions`: from a fixed registry only: add-to-context, followup-comment,
   open-diff, copy-review-prompt, run-source. Never arbitrary code.
-- `alert`: a row-count or threshold condition that shows a rail badge and
-  can be marked `nudge: true` (see below).
+- `alert`: a row-count or threshold condition that shows a rail badge
+  (current; nudging the agent is what advisories are for).
 
 Lenses render through one core `LensPage` / `LensSlot` in oxplow's design
 system, as a `lens:<slug>` page kind. Bookmarks, backlinks, the launcher
@@ -330,7 +341,7 @@ mounted, the page is plain.
 | `task-detail` | TaskPage |
 | `commit` | GitCommitPage |
 | `uncommitted` | UncommittedChangesPage |
-| `rail` | rail HUD (badges) |
+| `rail` | rail HUD Alerts section (current) |
 | `launcher` | Cmd+P launcher entries |
 | `settings` | Settings |
 

@@ -1319,6 +1319,17 @@ export type AiSettings = {
 	roles: RoleStatus[],
 };
 
+// A lens's alert, evaluated on one run.
+export type AlertState = {
+	firing: boolean,
+	// Rows the run returned.
+	count: number,
+	// The watched column's value, for a threshold alert.
+	value: number | null,
+	// What the badge says, e.g. `3 rows` or `Coverage low: 72`.
+	message: string,
+};
+
 export type AppVersion = {
 	version: string,
 };
@@ -2241,8 +2252,24 @@ export type Lens = {
 	 *  into another tool).
 	 */
 	copy: boolean,
+	// When the lens needs attention (a rail badge when mounted in `rail`).
+	alert: LensAlert | null,
 	// Repo-relative path of the lens file.
 	path: string,
+};
+
+/**
+ *  When a lens needs attention: its row count reaches `min_rows`, or the
+ *  first row's `column` goes `above` / `below` a threshold. Shown as a rail
+ *  badge when the lens is mounted in the `rail` slot.
+ */
+export type LensAlert = {
+	minRows: number | null,
+	column: string | null,
+	above: number | null,
+	below: number | null,
+	// Badge text; else the row count or the column's name.
+	label: string | null,
 };
 
 // Which result columns a chart viz draws from.
@@ -2326,6 +2353,8 @@ export type LensRun = {
 	// The parameter values actually used (supplied or default).
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
+	// The lens's alert on this result, if it declares one.
+	alert: AlertState | null,
 };
 
 // A lens an extension mounts into a core page.

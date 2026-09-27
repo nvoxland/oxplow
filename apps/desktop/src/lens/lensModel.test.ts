@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId } from "./lensModel.js";
+import { slotRuns, mergeDirectory, barRows, childParams, lineSeries, numericRowId, treemapItems, cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId, firingAlerts } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -345,4 +345,22 @@ test("slot lenses get only the slot params they declare", () => {
 test("page links open any oxplow page by its tab id", () => {
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["task:tsk3"], ["p"])?.id).toBe("task:tsk3");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["git-dashboard"], ["p"])?.kind).toBe("git-dashboard");
+});
+
+test("firingAlerts keeps the rail lenses whose alert fires, with their message", () => {
+  const run = (title: string, firing: boolean | null, message = "") =>
+    ({
+      lens: { title },
+      params: {},
+      result: { columns: [], rows: [], truncated: false },
+      alert: firing === null ? null : { firing, count: 0, value: null, message },
+    }) as never;
+  expect(
+    firingAlerts([
+      { id: "r/a", run: run("Waiting on Me", true, "2 rows") },
+      { id: "r/b", run: run("Quiet", false, "0 rows") },
+      { id: "r/c", run: run("No alert", null) },
+      { id: "r/d", run: null },
+    ]),
+  ).toEqual([{ id: "r/a", title: "Waiting on Me", message: "2 rows" }]);
 });

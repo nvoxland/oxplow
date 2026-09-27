@@ -11,3 +11,4 @@ slots:
   - { slot: effort-review, lens: struggled }
   - { slot: effort-review, lens: context-read }
   - { slot: effort-review, lens: review-prompt }
+  - { slot: rail, lens: waiting-on-me }

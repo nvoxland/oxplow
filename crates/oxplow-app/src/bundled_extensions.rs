@@ -525,4 +525,50 @@ mod tests {
             );
         }
     }
+
+    /// Waiting on Me sits in the rail and raises an alert while anything
+    /// is waiting on the user.
+    #[tokio::test]
+    async fn waiting_on_me_alerts_in_the_rail() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let review = crate::extensions::load_extensions(f._dir.path())
+            .into_iter()
+            .find(|e| e.name == "oxplow-review")
+            .unwrap();
+        assert!(review
+            .slots
+            .iter()
+            .any(|s| s.slot == "rail" && s.lens_id == "oxplow-review/waiting-on-me"));
+        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
+        let run = crate::extensions::run_lens(
+            &layer,
+            f._dir.path(),
+            "oxplow-review/waiting-on-me",
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        assert!(!alert(run).firing);
+        let mut t = {
+            use oxplow_domain::stores::TaskStore as _;
+            f.svc.task_store.get(f.task).await.unwrap().unwrap()
+        };
+        t.status = oxplow_domain::TaskStatus::Blocked;
+        {
+            use oxplow_domain::stores::TaskStore as _;
+            f.svc.task_store.update(&t).await.unwrap();
+        }
+        let run = crate::extensions::run_lens(
+            &layer,
+            f._dir.path(),
+            "oxplow-review/waiting-on-me",
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let a = alert(run);
+        assert!(a.firing);
+        assert_eq!(a.message, "Waiting on you: 1");
+    }
 }

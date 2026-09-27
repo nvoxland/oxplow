@@ -4,11 +4,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { BranchChangeEntry, FinishedEntry, GitFileStatus, ThreadWorkState, Task } from "../../api.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import type { TabRef } from "../../tabs/tabState.js";
-import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef } from "../../tabs/pageRefs.js";
+import { fileRef, wikiPageRef, tasksRef, uncommittedChangesRef, commentsRef, taskRef, refFromTabId, dashboardRef, lensRef } from "../../tabs/pageRefs.js";
 import { setContextRefDrag } from "../../agent-context-dnd.js";
 import { moveToIndex } from "../CenterTabs/centerTabsReorder.js";
 import { computeActiveEpicContext, computeActiveItem, computeUpNext } from "./sections.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./history.js";
+import { listExtensions, runLens, subscribeOxplowEvents } from "../../api.js";
+import { firingAlerts, shouldRerunLens, slotRuns } from "../../lens/lensModel.js";
 import {
   listCommentsForStream,
   listRecentPageVisits,
@@ -68,12 +70,14 @@ export interface RailHudProps {
 // "bookmarks" is the combined Bookmarks + History pane: collapsed it
 // shows bookmarks only; expanded it adds the page-visit History list.
 type RailSectionId =
+  | "alerts"
   | "uncommitted"
   | "comments"
   | "work"
   | "bookmarks";
 
 const DEFAULT_SECTION_ORDER: RailSectionId[] = [
+  "alerts",
   "uncommitted",
   "comments",
   "work",
@@ -83,6 +87,7 @@ const DEFAULT_SECTION_ORDER: RailSectionId[] = [
 // Work defaults collapsed (it keeps a one-line summary when collapsed);
 // every other section defaults expanded.
 const DEFAULT_SECTION_EXPANDED: Record<RailSectionId, boolean> = {
+  alerts: true,
   uncommitted: true,
   comments: true,
   work: false,
@@ -432,6 +437,8 @@ export function RailHud({
   // disappear); each shows its own empty state when it has no content.
   function renderSection(id: RailSectionId): ReactNode {
     switch (id) {
+      case "alerts":
+        return <AlertsSection key={id} streamId={streamId ?? null} onOpenPage={onOpenPage} />;
       case "uncommitted":
         return <UncommittedSection key={id} summary={uncommitted ?? null} onOpenPage={onOpenPage} />;
       case "comments":
@@ -1156,6 +1163,69 @@ function UncommittedSection({
 /// stream, split by intent — "for me" (notes-to-self) and "for the
 /// agent" (follow-ups). Self-fetching + live like the history rows;
 /// hidden when there are none. Each row opens the Comments inbox.
+/** Alerts from extension lenses mounted in the `rail` slot: one row per
+ *  lens whose `alert` fires, opening the lens. Re-runs (debounced) when
+ *  oxplow data changes. */
+function AlertsSection({
+  streamId,
+  onOpenPage,
+}: {
+  streamId: string | null;
+  onOpenPage(ref: TabRef): void;
+}) {
+  const [alerts, setAlerts] = useState<{ id: string; title: string; message: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const mounts = slotRuns(await listExtensions(streamId), "rail", {});
+        const runs = await Promise.all(
+          mounts.map(async ({ id, params }) => ({
+            id,
+            run: await runLens(id, params, streamId).catch(() => null),
+          })),
+        );
+        if (!cancelled) setAlerts(firingAlerts(runs));
+      } catch {
+        if (!cancelled) setAlerts([]);
+      }
+    };
+    void refresh();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = subscribeOxplowEvents((event) => {
+      if (!shouldRerunLens({ kind: event.kind, path: (event as { path?: unknown }).path })) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void refresh(), 750);
+    });
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      off();
+    };
+  }, [streamId]);
+
+  return (
+    <RailSection id="alerts" title="Alerts" count={alerts.length || undefined}>
+      {alerts.length === 0 ? <RailEmpty label="Nothing needs you" /> : null}
+      {alerts.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          data-testid={`rail-alert-${a.id}`}
+          onClick={() => onOpenPage(lensRef(a.id))}
+          title={`Open ${a.title}`}
+          style={{ ...rowStyle, padding: "4px 14px 4px", gap: 8 }}
+        >
+          <span style={{ color: "var(--text-primary)", fontSize: "var(--text-xs)" }}>{a.title}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "var(--accent)", fontSize: 11 }}>{a.message}</span>
+        </button>
+      ))}
+    </RailSection>
+  );
+}
+
 function CommentsSection({
   streamId,
   onOpenPage,
