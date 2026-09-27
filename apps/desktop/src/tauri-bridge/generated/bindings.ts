@@ -1427,6 +1427,8 @@ export type BranchRef = {
 	ref_: string,
 	// Remote name for `kind = Remote`; `None` for locals.
 	remote: string | null,
+	// The commit the branch points at (full sha), when it resolves.
+	head: string | null,
 };
 
 export type BranchRefKind = "local" | "remote";

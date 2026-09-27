@@ -17,6 +17,7 @@ pub mod effort_evidence_store;
 pub mod effort_store;
 pub mod ext_source_store;
 pub mod fact_store;
+pub mod git_store;
 pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
@@ -64,6 +65,7 @@ pub use fact_store::{
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
     NewMetricCapture, NewMetricSpec, SqliteFactStore,
 };
+pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, SqliteGitStore};
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};

@@ -431,6 +431,8 @@ pub struct Services {
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
+    /// Git history and branches (`v_commit`, `v_branch`, …).
+    pub git_store: Arc<oxplow_db::SqliteGitStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
     /// Stored change analysis (`v_change*`) and its producer state.
@@ -545,6 +547,7 @@ impl Services {
         let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
+        let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
         let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -746,6 +749,7 @@ impl Services {
             ext_source_store,
             reasoning_store,
             tool_call_store,
+            git_store,
             ai,
             secrets: ai_env.secrets,
             effort_evidence_store,

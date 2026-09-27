@@ -18,6 +18,8 @@ pub struct BranchRef {
     pub ref_: String,
     /// Remote name for `kind = Remote`; `None` for locals.
     pub remote: Option<String>,
+    /// The commit the branch points at (full sha), when it resolves.
+    pub head: Option<String>,
 }
 
 /// List local + remote branches in a repo. Empty list when not a repo.
@@ -35,12 +37,14 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
         let short = short.to_string();
         let r = b.into_reference();
         let full = r.name().unwrap_or("").to_string();
+        let head = r.peel_to_commit().ok().map(|c| c.id().to_string());
         match ty {
             git2::BranchType::Local => out.push(BranchRef {
                 kind: BranchRefKind::Local,
                 name: short,
                 ref_: full,
                 remote: None,
+                head,
             }),
             git2::BranchType::Remote => {
                 let (remote, name) = split_remote(&short);
@@ -49,6 +53,7 @@ pub fn list_branches(path: impl AsRef<Path>) -> Vec<BranchRef> {
                     name: name.to_string(),
                     ref_: full,
                     remote: Some(remote.to_string()),
+                    head,
                 });
             }
         }
@@ -67,6 +72,25 @@ fn split_remote(short: &str) -> (&str, &str) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn branches_carry_their_head_commit() {
+        let dir = init_repo();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let head = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let b = list_branches(dir.path());
+        assert!(!b.is_empty());
+        assert!(
+            b.iter().all(|r| r.head.as_deref() == Some(head.as_str())),
+            "{b:?}"
+        );
+    }
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempdir().unwrap();

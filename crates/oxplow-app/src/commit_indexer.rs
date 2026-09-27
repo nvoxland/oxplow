@@ -110,11 +110,18 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     out
 }
 
-/// Walk the most-recent `limit` commits reachable from HEAD and
-/// project each one into `page_ref`. Skips commits already indexed
-/// (by source-existence probe), so subsequent calls only index new
-/// commits. Returns the number of commits newly indexed.
-pub async fn index_recent(repo_path: &Path, page_refs: &SqlitePageRefStore, limit: usize) -> usize {
+/// Walk the most-recent `limit` commits reachable from HEAD, store each
+/// one (`v_commit`, `v_commit_file`) and project it into `page_ref`.
+/// Skips commits already stored, so subsequent calls only index new
+/// commits (and commits indexed into `page_ref` before commits were
+/// stored get backfilled once). Returns the number of commits newly
+/// indexed.
+pub async fn index_recent(
+    repo_path: &Path,
+    page_refs: &SqlitePageRefStore,
+    git: &oxplow_db::SqliteGitStore,
+    limit: usize,
+) -> usize {
     let log = {
         let repo_path = repo_path.to_path_buf();
         tokio::task::spawn_blocking(move || {
@@ -136,15 +143,10 @@ pub async fn index_recent(repo_path: &Path, page_refs: &SqlitePageRefStore, limi
 
     let mut indexed = 0usize;
     for commit in log.commits {
-        // Cheap probe: if this sha already has any page_ref rows,
-        // skip the diff. replace_source is idempotent, but the diff
-        // walk is O(filecount) and we'd rather not pay it on every
-        // boot for old commits.
-        let already = page_refs
-            .list_outbound(KIND_GIT_COMMIT, &commit.sha, Some(1))
-            .await
-            .unwrap_or_default();
-        if !already.is_empty() {
+        // Cheap probe: a stored commit is fully indexed. replace_source
+        // is idempotent, but the diff walk is O(filecount) and we'd
+        // rather not pay it on every boot for old commits.
+        if git.has_commit(&commit.sha).await.unwrap_or(false) {
             continue;
         }
         let repo_path = repo_path.to_path_buf();
@@ -164,9 +166,107 @@ pub async fn index_recent(repo_path: &Path, page_refs: &SqlitePageRefStore, limi
             tracing::warn!(?e, sha = %commit.sha, "commit indexer write failed");
             continue;
         }
+        if let Err(e) = git.upsert_commit(commit_row(&detail)).await {
+            tracing::warn!(?e, sha = %commit.sha, "commit indexer: storing the commit failed");
+            continue;
+        }
         indexed += 1;
     }
     indexed
+}
+
+/// Index new commits and restate the branch list, for the primary
+/// worktree. Returns the number of commits newly indexed.
+pub async fn refresh(svc: &crate::Services) -> usize {
+    use oxplow_domain::stores::StreamStore as _;
+    let repo_path = svc.layout.project_dir.clone();
+    let n = index_recent(
+        &repo_path,
+        &svc.page_ref_store,
+        &svc.git_store,
+        DEFAULT_INDEX_DEPTH,
+    )
+    .await;
+    let streams: Vec<(i64, String)> = svc
+        .stream_store
+        .list()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| (s.id.value(), s.branch))
+        .collect();
+    refresh_branches(&repo_path, &streams, &svc.git_store).await;
+    n
+}
+
+/// The stored form of a commit.
+fn commit_row(d: &CommitDetail) -> oxplow_db::GitCommitRow {
+    oxplow_db::GitCommitRow {
+        sha: d.sha.clone(),
+        author: d.author.clone(),
+        email: d.email.clone(),
+        committed_secs: d.timestamp_secs,
+        subject: d.subject.clone(),
+        body: d.body.clone(),
+        parents: d.parents.clone(),
+        files: d
+            .files
+            .iter()
+            .filter(|f| !f.path.is_empty())
+            .map(|f| oxplow_db::GitCommitFileRow {
+                path: f.path.clone(),
+                status: f.status.clone(),
+                additions: f.additions as i64,
+                deletions: f.deletions as i64,
+            })
+            .collect(),
+    }
+}
+
+/// Restate `v_branch`: every local and remote-tracking branch with its
+/// head, and which stream (`(stream_id, branch)` pairs) has a local one
+/// checked out.
+pub async fn refresh_branches(
+    repo_path: &Path,
+    streams: &[(i64, String)],
+    git: &oxplow_db::SqliteGitStore,
+) {
+    let path = repo_path.to_path_buf();
+    let branches = tokio::task::spawn_blocking(move || oxplow_git::list_branches(&path))
+        .await
+        .unwrap_or_default();
+    let rows = branch_rows(&branches, streams);
+    if let Err(e) = git.replace_branches(rows).await {
+        tracing::warn!(?e, "branch refresh failed");
+    }
+}
+
+/// Pure: branch refs + stream checkouts → stored rows.
+fn branch_rows(
+    branches: &[oxplow_git::BranchRef],
+    streams: &[(i64, String)],
+) -> Vec<oxplow_db::GitBranchRow> {
+    use oxplow_git::BranchRefKind;
+    branches
+        .iter()
+        .map(|b| {
+            let local = b.kind == BranchRefKind::Local;
+            oxplow_db::GitBranchRow {
+                name: b.name.clone(),
+                kind: if local { "local" } else { "remote" }.into(),
+                remote: b.remote.clone(),
+                head_sha: b.head.clone(),
+                stream_id: if local {
+                    streams
+                        .iter()
+                        .find(|(_, br)| *br == b.name)
+                        .map(|(id, _)| *id)
+                } else {
+                    None
+                },
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -278,9 +378,31 @@ mod tests {
             .unwrap();
 
         let db = oxplow_db::Database::in_memory();
-        let page_refs = SqlitePageRefStore::new(db);
-        let n = index_recent(dir.path(), &page_refs, 50).await;
+        let page_refs = SqlitePageRefStore::new(db.clone());
+        let git = oxplow_db::SqliteGitStore::new(db.clone());
+        let n = index_recent(dir.path(), &page_refs, &git, 50).await;
         assert_eq!(n, 1, "should index the one commit");
+
+        // The commit, its file and its task mention read through v_*.
+        let sl = oxplow_db::SemanticLayer::new(db.clone());
+        let q = |sql: &'static str| {
+            let sl = sl.clone();
+            async move {
+                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
+            }
+        };
+        assert_eq!(
+            q("SELECT subject, author, parent_count FROM v_commit").await,
+            serde_json::json!([["fix tsk42 and touch [[architecture]]", "a", 0]])
+        );
+        assert_eq!(
+            q("SELECT path, status FROM v_commit_file").await,
+            serde_json::json!([["a.rs", "added"]])
+        );
+        assert_eq!(
+            q("SELECT task_id FROM v_commit_task").await,
+            serde_json::json!([[42]])
+        );
 
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
@@ -296,7 +418,39 @@ mod tests {
         assert!(file_inbound.iter().any(|e| e.source_kind == "git-commit"));
 
         // Re-index — nothing new.
-        let n2 = index_recent(dir.path(), &page_refs, 50).await;
+        let n2 = index_recent(dir.path(), &page_refs, &git, 50).await;
         assert_eq!(n2, 0, "second pass must skip already-indexed commits");
+    }
+
+    #[test]
+    fn local_branches_map_to_the_stream_that_checks_them_out() {
+        use oxplow_git::{BranchRef, BranchRefKind};
+        let b = |kind, name: &str, remote: Option<&str>| BranchRef {
+            kind,
+            name: name.into(),
+            ref_: String::new(),
+            remote: remote.map(str::to_string),
+            head: Some("abc".into()),
+        };
+        let rows = branch_rows(
+            &[
+                b(BranchRefKind::Local, "main", None),
+                b(BranchRefKind::Local, "feature", None),
+                b(BranchRefKind::Remote, "main", Some("origin")),
+            ],
+            &[(1, "main".into()), (2, "feature".into())],
+        );
+        let got: Vec<(&str, &str, Option<i64>)> = rows
+            .iter()
+            .map(|r| (r.name.as_str(), r.kind.as_str(), r.stream_id))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("main", "local", Some(1)),
+                ("feature", "local", Some(2)),
+                ("main", "remote", None)
+            ]
+        );
     }
 }

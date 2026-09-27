@@ -362,29 +362,19 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
-    // Commit indexer: walk the most-recent N commits at boot, then
-    // re-scan whenever git refs change. Idempotent.
+    // Commit indexer + branch refresh: walk the most-recent N commits
+    // and restate the branch list at boot, then again whenever git refs
+    // change. Idempotent.
     {
-        let repo_path = state.layout.project_dir.clone();
-        let page_refs = state.page_ref_store.clone();
+        let state = state.clone();
         let mut rx = state.events.subscribe();
         tokio::spawn(async move {
-            let n = crate::commit_indexer::index_recent(
-                &repo_path,
-                &page_refs,
-                crate::commit_indexer::DEFAULT_INDEX_DEPTH,
-            )
-            .await;
+            let n = crate::commit_indexer::refresh(&state).await;
             tracing::info!(indexed = n, "commit indexer initial scan done");
             loop {
                 match rx.recv().await {
                     Ok(crate::events::OxplowEvent::GitRefsChanged { .. }) => {
-                        let _ = crate::commit_indexer::index_recent(
-                            &repo_path,
-                            &page_refs,
-                            crate::commit_indexer::DEFAULT_INDEX_DEPTH,
-                        )
-                        .await;
+                        crate::commit_indexer::refresh(&state).await;
                     }
                     Ok(_) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,

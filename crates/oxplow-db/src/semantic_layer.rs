@@ -824,6 +824,51 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
+        name: "v_commit",
+        description: "Git commits the indexer has read (the last 500 reachable from the primary worktree's HEAD, kept as it moves).",
+        columns: &[
+            ("sha", "Full commit sha."),
+            ("author", "Author name."),
+            ("email", "Author email."),
+            ("committed_at", "Commit time (RFC 3339)."),
+            ("subject", "First line of the message."),
+            ("body", "The rest of the message."),
+            ("first_parent", "First parent's sha; NULL for a root commit."),
+            ("parent_count", "Number of parents (2+ for a merge)."),
+        ],
+    },
+    CatalogView {
+        name: "v_commit_file",
+        description: "Files each commit changed, against its first parent.",
+        columns: &[
+            ("sha", "The commit (v_commit.sha)."),
+            ("path", "Repo-relative path."),
+            ("status", "`added`, `modified`, `deleted` or `renamed`."),
+            ("additions", "Lines added."),
+            ("deletions", "Lines deleted."),
+        ],
+    },
+    CatalogView {
+        name: "v_commit_task",
+        description: "Tasks a commit's message mentions (`tsk42`, `[[tsk42]]`).",
+        columns: &[
+            ("sha", "The commit (v_commit.sha)."),
+            ("task_id", "The task (v_task.id)."),
+        ],
+    },
+    CatalogView {
+        name: "v_branch",
+        description: "Local and remote-tracking branches, refreshed on boot and whenever refs move.",
+        columns: &[
+            ("name", "Branch name (without the remote)."),
+            ("kind", "`local` or `remote`."),
+            ("remote", "Remote name for a remote-tracking branch."),
+            ("head_sha", "The commit it points at."),
+            ("stream_id", "The stream whose worktree has it checked out (v_stream.id), if any."),
+            ("updated_at", "When oxplow last read it (RFC 3339)."),
+        ],
+    },
+    CatalogView {
         name: "v_change",
         description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis.",
         columns: &[
