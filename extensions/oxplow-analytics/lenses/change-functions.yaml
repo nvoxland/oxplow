@@ -1,0 +1,27 @@
+title: Function Changes
+description: Functions the change added, deleted or modified outside tests, most-churned first.
+params: [{ name: change_id }]
+query: |
+  SELECT fn.path,
+         CASE WHEN fn.container <> '' THEN fn.container || '::' ELSE '' END || fn.name AS function,
+         fn.status,
+         CASE WHEN fn.signature_changed = 1 THEN 'signature'
+              WHEN fn.body_changed = 1 THEN 'body' END AS what,
+         fn.complexity, fn.complexity_delta, fn.length_delta,
+         fn.added_lines + fn.deleted_lines AS churn,
+         fn.visibility, fn.start_line, c.base_label, c.head_label
+  FROM v_change_function fn JOIN v_change c ON c.id = fn.change_id
+  WHERE fn.change_id = :change_id AND fn.is_test = 0
+  ORDER BY churn DESC, fn.path, fn.start_line
+columns:
+  - { key: function, label: Function, link: { kind: diff-at, from: path, line: start_line, base: base_label, head: head_label } }
+  - { key: path, label: File }
+  - { key: status, label: Status }
+  - { key: what, label: Changed }
+  - { key: complexity, label: Complexity }
+  - { key: complexity_delta, label: Δ Complexity }
+  - { key: length_delta, label: Δ Length }
+  - { key: churn, label: Churn }
+  - { key: visibility, label: Visibility }
+empty: No functions changed outside tests.
+hidden: true

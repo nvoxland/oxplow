@@ -22,7 +22,6 @@ pub mod background;
 pub mod backlog;
 pub mod branch;
 pub mod changes;
-pub mod code_quality;
 pub mod comments;
 pub mod config;
 pub mod dashboards;

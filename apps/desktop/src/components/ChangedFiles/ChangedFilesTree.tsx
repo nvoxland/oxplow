@@ -9,14 +9,10 @@ import {
   type HierarchyStatus,
 } from "../HierarchyView/HierarchyView.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
-import { changeAnalysisRef, fileRef, type ChangeAnalysisTarget } from "../../tabs/pageRefs.js";
+import { fileRef } from "../../tabs/pageRefs.js";
 
 interface Props {
   files: BranchChangeEntry[];
-  /** Analysis target ("working" or commit sha) — needed so a
-   *  directory click can drill into the same host page scoped to
-   *  that directory. */
-  target: ChangeAnalysisTarget;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   /** When supplied, plain click opens the file's diff in the current
    *  tab (browser-tab semantic, back returns to this list).
@@ -29,12 +25,12 @@ interface Props {
 }
 
 /**
- * Tree-style file list for the Change Analysis drilldown. Builds a
- * directory > file hierarchy and renders it through `HierarchyView`
+ * Tree-style list of a change's files (commit, uncommitted, diff and
+ * task pages). Builds a directory > file hierarchy and renders it through `HierarchyView`
  * so the toolbar (filter + Expand all / Collapse all), the chevron
  * toggle, and the status badges all match the Semantic view exactly.
  */
-export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDiff, showFileCount = true }: Props) {
+export function ChangedFilesTree({ files, onOpenFile, onOpenFileDiff, showFileCount = true }: Props) {
   const ctxNav = useOptionalPageNavigation();
   // Default click semantic: navigate **in-tab** to the file's diff
   // when an `onOpenFileDiff` is supplied; otherwise fall through to
@@ -54,16 +50,12 @@ export function ChangeAnalysisFileTree({ files, target, onOpenFile, onOpenFileDi
   };
   // Directory drill: navigate to the host page scoped to that
   // directory. In-tab by default; cmd/ctrl-click opens a new tab.
-  const openDir = (dirPath: string, opts: { newTab: boolean }) => {
-    const ref = changeAnalysisRef(target, { kind: "dir", value: dirPath });
-    if (ctxNav) ctxNav.navigate(ref, { newTab: opts.newTab });
-  };
   // Zone badges come from the project's own `zones:` table (tsk251);
   // a project that declared none simply shows no badges.
   const zoneRules = useZoneRules();
   const tree = useMemo(
-    () => buildTree(files, openFile, openDir, zoneRules),
-    [files, openFile, openDir, zoneRules],
+    () => buildTree(files, openFile, zoneRules),
+    [files, openFile, zoneRules],
   );
   const total = files.length;
   return (
@@ -93,7 +85,6 @@ interface RawDirNode {
 function buildTree(
   files: BranchChangeEntry[],
   openFile: (path: string, opts: { newTab: boolean }) => void,
-  openDir: (path: string, opts: { newTab: boolean }) => void,
   zoneRules: CompiledZoneRules,
 ): HierarchyNode[] {
   const root: RawDirNode = { name: "", path: "", files: [], dirs: new Map() };
@@ -113,14 +104,13 @@ function buildTree(
     }
     cursor.files.push({ name: fileName, entry: file });
   }
-  return materialize(root, "", openFile, openDir, zoneRules);
+  return materialize(root, "", openFile, zoneRules);
 }
 
 function materialize(
   node: RawDirNode,
   idPrefix: string,
   openFile: (path: string, opts: { newTab: boolean }) => void,
-  openDir: (path: string, opts: { newTab: boolean }) => void,
   zoneRules: CompiledZoneRules,
 ): HierarchyNode[] {
   const out: HierarchyNode[] = [];
@@ -128,7 +118,7 @@ function materialize(
   const dirsSorted = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const d of dirsSorted) {
     const id = `${idPrefix}/dir:${d.path}`;
-    const children = materialize(d, id, openFile, openDir, zoneRules);
+    const children = materialize(d, id, openFile, zoneRules);
     const summary = summarize(d);
     out.push({
       id,
@@ -138,8 +128,6 @@ function materialize(
       count: summary.count,
       metrics: summary.metrics,
       children,
-      onDrill: (e) => openDir(d.path, { newTab: e.metaKey || e.ctrlKey }),
-      drillTitle: `Drill into ${d.path}/`,
     });
   }
   // Then files.

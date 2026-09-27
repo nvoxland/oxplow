@@ -25,6 +25,15 @@ pub const BUNDLED: &[BundledExtension] = &[
         files: &[
             ext_file!("oxplow-analytics", "extension.yaml"),
             ext_file!("oxplow-analytics", "lenses/backlog-tasks.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-co-change.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-cross-zone-imports.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-duplicates.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-functions.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-look-here.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-review.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-summary.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-test-files.yaml"),
+            ext_file!("oxplow-analytics", "lenses/change-treemap.yaml"),
             ext_file!("oxplow-analytics", "lenses/duplicate-blocks.yaml"),
             ext_file!("oxplow-analytics", "lenses/effort-analysis-findings.yaml"),
             ext_file!("oxplow-analytics", "lenses/effort-coverage.yaml"),
@@ -248,5 +257,50 @@ mod tests {
             serde_json::json!([]),
             "an idle thread shows nothing"
         );
+    }
+
+    /// The change-review grid reads a real analyzed commit.
+    #[tokio::test]
+    async fn analytics_change_lenses_read_an_analyzed_commit() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "fn grow(a: u32) -> u32 {\n    a\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tests/it.rs"), "fn t() {}\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "fn grow(a: u32, b: u32) -> u32 {\n    if a > b {\n        a\n    } else {\n        b\n    }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("tests/it.rs"), "fn t() {}\nfn u() {}\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "change");
+        let change = crate::change_analysis::ensure_change(
+            &f.svc,
+            crate::change_analysis::ChangeTarget::Commit {
+                sha,
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let summary = run_analytics_lens(&f, "change-summary", "change_id", change.id).await;
+        assert_eq!(
+            summary,
+            serde_json::json!([[
+                "**2 files** · +7 −2 · 0 added, 2 modified, 0 deleted · 1 test file · test/code lines 12%"
+            ]])
+        );
+        let functions = run_analytics_lens(&f, "change-functions", "change_id", change.id).await;
+        assert_eq!(functions[0][1], serde_json::json!("grow"));
+        assert_eq!(functions[0][3], serde_json::json!("signature"));
+        let tests = run_analytics_lens(&f, "change-test-files", "change_id", change.id).await;
+        assert_eq!(tests[0][0], serde_json::json!("tests/it.rs"));
     }
 }

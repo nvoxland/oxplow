@@ -584,54 +584,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCodeQualityFindings: (scanId: number) => typedError<CodeQualityFinding[], IpcError>(__TAURI_INVOKE("list_code_quality_findings", { scanId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	runDuplicationScanAt: (treeVersion: TreeVersion, fileFilter: FileFilterSpec, scope: string) => typedError<number, IpcError>(__TAURI_INVOKE("run_duplication_scan_at", { treeVersion, fileFilter, scope })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	findLatestCodeQualityScan: (tool: string, treeVersion: TreeVersion, fileFilter: FileFilterSpec) => typedError<{
-	id: number,
-	tool: string,
-	scope: string,
-	status: CodeQualityScanStatus,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	error: string | null,
-	/**
-	 *  Tree version the scan ran against. `"disk" | "ref" | "snapshot"`.
-	 *  Backfilled to `"disk"` for pre-V9 rows.
-	 */
-	tree_version_kind: string,
-	/**
-	 *  Identifier for the version: ref-spec or snapshot id; null for
-	 *  disk.
-	 */
-	tree_version_value: string | null,
-	/**
-	 *  File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
-	 *  Backfilled to `"all"` for pre-V9 rows.
-	 */
-	file_filter: string,
-} | null, IpcError>(__TAURI_INVOKE("find_latest_code_quality_scan", { tool, treeVersion, fileFilter })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	analyzeFunctionsAtRefs: (files: AnalyzeFileSpec[]) => typedError<AnalyzeFunctionsResult, IpcError>(__TAURI_INVOKE("analyze_functions_at_refs", { files })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	analyzeCoChangeSurprise: (filePaths: string[]) => typedError<FileSurprise[], IpcError>(__TAURI_INVOKE("analyze_co_change_surprise", { filePaths })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -697,11 +649,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readEndpointFilesContent: (endpoint: DiffEndpoint, paths: string[]) => typedError<(string | null)[], IpcError>(__TAURI_INVOKE("read_endpoint_files_content", { endpoint, paths })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getSnapshotSummary: (snapshotId: number) => typedError<{
 	snapshot: FileSnapshot,
 	previousSnapshotId: string | null,
@@ -713,16 +660,6 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	getSnapshotStats: (snapshotId: number) => typedError<SnapshotStats, IpcError>(__TAURI_INVOKE("get_snapshot_stats", { snapshotId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listSnapshotChangeEntries: (snapshotId: number) => typedError<SnapshotChangeEntry[], IpcError>(__TAURI_INVOKE("list_snapshot_change_entries", { snapshotId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	readSnapshotFileContent: (fileSnapshotId: number) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_snapshot_file_content", { fileSnapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1434,79 +1371,6 @@ export type AiSettings = {
 	roles: RoleStatus[],
 };
 
-/**
- *  One file's content at one side of the diff. `content == None` means
- *  the file did not exist on that side (e.g. add/delete).
- */
-export type AnalyzeFileSpec = {
-	path: string,
-	base_content: string | null,
-	head_content: string | null,
-};
-
-export type AnalyzeFunctionsResult = {
-	sides: AnalyzedFileSide[],
-	/**
-	 *  One entry per file with both base + head content present —
-	 *  i.e. modified files. Added / deleted / unsupported / binary
-	 *  files are omitted (the file-level totals already cover those
-	 *  cases via `BranchChangeEntry.additions` / `deletions`).
-	 */
-	churn?: AnalyzedFileChurn[],
-	/**
-	 *  One entry per file with imports that changed (added or
-	 *  removed). Files with stable imports are omitted.
-	 */
-	import_deltas?: ImportDelta[],
-};
-
-export type AnalyzedFileChurn = {
-	path: string,
-	file_added: number,
-	file_deleted: number,
-	functions: AnalyzedFunctionChurn[],
-};
-
-export type AnalyzedFileSide = {
-	path: string,
-	// `"base"` or `"head"`.
-	side: string,
-	functions: AnalyzedFunction[],
-};
-
-// Function metadata for one (path, side) pair.
-export type AnalyzedFunction = {
-	name: string,
-	start_line: number,
-	length: number,
-	complexity: number,
-	parameter_count: number,
-	nloc: number,
-	/**
-	 *  Outer-to-inner names of the named-declaration ancestors this
-	 *  function lives inside (class / impl / module / namespace).
-	 *  Empty for top-level functions; used to render the Functions
-	 *  card hierarchically.
-	 */
-	container_path: string[],
-	/**
-	 *  Heuristic public/private classification — see
-	 *  `oxplow_code_metrics::Visibility`. Frontend uses this to
-	 *  drive a "Show private" filter on the Semantic view.
-	 *  Serialized as `"public"` / `"private"` / `"unknown"`.
-	 */
-	visibility: string,
-};
-
-export type AnalyzedFunctionChurn = {
-	name: string,
-	container_path: string[],
-	start_line_head: number,
-	added_lines: number,
-	deleted_lines: number,
-	modified_lines: number,
-};
-
 export type AppVersion = {
 	version: string,
 };
@@ -1661,49 +1525,11 @@ export type ChangeTarget =
  */
 { kind: "effort"; effortId: string };
 
-export type CodeQualityFinding = {
-	id: number,
-	scan_id: number,
-	path: string,
-	start_line: number,
-	end_line: number,
-	kind: string,
-	metric_value: number,
-	extra_json: string | null,
-};
-
-export type CodeQualityScan = {
-	id: number,
-	tool: string,
-	scope: string,
-	status: CodeQualityScanStatus,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	error: string | null,
-	/**
-	 *  Tree version the scan ran against. `"disk" | "ref" | "snapshot"`.
-	 *  Backfilled to `"disk"` for pre-V9 rows.
-	 */
-	tree_version_kind: string,
-	/**
-	 *  Identifier for the version: ref-spec or snapshot id; null for
-	 *  disk.
-	 */
-	tree_version_value: string | null,
-	/**
-	 *  File filter applied: `"all"` or `"explicit:<sha-of-paths>"`.
-	 *  Backfilled to `"all"` for pre-V9 rows.
-	 */
-	file_filter: string,
-};
-
 /**
  *  Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
  *  renderer-era enum.
  */
 export type CodeQualityScanPhase = "started" | "completed" | "failed";
-
-export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
 
 /**
  *  Per-project collection profile (the `collection:` block). Written by
@@ -2213,14 +2039,6 @@ export type FactFinding = {
 	captured_at: Timestamp,
 };
 
-/**
- *  File filter the renderer can request: `all` (whole corpus) or an
- *  explicit set of repo-relative paths. The serialized shape mirrors
- *  the persisted `file_filter` column — callers pass `kind: "all"` or
- *  `{ kind: "explicit", paths: [...] }`.
- */
-export type FileFilterSpec = { kind: "all" } | { kind: "explicit"; paths: string[] };
-
 export type FileSnapshot = {
 	id: number,
 	stream_id: StreamId,
@@ -2251,12 +2069,6 @@ export type FileSnapshot = {
 	 *  and the bytes aren't re-read or re-hashed.
 	 */
 	mtime_ms: number | null,
-};
-
-// One row of [`analyze_surprise`] output.
-export type FileSurprise = {
-	path: string,
-	reason: SurpriseReason,
 };
 
 /**
@@ -2503,73 +2315,6 @@ export type HookKind =
  *  observes traffic for it.
  */
 "agent_boot";
-
-/**
- *  Delta between the before- and after-revision import edges for a
- *  single file. `cross_zone_added` is the highlight signal — a new
- *  import that crosses an architectural zone boundary (e.g. `ui`
- *  suddenly reaches into `store`) is the "wrong layer" callout.
- */
-export type ImportDelta = {
-	path: string,
-	added: ZonedImportEdge[],
-	removed: ZonedImportEdge[],
-	/**
-	 *  Subset of `added` whose `from_zone != to_zone` AND `to_zone`
-	 *  is known (we never flag external/unresolved targets).
-	 */
-	cross_zone_added: ZonedImportEdge[],
-};
-
-/**
- *  One discovered dependency edge: "this file references this module
- *  in this way at this span."
- */
-export type ImportEdge = {
-	// Repo-relative path of the importing file (pass-through).
-	from_path: string,
-	// The exact text of the import declaration as written.
-	raw: string,
-	/**
-	 *  Parsed module identifier — what the author imported. Format
-	 *  is language-native: `"std::fs"` for Rust, `"@scope/pkg"` or
-	 *  `"./relative"` for JS/TS, `"foo.bar"` for Python/Java,
-	 *  `"github.com/foo/bar"` for Go, `"<stdio.h>"` or `"foo.h"` for
-	 *  C/C++, `"foo.bar"` for Clojure.
-	 */
-	module: string,
-	// Declaration kind.
-	kind: ImportKind,
-	// 1-based start line of the import declaration.
-	start_line: number,
-	// 1-based end line of the import declaration.
-	end_line: number,
-};
-
-// What kind of dependency declaration produced this edge.
-export type ImportKind = 
-// Rust `use foo::bar;` / `pub use ...;` / `extern crate foo;`.
-"use" | 
-/**
- *  JS/TS `import { x } from "foo"` / `import * as x from "foo"`
- *  / `import "foo"`, plus `require("foo")` calls.
- */
-"import" | 
-// Python `import foo` / `from foo import bar`.
-"py_import" | 
-// Go `import "foo"` (within a single-or-grouped import decl).
-"go_import" | 
-// Java `import foo.bar.Baz;` / `import static foo.Bar.baz;`.
-"java_import" | 
-// C / C++ preprocessor `#include <stdio.h>` / `#include "foo.h"`.
-"include" | 
-// C++ `using foo::bar;` / `using namespace foo;`.
-"using" | 
-/**
- *  Clojure `(ns my.ns (:require [foo.bar :as fb]))` or top-level
- *  `(require '[foo.bar :as fb])`.
- */
-"clj_require";
 
 export type InstalledLspPackage = {
 	name: string,
@@ -3670,25 +3415,6 @@ export type Snapshot = {
 	git_branch: string | null,
 };
 
-/**
- *  One row per file captured under a snapshot, in the shape the
- *  renderer's change-analysis pipeline expects. `status` mirrors
- *  `BranchChangeEntry`'s set (`added`/`modified`/`deleted`) so the
- *  shared SummaryCard / ChangeAnalysisPanel can render snapshot
- *  changes alongside git ones. `current_file_id` is the row in
- *  `file_snapshot` captured for this snapshot; `prior_file_id` is
- *  the most recent prior capture of the same `(stream_id, path)`,
- *  used to pull the "before" blob bytes for diff + function
- *  analysis.
- */
-export type SnapshotChangeEntry = {
-	path: string,
-	status: string,
-	current_file_id: number,
-	prior_file_id: number | null,
-	oversize: boolean,
-};
-
 export type SnapshotEntry = {
 	hash: string,
 	mtimeMs: number,
@@ -3939,25 +3665,6 @@ export type StreamId = string;
 
 // Whether a stream is the project's primary stream or a worktree.
 export type StreamKind = "primary" | "worktree";
-
-// Why a file was flagged as surprising.
-export type SurpriseReason = 
-/**
- *  Nothing surprising — file has no strong co-changers, OR its
- *  usual co-changers are also in this commit.
- */
-{ kind: "normal" } | 
-/**
- *  The file has well-established co-changers (≥ N co-occurrences
- *  historically), but none of them are in this commit. Carries
- *  the top-3 expected co-changers for the tooltip.
- */
-{ kind: "usual_co_changers_absent"; expected: string[] } | 
-/**
- *  File hasn't been touched in `last_touched_days`. Threshold
- *  is `DEFAULT_DORMANT_DAYS` unless the caller overrode it.
- */
-{ kind: "dormant"; last_touched_days: number };
 
 // A task row.
 export type Task = {
@@ -4291,21 +3998,6 @@ export type ZoneRuleConfig = {
 	 *  assigned by order of first appearance.
 	 */
 	color?: string | null,
-};
-
-/**
- *  A directed edge between two zones, with the originating
- *  [`ImportEdge`] for hover/drill-down.
- */
-export type ZonedImportEdge = {
-	edge: ImportEdge,
-	from_zone: string,
-	/**
-	 *  The target zone if we could classify it, else None. None
-	 *  indicates a target we couldn't resolve (external package, path
-	 *  the resolver doesn't know how to walk).
-	 */
-	to_zone: string | null,
 };
 
 /* Tauri Specta runtime */

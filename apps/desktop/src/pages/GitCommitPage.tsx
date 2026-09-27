@@ -1,7 +1,7 @@
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CommitDetail, Stream, ThreadWorkState } from "../api.js";
+import type { BranchChangeEntry, CommitDetail, Stream, ThreadWorkState } from "../api.js";
 import { getCommitDetail, gitCherryPick, gitRevert } from "../api.js";
 import { awaitGitOp, gitOpErrorMessage, gitOpOutcomeMessage } from "../git-op.js";
 import { logUi } from "../logger.js";
@@ -11,30 +11,20 @@ import { recordOpError } from "../components/opErrorsStore.js";
 import { showToast } from "../components/toastStore.js";
 import { Page } from "../tabs/Page.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
-import { gitCommitRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
+import { gitCommitRef } from "../tabs/pageRefs.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
-import { ScopeFilterBanner } from "../components/ChangeAnalysis/ScopeFilterBanner.js";
-import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
-import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
-import {
-  summarizeTestFunctions,
-  summarizeTestLineRatio,
-} from "../components/ChangeAnalysis/analysisHelpers.js";
+import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
+import { commitBase } from "../components/ChangedFiles/useChangedFiles.js";
+import { refVersion } from "../file-version.js";
 
 export interface GitCommitPageProps {
   stream: Stream | null;
   sha: string;
   /** Subject the caller already knows (for instant header rendering). */
   subject?: string;
-  /** Optional drilldown scope. Pivot clicks from inside the embedded
-   *  analysis panel set this on the page's own ref so the user
-   *  stays on this commit while filtering by extension / directory
-   *  / status. */
-  scope?: ChangeAnalysisScope;
   threadWork: ThreadWorkState | null;
-  /** DiffSpec opener forwarded to the embedded change-analysis panel. */
+  /** Opens a changed file's diff (parent → this commit). */
   onOpenDiff?(spec: DiffSpec): void;
   onOpenDiffInTab?(spec: DiffSpec, siblings?: import("../tabs/PageNavigationContext.js").NavSiblings): void;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
@@ -54,11 +44,10 @@ export function buildCommitTitle(input: { sha: string; subject: string }): strin
 }
 
 /**
- * Single-commit page. Renders the standard `SummaryCard` at the top,
- * the inline commit metadata (subject, message body, SHA, author,
- * date, parents), then the embedded `ChangeAnalysisPanel` which
- * owns all file viewing for this surface — the page no longer
- * keeps a separate "files changed" tree.
+ * Single-commit page: the commit metadata (subject, message body, SHA,
+ * author, date, parents, cherry-pick / revert), its changed files, and
+ * the `commit` lens slot, where extensions show analysis of the change
+ * (`v_change*` for this `change_id`).
  *
  * Linked from `gitCommitRef(sha)`. Backlink clicks anywhere in the
  * app open this page rather than a slideover.
@@ -67,7 +56,6 @@ export function GitCommitPage({
   stream,
   sha,
   subject = "",
-  scope,
   threadWork,
   onOpenDiff,
   onOpenDiffInTab,
@@ -76,26 +64,7 @@ export function GitCommitPage({
 }: GitCommitPageProps) {
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(false);
-  const analysis = useChangeAnalysis({ streamId: stream?.id ?? null, target: sha, scope });
   const { change } = useChange(sha ? { kind: "commit", sha, streamId: stream?.id ?? null } : null);
-  // Measure the SummaryCard so the CommitMeta on its left collapses
-  // to the same height — the meta panel is content-driven and would
-  // otherwise either be much shorter (1-line message) or much taller
-  // (long body) than the summary it sits beside.
-  const summaryRef = useRef<HTMLDivElement>(null);
-  const [summaryHeight, setSummaryHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = summaryRef.current;
-    if (!el) {
-      setSummaryHeight(null);
-      return;
-    }
-    const measure = () => setSummaryHeight(el.getBoundingClientRect().height);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [analysis.files.length, sha, stream?.id]);
   const refForGraph = gitCommitRef(sha);
   const backlinkEntries = useBacklinks(refForGraph);
   const outboundEntries = usePageOutbound(refForGraph);
@@ -161,67 +130,47 @@ export function GitCommitPage({
     [stream, sha],
   );
 
+  const openDiff = (d: CommitDetail, path: string) => {
+    const spec: DiffSpec = {
+      path,
+      leftVersion: refVersion(commitBase(sha, d.parents)),
+      rightVersion: refVersion(sha),
+      baseLabel: commitBase(sha, d.parents).slice(0, 7),
+    };
+    if (onOpenDiffInTab) onOpenDiffInTab(spec);
+    else if (onOpenDiff) onOpenDiff(spec);
+    else onOpenFile?.(path);
+  };
+
   const headerTitle = buildCommitTitle({ sha, subject: detail?.subject ?? subject });
 
   return (
     <Page testId="page-git-commit" title={headerTitle} kind="git-commit" backlinks={backlinks} outbound={outbound}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "12px 16px" }}>
-        {scope ? (
-          <ScopeFilterBanner
-            scope={scope}
-            onClear={() => onOpenPage(gitCommitRef(sha))}
-          />
-        ) : null}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 3fr) minmax(0, 2fr)",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            {!sha ? (
-              <div style={muted}>No commit selected.</div>
-            ) : loading && !detail ? (
-              <div style={muted}>Loading…</div>
-            ) : !detail ? (
-              <div style={muted}>Commit not found.</div>
-            ) : (
-              <CommitMeta
-                detail={detail}
-                collapsedMaxHeight={summaryHeight}
-                onRunOp={stream ? runCommitOp : undefined}
-              />
-            )}
-          </div>
-          <div style={{ minWidth: 0 }} ref={summaryRef}>
-            {sha && stream && analysis.files.length > 0 ? (
-              <SummaryCard
-                fileCount={analysis.files.length}
-                additions={analysis.totals.additions}
-                deletions={analysis.totals.deletions}
-                byStatus={analysis.pivots.byStatus}
-                tests={analysis.tests}
-                testFunctions={summarizeTestFunctions(analysis.functions)}
-                testLineRatio={summarizeTestLineRatio(analysis.functionChurn)}
-              />
+        {!sha ? (
+          <div style={muted}>No commit selected.</div>
+        ) : loading && !detail ? (
+          <div style={muted}>Loading…</div>
+        ) : !detail ? (
+          <div style={muted}>Commit not found.</div>
+        ) : (
+          <>
+            <CommitMeta
+              detail={detail}
+              collapsedMaxHeight={COMMIT_META_MAX_HEIGHT}
+              onRunOp={stream ? runCommitOp : undefined}
+            />
+            {onOpenFile ? (
+              <section data-testid="git-commit-files">
+                <ChangedFilesTree
+                  files={detail.files.map((f) => ({ ...f, status: f.status as BranchChangeEntry["status"] }))}
+                  onOpenFile={onOpenFile}
+                  onOpenFileDiff={(path) => openDiff(detail, path)}
+                />
+              </section>
             ) : null}
-          </div>
-        </div>
-
-        {sha && stream && onOpenFile ? (
-          <ChangeAnalysisPanel
-            analysis={analysis}
-            target={sha}
-            scope={scope}
-            showHeader={false}
-            onOpenPage={onOpenPage}
-            onOpenFile={onOpenFile}
-            onOpenDiff={onOpenDiff}
-            onOpenDiffInTab={onOpenDiffInTab}
-          />
-        ) : null}
+          </>
+        )}
         <LensSlots
           slot="commit"
           params={change ? { change_id: change.id } : null}
@@ -233,12 +182,13 @@ export function GitCommitPage({
   );
 }
 
+/** A long commit message collapses to this height behind "Show more". */
+const COMMIT_META_MAX_HEIGHT = 240;
+
 interface CommitMetaProps {
   detail: CommitDetail;
-  /** Pixel height the SummaryCard alongside this panel renders at —
-   *  the panel collapses to roughly that height, with a "Show more"
-   *  toggle when the message body would overflow. `null` means "let
-   *  it grow" (e.g. before the summary mounts). */
+  /** Pixel height the panel collapses to, with a "Show more" toggle
+   *  when the message body would overflow. `null` means "let it grow". */
   collapsedMaxHeight: number | null;
   /** Run cherry-pick / revert of this commit against the current
    *  stream's worktree. Absent when no stream is selected. */

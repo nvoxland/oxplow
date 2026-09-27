@@ -209,15 +209,6 @@ async fn top_visited_pages_empty_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_code_quality_findings_empty_for_unknown_scan() {
-    let app = TestApp::build();
-    let v = commands::generated::list_code_quality_findings(app.state(), 9999)
-        .await
-        .unwrap();
-    assert!(v.is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn list_snapshots_empty_for_unknown_path() {
     let app = TestApp::build();
     let v = commands::generated::list_snapshots(app.state(), "nope.txt".into())
@@ -757,18 +748,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
             .is_empty()
     );
     assert!(
-        commands::generated::list_snapshot_change_entries(app.state(), 999)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        commands::generated::read_snapshot_file_content(app.state(), 999)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
         commands::generated::list_files_for_snapshot(app.state(), 999)
             .await
             .unwrap()
@@ -844,98 +823,6 @@ async fn lsp_list_reads_for_fresh_project() {
             .is_empty()
     );
     let _ = commands::generated::list_lsp_servers(app.state()).await;
-}
-
-// ---------------------------------------------------------------------------
-// analyze_functions — the one richly-assertable code-quality core. The Tauri
-// adapter now takes `Services` only to read the project's zone table (tsk251),
-// so these drive the core directly with an empty table: they lock the real
-// parse + churn-attribution behavior the Change Analysis dashboard depends on,
-// not just "doesn't panic". Zone classification has its own tests in
-// oxplow-rpc / oxplow-code-deps.
-// ---------------------------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn analyze_functions_detects_functions_and_churn_for_a_modified_file() {
-    use commands::code_quality::AnalyzeFileSpec;
-    // head changes alpha's body AND adds beta.
-    let base = "fn alpha() -> i32 {\n    1\n}\n";
-    let head = "fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n";
-    let result = oxplow_rpc::commands::code_quality::analyze_functions(
-        vec![AnalyzeFileSpec {
-            path: "src/x.rs".into(),
-            base_content: Some(base.into()),
-            head_content: Some(head.into()),
-        }],
-        &[],
-    )
-    .await
-    .unwrap();
-
-    let base_side = result
-        .sides
-        .iter()
-        .find(|s| s.side == "base")
-        .expect("base side present");
-    let head_side = result
-        .sides
-        .iter()
-        .find(|s| s.side == "head")
-        .expect("head side present");
-    assert!(base_side.functions.iter().any(|f| f.name == "alpha"));
-    assert!(head_side.functions.iter().any(|f| f.name == "alpha"));
-    assert!(
-        head_side.functions.iter().any(|f| f.name == "beta"),
-        "the newly added fn must appear on the head side"
-    );
-
-    assert_eq!(result.churn.len(), 1, "one modified file → one churn entry");
-    let churn = &result.churn[0];
-    assert_eq!(churn.path, "src/x.rs");
-    assert!(
-        churn.file_added > 0,
-        "adding fn beta should register added lines, got {churn:?}"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn analyze_functions_added_file_has_only_head_side_and_no_churn() {
-    use commands::code_quality::AnalyzeFileSpec;
-    let result = oxplow_rpc::commands::code_quality::analyze_functions(
-        vec![AnalyzeFileSpec {
-            path: "src/new.rs".into(),
-            base_content: None,
-            head_content: Some("fn brand_new() {}\n".into()),
-        }],
-        &[],
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(
-        result.sides.len(),
-        1,
-        "an added file has only the head side"
-    );
-    assert_eq!(result.sides[0].side, "head");
-    assert!(result.sides[0]
-        .functions
-        .iter()
-        .any(|f| f.name == "brand_new"));
-    assert!(
-        result.churn.is_empty(),
-        "a file with no base content has no before→after churn"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn analyze_functions_empty_input_returns_empty() {
-    let result = oxplow_rpc::commands::code_quality::analyze_functions(vec![], &[])
-        .await
-        .unwrap();
-    assert!(result.sides.is_empty());
-    assert!(result.churn.is_empty());
-    assert!(result.import_deltas.is_empty());
 }
 
 // ---- launcher: recent-projects exists-flag mapping ----

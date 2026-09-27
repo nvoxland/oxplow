@@ -1,0 +1,15 @@
+title: New Cross-zone Imports
+description: Imports this change added from one architectural zone into another.
+params: [{ name: change_id }]
+query: |
+  SELECT i.path, i.module, i.from_zone, i.to_zone, i.start_line, c.base_label, c.head_label
+  FROM v_change_import i JOIN v_change c ON c.id = i.change_id
+  WHERE i.change_id = :change_id AND i.cross_zone = 1
+  ORDER BY i.path, i.start_line
+columns:
+  - { key: path, label: File, link: { kind: diff-at, line: start_line, base: base_label, head: head_label } }
+  - { key: module, label: Imports }
+  - { key: from_zone, label: From }
+  - { key: to_zone, label: To }
+empty: No new cross-zone imports.
+hidden: true

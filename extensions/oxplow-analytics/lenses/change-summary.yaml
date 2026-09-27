@@ -1,0 +1,29 @@
+title: Summary
+params: [{ name: change_id }]
+query: |
+  WITH f AS (
+    SELECT count(*) AS n,
+           coalesce(sum(additions), 0) AS a, coalesce(sum(deletions), 0) AS d,
+           coalesce(sum(status = 'added'), 0) AS na,
+           coalesce(sum(status = 'modified'), 0) AS nm,
+           coalesce(sum(status = 'deleted'), 0) AS nd,
+           coalesce(sum(is_test), 0) AS nt,
+           coalesce(sum(CASE WHEN is_test = 1 THEN additions + deletions ELSE 0 END), 0) AS test_lines,
+           coalesce(sum(CASE WHEN is_test = 1 THEN 0 ELSE additions + deletions END), 0) AS code_lines
+    FROM v_change_file WHERE change_id = :change_id
+  )
+  SELECT CASE c.status
+           WHEN 'failed' THEN 'Change analysis failed: ' || coalesce(c.error, 'unknown error')
+           WHEN 'done' THEN
+             printf('**%d file%s** · +%d −%d · %d added, %d modified, %d deleted · %d test file%s',
+                    f.n, CASE f.n WHEN 1 THEN '' ELSE 's' END, f.a, f.d, f.na, f.nm, f.nd,
+                    f.nt, CASE f.nt WHEN 1 THEN '' ELSE 's' END)
+             || CASE WHEN f.code_lines > 0
+                     THEN printf(' · test/code lines %d%%', f.test_lines * 100 / f.code_lines)
+                     ELSE '' END
+           ELSE '_Analyzing this change…_'
+         END AS summary
+  FROM v_change c, f
+  WHERE c.id = :change_id
+viz: markdown
+hidden: true

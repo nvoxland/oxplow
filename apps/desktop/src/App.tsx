@@ -2724,18 +2724,13 @@ export function App() {
           ),
         });
       } else if (ref.kind === "uncommitted-changes") {
-        const payload = (ref.payload as {
-          scope?: { kind: "ext" | "dir" | "status"; value: string };
-        } | null) ?? null;
-        const scope = payload?.scope ?? undefined;
         tabs.push({
           id: ref.id,
-          label: scope ? `Uncommitted — ${scope.value}` : "Uncommitted",
+          label: "Uncommitted",
           closable: true,
           render: () => (
             <UncommittedChangesPage
               stream={stream}
-              scope={scope}
               onOpenPage={navOpen}
               onOpenFile={navOpenFile}
               onOpenDiff={navOpenDiff}
@@ -2744,22 +2739,15 @@ export function App() {
           ),
         });
       } else if (ref.kind === "git-commit") {
-        const payload = (ref.payload as {
-          sha?: string;
-          scope?: { kind: "ext" | "dir" | "status"; value: string };
-        } | null) ?? null;
-        const sha = payload?.sha ?? "";
-        const scope = payload?.scope ?? undefined;
-        const shaLabel = sha ? sha.slice(0, 7) : "commit";
+        const sha = (ref.payload as { sha?: string } | null)?.sha ?? "";
         tabs.push({
           id: ref.id,
-          label: scope ? `${shaLabel} — ${scope.value}` : shaLabel,
+          label: sha ? sha.slice(0, 7) : "commit",
           closable: true,
           render: () => (
             <GitCommitPage
               stream={stream}
               sha={sha}
-              scope={scope}
               threadWork={selectedThreadWork}
               onOpenDiff={navOpenDiff}
               onOpenDiffInTab={navOpenDiff}

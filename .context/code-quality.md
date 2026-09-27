@@ -14,18 +14,27 @@ for the user to install.
 > computed via the `code_metrics()` host builtin across all languages, tsk314 —
 > see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
 > (`"duplication"` tool — no plugin equivalent, so it stays inherent) and the
-> live **Change-Analysis** pipeline (`analyze_functions_at_refs`, import deltas,
-> co-change), which call `oxplow-code-metrics` directly and never touched the
-> scan store. The `code_quality_scan` / `code_quality_finding` tables persist —
-> they now hold only `duplicate-block` findings.
+> building blocks of the **change-analysis producer** (per-function metrics,
+> churn, import deltas, co-change), which call `oxplow-code-metrics` directly.
+> The `code_quality_scan` / `code_quality_finding` tables persist — they hold
+> only `duplicate-block` findings, written by the change analyzer's scans.
+>
+> **Moved (tsk308):** the Change Analysis UI (the `components/ChangeAnalysis/`
+> cards, `useChangeAnalysis`, the scope drilldown) and its IPC
+> (`analyze_functions_at_refs`, `analyze_co_change_surprise`,
+> `run_duplication_scan_at`, `find_latest_code_quality_scan`,
+> `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
+> `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
+> behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
+> analysis"), and the oxplow-analytics `change-review` lens grid shows it in
+> the commit, uncommitted and effort-review slots.
 
-## Per-function metrics (Change-Analysis, not a persisted scan)
+## Per-function metrics (change analysis, not a persisted scan)
 
 `oxplow-code-metrics` computes complexity / length / parameter-count /
 visibility / container-path per function. These are no longer fanned into a
-persisted code-quality scan; they're consumed live by the Change-Analysis
-`analyze_functions_at_refs` command (below) and projected into the metric
-substrate by the bundled gauges.
+persisted code-quality scan; the change analyzer uses them (below) and the
+bundled gauges project them into the metric substrate.
 
 `FunctionMetrics.visibility` (`Public`/`Private`/`Unknown`, surfaced
 on the IPC as `"public"`/`"private"`/`"unknown"`) is a heuristic
@@ -36,16 +45,13 @@ top-level functions; Java reads the `modifiers` child; C++ tracks the
 preceding `access_specifier` within the enclosing class/struct (class
 default = private, struct default = public); Go uses identifier
 capitalization; Python uses the leading-underscore convention; C
-treats `static` storage class as private. The Change Analysis
-Semantic view drives a "Show private" toggle from this field
-(default on) and colors the function glyph by visibility.
+treats `static` storage class as private. It lands in
+`v_change_function.visibility`.
 
 `FunctionMetrics.container_path` (and `AnalyzedFunction.container_path`
-on the IPC surface) carries the outer-to-inner names of the named-
-declaration ancestors a function lives inside (class / impl / trait /
-mod / namespace / interface / enum / record). The Change Analysis
-Functions card uses it to render a `path > container > … > function`
-tree so the user can scan high-level constructs first and drill in.
+carries the outer-to-inner names of the named-declaration ancestors a
+function lives inside (class / impl / trait / mod / namespace / interface /
+enum / record); it's stored `::`-joined as `v_change_function.container`.
 Top-level functions report an empty `container_path`. The set of
 container kinds is per-language — `LanguageSpec.container_kinds` plus
 `container_name_fields` in `crates/oxplow-code-metrics/src/spec.rs`.
@@ -105,44 +111,40 @@ interface CodeQualityFinding {
 }
 ```
 
-`run_duplication_scan` (in `crates/oxplow-app/src/code_quality_runner.rs`)
-produces this shape directly. The duplication card surfaces it via the
-`list_code_quality_findings` / `run_duplication_scan_at` /
-`find_latest_code_quality_scan` IPC.
+`run_duplication_scan_scoped` (in
+`crates/oxplow-app/src/code_quality_runner.rs`) produces this shape. The
+whole tree at the scanned version is the corpus; the scope (a path list)
+only decides which files findings are anchored to, so a copy of an
+unchanged file is still found.
 
-## Scope: codebase vs diff
+## Where scans come from
 
-Scans run in one of two scopes:
+The change analyzer is the one producer: each analyzed change with a
+scannable head (the working tree or a commit) runs a scan scoped to its
+changed files, in the background. `DuplicationRecorder::record`
+(`crates/oxplow-app/src/duplication_scan.rs`) leaves the record:
 
-- `codebase` — the runner walks every supported file under the
-  project root (skipping `.git`, `target`, `node_modules`, `dist`,
-  `build`, and dotdirs).
-- `diff` — caller passes a file list (typically from
-  `listBranchChanges`); the runner only reads those.
+- a `code_quality_scan` row (tool `duplication`, scope `change <id>`, the
+  tree version and a path-list fingerprint) and its findings, read through
+  `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-analytics
+  `findings` and `duplicate-blocks` lenses);
+- `oxplow.duplicate_lines` facts under one capture stamped with the
+  primary stream; an **empty** capture when nothing is found, so the
+  metric's current state clears after a refactor (tsk44);
+- a status-bar background task and `CodeQualityScanned` events.
 
-Both scopes are persisted independently per `(stream, tool)`, so
-the panel can show "what's complex / duplicated in the whole repo"
-and "in just my branch's changes" at the same time without one
-overwriting the other.
+The change's own `v_change_duplicate` rows are the findings anchored in
+its changed files. There is no manual "Scan now" any more.
 
-## `analyze_functions_at_refs` — before/after metrics for Change Analysis
+## Function analysis for a change
 
-The Change Analysis Dashboard
-(`apps/desktop/src/pages/ChangeAnalysisPage.tsx`) needs per-function
-metadata at *both* the base and head sides of a diff to bucket
-functions into added / deleted / signature-changed / body-changed.
-
-The IPC command `analyze_functions_at_refs`
-(`crates/oxplow-tauri-ipc/src/commands/code_quality.rs`) takes a
-list of `{ path, base_content, head_content }` specs and calls
-`oxplow_code_metrics::analyze_file` directly per side. No tempdir,
-no subprocess, no install dependency.
-
-This is **not** persisted — every call re-analyses the provided
-contents. It's also **separate from the scan store**: results do
-not appear in the Code Quality panel or share scan IDs. Callers
-that want persistent rollups should use `runCodeQualityScan`
-instead.
+`code_analysis::analyze_files` (`crates/oxplow-app/src/code_analysis.rs`)
+takes `{ path, base_content, head_content }` specs and calls
+`oxplow_code_metrics::analyze_file` per side (no tempdir, no subprocess).
+The change analyzer buckets the result into added / deleted /
+signature-changed / body-changed functions and scores each file's review
+priority (`file_interest`); see [semantic-layer.md](./semantic-layer.md)
+→ "Change analysis".
 
 The result also carries a `churn: Vec<AnalyzedFileChurn>` rollup
 — one entry per file where both `base_content` and
@@ -155,38 +157,8 @@ function via qualified-name match
 (`container::container::name`); base-only functions count toward
 `file_deleted` but produce no per-function row. `modified_lines`
 = `min(added_lines, deleted_lines)` per function — a cheap,
-explainable "edited both ways" signal.
-
-The diff itself is computed inside the IPC via
-`similar::TextDiff::from_lines` (no separate `git diff` invocation
-needed). Source: `crates/oxplow-tauri-ipc/src/commands/churn.rs`.
-
-## Change Analysis: interestingness scoring
-
-The dashboard's `LookHereFirstCard` ranks files by a CRAP-flavored
-multiplicative score so a single hot factor dominates:
-
-```
-sizeFactor      = log2(1 + additions + deletions)
-complexitySpike = sum(complexityDelta where >0) across this file's modifiedBody
-paramSpike      = sum(after-before where >0) across modifiedSignature
-longNewFn       = max(0, max(added.length where length>60) - 60) / 40
-untestedMul     = hasMatchingTest ? 1.0 : 1.5
-
-base    = 1 + sizeFactor
-spike   = (1 + 0.6 * complexitySpike) * (1 + 0.4 * paramSpike) * (1 + longNewFn)
-score   = base * spike * untestedMul
-```
-
-Each multiplier ≥ 1.2 contributes a hover-readable `reason` —
-"complexity +14 across 3 fns", "no test in same dir", etc. All
-weights live in `INTERESTINGNESS_WEIGHTS`
-(`apps/desktop/src/components/ChangeAnalysis/interestingness.ts`)
-so they're tuneable from one place.
-
-Per-function variant `functionInterestingness` uses the same
-shape but with churn lines + length on a single function. Used
-by `FunctionChurnCard` for tiebreak ordering.
+explainable "edited both ways" signal. The diff is
+`similar::TextDiff::from_lines` (`crates/oxplow-app/src/churn.rs`).
 
 ## Architectural-change overlay: zones, import deltas, co-change surprise
 
@@ -235,8 +207,9 @@ sentinels and are rejected as declared labels. Config shape, ordering
 semantics, and the MCP authoring tools are below.
 
 The UI has its own matcher at
-`apps/desktop/src/components/ChangeAnalysis/zones.ts` (so file badges
-need no backend roundtrip); it reads the same rules off `get_config`.
+`apps/desktop/src/components/ChangedFiles/zones.ts` (so the changed-files
+tree's zone badges need no backend roundtrip); it reads the same rules off
+`get_config`.
 The two glob implementations are pinned by the shared fixture
 `fixtures/zone-globs.json`, which both test suites run — that is what
 keeps them from drifting.
@@ -280,7 +253,7 @@ it meant. Implementation: `crates/oxplow-app/src/zones_service.rs`.
 
 No IPC of its own — `zones` rides on `get_config`, and the config
 watcher hot-reloads file edits, so a `set_zones` call repaints an open
-Change-analysis view without a restart.
+changed-files tree without a restart.
 
 ### `oxplow-git/co_change`
 
@@ -298,24 +271,15 @@ classifies each file as `Normal | UsualCoChangersAbsent { expected }
 co-changer check (cheaper, clearer signal); files never seen in the
 window are treated as dormant. `SurpriseReason` is specta-derived.
 
-The caller is expected to cache `CoChangeHistory` per `(repo,
-window)` — the public API is pure once the history is built.
+The change analyzer caches `CoChangeHistory` per (repo, HEAD) — the
+public API is pure once the history is built.
 
-### IPC: `import_deltas` + `analyze_co_change_surprise`
+### Import deltas
 
-`analyze_functions_at_refs` (the existing per-function metrics
-command) now also returns `import_deltas: Vec<ImportDelta>`:
-
-```ts
-interface ImportDelta {
-  path: string;
-  added: ZonedImportEdge[];
-  removed: ZonedImportEdge[];
-  cross_zone_added: ZonedImportEdge[]; // subset of `added`
-}
-```
-
-The resolver inside the IPC is intentionally minimal:
+`analyze_files` also returns `import_deltas: Vec<ImportDelta>`
+(`added` / `removed` / `cross_zone_added` zoned edges per file), stored as
+`v_change_import` rows with `cross_zone` set for new boundary crossings.
+The resolver is intentionally minimal:
 
 - Rust `use crate::*` / `self` / `super` → importer's own zone.
 - Rust `use foo::*` → `ZoneRules::zone_for_module`; missing → External.
@@ -328,29 +292,13 @@ The resolver inside the IPC is intentionally minimal:
 Better to underflag than overflag — a missed cross-zone touch is a
 quieter UI; a false-positive is a wrong "wrong layer" callout.
 
-New command `analyze_co_change_surprise(file_paths) -> Vec<FileSurprise>`
-runs the git-history pipeline above on a `spawn_blocking` worker.
-History is rebuilt on every call (sub-second on oxplow-scale repos)
-— runtime-level caching is a future optimization.
+### Where it shows
 
-### UI cards (Change Analysis drilldown)
-
-Three new cards in
-`apps/desktop/src/components/ChangeAnalysis/`, inserted at the top
-of `ChangeAnalysisDrilldown` above `FilesPanel`:
-
-- **`ZoneBarCard`** — horizontal bar of touched zones sized by churn,
-  with cross-zone-added-imports listed below. The headline "wrong
-  layer" signal.
-- **`ChangeTreemapCard`** — squarified treemap (inline algorithm, no
-  d3 dep) sized by churn, coloured by zone. Visual gestalt for "where
-  is this commit's mass."
-- **`CoChangeSurpriseCard`** — only renders when the backend flags
-  something. Lists files with `Dormant` (amber chip + day count) or
-  `UsualCoChangersAbsent` (blue chip + top-3 expected co-changers).
-
-Zone badges also render inline in `FileTreeView` rows via the muted
-`detail` slot.
+The oxplow-analytics `change-review` grid (commit, uncommitted and
+effort-review slots): summary, look-here-first, a churn treemap grouped
+by zone, function changes, test changes, co-change surprises,
+duplication (with compare links) and new cross-zone imports. Zone badges
+also render in the core changed-files tree (`ChangedFilesTree`).
 
 ## Adding a new code/quality signal
 

@@ -286,21 +286,20 @@ pub const MANIFEST: &[Capability] = &[
     both("list_files_for_snapshot"),
     both("get_snapshot"),
     both("get_snapshot_stats"),
-    both("list_snapshot_change_entries"),
-    both("read_snapshot_file_content"),
+    agent("list_snapshot_change_entries"),
+    agent("read_snapshot_file_content"),
     both("restore_file_from_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
     ui("diff_endpoints"),
     // Per-file content at an endpoint, feeding the diff view's function
     // analysis (base + head). UI-only.
-    ui("read_endpoint_files_content"),
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
     todo("list_snapshots"),
     todo("get_snapshot_pair_diff"),
     todo("get_snapshot_summary"),
     // ---- code quality: duplication findings mirrored to MCP (metrics scan
     //      retired in tsk229; signals moved to the metric substrate) ----
-    both("list_code_quality_findings"),
+    agent("list_code_quality_findings"),
     // ---- comments + stream/thread lifecycle mirrored to MCP (Child 5) ----
     both("create_comment"),
     both("set_comment_intent"),
@@ -374,10 +373,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("record_usage"),
     ui("list_recent_usage_rollup"),
     // ---- ui-only: code quality (UI-internal analysis helpers) ----
-    ui("run_duplication_scan_at"),
-    ui("find_latest_code_quality_scan"),
-    ui("analyze_functions_at_refs"),
-    ui("analyze_co_change_surprise"),
     // ---- ui-only: snapshots (UI presentation helpers) ----
     ui("list_wiki_slugs_for_snapshots"),
     ui("get_blob_storage_bytes"),

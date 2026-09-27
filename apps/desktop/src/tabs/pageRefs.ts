@@ -268,62 +268,14 @@ export function endpointDiffRef(start: DiffEndpoint | null, end: DiffEndpoint): 
   };
 }
 
-/**
- * Drilldown scope. `undefined` is "no scope" — show every changed
- * file. The host pages (commit, uncommitted) own the scope on their
- * own ref so a pivot click stays in-page rather than spawning a
- * separate analysis tab.
- */
-export type ChangeAnalysisScope =
-  | { kind: "ext"; value: string }
-  | { kind: "dir"; value: string }
-  | { kind: "status"; value: string };
-
-/** Kept as an alias for callers that still talk in terms of
- *  `target` ("working" or a commit sha). New code should call the
- *  host ref directly. */
-export type ChangeAnalysisTarget = "working" | string;
-
-/** Uncommitted Changes — stats + analysis panel for the working
- *  tree. Optional drilldown scope (set when a pivot row is clicked
- *  from inside the page) keeps the user on the same tab while
- *  filtering. */
-export function uncommittedChangesRef(scope?: ChangeAnalysisScope): TabRef {
-  if (scope) {
-    return {
-      id: `uncommitted-changes:${scope.kind}:${scope.value}`,
-      kind: "uncommitted-changes",
-      payload: { scope },
-    };
-  }
+/** Uncommitted Changes — the working tree's changed files, commit form
+ *  and the `uncommitted` lens slot. */
+export function uncommittedChangesRef(): TabRef {
   return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
 }
 
-/**
- * Convenience for "Change Analysis at <target>" call sites. Picks
- * the right host ref by target: working-tree → uncommittedChangesRef,
- * commit sha → gitCommitRef. The standalone "change-analysis" tab
- * kind no longer exists — drilldowns stay on the host page with a
- * scope set on its ref instead.
- */
-export function changeAnalysisRef(
-  target: ChangeAnalysisTarget,
-  scope?: ChangeAnalysisScope,
-): TabRef {
-  return target === "working" ? uncommittedChangesRef(scope) : gitCommitRef(target, scope);
-}
-
-/** Single git commit page. Optional drilldown scope is folded into
- *  the same ref so pivot clicks stay on the commit page rather than
- *  navigating to a separate analysis tab. */
-export function gitCommitRef(sha: string, scope?: ChangeAnalysisScope): TabRef {
-  if (scope) {
-    return {
-      id: `git-commit:${sha}:${scope.kind}:${scope.value}`,
-      kind: "git-commit",
-      payload: { sha, scope },
-    };
-  }
+/** Single git commit page. */
+export function gitCommitRef(sha: string): TabRef {
   return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
 }
 
@@ -500,9 +452,11 @@ function parseTabId(id: string): TabRef {
       return { id, kind: "diff-view", payload: null };
     }
     case "git-commit":
-      // Id may carry a `:scope:value` suffix; the bare sha reopens the
-      // full-commit view, which is the right default from history.
+      // Old ids may carry a `:scope:value` drilldown suffix (the scope
+      // filter is gone); the bare sha reopens the commit.
       return gitCommitRef(rest.split(":")[0] ?? rest);
+    case "uncommitted-changes":
+      return uncommittedChangesRef();
     case "external-url":
       return externalUrlRef(rest);
     case "op-error":

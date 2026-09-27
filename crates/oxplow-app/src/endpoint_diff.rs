@@ -311,3 +311,47 @@ pub fn endpoint_contents(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn read(
+        f: &crate::test_fixtures::EffortFixture,
+        ep: DiffEndpoint,
+        paths: &[&str],
+    ) -> Vec<Option<String>> {
+        let root = f.svc.layout.project_dir.clone();
+        let filter =
+            WorkspaceFilter::for_project(&root, Vec::<String>::new(), Vec::<String>::new());
+        endpoint_contents(
+            &ep,
+            None,
+            &root,
+            &f.svc.blobs,
+            &filter,
+            paths.iter().map(|p| p.to_string()).collect(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_commit_endpoint_reads_blobs_and_misses_absent_paths() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.txt"), "hello\nworld\n").unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "c1");
+        let out = read(&f, DiffEndpoint::Commit { sha }, &["a.txt", "missing.txt"]);
+        assert_eq!(out, vec![Some("hello\nworld\n".to_string()), None]);
+    }
+
+    #[tokio::test]
+    async fn the_working_endpoint_reads_the_disk() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        std::fs::write(f.svc.layout.project_dir.join("w.txt"), "live").unwrap();
+        assert_eq!(
+            read(&f, DiffEndpoint::Working, &["w.txt"]),
+            vec![Some("live".to_string())]
+        );
+    }
+}

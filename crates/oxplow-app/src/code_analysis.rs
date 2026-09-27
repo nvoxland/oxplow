@@ -333,3 +333,160 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_code_deps::{ZONE_EXTERNAL, ZONE_OTHER};
+
+    /// A project zone table for the import tests — the same shape a
+    /// project writes into `.oxplow/project.yaml` (tsk251). Oxplow has no
+    /// built-in table, so every zone assertion below is against THESE
+    /// rules, not oxplow's opinion of the repo.
+    fn zones() -> ZoneRules {
+        let config: Vec<oxplow_config::ZoneRuleConfig> = [
+            ("analysis", "crates/oxplow-code-deps/**"),
+            ("store", "crates/oxplow-db/**"),
+        ]
+        .into_iter()
+        .map(|(zone, pattern)| oxplow_config::ZoneRuleConfig {
+            patterns: vec![pattern.to_string()],
+            zone: zone.to_string(),
+            color: None,
+        })
+        .collect();
+        ZoneRules::from_config(&config)
+    }
+
+    fn spec(path: &str, base: Option<&str>, head: Option<&str>) -> AnalyzeFileSpec {
+        AnalyzeFileSpec {
+            path: path.into(),
+            base_content: base.map(str::to_string),
+            head_content: head.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn each_side_gets_its_functions() {
+        let r = analyze_files(
+            vec![spec(
+                "src/foo.rs",
+                Some("fn a() {}"),
+                Some("fn a() { if true { 1; } }"),
+            )],
+            &zones(),
+        );
+        assert_eq!(r.sides.len(), 2);
+        let head = r.sides.iter().find(|s| s.side == "head").unwrap();
+        assert_eq!(head.functions.len(), 1);
+        assert!(head.functions[0].complexity >= 2.0);
+    }
+
+    #[test]
+    fn an_added_file_has_only_a_head_side() {
+        let r = analyze_files(
+            vec![spec("src/new.py", None, Some("def f(x):\n    return x\n"))],
+            &zones(),
+        );
+        assert_eq!(r.sides.len(), 1);
+        assert_eq!(r.sides[0].side, "head");
+    }
+
+    #[test]
+    fn an_added_import_into_another_zone_is_cross_zone() {
+        let r = analyze_files(
+            vec![spec(
+                "crates/oxplow-code-deps/src/lib.rs",
+                Some("use std::fs;\nfn a() {}\n"),
+                Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
+            )],
+            &zones(),
+        );
+        assert_eq!(r.import_deltas.len(), 1);
+        let cz = &r.import_deltas[0].cross_zone_added;
+        assert!(!cz.is_empty(), "expected cross-zone added; got {r:?}");
+        assert_eq!(cz[0].from_zone, "analysis");
+        assert_eq!(cz[0].to_zone.as_deref(), Some("store"));
+    }
+
+    /// No `zones:` block means no zone vocabulary, so nothing is
+    /// cross-zone; the import delta itself is still reported.
+    #[test]
+    fn without_a_zone_table_nothing_is_cross_zone() {
+        let r = analyze_files(
+            vec![spec(
+                "crates/oxplow-code-deps/src/lib.rs",
+                Some("use std::fs;\nfn a() {}\n"),
+                Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
+            )],
+            &ZoneRules::from_config(&[]),
+        );
+        let delta = &r.import_deltas[0];
+        assert_eq!(delta.added.len(), 1);
+        assert_eq!(delta.added[0].from_zone, ZONE_OTHER);
+        assert!(delta.cross_zone_added.is_empty());
+    }
+
+    /// A store crate pulling in serde is not a layer violation.
+    #[test]
+    fn an_external_import_is_not_cross_zone() {
+        let r = analyze_files(
+            vec![spec(
+                "crates/oxplow-db/src/lib.rs",
+                Some("fn a() {}\n"),
+                Some("use serde::Serialize;\nfn a() {}\n"),
+            )],
+            &zones(),
+        );
+        let delta = &r.import_deltas[0];
+        assert_eq!(delta.added.len(), 1);
+        assert_eq!(delta.added[0].to_zone.as_deref(), Some(ZONE_EXTERNAL));
+        assert!(delta.cross_zone_added.is_empty());
+    }
+
+    /// Unsupported languages still get (empty) sides, so the caller can
+    /// see the file was looked at.
+    #[test]
+    fn unsupported_languages_get_empty_sides() {
+        let r = analyze_files(
+            vec![spec("README.md", Some("# old"), Some("# new"))],
+            &zones(),
+        );
+        assert_eq!(r.sides.len(), 2);
+        assert!(r.sides[0].functions.is_empty());
+    }
+
+    #[test]
+    fn a_modified_file_gets_its_functions_and_churn() {
+        // The head changes alpha's body AND adds beta.
+        let r = analyze_files(
+            vec![spec(
+                "src/x.rs",
+                Some("fn alpha() -> i32 {\n    1\n}\n"),
+                Some("fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n"),
+            )],
+            &ZoneRules::from_config(&[]),
+        );
+        let side = |name: &str| r.sides.iter().find(|s| s.side == name).unwrap();
+        assert!(side("base").functions.iter().any(|f| f.name == "alpha"));
+        assert!(side("head").functions.iter().any(|f| f.name == "alpha"));
+        assert!(side("head").functions.iter().any(|f| f.name == "beta"));
+        assert_eq!(r.churn.len(), 1, "one modified file → one churn entry");
+        assert_eq!(r.churn[0].path, "src/x.rs");
+        assert!(
+            r.churn[0].file_added > 0,
+            "adding beta adds lines: {:?}",
+            r.churn[0]
+        );
+    }
+
+    #[test]
+    fn an_added_file_has_no_churn() {
+        let r = analyze_files(
+            vec![spec("src/new.rs", None, Some("fn brand_new() {}\n"))],
+            &ZoneRules::from_config(&[]),
+        );
+        assert!(r.sides[0].functions.iter().any(|f| f.name == "brand_new"));
+        assert!(r.churn.is_empty(), "no base content, no before→after churn");
+    }
+}

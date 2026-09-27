@@ -1,0 +1,14 @@
+title: Test Changes
+params: [{ name: change_id }]
+query: |
+  SELECT f.path, f.status, f.additions, f.deletions, c.base_label, c.head_label
+  FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+  WHERE f.change_id = :change_id AND f.is_test = 1
+  ORDER BY f.path
+columns:
+  - { key: path, label: File, link: { kind: diff-at, base: base_label, head: head_label } }
+  - { key: status, label: Status }
+  - { key: additions, label: "+" }
+  - { key: deletions, label: "−" }
+empty: No test files changed.
+hidden: true

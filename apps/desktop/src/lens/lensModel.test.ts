@@ -298,9 +298,15 @@ describe("change links", () => {
       cols,
     )!;
     expect((working.payload as { rightVersion: unknown }).rightVersion).toEqual({ kind: "disk" });
-    expect(
-      cellLinkRef({ kind: "diff-at", from: "path", line: null, base: "base", head: "head" }, "path", ["a", null, "snapshot 3", "snapshot 4", null], cols),
-    ).toBeNull();
+    // An effort's change is labelled by its snapshots; those open too.
+    const effort = cellLinkRef(
+      { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
+      "path",
+      ["a", null, "snapshot 3", "snapshot 4", null],
+      cols,
+    )!;
+    expect((effort.payload as { leftVersion: unknown }).leftVersion).toEqual({ kind: "snapshot", id: "3" });
+    expect((effort.payload as { rightVersion: unknown }).rightVersion).toEqual({ kind: "snapshot", id: "4" });
   });
   test("compare opens both ranges side by side at the change's version", () => {
     const ref = cellLinkRef(

@@ -22,6 +22,21 @@ pub fn init_git_repo(dir: &Path) {
         .unwrap();
 }
 
+/// Stage everything in `dir` and commit it on HEAD; the new sha.
+pub fn commit_all(dir: &Path, message: &str) -> String {
+    let repo = git2::Repository::open(dir).unwrap();
+    let mut idx = repo.index().unwrap();
+    idx.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    idx.write().unwrap();
+    let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+    let sig = repo.signature().unwrap();
+    let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+        .unwrap()
+        .to_string()
+}
+
 pub struct EffortFixture {
     pub svc: Arc<crate::Services>,
     /// Keep alive: the project directory.

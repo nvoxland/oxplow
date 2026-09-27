@@ -1488,67 +1488,6 @@ export async function listFrequentUsage(input: {
   );
 }
 
-export type CodeQualityTool = import("./api-types.js").CodeQualityTool;
-export type CodeQualityScope = import("./api-types.js").CodeQualityScope;
-export type CodeQualityScanStatus = import("./api-types.js").CodeQualityScanStatus;
-export type CodeQualityFindingKind = import("./api-types.js").CodeQualityFindingKind;
-export type CodeQualityScanRow = import("./api-types.js").CodeQualityScanRow;
-export type CodeQualityFindingRow = import("./api-types.js").CodeQualityFindingRow;
-
-export async function listCodeQualityFindings(input: {
-  streamId: string;
-  tool?: CodeQualityTool;
-  paths?: string[];
-  scanId?: number;
-}): Promise<CodeQualityFindingRow[]> {
-  const raw = unwrap(
-    await commands.listCodeQualityFindings(input.scanId ?? 0),
-  );
-  return raw.map((r) => ({
-    id: r.id,
-    scanId: r.scan_id,
-    path: r.path,
-    startLine: r.start_line,
-    endLine: r.end_line,
-    kind: r.kind as CodeQualityFindingKind,
-    metricValue: r.metric_value,
-    extra: r.extra_json ? safeParseJsonObject(r.extra_json) : null,
-  }));
-}
-
-function safeParseJsonObject(s: string): Record<string, unknown> | null {
-  try {
-    const v = JSON.parse(s);
-    return v && typeof v === "object" && !Array.isArray(v)
-      ? (v as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-export function subscribeCodeQualityEvents(
-  streamId: string,
-  fn: (event: { scanId: number; tool: CodeQualityTool; scope: CodeQualityScope; status: CodeQualityScanStatus }) => void,
-): () => void {
-  // Backend emits `codeQualityScanned` { streamId, scanId, tool, scope,
-  // phase: "started" | "completed" | "failed" }. Map phase → status
-  // for the renderer's enum.
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "codeQualityScanned") return;
-    if (event.streamId != null && event.streamId !== streamId) return;
-    const phase = event.phase as string;
-    const status: CodeQualityScanStatus =
-      phase === "completed" ? "done" : phase === "failed" ? "failed" : "running";
-    fn({
-      scanId: event.scanId as number,
-      tool: event.tool as CodeQualityTool,
-      scope: event.scope as CodeQualityScope,
-      status,
-    });
-  });
-}
-
 export async function getTask(id: string): Promise<Task | null> {
   return unwrap(await commands.getTask(id)) as unknown as Task | null;
 }

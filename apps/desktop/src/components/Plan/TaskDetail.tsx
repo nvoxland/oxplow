@@ -8,7 +8,7 @@ import type { RichTextCommentConfig } from "../RichText/RichTextField.js";
 import { inputStyle, miniButtonStyle } from "./plan-utils.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { fileRef } from "../../tabs/pageRefs.js";
-import { ChangeAnalysisFileTree } from "../ChangeAnalysis/FileTreeView.js";
+import { ChangedFilesTree } from "../ChangedFiles/ChangedFilesTree.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
 import { resolveEffortEndpoints } from "../../diffViewModel.js";
@@ -698,9 +698,8 @@ function ActivityEffortSection({
       {detail.changed_paths.length > 0 ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <h2 className="task-activity-heading">Modified Files</h2>
-          <ChangeAnalysisFileTree
+          <ChangedFilesTree
             files={effortFiles}
-            target={`effort:${detail.effort.id}`}
             onOpenFile={(path) => openFile(path)}
             onOpenFileDiff={onOpenDiff ? (path) => openDiff(path) : undefined}
             showFileCount={false}

@@ -171,7 +171,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
   `head` columns holding the change's labels; join `v_change`) opens that
   file's diff between the two sides (commit shas / `HEAD` → git refs,
-  `working tree` → disk; snapshot sides give no link yet). `compare` takes
+  `working tree` → disk, `snapshot N` → that snapshot, so an effort's
+  change links too). `compare` takes
   a `path:start-end|peer:start-end` value (build it in SQL) plus an
   optional `head` version column and opens the side-by-side
   `duplicate-block` page, which is now the general core compare page.
@@ -420,7 +421,7 @@ What moves out of core, and what it becomes:
 |---|---|
 | Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
-| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot lenses |
+| Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | **done:** the `change-review` grid in the `effort-review` / `commit` / `uncommitted` slots; core keeps a changed-files tree (`ChangedFilesTree`, `useChangedFiles`) |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
 | Gauge-threshold nudges | extension alerts → core nudge primitive |
 | Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`task-detail` slot) and `thread-tokens` (`thread` slot) |

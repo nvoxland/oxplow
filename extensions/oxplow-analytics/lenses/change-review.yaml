@@ -1,0 +1,15 @@
+title: Change Analysis
+description: What changed and where to look first — files by review priority, churn by zone, changed functions, tests, and co-change, duplication and import surprises.
+params: [{ name: change_id }]
+query: SELECT 1
+viz: grid
+children:
+  - change-summary
+  - change-look-here
+  - change-treemap
+  - change-functions
+  - change-test-files
+  - change-co-change
+  - change-duplicates
+  - change-cross-zone-imports
+hidden: true

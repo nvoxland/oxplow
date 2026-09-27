@@ -30,6 +30,7 @@ pub mod config_service;
 pub mod config_watch;
 pub mod daemon_supervisor;
 pub mod diagnostics;
+pub mod duplication_scan;
 pub mod effort_evidence;
 pub mod endpoint_diff;
 pub mod events;

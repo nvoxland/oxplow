@@ -22,7 +22,6 @@ import {
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
 import { logUi } from "../logger.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
-import { DISK, refVersion } from "../file-version.js";
 import { Page, pageH1Style } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { usePageTitle } from "../tabs/PageNavigationContext.js";
@@ -34,18 +33,12 @@ import {
 } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
-import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
-import { ChangeAnalysisFileTree } from "../components/ChangeAnalysis/FileTreeView.js";
-import { ChangeTreemapCard } from "../components/ChangeAnalysis/ChangeTreemapCard.js";
-import { LookHereFirstCard } from "../components/ChangeAnalysis/LookHereFirstCard.js";
-import { FunctionsCard } from "../components/ChangeAnalysis/FunctionsCard.js";
-import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelpers.js";
+import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
+import { useChangedFiles } from "../components/ChangedFiles/useChangedFiles.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { LensSlots } from "../lens/LensSlots.js";
 import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
-import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
-import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
 import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 
@@ -218,7 +211,6 @@ function DiffBody({
     <ResolvedEndpointDiff
       stream={stream}
       resolved={resolved}
-      tabKey={key}
       backlinks={backlinks}
       outbound={outbound}
       onOpenPage={onOpenPage}
@@ -243,7 +235,6 @@ function specKey(spec: DiffViewSpec): string {
 function ResolvedEndpointDiff({
   stream,
   resolved,
-  tabKey,
   backlinks,
   outbound,
   onOpenPage,
@@ -253,7 +244,6 @@ function ResolvedEndpointDiff({
 }: {
   stream: Stream | null;
   resolved: ResolvedDiff;
-  tabKey: string;
   backlinks: { count: number; body: ReactNode };
   outbound?: { count: number; body: ReactNode };
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
@@ -281,18 +271,10 @@ function ResolvedEndpointDiff({
     };
   }, [stream?.id]);
 
-  // Endpoint-diff analysis. An in-progress effort diffs its start
-  // snapshot against the live working tree (the `working` endpoint); a
-  // small header note flags that the end side is moving.
-  const endpoints = useMemo(
-    () => ({ start, end }),
-    [JSON.stringify(start), JSON.stringify(end)],
-  );
-  const analysis = useChangeAnalysis({
-    streamId: stream?.id ?? null,
-    target: tabKey,
-    endpoints,
-  });
+  // The changed files. An in-progress effort diffs its start snapshot
+  // against the live working tree (the `working` endpoint); a small
+  // header note flags that the end side is moving.
+  const changed = useChangedFiles(stream ? { kind: "endpoints", streamId: stream.id, start, end } : null);
 
   // Task title for the header (effort mode).
   const [taskTitle, setTaskTitle] = useState<string | null>(null);
@@ -493,70 +475,22 @@ function ResolvedEndpointDiff({
   // Files for the Files Changed tree. All changed files by default; only
   // the effort's claimed files when a diff was opened *for* an effort.
   const filesForList = useMemo<BranchChangeEntry[]>(() => {
-    if (!effortPassed) return analysis.files;
+    if (!effortPassed) return changed.files;
     if (!claimedPaths) return [];
-    return analysis.files.filter((f) => claimedPaths.has(f.path));
-  }, [effortPassed, claimedPaths, analysis.files]);
-  const filesLoading = analysis.loading || (effortPassed && claimedPaths === null);
+    return changed.files.filter((f) => claimedPaths.has(f.path));
+  }, [effortPassed, claimedPaths, changed.files]);
+  const filesLoading = changed.loading || (effortPassed && claimedPaths === null);
 
-  // Function-level changes for the standalone "Function Changes" section,
-  // scoped to the effort's claimed files when opened for one (mirrors
-  // filesForList). The bottom FilesPanel (which used to host this) is hidden
-  // on the diff view.
-  const functionsForList = useMemo<FunctionsBuckets>(() => {
-    if (!effortPassed || !claimedPaths) return analysis.functions;
-    const claimed = claimedPaths;
-    const keep = <T extends { path: string }>(rows: T[]): T[] =>
-      rows.filter((f) => claimed.has(f.path));
-    return {
-      added: keep(analysis.functions.added),
-      deleted: keep(analysis.functions.deleted),
-      modifiedSignature: keep(analysis.functions.modifiedSignature),
-      modifiedBody: keep(analysis.functions.modifiedBody),
-    };
-  }, [effortPassed, claimedPaths, analysis.functions]);
-  const hasFunctionChanges =
-    functionsForList.added.length +
-      functionsForList.deleted.length +
-      functionsForList.modifiedSignature.length +
-      functionsForList.modifiedBody.length >
-    0;
-
-  // Test work in the range — file-based (every test file counts, even
-  // ones with only `describe`/`test` blocks and no named functions, which
-  // the old function-based summary missed). Scoped to the full range, not
-  // the effort's claimed files.
-  const testFiles = useMemo(
-    () => analysis.files.filter((f) => isTestPath(f.path)),
-    [analysis.files],
-  );
-  const testStats = useMemo(() => {
-    let testLines = 0;
-    let productionLines = 0;
-    for (const f of analysis.files) {
-      const lines = (f.additions ?? 0) + (f.deletions ?? 0);
-      if (isTestPath(f.path)) testLines += lines;
-      else productionLines += lines;
-    }
-    return {
-      testLines,
-      productionLines,
-      ratio: productionLines > 0 ? testLines / productionLines : 0,
-    };
-  }, [analysis.files]);
-
-  // Open a file's diff in the current tab (revealing `line`), mirroring the
-  // drilldown. Used by both the Files tree and the Functions rows.
+  // Open a file's diff in the current tab (revealing `line`).
   const openDiffAt = (path: string, line = 1) => {
-    if (!analysis.refs) {
+    if (!changed.base || !changed.head) {
       onOpenFile?.(path);
       return;
     }
-    const { baseRef, headRef } = analysis.refs;
     const spec: DiffSpec = {
       path,
-      leftVersion: refVersion(baseRef),
-      rightVersion: headRef ? refVersion(headRef) : DISK,
+      leftVersion: changed.base,
+      rightVersion: changed.head,
       baseLabel: endpointPlain(startDisp),
       revealLine: line,
     };
@@ -685,9 +619,9 @@ function ResolvedEndpointDiff({
         </div>
       ) : null}
 
-      {analysis.error ? (
+      {changed.error ? (
         <div style={{ ...card, color: "var(--severity-critical, #f87171)", fontSize: "var(--text-sm)" }}>
-          {analysis.error}
+          {changed.error}
         </div>
       ) : null}
 
@@ -710,25 +644,6 @@ function ResolvedEndpointDiff({
         </section>
       ) : null}
 
-      {analysis.files.length > 0 && onOpenFile ? (
-        <ChangeTreemapCard
-          files={analysis.files}
-          functionChurn={analysis.functionChurn}
-          onOpenFile={onOpenFile}
-          onOpenFileDiff={(path, line) => openDiffAt(path, line ?? 1)}
-        />
-      ) : null}
-
-      {analysis.files.length > 0 ? (
-        <LookHereFirstCard
-          boxless
-          files={analysis.files}
-          fileScores={analysis.fileScores}
-          onOpenFile={onOpenFile}
-          onOpenFileDiff={(path) => openDiffAt(path, 1)}
-        />
-      ) : null}
-
       <section data-testid="diff-view-files-changed">
         <h2 style={h2Style}>Files Changed</h2>
         {filesLoading && filesForList.length === 0 ? (
@@ -740,77 +655,14 @@ function ResolvedEndpointDiff({
               : "No file changes between these endpoints."}
           </div>
         ) : onOpenFile ? (
-          <ChangeAnalysisFileTree
+          <ChangedFilesTree
             files={filesForList}
-            target={tabKey}
             onOpenFile={(path, opts) => onOpenFile(path, opts)}
             onOpenFileDiff={(path) => openDiffAt(path, 1)}
             showFileCount={false}
           />
         ) : null}
       </section>
-
-      <section data-testid="diff-view-tests">
-        <h2 style={h2Style}>Tests</h2>
-        {filesLoading && analysis.files.length === 0 ? (
-          <div style={muted}>Loading…</div>
-        ) : testFiles.length === 0 ? (
-          <div style={muted}>No test changes in this range.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {testStats.productionLines > 0 ? (
-              <div
-                style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}
-                data-testid="diff-view-tests-ratio"
-              >
-                Test/code line ratio: {(testStats.ratio * 100).toFixed(0)}%
-              </div>
-            ) : null}
-            {onOpenFile ? (
-              <ChangeAnalysisFileTree
-                files={testFiles}
-                target={tabKey}
-                onOpenFile={(path, opts) => onOpenFile?.(path, opts)}
-                onOpenFileDiff={(path) => openDiffAt(path, 1)}
-                showFileCount={false}
-              />
-            ) : null}
-          </div>
-        )}
-      </section>
-
-      {hasFunctionChanges && onOpenFile ? (
-        <section data-testid="diff-view-function-changes">
-          <h2 style={h2Style}>Function Changes</h2>
-          <FunctionsCard
-            boxless
-            functions={functionsForList}
-            churn={analysis.functionChurn}
-            target={tabKey}
-            onOpenFile={(path, opts) => onOpenFile(path, opts)}
-            onOpenFunctionDiff={(path, line) => openDiffAt(path, line)}
-          />
-        </section>
-      ) : null}
-
-      {/* "The rest" of the change analysis — co-change, churn, code smells,
-          duplication. Treemap + Look-here-first are hoisted above; the
-          Files/Functions panel is the page's own sections. */}
-      {analysis.files.length > 0 && onOpenFile ? (
-        <ChangeAnalysisPanel
-          analysis={analysis}
-          target={tabKey}
-          showHeader={false}
-          showFilesPanel={false}
-          showTreemap={false}
-          showLookHere={false}
-          duplicationBoxless
-          onOpenPage={onOpenPage}
-          onOpenFile={onOpenFile}
-          onOpenDiff={onOpenDiff}
-          onOpenDiffInTab={onOpenDiffInTab}
-        />
-      ) : null}
 
     </div>
     </Page>

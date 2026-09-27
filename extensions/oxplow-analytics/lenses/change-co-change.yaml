@@ -1,0 +1,20 @@
+title: Co-change Surprises
+description: Files that changed without the files they usually change with, or that had been dormant — worth a second look.
+params: [{ name: change_id }]
+query: |
+  SELECT x.path,
+         CASE x.reason
+           WHEN 'usual-co-changers-absent' THEN 'Usual partners unchanged'
+           WHEN 'dormant' THEN printf('Untouched for %d days', x.dormant_days)
+           ELSE x.reason
+         END AS why,
+         x.expected, c.base_label, c.head_label
+  FROM v_change_co_change x JOIN v_change c ON c.id = x.change_id
+  WHERE x.change_id = :change_id
+  ORDER BY x.reason, x.path
+columns:
+  - { key: path, label: File, link: { kind: diff-at, base: base_label, head: head_label } }
+  - { key: why, label: Why }
+  - { key: expected, label: Usually Changes With }
+empty: No co-change surprises.
+hidden: true

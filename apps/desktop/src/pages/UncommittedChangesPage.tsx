@@ -5,24 +5,14 @@ import type { BranchChangeEntry, Stream } from "../api.js";
 import { gitCommitAll } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { indexRef, opErrorRef, uncommittedChangesRef, type ChangeAnalysisScope } from "../tabs/pageRefs.js";
+import { indexRef, opErrorRef } from "../tabs/pageRefs.js";
 import { recordOpError } from "../components/opErrorsStore.js";
-import { ChangeAnalysisPanel } from "../components/ChangeAnalysis/ChangeAnalysisPanel.js";
-import { ScopeFilterBanner } from "../components/ChangeAnalysis/ScopeFilterBanner.js";
-import { SummaryCard } from "../components/ChangeAnalysis/SummaryCard.js";
-import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
-import {
-  summarizeTestFunctions,
-  summarizeTestLineRatio,
-} from "../components/ChangeAnalysis/analysisHelpers.js";
+import { ChangedFilesTree } from "../components/ChangedFiles/ChangedFilesTree.js";
+import { useChangedFiles } from "../components/ChangedFiles/useChangedFiles.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 export interface UncommittedChangesPageProps {
   stream: Stream | null;
-  /** Optional drilldown scope. Pivot clicks from inside the embedded
-   *  analysis panel set this on the page's own ref so the user
-   *  stays here while filtering. */
-  scope?: ChangeAnalysisScope;
   onOpenPage(ref: TabRef, opts?: { newTab?: boolean }): void;
   onOpenFile(path: string, opts?: { newTab?: boolean }): void;
   onOpenDiff?(spec: DiffSpec): void;
@@ -30,15 +20,12 @@ export interface UncommittedChangesPageProps {
 }
 
 /**
- * Working-tree page. Renders the standard
- * `SummaryCard` + change-analysis panel pair shared with the commit
- * page; the commit-message form sits between them. The previous
- * custom inline summary + tree-style file picker is gone — the
- * commit button now commits every changed file.
+ * Working-tree page: a commit form (commits every changed file), the
+ * changed files, and the `uncommitted` lens slot (change analysis comes
+ * from extensions there, reading `v_change*` for this `change_id`).
  */
 export function UncommittedChangesPage({
   stream,
-  scope,
   onOpenPage,
   onOpenFile,
   onOpenDiff,
@@ -46,12 +33,12 @@ export function UncommittedChangesPage({
 }: UncommittedChangesPageProps) {
   const streamId = stream?.id ?? null;
   const { change } = useChange(streamId ? { kind: "working", streamId } : null);
-  const analysis = useChangeAnalysis({ streamId, target: "working", scope });
+  const changed = useChangedFiles(streamId ? { kind: "working", streamId } : null);
   const [committing, setCommitting] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
 
-  const fileCount = analysis.files.length;
-  const hasUntracked = analysis.files.some((f) => f.status === "untracked");
+  const fileCount = changed.files.length;
+  const hasUntracked = changed.files.some((f) => f.status === "untracked");
 
   const onCommit = useCallback(async () => {
     if (!streamId) return;
@@ -60,7 +47,7 @@ export function UncommittedChangesPage({
     if (fileCount === 0) return;
     setCommitting(true);
     try {
-      const allPaths = analysis.files.map((f) => f.path);
+      const allPaths = changed.files.map((f) => f.path);
       const result = await gitCommitAll(streamId, message, {
         paths: allPaths,
         includeUntracked: hasUntracked,
@@ -76,12 +63,20 @@ export function UncommittedChangesPage({
         onOpenPage(opErrorRef(errorId), { newTab: true });
       } else {
         setCommitMessage("");
-        await analysis.refresh();
+        await changed.refresh();
       }
     } finally {
       setCommitting(false);
     }
-  }, [streamId, onOpenPage, commitMessage, fileCount, analysis, hasUntracked]);
+  }, [streamId, onOpenPage, commitMessage, fileCount, changed, hasUntracked]);
+
+  const openDiff = (path: string) => {
+    if (!changed.base || !changed.head) return onOpenFile(path);
+    const spec: DiffSpec = { path, leftVersion: changed.base, rightVersion: changed.head, baseLabel: "HEAD" };
+    if (onOpenDiffInTab) onOpenDiffInTab(spec);
+    else if (onOpenDiff) onOpenDiff(spec);
+    else onOpenFile(path);
+  };
 
   if (!streamId) {
     return (
@@ -94,25 +89,7 @@ export function UncommittedChangesPage({
   return (
     <Page testId="page-uncommitted-changes" title="Uncommitted Changes">
       <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 16, overflow: "auto" }}>
-        {scope ? (
-          <ScopeFilterBanner
-            scope={scope}
-            onClear={() => onOpenPage(uncommittedChangesRef())}
-          />
-        ) : null}
-        {analysis.error ? <div style={errorBanner}>{analysis.error}</div> : null}
-
-        {fileCount > 0 ? (
-          <SummaryCard
-            fileCount={fileCount}
-            additions={analysis.totals.additions}
-            deletions={analysis.totals.deletions}
-            byStatus={analysis.pivots.byStatus}
-            tests={analysis.tests}
-            testFunctions={summarizeTestFunctions(analysis.functions)}
-            testLineRatio={summarizeTestLineRatio(analysis.functionChurn)}
-          />
-        ) : null}
+        {changed.error ? <div style={errorBanner}>{changed.error}</div> : null}
 
         {fileCount > 0 ? (
           <section data-testid="uncommitted-commit-form" style={card}>
@@ -163,7 +140,7 @@ export function UncommittedChangesPage({
           </section>
         ) : null}
 
-        {fileCount === 0 && !analysis.loading ? (
+        {fileCount === 0 && !changed.loading ? (
           <div data-testid="uncommitted-clean" style={cleanState}>
             <span>Working tree is clean.</span>
             <button
@@ -176,16 +153,12 @@ export function UncommittedChangesPage({
           </div>
         ) : (
           <>
-            <ChangeAnalysisPanel
-              analysis={analysis}
-              target="working"
-              scope={scope}
-              showHeader={false}
-              onOpenPage={onOpenPage}
-              onOpenFile={onOpenFile}
-              onOpenDiff={onOpenDiff}
-              onOpenDiffInTab={onOpenDiffInTab}
-            />
+            <section data-testid="uncommitted-files">
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                Files <span style={subtle}>{totalsLabel(summarize(changed.files))}</span>
+              </div>
+              <ChangedFilesTree files={changed.files} onOpenFile={onOpenFile} onOpenFileDiff={openDiff} />
+            </section>
             <LensSlots
               slot="uncommitted"
               params={change ? { change_id: change.id } : null}
@@ -199,12 +172,7 @@ export function UncommittedChangesPage({
   );
 }
 
-/**
- * Status counts for a list of changed files. Kept as a pure helper
- * for the existing test suite even though the page now renders
- * `SummaryCard` (which derives equivalent counts via
- * `analysis.pivots.byStatus`).
- */
+/** Status counts and line totals for a list of changed files. */
 export interface SummaryNumbers {
   total: number;
   modified: number;
@@ -233,6 +201,11 @@ export function summarize(files: BranchChangeEntry[]): SummaryNumbers {
     out.deletions += file.deletions ?? 0;
   }
   return out;
+}
+
+/** `3 changed · +10 −2`: the Files heading's totals. */
+export function totalsLabel(n: SummaryNumbers): string {
+  return `${n.total} changed · +${n.additions} −${n.deletions}`;
 }
 
 const card: React.CSSProperties = {

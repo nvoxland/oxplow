@@ -644,8 +644,10 @@ pub async fn ensure_change(
 
 /// Find duplicated blocks between the changed files and anything else in
 /// the tree at `head`, in the background (it parses the whole tree), then
-/// store them and announce the change again. Snapshot heads (closed
-/// efforts) aren't scannable yet, so they get none.
+/// store them and announce the change again. The scan is also recorded as
+/// a code-quality scan with `oxplow.duplicate_lines` facts
+/// ([`crate::duplication_scan`]). Snapshot heads (closed efforts) aren't
+/// scannable yet, so they get none.
 fn spawn_duplicates(
     svc: &crate::Services,
     change_id: i64,
@@ -653,40 +655,24 @@ fn spawn_duplicates(
     head: &DiffEndpoint,
     changed: Vec<String>,
 ) {
-    use oxplow_tree_source::{
-        DiskTreeSource, ExplicitPaths, FileFilter, GitTreeSource, TreeSource,
-    };
-    let source: std::sync::Arc<dyn TreeSource> = match head {
-        DiffEndpoint::Working => std::sync::Arc::new(DiskTreeSource::new(root.to_path_buf())),
-        DiffEndpoint::Commit { sha } => {
-            std::sync::Arc::new(GitTreeSource::new(root.to_path_buf(), sha.clone()))
-        }
+    use oxplow_tree_source::TreeVersion;
+    let version = match head {
+        DiffEndpoint::Working => TreeVersion::Disk,
+        DiffEndpoint::Commit { sha } => TreeVersion::Ref { r#ref: sha.clone() },
         DiffEndpoint::Snapshot { .. } => return,
     };
     if changed.is_empty() {
         return;
     }
-    let workspace_filter = {
-        let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        oxplow_fs_watch::WorkspaceFilter::for_project(
-            root,
-            &cfg.generated.exclude,
-            &cfg.generated.include,
-        )
-    };
+    let recorder = crate::duplication_scan::DuplicationRecorder::new(svc);
     let store = svc.change_store.clone();
     let events = svc.events.clone();
+    let root = root.to_path_buf();
     tokio::spawn(async move {
-        let scope: std::sync::Arc<dyn FileFilter> =
-            std::sync::Arc::new(ExplicitPaths::new(changed.iter().cloned()));
-        match crate::code_quality_runner::run_duplication_scan_scoped(
-            source,
-            scope,
-            workspace_filter,
-            None,
-            None,
-        )
-        .await
+        let scope = format!("change {change_id}");
+        match recorder
+            .record(root, version, Some(changed.clone()), scope)
+            .await
         {
             Ok(findings) => {
                 let rows: Vec<oxplow_db::ChangeDuplicateRow> = findings
@@ -1086,20 +1072,6 @@ mod tests {
         );
     }
 
-    fn commit_all(dir: &std::path::Path, message: &str) -> String {
-        let repo = git2::Repository::open(dir).unwrap();
-        let mut idx = repo.index().unwrap();
-        idx.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
-            .unwrap();
-        idx.write().unwrap();
-        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
-        let sig = repo.signature().unwrap();
-        let parent = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-            .unwrap()
-            .to_string()
-    }
-
     const BEFORE: &str = "fn keep() -> u32 {\n    1\n}\n\nfn grow(a: u32) -> u32 {\n    a\n}\n";
     const AFTER: &str = "fn keep() -> u32 {\n    1\n}\n\nfn grow(a: u32, b: u32) -> u32 {\n    if a > b {\n        a\n    } else {\n        b\n    }\n}\n\nfn fresh() {}\n";
 
@@ -1117,9 +1089,9 @@ mod tests {
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
-        commit_all(&root, "base");
+        crate::test_fixtures::commit_all(&root, "base");
         std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
-        let sha = commit_all(&root, "change");
+        let sha = crate::test_fixtures::commit_all(&root, "change");
 
         let c = ensure_change(
             &f.svc,
@@ -1166,7 +1138,7 @@ mod tests {
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
-        commit_all(&root, "base");
+        crate::test_fixtures::commit_all(&root, "base");
         std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
         let target = ChangeTarget::Working {
             stream_id: oxplow_domain::StreamId::new(1).to_string(),
@@ -1270,9 +1242,9 @@ mod tests {
         let body = "pub fn tally(items: &[u32]) -> u32 {\n    let mut total = 0;\n    for item in items {\n        if *item > 10 {\n            total += item * 2;\n        } else {\n            total += item + 1;\n        }\n    }\n    total\n}\n";
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/a.rs"), body).unwrap();
-        commit_all(&root, "base");
+        crate::test_fixtures::commit_all(&root, "base");
         std::fs::write(root.join("src/b.rs"), body.replace("tally", "count_up")).unwrap();
-        let sha = commit_all(&root, "copy");
+        let sha = crate::test_fixtures::commit_all(&root, "copy");
         let mut rx = f.svc.events.subscribe();
         let c = ensure_change(
             &f.svc,
@@ -1302,6 +1274,18 @@ mod tests {
                 assert_eq!(
                     announced, 2,
                     "once for the analysis, once for its duplicates"
+                );
+                // The scan is on the code-quality record too, at the commit,
+                // with both halves of the pair.
+                assert_eq!(
+                    rows(
+                        &f.svc,
+                        "SELECT s.status, s.tree_version_kind, f.path FROM v_code_quality_scan s \
+                         JOIN v_code_quality_finding f ON f.scan_id = s.id WHERE ?1 > 0 ORDER BY f.path",
+                        c.id,
+                    )
+                    .await,
+                    serde_json::json!([["done", "ref", "src/a.rs"], ["done", "ref", "src/b.rs"]])
                 );
                 return;
             }

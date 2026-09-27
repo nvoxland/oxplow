@@ -408,35 +408,6 @@ export interface FinishedEntry {
   finishedAt: string;
 }
 
-// ---- Code quality ----
-
-export type CodeQualityTool = "metrics" | "duplication";
-export type CodeQualityScope = "workspace" | "stream" | "codebase" | "diff";
-export type CodeQualityScanStatus = "pending" | "running" | "done" | "failed";
-export type CodeQualityFindingKind = "complexity" | "duplication" | "duplicate-block";
-
-export interface CodeQualityScanRow {
-  id: number;
-  tool: CodeQualityTool;
-  scope: CodeQualityScope;
-  status: CodeQualityScanStatus;
-  started_at?: string;
-  error_message?: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [extra: string]: any;
-}
-
-export interface CodeQualityFindingRow {
-  id: number;
-  scanId: number;
-  path: string;
-  startLine: number;
-  endLine: number;
-  kind: CodeQualityFindingKind;
-  metricValue: number;
-  extra: Record<string, unknown> | null;
-}
-
 // ---- OxplowEvent (UI event-bus payloads) ----
 
 // Permissive OxplowEvent shape — the original was a discriminated

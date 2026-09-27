@@ -3,7 +3,6 @@ import type { TabRef } from "../../tabs/tabState.js";
 import {
   archivedRef,
   backlogRef,
-  changeAnalysisRef,
   closedThreadsRef,
   dashboardRef,
   dashboardsRef,
@@ -71,7 +70,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "git-dashboard", label: "Git", ref: gitDashboardRef(), category: "Git" },
     { id: "git-history", label: "Git History", ref: indexRef("git-history"), category: "Git" },
     { id: "uncommitted-changes", label: "Uncommitted", ref: uncommittedChangesRef(), category: "Git" },
-    { id: "change-analysis", label: "Change Analysis", ref: changeAnalysisRef("working"), category: "Git" },
     { id: "local-history", label: "Local History", ref: indexRef("local-history"), category: "Activity" },
     { id: "hook-events", label: "Hook Events", ref: indexRef("hook-events"), category: "Activity" },
     { id: "comments", label: "Comments Dashboard", ref: indexRef("comments"), category: "Activity" },

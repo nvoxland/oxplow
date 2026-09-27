@@ -315,18 +315,22 @@ oxplow-analytics change cards) only read them.
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
   - files: status, +/−, zone (project zone rules), `is_test`, and the
-    "look here first" `interest` score + reasons (ported from the old
-    `interestingness.ts`: `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
+    "look here first" `interest` score + reasons (`file_interest`, ported
+    from the old UI formula: `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
     (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)`);
   - functions: added / deleted / modified (signature and/or body), deltas,
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary
     crossings;
   - co-change: `analyze_surprise` over a history cached per (repo, HEAD).
-- **Duplicates** come later: a background whole-tree scan
-  (`run_duplication_scan_scoped`, scoped to the changed files) stores
-  `v_change_duplicate` and emits `ChangeAnalyzed` again. Closed efforts
-  (snapshot heads) get none: snapshot trees aren't scannable yet.
+- **Duplicates** come later: a background whole-tree scan scoped to the
+  changed files (`duplication_scan::DuplicationRecorder`) stores
+  `v_change_duplicate` and emits `ChangeAnalyzed` again. The same scan is
+  recorded as a code-quality scan (`v_code_quality_scan` /
+  `v_code_quality_finding`) with `oxplow.duplicate_lines` facts — it is
+  the only duplication producer now ([code-quality.md](./code-quality.md)).
+  Closed efforts (snapshot heads) get none: snapshot trees aren't
+  scannable yet.
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are
   resolved to full ids, so `HEAD` and a short sha share one row. Commits
   and closed efforts are computed once. Working-tree and open-effort

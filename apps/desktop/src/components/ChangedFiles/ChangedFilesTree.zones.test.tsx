@@ -7,7 +7,7 @@ import { cleanup, render } from "@testing-library/react";
 // no vocabulary and the column must stay quiet rather than guess.
 
 import type { BranchChangeEntry } from "../../api.js";
-import { ChangeAnalysisFileTree } from "./FileTreeView.js";
+import { ChangedFilesTree } from "./ChangedFilesTree.js";
 import { compileZoneRules } from "./zones.js";
 import { __setZoneRulesForTest } from "./useZoneRules.js";
 
@@ -24,7 +24,7 @@ const FILES: BranchChangeEntry[] = [
 
 function renderTree() {
   return render(
-    <ChangeAnalysisFileTree files={FILES} target="working" onOpenFile={() => {}} />,
+    <ChangedFilesTree files={FILES} onOpenFile={() => {}} />,
   );
 }
 

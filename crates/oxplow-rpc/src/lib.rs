@@ -365,11 +365,6 @@ macro_rules! oxplow_command_table {
                 delete_workspace_path => $crate::commands::workspace::delete_workspace_path { stream_id: Option<String>, relative_path: String } -> String,
                 get_workspace_status_summary => $crate::commands::workspace::get_workspace_status_summary { stream_id: Option<String> } -> ::oxplow_git::WorkspaceStatusSummary,
                 // code_quality (duplication only — the metrics scan was retired in tsk229)
-                list_code_quality_findings => $crate::commands::code_quality::list_code_quality_findings { scan_id: i64 } -> Vec<::oxplow_db::CodeQualityFinding>,
-                run_duplication_scan_at => $crate::commands::code_quality::run_duplication_scan_at { tree_version: ::oxplow_tree_source::TreeVersion, file_filter: $crate::commands::code_quality::FileFilterSpec, scope: String } -> i64,
-                find_latest_code_quality_scan => $crate::commands::code_quality::find_latest_code_quality_scan { tool: String, tree_version: ::oxplow_tree_source::TreeVersion, file_filter: $crate::commands::code_quality::FileFilterSpec } -> Option<::oxplow_db::CodeQualityScan>,
-                analyze_co_change_surprise => $crate::commands::code_quality::analyze_co_change_surprise { file_paths: Vec<String> } -> Vec<::oxplow_git::co_change::FileSurprise>,
-                analyze_functions_at_refs => $crate::commands::code_quality::analyze_functions_at_refs { files: Vec<$crate::commands::code_quality::AnalyzeFileSpec> } -> $crate::commands::code_quality::AnalyzeFunctionsResult,
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 set_agent_prompt_append => $crate::commands::config::set_agent_prompt_append { text: String } -> ::oxplow_config::OxplowConfig,
@@ -398,15 +393,12 @@ macro_rules! oxplow_command_table {
                 list_snapshots => $crate::commands::snapshot::list_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: i64 } -> ::oxplow_db::SnapshotStats,
-                list_snapshot_change_entries => $crate::commands::snapshot::list_snapshot_change_entries { snapshot_id: i64 } -> Vec<::oxplow_db::SnapshotChangeEntry>,
-                read_snapshot_file_content => $crate::commands::snapshot::read_snapshot_file_content { file_snapshot_id: i64 } -> Option<String>,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> i64,
                 list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<i64> } -> Vec<(i64, String)>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: i64 } -> Vec<::oxplow_db::FileSnapshot>,
                 get_snapshot => $crate::commands::snapshot::get_snapshot { id: i64 } -> Option<::oxplow_db::FileSnapshot>,
                 get_snapshot_pair_diff => $crate::commands::snapshot::get_snapshot_pair_diff { before_id: Option<i64>, after_id: Option<i64> } -> $crate::commands::snapshot::SnapshotPairDiff,
                 diff_endpoints => $crate::commands::snapshot::diff_endpoints { start: Option<$crate::commands::snapshot::DiffEndpoint>, end: $crate::commands::snapshot::DiffEndpoint } -> Vec<$crate::commands::snapshot::DiffEntry>,
-                read_endpoint_files_content => $crate::commands::snapshot::read_endpoint_files_content { endpoint: $crate::commands::snapshot::DiffEndpoint, paths: Vec<String> } -> Vec<Option<String>>,
                 get_snapshot_summary => $crate::commands::snapshot::get_snapshot_summary { snapshot_id: i64 } -> Option<$crate::commands::snapshot::SnapshotSummary>,
                 restore_file_from_snapshot => $crate::commands::snapshot::restore_file_from_snapshot { snapshot_id: i64 } -> (),
                 // background

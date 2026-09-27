@@ -10,6 +10,7 @@ import {
   externalUrlRef,
   fileRef,
   gitCommitRef,
+  uncommittedChangesRef,
   hookEventsRef,
   indexRef,
   lensRef,
@@ -161,6 +162,10 @@ describe("refFromTabId", () => {
     // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
     expect(refFromTabId(snapshotRef(112).id)).toEqual(snapshotRef(112));
     expect(refFromTabId("external-url:https://x.test/p")).toEqual(externalUrlRef("https://x.test/p"));
+  });
+
+  test("uncommitted-changes drops an old drilldown scope suffix", () => {
+    expect(refFromTabId("uncommitted-changes:dir:src")).toEqual(uncommittedChangesRef());
   });
 
   test("git-commit drops a scope suffix to the bare sha", () => {

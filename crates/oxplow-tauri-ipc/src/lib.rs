@@ -198,11 +198,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::record_usage,
             commands::generated::list_recent_usage_rollup,
             // code quality (duplication only — metrics scan retired, tsk229)
-            commands::generated::list_code_quality_findings,
-            commands::generated::run_duplication_scan_at,
-            commands::generated::find_latest_code_quality_scan,
-            commands::generated::analyze_functions_at_refs,
-            commands::generated::analyze_co_change_surprise,
             // snapshots
             commands::generated::list_snapshots,
             commands::generated::list_snapshots_for_stream,
@@ -211,11 +206,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_snapshot,
             commands::generated::get_snapshot_pair_diff,
             commands::generated::diff_endpoints,
-            commands::generated::read_endpoint_files_content,
             commands::generated::get_snapshot_summary,
             commands::generated::get_snapshot_stats,
-            commands::generated::list_snapshot_change_entries,
-            commands::generated::read_snapshot_file_content,
             commands::generated::get_blob_storage_bytes,
             commands::generated::restore_file_from_snapshot,
             // branch

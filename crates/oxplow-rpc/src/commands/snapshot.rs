@@ -8,7 +8,7 @@ use specta::Type;
 
 pub use oxplow_app::endpoint_diff::{DiffEndpoint, DiffEntry};
 use oxplow_app::Services;
-use oxplow_db::{FileSnapshot, Snapshot, SnapshotChangeEntry, SnapshotStats};
+use oxplow_db::{FileSnapshot, Snapshot, SnapshotStats};
 use oxplow_domain::StreamId;
 use oxplow_fs_watch::WorkspaceFilter;
 
@@ -66,60 +66,6 @@ pub async fn get_snapshot_stats(
     snapshot_id: i64,
 ) -> Result<SnapshotStats, IpcError> {
     Ok(svc.snapshot_store.stats_for_snapshot(snapshot_id).await?)
-}
-
-/// Per-file change entries for one snapshot, in the shape the
-/// renderer's `useSnapshotChangeAnalysis` hook expects so it can
-/// feed the same SummaryCard / ChangeAnalysisPanel components the
-/// Git pages use.
-pub async fn list_snapshot_change_entries(
-    svc: &Services,
-    snapshot_id: i64,
-) -> Result<Vec<SnapshotChangeEntry>, IpcError> {
-    let filter = current_filter(svc);
-    let rows = svc
-        .snapshot_store
-        .list_changes_for_snapshot(snapshot_id)
-        .await?;
-    Ok(rows
-        .into_iter()
-        .filter(|r| !filter.ignore(Path::new(&r.path), false))
-        .collect())
-}
-
-/// Read a `file_snapshot` row's blob content as a UTF-8 string.
-/// Returns `None` when:
-/// - the row id doesn't exist,
-/// - the row has no blob hash (deletion row or oversize-tracked),
-/// - the content has EXPIRED from Local History (tsk105: records are
-///   permanent; on-disk bytes are kept only for the retention window plus
-///   each path's newest row) — the routine case for old history, which the
-///   UI treats as content-unavailable.
-///
-/// Binary bytes pass through as UTF-8 lossy — the renderer's diff /
-/// function-analysis pipeline treats the result as text either way.
-pub async fn read_snapshot_file_content(
-    svc: &Services,
-    file_snapshot_id: i64,
-) -> Result<Option<String>, IpcError> {
-    let Some(snap) = svc.snapshot_store.get(file_snapshot_id).await? else {
-        return Ok(None);
-    };
-    let Some(hash) = snap.blob_hash.clone() else {
-        return Ok(None);
-    };
-    let blobs = svc.blobs.clone();
-    let project_dir = svc.layout.project_dir.clone();
-    let storage = snap.storage;
-    let bytes = tokio::task::spawn_blocking(move || {
-        oxplow_app::snapshot_content::read_snapshot_content(storage, &hash, &project_dir, &blobs)
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?;
-    match bytes {
-        Ok(b) => Ok(Some(String::from_utf8_lossy(&b).into_owned())),
-        Err(_) => Ok(None),
-    }
 }
 
 /// Total on-disk size of every blob in the content-addressed store.
@@ -246,42 +192,6 @@ pub async fn diff_endpoints(
             &project_dir,
             &blobs,
             &filter,
-        )
-    })
-    .await
-    .map_err(|e| IpcError::internal(e.to_string()))?
-    .map_err(IpcError::internal)
-}
-
-/// Read the UTF-8 (lossy) content of each `path` as of `endpoint`.
-/// Returns a vec aligned to `paths`: `None` for a path absent at the
-/// endpoint, or binary / oversize / pruned content. Builds the
-/// endpoint's content tree once, then reads each requested path — the
-/// diff view's function-level analysis calls this twice (base + head)
-/// with the changed-file set, mirroring the snapshot/commit branches'
-/// per-file content reads.
-pub async fn read_endpoint_files_content(
-    svc: &Services,
-    endpoint: DiffEndpoint,
-    paths: Vec<String>,
-) -> Result<Vec<Option<String>>, IpcError> {
-    let snap = match &endpoint {
-        DiffEndpoint::Snapshot { snapshot_id } => {
-            Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
-        }
-        _ => None,
-    };
-    let project_dir = svc.layout.project_dir.clone();
-    let blobs = svc.blobs.clone();
-    let filter = current_filter(svc);
-    tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, String> {
-        oxplow_app::endpoint_diff::endpoint_contents(
-            &endpoint,
-            snap,
-            &project_dir,
-            &blobs,
-            &filter,
-            paths,
         )
     })
     .await
@@ -784,55 +694,5 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_array(), "expected a JSON array, got {out}");
-    }
-
-    #[tokio::test]
-    async fn read_endpoint_files_content_reads_commit_blobs() {
-        let (svc, dir) = crate::test_support::services();
-        let p = dir.path().to_path_buf();
-        let git = |args: &[&str]| {
-            assert!(std::process::Command::new("git")
-                .args(args)
-                .current_dir(&p)
-                .status()
-                .unwrap()
-                .success());
-        };
-        std::fs::write(p.join("a.txt"), "hello\nworld\n").unwrap();
-        git(&["add", "-A"]);
-        git(&["commit", "-q", "-m", "c1"]);
-        let sha = {
-            let o = std::process::Command::new("git")
-                .args(["rev-parse", "HEAD"])
-                .current_dir(&p)
-                .output()
-                .unwrap();
-            String::from_utf8(o.stdout).unwrap().trim().to_string()
-        };
-
-        let out = super::read_endpoint_files_content(
-            &svc,
-            super::DiffEndpoint::Commit { sha },
-            vec!["a.txt".into(), "missing.txt".into()],
-        )
-        .await
-        .unwrap();
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].as_deref(), Some("hello\nworld\n"));
-        assert_eq!(out[1], None, "path absent at the endpoint reads as None");
-    }
-
-    #[tokio::test]
-    async fn read_endpoint_files_content_reads_working_tree() {
-        let (svc, dir) = crate::test_support::services();
-        std::fs::write(dir.path().join("w.txt"), "live").unwrap();
-        let out = super::read_endpoint_files_content(
-            &svc,
-            super::DiffEndpoint::Working,
-            vec!["w.txt".into()],
-        )
-        .await
-        .unwrap();
-        assert_eq!(out[0].as_deref(), Some("live"));
     }
 }

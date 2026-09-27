@@ -1,0 +1,16 @@
+title: Look Here First
+description: The changed files most worth a reviewer's attention — size, complexity and parameter spikes, and long new functions.
+params: [{ name: change_id }]
+query: |
+  SELECT f.path, round(f.interest, 1) AS interest, f.interest_reasons AS reasons,
+         c.base_label, c.head_label
+  FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+  WHERE f.change_id = :change_id AND f.interest > 0
+  ORDER BY f.interest DESC, f.path
+  LIMIT 10
+columns:
+  - { key: path, label: File, link: { kind: diff-at, base: base_label, head: head_label } }
+  - { key: reasons, label: Why }
+  - { key: interest, label: Score }
+empty: Nothing stands out.
+hidden: true

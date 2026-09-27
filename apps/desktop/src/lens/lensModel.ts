@@ -7,7 +7,7 @@
 import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
 import { duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
-import { DISK, refVersion, type FileVersion } from "../file-version.js";
+import { DISK, refVersion, snapshotVersion, type FileVersion } from "../file-version.js";
 import { computeDiffId } from "../diff-id.js";
 import type { TabRef } from "../tabs/tabState.js";
 
@@ -114,7 +114,8 @@ export function labelToVersion(label: SqlCell): FileVersion | null {
   if (label === null || label === "") return null;
   const s = String(label);
   if (s === "working tree") return DISK;
-  if (s.startsWith("snapshot ")) return null;
+  const snap = /^snapshot (\d+)$/.exec(s);
+  if (snap) return snapshotVersion(snap[1]!);
   return refVersion(s);
 }
 

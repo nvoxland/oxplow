@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { BranchChangeEntry } from "../tauri-bridge/index.js";
-import { summarize } from "./UncommittedChangesPage.js";
+import { summarize, totalsLabel } from "./UncommittedChangesPage.js";
 
 function entry(
   path: string,
@@ -44,4 +44,10 @@ describe("summarize", () => {
     expect(result.additions).toBe(0);
     expect(result.deletions).toBe(0);
   });
+});
+
+test("totalsLabel reads the file count and line totals", () => {
+  expect(totalsLabel(summarize([entry("a.ts", "modified", 5, 2), entry("b.ts", "added", 10, null)]))).toBe(
+    "2 changed · +15 −2",
+  );
 });
