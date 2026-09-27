@@ -3297,6 +3297,16 @@ detail: string | null } |
  */
 { kind: "sourceSynced"; extension: string; sourceId: string } | 
 /**
+ *  An effort closed (its task left `in_progress`). Background work
+ *  that reviews a finished effort (inferred decisions) keys off this.
+ */
+{ kind: "effortFinished"; threadId: ThreadId; effortId: number } | 
+/**
+ *  Decisions or claims changed for `effort_id` (inferred decisions
+ *  stored after an effort closed). Review-packet lenses re-run.
+ */
+{ kind: "reasoningChanged"; effortId: number | null } | 
+/**
  *  A code-quality scan transitioned states (started / completed /
  *  failed). The renderer refreshes scan + finding lists on receipt.
  */

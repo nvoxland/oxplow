@@ -384,6 +384,12 @@ impl TaskService {
                 {
                     self.project_effort_lifecycle_metrics(item.id, &thread_id, &effort_id, false)
                         .await;
+                    if let Some(events) = self.events.as_ref() {
+                        events.emit(crate::OxplowEvent::EffortFinished {
+                            thread_id,
+                            effort_id: effort_id.value(),
+                        });
+                    }
                     // Run any config-declared `on-effort-complete` gauges
                     // against the effort's end snapshot (tsk213, P3).
                     if let Some(runner) = self.gauge_runner.as_ref() {
@@ -3369,5 +3375,29 @@ mod tests {
             !split.unclaimed.iter().any(|p| p == "changed.txt"),
             "a claimed change must not also be unclaimed; got {split:?}",
         );
+    }
+
+    #[tokio::test]
+    async fn closing_an_effort_emits_effort_finished() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let mut rx = f.svc.events.subscribe();
+        f.svc
+            .tasks
+            .update(
+                f.task,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let mut seen = None;
+        while let Ok(ev) = rx.try_recv() {
+            if let crate::OxplowEvent::EffortFinished { effort_id, .. } = ev {
+                seen = Some(effort_id);
+            }
+        }
+        assert_eq!(seen, Some(f.effort.value()));
     }
 }

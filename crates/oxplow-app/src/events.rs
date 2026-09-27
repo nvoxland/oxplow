@@ -241,6 +241,12 @@ pub enum OxplowEvent {
         extension: String,
         source_id: String,
     },
+    /// An effort closed (its task left `in_progress`). Background work
+    /// that reviews a finished effort (inferred decisions) keys off this.
+    EffortFinished { thread_id: ThreadId, effort_id: i64 },
+    /// Decisions or claims changed for `effort_id` (inferred decisions
+    /// stored after an effort closed). Review-packet lenses re-run.
+    ReasoningChanged { effort_id: Option<i64> },
     /// A code-quality scan transitioned states (started / completed /
     /// failed). The renderer refreshes scan + finding lists on receipt.
     CodeQualityScanned {

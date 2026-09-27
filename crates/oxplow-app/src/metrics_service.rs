@@ -2269,22 +2269,10 @@ mod tests {
     use super::*;
     use oxplow_config::GaugeComputeConfig;
 
-    fn init_git_repo(dir: &Path) {
-        let repo = git2::Repository::init(dir).unwrap();
-        let mut config = repo.config().unwrap();
-        config.set_str("user.name", "test").unwrap();
-        config.set_str("user.email", "test@example.com").unwrap();
-        let sig = repo.signature().unwrap();
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
-
     /// A `MetricsService` over a real in-memory `Services` + git repo.
     async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        init_git_repo(dir.path());
+        crate::test_fixtures::init_git_repo(dir.path());
         let svc = Arc::new(crate::Services::in_memory(dir.path()).unwrap());
         svc.streams.ensure_primary().await.unwrap();
         (svc, dir)

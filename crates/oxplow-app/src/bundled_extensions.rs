@@ -25,6 +25,7 @@ pub const BUNDLED: &[BundledExtension] = &[BundledExtension {
         ext_file!("oxplow-review", "extension.yaml"),
         ext_file!("oxplow-review", "lenses/context-read.yaml"),
         ext_file!("oxplow-review", "lenses/decisions.yaml"),
+        ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
         ext_file!("oxplow-review", "lenses/struggled.yaml"),
         ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
         ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),

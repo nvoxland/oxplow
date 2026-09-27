@@ -57,8 +57,10 @@ pub fn format_missing_decisions_hint(files: i64, decisions: i64) -> Option<Strin
 pub async fn effort_decisions_block(layer: &SemanticLayer, effort_id: i64) -> Option<String> {
     let out = layer
         .query_sql(
+            // Only what the agent recorded: inferred decisions are
+            // oxplow's guesses, not the agent's own commitments.
             "SELECT question, choice, alternatives, why FROM v_decision
-             WHERE effort_id = ?1 ORDER BY id DESC LIMIT ?2",
+             WHERE effort_id = ?1 AND provenance = 'recorded' ORDER BY id DESC LIMIT ?2",
             vec![
                 SqlCell::Int(effort_id),
                 SqlCell::Int(MAX_DECISIONS_IN_CONTEXT as i64),
@@ -91,7 +93,7 @@ pub async fn missing_decisions_hint(layer: &SemanticLayer, effort_id: i64) -> Op
     let out = layer
         .query_sql(
             "SELECT (SELECT count(*) FROM v_effort_file WHERE effort_id = ?1),
-                    (SELECT count(*) FROM v_decision WHERE effort_id = ?1)",
+                    (SELECT count(*) FROM v_decision WHERE effort_id = ?1 AND provenance = 'recorded')",
             vec![SqlCell::Int(effort_id)],
             None,
         )
@@ -145,6 +147,39 @@ mod tests {
         assert!(
             hint.contains("8 files") && hint.contains("record_decision"),
             "{hint}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inferred_decisions_are_never_fed_back_to_the_agent() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f.effort.value();
+        let d = |q: &str| oxplow_db::NewDecision {
+            thread_id: f.thread.value(),
+            task_id: Some(f.task.value()),
+            effort_id: Some(effort),
+            question: q.into(),
+            choice: "c".into(),
+            alternatives: vec![],
+            confidence: "medium".into(),
+            why: String::new(),
+        };
+        f.svc
+            .reasoning_store
+            .replace_inferred(effort, vec![d("guessed")])
+            .await
+            .unwrap();
+        let layer = SemanticLayer::new(f.svc.db.clone());
+        assert_eq!(effort_decisions_block(&layer, effort).await, None);
+        f.svc
+            .reasoning_store
+            .record_decision(d("recorded"))
+            .await
+            .unwrap();
+        let block = effort_decisions_block(&layer, effort).await.unwrap();
+        assert!(
+            block.contains("recorded") && !block.contains("guessed"),
+            "{block}"
         );
     }
 }

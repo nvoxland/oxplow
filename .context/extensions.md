@@ -152,7 +152,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     re-runs on data events.
 - **`oxplow-review` (the review packet).** Its lenses, mounted in
   `effort-review`:
-  - Decisions Made (`v_decision`)
+  - Decisions Made (`v_decision`, `provenance = 'recorded'`)
+  - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` where `verified = 0`)
   - Struggled Here (`v_struggle`)
   - Context Read (`v_context_read`)

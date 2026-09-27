@@ -7,7 +7,7 @@ query: |
          (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
          confidence, why
   FROM v_decision
-  WHERE effort_id = :effort_id
+  WHERE effort_id = :effort_id AND provenance = 'recorded'
   ORDER BY created_at
 viz: table
 columns:

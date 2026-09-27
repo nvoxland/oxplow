@@ -4,6 +4,7 @@
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+use crate::database::map_sql_err;
 use crate::Database;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -72,6 +73,58 @@ impl SqliteReasoningStore {
                     ],
                 )?;
                 Ok(c.last_insert_rowid())
+            })
+            .await
+    }
+
+    /// Replace `effort_id`'s inferred decisions (provenance `inferred`:
+    /// proposed by a model from the effort's activity, not recorded by the
+    /// agent) with `decisions`. Recorded decisions are untouched. Their
+    /// `effort_id` is overwritten with `effort_id`.
+    pub async fn replace_inferred(
+        &self,
+        effort_id: i64,
+        decisions: Vec<NewDecision>,
+    ) -> Result<usize, DomainError> {
+        let now = now_string();
+        let mut rows = Vec::new();
+        for d in decisions {
+            if d.question.trim().is_empty() || d.choice.trim().is_empty() {
+                continue;
+            }
+            let confidence = if ["low", "medium", "high"].contains(&d.confidence.as_str()) {
+                d.confidence
+            } else {
+                "low".to_string()
+            };
+            let alternatives = serde_json::to_string(&d.alternatives)
+                .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
+            rows.push((
+                d.thread_id,
+                d.task_id,
+                d.question,
+                d.choice,
+                alternatives,
+                confidence,
+                d.why,
+            ));
+        }
+        self.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "DELETE FROM decision WHERE effort_id = ?1 AND provenance = 'inferred'",
+                    [effort_id],
+                )
+                .map_err(map_sql_err)?;
+                for (thread_id, task_id, question, choice, alternatives, confidence, why) in &rows {
+                    tx.execute(
+                        "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'inferred', ?9)",
+                        rusqlite::params![thread_id, task_id, effort_id, question, choice, alternatives, confidence, why, now],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                Ok(rows.len())
             })
             .await
     }
@@ -270,5 +323,70 @@ mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             json!([[1], [0], [1], [0]])
         );
+    }
+
+    fn decision(question: &str) -> NewDecision {
+        NewDecision {
+            thread_id: 1,
+            task_id: Some(1),
+            effort_id: Some(1),
+            question: question.into(),
+            choice: "c".into(),
+            alternatives: vec![],
+            confidence: "medium".into(),
+            why: "w".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn inferred_decisions_are_marked_and_replaced_per_effort() {
+        let (_db, store, sl) = seeded().await;
+        store
+            .record_decision(decision("recorded one"))
+            .await
+            .unwrap();
+        store
+            .replace_inferred(1, vec![decision("guess a"), decision("guess b")])
+            .await
+            .unwrap();
+        store
+            .replace_inferred(2, vec![decision("other effort")])
+            .await
+            .unwrap();
+        // A second pass replaces the first; the recorded one and effort 2's stay.
+        let n = store
+            .replace_inferred(1, vec![decision("guess c")])
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        let out = sl
+            .query_sql(
+                "SELECT effort_id, question, provenance FROM v_decision ORDER BY effort_id, id",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([
+                [1, "recorded one", "recorded"],
+                [1, "guess c", "inferred"],
+                [2, "other effort", "inferred"]
+            ])
+        );
+        // Bad confidence is normalized rather than failing the whole batch.
+        let mut odd = decision("odd");
+        odd.confidence = "very".into();
+        store.replace_inferred(1, vec![odd]).await.unwrap();
+        let out = sl
+            .query_sql(
+                "SELECT confidence FROM v_decision WHERE question = 'odd'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([["low"]]));
     }
 }

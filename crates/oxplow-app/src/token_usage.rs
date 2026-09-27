@@ -888,18 +888,6 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    fn init_git_repo(dir: &Path) {
-        let repo = git2::Repository::init(dir).unwrap();
-        let mut config = repo.config().unwrap();
-        config.set_str("user.name", "test").unwrap();
-        config.set_str("user.email", "test@example.com").unwrap();
-        let sig = repo.signature().unwrap();
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
-
     /// Build a real in-memory `Services` over a fresh git repo, seed a
     /// primary stream + a Claude thread, and return the service + thread id.
     /// Token usage is attributed to the thread (no open effort created — the
@@ -907,7 +895,7 @@ mod tests {
     /// tests).
     async fn service_fixture() -> (std::sync::Arc<crate::Services>, tempfile::TempDir, ThreadId) {
         let dir = tempfile::tempdir().unwrap();
-        init_git_repo(dir.path());
+        crate::test_fixtures::init_git_repo(dir.path());
         let svc = std::sync::Arc::new(crate::Services::in_memory(dir.path()).unwrap());
         // Seed the catalog as boot does — the token/turn producers gate collection
         // on `measure_has_active_spec` (tsk31), so the specs must exist.

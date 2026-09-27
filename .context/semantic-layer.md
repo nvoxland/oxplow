@@ -131,7 +131,7 @@ never the physical tables, which stay internal and free to change.
 | `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |
 | `v_token_usage` | model tokens per thread / effort / model (V74) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
-| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why), via MCP `record_decision` (V76) |
+| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via MCP `record_decision` (V76), or `inferred` by the summarize model when the effort closed (V79) |
 | `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort has a failure-free test report) (V76) |
 | `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |

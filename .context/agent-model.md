@@ -1389,7 +1389,9 @@ The banner reaches the agent via two complementary injection points:
 ## Decisions fed back to the agent (tsk298)
 
 Decisions the agent records (`record_decision` → `v_decision`) are fed
-back to it in two places.
+back to it in two places. Only `provenance = 'recorded'` rows: decisions
+oxplow *inferred* after the fact ([ai-providers.md](./ai-providers.md))
+are guesses for the reviewer, never presented to the agent as its own.
 
 **On `UserPromptSubmit`**
 

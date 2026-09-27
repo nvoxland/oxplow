@@ -7,7 +7,7 @@ providers you configure, the roles that decide which model does what, the
 > **Status (epic tsk275):** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `list_ai_roles` / `ai_decide` /
-> `ai_summarize` MCP tools. **Not yet:** project role overrides from
+> `ai_summarize` MCP tools, and inferred decisions. **Not yet:** project role overrides from
 > `project.yaml` (`AiService::set_overrides` exists, nothing calls it yet),
 > the `ai_*` functions for sources and lenses, and a models.dev catalog.
 > Sections below say which parts are target design.
@@ -130,6 +130,29 @@ fast, deterministic and cheap.
 
 Agents can't change providers, roles or keys: those IPC commands are
 UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.
+
+## Inferred decisions (current)
+
+The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
+
+- `TaskService` emits `EffortFinished` when an effort closes;
+  `spawn_on_effort_finished` (started from boot) runs `infer_for_effort`
+  on its own task for each one.
+- Off until the `summarize` role has a model: `InferOutcome::Off`, no call.
+- It digests the effort: task title; the thread's turns that overlap the
+  effort's time window (`v_agent_turn` has no `effort_id`); its tool calls;
+  and decisions already recorded, so they aren't repeated. The digest is
+  capped at 40k characters, keeping the most recent turns.
+- The model returns `{"decisions": [...]}` (JSON mode). At most 8 are
+  kept; junk entries are skipped and a missing confidence becomes `low`.
+- `SqliteReasoningStore::replace_inferred` swaps the effort's inferred rows
+  in one transaction, so a re-run replaces rather than piles up.
+  `ReasoningChanged` is emitted so open review lenses re-run.
+- Inferred rows are **never fed back to the agent** (the decisions block
+  and the missing-decisions hint read `provenance = 'recorded'` only).
+- Calls record caller `inferred-decisions` in `v_ai_call`.
+- The review packet shows them as "Decisions Oxplow Noticed", separate from
+  "Decisions Made".
 
 ## Settings → AI (current)
 

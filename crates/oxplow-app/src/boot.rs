@@ -144,6 +144,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
 
     // Extension-source scheduler (tsk292): runs approved `every <n>` sources.
     crate::source_runner::spawn_scheduler(state.clone());
+    crate::inferred_decisions::spawn_on_effort_finished(state.clone());
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate

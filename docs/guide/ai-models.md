@@ -39,6 +39,14 @@ Oxplow and extensions ask for a role, not a model:
 A role with no model assigned just isn't available. Anything that needs it
 says so.
 
+## What oxplow uses them for
+
+- **Decisions Oxplow Noticed.** When an effort closes, the `summarize` model
+  reads that effort's conversation and tool calls and lists decisions the
+  agent made without recording them. They show on the effort's review,
+  next to the decisions the agent did record. They're guesses, and your
+  agent never sees them. Nothing runs until `summarize` has a model.
+
 ## What your agent can do
 
 Your coding agent sees three MCP tools:

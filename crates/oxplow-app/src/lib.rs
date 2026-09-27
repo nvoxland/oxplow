@@ -34,6 +34,7 @@ pub mod followup;
 pub mod git_service;
 pub mod hook_ingest;
 pub mod indexer;
+pub mod inferred_decisions;
 pub mod link_check;
 pub mod lsp_installer;
 pub mod lsp_sessions;
@@ -56,6 +57,8 @@ pub mod snapshot_content;
 pub mod source_runner;
 pub mod task_service;
 pub mod terminal_sessions;
+#[cfg(test)]
+pub(crate) mod test_fixtures;
 pub mod test_outcome;
 pub mod thread_runtime;
 pub mod token_usage;

@@ -1334,6 +1334,10 @@ empty: No tasks.
             .slots
             .iter()
             .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/decisions"));
+        assert!(review
+            .slots
+            .iter()
+            .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/inferred-decisions"));
         // Every bundled lens's SQL runs against a real schema.
         let v = validate_extension(&layer().await, dir.path(), "oxplow-review")
             .await

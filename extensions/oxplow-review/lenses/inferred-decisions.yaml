@@ -1,0 +1,19 @@
+title: Decisions Oxplow Noticed
+description: Forks the agent seems to have resolved without recording them, proposed by your summarize model from the effort's conversation and tool calls. Guesses, not the agent's word; check the ones that matter.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT question, choice,
+         (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
+         confidence, why
+  FROM v_decision
+  WHERE effort_id = :effort_id AND provenance = 'inferred'
+  ORDER BY id
+viz: table
+columns:
+  - { key: question, label: Decision }
+  - { key: choice, label: Chose }
+  - { key: alternatives, label: Over }
+  - { key: confidence, label: How Sure }
+  - { key: why, label: Why }
+empty: Nothing inferred. Either the agent recorded its decisions, or no summarize model is assigned (Settings → AI).

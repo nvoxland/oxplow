@@ -625,7 +625,7 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_decision",
-        description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why). What a reviewer most wants to check.",
+        description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check.",
         columns: &[
             ("id", "Decision id."),
             ("thread_id", "Thread it was made in."),
@@ -636,6 +636,7 @@ const CATALOG: &[CatalogView] = &[
             ("alternatives", "Options not taken, as a JSON array of strings."),
             ("confidence", "`low`, `medium` or `high`."),
             ("why", "The reasoning."),
+            ("provenance", "`recorded` (the agent recorded it) or `inferred` (oxplow's summarize model proposed it from the effort's activity; unconfirmed)."),
             ("created_at", "RFC 3339 timestamp."),
         ],
     },
