@@ -163,9 +163,6 @@ pub const MANIFEST: &[Capability] = &[
     // Explorer/Detail pages compute over IPC.
     both("metric_series"),
     both("metric_rollup"),
-    ui("list_token_usage_for_effort"),
-    ui("get_effort_token_totals"),
-    ui("get_thread_token_totals"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),

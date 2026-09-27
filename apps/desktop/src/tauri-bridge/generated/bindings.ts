@@ -1057,21 +1057,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listTokenUsageForEffort: (effortId: EffortId) => typedError<AgentTokenUsage[], IpcError>(__TAURI_INVOKE("list_token_usage_for_effort", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getEffortTokenTotals: (effortId: EffortId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_effort_token_totals", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getThreadTokenTotals: (threadId: ThreadId) => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("get_thread_token_totals", { threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1414,36 +1399,6 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
  *  notice. Never persisted to the agent_status table.
  */
 "stalled";
-
-// One persisted token-usage row (one agent turn's delta).
-export type AgentTokenUsage = {
-	id: number,
-	stream_id: string,
-	thread_id: string,
-	// Nullable — a Stop can land with no open effort.
-	effort_id: string | null,
-	session_id: string,
-	// `claude` | `codex` | `opencode`.
-	agent_kind: string,
-	// Actual model the turn ran on (e.g. `claude-opus-4-8`), for later cost.
-	model: string | null,
-	/**
-	 *  The human-authored user prompt that OPENED this turn (tsk143).
-	 *  Nullable — a turn can be an assistant continuation with no opening
-	 *  prompt, or an agent kind whose transcript text we don't parse. Pure
-	 *  observation: read from the transcript, never generated.
-	 */
-	prompt: string | null,
-	input_tokens: number,
-	output_tokens: number,
-	cache_creation_input_tokens: number,
-	cache_read_input_tokens: number,
-	// How many assistant messages contributed to this row.
-	message_count: number,
-	// Always `observed` — oxplow read the transcript directly.
-	provenance: string,
-	recorded_at: Timestamp,
-};
 
 /**
  *  One open or closed agent turn. Open rows render as live in-progress
@@ -4143,19 +4098,6 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
-
-// Aggregated totals across a set of usage rows (per effort or per thread).
-export type TokenUsageTotals = {
-	input_tokens: number,
-	output_tokens: number,
-	cache_creation_input_tokens: number,
-	cache_read_input_tokens: number,
-	// input + output + cache-creation + cache-read.
-	total_tokens: number,
-	message_count: number,
-	// Number of usage rows (turns) summed.
-	turns: number,
-};
 
 /**
  *  Identifies which version of the tree a `TreeSource` represents.

@@ -1239,12 +1239,12 @@ so this is purely a `None`-vs-`Some(0)` distinction.
 
 The cursor is **persisted** (not in-memory) so a daemon restart never
 re-sums already-recorded usage. Display is **tokens-only** for now; the
-stored `model` lets cost be layered on later. Surfaced UI-side: a per-turn
-LOG on the task page (`EffortTokenUsageBlock`) — each row shows the opening
-prompt (truncated, click to expand long ones), the model, and the turn's
-token total, above the effort summary; plus a running per-thread total in
-the Work panel header. `list_token_usage_for_effort` returns each row with
-its `prompt` (camelCase wire). Tables + IPC: see `.context/data-model.md`
+stored `model` lets cost be layered on later. Everything reads it through
+`v_token_usage` (which carries each turn's `prompt`, V82): the
+oxplow-analytics `task-tokens` lens in the task page's `task-detail` slot
+(a total plus a per-turn log of prompt, model and tokens across the task's
+efforts), the `thread-tokens` strip in the Work panel's `thread` slot, and
+the `usage` lenses. Tables: see `.context/data-model.md`
 (`agent_token_usage` / `agent_token_cursor`).
 
 ## Write guard

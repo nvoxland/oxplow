@@ -42,6 +42,10 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-analytics", "lenses/recent-notes.yaml"),
             ext_file!("oxplow-analytics", "lenses/recent-snapshots.yaml"),
             ext_file!("oxplow-analytics", "lenses/review.yaml"),
+            ext_file!("oxplow-analytics", "lenses/task-token-summary.yaml"),
+            ext_file!("oxplow-analytics", "lenses/task-tokens.yaml"),
+            ext_file!("oxplow-analytics", "lenses/task-turns.yaml"),
+            ext_file!("oxplow-analytics", "lenses/thread-tokens.yaml"),
             ext_file!("oxplow-analytics", "lenses/token-total.yaml"),
             ext_file!("oxplow-analytics", "lenses/tokens-by-agent.yaml"),
             ext_file!("oxplow-analytics", "lenses/tokens-by-day.yaml"),
@@ -108,7 +112,6 @@ mod tests {
     /// payloads (JUnit cases, uncovered lines) in SQL; run them on real rows.
     #[tokio::test]
     async fn analytics_effort_lenses_read_the_observation_payloads() {
-        use oxplow_db::SqlCell;
         let f = crate::test_fixtures::services_with_effort().await;
         let obs = |seq: i64, kind: &str, value: Option<f64>, payload: serde_json::Value| {
             oxplow_db::EffortObservation {
@@ -159,24 +162,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
-        let lens = |slug: &'static str| {
-            let layer = &layer;
-            let root = f._dir.path().to_path_buf();
-            let mut params = std::collections::BTreeMap::new();
-            params.insert("effort_id".to_string(), SqlCell::Int(f.effort.value()));
-            async move {
-                let run = crate::extensions::run_lens(
-                    layer,
-                    &root,
-                    &format!("oxplow-analytics/{slug}"),
-                    params,
-                )
-                .await
-                .unwrap();
-                serde_json::to_value(&run.result.rows).unwrap()
-            }
-        };
+        let lens = |slug: &'static str| run_analytics_lens(&f, slug, "effort_id", f.effort.value());
         assert_eq!(
             lens("effort-coverage").await,
             serde_json::json!([["**60%** of changed lines covered · 6/10"]])
@@ -191,5 +177,76 @@ mod tests {
         );
         let runs = lens("effort-test-runs").await;
         assert_eq!(runs.as_array().unwrap().len(), 2);
+    }
+
+    /// Run an oxplow-analytics lens with one integer param; its rows as JSON.
+    async fn run_analytics_lens(
+        f: &crate::test_fixtures::EffortFixture,
+        slug: &str,
+        param: &str,
+        value: i64,
+    ) -> serde_json::Value {
+        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let mut params = std::collections::BTreeMap::new();
+        params.insert(param.to_string(), oxplow_db::SqlCell::Int(value));
+        let run = crate::extensions::run_lens(
+            &layer,
+            f._dir.path(),
+            &format!("oxplow-analytics/{slug}"),
+            params,
+        )
+        .await
+        .unwrap();
+        serde_json::to_value(&run.result.rows).unwrap()
+    }
+
+    /// Token usage moved from the task/thread widgets to slot lenses.
+    #[tokio::test]
+    async fn analytics_token_lenses_sum_a_tasks_and_a_threads_turns() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let turn =
+            |effort: Option<String>, prompt: &str, tokens: i64| oxplow_db::NewAgentTokenUsage {
+                stream_id: "str1".into(),
+                thread_id: f.thread.to_string(),
+                effort_id: effort,
+                session_id: "s".into(),
+                agent_kind: "claude".into(),
+                model: Some("m".into()),
+                prompt: Some(prompt.into()),
+                input_tokens: tokens,
+                output_tokens: 1,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+                message_count: 1,
+            };
+        let store = &f.svc.token_usage_store;
+        store
+            .record(turn(Some(f.effort.to_string()), "fix it", 1999))
+            .await
+            .unwrap();
+        store
+            .record(turn(Some(f.effort.to_string()), "again", 99))
+            .await
+            .unwrap();
+        store.record(turn(None, "chat", 9)).await.unwrap();
+
+        let task = f.task.value();
+        assert_eq!(
+            run_analytics_lens(&f, "task-token-summary", "task_id", task).await,
+            serde_json::json!([[
+                "**2,100** tokens · 2 turns · in 2,098 · out 2 · cache-write 0 · cache-read 0"
+            ]])
+        );
+        let turns = run_analytics_lens(&f, "task-turns", "task_id", task).await;
+        assert_eq!(turns.as_array().unwrap().len(), 2);
+        assert_eq!(
+            run_analytics_lens(&f, "thread-tokens", "thread_id", f.thread.value()).await,
+            serde_json::json!([[2110]])
+        );
+        assert_eq!(
+            run_analytics_lens(&f, "thread-tokens", "thread_id", 999).await,
+            serde_json::json!([]),
+            "an idle thread shows nothing"
+        );
     }
 }

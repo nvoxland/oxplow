@@ -248,7 +248,6 @@ macro_rules! oxplow_command_table {
                 list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::TaskEffort>,
                 list_changed_paths_for_effort => $crate::commands::effort::list_changed_paths_for_effort { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::EffortChangedPaths,
                 list_effort_metric_deltas => $crate::commands::effort::list_effort_metric_deltas { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortMetricDelta>,
-                list_token_usage_for_effort => $crate::commands::effort::list_token_usage_for_effort { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::AgentTokenUsage>,
                 // metrics (unified substrate, tsk213)
                 list_metric_definitions => $crate::commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> } -> Vec<::oxplow_db::MetricSpec>,
                 list_metric_samples => $crate::commands::metrics::list_metric_samples { metric_key: String, limit: Option<i64>, group_by: Option<String>, from_ms: Option<i64>, to_ms: Option<i64> } -> Vec<::oxplow_app::metric_engine::SeriesPoint>,
@@ -260,8 +259,6 @@ macro_rules! oxplow_command_table {
                 set_metric_enabled => $crate::commands::metrics::set_metric_enabled { key: String, enabled: bool } -> (),
                 set_metrics_enabled => $crate::commands::metrics::set_metrics_enabled { keys: Vec<String>, enabled: bool } -> (),
                 set_metric_override => $crate::commands::metrics::set_metric_override { key: String, target: Option<f64> } -> (),
-                get_effort_token_totals => $crate::commands::effort::get_effort_token_totals { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::TokenUsageTotals,
-                get_thread_token_totals => $crate::commands::effort::get_thread_token_totals { thread_id: ::oxplow_domain::ThreadId } -> ::oxplow_db::TokenUsageTotals,
                 // followup
                 list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
                 add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,

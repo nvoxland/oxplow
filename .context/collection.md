@@ -310,7 +310,8 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   (`tasks-effort-in-progress` testid), no changed-files tree, no summary, no
   fetches.
 - A **completed** effort (`ActivityEffortSection`) shows the summary, the
-  **Modified Files** tree, and **token usage** (`EffortTokenUsageBlock`) — but
+  **Modified Files** tree (token usage is the task-level `task-tokens`
+  lens in the `task-detail` slot) — but
   **not** coverage, test runs or static analysis. Those live only on the
   effort **diff view** (`DiffViewPage`, the effort-review surface), as the
   oxplow-analytics `effort-tests` lens grid in its `effort-review` slot:

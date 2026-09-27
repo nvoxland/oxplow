@@ -285,9 +285,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_metric_enabled,
             commands::generated::set_metrics_enabled,
             commands::generated::set_metric_override,
-            commands::generated::list_token_usage_for_effort,
-            commands::generated::get_effort_token_totals,
-            commands::generated::get_thread_token_totals,
             // log
             commands::generated::get_git_log,
             commands::generated::get_commit_detail,

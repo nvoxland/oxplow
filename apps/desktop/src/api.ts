@@ -1985,35 +1985,6 @@ export async function listEffortsInWindow(
 }
 
 
-export type { AgentTokenUsage, TokenUsageTotals } from "./tauri-bridge/index.js";
-
-/** Per-turn agent token-usage rows for an effort, newest-first (tsk104). */
-export async function listTokenUsageForEffort(
-  effortId: string,
-): Promise<import("./tauri-bridge/index.js").AgentTokenUsage[]> {
-  return unwrap(
-    await commands.listTokenUsageForEffort(effortId),
-  ) as unknown as import("./tauri-bridge/index.js").AgentTokenUsage[];
-}
-
-/** Summed token totals for one effort. */
-export async function getEffortTokenTotals(
-  effortId: string,
-): Promise<import("./tauri-bridge/index.js").TokenUsageTotals> {
-  return unwrap(
-    await commands.getEffortTokenTotals(effortId),
-  ) as unknown as import("./tauri-bridge/index.js").TokenUsageTotals;
-}
-
-/** Summed token totals for a whole thread (the Work panel running total). */
-export async function getThreadTokenTotals(
-  threadId: string,
-): Promise<import("./tauri-bridge/index.js").TokenUsageTotals> {
-  return unwrap(
-    await commands.getThreadTokenTotals(threadId),
-  ) as unknown as import("./tauri-bridge/index.js").TokenUsageTotals;
-}
-
 /** Snapshot row — one per `request_snapshot()` call that captured
  *  anything. Local History dashboard surfaces this list. */
 export interface Snapshot {

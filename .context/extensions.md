@@ -423,7 +423,7 @@ What moves out of core, and what it becomes:
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot lenses |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
 | Gauge-threshold nudges | extension alerts → core nudge primitive |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | lenses + `task-detail` / `thread` slot lenses (**done** for Usage / Page Analytics: the `usage` grid) |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | **done:** the `usage` grid; `task-tokens` (`task-detail` slot) and `thread-tokens` (`thread` slot) |
 | Local history dashboard | lens over `v_snapshot` |
 | Effort metrics block, effort coverage page, tests-run and nudge blocks | **done:** `effort-review` slot lenses `effort-tests` (grid: coverage, untested files, test runs, failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges` |
 

@@ -11,7 +11,6 @@ import { fileRef } from "../../tabs/pageRefs.js";
 import { ChangeAnalysisFileTree } from "../ChangeAnalysis/FileTreeView.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
 import { DISK, snapshotVersion } from "../../file-version.js";
-import { EffortTokenUsageBlock } from "../EffortTokenUsage.js";
 import { resolveEffortEndpoints } from "../../diffViewModel.js";
 import { diffEndpoints } from "../../api.js";
 import type { BranchChangeEntry } from "../../api.js";
@@ -708,13 +707,6 @@ function ActivityEffortSection({
           />
         </div>
       ) : null}
-        {/* Coverage / tests / static-analysis are intentionally NOT shown
-            here — the task-page effort section stays focused on what changed.
-            That breakdown lives on the effort diff view (DiffViewPage). Token
-            usage stays: it's effort metadata, not test information. It always
-            reports its status here (showWhenEmpty) — "No token data collected"
-            rather than vanishing. */}
-        <EffortTokenUsageBlock effortId={detail.effort.id} showWhenEmpty />
       </div>
     </section>
   );

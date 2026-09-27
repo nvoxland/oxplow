@@ -1,0 +1,10 @@
+title: Agent Tokens
+description: Every token this thread's agent used, across its efforts and effort-less turns.
+params: [{ name: thread_id }]
+query: |
+  SELECT sum(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens) AS tokens
+  FROM v_token_usage
+  WHERE thread_id = :thread_id
+  HAVING count(*) > 0
+viz: number
+hidden: true

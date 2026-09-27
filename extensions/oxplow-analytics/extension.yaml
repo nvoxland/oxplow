@@ -4,6 +4,8 @@ slots:
   - { slot: effort-review, lens: effort-tests }
   - { slot: effort-review, lens: effort-metric-deltas }
   - { slot: effort-review, lens: effort-nudges }
+  - { slot: task-detail, lens: task-tokens }
+  - { slot: thread, lens: thread-tokens }
 advisories:
   # Steer the agent to add tests when this effort's changed lines are poorly
   # covered. Reads the stored observation, so it fires on the tool call after

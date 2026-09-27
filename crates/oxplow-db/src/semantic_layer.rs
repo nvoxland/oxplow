@@ -602,6 +602,7 @@ const CATALOG: &[CatalogView] = &[
             ("effort_id", "Effort open at the time, if any."),
             ("agent_kind", "Harness (`claude`, `codex`, …)."),
             ("model", "Model id, if reported."),
+            ("prompt", "The human prompt that opened this turn, if the transcript had one."),
             ("input_tokens", "Input tokens."),
             ("output_tokens", "Output tokens."),
             ("cache_creation_input_tokens", "Tokens written to the prompt cache."),
