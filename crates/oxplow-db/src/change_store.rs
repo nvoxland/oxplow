@@ -89,6 +89,18 @@ pub struct ChangeDuplicateRow {
     pub peer_end_line: i64,
 }
 
+/// How much one changed file's tests check, before and after.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ChangeTestFileRow {
+    pub path: String,
+    pub tests_before: i64,
+    pub tests_after: i64,
+    pub assertions_before: i64,
+    pub assertions_after: i64,
+    pub skips_before: i64,
+    pub skips_after: i64,
+}
+
 /// Everything the producer computed for one change.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ChangeResults {
@@ -96,6 +108,7 @@ pub struct ChangeResults {
     pub functions: Vec<ChangeFunctionRow>,
     pub imports: Vec<ChangeImportRow>,
     pub co_changes: Vec<ChangeCoChangeRow>,
+    pub test_files: Vec<ChangeTestFileRow>,
 }
 
 #[derive(Clone)]
@@ -190,7 +203,13 @@ impl SqliteChangeStore {
             .unwrap_or_default();
         self.db
             .transaction(move |tx| {
-                for t in ["change_file", "change_function", "change_import", "change_co_change"] {
+                for t in [
+                    "change_file",
+                    "change_function",
+                    "change_import",
+                    "change_co_change",
+                    "change_test_file",
+                ] {
                     tx.execute(&format!("DELETE FROM {t} WHERE change_id = ?1"), [id])
                         .map_err(map_sql_err)?;
                 }
@@ -236,6 +255,18 @@ impl SqliteChangeStore {
                         "INSERT OR REPLACE INTO change_co_change (change_id, path, reason, expected, dormant_days)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
                         rusqlite::params![id, c.path, c.reason, c.expected, c.dormant_days],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                for t in &results.test_files {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO change_test_file (change_id, path, tests_before, tests_after,
+                           assertions_before, assertions_after, skips_before, skips_after)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        rusqlite::params![
+                            id, t.path, t.tests_before, t.tests_after, t.assertions_before,
+                            t.assertions_after, t.skips_before, t.skips_after
+                        ],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -338,6 +369,7 @@ mod tests {
                 dormant_days: Some(120),
                 ..Default::default()
             }],
+            test_files: Vec::new(),
         };
         store.store_results(c.id, results("a.rs")).await.unwrap();
         store.store_results(c.id, results("b.rs")).await.unwrap();

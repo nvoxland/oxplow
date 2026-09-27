@@ -1,0 +1,29 @@
+title: Tests Weakened
+description: Tests the change deleted, test files that now assert less, and tests newly skipped. Assertion and skip counts are a heuristic across languages (assert*/expect(/t.Error calls; #[ignore], .skip(, xit(, @Disabled, t.Skip markers).
+params:
+  - { name: change_id, label: Change }
+query: |
+  SELECT * FROM (
+    SELECT 'Test deleted' AS what, fn.path,
+           CASE WHEN fn.container <> '' THEN fn.container || '::' ELSE '' END || fn.name AS detail,
+           fn.start_line AS line, 1 AS ord
+    FROM v_change_function fn
+    WHERE fn.change_id = :change_id AND fn.is_test = 1 AND fn.status = 'deleted'
+    UNION ALL
+    SELECT 'Fewer assertions', t.path, t.assertions_before || ' → ' || t.assertions_after, NULL, 2
+    FROM v_change_test_file t
+    WHERE t.change_id = :change_id AND t.assertions_after < t.assertions_before
+    UNION ALL
+    SELECT 'Tests skipped', t.path,
+           t.skips_before || ' → ' || t.skips_after || ' skip marker' || CASE t.skips_after WHEN 1 THEN '' ELSE 's' END,
+           NULL, 3
+    FROM v_change_test_file t
+    WHERE t.change_id = :change_id AND t.skips_after > t.skips_before
+  ) w
+  JOIN (SELECT base_label, head_label FROM v_change WHERE id = :change_id) c
+  ORDER BY ord, path, detail
+columns:
+  - { key: what, label: What }
+  - { key: path, label: File, link: { kind: diff-at, line: line, base: base_label, head: head_label } }
+  - { key: detail, label: Detail }
+empty: No tests were deleted, weakened or skipped.

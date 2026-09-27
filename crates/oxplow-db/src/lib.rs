@@ -46,7 +46,7 @@ pub use attribution_store::{
 };
 pub use change_store::{
     ChangeCoChangeRow, ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow,
-    ChangeResults, ChangeRow, SqliteChangeStore,
+    ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
 pub use comment_store::SqliteCommentStore;
 pub use dashboard_store::{

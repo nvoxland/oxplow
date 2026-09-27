@@ -904,6 +904,20 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
+        name: "v_change_test_file",
+        description: "How much each changed file's tests check, before and after the change: test functions, assertions and skip markers. Files that are tests or contain tests. The counts are a heuristic across languages (assert*/expect(/t.Error calls; #[ignore], .skip(, xit(, @Disabled, t.Skip markers), not a parse.",
+        columns: &[
+            ("change_id", "The change (v_change.id)."),
+            ("path", "The file."),
+            ("tests_before", "Test functions on the base side."),
+            ("tests_after", "Test functions on the head side."),
+            ("assertions_before", "Assertion calls on the base side."),
+            ("assertions_after", "Assertion calls on the head side."),
+            ("skips_before", "Skip markers on the base side."),
+            ("skips_after", "Skip markers on the head side."),
+        ],
+    },
+    CatalogView {
         name: "v_change_duplicate",
         description: "Blocks in a change's files that duplicate code elsewhere in the tree. Arrives after the rest of the analysis (a whole-tree scan); none for closed efforts yet.",
         columns: &[

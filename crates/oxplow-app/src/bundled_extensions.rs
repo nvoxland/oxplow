@@ -70,6 +70,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "lenses/decisions.yaml"),
             ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
             ext_file!("oxplow-review", "lenses/struggled.yaml"),
+            ext_file!("oxplow-review", "lenses/tests-weakened.yaml"),
             ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
             ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),
             ext_file!("oxplow-review", "lenses/what-deviated.yaml"),
@@ -413,5 +414,68 @@ mod tests {
         describe("Make the buttons feel snappier.").await;
         let rows = run_bundled_lens(&f, lens, &effort).await;
         assert_eq!(rows, serde_json::json!([]));
+    }
+
+    /// Tests Weakened: deleted tests, removed assertions and new skips.
+    #[tokio::test]
+    async fn tests_weakened_reports_deleted_tests_fewer_assertions_and_skips() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("tests/it.rs"),
+            "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n",
+        )
+        .unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(
+            root.join("tests/it.rs"),
+            "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n",
+        )
+        .unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "weaken");
+        let change = crate::change_analysis::ensure_change(
+            &f.svc,
+            crate::change_analysis::ChangeTarget::Commit {
+                sha,
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let rows = run_bundled_lens(
+            &f,
+            "oxplow-review/tests-weakened",
+            &[("change_id", change.id)],
+        )
+        .await;
+        let got: Vec<(String, String, String)> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r[0].as_str().unwrap().to_string(),
+                    r[1].as_str().unwrap().to_string(),
+                    r[2].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Test deleted".into(), "tests/it.rs".into(), "b".into()),
+                (
+                    "Fewer assertions".into(),
+                    "tests/it.rs".into(),
+                    "3 → 1".into()
+                ),
+                (
+                    "Tests skipped".into(),
+                    "tests/it.rs".into(),
+                    "0 → 1 skip marker".into()
+                ),
+            ]
+        );
     }
 }

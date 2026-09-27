@@ -322,7 +322,13 @@ oxplow-analytics change cards) only read them.
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary
     crossings;
-  - co-change: `analyze_surprise` over a history cached per (repo, HEAD).
+  - co-change: `analyze_surprise` over a history cached per (repo, HEAD);
+  - test files (`v_change_test_file`, V83): for each changed file that is
+    a test file or has tests on either side (Rust's inline `mod tests`
+    counts), test functions plus assertion calls and skip markers
+    before and after (`test_signals::count`, a heuristic across
+    languages; `//` and `#` comment lines don't count, so commenting an
+    assertion out lowers the count).
 - **Duplicates** come later: a background whole-tree scan scoped to the
   changed files (`duplication_scan::DuplicationRecorder`) stores
   `v_change_duplicate` and emits `ChangeAnalyzed` again. The same scan is
@@ -341,9 +347,10 @@ oxplow-analytics change cards) only read them.
   `running`; `ChangeAnalyzed { change_id }` fires when results land.
 - An effort without a start snapshot is an error, not an empty diff.
 
-**Still target (agent activity):** `v_test_change` (deleted / skipped
-tests, removed assertions) needs snapshot content analysis; "missing
-co-change" needs git history as a source.
+Deleted / skipped tests and removed assertions are `v_change_function`
+(deleted `is_test` rows) plus `v_change_test_file`, read by the
+oxplow-review Tests Weakened lens. Missing co-change is
+`v_change_co_change`.
 
 **Still target:** `starlark` / `jaq` runtimes; incremental upsert +
 tombstones (today: full replace per run); an enforced `network`

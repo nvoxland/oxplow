@@ -198,6 +198,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     file is in the task's area when the text names it or one of its
     directories at least two levels deep; silent when the task names no
     area)
+  - Tests Weakened (deleted test functions from `v_change_function`,
+    fewer assertions and new skip markers from `v_change_test_file`;
+    also mounted in the `commit` and `uncommitted` slots)
   - Struggled Here (`v_struggle`)
   - Context Read (`v_context_read`)
 

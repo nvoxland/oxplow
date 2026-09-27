@@ -323,7 +323,55 @@ pub fn build_results(
         functions,
         imports,
         co_changes: Vec::new(),
+        test_files: Vec::new(),
     }
+}
+
+/// Test functions, assertions and skip markers on each side of every
+/// analyzed file that is a test file or has tests on either side (Rust's
+/// inline `mod tests` counts). Files with no tests on either side are left
+/// out. `paths` lines up with the two content lists.
+pub fn test_file_rows(
+    paths: &[String],
+    base: &[Option<String>],
+    head: &[Option<String>],
+    analysis: &AnalyzeFunctionsResult,
+) -> Vec<oxplow_db::ChangeTestFileRow> {
+    let tests_on = |path: &str, side: &str| -> i64 {
+        analysis
+            .sides
+            .iter()
+            .filter(|s| s.path == path && s.side == side)
+            .flat_map(|s| s.functions.iter())
+            .filter(|f| is_test_function(path, &f.name, &f.container_path))
+            .count() as i64
+    };
+    let signals = |content: &Option<String>| {
+        content
+            .as_deref()
+            .map(crate::test_signals::count)
+            .unwrap_or_default()
+    };
+    paths
+        .iter()
+        .zip(base.iter().zip(head.iter()))
+        .filter_map(|(path, (b, h))| {
+            let (tests_before, tests_after) = (tests_on(path, "base"), tests_on(path, "head"));
+            if !is_test_path(path) && tests_before == 0 && tests_after == 0 {
+                return None;
+            }
+            let (before, after) = (signals(b), signals(h));
+            Some(oxplow_db::ChangeTestFileRow {
+                path: path.clone(),
+                tests_before,
+                tests_after,
+                assertions_before: before.assertions,
+                assertions_after: after.assertions,
+                skips_before: before.skips,
+                skips_after: after.skips,
+            })
+        })
+        .collect()
 }
 
 /// Stored rows for the surprising files (normal ones are left out).
@@ -790,6 +838,7 @@ async fn compute(
             })
             .collect();
         let mut results = build_results(&files, &analysis, &zones);
+        results.test_files = test_file_rows(&analyzed, &base_contents, &head_contents, &analysis);
         let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
         let history = analyzer.history(&root);
         results.co_changes = co_change_rows(oxplow_git::co_change::analyze_surprise(
@@ -1081,6 +1130,44 @@ mod tests {
             .await
             .unwrap();
         serde_json::to_value(out.rows).unwrap()
+    }
+
+    #[tokio::test]
+    async fn weakened_tests_are_counted_on_both_sides() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(
+            root.join("tests/it.rs"),
+            "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n",
+        )
+        .unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        std::fs::write(
+            root.join("tests/it.rs"),
+            "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n",
+        )
+        .unwrap();
+        let sha = crate::test_fixtures::commit_all(&root, "weaken");
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Commit {
+                sha,
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, tests_before, tests_after, assertions_before, assertions_after, \
+                 skips_before, skips_after FROM v_change_test_file WHERE change_id = ?1",
+                c.id
+            )
+            .await,
+            serde_json::json!([["tests/it.rs", 2, 1, 3, 1, 0, 1]])
+        );
     }
 
     #[tokio::test]
