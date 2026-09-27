@@ -205,6 +205,20 @@ pub struct ListMetricSamplesParams {
     pub metric_key: String,
     /// Max rows, newest-first. Default 50.
     pub limit: Option<i64>,
+    /// Optional dimension to slice by — one series per value. Besides the
+    /// conformed and `dims_json` dims: `oxplow.stream`, `oxplow.thread`,
+    /// `oxplow.effort`, `oxplow.task`, `oxplow.git_version`.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    /// Optional: keep only facts whose dimension `key` equals `value`, e.g.
+    /// `{"key": "oxplow.task", "value": "42"}`.
+    #[serde(default)]
+    pub dim_eq: Option<McpDimEq>,
+    /// Optional calendar bucket, `day` | `week` | `month` (UTC; weeks start
+    /// Monday): one point per bucket (and group) — the last capture for a
+    /// level, the sum for events, the mean otherwise; ratios re-divide.
+    #[serde(default)]
+    pub bucket: Option<String>,
     /// Optional stream id (`str<N>` or bare number) to scope the series to one
     /// worktree's scans — per-worktree captures don't interleave into one
     /// timeline. Omit for all streams.
@@ -767,6 +781,25 @@ pub struct ListFactsParams {
     pub limit: Option<i64>,
 }
 
+/// A dimension-equality filter for the metric reads.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct McpDimEq {
+    pub key: String,
+    pub value: String,
+}
+
+fn parse_bucket(
+    bucket: Option<&str>,
+) -> Result<Option<oxplow_app::metric_bucket::TimeBucket>, McpError> {
+    bucket
+        .map(|b| {
+            oxplow_app::metric_bucket::TimeBucket::parse(b).ok_or_else(|| {
+                McpError::invalid_params("bucket must be one of day|week|month", None)
+            })
+        })
+        .transpose()
+}
+
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MetricSeriesParams {
     /// Measure key, e.g. `oxplow.coverage` / `oxplow.complexity` (see list_measures).
@@ -774,8 +807,10 @@ pub struct MetricSeriesParams {
     /// Aggregation applied per capture: `count` | `sum` | `avg` | `min` | `max`
     /// | `last` | `ratio` (ratio = Σnumerator/Σdenominator, e.g. coverage %).
     pub aggregation: String,
-    /// Optional conformed dimension to slice by — one series per value, e.g.
-    /// `oxplow.package` / `oxplow.severity` / `oxplow.status`.
+    /// Optional dimension to slice by — one series per value, e.g.
+    /// `oxplow.package` / `oxplow.severity` / `oxplow.status`, or the capture's
+    /// `oxplow.stream` / `oxplow.thread` / `oxplow.effort` / `oxplow.task` /
+    /// `oxplow.git_version`.
     #[serde(default)]
     pub group_by: Option<String>,
     /// Optional: keep only facts with `value >= min_value` (count-over-threshold).
@@ -784,6 +819,15 @@ pub struct MetricSeriesParams {
     /// Optional: keep only facts whose reported severity equals this (e.g. `error`).
     #[serde(default)]
     pub severity: Option<String>,
+    /// Optional: keep only facts whose dimension `key` equals `value`, e.g.
+    /// `{"key": "oxplow.task", "value": "42"}`.
+    #[serde(default)]
+    pub dim_eq: Option<McpDimEq>,
+    /// Optional calendar bucket, `day` | `week` | `month` (UTC; weeks start
+    /// Monday): one point per bucket (and group) — the last capture for a
+    /// level, the sum for events, the mean otherwise; ratios re-divide.
+    #[serde(default)]
+    pub bucket: Option<String>,
     /// Optional stream id (`str<N>` or bare number) to scope the series to one
     /// worktree's scans. Omit for all streams.
     #[serde(default)]
@@ -2875,7 +2919,9 @@ impl OxplowMcp {
             (epic tsk12) — the metrics-as-definitions read: one point per capture, additivity-\
             correct. `aggregation` is count|sum|avg|min|max|last|ratio (ratio = Σnum/Σden, e.g. \
             coverage %). `group_by` slices by a conformed dimension (oxplow.package / \
-            oxplow.severity / oxplow.status / …). `min_value` keeps facts ≥ a threshold (the \
+            oxplow.severity / oxplow.status / …, or oxplow.stream / thread / effort / task / \
+            git_version); `dim_eq` keeps one dimension value; `bucket` (day|week|month) collapses \
+            to one point per calendar bucket. `min_value` keeps facts ≥ a threshold (the \
             count-over-threshold gauge, e.g. complexity ≥ N); `severity` keeps one lint severity. \
             Empty when the measure is unknown."
     )]
@@ -2893,8 +2939,9 @@ impl OxplowMcp {
             min_value: params.0.min_value,
             max_value: None,
             severity: params.0.severity,
-            dim_eq: None,
+            dim_eq: params.0.dim_eq.map(|d| (d.key, d.value)),
         };
+        let bucket = parse_bucket(params.0.bucket.as_deref())?;
         let stream = match params.0.stream.as_deref() {
             Some(s) => Some(parse_stream_id(s)?.value()),
             None => None,
@@ -2914,6 +2961,15 @@ impl OxplowMcp {
             )
             .await
             .map_err(internal)?;
+        let series = match bucket {
+            Some(b) => self
+                .services
+                .metric_engine
+                .bucket(&params.0.measure_key, series, b, agg)
+                .await
+                .map_err(internal)?,
+            None => series,
+        };
         json_result(&series)
     }
 
@@ -2947,7 +3003,9 @@ impl OxplowMcp {
             over the metric's source-measure facts (epic tsk12): value (+ numerator/denominator for \
             ratios), captured_at, branch, provenance. `metric_key` is a spec key like \
             `oxplow.tests.passed` or `oxplow.todos` (see list_metric_definitions). Points are \
-            time-anchored and durable (they outlive the effort that produced them)."
+            time-anchored and durable (they outlive the effort that produced them). Optional \
+            `group_by` (e.g. oxplow.task, oxplow.effort, oxplow.package), `dim_eq` \
+            ({key, value}) and `bucket` (day|week|month, one point per calendar bucket)."
     )]
     async fn list_metric_samples(
         &self,
@@ -2971,12 +3029,22 @@ impl OxplowMcp {
         };
         let window =
             oxplow_app::metric_engine::TimeWindow::from_ms(params.0.from_ms, params.0.to_ms);
+        let read = oxplow_app::metric_engine::SeriesRead {
+            group_by: params.0.group_by.clone(),
+            stream,
+            window,
+            dim_eq: params.0.dim_eq.clone().map(|d| (d.key, d.value)),
+            bucket: parse_bucket(params.0.bucket.as_deref())?,
+        };
         let mut series = self
             .services
             .metric_engine
-            .series_for_spec_in_stream(&spec, None, stream, window)
+            .series_for_spec_read(&spec, &read)
             .await
-            .map_err(internal)?;
+            .map_err(|e| match e {
+                oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+                e => internal(e),
+            })?;
         // The engine returns oldest→newest; this read is newest-first, capped.
         series.reverse();
         let limit = params.0.limit.unwrap_or(50).max(0) as usize;
@@ -6584,6 +6652,8 @@ mod tests {
                     stream: None,
                     from_ms: None,
                     to_ms: None,
+                    dim_eq: None,
+                    bucket: None,
                 }))
                 .await
                 .unwrap(),
@@ -6604,6 +6674,8 @@ mod tests {
                     stream: None,
                     from_ms: None,
                     to_ms: None,
+                    dim_eq: None,
+                    bucket: None,
                 }))
                 .await
                 .unwrap(),
@@ -6655,6 +6727,8 @@ mod tests {
                 stream: None,
                 from_ms: None,
                 to_ms: None,
+                dim_eq: None,
+                bucket: None,
             }))
             .await
             .is_err());
@@ -6742,6 +6816,9 @@ mod tests {
                     stream: None,
                     from_ms: None,
                     to_ms: None,
+                    group_by: None,
+                    dim_eq: None,
+                    bucket: None,
                 }))
                 .await
                 .unwrap(),
@@ -6749,6 +6826,36 @@ mod tests {
         .unwrap();
         assert_eq!(series.len(), 1);
         assert_eq!(series[0]["value"], 3.0);
+
+        // Bucketed by day: still one point, stamped at the day's start.
+        let samples = |bucket: &str| ListMetricSamplesParams {
+            metric_key: "oxplow.todos".into(),
+            limit: None,
+            stream: None,
+            from_ms: None,
+            to_ms: None,
+            group_by: Some("oxplow.stream".into()),
+            dim_eq: None,
+            bucket: Some(bucket.into()),
+        };
+        let daily: Vec<serde_json::Value> = serde_json::from_str(&text_payload(
+            server
+                .list_metric_samples(Parameters(samples("day")))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(daily.len(), 1);
+        assert_eq!(daily[0]["value"], 3.0);
+        assert!(daily[0]["captured_at"]
+            .as_str()
+            .unwrap()
+            .ends_with("T00:00:00Z"));
+        assert!(daily[0]["group"].is_string(), "grouped by stream");
+        assert!(server
+            .list_metric_samples(Parameters(samples("fortnight")))
+            .await
+            .is_err());
 
         // Summary: headline = last capture (semi-additive) = 3.
         let summary: serde_json::Value = serde_json::from_str(&text_payload(
@@ -6811,6 +6918,9 @@ mod tests {
                 stream: None,
                 from_ms: None,
                 to_ms: None,
+                group_by: None,
+                dim_eq: None,
+                bucket: None,
             }))
             .await
             .is_err());

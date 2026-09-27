@@ -801,6 +801,27 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   an effort's captures (the attribution-by-claim spine for T-D). These stay
   non-`Type` (out of `bindings.ts`) until T-C3 wires the IPC.
 
+### Spine dimensions and time buckets (tsk321)
+
+- **Spine dimensions.** `oxplow.stream`, `oxplow.thread`, `oxplow.effort`,
+  `oxplow.task` and `oxplow.git_version` read the fact's capture (arms in
+  `dim_value_cached`; excluded in `dim_is_slice_key`, listed in `SPINE_DIMS`).
+  `task_id` is on `FactRow`: `fact_row_mapper(conn)` loads `task_effort`'s
+  effort→task map once per read and stamps each row. A per-row join would cost
+  a lookup on every fact. They slice and filter (`dim_eq`) on the **fact path
+  only**. The cube drops them from the promoted set: a capture's `effort_id`
+  is stamped when the effort closes, after the cube may have folded it.
+- **Time buckets.** `metric_bucket::bucket_series(points, TimeBucket, temporal,
+  agg)` collapses points per (UTC day / Monday week / month, group). A level
+  (semi-additive) takes the bucket's last capture; events (additive) sum; the
+  rest (non-additive) average; ratios re-divide Σnum/Σden. Each point is
+  stamped at the bucket start and carries the bucket's last `capture_id`.
+- **One spec read.** `MetricEngine::series_for_spec_read(spec, &SeriesRead
+  {group_by, stream, window, dim_eq, bucket})` is the full-option read, and
+  `series_for_spec_in_stream` delegates to it. A `dim_eq` on top of a spec's
+  own different `dim_eq` is refused (`FactFilter` holds one pair). Buckets are
+  applied before the spec's value scale, so ratios re-divide raw parts.
+
 ### Producers — facts on the capture spine (the ONLY write since T-E2)
 
 Each producer writes atomic facts through `record_facts` (a capture + the
@@ -999,9 +1020,11 @@ measure-level primitives:
 - `list_facts(measure_key, limit)` — raw atomic facts, most-recent, with the
   capture spine.
 - `metric_series(measure_key, aggregation, group_by?, min_value?, severity?,
-  stream?)` — the metrics-as-definitions read: one aggregated point per capture,
-  optionally sliced by a dimension; `stream` scopes to one worktree's scans
-  (like `metric_breakdown`).
+  dim_eq?, bucket?, stream?)` — the metrics-as-definitions read: one aggregated
+  point per capture, optionally sliced by a dimension; `stream` scopes to one
+  worktree's scans (like `metric_breakdown`). `list_metric_samples` takes the
+  same `group_by` / `dim_eq` / `bucket` for a spec (see "Spine dimensions and
+  time buckets" below).
 - `metric_rollup(measure_key, dimension?)` — the by-dimension breakdown.
 
 **The five metric-KEY reads are flipped onto the engine (T-C2, tsk35)** — they

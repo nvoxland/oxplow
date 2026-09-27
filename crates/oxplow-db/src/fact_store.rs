@@ -709,6 +709,8 @@ pub struct FactRow {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
     pub effort_id: Option<i64>,
+    /// The task `effort_id` belongs to (resolved per read from `task_effort`).
+    pub task_id: Option<i64>,
     pub provenance: String,
     pub source: String,
     /// The capture's producer (gauge key / ingest kind) — identifies which scan
@@ -748,9 +750,17 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
 /// so a hit is correct **regardless of row order**. Ordering (the queries sort by
 /// `captured_at, id`) only decides the hit RATE — never correctness — so no
 /// caller has to guarantee adjacency.
-fn fact_row_mapper() -> impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> {
+fn fact_row_mapper(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow>> {
+    // Effort → task, loaded once per read: `task_effort` is small next to the
+    // facts, and a per-row join would cost a lookup on every fact.
+    let tasks: std::collections::HashMap<i64, i64> = conn
+        .prepare_cached("SELECT id, task_id FROM task_effort")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
     let mut last: Option<(i64, Timestamp)> = None;
-    move |row| {
+    Ok(move |row: &rusqlite::Row<'_>| {
         let capture_id: i64 = row.get(1)?;
         let captured_at = match last {
             Some((id, ts)) if id == capture_id => ts,
@@ -769,8 +779,10 @@ fn fact_row_mapper() -> impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactR
                 ts
             }
         };
-        row_to_fact_row_with(row, captured_at)
-    }
+        let mut fact = row_to_fact_row_with(row, captured_at)?;
+        fact.task_id = fact.effort_id.and_then(|e| tasks.get(&e).copied());
+        Ok(fact)
+    })
 }
 
 /// The column-by-column decode, with `captured_at` supplied by the caller so it
@@ -803,6 +815,7 @@ fn row_to_fact_row_with(
         stream_id: row.get(20)?,
         thread_id: row.get(21)?,
         effort_id: row.get(22)?,
+        task_id: None,
         provenance: row.get(23)?,
         source: row.get(24)?,
         producer: row.get(25)?,
@@ -1340,7 +1353,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id], fact_row_mapper())?;
+                let rows = stmt.query_map(params![measure_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1364,7 +1377,8 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
+                let rows =
+                    stmt.query_map(params![measure_id, stream_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1690,8 +1704,10 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
-                let rows =
-                    stmt.query_map(params![measure_id, stream_id, branch], fact_row_mapper())?;
+                let rows = stmt.query_map(
+                    params![measure_id, stream_id, branch],
+                    fact_row_mapper(conn)?,
+                )?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1937,7 +1953,8 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
+                let rows =
+                    stmt.query_map(params![measure_id, stream_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2114,7 +2131,7 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
-                let rows = stmt.query_map(params![measure_id], fact_row_mapper())?;
+                let rows = stmt.query_map(params![measure_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2145,7 +2162,8 @@ impl SqliteFactStore {
                 for id in &capture_ids {
                     binds.push(id);
                 }
-                let rows = stmt.query_map(rusqlite::params_from_iter(binds), fact_row_mapper())?;
+                let rows =
+                    stmt.query_map(rusqlite::params_from_iter(binds), fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2287,7 +2305,8 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
+                let rows =
+                    stmt.query_map(params![measure_id, stream_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -2765,7 +2784,8 @@ impl SqliteFactStore {
                       ORDER BY c.captured_at ASC, f.id ASC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![measure_id, stream_id], fact_row_mapper())?;
+                let rows =
+                    stmt.query_map(params![measure_id, stream_id], fact_row_mapper(conn)?)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await

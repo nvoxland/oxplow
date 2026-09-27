@@ -191,6 +191,12 @@ Precedence is **project > global > built-in** by key.
    or `get_metric_summary { metric_key: "repo.todo_count" }`.
 3. The metric appears on the **Metrics** page automatically — no UI code.
 
+Slicing a read: `list_metric_samples` (and `metric_series` for a raw measure)
+take `group_by` (any dim the facts carry, or `oxplow.stream` / `oxplow.thread`
+/ `oxplow.effort` / `oxplow.task` / `oxplow.git_version`), `dim_eq: {key,
+value}`, and `bucket: day|week|month`. For example, "tokens per task per week"
+is `{ metric_key, group_by: "oxplow.task", bucket: "week" }`.
+
 For a CI-imported or agent-asserted number oxplow can't compute itself, use
 `record_metric { key, value, subject?, dims? }` (stored `asserted`, lower-trust).
 

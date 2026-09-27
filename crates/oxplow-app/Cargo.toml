@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+time = { workspace = true }
 url = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }

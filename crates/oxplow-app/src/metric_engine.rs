@@ -366,6 +366,21 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
     }
 }
 
+/// Read options for [`MetricEngine::series_for_spec_read`].
+#[derive(Debug, Clone, Default)]
+pub struct SeriesRead {
+    /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
+    /// `oxplow.task`).
+    pub group_by: Option<String>,
+    /// Scope to one stream; `None` reads all.
+    pub stream: Option<i64>,
+    pub window: Option<TimeWindow>,
+    /// Keep only facts with this dimension value, on top of the spec's filter.
+    pub dim_eq: Option<(String, String)>,
+    /// Collapse into calendar buckets.
+    pub bucket: Option<crate::metric_bucket::TimeBucket>,
+}
+
 /// One row of a by-dimension rollup (the metric's "breakdown" card).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct RollupRow {
@@ -463,8 +478,30 @@ pub(crate) fn dim_value_cached(
             }
             _ => dims.get(f).and_then(|d| dim_from_map(d, "oxplow.model")),
         },
+        // The capture spine: who/where a fact was measured (tsk321).
+        "oxplow.stream" => Some(f.stream_id.to_string()),
+        "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
+        "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
+        "oxplow.task" => f.task_id.map(|v| v.to_string()),
+        "oxplow.git_version" => f.closest_git_version.clone(),
         key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
+}
+
+/// Dimensions read off the capture spine (stream, thread, effort, task, git
+/// version). Sliceable on the fact path only: the cube never buckets by them,
+/// because a capture's effort is stamped when the effort closes, after the
+/// cube may already have folded it.
+pub(crate) const SPINE_DIMS: &[&str] = &[
+    "oxplow.stream",
+    "oxplow.thread",
+    "oxplow.effort",
+    "oxplow.task",
+    "oxplow.git_version",
+];
+
+pub(crate) fn is_spine_dim(dimension: &str) -> bool {
+    SPINE_DIMS.contains(&dimension)
 }
 
 /// Whether a dimension resolves entirely from a [`FactSliceKey`] — i.e. from
@@ -488,7 +525,7 @@ pub(crate) fn dim_is_slice_key(dimension: &str) -> bool {
             | "subject"
             | "oxplow.model"
             | "model"
-    )
+    ) && !is_spine_dim(dimension)
 }
 
 /// [`dim_value_cached`] restricted to a slice key. Mirrors the arms
@@ -1926,14 +1963,56 @@ impl MetricEngine {
         stream: Option<i64>,
         window: Option<TimeWindow>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
+        self.series_for_spec_read(
+            spec,
+            &SeriesRead {
+                group_by: group_by.map(str::to_string),
+                stream,
+                window,
+                ..SeriesRead::default()
+            },
+        )
+        .await
+    }
+
+    /// A spec's series with the full set of read options: group-by, an extra
+    /// dimension filter on top of the spec's own, and time buckets (tsk321).
+    pub async fn series_for_spec_read(
+        &self,
+        spec: &MetricSpec,
+        read: &SeriesRead,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
         let Some(measure_key) = spec.source_measure.as_deref() else {
             return Ok(Vec::new());
         };
         let agg = spec_aggregation(spec)?;
-        let filter = spec_filter(spec)?;
-        let mut series = self
-            .series_in_stream(measure_key, agg, &filter, group_by, stream, window)
+        let mut filter = spec_filter(spec)?;
+        if let Some(extra) = &read.dim_eq {
+            match &filter.dim_eq {
+                Some(own) if own != extra => {
+                    return Err(DomainError::Invalid(format!(
+                        "metric `{}` already filters on {} = {}",
+                        spec.key, own.0, own.1
+                    )))
+                }
+                _ => filter.dim_eq = Some(extra.clone()),
+            }
+        }
+        let series = self
+            .series_in_stream(
+                measure_key,
+                agg,
+                &filter,
+                read.group_by.as_deref(),
+                read.stream,
+                read.window,
+            )
             .await?;
+        // Bucket before scaling: a ratio re-divides its raw parts.
+        let mut series = match read.bucket {
+            Some(b) => self.bucket(measure_key, series, b, agg).await?,
+            None => series,
+        };
         let scale = spec_value_scale(spec);
         if scale != 1.0 {
             for p in &mut series {
@@ -1943,6 +2022,24 @@ impl MetricEngine {
             }
         }
         Ok(series)
+    }
+
+    /// Collapse a measure's series into calendar buckets by its temporal rule
+    /// (see [`crate::metric_bucket`]).
+    pub async fn bucket(
+        &self,
+        measure_key: &str,
+        series: Vec<SeriesPoint>,
+        bucket: crate::metric_bucket::TimeBucket,
+        agg: Aggregation,
+    ) -> Result<Vec<SeriesPoint>, DomainError> {
+        let Some(measure) = self.facts.get_measure(measure_key).await? else {
+            return Ok(Vec::new());
+        };
+        let temporal = parse_temporal(measure_key, &measure.temporal_semantics)?;
+        Ok(crate::metric_bucket::bucket_series(
+            series, bucket, temporal, agg,
+        ))
     }
 
     /// The by-dimension rollup for a spec — the source measure's facts filtered by
@@ -2201,6 +2298,7 @@ mod tests {
             stream_id: 1,
             thread_id: None,
             effort_id: None,
+            task_id: None,
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2818,6 +2916,10 @@ mod tests {
             subject_kind: Some("model".into()),
             subject_ref: Some("model:opus".into()),
             branch: Some("feature/x".into()),
+            thread_id: Some(4),
+            effort_id: Some(9),
+            task_id: Some(12),
+            closest_git_version: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
             dims_json: Some(
@@ -2859,6 +2961,11 @@ mod tests {
             "subject",
             "oxplow.model",
             "model",
+            "oxplow.stream",
+            "oxplow.thread",
+            "oxplow.effort",
+            "oxplow.task",
+            "oxplow.git_version",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
             assert_ne!(
@@ -2867,6 +2974,44 @@ mod tests {
                 "{key} is excluded, so the slice key must NOT reproduce it"
             );
         }
+    }
+
+    #[test]
+    fn spine_dimensions_read_the_capture_it_came_from() {
+        let f = FactRow {
+            thread_id: Some(4),
+            effort_id: Some(9),
+            task_id: Some(12),
+            closest_git_version: Some("abc123".into()),
+            ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+        };
+        let got: Vec<_> = [
+            "oxplow.stream",
+            "oxplow.thread",
+            "oxplow.effort",
+            "oxplow.task",
+            "oxplow.git_version",
+        ]
+        .iter()
+        .map(|d| dim_value(&f, d))
+        .collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(f.stream_id.to_string()),
+                Some("4".into()),
+                Some("9".into()),
+                Some("12".into()),
+                Some("abc123".into())
+            ]
+        );
+        // Unattributed facts have no effort/task group rather than a blank one.
+        let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
+        assert_eq!(dim_value(&bare, "oxplow.task"), None);
+        // The cube never buckets by these: an effort is stamped on its
+        // captures at close, after the cube may have folded them.
+        assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
+        assert!(!is_spine_dim("oxplow.language"));
     }
 
     #[test]
@@ -3267,6 +3412,99 @@ mod tests {
         );
         // complexity is semi-additive → headline is the LAST capture's value.
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn a_spec_series_groups_by_task_filters_by_it_and_buckets_by_day() {
+        let db = Database::in_memory();
+        db.transaction(|c| {
+            c.execute_batch(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                   VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
+                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                   VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
+                   VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
+                          (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
+                 INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at)
+                   VALUES (7, 1, 1, '2026-01-01', '2026-01-02'), (8, 2, 1, '2026-01-01', '2026-01-02');",
+            )
+            .map_err(|e| DomainError::Invalid(e.to_string()))
+        })
+        .await
+        .unwrap();
+        let facts = SqliteFactStore::new(db);
+        let mut m = oxplow_db::NewMeasure::new("acme.tokens", "Tokens");
+        m.temporal_semantics = "additive".into();
+        let tokens = facts.upsert_measure(m).await.unwrap();
+        for (at, effort, value) in [
+            ("2026-06-30T10:00:00Z", 7, 10.0),
+            ("2026-06-30T11:00:00Z", 8, 5.0),
+            ("2026-06-30T12:00:00Z", 7, 3.0),
+            ("2026-07-01T09:00:00Z", 7, 1.0),
+        ] {
+            let mut cap = cap_at(at);
+            cap.effort_id = Some(effort);
+            facts
+                .record_facts(cap, vec![NewFact::new(tokens, value)])
+                .await
+                .unwrap();
+        }
+        facts
+            .upsert_spec(NewMetricSpec::base(
+                "acme.spend",
+                "Spend",
+                "acme.tokens",
+                "sum",
+            ))
+            .await
+            .unwrap();
+        let spec = facts.get_spec("acme.spend").await.unwrap().unwrap();
+        let engine = MetricEngine::new(facts);
+        let read = |r: SeriesRead| {
+            let (engine, spec) = (&engine, &spec);
+            async move {
+                engine
+                    .series_for_spec_read(spec, &r)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .filter(|p| p.value != 0.0)
+                    .map(|p| (p.group, p.value))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let task = |t: &str| Some(t.to_string());
+        assert_eq!(
+            read(SeriesRead {
+                group_by: Some("oxplow.task".into()),
+                ..SeriesRead::default()
+            })
+            .await,
+            vec![
+                (task("1"), 10.0),
+                (task("2"), 5.0),
+                (task("1"), 3.0),
+                (task("1"), 1.0)
+            ]
+        );
+        assert_eq!(
+            read(SeriesRead {
+                group_by: Some("oxplow.task".into()),
+                bucket: Some(crate::metric_bucket::TimeBucket::Day),
+                ..SeriesRead::default()
+            })
+            .await,
+            vec![(task("1"), 13.0), (task("2"), 5.0), (task("1"), 1.0)]
+        );
+        assert_eq!(
+            read(SeriesRead {
+                dim_eq: Some(("oxplow.task".into(), "2".into())),
+                ..SeriesRead::default()
+            })
+            .await,
+            vec![(None, 5.0)]
+        );
     }
 
     #[tokio::test]

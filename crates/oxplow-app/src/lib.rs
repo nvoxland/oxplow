@@ -46,6 +46,7 @@ pub mod link_check;
 pub mod lsp_diagnostics;
 pub mod lsp_installer;
 pub mod lsp_sessions;
+pub mod metric_bucket;
 pub mod metric_cube;
 pub mod metric_engine;
 pub mod metric_visibility;

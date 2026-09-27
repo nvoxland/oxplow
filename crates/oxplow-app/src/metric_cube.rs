@@ -131,7 +131,7 @@ impl MetricCubeBuilder {
             .list_dimensions()
             .await?
             .into_iter()
-            .filter(|d| d.promoted)
+            .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&d.key))
             .map(|d| d.key)
             .collect();
 
@@ -610,7 +610,7 @@ pub async fn cube_series(
         .list_dimensions()
         .await?
         .into_iter()
-        .filter(|d| d.promoted)
+        .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&d.key))
         .map(|d| d.key)
         .collect();
     // Every dim the read filters or slices on must be IN the grain — the cube

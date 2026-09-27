@@ -64,7 +64,9 @@ local to you; ask your agent to set one.
 
 Breakdowns (a metric by package, language, or model) aren't on the
 detail page. Ask your agent: it has `metric_breakdown` over MCP, and it
-can build a [lens](lenses.md) if you want to keep the view.
+can build a [lens](lenses.md) if you want to keep the view. It can also
+slice a metric's history by worktree, thread, effort, task, or commit,
+and roll it up by day, week, or month, e.g. "tokens per task per week".
 
 ## Where the numbers come from
 
