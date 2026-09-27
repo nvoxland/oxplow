@@ -461,6 +461,92 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
 }
 
 #[tokio::test]
+async fn prompts_carry_the_efforts_decisions_once_per_session() {
+    use oxplow_app::TaskEffortStore as _;
+    let (cp, svc, _root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let now = Timestamp::from_unix_ms(1);
+    let task_id = svc
+        .task_store
+        .insert(&Task {
+            id: TaskId::placeholder(),
+            thread_id: Some(tid),
+            parent_id: None,
+            title: "decide things".into(),
+            description: "d".into(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: None,
+        })
+        .await
+        .unwrap();
+    let effort = svc.effort_store.start(task_id, &tid, None).await.unwrap();
+    svc.reasoning_store
+        .record_decision(oxplow_db::NewDecision {
+            thread_id: tid.value(),
+            task_id: Some(task_id.value()),
+            effort_id: Some(effort.id.value()),
+            question: "Storage?".into(),
+            choice: "main DB".into(),
+            alternatives: vec!["attached DB".into()],
+            confidence: "high".into(),
+            why: "cache".into(),
+        })
+        .await
+        .unwrap();
+
+    let context = |body: serde_json::Value| {
+        body["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
+    };
+    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
+    let first = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        context(first).contains("Storage? → main DB"),
+        "first prompt of a session carries decisions"
+    );
+    let second = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !context(second).contains("Storage?"),
+        "not repeated while unchanged"
+    );
+    // A compaction / resume starts a new context: decisions come back.
+    post_hook(
+        &cp,
+        "SessionStart",
+        Some(tid),
+        serde_json::json!({ "session_id": "s1", "source": "compact" }),
+    )
+    .await;
+    let third = post_hook(&cp, "UserPromptSubmit", Some(tid), prompt())
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        context(third).contains("Storage? → main DB"),
+        "re-sent after SessionStart"
+    );
+}
+
+#[tokio::test]
 async fn ingest_failure_still_acks_200() {
     // An unknown thread id makes agent_turn's thread FK fail inside
     // ingest. The agent can't do anything useful with a 500 — it just

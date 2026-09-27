@@ -1386,6 +1386,33 @@ The banner reaches the agent via two complementary injection points:
    PostToolUse `additionalContext` channel so the agent learns about
    the role flip before its next tool call.
 
+## Decisions fed back to the agent (tsk298)
+
+Decisions the agent records (`record_decision` → `v_decision`) are fed
+back to it in two places.
+
+**On `UserPromptSubmit`**
+
+- The open effort's decisions, capped at 15 and most recent last, ride
+  the same `additionalContext` as the session-context block. They're
+  built by `oxplow_app::reasoning::effort_decisions_block`.
+- They're deduped with the same per-session state (the key is
+  `<session_id>#decisions`). So they're sent on the first prompt of a
+  session and again only when they change.
+- `SessionStart` (startup / resume / clear / compact) clears that key, so
+  **after a compaction the agent gets its earlier decisions back**. That
+  is the point: agents otherwise forget their own choices across
+  compaction.
+
+**In the `complete_task` response**
+
+- `decision_hint` is set when the effort touched 8 or more files and
+  recorded no decisions, asking the agent to record the forks it
+  resolved (`missing_decisions_hint`).
+- It lives on the tool response, not on the Stop hook, because the agent
+  reads it at the exact moment it closes the effort, and it needs none
+  of the Stop-directive dedupe machinery.
+
 ## Preamble vs skill split
 
 `buildBatchAgentPrompt` is intentionally terse — session ids, writer

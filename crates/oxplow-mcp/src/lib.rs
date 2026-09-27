@@ -3956,10 +3956,26 @@ impl OxplowMcp {
         }
         self.emit_tasks_changed(item.thread_id);
         let link_warnings = oxplow_app::link_check::check_links(&self.services, &p.summary).await;
+        let decision_hint = match self
+            .services
+            .effort_store
+            .most_recent_for_task(item.id)
+            .await
+        {
+            Ok(Some(effort)) => {
+                oxplow_app::reasoning::missing_decisions_hint(
+                    &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+                    effort.id.value(),
+                )
+                .await
+            }
+            _ => None,
+        };
         let payload = CompleteTaskResult {
             task: item,
             file_review: review,
             link_warnings,
+            decision_hint,
         };
         json_result(&payload)
     }
@@ -5754,6 +5770,10 @@ pub struct CompleteTaskResult {
     /// dangling target). Omitted when the summary's links all resolve.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub link_warnings: Vec<oxplow_app::link_check::LinkWarning>,
+    /// Set when the effort touched many files but recorded no decisions:
+    /// a prompt to record the forks it resolved (see `record_decision`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_hint: Option<String>,
 }
 
 /// Wraps a write-tool result with wikilink-validity warnings for the
@@ -7069,6 +7089,52 @@ mod tests {
     /// `.gitignore`). Such a path is never snapshotted, so it can't be
     /// observed as changed — recording it only guarantees a
     /// "claimed but not changed" nudge on every close.
+    #[tokio::test]
+    async fn complete_task_nudges_for_decisions_on_a_big_effort() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let close = |title: &'static str, files: usize| {
+            let services = services.clone();
+            let server = &server;
+            async move {
+                let task_id = services
+                    .task_store
+                    .insert(&make_task(Some(thread.id), title))
+                    .await
+                    .unwrap();
+                let r = server
+                    .complete_task(Parameters(CompleteTaskParams {
+                        id: task_id.to_string(),
+                        summary: "done".into(),
+                        author: None,
+                        touched_files: Some((0..files).map(|i| format!("src/f{i}.rs")).collect()),
+                        impacts: None,
+                        claim_runs: None,
+                        disclaim_runs: None,
+                    }))
+                    .await
+                    .unwrap();
+                serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap()
+            }
+        };
+        let big = close("big change", 9).await;
+        let hint = big["decision_hint"]
+            .as_str()
+            .expect("hint on a big effort with no decisions");
+        assert!(hint.contains("record_decision"), "{hint}");
+        let small = close("small change", 2).await;
+        assert!(small.get("decision_hint").is_none(), "{small}");
+    }
+
     #[tokio::test]
     async fn complete_task_ignores_claims_on_never_snapshotted_paths() {
         use oxplow_db::TaskEffortStore as _;

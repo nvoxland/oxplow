@@ -687,7 +687,13 @@ async fn handle_hook_inner(
                 .collection
                 .effort_metric_context(thread_id)
                 .await;
-            let combined: String = [ctx_block, metric_block]
+            let decisions_block = refreshed_decisions_context(
+                &ctx,
+                thread_id,
+                envelope_for_resume.session_id.as_deref(),
+            )
+            .await;
+            let combined: String = [ctx_block, metric_block, decisions_block]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
@@ -1632,6 +1638,35 @@ async fn refreshed_session_context(
     should_emit_session_context(&ctx.role_state, session_id, &block).then_some(block)
 }
 
+/// The open effort's recorded decisions as context, emitted on the first
+/// prompt of a session (so they survive a compaction / resume, which
+/// resets the baseline via `SessionStart`) and again whenever they change.
+async fn refreshed_decisions_context(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+    session_id: Option<&str>,
+) -> Option<String> {
+    use oxplow_app::TaskEffortStore as _;
+    let effort = ctx
+        .services
+        .effort_store
+        .find_open_for_thread(thread_id)
+        .await
+        .ok()
+        .flatten()?;
+    let block = oxplow_app::reasoning::effort_decisions_block(
+        &oxplow_db::SemanticLayer::new(ctx.services.db.clone()),
+        effort.id.value(),
+    )
+    .await?;
+    let key = session_id.map(|s| format!("{s}{DECISIONS_KEY_SUFFIX}"));
+    should_emit_session_context(&ctx.role_state, key.as_deref(), &block).then_some(block)
+}
+
+/// Dedupe key suffix for the decisions block, beside the session-context
+/// block's plain session-id key.
+const DECISIONS_KEY_SUFFIX: &str = "#decisions";
+
 fn should_emit_session_context(
     state: &Mutex<RoleState>,
     session_id: Option<&str>,
@@ -1662,6 +1697,9 @@ fn reset_session_context_state(state: &Mutex<RoleState>, session_id: Option<&str
     let mut state = state.lock();
     state.initial_role_by_session_id.remove(session_id);
     state.last_context_by_session_id.remove(session_id);
+    state
+        .last_context_by_session_id
+        .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
 }
 
 /// Returns just the ROLE CHANGE sentence (no surrounding session-

@@ -44,6 +44,7 @@ pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod producer_metrics;
+pub mod reasoning;
 pub mod recovery;
 pub mod ref_resolver;
 pub mod resume_check;
