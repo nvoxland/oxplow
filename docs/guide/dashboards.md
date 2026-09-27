@@ -18,6 +18,9 @@ they're local to you rather than shared with the project.
 
 ## Tiles
 
+A tile can also be a [lens](lenses.md): **Pin to Dashboard** on any lens page
+adds it, showing its first few rows.
+
 Each metric tile renders as a **line** chart (the default),
 **number**, **sparkline**, or **bar**. There's also a plain **text**
 item for labelling a group of tiles -- it's literal text, not

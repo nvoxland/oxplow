@@ -10,9 +10,11 @@ and agents query.
 >   `describe_schema` over IPC and MCP (tsk282), and the **fact substrate**
 >   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
 >   documented in [metrics.md](./metrics.md).
-> - **Target:** everything else in this doc (sources that emit entities,
->   expression/join dimensions, entity-level metrics, extension sources, the
->   remaining shipped sources), tracked in tsk277.
+> - **Current (tsk289):** extension `exec` sources that bring external
+>   entities in (see "User and extension sources").
+> - **Target:** expression/join dimensions, entity-level metrics, the
+>   remaining shipped sources (git, LSP, tests as entities), decisions and
+>   claims; tracked in tsk277.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -181,53 +183,98 @@ as `v_<ext>_<entity>` (target).
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
-## User and extension sources
+## User and extension sources (current: exec sources)
 
-Example: a GitHub source that brings in PRs and joins them to core data.
+Extensions declare **sources**: code that pulls external records into the
+semantic layer as entities. The real, tested example is
+`examples/extensions/github/` (PRs from the GitHub API via `gh` or
+`GITHUB_TOKEN`); the user guide is `docs/guide/lenses.md`.
 
 ```yaml
 sources:
-  - id: github
-    runtime: exec            # or starlark / jaq over a payload the host fetches
-    entry: bin/github-sync
-    schedule: every 10m
-    credentials: [github]    # keychain entry names; injected as env vars
-    network: [api.github.com]
+  - id: prs
+    doc: The repo's recent pull requests.
+    runtime: exec              # the only runtime today
+    entry: sync.sh             # relative, inside the extension folder
+    schedule: every 15m        # or manual; every <n>m | <n>h
+    env: [GITHUB_TOKEN]        # host env vars passed through; nothing else is
     entities:
-      - name: pr
+      - name: pr               # view: v_<extension>_<entity> = v_github_pr
+        doc: One pull request.
         key: number
-        columns: {title: text, state: text, author: text, head_branch: text,
-                  opened_at: time, merged_at: time}
-        relations:
-          - {to: branch, on: head_branch}
-          - {to: task, via: "title ~ 'tsk\\d+'"}
-dimensions:
-  - {name: pr.author, entity: pr, expr: author}
-metrics:
-  - {key: gh.time_to_merge, entity: pr, agg: median,
-     expr: "merged_at - opened_at", where: "state = 'merged'"}
+        columns:               # ordered; `type` or `{type, doc}`
+          number: int          # text | int | real | bool | time
+          title: { type: text, doc: PR title }
+        relations:             # documented joins (not executed)
+          - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }
 ```
 
-Rules:
+The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 
-- **Storage.** Extension entities live in a **per-extension attached SQLite
-  DB** (`.oxplow/ext/<ext>.sqlite`), never in core tables. An extension
-  can't corrupt core data, and disabling it drops its data cleanly. Oxplow
-  creates the tables from the declared schema. The source protocol is
-  upsert-by-key plus tombstones.
-- **Relations.** Declared joins are what make this a layer and not a pile
-  of tables. They let one query cross sources, e.g. "PRs whose linked task
-  has an effort with unverified claims".
-- **Containment.** An `exec` source can reach only the hosts it lists in
-  `network` and only the keychain entries it lists in `credentials`.
-  Credentials are injected as environment variables and never written under
-  the project dir. `starlark` and `jaq` sources stay pure: they transform a
-  payload the host fetched. Budgets and timeouts reuse `SandboxBudget`.
-- **AI.** A source may call AI roles ([ai-providers.md](./ai-providers.md)),
-  for example to classify each new PR. Results are stored as columns or
-  facts, never recomputed on read.
-- **Visibility.** A Settings → Data page lists every source with its owner
-  (core or extension), last sync, row counts and errors, plus "sync now".
+**Code map.**
+
+| Piece | Where |
+|---|---|
+| Parse/validate declarations | `crates/oxplow-app/src/extension_sources.rs` |
+| Consent, exec, coercion, `run_source`, scheduler | `crates/oxplow-app/src/source_runner.rs` |
+| Entity tables + views, run state (V75 `ext_source_state`) | `crates/oxplow-db/src/ext_source_store.rs` |
+| Combined catalog for `describe_schema` | `crates/oxplow-app/src/semantic_catalog.rs` |
+| IPC `list_sources` / `run_source(approve?)` | `crates/oxplow-rpc/src/commands/sources.rs` |
+| MCP `list_sources` / `run_source` (never approves) | `crates/oxplow-mcp/src/lib.rs` |
+| UI: Settings → Extensions source rows | `apps/desktop/src/components/ExtensionsSection.tsx` |
+
+**Decisions (epic tsk289, 2026-09-27).**
+
+- **Storage is a re-syncable cache in the main DB,** not the attached
+  per-extension DB the first design sketched. Each entity is a table
+  `ext__<extension>__<entity>` (dashes → underscores) plus its
+  `v_<extension>_<entity>` view.
+  - Oxplow does all the writing from the declared schema, and no
+    extension SQL runs on writes, so isolation buys little.
+  - One pool and plain views keep `query_sql` simple.
+  - Every run replaces all of a source's entities in **one transaction**,
+    so a failed run changes nothing.
+  - A changed column set rebuilds the table.
+  - The store refuses to replace a view it doesn't own: a core view, or
+    one from another extension. Extension `task` plus entity `note` can't
+    shadow `v_task_note`.
+  - `drop_extension` removes an extension's tables, views and state.
+- **Consent.** A source runs code, so it runs only after a person
+  approves it.
+  - Approval is bound to the entry script's SHA-256 and stored in local
+    `.oxplow/source-approvals.json`, which is gitignored and so per
+    machine.
+  - A teammate who pulls the repo approves it themselves, and a changed
+    script needs re-approval.
+  - The IPC `approve` flag exists only on the UI path. MCP `run_source`
+    never approves, so an agent can't consent on a person's behalf.
+- **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
+  names, `OXPLOW_EXTENSION_DIR` and `OXPLOW_SOURCE_ID`. It runs with a
+  120 s timeout and a 64 MB stdout cap, and both pipes are drained so it
+  can't deadlock.
+  - **Network hosts aren't restricted yet.**
+  - Keychain credentials are planned together with AI providers (tsk279).
+- **Where it runs.** Sources run from the **primary** stream's worktree,
+  and their data is project-global, like dashboards.
+- **Errors.**
+  - `RunSourceError` distinguishes `NotFound`, `NeedsApproval` (nothing
+    ran), `Failed` (it ran; recorded as the source's state, keeping the
+    last good row counts) and `Storage`.
+  - `SourceSynced` is emitted only when the source actually ran.
+  - A lens reading an unsynced entity gets "reads `v_x`, which hasn't
+    synced yet. Run source `ext/id`…" in place of SQLite's bare "no such
+    table".
+- **Scheduling.** A background loop (`spawn_scheduler`, started from boot)
+  runs approved `every` sources once they're due (`due_sources`, which is
+  pure and tested). Unapproved sources never run unattended.
+- **Schema.** `describe_schema` lists declared entities even before they
+  sync. It sets `available: false` until the view exists, and includes
+  column docs, relations and the owner (the extension name).
+
+**Still target:** `starlark` / `jaq` runtimes; incremental upsert +
+tombstones (today: full replace per run); keychain `credentials` and an
+enforced `network` allowlist; expression/join `dimensions` and
+entity-level `metrics` declared by extensions; AI-role columns.
 
 ## Relation to other docs
 

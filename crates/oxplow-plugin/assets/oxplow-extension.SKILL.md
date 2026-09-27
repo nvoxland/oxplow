@@ -112,6 +112,31 @@ file or pick up a task before editing, and list the files in
   3. Change the file.
   4. Validate and run it again.
 
+## Bringing in outside data (sources)
+
+When the user wants data oxplow doesn't have (GitHub PRs, Linear issues,
+CI runs), add a **source** to the extension:
+
+- Write a script that prints
+  `{"entities": {"<name>": [ {col: value, …} ]}}`.
+- Declare it under `sources:` in `extension.yaml`, with its entities'
+  typed columns and key.
+- `examples/extensions/github/` in the oxplow repo is a complete, working
+  example; copy its shape.
+- The entity becomes `v_<extension>_<entity>`. Join it to core views in
+  lenses.
+
+Rules:
+
+- Pass secrets through `env: [NAME]` from the user's environment. Never
+  hard-code them.
+- **You can't approve a source.** Tell the user to approve it in
+  Settings → Extensions → Approve & Run. After that, `run_source`
+  (MCP) re-runs it.
+- `list_sources` shows each source's status and last error.
+- `describe_schema` lists declared entities with `available: false`
+  until the source first syncs.
+
 ## Sharing and installing
 
 - **Team:** extensions are ordinary committed files under

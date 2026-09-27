@@ -14,7 +14,11 @@ the bundled `oxplow-analytics` example extension.
 >   - sharing: team via the repo, world via `install_extension` /
 >     `update_extension` and Settings → Extensions;
 >   - the core explorer: the Explore Data page (with Save as Lens) and
->     lens tiles on dashboards.
+>     lens tiles on dashboards;
+>   - `exec` **sources** that bring external records in as entities. The
+>     mechanics and decisions are in
+>     [semantic-layer.md](./semantic-layer.md) → "User and extension
+>     sources", and a tested example is in `examples/extensions/github/`.
 > - **Target:** everything else here, including sources, dimensions,
 >   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
 >   (tsk278 / tsk280).
@@ -118,6 +122,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       project-global.
     - The launcher's new **Data** category holds Explore Data, Metrics
       and Dashboards.
+- **Sources.** Declared under `sources:` in `extension.yaml` and parsed
+  into `Extension.sources`. A bad source is reported in `errors` without
+  hiding the extension's lenses. Settings → Extensions shows each source
+  (schedule, row counts or failure, Approve & Run / Sync Now).
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.

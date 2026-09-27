@@ -1,0 +1,28 @@
+name: github
+description: Pull requests from this repo's GitHub, joined to oxplow tasks and streams.
+sources:
+  - id: prs
+    doc: The repo's 100 most recent pull requests (open and closed).
+    runtime: exec
+    entry: sync.sh
+    schedule: every 15m
+    # Passed through from the environment oxplow runs in. Without
+    # GITHUB_TOKEN the script falls back to the `gh` CLI's own login.
+    env: [GITHUB_TOKEN, GITHUB_REPOSITORY]
+    entities:
+      - name: pr
+        doc: One GitHub pull request.
+        key: number
+        columns:
+          number: { type: int, doc: PR number }
+          title: text
+          state: { type: text, doc: "`open` or `closed`" }
+          author: { type: text, doc: GitHub login of the author }
+          head_branch: { type: text, doc: Branch the PR is from }
+          draft: bool
+          opened_at: time
+          merged_at: { type: time, doc: "When it was merged; NULL if not merged" }
+          url: text
+        relations:
+          - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
+          - { to: v_task, on: "v_github_pr.title LIKE '%tsk' || v_task.id || '%'" }

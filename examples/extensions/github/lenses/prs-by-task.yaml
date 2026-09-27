@@ -1,0 +1,18 @@
+title: Pull Requests by Task
+description: Recent PRs with the oxplow task their title mentions (tskNN), if any.
+params:
+  - { name: state, label: "State (open / closed / all)", default: all }
+query: |
+  SELECT pr.number, pr.title, pr.state, pr.author, t.id AS task_id, t.title AS task
+  FROM v_github_pr pr
+  LEFT JOIN v_task t ON pr.title LIKE '%tsk' || t.id || '%'
+  WHERE :state = 'all' OR pr.state = :state
+  ORDER BY pr.number DESC
+viz: table
+columns:
+  - { key: number, label: "#" }
+  - { key: title, label: Pull Request }
+  - { key: state, label: State }
+  - { key: author, label: Author }
+  - { key: task, label: Task, link: { kind: task, from: task_id } }
+empty: No pull requests synced yet. Approve & run the `prs` source in Settings → Extensions.

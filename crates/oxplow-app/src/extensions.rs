@@ -323,7 +323,35 @@ pub async fn run_lens(
     params: BTreeMap<String, SqlCell>,
 ) -> Result<LensRun, DomainError> {
     let lens = find_lens(root, id)?;
-    execute(layer, lens, params).await
+    execute(layer, lens, params).await.map_err(|e| match e {
+        DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(root, &m)),
+        other => other,
+    })
+}
+
+/// A lens reading a source entity before its first sync fails with
+/// SQLite's bare "no such table: v_x". Say which source to run instead.
+fn explain_unsynced(root: &Path, message: &str) -> String {
+    let Some(rest) = message.split("no such table: ").nth(1) else {
+        return message.to_string();
+    };
+    let view: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    for ext in load_extensions(root) {
+        for source in &ext.sources {
+            if source.entities.iter().any(|e| e.view == view) {
+                let lens = message.split(':').next().unwrap_or("lens");
+                return format!(
+                    "{lens}: reads `{view}`, which hasn't synced yet. Run source `{}/{}` \
+                     (Settings → Extensions → Approve & Run, or Sync Now).",
+                    ext.name, source.id
+                );
+            }
+        }
+    }
+    message.to_string()
 }
 
 async fn execute(
@@ -383,9 +411,10 @@ pub async fn validate_extension(
     for lens in ext.lenses.clone() {
         let id = lens.id.clone();
         match execute(layer, lens, BTreeMap::new()).await {
-            Err(e) => ext
-                .errors
-                .push(e.to_string().replacen("invalid value: ", "", 1)),
+            Err(e) => ext.errors.push(explain_unsynced(
+                root,
+                &e.to_string().replacen("invalid value: ", "", 1),
+            )),
             Ok(run) => {
                 let cols = &run.result.columns;
                 for c in &run.lens.columns {
@@ -1110,5 +1139,31 @@ empty: No tasks.
             e.errors
         );
         assert_eq!(e.lenses.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unsynced_source_entity_gets_a_helpful_error() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/gh/extension.yaml",
+            "name: gh\nsources:\n  - id: prs\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/gh/lenses/all.yaml",
+            "title: All\nquery: SELECT number FROM v_gh_pr\n",
+        );
+        let sl = layer().await;
+        let err = run_lens(&sl, dir.path(), "gh/all", BTreeMap::new())
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't synced"),
+            "{msg}"
+        );
+        let e = validate_extension(&sl, dir.path(), "gh").await.unwrap();
+        assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
     }
 }
