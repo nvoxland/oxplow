@@ -1,14 +1,12 @@
 //! Cores for the `snapshot` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use similar::{ChangeTag, TextDiff};
 use specta::Type;
 
-use oxplow_app::blob_store::BlobStore;
+pub use oxplow_app::endpoint_diff::{DiffEndpoint, DiffEntry};
 use oxplow_app::Services;
 use oxplow_db::{FileSnapshot, Snapshot, SnapshotChangeEntry, SnapshotStats};
 use oxplow_domain::StreamId;
@@ -221,39 +219,6 @@ pub async fn get_snapshot_pair_diff(
     })
 }
 
-/// One endpoint of a diff: a captured local-history snapshot, a git
-/// commit (any revspec libgit2 resolves), or the live working tree
-/// (reserved for an in-progress effort's open end).
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum DiffEndpoint {
-    Snapshot { snapshot_id: i64 },
-    Commit { sha: String },
-    Working,
-}
-
-/// One changed path between two [`DiffEndpoint`]s. `status` is
-/// `"added" | "modified" | "deleted"`, matching the renderer's
-/// `BranchChangeEntry`. `additions`/`deletions` are per-file line
-/// counts (via `similar`), `0` only for binary, oversize, or otherwise
-/// unreadable content.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct DiffEntry {
-    pub path: String,
-    pub status: String,
-    pub additions: u32,
-    pub deletions: u32,
-}
-
-fn change_status_str(s: oxplow_domain::ChangeStatus) -> &'static str {
-    match s {
-        oxplow_domain::ChangeStatus::Added => "added",
-        oxplow_domain::ChangeStatus::Modified => "modified",
-        oxplow_domain::ChangeStatus::Deleted => "deleted",
-    }
-}
-
 /// Diff two endpoints. `start = None` diffs `end` against the empty
 /// tree (everything added).
 ///
@@ -289,7 +254,7 @@ pub async fn diff_endpoints(
     let blobs = svc.blobs.clone();
     let filter = current_filter(svc);
     tokio::task::spawn_blocking(move || {
-        compute_diff(
+        oxplow_app::endpoint_diff::compute_diff(
             start,
             end,
             start_snap,
@@ -326,264 +291,18 @@ pub async fn read_endpoint_files_content(
     let blobs = svc.blobs.clone();
     let filter = current_filter(svc);
     tokio::task::spawn_blocking(move || -> Result<Vec<Option<String>>, String> {
-        let (cells, _space) = cells_for_endpoint(&endpoint, snap, &project_dir, &filter)?;
-        Ok(paths
-            .into_iter()
-            .map(|p| {
-                cells
-                    .get(&p)
-                    .and_then(|cell| read_cell(cell, &blobs, &project_dir))
-                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            })
-            .collect())
+        oxplow_app::endpoint_diff::endpoint_contents(
+            &endpoint,
+            snap,
+            &project_dir,
+            &blobs,
+            &filter,
+            paths,
+        )
     })
     .await
     .map_err(|e| IpcError::internal(e.to_string()))?
     .map_err(IpcError::internal)
-}
-
-/// The identity space a tree's `Cell`s compare in.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Space {
-    /// xxh3 / git-oid / oversize-sentinel as stored by the snapshot store.
-    Snapshot,
-    /// git blob oids (commit trees, and the working tree we build in this
-    /// space).
-    Git,
-}
-
-/// How to fetch a path's raw bytes for line counting.
-#[derive(Clone)]
-enum ContentSource {
-    /// `id` is an xxh3 hash → oxplow blob store.
-    Oxplow,
-    /// `id` is a git blob oid → git odb.
-    Git,
-    /// live file on disk.
-    Working(PathBuf),
-    /// oversize / pruned — no readable bytes; identity is opaque.
-    Unreadable,
-}
-
-/// A path's content within one endpoint's tree.
-#[derive(Clone)]
-struct Cell {
-    /// Diff-comparison identity, in the cell's native [`Space`].
-    id: String,
-    source: ContentSource,
-}
-
-fn compute_diff(
-    start: Option<DiffEndpoint>,
-    end: DiffEndpoint,
-    start_snap: Option<BTreeMap<String, String>>,
-    end_snap: Option<BTreeMap<String, String>>,
-    project_dir: &Path,
-    blobs: &BlobStore,
-    filter: &WorkspaceFilter,
-) -> Result<Vec<DiffEntry>, String> {
-    let (after_cells, after_space) = cells_for_endpoint(&end, end_snap, project_dir, filter)?;
-    let (before_cells, before_space) = match &start {
-        Some(ep) => {
-            let (cells, space) = cells_for_endpoint(ep, start_snap, project_dir, filter)?;
-            (cells, Some(space))
-        }
-        None => (BTreeMap::new(), None),
-    };
-
-    // Cross-space pairs normalize into git-oid space; same-space pairs
-    // (incl. None start) compare raw identities with no byte reads.
-    let normalize = before_space.is_some_and(|bs| bs != after_space);
-    let before_ids: BTreeMap<String, String> = before_cells
-        .iter()
-        .map(|(p, c)| (p.clone(), compare_id(c, normalize, blobs)))
-        .collect();
-    let after_ids: BTreeMap<String, String> = after_cells
-        .iter()
-        .map(|(p, c)| (p.clone(), compare_id(c, normalize, blobs)))
-        .collect();
-    let changes = oxplow_domain::diff_trees(&before_ids, &after_ids);
-
-    Ok(changes
-        .into_iter()
-        .map(|c| {
-            let base = before_cells
-                .get(&c.path)
-                .and_then(|cell| read_cell(cell, blobs, project_dir));
-            let head = after_cells
-                .get(&c.path)
-                .and_then(|cell| read_cell(cell, blobs, project_dir));
-            let (additions, deletions) = count_lines(base.as_deref(), head.as_deref());
-            DiffEntry {
-                path: c.path,
-                status: change_status_str(c.status).to_string(),
-                additions,
-                deletions,
-            }
-        })
-        .collect())
-}
-
-/// Build one endpoint's `path -> Cell` tree + its identity space.
-fn cells_for_endpoint(
-    ep: &DiffEndpoint,
-    snap_tree: Option<BTreeMap<String, String>>,
-    project_dir: &Path,
-    filter: &WorkspaceFilter,
-) -> Result<(BTreeMap<String, Cell>, Space), String> {
-    match ep {
-        // EVERY arm applies the filter, not just `Working` (tsk177). Filtering
-        // one side only makes a hidden path look DELETED — it's present in the
-        // commit/snapshot tree and absent from the filtered worktree scan — and
-        // it lands with the file's full line count as `deletions`. A filtered
-        // path is out of scope, so it must be absent from both sides.
-        DiffEndpoint::Snapshot { .. } => {
-            let cells = snap_tree
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|(path, _)| !filter.ignore(Path::new(path), false))
-                .map(|(path, id)| (path, classify_snapshot_cell(id)))
-                .collect();
-            Ok((cells, Space::Snapshot))
-        }
-        DiffEndpoint::Commit { sha } => {
-            let tree = oxplow_git::tree_at_commit(project_dir, sha).map_err(|e| e.to_string())?;
-            let cells = tree
-                .into_iter()
-                .filter(|(path, _)| !filter.ignore(Path::new(path), false))
-                .map(|(path, oid)| {
-                    (
-                        path,
-                        Cell {
-                            id: oid,
-                            source: ContentSource::Git,
-                        },
-                    )
-                })
-                .collect();
-            Ok((cells, Space::Git))
-        }
-        DiffEndpoint::Working => Ok((working_cells(project_dir, filter), Space::Git)),
-    }
-}
-
-/// Infer a snapshot row's content source from its `tree_at` identity:
-/// 40-hex git oid, `oversize:…` sentinel, else a 32-hex xxh3 hash.
-fn classify_snapshot_cell(id: String) -> Cell {
-    let source = if id.starts_with("oversize:") {
-        ContentSource::Unreadable
-    } else if id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        ContentSource::Git
-    } else {
-        ContentSource::Oxplow
-    };
-    Cell { id, source }
-}
-
-/// Build the live working tree in git-oid space, honouring the
-/// generated-file filter (the same walk the capture sweep uses). Clean
-/// tracked files reuse their HEAD blob oid (no read); dirty / untracked
-/// files are hashed from disk.
-fn working_cells(project_dir: &Path, filter: &WorkspaceFilter) -> BTreeMap<String, Cell> {
-    let clean = oxplow_git::clean_head_blob_oids(project_dir);
-    let mut out = BTreeMap::new();
-    for entry in walkdir::WalkDir::new(project_dir)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let rel = e.path().strip_prefix(project_dir).unwrap_or(e.path());
-            !filter.ignore(rel, e.file_type().is_dir())
-        })
-        .filter_map(Result::ok)
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Ok(rel) = entry.path().strip_prefix(project_dir) else {
-            continue;
-        };
-        let rel_str = rel.to_string_lossy().replace('\\', "/");
-        let abs = entry.path().to_path_buf();
-        let id = match clean.get(&rel_str) {
-            Some(oid) => oid.clone(),
-            None => match std::fs::read(&abs)
-                .ok()
-                .as_deref()
-                .and_then(oxplow_git::git_blob_oid)
-            {
-                Some(oid) => oid,
-                None => continue,
-            },
-        };
-        out.insert(
-            rel_str,
-            Cell {
-                id,
-                source: ContentSource::Working(abs),
-            },
-        );
-    }
-    out
-}
-
-/// The comparison identity for a cell. Raw when same-space; normalized
-/// into git-oid space when crossing spaces (only an oxplow xxh3 cell
-/// needs a byte read + rehash — git/working ids are already oids, an
-/// oversize sentinel stays opaque). A failed read falls back to the raw
-/// id (best-effort: it simply won't match, so the file reads as changed).
-fn compare_id(cell: &Cell, normalize_to_git: bool, blobs: &BlobStore) -> String {
-    if !normalize_to_git {
-        return cell.id.clone();
-    }
-    match &cell.source {
-        ContentSource::Oxplow => blobs
-            .read(&cell.id)
-            .ok()
-            .as_deref()
-            .and_then(oxplow_git::git_blob_oid)
-            .unwrap_or_else(|| cell.id.clone()),
-        _ => cell.id.clone(),
-    }
-}
-
-/// Raw bytes for a cell, for line counting. `None` for oversize / pruned
-/// content or a failed read.
-fn read_cell(cell: &Cell, blobs: &BlobStore, project_dir: &Path) -> Option<Vec<u8>> {
-    match &cell.source {
-        ContentSource::Oxplow => blobs.read(&cell.id).ok(),
-        ContentSource::Git => oxplow_git::read_blob(project_dir, &cell.id),
-        ContentSource::Working(path) => std::fs::read(path).ok(),
-        ContentSource::Unreadable => None,
-    }
-}
-
-/// Added / deleted line counts between two blobs via `similar`. A
-/// missing side is the empty file (added → all of head; deleted → all
-/// of base). Binary content (NUL byte) yields `(0, 0)`.
-fn count_lines(base: Option<&[u8]>, head: Option<&[u8]>) -> (u32, u32) {
-    let is_binary = |b: &&[u8]| b.contains(&0);
-    if base.filter(is_binary).is_some() || head.filter(is_binary).is_some() {
-        return (0, 0);
-    }
-    let base_s = base
-        .map(|b| String::from_utf8_lossy(b).into_owned())
-        .unwrap_or_default();
-    let head_s = head
-        .map(|b| String::from_utf8_lossy(b).into_owned())
-        .unwrap_or_default();
-    let diff = TextDiff::from_lines(base_s.as_str(), head_s.as_str());
-    let mut additions = 0u32;
-    let mut deletions = 0u32;
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Insert => additions += 1,
-            ChangeTag::Delete => deletions += 1,
-            ChangeTag::Equal => {}
-        }
-    }
-    (additions, deletions)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
