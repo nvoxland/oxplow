@@ -348,11 +348,11 @@ to `runtime.handleHookEnvelope`, which:
    on every turn so the agent notices when the user promoted a
    different thread to writer mid-session; the frozen ids in the
    launch-time system prompt no longer win. The same `additionalContext`
-   also carries the **effort metric deltas** block when present
-   (`CollectionService::effort_metric_context`, tsk231 — see
-   `.context/metrics.md`): how the open effort's code metrics moved +
-   a one-shot gauge warn/fail crossing marker. The two pieces are joined
-   with a blank line; either may be absent.
+   also carries any **prompt advisories** that fire for the thread's open
+   effort (`oxplow_app::advisories::for_thread`, see
+   `.context/extensions.md` → "Advisories"): with `oxplow-analytics`
+   enabled, the metric deltas block and one-shot threshold crossings. The
+   pieces are joined with a blank line; any may be absent.
 6. For `Stop`: runs `computeStopDirective` (below).
 
 **Side-band hook steps are best-effort by design.** The PostToolUse
@@ -1142,9 +1142,12 @@ nudge" section in `.context/collection.md`.
 
 ### Nudge persistence
 
-The PostToolUse nudges — the report-less-run nudge above and the
-coverage-target nudge — are **persisted** as well as returned. The service
-(`CollectionService::on_post_tool_use`) writes each fired nudge to the
+The PostToolUse nudges — the report-less-run nudge above and any
+post-tool-use **advisory** that fires (e.g. oxplow-analytics'
+`coverage-target`, kind `oxplow-analytics/coverage-target`) — are
+**persisted** as well as returned. The service
+(`CollectionService::on_post_tool_use`, and `advisories::for_thread` for
+advisories) writes each fired nudge to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
 `.context/data-model.md`) tagged with kind (`report-less-run` /
 `coverage-target`), the message it surfaced, and the trigger (bash command).

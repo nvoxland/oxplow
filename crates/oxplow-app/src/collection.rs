@@ -288,7 +288,8 @@ pub fn parse_bash_post_tool(payload_json: &str) -> Option<BashInvocation> {
 
 /// Diff-coverage thresholds (tsk220), stored as the `oxplow.coverage.diff_pct`
 /// definition's `target`/`fail_at` so the renderer colors from DATA rather than
-/// a hardcoded 50/80 ramp, and the advisory nudge fires below target.
+/// a hardcoded 50/80 ramp. oxplow-analytics' `coverage-target` advisory
+/// uses the same 80%.
 pub const COVERAGE_TARGET_PCT: f64 = 80.0;
 pub const COVERAGE_FAIL_PCT: f64 = 50.0;
 
@@ -348,14 +349,14 @@ const NUDGE_DEDUP_CAP: usize = 1024;
 
 /// A `HashSet` with a bounded size and oldest-first eviction. Used for the
 /// ephemeral in-memory nudge-dedup sets so they can't grow without limit.
-struct BoundedSet<T> {
+pub(crate) struct BoundedSet<T> {
     set: std::collections::HashSet<T>,
     order: std::collections::VecDeque<T>,
     cap: usize,
 }
 
 impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
-    fn new(cap: usize) -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         Self {
             set: std::collections::HashSet::new(),
             order: std::collections::VecDeque::new(),
@@ -365,7 +366,7 @@ impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
 
     /// Insert `v`; return `true` the first time it's seen, `false` if already
     /// present. Evicts the oldest entry once over capacity.
-    fn insert(&mut self, v: T) -> bool {
+    pub(crate) fn insert(&mut self, v: T) -> bool {
         if !self.set.insert(v.clone()) {
             return false;
         }
@@ -378,7 +379,7 @@ impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
         true
     }
 
-    fn contains(&self, v: &T) -> bool {
+    pub(crate) fn contains(&self, v: &T) -> bool {
         self.set.contains(v)
     }
 }
@@ -414,17 +415,6 @@ pub struct CollectionService {
     /// ephemeral guidance that shouldn't be persisted or survive a restart.
     /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
     nudged_efforts: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
-    /// Efforts already nudged about coverage below target (tsk220). Separate
-    /// set from `nudged_efforts` so the report-less and coverage-target nudges
-    /// don't suppress each other; same ephemeral bounded in-memory dedup.
-    nudged_coverage: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
-    /// `(effort, metric_id)` pairs already surfaced as a gauge warn/fail
-    /// crossing in the effort-metric prompt context (tsk231). Gauge metrics run
-    /// on-snapshot in the background, not in a hook, so their threshold crossing
-    /// can't ride the PostToolUse `additionalContext`; instead the
-    /// UserPromptSubmit context line surfaces it **once** per effort+metric.
-    /// Same ephemeral bounded in-memory dedup.
-    nudged_gauge: Arc<std::sync::Mutex<BoundedSet<(EffortId, i64)>>>,
 }
 
 impl CollectionService {
@@ -460,8 +450,6 @@ impl CollectionService {
             attribution,
             metric_visibility,
             nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
-            nudged_coverage: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
-            nudged_gauge: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
         }
     }
 
@@ -1714,8 +1702,8 @@ impl CollectionService {
         }
         // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
         // report regardless of effort; the effort-relative diff is derived later
-        // at read. Keep the merged report so the coverage-target nudge can derive
-        // this effort's diff-coverage when a single effort is open.
+        // at read (the effort's diff coverage lands in v_effort_observation,
+        // where oxplow-analytics' coverage-target advisory reads it).
         // A transient error here used to silently drop the run's coverage
         // (tsk79) — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
@@ -1758,36 +1746,6 @@ impl CollectionService {
             }
             return Ok(None);
         };
-        // Derive THIS effort's diff-coverage from the absolute report (read-time)
-        // for the coverage-target nudge.
-        let coverage_pct = match &coverage {
-            Some((merged, _)) => match coverage_abs_payload(merged) {
-                Some((_, _, _, abs_payload)) => self
-                    .diff_coverage_for_effort(&effort, &abs_payload)
-                    .await?
-                    .map(|(pct, _)| pct),
-                None => None,
-            },
-            None => None,
-        };
-        // Coverage-target nudge (tsk220, advise only): the effort's diff
-        // coverage landed below target → steer the agent to add tests, at most
-        // once per effort. Never blocks. Mutually exclusive with the report-less
-        // nudge below (this only fires when a coverage report WAS produced).
-        if let Some(pct) = coverage_pct {
-            if pct < COVERAGE_TARGET_PCT && self.mark_coverage_nudged(&effort.id) {
-                let msg = coverage_target_nudge_message(pct);
-                self.persist_nudge(
-                    thread,
-                    Some(&effort),
-                    "coverage-target",
-                    &msg,
-                    &bash.command,
-                )
-                .await;
-                return Ok(Some(msg));
-            }
-        }
         // Nudge: the agent ran tests but this run regenerated no report
         // oxplow could parse for the effort (so the effort gets a
         // command-only test-run and no coverage). Steer it to the
@@ -1816,7 +1774,7 @@ impl CollectionService {
     /// one-shot dedup gates pass, so a deduped/non-fired nudge is never
     /// stored. Never fails the hook: a persistence error is logged and
     /// swallowed.
-    async fn persist_nudge(
+    pub(crate) async fn persist_nudge(
         &self,
         thread: &ThreadId,
         effort: Option<&TaskEffort>,
@@ -1917,141 +1875,6 @@ impl CollectionService {
             // best-effort hook.
             Err(_) => false,
         }
-    }
-
-    /// Record that `effort` has been nudged about coverage below target.
-    /// Returns `true` the first time (caller should nudge), `false` after.
-    fn mark_coverage_nudged(&self, effort: &EffortId) -> bool {
-        match self.nudged_coverage.lock() {
-            Ok(mut set) => set.insert(*effort),
-            Err(_) => false,
-        }
-    }
-
-    /// Record that `(effort, metric)` had its gauge warn/fail crossing
-    /// surfaced. Returns `true` the first time (caller should surface the loud
-    /// marker), `false` after. One-shot-per-effort+metric anti-nag (tsk231).
-    fn mark_gauge_nudged(&self, effort: &EffortId, metric_id: i64) -> bool {
-        match self.nudged_gauge.lock() {
-            Ok(mut set) => set.insert((*effort, metric_id)),
-            Err(_) => false,
-        }
-    }
-
-    /// Has `(effort, metric)` already had its crossing surfaced? A read-only
-    /// peek: [`effort_metric_context`] decides which crossings are fresh during
-    /// its loop but defers the actual `mark_gauge_nudged` to its await-free tail
-    /// (so a hook timeout mid-loop can't consume a one-shot the agent never saw).
-    /// A poisoned lock reads as "already nudged" — suppress rather than nag.
-    fn gauge_already_nudged(&self, effort: &EffortId, metric_id: i64) -> bool {
-        match self.nudged_gauge.lock() {
-            Ok(set) => set.contains(&(*effort, metric_id)),
-            Err(_) => true,
-        }
-    }
-
-    /// The advisory "metric deltas this effort" block for the open effort on
-    /// `thread` (tsk231) — how each code metric's samples moved since the
-    /// effort started, plus a **one-shot** loud marker the first turn a gauge
-    /// crosses its `warn_at`/`fail_at` threshold. Advise-only; returns `None`
-    /// when there's no open effort, no moved metric, and no fresh crossing (so
-    /// steady-state turns add nothing). Surfaced via the UserPromptSubmit
-    /// `additionalContext`, since on-snapshot gauges run outside any hook.
-    pub async fn effort_metric_context(&self, thread: &ThreadId) -> Option<String> {
-        // Advisory prompt — only when the open effort is unambiguous; under
-        // parallel sub-agents we can't say whose deltas these are (tsk263).
-        let effort = self
-            .efforts
-            .find_single_open_for_thread(thread)
-            .await
-            .ok()??;
-        // Shared attribution core (tsk253): the same per-family roll-up the
-        // task-page panel reads (`effort_metric_deltas`), so the prompt and the
-        // UI report the SAME baseline→current — file-attributed for gauges, so
-        // under overlapping efforts the agent sees only its own effort's effect.
-        // The one-shot warn/fail crossing nudge is layered on top here.
-        let deltas = self.effort_metric_deltas(&effort.id.to_string()).await;
-        if deltas.is_empty() {
-            return None;
-        }
-        // key → metric-spec id, for the one-shot crossing dedup (keyed by that id
-        // in `nudged_gauge`); the delta carries the key, not the id.
-        let id_by_key: std::collections::HashMap<String, i64> = self
-            .facts
-            .list_specs()
-            .await
-            .ok()?
-            .into_iter()
-            .map(|s| (s.key, s.id))
-            .collect();
-        let mut lines: Vec<String> = Vec::new();
-        // Crossings surfaced this turn — marked consumed only in the await-free
-        // tail below, never inside the loop (a hook timeout could otherwise drop
-        // the response after a one-shot was already consumed mid-loop).
-        let mut fresh_crossings: Vec<i64> = Vec::new();
-        for d in &deltas {
-            // Operational/event metrics (tokens, cost, cycle-time, nudges,
-            // navigation) grow every turn and aren't code-health signals — keep
-            // the line focused on code metrics.
-            if d.kind == "event" || crate::attribution::is_operational_metric_key(&d.key) {
-                continue;
-            }
-            let metric_id = id_by_key.get(&d.key).copied();
-            // Peek (don't consume) the one-shot here; consume after the loop.
-            let fresh_crossing = d.crossing.is_some()
-                && metric_id.is_some_and(|id| !self.gauge_already_nudged(&effort.id, id));
-            if fresh_crossing {
-                if let Some(id) = metric_id {
-                    fresh_crossings.push(id);
-                }
-            }
-            if !d.changed && !fresh_crossing {
-                continue;
-            }
-            let mut line = format!(
-                "- {}: {} → {}{}",
-                d.title,
-                fmt_metric_num(d.baseline.unwrap_or(d.current)),
-                fmt_metric_num(d.current),
-                fmt_unit_suffix(d.unit.as_deref().unwrap_or("")),
-            );
-            if d.changed {
-                if let Some(delta) = d.delta {
-                    line.push_str(&format!(" (Δ {})", fmt_signed(delta)));
-                }
-            }
-            if fresh_crossing {
-                if let Some(level) = d.crossing.as_deref() {
-                    let thresh = if level == "fail" {
-                        d.fail_at
-                    } else {
-                        d.warn_at
-                    };
-                    line.push_str(&format!(
-                        " ⚠ crossed {} threshold{}",
-                        level,
-                        thresh
-                            .map(|t| format!(" ({})", fmt_metric_num(t)))
-                            .unwrap_or_default(),
-                    ));
-                }
-            }
-            lines.push(line);
-        }
-        if lines.is_empty() {
-            return None;
-        }
-        // Await-free tail: consume the one-shots now that the context is fully
-        // built and about to be returned. The timeout that bounds the hook only
-        // fires at await points, so nothing between here and the response can
-        // drop a marker we've consumed.
-        for metric_id in fresh_crossings {
-            self.mark_gauge_nudged(&effort.id, metric_id);
-        }
-        Some(format!(
-            "# Metric deltas (this effort)\n{}\n\n(Advisory — for awareness, not gating.)",
-            lines.join("\n")
-        ))
     }
 
     /// Merge every configured test report that exists and is fresher than
@@ -2487,7 +2310,7 @@ impl CollectionService {
     }
 
     /// Roll every metric up over a single effort for the task/effort page — the
-    /// structured sibling of [`effort_metric_context`](Self::effort_metric_context)
+    /// structured sibling of the oxplow-analytics `metric-deltas` advisory
     /// (which builds the agent-prompt text). Reads the spec catalog and, per
     /// family, aggregates the effort's own facts (epic tsk12, T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the effort's *claimed* files
@@ -3242,44 +3065,6 @@ fn spec_fact_filter(
     }
 }
 
-/// Format a metric value compactly: integers as integers, else one decimal.
-fn fmt_metric_num(v: f64) -> String {
-    if v.fract().abs() < f64::EPSILON {
-        format!("{v:.0}")
-    } else {
-        format!("{v:.1}")
-    }
-}
-
-/// A signed delta (`+2`, `-11`, `+1.5`) for the deltas line.
-fn fmt_signed(v: f64) -> String {
-    let n = fmt_metric_num(v.abs());
-    if v < 0.0 {
-        format!("-{n}")
-    } else {
-        format!("+{n}")
-    }
-}
-
-/// `%` renders glued to the number (`71%`); other units get a leading space
-/// (`7 count`); an empty unit adds nothing.
-fn fmt_unit_suffix(unit: &str) -> String {
-    match unit {
-        "" => String::new(),
-        "%" => "%".to_string(),
-        u => format!(" {u}"),
-    }
-}
-
-fn coverage_target_nudge_message(pct: f64) -> String {
-    format!(
-        "Diff coverage on this effort's changed lines is {pct:.0}%, below the {target:.0}% \
-         target. Add tests for the uncovered changed lines before closing (advisory — oxplow \
-         won't block you). See the effort's coverage panel for which lines are uncovered.",
-        target = COVERAGE_TARGET_PCT
-    )
-}
-
 /// How far back a report's mtime can be and still count as "fresh" for passive
 /// ingestion (tsk269). Replaces the effort-start floor so collection works at
 /// 0/N open efforts (observe-always). A report regenerated by the command that
@@ -3508,17 +3293,6 @@ mod tests {
             threshold_state("neutral", 999.0, Some(1.0), Some(1.0)),
             None
         );
-    }
-
-    #[test]
-    fn fmt_helpers_format_compactly() {
-        assert_eq!(fmt_metric_num(7.0), "7");
-        assert_eq!(fmt_metric_num(70.5), "70.5");
-        assert_eq!(fmt_signed(9.0), "+9");
-        assert_eq!(fmt_signed(-11.0), "-11");
-        assert_eq!(fmt_unit_suffix("%"), "%");
-        assert_eq!(fmt_unit_suffix("count"), " count");
-        assert_eq!(fmt_unit_suffix(""), "");
     }
 
     #[test]
@@ -5034,120 +4808,6 @@ mod tests {
                 .is_empty());
         }
 
-        /// Seed a gauge definition + two samples (baseline, current) in the open
-        /// effort's window. Returns the metric id.
-        /// Seed a headline gauge SPEC (+ its measure) and two captures straddling
-        /// the effort start — a `baseline` before, `current` after — so with no
-        /// claimed files the effort reads the repo-wide before→after (the `File`
-        /// fallback). Operational `agent.*` keys get the operational category so
-        /// they route to the `Window` family (no effort-stamped captures here →
-        /// they no-op, which the skip-operational test relies on). Returns the
-        /// measure id.
-        async fn seed_gauge(
-            h: &Harness,
-            key: &str,
-            direction: &str,
-            warn_at: Option<f64>,
-            fail_at: Option<f64>,
-            baseline: f64,
-            current: f64,
-        ) -> i64 {
-            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
-            let measure_key = format!("{key}.m");
-            let m = facts
-                .upsert_measure(oxplow_db::NewMeasure::new(&measure_key, key))
-                .await
-                .unwrap();
-            let mut s = oxplow_db::NewMetricSpec::base(key, "unsafe blocks", &measure_key, "sum");
-            s.unit = Some("count".into());
-            s.direction = direction.into();
-            s.warn_at = warn_at;
-            s.fail_at = fail_at;
-            if crate::attribution::is_operational_metric_key(key) {
-                s.display_kind = "event".into();
-                s.category = Some("operational".into());
-            } else {
-                s.display_kind = "gauge".into();
-                s.category = Some("custom".into());
-            }
-            facts.upsert_spec(s).await.unwrap();
-            let start = effort_start(h, &h.effort_id).await;
-            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
-            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
-            for (at, value) in [(before, baseline), (after, current)] {
-                let mut cap = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
-                cap.captured_at = Some(at);
-                cap.thread_id = Some(h.thread.value());
-                facts
-                    .record_facts(cap, vec![oxplow_db::NewFact::new(m, value)])
-                    .await
-                    .unwrap();
-            }
-            m
-        }
-
-        #[tokio::test]
-        async fn effort_metric_context_reports_deltas_and_one_shot_crossing() {
-            let h = build(None).await;
-            // unsafe blocks went 3 → 12 (lower-better), crossing fail_at=10.
-            seed_gauge(
-                &h,
-                "test.unsafe_blocks",
-                "lower-better",
-                Some(5.0),
-                Some(10.0),
-                3.0,
-                12.0,
-            )
-            .await;
-
-            let first = h.service.effort_metric_context(&h.thread).await.unwrap();
-            assert!(first.contains("Metric deltas (this effort)"), "{first}");
-            assert!(first.contains("unsafe blocks: 3 → 12"), "{first}");
-            assert!(first.contains("Δ +9"), "{first}");
-            assert!(
-                first.contains("crossed fail threshold (10)"),
-                "first turn surfaces the crossing: {first}"
-            );
-
-            // Second turn: the delta still shows, but the loud crossing is
-            // one-shot — it must not repeat.
-            let second = h.service.effort_metric_context(&h.thread).await.unwrap();
-            assert!(second.contains("unsafe blocks: 3 → 12"), "{second}");
-            assert!(
-                !second.contains("crossed"),
-                "crossing is one-shot per effort: {second}"
-            );
-        }
-
-        #[tokio::test]
-        async fn effort_metric_context_none_when_nothing_moved() {
-            let h = build(None).await;
-            // Two equal samples, neutral direction → no movement, no crossing.
-            seed_gauge(&h, "test.flat", "neutral", None, None, 7.0, 7.0).await;
-            assert!(h.service.effort_metric_context(&h.thread).await.is_none());
-        }
-
-        #[tokio::test]
-        async fn effort_metric_context_skips_operational_keys() {
-            let h = build(None).await;
-            // Tokens grow every turn but aren't a code-health signal — excluded.
-            seed_gauge(
-                &h,
-                "agent.tokens.total",
-                "neutral",
-                None,
-                None,
-                100.0,
-                5000.0,
-            )
-            .await;
-            assert!(
-                h.service.effort_metric_context(&h.thread).await.is_none(),
-                "operational `agent.*` metrics are filtered out"
-            );
-        }
-
         // ---- effort_metric_deltas (tsk250) -------------------------------
 
         /// A per-file code-gauge SPEC (category custom → the `File` family) over a
@@ -5786,43 +5446,6 @@ mod tests {
             assert_eq!(d.baseline, None);
             assert_eq!(d.current, 3000.0); // 1000 + 2000
             assert_eq!(d.delta, Some(3000.0));
-        }
-
-        #[tokio::test]
-        async fn effort_metric_context_uses_file_attribution_and_agrees_with_panel() {
-            // tsk253: the prompt now reports the effort's OWN contribution (the
-            // claimed-file slice), matching the task-page panel — not the repo
-            // total, which under overlap includes other efforts' changes.
-            let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
-            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
-            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
-            let (m, facts) =
-                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
-            // Repo total jumps 10 → 13, but THIS effort's file (a.rs) only 2 → 5;
-            // z.rs (8, unchanged, unclaimed) is another effort's churn.
-            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0), ("src/z.rs", 8.0)]).await;
-            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 5.0), ("src/z.rs", 8.0)]).await;
-
-            let ctx = h.service.effort_metric_context(&h.thread).await.unwrap();
-            assert!(
-                ctx.contains("2 → 5"),
-                "file-attributed slice, not repo total: {ctx}"
-            );
-            assert!(
-                !ctx.contains("10 → 13"),
-                "must not report the repo total: {ctx}"
-            );
-
-            // The prompt agrees with the panel for the same effort.
-            let panel = h.service.effort_metric_deltas(&h.effort_id).await;
-            let d = panel
-                .iter()
-                .find(|d| d.key == "oxplow.rust.unsafe_blocks")
-                .unwrap();
-            assert_eq!(d.baseline, Some(2.0));
-            assert_eq!(d.current, 5.0);
         }
 
         #[tokio::test]
@@ -6724,29 +6347,6 @@ mod tests {
             assert_eq!(spec.target, Some(80.0), "target in data");
             assert_eq!(spec.fail_at, Some(50.0), "fail floor in data");
             assert_eq!(spec.direction, "higher-better");
-        }
-
-        #[test]
-        fn coverage_target_nudge_message_names_pct_and_target() {
-            let msg = super::coverage_target_nudge_message(50.0);
-            assert!(msg.contains("50%"), "names the actual pct; got: {msg}");
-            assert!(msg.contains("80% target"), "names the target; got: {msg}");
-            assert!(
-                msg.to_lowercase().contains("advisory"),
-                "flagged advise-only; got: {msg}"
-            );
-        }
-
-        #[tokio::test]
-        async fn coverage_target_nudge_is_one_shot_per_effort() {
-            // The acceptance invariant: at most one coverage nudge per effort.
-            let h = build(None).await;
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            assert!(h.service.mark_coverage_nudged(&eid), "first time fires");
-            assert!(
-                !h.service.mark_coverage_nudged(&eid),
-                "second time is deduped"
-            );
         }
 
         #[tokio::test]

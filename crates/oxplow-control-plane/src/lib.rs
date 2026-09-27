@@ -601,7 +601,19 @@ async fn handle_hook_inner(
                         None
                     }
                 };
-                let _ = nudge_tx.send(nudge);
+                // Extension advisories (e.g. oxplow-analytics' coverage
+                // target) ride the same additionalContext.
+                let advisories = oxplow_app::advisories::for_thread(
+                    &services,
+                    &collection_thread,
+                    oxplow_app::extensions::AdvisoryOn::PostToolUse,
+                )
+                .await;
+                let combined: Vec<String> = nudge
+                    .into_iter()
+                    .chain(advisories.into_iter().map(|h| h.text))
+                    .collect();
+                let _ = nudge_tx.send((!combined.is_empty()).then(|| combined.join("\n\n")));
             });
             let collection_nudge = match tokio::time::timeout(
                 std::time::Duration::from_millis(2500),
@@ -671,29 +683,37 @@ async fn handle_hook_inner(
     // promotions/demotions and append a loud ROLE CHANGE banner.
     if kind == HookKind::UserPromptSubmit {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
-            // Two independent context pieces ride this one additionalContext:
+            // Independent context pieces ride this one additionalContext:
             // the session-context block (role/stream changes, deduped so it
-            // only re-emits when it actually changes) and the advisory metric
-            // deltas for the open effort (tsk231, recomputed each turn). Join
-            // whatever is present.
+            // only re-emits when it actually changes), extension advisories
+            // for the open effort (e.g. oxplow-analytics' metric deltas), and
+            // the effort's recorded decisions. Join whatever is present.
             let ctx_block = refreshed_session_context(
                 &ctx,
                 thread_id,
                 envelope_for_resume.session_id.as_deref(),
             )
             .await;
-            let metric_block = ctx
-                .services
-                .collection
-                .effort_metric_context(thread_id)
-                .await;
+            let advisory_hits = oxplow_app::advisories::for_thread(
+                &ctx.services,
+                thread_id,
+                oxplow_app::extensions::AdvisoryOn::Prompt,
+            )
+            .await;
+            let advisory_block = (!advisory_hits.is_empty()).then(|| {
+                advisory_hits
+                    .into_iter()
+                    .map(|h| h.text)
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            });
             let decisions_block = refreshed_decisions_context(
                 &ctx,
                 thread_id,
                 envelope_for_resume.session_id.as_deref(),
             )
             .await;
-            let combined: String = [ctx_block, metric_block, decisions_block]
+            let combined: String = [ctx_block, advisory_block, decisions_block]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()

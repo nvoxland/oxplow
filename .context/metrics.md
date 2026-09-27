@@ -1273,7 +1273,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (`ingest_otlp_tokens`, fed by the control-plane OTLP receiver — tsk22) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
-| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `task_service.rs` ride-along; `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |
+| config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `EffortFinished` event in `run()` (TaskService no longer calls gauges); `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |
 
 > Navigation / activity (`page_visit`, `usage_event`) are **deliberately not
 > projected** into the substrate: they're oxplow-usage telemetry (UI metadata),
@@ -1349,7 +1349,8 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   to `MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`. `list_effort_metric_deltas`
   (tsk250, `ui`-scoped — `commands/effort.rs`) returns the family-attributed
   per-effort roll-up (`EffortMetricDelta`) for the task-page panel; the agent
-  gets the same numbers as prompt text via `effort_metric_context`.
+  gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
+  advisory (over the stored `v_effort_metric_delta`).
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
   renderer refetches).
 
@@ -1782,28 +1783,30 @@ the single source of red/green: the Metrics page colors from them
 `target: 80` / `fail_at: 50`, set in `collection.rs::record_coverage_metric`).
 See [theming.md](./theming.md).
 
-Feedback is **advisory — oxplow never blocks**. Two paths:
+Feedback is **advisory — oxplow never blocks**. It lives in the bundled
+`oxplow-analytics` extension as **advisories** (see
+[extensions.md](./extensions.md) → "Advisories"), SQL over the stored
+per-effort views, not in core:
 
-- **Coverage-target nudge** (PostToolUse). When an effort's diff coverage lands
-  below target, the ride-along fires a **one-shot** nudge ("coverage X% < 80%
-  target — add tests…") via the same `persist_nudge` + `additionalContext` path
-  as the report-less nudge, deduped per-effort by an in-memory
-  `nudged_coverage` set.
-- **Effort metric deltas** (UserPromptSubmit, tsk231). `CollectionService::
-  effort_metric_context(thread)` builds a "# Metric deltas (this effort)" block —
-  for every **code** metric (operational `agent.*`/`effort.*`/`task.*` and `event`
-  kinds are skipped) it shows `title: baseline → current (Δ ±N)`. It consumes the
-  **shared `effort_metric_deltas` core** (tsk253), so the prompt and the task-page
-  panel report the **same** numbers — file-attributed for gauges, so under
-  overlapping efforts the agent sees only its own effort's effect, not the repo
-  total. The first turn a **gauge crosses** its `warn_at`/`fail_at` (`threshold_state`,
-  interpreted via `direction`) the line gets a loud `⚠ crossed fail/warn
-  threshold` marker, **one-shot** per `(effort, metric)` via an in-memory
-  `nudged_gauge` set — on-snapshot gauges run outside any hook, so the crossing
-  can't ride the PostToolUse return; the per-turn prompt context surfaces it
-  instead. The control-plane joins this with the session-context block into the
-  one UserPromptSubmit `additionalContext`. Returns `None` (adds nothing) when no
-  metric moved and no crossing is fresh, so steady-state turns stay quiet.
+- **`coverage-target`** (post-tool-use, once per effort): the effort's diff
+  coverage (`v_effort_observation`, kind `diff-coverage`) is below 80%. The
+  message text is unchanged. It reads the stored observation, so it fires on
+  the tool call *after* the coverage lands (the evidence refresh is debounced
+  3 s), not the same one.
+- **`metric-deltas`** (prompt, every turn): "# Metric deltas (this effort)",
+  one `title: baseline → current (Δ ±N)` line per moved **code** metric
+  (`v_effort_metric_delta`; operational `agent.*`/`effort.*`/`task.*` and
+  `event` kinds skipped), then "(Advisory — for awareness, not gating.)".
+  The numbers are the same `effort_metric_deltas` roll-up the task page
+  shows (file-attributed for gauges).
+- **`threshold-crossed`** (prompt, once per metric per effort): "⚠ <title>
+  crossed its warn/fail threshold (N)", from the delta's `crossing`
+  (`threshold_state`). This used to be a marker on the delta line; it's now
+  its own block.
+
+All three reach the agent through the same `additionalContext` paths the old
+core code used, and post-tool-use hits are still persisted as nudges.
+Disabling `oxplow-analytics` turns them off.
 
 ## Performance: the `producers_for_measure` memo (tsk130)
 

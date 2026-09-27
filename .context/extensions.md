@@ -296,14 +296,42 @@ mounted, the page is plain.
 | `launcher` | Cmd+P launcher entries |
 | `settings` | Settings |
 
-## Nudges
+## Advisories
 
-Today nudges are wired to gauge thresholds inside core
-(`collection.rs` → PostToolUse `additionalContext`). In the target design
-core keeps only a generic **nudge primitive**: an extension `alert` marked
-`nudge: true` becomes PostToolUse context, and an alert marked
-`inject: prompt` is added on UserPromptSubmit. The threshold logic lives in
-the extension.
+An extension gives the coding agent guidance with **advisories** in
+`extension.yaml` (current). Core owns only the mechanism; what to say, and
+when, is SQL in the extension.
+
+```yaml
+advisories:
+  - id: coverage-target
+    on: post-tool-use        # or prompt
+    once_per: effort         # effort (default) | row (needs a `key` column) | turn
+    heading: "# Optional heading line"
+    query: |                 # :effort_id = the thread's open effort
+      SELECT '...' AS message FROM v_effort_observation WHERE effort_id = :effort_id ...
+```
+
+- `crates/oxplow-app/src/advisories.rs`: `AdvisoryRunner` runs the enabled
+  extensions' advisories for one hook point and applies `once_per` with an
+  in-memory, bounded fired-set (like the nudges it replaced, a restart may
+  repeat one). Marks are recorded only after every query ran. A failing
+  query is logged and skipped.
+- `for_thread(svc, thread, on)` runs them for the thread's **single** open
+  effort (none under parallel efforts), reading extensions from the
+  thread's stream worktree. Post-tool-use hits are persisted as nudges
+  (kind `<extension>/<id>`, `v_agent_nudge`).
+- The control plane appends post-tool-use hits to the collection nudge in
+  PostToolUse `additionalContext`, and prompt hits to the UserPromptSubmit
+  context (with the session-context and decisions blocks).
+- `validate_extension` dry-runs each advisory with `:effort_id` NULL and
+  checks it returns `message` (and `key` for `once_per: row`).
+- oxplow-analytics ships three: `coverage-target`, `metric-deltas`,
+  `threshold-crossed` (see [metrics.md](./metrics.md)). Advisories read
+  stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
+  engine directly.
+- The report-less-run nudge stays in core: it's about collection hygiene,
+  not an instrument.
 
 ## Agents: the MCP surface
 
@@ -426,6 +454,7 @@ available to every extension:
 - `task-detail` and `thread` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
 - Disabling extensions per project.
+- Advisories: the generic nudge primitive (see "Advisories").
 - `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,
   bookmarks and history for a page kind that moved to a lens open the
   lens.

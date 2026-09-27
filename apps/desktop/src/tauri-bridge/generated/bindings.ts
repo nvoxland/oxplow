@@ -1390,6 +1390,39 @@ export type AdoptWorktreeRequest = {
 	title: string,
 };
 
+/**
+ *  Guidance an extension gives the coding agent: a query over the semantic
+ *  layer, run by core at `on`, with `:effort_id` bound to the thread's
+ *  open effort. Each result row's `message` column is a line of guidance.
+ */
+export type Advisory = {
+	id: string,
+	on: AdvisoryOn,
+	query: string,
+	oncePer: AdvisoryOncePer,
+	// Line put above the messages (e.g. `# Metric deltas (this effort)`).
+	heading: string | null,
+};
+
+// When core runs an advisory.
+export type AdvisoryOn = 
+/**
+ *  After each agent tool call; results go to the agent as that call's
+ *  context and are recorded as nudges.
+ */
+"post-tool-use" | 
+// On each prompt the human sends; results join the prompt's context.
+"prompt";
+
+// How often the same advisory may reach the agent.
+export type AdvisoryOncePer = 
+// Once per effort, the first time the query returns rows.
+"effort" | 
+// Once per effort per `key` value: each row's `key` column fires once.
+"row" | 
+// Every time, whenever the query returns rows.
+"turn";
+
 export type AgentKind = "claude" | "codex" | "opencode";
 
 /**
@@ -2248,9 +2281,11 @@ export type Extension = {
 	slots: LensSlot[],
 	/**
 	 *  False when `.oxplow/project.yaml` disables it; a disabled
-	 *  extension has no lenses, slots or sources.
+	 *  extension has no lenses, slots, sources or advisories.
 	 */
 	enabled: boolean,
+	// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
+	advisories: Advisory[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.

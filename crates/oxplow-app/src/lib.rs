@@ -7,6 +7,7 @@
 //! Held inside `Arc<Services>` and registered as Tauri state. Methods
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
+pub mod advisories;
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_path;
@@ -426,6 +427,8 @@ pub struct Services {
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
+    /// Runs extension advisories for the hooks (see `advisories`).
+    pub advisories: Arc<advisories::AdvisoryRunner>,
     /// Per-effort metric deltas / observations for lenses (see `effort_evidence`).
     pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
@@ -675,7 +678,6 @@ impl Services {
             .with_thread_store(thread_store.clone())
             .with_metrics(fact_store.clone(), event_bus.clone())
             .with_attribution(attribution_store.clone())
-            .with_gauge_runner(metrics.clone())
             .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         let collection = collection::CollectionService::new(
             fact_store.clone(),
@@ -737,6 +739,7 @@ impl Services {
             ai,
             secrets: ai_env.secrets,
             effort_evidence_store,
+            advisories: Arc::new(advisories::AdvisoryRunner::default()),
             collection,
             token_usage_store,
             token_usage,

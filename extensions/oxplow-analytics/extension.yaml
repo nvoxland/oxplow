@@ -1,0 +1,68 @@
+name: oxplow-analytics
+description: Oxplow's own instruments, built as an ordinary extension. Metric movement, coverage and threshold guidance for the agent; usage, dashboards, code quality and change analysis lenses.
+advisories:
+  # Steer the agent to add tests when this effort's changed lines are poorly
+  # covered. Reads the stored observation, so it fires on the tool call after
+  # the coverage lands.
+  - id: coverage-target
+    on: post-tool-use
+    once_per: effort
+    query: |
+      SELECT printf(
+               'Diff coverage on this effort''s changed lines is %d%%, below the %d%% target. '
+               || 'Add tests for the uncovered changed lines before closing (advisory — oxplow '
+               || 'won''t block you). See the effort''s coverage panel for which lines are uncovered.',
+               CAST(round(metric_value) AS INTEGER), 80) AS message
+      FROM v_effort_observation
+      WHERE effort_id = :effort_id AND kind = 'diff-coverage' AND metric_value < 80
+      ORDER BY seq DESC
+      LIMIT 1
+  # How code metrics moved this effort, every prompt while any moved.
+  # Operational metrics (tokens, cycle time, …) grow every turn and aren't
+  # code-health signals, so they're left out.
+  - id: metric-deltas
+    on: prompt
+    once_per: turn
+    heading: "# Metric deltas (this effort)"
+    query: |
+      WITH d AS (
+        SELECT key,
+               '- ' || title || ': '
+               || (CASE WHEN coalesce(baseline, current) = CAST(coalesce(baseline, current) AS INTEGER)
+                        THEN printf('%d', CAST(coalesce(baseline, current) AS INTEGER))
+                        ELSE printf('%.1f', coalesce(baseline, current)) END)
+               || ' → '
+               || (CASE WHEN current = CAST(current AS INTEGER) THEN printf('%d', CAST(current AS INTEGER))
+                        ELSE printf('%.1f', current) END)
+               || (CASE WHEN unit IS NULL OR unit = '' THEN '' WHEN unit = '%' THEN '%' ELSE ' ' || unit END)
+               || (CASE WHEN delta IS NULL THEN ''
+                        ELSE ' (Δ ' || (CASE WHEN delta < 0 THEN '-' ELSE '+' END)
+                             || (CASE WHEN abs(delta) = CAST(abs(delta) AS INTEGER)
+                                      THEN printf('%d', CAST(abs(delta) AS INTEGER))
+                                      ELSE printf('%.1f', abs(delta)) END) || ')' END) AS line
+        FROM v_effort_metric_delta
+        WHERE effort_id = :effort_id AND changed = 1 AND kind <> 'event'
+          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      )
+      SELECT message FROM (
+        SELECT 0 AS o, key, line AS message FROM d
+        UNION ALL
+        SELECT 1, '', '(Advisory — for awareness, not gating.)' WHERE EXISTS (SELECT 1 FROM d)
+      )
+      ORDER BY o, key
+  # A metric this effort pushed past its warn/fail threshold, once per metric.
+  - id: threshold-crossed
+    on: prompt
+    once_per: row
+    heading: "# Metric thresholds"
+    query: |
+      SELECT key,
+             '⚠ ' || title || ' crossed its ' || crossing || ' threshold'
+             || coalesce(' (' || (CASE WHEN t = CAST(t AS INTEGER) THEN printf('%d', CAST(t AS INTEGER))
+                                       ELSE printf('%.1f', t) END) || ')', '')
+             AS message
+      FROM (SELECT *, CASE WHEN crossing = 'fail' THEN fail_at ELSE warn_at END AS t
+            FROM v_effort_metric_delta)
+      WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
+        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+      ORDER BY key

@@ -1165,8 +1165,9 @@ impl MetricsService {
         Ok(key.to_string())
     }
 
-    /// Event loop: seed once, then reseed on `ConfigChanged` and run on-snapshot
-    /// gauges when a snapshot batch lands. Spawned at boot (see `boot.rs`).
+    /// Event loop: seed once, then reseed on `ConfigChanged`, run on-snapshot
+    /// gauges when a snapshot batch lands, and on-effort-complete gauges on
+    /// `EffortFinished`. Spawned at boot (see `boot.rs`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
         self.seed_catalog().await;
         loop {
@@ -1194,6 +1195,13 @@ impl MetricsService {
                     ..
                 }) => {
                     self.run_snapshot_gauges(stream_id, snapshot_id).await;
+                }
+                Ok(OxplowEvent::EffortFinished {
+                    thread_id,
+                    effort_id,
+                }) => {
+                    self.run_effort_complete_gauges(&thread_id, &EffortId::new(effort_id))
+                        .await;
                 }
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -3087,6 +3095,78 @@ def transform(input):
             .unwrap();
         assert_eq!(caps.len(), 1, "the capture is stamped with the effort");
         assert_eq!(caps[0].producer, "acme.effgauge");
+    }
+
+    #[tokio::test]
+    async fn effort_finished_runs_on_effort_complete_gauges() {
+        // Effort-complete gauges key off the EffortFinished event, not a
+        // direct call from TaskService.
+        use oxplow_domain::stores::TaskStore as _;
+        use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
+        let (svc, dir) = fixture().await;
+        let now = oxplow_domain::Timestamp::now();
+        let thread = ThreadId::new(1);
+        let task = svc
+            .task_store
+            .insert(&Task {
+                id: TaskId::placeholder(),
+                thread_id: Some(thread),
+                parent_id: None,
+                title: "t".into(),
+                description: String::new(),
+                status: TaskStatus::InProgress,
+                priority: TaskPriority::Medium,
+                sort_index: 0,
+                created_by: TaskActorKind::User,
+                created_at: now,
+                updated_at: now,
+                completed_at: None,
+                deleted_at: None,
+                note_count: 0,
+                author: Some(TaskAuthor::User),
+            })
+            .await
+            .unwrap();
+        let effort = svc.effort_store.start(task, &thread, None).await.unwrap();
+        std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
+        std::fs::write(
+            dir.path().join("oxplow/metrics/eff.star"),
+            "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"tree:.\"}]}\n",
+        )
+        .unwrap();
+        svc.config
+            .write()
+            .unwrap()
+            .gauges
+            .push(oxplow_config::GaugeEntry {
+                key: Some("acme.effgauge".into()),
+                title: None,
+                trigger: Some("on-effort-complete".into()),
+                emits: vec!["oxplow.ast_hit".into()],
+                compute: Some(GaugeComputeConfig {
+                    runtime: "starlark".into(),
+                    entry_file: Some("oxplow/metrics/eff.star".into()),
+                    ..Default::default()
+                }),
+            });
+        tokio::spawn(svc.metrics.clone().run(svc.events.subscribe()));
+        tokio::task::yield_now().await;
+        svc.events.emit(OxplowEvent::EffortFinished {
+            thread_id: thread,
+            effort_id: effort.id.value(),
+        });
+        for _ in 0..100 {
+            let caps = svc
+                .fact_store
+                .captures_for_effort(effort.id.value())
+                .await
+                .unwrap();
+            if caps.iter().any(|c| c.producer == "acme.effgauge") {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("the on-effort-complete gauge didn't run after EffortFinished");
     }
 
     #[tokio::test]

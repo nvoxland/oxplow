@@ -203,6 +203,63 @@ struct ExtensionFile {
     sources: Option<serde_yaml::Value>,
     #[serde(default)]
     slots: Vec<SlotFile>,
+    /// Parsed one by one so a bad advisory doesn't fail the manifest.
+    #[serde(default)]
+    advisories: Vec<serde_yaml::Value>,
+}
+
+/// When core runs an advisory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum AdvisoryOn {
+    /// After each agent tool call; results go to the agent as that call's
+    /// context and are recorded as nudges.
+    PostToolUse,
+    /// On each prompt the human sends; results join the prompt's context.
+    Prompt,
+}
+
+/// How often the same advisory may reach the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum AdvisoryOncePer {
+    /// Once per effort, the first time the query returns rows.
+    Effort,
+    /// Once per effort per `key` value: each row's `key` column fires once.
+    Row,
+    /// Every time, whenever the query returns rows.
+    Turn,
+}
+
+fn default_once_per() -> AdvisoryOncePer {
+    AdvisoryOncePer::Effort
+}
+
+/// Guidance an extension gives the coding agent: a query over the semantic
+/// layer, run by core at `on`, with `:effort_id` bound to the thread's
+/// open effort. Each result row's `message` column is a line of guidance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Advisory {
+    pub id: String,
+    pub on: AdvisoryOn,
+    pub query: String,
+    pub once_per: AdvisoryOncePer,
+    /// Line put above the messages (e.g. `# Metric deltas (this effort)`).
+    pub heading: Option<String>,
+}
+
+/// An advisory as written in `extension.yaml`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdvisoryFile {
+    id: String,
+    on: AdvisoryOn,
+    query: String,
+    #[serde(default = "default_once_per")]
+    once_per: AdvisoryOncePer,
+    #[serde(default)]
+    heading: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -282,8 +339,10 @@ pub struct Extension {
     /// Lenses mounted into core pages.
     pub slots: Vec<LensSlot>,
     /// False when `.oxplow/project.yaml` disables it; a disabled
-    /// extension has no lenses, slots or sources.
+    /// extension has no lenses, slots, sources or advisories.
     pub enabled: bool,
+    /// Guidance for the coding agent (valid ones; invalid ones are in `errors`).
+    pub advisories: Vec<Advisory>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -415,7 +474,15 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         origin: origin.to_string(),
         slots: Vec::new(),
         enabled: true,
+        advisories: Vec::new(),
     }
+}
+
+fn is_advisory_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Load one extension. Always returns an `Extension`; problems go in
@@ -446,6 +513,22 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                         .into_iter()
                         .map(|e| format!("{rel}/extension.yaml: {e}")),
                 );
+            }
+            for v in m.advisories {
+                match serde_yaml::from_value::<AdvisoryFile>(v).map(|a| Advisory {
+                    id: a.id,
+                    on: a.on,
+                    query: a.query,
+                    once_per: a.once_per,
+                    heading: a.heading,
+                }) {
+                    Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(format!(
+                        "{rel}/extension.yaml: advisory id `{}` must be lowercase letters, digits and dashes",
+                        a.id
+                    )),
+                    Ok(a) => ext.advisories.push(a),
+                    Err(e) => ext.errors.push(format!("{rel}/extension.yaml: advisory: {e}")),
+                }
             }
             m.slots
         }
@@ -607,6 +690,7 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
         ext.lenses.clear();
         ext.slots.clear();
         ext.sources.clear();
+        ext.advisories.clear();
     }
     ext
 }
@@ -748,6 +832,37 @@ pub async fn validate_extension(
     name: &str,
 ) -> Result<Extension, DomainError> {
     let mut ext = load_named(root, name)?;
+    for a in ext.advisories.clone() {
+        let run = layer
+            .query_sql_named(
+                &a.query,
+                vec![("effort_id".into(), SqlCell::Null(()))],
+                None,
+            )
+            .await;
+        match run {
+            Err(e) => ext.errors.push(format!(
+                "advisory {}: {}",
+                a.id,
+                e.to_string().replacen("invalid value: ", "", 1)
+            )),
+            Ok(r) => {
+                let mut need = vec!["message"];
+                if a.once_per == AdvisoryOncePer::Row {
+                    need.push("key");
+                }
+                for col in need {
+                    if !r.columns.iter().any(|c| c == col) {
+                        ext.errors.push(format!(
+                            "advisory {}: the query must return a `{col}` column (columns: {})",
+                            a.id,
+                            r.columns.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
     for lens in ext.lenses.clone() {
         let id = lens.id.clone();
         match execute(layer, lens, BTreeMap::new()).await {
@@ -1564,6 +1679,11 @@ empty: No tasks.
             .slots
             .iter()
             .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/inferred-decisions"));
+        // The analytics extension's advisory and lens SQL runs too.
+        let a = validate_extension(&layer().await, dir.path(), "oxplow-analytics")
+            .await
+            .unwrap();
+        assert!(a.errors.is_empty(), "{:?}", a.errors);
         // Every bundled lens's SQL runs against a real schema.
         let v = validate_extension(&layer().await, dir.path(), "oxplow-review")
             .await
@@ -1863,5 +1983,32 @@ empty: No tasks.
         .await
         .unwrap_err();
         assert!(err.to_string().contains("disabled"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn advisories_parse_and_validate_their_columns() {
+        let (d, ext) = load_x(
+            &[],
+            "advisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
+        );
+        let ids: Vec<&str> = ext.advisories.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, vec!["low-coverage", "crossings", "nokey"]);
+        assert_eq!(ext.advisories[0].on, AdvisoryOn::PostToolUse);
+        assert_eq!(ext.advisories[1].once_per, AdvisoryOncePer::Row);
+        assert_eq!(
+            ext.advisories[1].heading.as_deref(),
+            Some("# Metric thresholds")
+        );
+        assert!(ext.errors.join("\n").contains("Bad Id"), "{:?}", ext.errors);
+
+        let v = validate_extension(&layer().await, d.path(), "x")
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(errs.contains("nokey") && errs.contains("`key`"), "{errs}");
+        assert!(
+            !errs.contains("low-coverage") && !errs.contains("crossings"),
+            "{errs}"
+        );
     }
 }

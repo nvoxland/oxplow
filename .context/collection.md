@@ -363,7 +363,8 @@ general-purpose tool must not make (see also [[tsk251]]).
 
 ## Nudge persistence
 
-PostToolUse nudges (report-less-run, coverage-target) are **persisted**
+PostToolUse nudges (report-less-run, and post-tool-use advisories such as
+oxplow-analytics' `coverage-target`) are **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
 agent this effort" after the fact — previously the nudge string was forwarded
 via `additionalContext` and then lost. When `on_post_tool_use` decides to

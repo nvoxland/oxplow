@@ -122,10 +122,6 @@ pub struct TaskService {
     /// the renderer refetches on a new capture.
     fact_store: Option<Arc<SqliteFactStore>>,
     events: Option<EventBus>,
-    /// Config-declared gauge runner (tsk213, P3): when set, closing an effort
-    /// also runs any `on-effort-complete` gauges against the effort's end
-    /// snapshot. Optional so bare TaskService tests skip it.
-    gauge_runner: Option<crate::metrics_service::MetricsService>,
     /// Kind-agnostic attribution ledger (tsk263). When set (with
     /// `effort_store`), closing an effort reconciles the run kinds too — the
     /// concurrent-effort runs left unattributed become the close residue.
@@ -157,7 +153,6 @@ impl TaskService {
             thread_store: None,
             fact_store: None,
             events: None,
-            gauge_runner: None,
             attribution: None,
             agent_turn_store: None,
             comment_store: None,
@@ -168,13 +163,6 @@ impl TaskService {
     /// kinds (test/coverage/analysis) alongside files (tsk263).
     pub fn with_attribution(mut self, store: Arc<SqliteAttributionStore>) -> Self {
         self.attribution = Some(store);
-        self
-    }
-
-    /// Attach the config-declared gauge runner so closing an effort also runs
-    /// `on-effort-complete` gauges (tsk213, P3).
-    pub fn with_gauge_runner(mut self, runner: crate::metrics_service::MetricsService) -> Self {
-        self.gauge_runner = Some(runner);
         self
     }
 
@@ -389,13 +377,6 @@ impl TaskService {
                             thread_id,
                             effort_id: effort_id.value(),
                         });
-                    }
-                    // Run any config-declared `on-effort-complete` gauges
-                    // against the effort's end snapshot (tsk213, P3).
-                    if let Some(runner) = self.gauge_runner.as_ref() {
-                        runner
-                            .run_effort_complete_gauges(&thread_id, &effort_id)
-                            .await;
                     }
                 }
             }
