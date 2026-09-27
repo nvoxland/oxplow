@@ -299,6 +299,8 @@ macro_rules! oxplow_command_table {
                 get_lens => $crate::commands::extensions::get_lens { id: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 run_lens => $crate::commands::extensions::run_lens { id: String, params: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, stream_id: Option<String> } -> ::oxplow_app::extensions::LensRun,
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
+                install_extension => $crate::commands::extensions::install_extension { git_url: String, git_ref: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
+                update_extension => $crate::commands::extensions::update_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 // comments
                 create_comment => $crate::commands::comments::create_comment { req: $crate::commands::comments::CreateCommentRequest } -> ::oxplow_domain::CommentThread,
                 add_comment_message => $crate::commands::comments::add_comment_message { comment_id: ::oxplow_domain::CommentId, author: String, body: String } -> ::oxplow_domain::CommentMessage,

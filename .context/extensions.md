@@ -10,7 +10,9 @@ the bundled `oxplow-analytics` example extension.
 >     `oxplow/extensions/` (see "What works today" below);
 >   - running and validating lenses over IPC and MCP;
 >   - the `oxplow-extension` agent skill;
->   - the lens page and the launcher's "Lenses" section.
+>   - the lens page and the launcher's "Lenses" section;
+>   - sharing: team via the repo, world via `install_extension` /
+>     `update_extension` and Settings → Extensions.
 > - **Target:** everything else here, including sources, dimensions,
 >   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
 >   (tsk278 / tsk280).
@@ -70,6 +72,31 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - The Cmd+P launcher re-reads lenses from the stream's worktree every
     time it opens and lists them under **Lenses**, so they're both
     browsable and searchable.
+- **Sharing.** There are three levels:
+  - **Yourself.** An extension works in your worktree as soon as it's
+    written.
+  - **Your team.** Extensions are committed files under
+    `oxplow/extensions/`.
+  - **The world.** Publish an extension as a git repo with
+    `extension.yaml` at its root. Others run `install_extension(git_url,
+    git_ref?)` (IPC and MCP, or the install box in Settings → Extensions).
+    - The repo is cloned inside `.oxplow/tmp/`, because workspace
+      isolation forbids writing outside the project.
+    - It's validated, then copied without `.git` into
+      `oxplow/extensions/<name>/`. Symlinks are skipped, since they could
+      point outside the extension.
+    - The origin is recorded in `source.yaml` (`git`, `gitRef`, `sha`).
+      The loader surfaces it as `Extension.source`.
+    - Installing never overwrites an existing folder, and a name must be
+      lowercase letters, digits and single dashes.
+    - `update_extension(name)` re-clones from the recorded source. The old
+      folder is replaced only after the new clone validates, and only for
+      git-installed extensions.
+    - Installing is a write tool on MCP. The skill says to do it only when
+      the user asks, and to offer to commit the result.
+  - Installed extensions are declarative (SQL lenses), so nothing
+    executable runs. Exec sources will need explicit consent when they
+    land.
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.

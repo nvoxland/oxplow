@@ -495,6 +495,20 @@ export async function validateExtension(name: string, streamId: string | null): 
   return unwrap(await commands.validateExtension(name, streamId));
 }
 
+/// Install an extension from a git repo into the stream's worktree.
+export async function installExtension(
+  gitUrl: string,
+  gitRef: string | null,
+  streamId: string | null,
+): Promise<Extension> {
+  return unwrap(await commands.installExtension(gitUrl, gitRef, streamId));
+}
+
+/// Re-install a git-installed extension from its recorded source.
+export async function updateExtension(name: string, streamId: string | null): Promise<Extension> {
+  return unwrap(await commands.updateExtension(name, streamId));
+}
+
 /// The semantic layer's queryable entities with column docs.
 export async function describeSchema(): Promise<SchemaEntity[]> {
   return unwrap(await commands.describeSchema());

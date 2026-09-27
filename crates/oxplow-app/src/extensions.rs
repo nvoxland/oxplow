@@ -148,7 +148,25 @@ pub struct Extension {
     /// failed to load is listed here and missing from `lenses`.
     pub errors: Vec<String>,
     pub lenses: Vec<Lens>,
+    /// Where it was installed from, for extensions added with
+    /// `install_extension`; `None` for ones written in this repo.
+    pub source: Option<ExtensionSource>,
 }
+
+/// Provenance of an installed extension, kept in its `source.yaml`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtensionSource {
+    /// The git URL it was cloned from.
+    pub git: String,
+    /// The branch, tag or commit asked for; `None` = the remote's default branch.
+    pub git_ref: Option<String>,
+    /// The commit actually installed.
+    pub sha: String,
+}
+
+/// File recording an installed extension's [`ExtensionSource`].
+pub const SOURCE_FILE: &str = "source.yaml";
 
 /// The result of running a lens.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -187,6 +205,7 @@ fn load_one(root: &Path, name: &str) -> Extension {
         path: rel.clone(),
         errors: Vec::new(),
         lenses: Vec::new(),
+        source: None,
     };
 
     let manifest = match std::fs::read_to_string(dir.join("extension.yaml")) {
@@ -208,6 +227,12 @@ fn load_one(root: &Path, name: &str) -> Extension {
         Err(e) => {
             ext.errors.push(format!("{rel}/extension.yaml: {e}"));
             return ext;
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string(dir.join(SOURCE_FILE)) {
+        match serde_yaml::from_str::<ExtensionSource>(&text) {
+            Ok(src) => ext.source = Some(src),
+            Err(e) => ext.errors.push(format!("{rel}/{SOURCE_FILE}: {e}")),
         }
     }
 
@@ -363,6 +388,155 @@ pub async fn validate_extension(
         }
     }
     Ok(ext)
+}
+
+/// Install an extension from a git repo whose root holds `extension.yaml`:
+/// clone it (inside `.oxplow/tmp/`, per workspace isolation), copy it to
+/// `oxplow/extensions/<name>/` without `.git`, and record its source.
+/// Refuses to overwrite an existing folder; use [`update_extension`].
+pub fn install_extension(
+    root: &Path,
+    git_url: &str,
+    git_ref: Option<&str>,
+) -> Result<Extension, DomainError> {
+    install_from_git(root, git_url, git_ref, None)
+}
+
+/// Re-install an installed extension from its recorded source (same URL
+/// and ref), picking up new commits.
+pub fn update_extension(root: &Path, name: &str) -> Result<Extension, DomainError> {
+    let existing = load_named(root, name)?;
+    let source = existing.source.ok_or_else(|| {
+        DomainError::Invalid(format!(
+            "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
+        ))
+    })?;
+    install_from_git(root, &source.git, source.git_ref.as_deref(), Some(name))
+}
+
+/// Lowercase letters, digits and single dashes — safe as a folder name
+/// and a lens-id prefix.
+fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && !name.contains("--")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Clone, validate, then copy into place. `replacing` names the
+/// installed extension an update must match; the old folder is removed
+/// only after the new clone validated, so a failed update changes nothing.
+fn install_from_git(
+    root: &Path,
+    git_url: &str,
+    git_ref: Option<&str>,
+    replacing: Option<&str>,
+) -> Result<Extension, DomainError> {
+    let invalid = |m: String| DomainError::Invalid(m);
+    if git_url.starts_with('-') || git_ref.is_some_and(|r| r.starts_with('-')) {
+        return Err(invalid("git URL and ref may not start with `-`".into()));
+    }
+    let storage = |e: std::io::Error| DomainError::Storage(format!("extension install: {e}"));
+
+    let tmp_parent = root.join(".oxplow").join("tmp");
+    std::fs::create_dir_all(&tmp_parent).map_err(storage)?;
+    let tmp = tempfile::Builder::new()
+        .prefix("ext-install-")
+        .tempdir_in(&tmp_parent)
+        .map_err(storage)?;
+    let clone = tmp.path().join("repo");
+    let clone_str = clone.to_string_lossy().to_string();
+    run_git(tmp.path(), &["clone", "--quiet", "--", git_url, &clone_str])
+        .map_err(|e| invalid(format!("couldn't clone {git_url}: {e}")))?;
+    if let Some(r) = git_ref {
+        run_git(&clone, &["checkout", "--quiet", r])
+            .map_err(|e| invalid(format!("couldn't check out `{r}` in {git_url}: {e}")))?;
+    }
+    let sha = run_git(&clone, &["rev-parse", "HEAD"])
+        .map_err(|e| invalid(format!("couldn't read the cloned commit: {e}")))?;
+
+    let manifest = std::fs::read_to_string(clone.join("extension.yaml")).map_err(|_| {
+        invalid(format!(
+            "{git_url} has no extension.yaml at its root, so it isn't an oxplow extension"
+        ))
+    })?;
+    let manifest: ExtensionFile = serde_yaml::from_str(&manifest)
+        .map_err(|e| invalid(format!("{git_url}: extension.yaml: {e}")))?;
+    let name = manifest.name;
+    if !is_valid_name(&name) {
+        return Err(invalid(format!(
+            "extension name `{name}` must be lowercase letters, digits and single dashes"
+        )));
+    }
+    if let Some(expected) = replacing {
+        if name != expected {
+            return Err(invalid(format!(
+                "{git_url} now names itself `{name}`, not `{expected}`; install it separately"
+            )));
+        }
+    }
+
+    let target = root.join(EXTENSIONS_DIR).join(&name);
+    match (target.exists(), replacing) {
+        (true, None) => {
+            return Err(invalid(format!(
+                "extension `{name}` is already installed at {EXTENSIONS_DIR}/{name}; use update_extension"
+            )))
+        }
+        (true, Some(_)) => std::fs::remove_dir_all(&target).map_err(storage)?,
+        (false, _) => {}
+    }
+    copy_tree_without_git(&clone, &target).map_err(storage)?;
+
+    let source = ExtensionSource {
+        git: git_url.to_string(),
+        git_ref: git_ref.map(str::to_string),
+        sha,
+    };
+    let yaml = serde_yaml::to_string(&source)
+        .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
+    std::fs::write(target.join(SOURCE_FILE), yaml).map_err(storage)?;
+    Ok(load_one(root, &name))
+}
+
+/// Copy regular files and directories from `from` to `to`, skipping
+/// `.git` and anything that isn't a plain file or directory (symlinks
+/// could point outside the extension).
+fn copy_tree_without_git(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in walkdir::WalkDir::new(from)
+        .into_iter()
+        .filter_entry(|e| e.file_name() != ".git")
+    {
+        let entry = entry.map_err(std::io::Error::other)?;
+        let rel = entry
+            .path()
+            .strip_prefix(from)
+            .map_err(std::io::Error::other)?;
+        let dest = to.join(rel);
+        let ft = entry.file_type();
+        if ft.is_dir() {
+            std::fs::create_dir_all(&dest)?;
+        } else if ft.is_file() {
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -621,5 +795,145 @@ empty: No tasks.
             validate_extension(&sl, dir.path(), "nope").await,
             Err(DomainError::NotFound)
         ));
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?} failed");
+    }
+
+    /// A git repo shaped like a published extension.
+    fn published_repo(lens_title: &str) -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            "extension.yaml",
+            "name: shared\ndescription: Shared lenses\n",
+        );
+        write(
+            repo.path(),
+            "lenses/count.yaml",
+            &format!("title: {lens_title}\nquery: SELECT 1 AS n\nviz: number\n"),
+        );
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "init"]);
+        repo
+    }
+
+    #[test]
+    fn installs_from_git_and_records_the_source() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        let url = repo.path().to_string_lossy().to_string();
+
+        let ext = install_extension(project.path(), &url, None).unwrap();
+        assert_eq!(ext.name, "shared");
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(ext.lenses[0].title, "Count");
+        let src = ext.source.clone().unwrap();
+        assert_eq!(src.git, url);
+        assert_eq!(src.git_ref, None);
+        assert_eq!(src.sha.len(), 40);
+
+        let dir = project.path().join("oxplow/extensions/shared");
+        assert!(dir.join("lenses/count.yaml").is_file());
+        assert!(
+            !dir.join(".git").exists(),
+            "the clone's .git must not be copied"
+        );
+        assert!(dir.join(SOURCE_FILE).is_file());
+        // Loading later still reports the source.
+        assert_eq!(load_extensions(project.path())[0].source, Some(src));
+        // The temporary clone is gone.
+        let tmp = project.path().join(".oxplow/tmp");
+        assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn refuses_to_overwrite_and_update_pulls_new_commits() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        let url = repo.path().to_string_lossy().to_string();
+        install_extension(project.path(), &url, None).unwrap();
+
+        let err = install_extension(project.path(), &url, None).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("already")),
+            "{err:?}"
+        );
+
+        write(
+            repo.path(),
+            "lenses/count.yaml",
+            "title: Count v2\nquery: SELECT 2 AS n\nviz: number\n",
+        );
+        git(repo.path(), &["commit", "-q", "-am", "v2"]);
+        let ext = update_extension(project.path(), "shared").unwrap();
+        assert_eq!(ext.lenses[0].title, "Count v2");
+    }
+
+    #[test]
+    fn update_only_applies_to_installed_extensions() {
+        let project = tempfile::tempdir().unwrap();
+        write(
+            project.path(),
+            "oxplow/extensions/local/extension.yaml",
+            "name: local\n",
+        );
+        let err = update_extension(project.path(), "local").unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("wasn't installed")),
+            "{err:?}"
+        );
+        assert!(matches!(
+            update_extension(project.path(), "nope"),
+            Err(DomainError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn rejects_repos_that_are_not_extensions() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), "README.md", "hi");
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "init"]);
+        let err =
+            install_extension(project.path(), &repo.path().to_string_lossy(), None).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("extension.yaml")),
+            "{err:?}"
+        );
+        assert!(!project.path().join("oxplow/extensions").exists());
+
+        let err = install_extension(project.path(), "/definitely/not/a/repo", None).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("clone")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_extension_names() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), "extension.yaml", "name: ../escape\n");
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "init"]);
+        let err =
+            install_extension(project.path(), &repo.path().to_string_lossy(), None).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("name")),
+            "{err:?}"
+        );
     }
 }

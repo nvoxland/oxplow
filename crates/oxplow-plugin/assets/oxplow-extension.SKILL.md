@@ -106,3 +106,15 @@ file or pick up a task before editing, and list the files in
   existing lens over adding a near-duplicate.
 - When the user says "this lens" or pastes `[oxplow lens <id>]`, read it
   with `get_lens`, change the file, then validate and run it again.
+
+## Sharing and installing
+
+- **Team:** extensions are ordinary committed files under
+  `oxplow/extensions/`. Commit them and the team has them.
+- **World:** to publish, put an extension in its own git repo with
+  `extension.yaml` at the root. To use someone else's, call
+  `install_extension(git_url, git_ref?, stream_id)`, but **only when the
+  user asks**. It records the source in `source.yaml`.
+  `update_extension(name)` pulls the latest from that source. Never
+  hand-edit an installed extension's files; they're overwritten on update.
+  Copy it into a new extension instead.

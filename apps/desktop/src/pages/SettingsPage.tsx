@@ -12,6 +12,7 @@ import {
 } from "../api.js";
 import { Page } from "../tabs/Page.js";
 import { LspServersSection } from "../components/LspServersSection.js";
+import { ExtensionsSection } from "../components/ExtensionsSection.js";
 import { agentLabel, ALL_AGENT_KINDS } from "../agentKinds.js";
 
 export interface SettingsPageProps {
@@ -215,6 +216,15 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
             immediately — no Save needed. Agents can also configure these for you.
           </Hint>
           <LspServersSection />
+        </Section>
+
+        <Section title="Extensions">
+          <Hint>
+            Extensions add lenses (pages you or your agent build over oxplow&apos;s data). They live in{" "}
+            <code>oxplow/extensions/</code> and are ordinary project files: commit them to share with your
+            team. Installing and updating apply immediately; no Save needed.
+          </Hint>
+          <ExtensionsSection />
         </Section>
 
         <div style={actionsRowStyle}>

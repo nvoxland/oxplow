@@ -355,6 +355,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	installExtension: (gitUrl: string, gitRef: string | null, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	updateExtension: (name: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("update_extension", { name, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2141,6 +2151,21 @@ export type Extension = {
 	 */
 	errors: string[],
 	lenses: Lens[],
+	/**
+	 *  Where it was installed from, for extensions added with
+	 *  `install_extension`; `None` for ones written in this repo.
+	 */
+	source: ExtensionSource | null,
+};
+
+// Provenance of an installed extension, kept in its `source.yaml`.
+export type ExtensionSource = {
+	// The git URL it was cloned from.
+	git: string,
+	// The branch, tag or commit asked for; `None` = the remote's default branch.
+	gitRef: string | null,
+	// The commit actually installed.
+	sha: string,
 };
 
 /**

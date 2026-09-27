@@ -62,6 +62,38 @@ pub async fn validate_extension(
     Ok(extensions::validate_extension(&layer(svc), &root, &name).await?)
 }
 
+/// Install an extension from a git repo into this stream's worktree
+/// (`oxplow/extensions/<name>/`). The files are then ordinary project
+/// files: commit them to share with the team.
+pub async fn install_extension(
+    svc: &Services,
+    git_url: String,
+    git_ref: Option<String>,
+    stream_id: Option<String>,
+) -> Result<Extension, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    // git clone + file copy: blocking work off the async runtime.
+    let ext = tokio::task::spawn_blocking(move || {
+        extensions::install_extension(&root, &git_url, git_ref.as_deref())
+    })
+    .await
+    .map_err(|e| IpcError::internal(format!("install task panicked: {e}")))??;
+    Ok(ext)
+}
+
+/// Re-install an installed extension from its recorded git source.
+pub async fn update_extension(
+    svc: &Services,
+    name: String,
+    stream_id: Option<String>,
+) -> Result<Extension, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    let ext = tokio::task::spawn_blocking(move || extensions::update_extension(&root, &name))
+        .await
+        .map_err(|e| IpcError::internal(format!("update task panicked: {e}")))??;
+    Ok(ext)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -136,5 +168,53 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.code, "INVALID");
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        assert!(std::process::Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    #[tokio::test]
+    async fn installs_and_updates_from_git() {
+        let (svc, _dir) = crate::test_support::services();
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), "extension.yaml", "name: shared\n");
+        write(
+            repo.path(),
+            "lenses/one.yaml",
+            "title: One\nquery: SELECT 1\n",
+        );
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "init"]);
+        let url = repo.path().to_string_lossy().to_string();
+
+        let ext = crate::dispatch("install_extension", json!({ "gitUrl": url }), &svc)
+            .await
+            .unwrap();
+        assert_eq!(ext["name"], "shared");
+        assert_eq!(ext["source"]["git"], json!(url));
+
+        let err = crate::dispatch("install_extension", json!({ "gitUrl": url }), &svc)
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+
+        write(
+            repo.path(),
+            "lenses/one.yaml",
+            "title: One v2\nquery: SELECT 1\n",
+        );
+        git(repo.path(), &["commit", "-q", "-am", "v2"]);
+        let ext = crate::dispatch("update_extension", json!({ "name": "shared" }), &svc)
+            .await
+            .unwrap();
+        assert_eq!(ext["lenses"][0]["title"], "One v2");
     }
 }

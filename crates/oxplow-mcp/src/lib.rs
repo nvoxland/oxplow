@@ -877,6 +877,17 @@ pub struct RunLensParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstallExtensionParams {
+    /// Git URL of a repo whose root holds `extension.yaml` (a published
+    /// oxplow extension).
+    pub git_url: String,
+    /// Branch, tag or commit to install; omit for the default branch.
+    pub git_ref: Option<String>,
+    /// Stream whose worktree to install into; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ValidateExtensionParams {
     /// Extension folder name under `oxplow/extensions/`.
     pub name: String,
@@ -1124,6 +1135,69 @@ impl OxplowMcp {
             .map_err(internal)?;
         self.services.events.emit(OxplowEvent::DashboardsChanged);
         json_result(&serde_json::json!({ "id": id }))
+    }
+
+    #[tool(
+        description = "Install a published extension from a git repo (its root holds \
+                       `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's \
+                       worktree, recording the source URL, ref and commit. Only do this when \
+                       the user asks. The installed files are ordinary project files: offer to \
+                       commit them so the team gets them. Refuses to overwrite; use \
+                       `update_extension` for that."
+    )]
+    async fn install_extension(
+        &self,
+        params: Parameters<InstallExtensionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("install_extension", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let ext = tokio::task::spawn_blocking(move || {
+            oxplow_app::extensions::install_extension(&root, &p.git_url, p.git_ref.as_deref())
+        })
+        .await
+        .map_err(internal)?
+        .map_err(extension_error)?;
+        json_result(&ext)
+    }
+
+    #[tool(
+        description = "Update an installed extension to the latest commit of the git URL and ref \
+                       it was installed from. Only for extensions installed with \
+                       `install_extension`; ones written in this repo are edited in place."
+    )]
+    async fn update_extension(
+        &self,
+        params: Parameters<ValidateExtensionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("update_extension", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let name = p.name.clone();
+        let ext = tokio::task::spawn_blocking(move || {
+            oxplow_app::extensions::update_extension(&root, &name)
+        })
+        .await
+        .map_err(internal)?
+        .map_err(|e| match e {
+            oxplow_domain::DomainError::NotFound => McpError::invalid_params(
+                format!(
+                    "no extension `{}` under oxplow/extensions/ in that stream",
+                    p.name
+                ),
+                None,
+            ),
+            other => extension_error(other),
+        })?;
+        json_result(&ext)
     }
 
     #[tool(
@@ -4815,6 +4889,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    "install_extension",
+    "update_extension",
     "create_dashboard",
     "add_dashboard_item",
     "restore_file_from_snapshot",
@@ -5008,6 +5084,14 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
 
 /// Validate an optional `stream_id`: enforce the `s-` prefix when present,
 /// and accept `None` (resolves to the current/primary worktree downstream).
+/// Map an extension install/update error to an MCP error.
+fn extension_error(e: oxplow_domain::DomainError) -> McpError {
+    match e {
+        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+        other => internal(other),
+    }
+}
+
 /// Map a lens lookup/run error to an MCP error an agent can act on.
 fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
     match e {
@@ -5520,6 +5604,81 @@ mod tests {
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot();
+    }
+
+    #[tokio::test]
+    async fn install_and_update_extension_tools() {
+        let (proj, _services, server) = boot();
+        let repo = tempfile::tempdir().unwrap();
+        let w = |root: &std::path::Path, rel: &str, body: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success());
+        };
+        w(repo.path(), "extension.yaml", "name: shared\n");
+        w(
+            repo.path(),
+            "lenses/one.yaml",
+            "title: One\nquery: SELECT 1\n",
+        );
+        git(&["init", "-q", "-b", "main"]);
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "init"]);
+        let url = repo.path().to_string_lossy().to_string();
+
+        let ext: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .install_extension(Parameters(InstallExtensionParams {
+                    git_url: url.clone(),
+                    git_ref: None,
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(ext["name"], "shared");
+        assert!(proj
+            .path()
+            .join("oxplow/extensions/shared/lenses/one.yaml")
+            .is_file());
+
+        let err = server
+            .install_extension(Parameters(InstallExtensionParams {
+                git_url: url,
+                git_ref: None,
+                stream_id: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("already installed"), "{err:?}");
+
+        w(
+            repo.path(),
+            "lenses/one.yaml",
+            "title: One v2\nquery: SELECT 1\n",
+        );
+        git(&["commit", "-q", "-am", "v2"]);
+        let ext: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .update_extension(Parameters(ValidateExtensionParams {
+                    name: "shared".into(),
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(ext["lenses"][0]["title"], "One v2");
     }
 
     #[tokio::test]
