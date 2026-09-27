@@ -74,7 +74,10 @@ Four config blocks in `.oxplow/project.yaml`:
 
 - `measures` -- what is being counted, and how it aggregates.
 - `gauges` -- the script that produces the raw numbers. Starlark,
-  jq, or an external program.
+  jq, or an external program. An external program from the project's
+  config runs only after you approve it in Settings → Data → Programs,
+  so pulling a repo can't run something behind your back. A changed
+  program or arguments needs approving again.
 - `metrics` -- a chartable view over a measure: aggregation, filters,
   target, direction.
 - `dimensions` -- the axes you can slice by (package, language,

@@ -166,7 +166,9 @@ The `metrics:` spec `aggregation: sum` re-adds the per-file facts into the headl
 **C) exec (escape hatch)** — a program that prints the fact JSON to stdout:
 `compute: { runtime: exec, entryFile: oxplow/gauges/bundle-size.sh }`. Lower trust
 (it does I/O) — tagged `plugin-exec:<key>`. Use only when no in-process tier can
-compute it.
+compute it: **it won't run until the user approves it** in Settings → Data →
+Programs (you can't approve it; `run_metric` tells you when it's waiting), and
+any change to the program or its args needs approving again.
 
 The bundled gauge scripts in
 `crates/oxplow-collect-plugin/src/plugins/metrics/<lang>/*.star` are the canonical

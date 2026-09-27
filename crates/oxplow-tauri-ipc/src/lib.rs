@@ -153,6 +153,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_sources,
             commands::generated::run_source,
             commands::generated::set_source_credential,
+            commands::generated::list_project_programs,
+            commands::generated::approve_project_program,
             commands::generated::ensure_change,
             commands::generated::ai_settings,
             commands::generated::save_ai_provider,

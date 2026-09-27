@@ -296,6 +296,8 @@ macro_rules! oxplow_command_table {
                 test_ai_provider => $crate::commands::ai::test_ai_provider { id: String, model: String } -> String,
                 run_source => $crate::commands::sources::run_source { extension: String, source_id: String, approve: Option<bool> } -> ::oxplow_app::source_runner::SourceRunReport,
                 set_source_credential => $crate::commands::sources::set_source_credential { extension: String, name: String, value: Option<String> } -> (),
+                list_project_programs => $crate::commands::sources::list_project_programs {} -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
+                approve_project_program => $crate::commands::sources::approve_project_program { kind: ::oxplow_app::exec_consent::ProgramKind, name: String } -> Vec<::oxplow_app::exec_consent::ProjectProgram>,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
                 save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments

@@ -188,6 +188,10 @@ pub const MANIFEST: &[Capability] = &[
     both("run_source"),
     // Secrets are the person's to set; agents only see whether one is set.
     ui("set_source_credential"),
+    // Consent to run a program from the repo is a person's (tsk331); an
+    // agent learns an unapproved one from the run's error.
+    ui("list_project_programs"),
+    ui("approve_project_program"),
     both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),

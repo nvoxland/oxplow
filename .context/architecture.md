@@ -53,6 +53,29 @@ has no exceptions.
   automatically. The same source-scan test that guards terminal input will
   guard ACP prompts.
 
+## A repo's config never runs a program without consent
+
+A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
+tsk162). Its committed config can name programs:
+
+- `exec` gauges and collection plugins in `.oxplow/project.yaml`;
+- `exec` sources in `oxplow/extensions/*/extension.yaml`.
+
+None of these run until a person approves that program on their machine.
+
+- **What an approval covers.** It is bound to a hash of what runs: the
+  program's content plus its args, and for a source its `network` list.
+  Any change needs approving again.
+- **Where it lives.** Approvals go in the gitignored
+  `.oxplow/source-approvals.json` (`exec_consent.rs`), so each teammate
+  consents for themselves.
+- **Who approves.** Only a person, in Settings → Data. Agents can't, and a
+  lens button never does.
+- **Not gated:** in-process Starlark/jq (sandboxed, no I/O) and the user's
+  own global-scope config.
+
+A new way for config to start a program must go through the same gate.
+
 ## Skeleton + semantic layer (target direction)
 
 > **Status: target design (epic tsk275), recorded 2026-09.** Today's

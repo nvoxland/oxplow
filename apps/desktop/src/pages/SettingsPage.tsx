@@ -233,7 +233,8 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         <Section title="Data">
           <Hint>
             What oxplow can query: its own data and what extension sources bring in, with row counts. Lenses,
-            metrics and agents read these through SQL. Sources run here; set their credentials under Extensions.
+            metrics and agents read these through SQL. Sources run here, and programs the project&apos;s config would run
+            are approved here; set credentials under Extensions.
           </Hint>
           <DataSection />
         </Section>

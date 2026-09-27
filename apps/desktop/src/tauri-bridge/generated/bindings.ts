@@ -388,6 +388,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listProjectPrograms: () => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("list_project_programs")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	approveProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("approve_project_program", { kind, name })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3159,6 +3169,25 @@ export type PluginConfig = {
 	entryFile?: string | null,
 	// Extra arguments for the `exec` runtime.
 	args?: string[],
+};
+
+// What kind of project program it is.
+export type ProgramKind = 
+// A metric gauge (`gauges:`).
+"gauge" | 
+// A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
+"plugin";
+
+// A program the project's config would run.
+export type ProjectProgram = {
+	kind: ProgramKind,
+	// The gauge key or plugin name.
+	name: string,
+	// Project-relative path of the program.
+	program: string,
+	args: string[],
+	// This machine approved it as it is now.
+	approved: boolean,
 };
 
 export type ProviderConfig = {

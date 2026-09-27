@@ -291,8 +291,10 @@ An unknown format is `tracing::warn!`-logged and skipped (not silently dropped).
 Trust tier rides in `source`: in-process tiers (jaq/Starlark) are deterministic
 and do no I/O → `observed` / `coverage-report` / `analysis-report`; the
 external-exec escape hatch can do I/O, so its output is tagged
-`plugin-exec:<name>` so the UI can mark it lower-trust. The `provenance` column
-stays `observed` vs `asserted`.
+`plugin-exec:<name>` so the UI can mark it lower-trust. Every path carries it,
+including coverage: `coverage_source(collector)` on direct ingest, the merged
+label on the ride-along (before tsk331 coverage hard-coded `coverage-report`).
+The `provenance` column stays `observed` vs `asserted`.
 
 The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
 errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
@@ -418,7 +420,10 @@ script, never a Rust change (`crates/oxplow-collect-plugin/`):
 JSON→JSON reshaping), `starlark` (general/imperative; note: standard Starlark
 forbids recursion + `while`, so deep tree-walks are impractical — jaq suits XML
 better), `exec` (external process, JSON stdin→stdout — the escape hatch; can do
-I/O, so it's tagged lower-trust). All three tiers run under a `SandboxBudget`
+I/O, so it's tagged lower-trust, and **runs only once a person approved it on
+this machine**: `plugin_to_collector` refuses an unapproved one with the
+reason; see architecture.md → "A repo's config never runs a program without
+consent"). All three tiers run under a `SandboxBudget`
 (wall-clock timeout) so a runaway/malformed script is surfaced as an error, not
 a hang.
 

@@ -1,7 +1,7 @@
 /// Pure view model for Settings → Data (DataSection.tsx): what data the
 /// semantic layer holds, who provides it, and how much. See
 /// `.context/semantic-layer.md`.
-import type { EntityRowCount, SchemaEntity } from "../tauri-bridge/generated/bindings.js";
+import type { EntityRowCount, ProjectProgram, SchemaEntity } from "../tauri-bridge/generated/bindings.js";
 
 export interface EntityRowModel {
   name: string;
@@ -39,4 +39,30 @@ export function entitySummary(rows: EntityRowModel[]): string {
   const ext = rows.filter((r) => r.owner !== "core").length;
   const noun = rows.length === 1 ? "entity" : "entities";
   return ext > 0 ? `${rows.length} ${noun} · ${ext} from extensions` : `${rows.length} ${noun}`;
+}
+
+export interface ProgramRowModel {
+  key: string;
+  label: string;
+  /** What runs, as a command line. */
+  command: string;
+  status: string;
+  approved: boolean;
+  /** The Approve button's hover: what consenting means. */
+  approveTitle: string;
+}
+
+/// A program the project's config would run (an `exec` gauge or collection
+/// plugin): unapproved ones don't run until a person approves them here.
+export function programRow(p: ProjectProgram): ProgramRowModel {
+  const command = [p.program, ...p.args].join(" ");
+  const what = p.kind === "gauge" ? "Gauge" : "Collection plugin";
+  return {
+    key: `${p.kind}:${p.name}`,
+    label: `${what} ${p.name}`,
+    command,
+    status: p.approved ? "Approved on this machine" : "Not approved: it won't run",
+    approved: p.approved,
+    approveTitle: `Runs ${command} from this project's config on this machine. Approve only if you trust this repo; a changed program or arguments need approval again.`,
+  };
 }

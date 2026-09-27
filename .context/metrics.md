@@ -901,6 +901,20 @@ The UI shows the entity aggregation (`specAggregation`).
   in-memory value, or on a fresh process the latest stored fact. A level
   carries forward, so a restart doesn't pile up duplicates.
 
+### Exec gauges need consent (tsk331)
+
+A project-scope `runtime: exec` gauge runs only once a person approved it on
+this machine (`exec_consent::may_run`, checked in `compute_to_collector`), at
+its current program content and args. Global-scope gauges are the user's own
+and aren't gated.
+
+- **Background runs** (snapshots, triggers) log "gauge: not run" and skip.
+- **Explicit runs** (`run_metric_by_key`, MCP `run_metric`) return the
+  reason, via the `gauge_collector` / `run_gauge_collector` split.
+- **Approving.** Settings → Data → Programs (IPC `list_project_programs` /
+  `approve_project_program`, UI-only). See architecture.md → "A repo's
+  config never runs a program without consent".
+
 ### Producers — facts on the capture spine (the ONLY write since T-E2)
 
 Each producer writes atomic facts through `record_facts` (a capture + the

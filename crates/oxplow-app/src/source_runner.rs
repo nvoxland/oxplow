@@ -35,8 +35,8 @@ use crate::extension_sources::{ColumnType, SourceEntity, SourceRuntime, SourceSp
 pub const SOURCE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Largest stdout a source may produce.
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-/// Local (gitignored) consent file under `.oxplow/`.
-pub const APPROVALS_FILE: &str = "source-approvals.json";
+/// Local (gitignored) consent file under `.oxplow/` (see `exec_consent`).
+pub use crate::exec_consent::APPROVALS_FILE;
 
 /// Outcome of one run, as reported to the UI / agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -255,36 +255,14 @@ pub enum Egress {
     Sandboxed { proxy_env: Vec<(String, String)> },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ApprovalFile {
-    /// `"<extension>/<source>"` → approved entry hash.
-    #[serde(default)]
-    approved: BTreeMap<String, String>,
-}
-
-fn read_approvals(state_dir: &Path) -> ApprovalFile {
-    std::fs::read_to_string(state_dir.join(APPROVALS_FILE))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
-}
-
 /// Whether `extension/source` is approved for this exact entry hash.
 pub fn is_approved(state_dir: &Path, extension: &str, source: &str, hash: &str) -> bool {
-    read_approvals(state_dir)
-        .approved
-        .get(&format!("{extension}/{source}"))
-        .is_some_and(|h| h == hash)
+    crate::exec_consent::is_approved(state_dir, &format!("{extension}/{source}"), hash)
 }
 
 /// Record a human's approval of `extension/source` at `hash`.
 pub fn approve(state_dir: &Path, extension: &str, source: &str, hash: &str) -> std::io::Result<()> {
-    let mut file = read_approvals(state_dir);
-    file.approved
-        .insert(format!("{extension}/{source}"), hash.to_string());
-    std::fs::create_dir_all(state_dir)?;
-    let text = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
-    std::fs::write(state_dir.join(APPROVALS_FILE), text)
+    crate::exec_consent::approve(state_dir, &format!("{extension}/{source}"), hash)
 }
 
 /// What a source run returns: rows per entity, and (with `sync: upsert`)

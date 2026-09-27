@@ -45,6 +45,42 @@ pub async fn set_source_credential(
     )?)
 }
 
+/// The programs the project's config would run (`exec` gauges and
+/// collection plugins) and whether this machine approved each. UI only.
+pub async fn list_project_programs(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
+    let config = svc
+        .config
+        .read()
+        .map(|c| c.clone())
+        .unwrap_or_else(|p| p.into_inner().clone());
+    Ok(oxplow_app::exec_consent::list(
+        &svc.layout.project_dir,
+        &config,
+    ))
+}
+
+/// Approve one of the project's programs as it is now. UI only: consent to
+/// run a program from the repo is a person's (tsk331).
+pub async fn approve_project_program(
+    svc: &Services,
+    kind: oxplow_app::exec_consent::ProgramKind,
+    name: String,
+) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
+    let config = svc
+        .config
+        .read()
+        .map(|c| c.clone())
+        .unwrap_or_else(|p| p.into_inner().clone());
+    oxplow_app::exec_consent::approve_program(&svc.layout.project_dir, &config, kind, &name)
+        .map_err(IpcError::invalid)?;
+    Ok(oxplow_app::exec_consent::list(
+        &svc.layout.project_dir,
+        &config,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -65,6 +101,23 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_and_approve_project_programs_dispatch() {
+        let (svc, _dir) = crate::test_support::services();
+        let out = crate::dispatch("list_project_programs", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        assert_eq!(out, serde_json::json!([]), "no exec programs configured");
+        let err = crate::dispatch(
+            "approve_project_program",
+            serde_json::json!({ "kind": "gauge", "name": "repo.nope" }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
     }
 
     #[tokio::test]

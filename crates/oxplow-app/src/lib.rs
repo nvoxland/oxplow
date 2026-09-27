@@ -35,6 +35,7 @@ pub mod effort_evidence;
 pub mod endpoint_diff;
 pub mod entity_metrics;
 pub mod events;
+pub mod exec_consent;
 pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;

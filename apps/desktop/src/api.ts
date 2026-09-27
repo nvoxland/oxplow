@@ -29,6 +29,8 @@ import type {
   SourceRunReport,
   SchemaEntity,
   EntityRowCount,
+  ProgramKind,
+  ProjectProgram,
   LensActionResult,
   SearchHit,
   SqlCell,
@@ -612,6 +614,16 @@ export async function updateExtension(name: string, streamId: string | null): Pr
 /// The semantic layer's queryable entities with column docs.
 export async function describeSchema(): Promise<SchemaEntity[]> {
   return unwrap(await commands.describeSchema());
+}
+
+/// Programs the project's config would run, and whether each is approved.
+export async function listProjectPrograms(): Promise<ProjectProgram[]> {
+  return unwrap(await commands.listProjectPrograms());
+}
+
+/// A person approves one of the project's programs (Settings → Data).
+export async function approveProjectProgram(kind: ProgramKind, name: string): Promise<ProjectProgram[]> {
+  return unwrap(await commands.approveProjectProgram(kind, name));
 }
 
 /// Rows in every entity right now (Settings → Data).

@@ -11,16 +11,19 @@ import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  approveProjectProgram,
   describeSchema,
+  listProjectPrograms,
   listSources,
   runSource,
   semanticRowCounts,
   subscribeOxplowEvents,
   type SourceListing,
 } from "../api.js";
+import type { ProjectProgram } from "../tauri-bridge/generated/bindings.js";
 import { indexRef } from "../tabs/pageRefs.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
-import { entityRows, entitySummary, type EntityRowModel } from "./dataSectionModel.js";
+import { entityRows, entitySummary, programRow, type EntityRowModel } from "./dataSectionModel.js";
 import { sourceRowModel } from "./extensionRowModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -29,13 +32,20 @@ export function DataSection() {
   const nav = useOptionalPageNavigation();
   const [rows, setRows] = useState<EntityRowModel[] | null>(null);
   const [sources, setSources] = useState<SourceListing[]>([]);
+  const [programs, setPrograms] = useState<ProjectProgram[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [schema, counts, listings] = await Promise.all([describeSchema(), semanticRowCounts(), listSources()]);
+      const [schema, counts, listings, progs] = await Promise.all([
+        describeSchema(),
+        semanticRowCounts(),
+        listSources(),
+        listProjectPrograms(),
+      ]);
       setRows(entityRows(schema, counts));
       setSources(listings);
+      setPrograms(progs);
     } catch (e) {
       recordOpError({ label: "List data", message: String(e) });
       setRows([]);
@@ -64,6 +74,19 @@ export function DataSection() {
     } finally {
       setBusy(null);
       await refresh();
+    }
+  }
+
+  async function approve(p: ProjectProgram) {
+    const key = `${p.kind}:${p.name}`;
+    setBusy(key);
+    try {
+      setPrograms(await approveProjectProgram(p.kind, p.name));
+      showToast({ message: `Approved ${p.name}. It runs from the next trigger on this machine.` });
+    } catch (e) {
+      recordOpError({ label: `Approve ${p.name}`, message: String(e) });
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -135,6 +158,37 @@ export function DataSection() {
               </div>
               {s.error ? <div style={errorStyle}>{s.error}</div> : null}
               {s.missingCredentials ? <div style={mutedStyle}>{s.missingCredentials}</div> : null}
+            </div>
+          );
+        })
+      )}
+      <h3 style={subheadStyle}>Programs</h3>
+      {programs.length === 0 ? (
+        <div style={mutedStyle} data-testid="data-programs-empty">
+          This project&apos;s config runs no programs.
+        </div>
+      ) : (
+        programs.map((p) => {
+          const m = programRow(p);
+          return (
+            <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{m.label}</span>
+                <code style={mutedStyle}>{m.command}</code>
+                <span style={{ flex: 1 }} />
+                <span style={m.approved ? mutedStyle : errorStyle}>{m.status}</span>
+                {m.approved ? null : (
+                  <button
+                    type="button"
+                    data-testid={`program-approve-${m.key}`}
+                    title={m.approveTitle}
+                    disabled={busy !== null}
+                    onClick={() => void approve(p)}
+                  >
+                    {busy === m.key ? "Approving…" : "Approve"}
+                  </button>
+                )}
+              </div>
             </div>
           );
         })

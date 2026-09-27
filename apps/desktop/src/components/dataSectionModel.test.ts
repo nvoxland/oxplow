@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SchemaEntity } from "../tauri-bridge/generated/bindings.js";
-import { entityRows, entitySummary } from "./dataSectionModel.js";
+import { entityRows, entitySummary, programRow } from "./dataSectionModel.js";
 
 const entity = (name: string, owner: string, available = true): SchemaEntity => ({
   name,
@@ -33,4 +33,15 @@ test("entityRows puts core first, formats counts and flags unsynced entities", (
 
 test("an entity missing from the counts reads as a dash, not zero", () => {
   expect(entityRows([entity("v_task", "core")], [])[0]!.rows).toBe("—");
+});
+
+test("programRow says what runs and whether it will", () => {
+  const m = programRow({ kind: "plugin", name: "acme.parse", program: "tools/parse.sh", args: ["--x"], approved: false });
+  expect(m.label).toBe("Collection plugin acme.parse");
+  expect(m.command).toBe("tools/parse.sh --x");
+  expect(m.status).toBe("Not approved: it won't run");
+  expect(m.approveTitle).toContain("tools/parse.sh --x");
+  expect(programRow({ kind: "gauge", name: "repo.n", program: "t.sh", args: [], approved: true }).status).toBe(
+    "Approved on this machine",
+  );
 });

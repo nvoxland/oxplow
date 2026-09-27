@@ -905,7 +905,8 @@ impl CollectionService {
             }
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
-        self.observe_coverage(thread, &stream_id, &report).await
+        self.observe_coverage(thread, &stream_id, &report, &coverage_source(collector))
+            .await
     }
 
     /// Ingest a SINGLE analysis report (the explicit MCP path) — the on-demand
@@ -1184,6 +1185,7 @@ impl CollectionService {
         thread: &ThreadId,
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
+        source: &str,
     ) -> Result<CoverageIngest, DomainError> {
         // Stop-collecting gate (tsk31): with the coverage metric disabled, no
         // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
@@ -1286,7 +1288,7 @@ impl CollectionService {
                 let branch = oxplow_git::detect_current_branch(&self.project_dir);
                 let snapshot_id =
                     (version.local_snapshot_id != 0).then_some(version.local_snapshot_id);
-                let mut capture = NewMetricCapture::done(stream_val, "coverage", "coverage-report");
+                let mut capture = NewMetricCapture::done(stream_val, "coverage", source);
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("on-report".into());
                 capture.snapshot_id = snapshot_id;
@@ -1410,9 +1412,11 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
+        source: &str,
     ) -> Result<(), DomainError> {
         if let Some(stream_id) = self.stream_id_for(thread).await? {
-            self.observe_coverage(thread, &stream_id, report).await?;
+            self.observe_coverage(thread, &stream_id, report, source)
+                .await?;
         }
         Ok(())
     }
@@ -1427,14 +1431,15 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
+        source: &str,
     ) {
-        let first = match self.try_observe_coverage(thread, report).await {
+        let first = match self.try_observe_coverage(thread, report, source).await {
             Ok(()) => return,
             Err(e) => e,
         };
         tracing::warn!(error = %first, "coverage ride-along failed; retrying once");
         tokio::time::sleep(COVERAGE_RETRY_DELAY).await;
-        if let Err(e) = self.try_observe_coverage(thread, report).await {
+        if let Err(e) = self.try_observe_coverage(thread, report, source).await {
             tracing::warn!(error = %e, "coverage ride-along failed after retry");
             self.record_coverage_failure(thread, &format!("{first}; retry: {e}"))
                 .await;
@@ -1708,8 +1713,10 @@ impl CollectionService {
         // (tsk79) — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
         let (coverage, coverage_errors) = self.merge_fresh_coverage(floor, &cfg, &registry);
-        if let Some((merged, _source)) = &coverage {
-            self.coverage_ride_along_with_retry(thread, merged).await;
+        if let Some((merged, source)) = &coverage {
+            // The label says whether a lower-trust exec plugin produced it.
+            self.coverage_ride_along_with_retry(thread, merged, source)
+                .await;
         } else if !coverage_errors.is_empty() {
             self.record_coverage_failure(thread, &coverage_errors.join("; "))
                 .await;
@@ -3200,6 +3207,18 @@ fn plugin_to_collector(
             }
         }
         "exec" => {
+            // A program from the repo's config: only once a person approved
+            // it on this machine, at this content and args (tsk331).
+            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
+            if !may_run(
+                project_dir,
+                ProgramKind::Plugin,
+                &p.name,
+                entry_file,
+                &p.args,
+            ) {
+                return Err(needs_approval(ProgramKind::Plugin, &p.name, entry_file));
+            }
             // entryFile is the program to spawn (must be executable).
             let mut argv = vec![abs.to_string_lossy().into_owned()];
             argv.extend(p.args.iter().cloned());
@@ -3233,6 +3252,18 @@ fn first_analysis_report<'a>(
             .resolve(&r.format)
             .is_some_and(|c| c.kind() == CollectorKind::Analysis)
     })
+}
+
+/// Trust label for a coverage collector's output: in-process tiers are an
+/// observed `coverage-report`; the external-exec escape hatch is flagged
+/// `plugin-exec:<name>` so exec-produced coverage isn't stored as a
+/// first-party parse ([[tsk162]]).
+fn coverage_source(collector: &Collector) -> String {
+    if collector.runtime() == CollectorRuntime::Exec {
+        format!("plugin-exec:{}", collector.name())
+    } else {
+        "coverage-report".to_string()
+    }
 }
 
 /// Trust label for an analysis collector's output: in-process tiers are
@@ -3380,6 +3411,55 @@ mod tests {
         assert!(reg.resolve("cobertura").is_some());
         // An unknown format resolves to None — merge_* warns and skips it.
         assert!(reg.resolve("nope").is_none());
+    }
+
+    #[test]
+    fn exec_coverage_keeps_its_lower_trust_label() {
+        let exec = Collector::exec(
+            "acme.parse",
+            CollectorKind::Coverage,
+            ["mine"],
+            vec!["/bin/cat".to_string()],
+        );
+        assert_eq!(coverage_source(&exec), "plugin-exec:acme.parse");
+        let builtin = CollectorRegistry::with_builtins()
+            .resolve("cobertura")
+            .cloned()
+            .unwrap();
+        assert_eq!(coverage_source(&builtin), "coverage-report");
+    }
+
+    #[test]
+    fn an_exec_plugin_runs_only_once_a_person_approved_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
+        let p = oxplow_config::PluginConfig {
+            name: "acme.parse".into(),
+            kind: "coverage".into(),
+            formats: vec!["mine".into()],
+            runtime: "exec".into(),
+            input: None,
+            entry_file: Some("tools/parse.sh".into()),
+            args: vec!["--x".into()],
+        };
+        let err = plugin_to_collector(&p, dir.path()).unwrap_err();
+        assert!(err.contains("approval"), "{err}");
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "collection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh, args: [--x] }\n",
+        )
+        .unwrap();
+        let cfg = oxplow_config::load_project_config(dir.path()).unwrap();
+        crate::exec_consent::approve_program(
+            dir.path(),
+            &cfg,
+            crate::exec_consent::ProgramKind::Plugin,
+            "acme.parse",
+        )
+        .unwrap();
+        assert!(plugin_to_collector(&p, dir.path()).is_ok());
     }
 
     #[test]

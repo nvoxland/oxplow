@@ -1709,10 +1709,15 @@ impl MetricsService {
             Some(sid) => self.build_file_map(sid).await,
             None => HashMap::new(),
         });
+        // Asked for explicitly: say why it can't run (an unapproved program,
+        // a missing script) instead of quietly recording nothing.
+        let collector = self.gauge_collector(&metric)?;
         let ctx = self
             .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0))
             .await;
-        Ok(self.run_one_gauge(&metric, &ctx, files).await)
+        Ok(self
+            .run_gauge_collector(&metric, collector, &ctx, files)
+            .await)
     }
 
     /// Build the snapshot file map (repo-relative path → UTF-8 content) for
@@ -1809,6 +1814,18 @@ impl MetricsService {
         }
     }
 
+    /// The collector a gauge runs: the embedded script for a built-in, else
+    /// its `compute:` block (which refuses an unapproved project `exec`).
+    fn gauge_collector(&self, gauge: &ResolvedGauge) -> Result<Collector, String> {
+        if gauge.scope == "built-in" {
+            return builtin_collector(&gauge.key)
+                .ok_or_else(|| format!("unknown built-in gauge `{}`", gauge.key));
+        }
+        // A global gauge's script lives under the global config dir, not the
+        // project; project gauges resolve against the project dir.
+        compute_to_collector(gauge, &self.script_base_dir(gauge), &self.project_dir)
+    }
+
     /// Run one gauge: build its collector, execute under the sandbox with the
     /// file-map host, and record a run + a sample per `MetricReport.sample`.
     /// Best-effort — errors are logged and swallowed. Returns the sample count.
@@ -1818,28 +1835,23 @@ impl MetricsService {
         ctx: &GaugeRunContext,
         files: Arc<HashMap<String, String>>,
     ) -> usize {
-        // Built-in gauges run from their embedded script (no project-disk file);
-        // global/project gauges build from their `compute.entryFile`.
-        let collector = if gauge.scope == "built-in" {
-            match builtin_collector(&gauge.key) {
-                Some(c) => c,
-                None => {
-                    tracing::warn!(key = %gauge.key, "gauge: unknown built-in key");
-                    return 0;
-                }
+        match self.gauge_collector(gauge) {
+            Ok(collector) => self.run_gauge_collector(gauge, collector, ctx, files).await,
+            Err(e) => {
+                tracing::warn!(key = %gauge.key, error = %e, "gauge: not run");
+                0
             }
-        } else {
-            // A global gauge's script lives under the global config dir, not the
-            // project; project gauges resolve against the project dir.
-            let base = self.script_base_dir(gauge);
-            match compute_to_collector(gauge, &base, &self.project_dir) {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(key = %gauge.key, error = %e, "gauge: bad compute");
-                    return 0;
-                }
-            }
-        };
+        }
+    }
+
+    /// [`Self::run_one_gauge`] with its collector already built.
+    async fn run_gauge_collector(
+        &self,
+        gauge: &ResolvedGauge,
+        collector: Collector,
+        ctx: &GaugeRunContext,
+        files: Arc<HashMap<String, String>>,
+    ) -> usize {
         let source = gauge_source(gauge, &collector);
         // The report-derived content (if any); tree-derived gauges ignore it.
         let content = match &gauge.compute.report {
@@ -2606,6 +2618,21 @@ fn compute_to_collector(
             }
         }
         "exec" => {
+            // A project gauge's program comes from the repo: it runs only once
+            // a person approved it on this machine (tsk331). A global gauge is
+            // the user's own config.
+            use crate::exec_consent::{may_run, needs_approval, ProgramKind};
+            if gauge.scope == "project"
+                && !may_run(
+                    project_dir,
+                    ProgramKind::Gauge,
+                    &gauge.key,
+                    entry_file,
+                    &c.args,
+                )
+            {
+                return Err(needs_approval(ProgramKind::Gauge, &gauge.key, entry_file));
+            }
             let mut argv = vec![abs.to_string_lossy().into_owned()];
             argv.extend(c.args.iter().cloned());
             Collector::exec(name, CollectorKind::Gauge, formats, argv)
@@ -4691,6 +4718,48 @@ def transform(input):
             .unwrap()
             .iter()
             .any(|d| d.key == "acme.status"));
+    }
+
+    #[tokio::test]
+    async fn a_project_exec_gauge_runs_only_once_a_person_approved_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let (svc, dir) = fixture().await;
+        let script = dir.path().join("tools/count.sh");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho '{\"facts\":[{\"measure\":\"repo.n\",\"value\":2}]}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            oxplow_config::config_path(dir.path()),
+            "measures:\n  - { key: repo.n, title: N }\ngauges:\n  - key: repo.count\n    trigger: manual\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+        )
+        .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
+        let err = svc
+            .metrics
+            .run_metric_by_key("repo.count", None)
+            .await
+            .unwrap_err();
+        assert!(err.contains("approval"), "{err}");
+        let cfg = svc.config.read().unwrap().clone();
+        crate::exec_consent::approve_program(
+            dir.path(),
+            &cfg,
+            crate::exec_consent::ProgramKind::Gauge,
+            "repo.count",
+        )
+        .unwrap();
+        assert_eq!(
+            svc.metrics
+                .run_metric_by_key("repo.count", None)
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
