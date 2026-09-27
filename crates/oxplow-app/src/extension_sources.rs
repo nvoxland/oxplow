@@ -190,12 +190,9 @@ fn parse_schedule(s: &str) -> Option<SourceSchedule> {
         return Some(SourceSchedule::Manual);
     }
     let rest = s.strip_prefix("every ")?.trim();
-    let (n, mult) = if let Some(n) = rest.strip_suffix('m') {
-        (n, 1)
-    } else if let Some(n) = rest.strip_suffix('h') {
-        (n, 60)
-    } else {
-        return None;
+    let (n, mult) = match rest.strip_suffix('m') {
+        Some(n) => (n, 1),
+        None => (rest.strip_suffix('h')?, 60),
     };
     let n: u32 = n.trim().parse().ok().filter(|n| *n > 0)?;
     Some(SourceSchedule::Every { minutes: n * mult })
