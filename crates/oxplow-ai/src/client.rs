@@ -11,9 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{ProviderConfig, ProviderKind};
 
-/// Jev's published price (USD per million input tokens; output is free).
-pub const JEV_USD_PER_M_INPUT: f64 = 0.042;
-
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
 pub enum AiError {
     #[error("{provider}: authentication failed; check the key in Settings → AI")]
@@ -39,8 +36,6 @@ pub struct Completion {
     pub text: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
-    /// Provider-reported cost (OpenRouter), when known.
-    pub cost_usd: Option<f64>,
 }
 
 /// One typed question for `decide`.
@@ -85,7 +80,6 @@ pub struct Decision {
     pub answers: BTreeMap<String, Answer>,
     pub input_tokens: i64,
     pub output_tokens: i64,
-    pub cost_usd: Option<f64>,
 }
 
 /// Talks to one provider.
@@ -241,7 +235,6 @@ impl Client {
             text,
             input_tokens: v["usage"]["input_tokens"].as_i64().unwrap_or(0),
             output_tokens: v["usage"]["output_tokens"].as_i64().unwrap_or(0),
-            cost_usd: None,
         })
     }
 
@@ -263,10 +256,6 @@ impl Client {
         if json {
             body["response_format"] = serde_json::json!({"type": "json_object"});
         }
-        if provider.kind == ProviderKind::Openrouter {
-            // Ask OpenRouter to report the call's cost.
-            body["usage"] = serde_json::json!({"include": true});
-        }
         let url = format!("{}/chat/completions", base_url(provider));
         let v = self.post(provider, &url, bearer(key), body).await?;
         let text = v["choices"][0]["message"]["content"]
@@ -280,7 +269,6 @@ impl Client {
             text,
             input_tokens: v["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
             output_tokens: v["usage"]["completion_tokens"].as_i64().unwrap_or(0),
-            cost_usd: v["usage"]["cost"].as_f64(),
         })
     }
 
@@ -313,14 +301,10 @@ impl Client {
         let body = serde_json::json!({"model": model, "state": state, "questions": qs});
         let v = self.post(provider, url, bearer(key), body).await?;
         let answers = parse_answers(provider, &v["answers"], questions, "noul")?;
-        let input_tokens = v["usage"]["input_tokens"].as_i64().unwrap_or(0);
         Ok(Decision {
             answers,
-            input_tokens,
+            input_tokens: v["usage"]["input_tokens"].as_i64().unwrap_or(0),
             output_tokens: v["usage"]["output_tokens"].as_i64().unwrap_or(0),
-            cost_usd: v["usage"]["cost"].as_f64().or(Some(
-                input_tokens as f64 / 1_000_000.0 * JEV_USD_PER_M_INPUT,
-            )),
         })
     }
 
@@ -377,7 +361,6 @@ impl Client {
             answers,
             input_tokens: c.input_tokens,
             output_tokens: c.output_tokens,
-            cost_usd: c.cost_usd,
         })
     }
 }
@@ -508,7 +491,6 @@ mod tests {
                 text: "hi".into(),
                 input_tokens: 7,
                 output_tokens: 2,
-                cost_usd: None
             }
         );
         let (_, headers, body) = seen.lock().unwrap()[0].clone();
@@ -520,11 +502,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openai_compatible_chat_with_optional_key_and_cost() {
+    async fn openai_compatible_chat_with_optional_key() {
         let (base, seen) = mock(
             "/chat/completions",
             200,
-            json!({"choices": [{"message": {"content": "{\"a\":1}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3, "cost": 0.0012}}),
+            json!({"choices": [{"message": {"content": "{\"a\":1}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}),
         )
         .await;
         let c = Client::default()
@@ -540,7 +522,6 @@ mod tests {
             .unwrap();
         assert_eq!(c.text, "{\"a\":1}");
         assert_eq!((c.input_tokens, c.output_tokens), (5, 3));
-        assert_eq!(c.cost_usd, Some(0.0012));
         let (_, headers, body) = seen.lock().unwrap()[0].clone();
         assert!(
             !headers.contains_key("authorization"),
@@ -595,7 +576,6 @@ mod tests {
             .unwrap();
         assert_eq!(d.answers["risky"], Answer::Noul { probability: 0.8 });
         assert!(matches!(&d.answers["area"], Answer::Choice { choice, .. } if choice == "db"));
-        assert_eq!(d.cost_usd, Some(JEV_USD_PER_M_INPUT));
         let (_, headers, body) = seen.lock().unwrap()[0].clone();
         assert_eq!(headers["authorization"], "Bearer tk");
         assert_eq!(body["state"], "diff…");

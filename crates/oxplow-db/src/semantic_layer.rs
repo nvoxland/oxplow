@@ -692,7 +692,7 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_ai_call",
-        description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and estimated cost. What per-role daily budgets check.",
+        description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded.",
         columns: &[
             ("id", "Row id."),
             ("role", "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`)."),
@@ -702,7 +702,6 @@ const CATALOG: &[CatalogView] = &[
             ("input_tokens", "Input tokens."),
             ("output_tokens", "Output tokens."),
             ("latency_ms", "Round-trip time."),
-            ("cost_usd", "Estimated cost; NULL when the model's price is unknown."),
             ("ok", "1 succeeded, 0 failed."),
             ("error", "Error message when it failed."),
             ("at", "RFC 3339 timestamp."),

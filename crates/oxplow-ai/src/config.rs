@@ -71,9 +71,6 @@ pub struct RoleBinding {
     /// A provider `id`.
     pub provider: String,
     pub model: String,
-    /// Daily spend cap in USD for this role; calls fail once reached.
-    #[serde(default)]
-    pub daily_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -146,11 +143,6 @@ impl AiConfig {
                     "role `{role:?}` needs a model"
                 )));
             }
-            if b.daily_budget_usd.is_some_and(|v| v < 0.0) {
-                return Err(ConfigError::Invalid(format!(
-                    "role `{role:?}` has a negative budget"
-                )));
-            }
         }
         Ok(())
     }
@@ -183,7 +175,7 @@ providers:
   - { id: jev, kind: typesafe }
 roles:
   main: { provider: anthropic, model: claude-opus-5-5 }
-  summarize: { provider: local, model: qwen3:14b, dailyBudgetUsd: 1.5 }
+  summarize: { provider: local, model: qwen3:14b }
   decide: { provider: jev, model: jev-latest }
 "#;
 
@@ -209,7 +201,6 @@ roles:
         let (p, b) = c.resolve(Role::Summarize).unwrap();
         assert_eq!(p.kind, ProviderKind::OpenaiCompatible);
         assert_eq!(b.model, "qwen3:14b");
-        assert_eq!(b.daily_budget_usd, Some(1.5));
         assert!(c.resolve(Role::Embed).is_none());
     }
 
@@ -221,7 +212,6 @@ roles:
             RoleBinding {
                 provider: "local".into(),
                 model: "llama".into(),
-                daily_budget_usd: None,
             },
         );
         let c = cfg().with_overrides(&o);
@@ -242,7 +232,6 @@ roles:
             RoleBinding {
                 provider: "nope".into(),
                 model: "m".into(),
-                daily_budget_usd: None,
             },
         );
         assert!(matches!(bad.validate(), Err(ConfigError::Invalid(m)) if m.contains("nope")));

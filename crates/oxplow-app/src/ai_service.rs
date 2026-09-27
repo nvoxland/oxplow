@@ -1,7 +1,7 @@
 //! Oxplow's model calls, by role. Resolves a role to a provider and model
 //! from the user-global `ai.yaml` (plus any project overrides), fetches the
-//! provider's key from the keychain, refuses calls over the role's daily
-//! budget, and records every call in `ai_call` (`v_ai_call`).
+//! provider's key from the keychain, and records every call in `ai_call`
+//! (`v_ai_call`).
 //! See `.context/ai-providers.md`.
 
 use std::collections::BTreeMap;
@@ -19,12 +19,6 @@ use parking_lot::RwLock;
 pub enum AiServiceError {
     #[error("no model is assigned to the `{0}` role (Settings → AI)")]
     NotConfigured(String),
-    #[error("the `{role}` role has spent ${spent:.2} of its ${budget:.2} daily budget")]
-    OverBudget {
-        role: String,
-        spent: f64,
-        budget: f64,
-    },
     #[error("AI settings: {0}")]
     Config(String),
     #[error("keychain: {0}")]
@@ -83,7 +77,7 @@ impl AiService {
         prompt: &str,
         json: bool,
     ) -> Result<Completion, AiServiceError> {
-        let (provider, binding, key) = self.prepare(role).await?;
+        let (provider, binding, key) = self.prepare(role)?;
         let started = Instant::now();
         let result = self
             .client
@@ -96,9 +90,7 @@ impl AiService {
                 json,
             )
             .await;
-        let outcome = result
-            .as_ref()
-            .map(|c| (c.input_tokens, c.output_tokens, c.cost_usd));
+        let outcome = result.as_ref().map(|c| (c.input_tokens, c.output_tokens));
         self.record(role, caller, &provider, &binding, started, outcome)
             .await;
         Ok(result?)
@@ -112,24 +104,22 @@ impl AiService {
         state: &str,
         questions: &BTreeMap<String, Question>,
     ) -> Result<Decision, AiServiceError> {
-        let (provider, binding, key) = self.prepare(role).await?;
+        let (provider, binding, key) = self.prepare(role)?;
         let started = Instant::now();
         let result = self
             .client
             .decide(&provider, key.as_deref(), &binding.model, state, questions)
             .await;
-        let outcome = result
-            .as_ref()
-            .map(|d| (d.input_tokens, d.output_tokens, d.cost_usd));
+        let outcome = result.as_ref().map(|d| (d.input_tokens, d.output_tokens));
         self.record(role, caller, &provider, &binding, started, outcome)
             .await;
         Ok(result?)
     }
 
-    /// Resolve `role`, check its budget, and fetch its provider's key.
+    /// Resolve `role` and fetch its provider's key.
     /// Keys are stored under the provider id; a provider without one (a
     /// local server) is called without auth.
-    async fn prepare(
+    fn prepare(
         &self,
         role: Role,
     ) -> Result<(ProviderConfig, RoleBinding, Option<String>), AiServiceError> {
@@ -138,20 +128,6 @@ impl AiService {
             .resolve(role)
             .map(|(p, b)| (p.clone(), b.clone()))
             .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))?;
-        if let Some(budget) = binding.daily_budget_usd {
-            let spent = self
-                .calls
-                .spent_since(&role_name(role), &start_of_today())
-                .await
-                .map_err(|e| AiServiceError::Config(e.to_string()))?;
-            if spent >= budget {
-                return Err(AiServiceError::OverBudget {
-                    role: role_name(role),
-                    spent,
-                    budget,
-                });
-            }
-        }
         let key = self
             .secrets
             .get(&provider.id)
@@ -166,9 +142,9 @@ impl AiService {
         provider: &ProviderConfig,
         binding: &RoleBinding,
         started: Instant,
-        outcome: Result<(i64, i64, Option<f64>), &AiError>,
+        outcome: Result<(i64, i64), &AiError>,
     ) {
-        let (input_tokens, output_tokens, cost_usd) = outcome.unwrap_or((0, 0, None));
+        let (input_tokens, output_tokens) = outcome.unwrap_or((0, 0));
         let error = outcome.err();
         let call = NewAiCall {
             role: role_name(role),
@@ -178,7 +154,6 @@ impl AiService {
             input_tokens,
             output_tokens,
             latency_ms: started.elapsed().as_millis() as i64,
-            cost_usd,
             ok: error.is_none(),
             error: error.map(|e| e.to_string()),
         };
@@ -196,17 +171,6 @@ fn role_name(role: Role) -> String {
         .unwrap_or_default()
 }
 
-/// Midnight UTC today, in the RFC 3339 form `ai_call.at` is stored in, so
-/// the two compare as strings.
-fn start_of_today() -> String {
-    let now = oxplow_domain::Timestamp::now().unix_ms();
-    let midnight = oxplow_domain::Timestamp::from_unix_ms(now - now.rem_euclid(86_400_000));
-    serde_json::to_value(midnight)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,14 +181,13 @@ mod tests {
     use oxplow_db::Database;
     use serde_json::json;
 
-    fn chat_reply(cost: f64) -> serde_json::Value {
+    fn chat_reply() -> serde_json::Value {
         json!({"choices": [{"message": {"content": "hello"}}],
-               "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": cost}})
+               "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
     }
 
-    /// A service whose `summarize` role points at `base` (an OpenRouter-kind
-    /// provider, so the mock's `usage.cost` is read), with `budget`.
-    fn service(base: &str, budget: Option<f64>, dir: &tempfile::TempDir) -> (AiService, Database) {
+    /// A service whose `summarize` role points at `base`.
+    fn service(base: &str, dir: &tempfile::TempDir) -> (AiService, Database) {
         let cfg = AiConfig {
             providers: vec![ProviderConfig {
                 id: "or".into(),
@@ -236,7 +199,6 @@ mod tests {
                 RoleBinding {
                     provider: "or".into(),
                     model: "m".into(),
-                    daily_budget_usd: budget,
                 },
             )]),
         };
@@ -251,11 +213,11 @@ mod tests {
         )
     }
 
-    /// `v_ai_call` rows as `[role, caller, ok, error is set]`.
+    /// `v_ai_call` rows as `[role, caller, ok, error is set, input_tokens]`.
     async fn recorded(db: &Database) -> serde_json::Value {
         let out = oxplow_db::SemanticLayer::new(db.clone())
             .query_sql(
-                "SELECT role, caller, ok, error IS NOT NULL, cost_usd FROM v_ai_call ORDER BY id",
+                "SELECT role, caller, ok, error IS NOT NULL, input_tokens FROM v_ai_call ORDER BY id",
                 vec![],
                 None,
             )
@@ -266,9 +228,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_call_uses_the_role_binding_and_keychain_key_and_is_recorded() {
-        let (base, seen) = mock("/chat/completions", 200, chat_reply(0.25)).await;
+        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         let dir = tempfile::tempdir().unwrap();
-        let (svc, db) = service(&base, None, &dir);
+        let (svc, db) = service(&base, &dir);
         let c = svc
             .complete(Role::Summarize, "ext:review", None, "hi", false)
             .await
@@ -279,14 +241,14 @@ mod tests {
         assert_eq!(body["model"], "m");
         assert_eq!(
             recorded(&db).await,
-            json!([["summarize", "ext:review", 1, 0, 0.25]])
+            json!([["summarize", "ext:review", 1, 0, 10]])
         );
     }
 
     #[tokio::test]
     async fn an_unassigned_role_is_explained() {
         let dir = tempfile::tempdir().unwrap();
-        let (svc, _) = service("http://127.0.0.1:1", None, &dir);
+        let (svc, _) = service("http://127.0.0.1:1", &dir);
         let err = svc
             .complete(Role::Main, "core", None, "hi", false)
             .await
@@ -296,15 +258,14 @@ mod tests {
 
     #[tokio::test]
     async fn project_overrides_win_over_the_global_file() {
-        let (base, seen) = mock("/chat/completions", 200, chat_reply(0.0)).await;
+        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
         let dir = tempfile::tempdir().unwrap();
-        let (svc, _) = service(&base, None, &dir);
+        let (svc, _) = service(&base, &dir);
         svc.set_overrides(BTreeMap::from([(
             Role::Main,
             RoleBinding {
                 provider: "or".into(),
                 model: "big".into(),
-                daily_budget_usd: None,
             },
         )]));
         svc.complete(Role::Main, "core", None, "hi", false)
@@ -314,42 +275,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn calls_stop_once_the_daily_budget_is_spent() {
-        let (base, seen) = mock("/chat/completions", 200, chat_reply(0.6)).await;
-        let dir = tempfile::tempdir().unwrap();
-        let (svc, _) = service(&base, Some(1.0), &dir);
-        svc.complete(Role::Summarize, "core", None, "a", false)
-            .await
-            .unwrap();
-        svc.complete(Role::Summarize, "core", None, "b", false)
-            .await
-            .unwrap();
-        let err = svc
-            .complete(Role::Summarize, "core", None, "c", false)
-            .await
-            .unwrap_err();
-        assert!(matches!(err, AiServiceError::OverBudget { .. }), "{err:?}");
-        assert_eq!(
-            seen.lock().unwrap().len(),
-            2,
-            "the third call never reached the provider"
-        );
-    }
-
-    #[tokio::test]
     async fn failed_calls_are_recorded_too() {
         let (base, _) = mock("/chat/completions", 401, json!({})).await;
         let dir = tempfile::tempdir().unwrap();
-        let (svc, db) = service(&base, None, &dir);
+        let (svc, db) = service(&base, &dir);
         let err = svc
             .complete(Role::Summarize, "core", None, "a", false)
             .await
             .unwrap_err();
         assert!(matches!(err, AiServiceError::Call(AiError::Auth { .. })));
-        assert_eq!(
-            recorded(&db).await,
-            json!([["summarize", "core", 0, 1, null]])
-        );
+        assert_eq!(recorded(&db).await, json!([["summarize", "core", 0, 1, 0]]));
     }
 
     #[tokio::test]
@@ -362,7 +297,7 @@ mod tests {
         )
         .await;
         let dir = tempfile::tempdir().unwrap();
-        let (svc, _) = service(&base, None, &dir);
+        let (svc, _) = service(&base, &dir);
         let qs = BTreeMap::from([(
             "ok".to_string(),
             Question::Noul {

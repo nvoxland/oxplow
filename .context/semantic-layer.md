@@ -88,7 +88,7 @@ This generalizes today's `metric_spec`, which aggregates facts only.
 | tests & coverage | test_run, test_case | coverage, pass/fail |
 | code metrics | function, file | complexity, length, params |
 | agent | session, turn, tool_call, hook_event, context_read | tokens, struggle |
-| ai | ai_call | cost, latency |
+| ai | ai_call | tokens, latency |
 | usage | page_visit | — |
 
 New primitives that don't exist yet:
@@ -136,7 +136,7 @@ never the physical tables, which stay internal and free to change.
 | `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |
 | `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |
-| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, cost, ok/error (V78; see [ai-providers.md](./ai-providers.md)) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error (V78; see [ai-providers.md](./ai-providers.md)) |
 
 Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`
 and the rest of the shipped-sources table above.

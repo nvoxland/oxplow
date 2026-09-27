@@ -2,10 +2,10 @@
 
 This doc covers oxplow's own access to models over their APIs: the
 providers you configure, the roles that decide which model does what, the
-`ai_*` functions sources and lenses call, and how spend is tracked.
+`ai_*` functions sources and lenses call, and how calls are recorded.
 
 > **Status (epic tsk275):** the core is built: providers, keychain keys,
-> roles, the client, budgets and call records (`oxplow-ai`,
+> roles, the client and call records (`oxplow-ai`,
 > `oxplow-app/src/ai_service.rs`, `v_ai_call`). **Not yet:** the Settings → AI
 > page, IPC and MCP tools (tsk300), project role overrides from
 > `project.yaml` (`AiService::set_overrides` exists, nothing calls it yet),
@@ -45,7 +45,7 @@ What can be called, as of 2026-09:
     - { id: local, kind: openai-compatible, baseUrl: http://localhost:11434/v1 }
     - { id: ts, kind: typesafe }
   roles:
-    summarize: { provider: or, model: openai/gpt-5-mini, dailyBudgetUsd: 1.0 }
+    summarize: { provider: or, model: openai/gpt-5-mini }
     decide:    { provider: ts, model: jev-latest }
   ```
 
@@ -62,7 +62,7 @@ What can be called, as of 2026-09:
 ## Roles
 
 Extensions and core refer to **roles, never to models**. Each role maps to
-`{provider, model, dailyBudgetUsd}`. Defaults are global; a project will be
+`{provider, model}`. Defaults are global; a project will be
 able to override them (target: in `.oxplow/project.yaml`).
 
 | Role | Used for |
@@ -78,12 +78,11 @@ able to override them (target: in `.oxplow/project.yaml`).
 
 - `oxplow_ai::client::Client`, hand-rolled on the workspace's `reqwest`
   rather than `genai`: we need three small request shapes, and owning them
-  keeps Jev's API and OpenRouter's reported cost first-class.
+  keeps Jev's typed-question API first-class.
   - Anthropic Messages: `POST {base}/v1/messages`, `x-api-key`,
     `anthropic-version: 2023-06-01`.
   - OpenAI, OpenRouter, compatible servers: `POST {base}/chat/completions`,
     Bearer key, `response_format: json_object` when JSON is asked for.
-    OpenRouter is asked to include `usage.cost`, which becomes the call's cost.
   - TypeSafe Jev: `POST {base}/v1/systemone` with `{model, state,
     questions}`. A `noul` (yes/no) question has no criteria, a `choice`
     question's criteria are `{option: null}`, and a `score` question's are
@@ -98,16 +97,12 @@ able to override them (target: in `.oxplow/project.yaml`).
   `Answer` derive: a dependency turns on serde_json's `arbitrary_precision`,
   which breaks numbers inside internally tagged enums.
 - `AiService` (in `oxplow-app`, on `Services.ai`) is what callers use:
-  role → provider + model + keychain key → budget check → call → record.
-- **Cost** is the provider-reported value (OpenRouter) or, for Jev, input
-  tokens × $0.042/M. Other providers record no cost. **Budgets count only
-  known costs**: a role on a provider that reports none is never stopped by
-  its budget.
-- Budgets are per role per UTC day. A call over budget fails with
-  `OverBudget` before reaching the provider.
+  role → provider + model + keychain key → call → record.
+- **No budgets or cost tracking**, by the owner's decision (2026-09-26).
+  Don't add them back without asking. Tokens are recorded.
 - Every call, including failures, is a row in `ai_call` / `v_ai_call`
-  (role, provider, model, caller, tokens, latency, cost, ok, error), so AI
-  spend is itself queryable in the [semantic layer](./semantic-layer.md).
+  (role, provider, model, caller, tokens, latency, ok, error), so AI
+  usage is itself queryable in the [semantic layer](./semantic-layer.md).
 - Tests use `oxplow_ai::testing::mock` (feature `test-support`), a local
   axum server standing in for a provider.
 
@@ -129,5 +124,4 @@ One page answers "which model is used for what":
 
 - providers (connect, test);
 - roles (assign a model);
-- usage and spend this week, per extension;
-- budget caps.
+- recent calls, per role and caller.

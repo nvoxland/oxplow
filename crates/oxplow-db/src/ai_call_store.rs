@@ -1,5 +1,4 @@
-//! Records of oxplow's own model calls (`ai_call` → `v_ai_call`), and
-//! the per-role spend that daily budgets check. See
+//! Records of oxplow's own model calls (`ai_call` → `v_ai_call`). See
 //! `.context/ai-providers.md`.
 
 use oxplow_domain::DomainError;
@@ -15,7 +14,6 @@ pub struct NewAiCall {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub latency_ms: i64,
-    pub cost_usd: Option<f64>,
     pub ok: bool,
     pub error: Option<String>,
 }
@@ -38,8 +36,8 @@ impl SqliteAiCallStore {
         self.db
             .call(move |c| {
                 c.execute(
-                    "INSERT INTO ai_call (role, provider, model, caller, input_tokens, output_tokens, latency_ms, cost_usd, ok, error, at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    "INSERT INTO ai_call (role, provider, model, caller, input_tokens, output_tokens, latency_ms, ok, error, at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     rusqlite::params![
                         call.role,
                         call.provider,
@@ -48,28 +46,12 @@ impl SqliteAiCallStore {
                         call.input_tokens,
                         call.output_tokens,
                         call.latency_ms,
-                        call.cost_usd,
                         i64::from(call.ok),
                         call.error,
                         at
                     ],
                 )
                 .map(|_| ())
-            })
-            .await
-    }
-
-    /// Estimated USD spent by `role` since `since` (RFC 3339). Calls with
-    /// an unknown price count as 0.
-    pub async fn spent_since(&self, role: &str, since: &str) -> Result<f64, DomainError> {
-        let (role, since) = (role.to_string(), since.to_string());
-        self.db
-            .call(move |c| {
-                c.query_row(
-                    "SELECT COALESCE(SUM(cost_usd), 0) FROM ai_call WHERE role = ?1 AND at >= ?2",
-                    rusqlite::params![role, since],
-                    |r| r.get(0),
-                )
             })
             .await
     }
@@ -80,7 +62,7 @@ mod tests {
     use super::*;
     use crate::SemanticLayer;
 
-    fn call(role: &str, cost: Option<f64>) -> NewAiCall {
+    fn call(role: &str) -> NewAiCall {
         NewAiCall {
             role: role.into(),
             provider: "p".into(),
@@ -89,35 +71,21 @@ mod tests {
             input_tokens: 10,
             output_tokens: 5,
             latency_ms: 42,
-            cost_usd: cost,
             ok: true,
             error: None,
         }
     }
 
     #[tokio::test]
-    async fn records_calls_and_sums_spend_per_role() {
+    async fn records_calls_into_v_ai_call() {
         let db = Database::in_memory();
         let store = SqliteAiCallStore::new(db.clone());
-        store.record(call("summarize", Some(0.25))).await.unwrap();
-        store.record(call("summarize", Some(0.5))).await.unwrap();
-        store.record(call("summarize", None)).await.unwrap(); // unknown price counts as 0
-        store.record(call("decide", Some(9.0))).await.unwrap();
-        let spent = store
-            .spent_since("summarize", "2000-01-01T00:00:00Z")
-            .await
-            .unwrap();
-        assert!((spent - 0.75).abs() < 1e-9, "{spent}");
-        assert_eq!(
-            store
-                .spent_since("summarize", "2999-01-01T00:00:00Z")
-                .await
-                .unwrap(),
-            0.0
-        );
+        store.record(call("summarize")).await.unwrap();
+        store.record(call("summarize")).await.unwrap();
+        store.record(call("decide")).await.unwrap();
         let out = SemanticLayer::new(db)
             .query_sql(
-                "SELECT role, count(*) FROM v_ai_call GROUP BY role ORDER BY role",
+                "SELECT role, count(*), sum(input_tokens) FROM v_ai_call GROUP BY role ORDER BY role",
                 vec![],
                 None,
             )
@@ -125,7 +93,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([["decide", 1], ["summarize", 3]])
+            serde_json::json!([["decide", 1, 10], ["summarize", 2, 20]])
         );
     }
 }
