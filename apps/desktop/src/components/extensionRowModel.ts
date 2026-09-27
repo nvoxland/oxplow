@@ -15,15 +15,18 @@ export interface ExtensionRowModel {
 
 export function extensionRowModel(ext: Extension): ExtensionRowModel {
   const src = ext.source;
-  const origin = src
-    ? `${src.git}${src.gitRef ? ` @ ${src.gitRef}` : ""} (${src.sha.slice(0, 7)})`
-    : "In this repo";
+  const origin =
+    ext.origin === "bundled"
+      ? "Ships with oxplow"
+      : src
+        ? `${src.git}${src.gitRef ? ` @ ${src.gitRef}` : ""} (${src.sha.slice(0, 7)})`
+        : "In this repo";
   return {
     name: ext.name,
     description: ext.description,
     lensCount: ext.lenses.length,
     origin,
-    canUpdate: src !== null,
+    canUpdate: src !== null && ext.origin !== "bundled",
     healthy: ext.errors.length === 0,
     errors: ext.errors,
   };

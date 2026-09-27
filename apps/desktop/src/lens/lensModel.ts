@@ -165,3 +165,16 @@ export function rowMention(lensId: string, columns: string[], row: SqlCell[]): s
   const fields = columns.map((c, i) => `${c}=${JSON.stringify(row[i] ?? null)}`).join(", ");
   return `[oxplow lens ${lensId} row: ${fields}] `;
 }
+
+/** Lens ids extensions mount into `slot` (e.g. `effort-review`), in
+ *  extension order. */
+export function slotMounts(extensions: Extension[], slot: string): string[] {
+  return extensions.flatMap((e) => e.slots.filter((s) => s.slot === slot).map((s) => s.lensId));
+}
+
+/** The numeric row id the `v_*` views use, from a UI effort id like
+ *  `eff262` (or a bare number). */
+export function effortRowId(effortId: string): number | null {
+  const m = /^(?:eff)?(\d+)$/.exec(effortId);
+  return m ? Number(m[1]) : null;
+}

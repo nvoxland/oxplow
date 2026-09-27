@@ -118,6 +118,28 @@ struct ExtensionFile {
     /// one bad source doesn't fail the whole manifest.
     #[serde(default)]
     sources: Option<serde_yaml::Value>,
+    #[serde(default)]
+    slots: Vec<SlotFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SlotFile {
+    slot: String,
+    lens: String,
+}
+
+/// Places in core pages an extension can mount a lens.
+pub const SLOTS: &[&str] = &["effort-review"];
+
+/// A lens an extension mounts into a core page.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensSlot {
+    /// Which page: `effort-review` (an effort's diff view, which binds
+    /// `:effort_id`).
+    pub slot: String,
+    pub lens_id: String,
 }
 
 /// A loaded lens.
@@ -157,6 +179,11 @@ pub struct Extension {
     pub source: Option<ExtensionSource>,
     /// Declared data sources (valid ones; invalid ones are in `errors`).
     pub sources: Vec<crate::extension_sources::SourceSpec>,
+    /// `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+    /// read-only).
+    pub origin: String,
+    /// Lenses mounted into core pages.
+    pub slots: Vec<LensSlot>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -184,45 +211,120 @@ pub struct LensRun {
     pub result: SqlQueryResult,
 }
 
-/// Load every project extension under `root/oxplow/extensions/`.
-/// Missing directory = no extensions.
+/// Load bundled extensions plus every project extension under
+/// `root/oxplow/extensions/`, sorted by name. A project extension using a
+/// bundled name is listed with an error and never shadows the bundled one.
 pub fn load_extensions(root: &Path) -> Vec<Extension> {
-    let Ok(entries) = std::fs::read_dir(root.join(EXTENSIONS_DIR)) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| !n.starts_with('.'))
+    let mut out: Vec<Extension> = crate::bundled_extensions::BUNDLED
+        .iter()
+        .map(|b| {
+            load_one(
+                &Embedded(b),
+                b.name,
+                &format!("bundled:{}", b.name),
+                "bundled",
+            )
+        })
         .collect();
-    names.sort();
-    names.iter().map(|n| load_one(root, n)).collect()
+    if let Ok(entries) = std::fs::read_dir(root.join(EXTENSIONS_DIR)) {
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| !n.starts_with('.'))
+            .collect();
+        names.sort();
+        for n in names {
+            let rel = format!("{EXTENSIONS_DIR}/{n}");
+            if crate::bundled_extensions::is_reserved(&n) {
+                out.push(Extension {
+                    errors: vec![format!(
+                        "{rel}: the name `{n}` is reserved for an extension that ships with oxplow; rename the folder"
+                    )],
+                    ..empty_extension(&n, &rel, "project")
+                });
+                continue;
+            }
+            out.push(load_one(&Disk(root.join(&rel)), &n, &rel, "project"));
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
+    out
 }
 
-/// Load one extension folder. Always returns an `Extension`; problems
-/// go in `errors`.
-fn load_one(root: &Path, name: &str) -> Extension {
-    let rel = format!("{EXTENSIONS_DIR}/{name}");
-    let dir = root.join(&rel);
-    let mut ext = Extension {
+/// Where an extension's files come from.
+trait ExtensionFiles {
+    /// Contents of a file, by path inside the extension folder.
+    fn read(&self, rel: &str) -> Option<String>;
+    /// File names directly inside `dir` (e.g. `lenses`).
+    fn list(&self, dir: &str) -> Vec<String>;
+}
+
+struct Disk(std::path::PathBuf);
+
+impl ExtensionFiles for Disk {
+    fn read(&self, rel: &str) -> Option<String> {
+        std::fs::read_to_string(self.0.join(rel)).ok()
+    }
+    fn list(&self, dir: &str) -> Vec<String> {
+        std::fs::read_dir(self.0.join(dir))
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+struct Embedded(&'static crate::bundled_extensions::BundledExtension);
+
+impl ExtensionFiles for Embedded {
+    fn read(&self, rel: &str) -> Option<String> {
+        self.0
+            .files
+            .iter()
+            .find(|(p, _)| *p == rel)
+            .map(|(_, c)| (*c).to_string())
+    }
+    fn list(&self, dir: &str) -> Vec<String> {
+        let prefix = format!("{dir}/");
+        self.0
+            .files
+            .iter()
+            .filter_map(|(p, _)| p.strip_prefix(&prefix))
+            .filter(|rest| !rest.contains('/'))
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
+    Extension {
         name: name.to_string(),
         description: String::new(),
-        path: rel.clone(),
+        path: path.to_string(),
         errors: Vec::new(),
         lenses: Vec::new(),
         source: None,
         sources: Vec::new(),
-    };
+        origin: origin.to_string(),
+        slots: Vec::new(),
+    }
+}
 
-    let manifest = match std::fs::read_to_string(dir.join("extension.yaml")) {
-        Ok(text) => text,
-        Err(_) => {
-            ext.errors.push(format!("{rel}: missing extension.yaml"));
-            return ext;
-        }
+/// Load one extension. Always returns an `Extension`; problems go in
+/// `errors`. `rel` is how its paths are shown (a repo-relative folder,
+/// or `bundled:<name>`).
+fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> Extension {
+    let mut ext = empty_extension(name, rel, origin);
+
+    let Some(manifest) = files.read("extension.yaml") else {
+        ext.errors.push(format!("{rel}: missing extension.yaml"));
+        return ext;
     };
-    match serde_yaml::from_str::<ExtensionFile>(&manifest) {
+    let slot_files = match serde_yaml::from_str::<ExtensionFile>(&manifest) {
         Ok(m) if m.name != name => {
             ext.errors.push(format!(
                 "{rel}/extension.yaml: name `{}` must match its folder `{name}`",
@@ -241,36 +343,35 @@ fn load_one(root: &Path, name: &str) -> Extension {
                         .map(|e| format!("{rel}/extension.yaml: {e}")),
                 );
             }
+            m.slots
         }
         Err(e) => {
             ext.errors.push(format!("{rel}/extension.yaml: {e}"));
             return ext;
         }
-    }
-    if let Ok(text) = std::fs::read_to_string(dir.join(SOURCE_FILE)) {
+    };
+    if let Some(text) = files.read(SOURCE_FILE) {
         match serde_yaml::from_str::<ExtensionSource>(&text) {
             Ok(src) => ext.source = Some(src),
             Err(e) => ext.errors.push(format!("{rel}/{SOURCE_FILE}: {e}")),
         }
     }
 
-    let Ok(entries) = std::fs::read_dir(dir.join("lenses")) else {
-        return ext;
-    };
-    let mut files: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|e| e.file_name().into_string().ok())
+    let mut lens_files: Vec<String> = files
+        .list("lenses")
+        .into_iter()
         .filter(|f| f.ends_with(".yaml") || f.ends_with(".yml"))
         .collect();
-    files.sort();
-    for file in files {
+    lens_files.sort();
+    for file in lens_files {
         let slug = file
             .trim_end_matches(".yaml")
             .trim_end_matches(".yml")
             .to_string();
         let lens_rel = format!("{rel}/lenses/{file}");
-        let parsed = std::fs::read_to_string(root.join(&lens_rel))
-            .map_err(|e| e.to_string())
+        let parsed = files
+            .read(&format!("lenses/{file}"))
+            .ok_or_else(|| "unreadable".to_string())
             .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()));
         match parsed {
             Ok(l) => ext.lenses.push(Lens {
@@ -289,18 +390,47 @@ fn load_one(root: &Path, name: &str) -> Extension {
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
         }
     }
+
+    for s in slot_files {
+        if !SLOTS.contains(&s.slot.as_str()) {
+            ext.errors.push(format!(
+                "{rel}/extension.yaml: unknown slot `{}` (known: {})",
+                s.slot,
+                SLOTS.join(", ")
+            ));
+        } else if !ext.lenses.iter().any(|l| l.slug == s.lens) {
+            ext.errors.push(format!(
+                "{rel}/extension.yaml: slot `{}` mounts lens `{}`, which isn't in lenses/",
+                s.slot, s.lens
+            ));
+        } else {
+            ext.slots.push(LensSlot {
+                slot: s.slot,
+                lens_id: format!("{name}/{}", s.lens),
+            });
+        }
+    }
     ext
 }
 
 /// Load the extension named `name`, if its folder exists.
 fn load_named(root: &Path, name: &str) -> Result<Extension, DomainError> {
+    if let Some(b) = crate::bundled_extensions::find(name) {
+        return Ok(load_one(
+            &Embedded(b),
+            b.name,
+            &format!("bundled:{}", b.name),
+            "bundled",
+        ));
+    }
     if name.is_empty()
         || name.contains(['/', '\\', '.'])
         || !root.join(EXTENSIONS_DIR).join(name).is_dir()
     {
         return Err(DomainError::NotFound);
     }
-    Ok(load_one(root, name))
+    let rel = format!("{EXTENSIONS_DIR}/{name}");
+    Ok(load_one(&Disk(root.join(&rel)), name, &rel, "project"))
 }
 
 /// Find one lens by `<extension>/<slug>`.
@@ -526,6 +656,11 @@ fn install_from_git(
     let manifest: ExtensionFile = serde_yaml::from_str(&manifest)
         .map_err(|e| invalid(format!("{git_url}: extension.yaml: {e}")))?;
     let name = manifest.name;
+    if crate::bundled_extensions::is_reserved(&name) {
+        return Err(invalid(format!(
+            "`{name}` is the name of an extension that ships with oxplow; it can't be installed over"
+        )));
+    }
     if !is_valid_name(&name) {
         return Err(invalid(format!(
             "extension name `{name}` must be lowercase letters, digits and single dashes"
@@ -559,7 +694,8 @@ fn install_from_git(
     let yaml = serde_yaml::to_string(&source)
         .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
     std::fs::write(target.join(SOURCE_FILE), yaml).map_err(storage)?;
-    Ok(load_one(root, &name))
+    Ok(load_named(root, &name)
+        .unwrap_or_else(|_| empty_extension(&name, &format!("{EXTENSIONS_DIR}/{name}"), "project")))
 }
 
 /// Copy regular files and directories from `from` to `to`, skipping
@@ -617,6 +753,11 @@ pub fn save_lens(
     if !is_valid_name(slug) {
         return Err(invalid(format!(
             "lens slug `{slug}` must be lowercase letters, digits and single dashes"
+        )));
+    }
+    if crate::bundled_extensions::is_reserved(extension) {
+        return Err(invalid(format!(
+            "`{extension}` is a bundled extension (read-only); save to another extension"
         )));
     }
     let dir = root.join(EXTENSIONS_DIR).join(extension);
@@ -686,10 +827,18 @@ empty: No tasks.
         SemanticLayer::new(Database::in_memory())
     }
 
+    /// Project extensions only (bundled ones are always present).
+    fn project_extensions(root: &Path) -> Vec<Extension> {
+        load_extensions(root)
+            .into_iter()
+            .filter(|e| e.origin == "project")
+            .collect()
+    }
+
     #[test]
-    fn no_extensions_dir_means_no_extensions() {
+    fn no_extensions_dir_means_no_project_extensions() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_extensions(dir.path()).is_empty());
+        assert!(project_extensions(dir.path()).is_empty());
     }
 
     #[test]
@@ -702,7 +851,7 @@ empty: No tasks.
             LENS,
         );
 
-        let exts = load_extensions(dir.path());
+        let exts = project_extensions(dir.path());
         assert_eq!(exts.len(), 1);
         let e = &exts[0];
         assert_eq!(e.name, "review");
@@ -754,7 +903,7 @@ empty: No tasks.
             "name: other\n",
         );
 
-        let exts = load_extensions(dir.path());
+        let exts = project_extensions(dir.path());
         let by = |n: &str| {
             exts.iter()
                 .find(|e| e.name == n)
@@ -967,7 +1116,7 @@ empty: No tasks.
         );
         assert!(dir.join(SOURCE_FILE).is_file());
         // Loading later still reports the source.
-        assert_eq!(load_extensions(project.path())[0].source, Some(src));
+        assert_eq!(project_extensions(project.path())[0].source, Some(src));
         // The temporary clone is gone.
         let tmp = project.path().join(".oxplow/tmp");
         assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
@@ -1070,7 +1219,7 @@ empty: No tasks.
             .path()
             .join("oxplow/extensions/mine/extension.yaml")
             .is_file());
-        let ext = &load_extensions(project.path())[0];
+        let ext = &project_extensions(project.path())[0];
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
 
         let err = save_lens(project.path(), "mine", "open-tasks", new()).unwrap_err();
@@ -1129,7 +1278,7 @@ empty: No tasks.
             "oxplow/extensions/review/lenses/by-status.yaml",
             LENS,
         );
-        let e = &load_extensions(dir.path())[0];
+        let e = &project_extensions(dir.path())[0];
         assert_eq!(e.sources.len(), 1);
         assert_eq!(e.sources[0].entities[0].view, "v_review_pr");
         assert_eq!(e.errors.len(), 1, "{:?}", e.errors);
@@ -1165,5 +1314,102 @@ empty: No tasks.
         );
         let e = validate_extension(&sl, dir.path(), "gh").await.unwrap();
         assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
+    }
+
+    #[tokio::test]
+    async fn bundled_extensions_load_validate_and_mount_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        let exts = load_extensions(dir.path());
+        let review = exts
+            .iter()
+            .find(|e| e.name == "oxplow-review")
+            .expect("bundled extension present");
+        assert_eq!(review.origin, "bundled");
+        assert!(review.errors.is_empty(), "{:?}", review.errors);
+        assert!(review
+            .lenses
+            .iter()
+            .any(|l| l.id == "oxplow-review/decisions"));
+        assert!(review
+            .slots
+            .iter()
+            .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/decisions"));
+        // Every bundled lens's SQL runs against a real schema.
+        let v = validate_extension(&layer().await, dir.path(), "oxplow-review")
+            .await
+            .unwrap();
+        assert!(v.errors.is_empty(), "{:?}", v.errors);
+        assert_eq!(
+            find_lens(dir.path(), "oxplow-review/decisions")
+                .unwrap()
+                .title,
+            "Decisions Made"
+        );
+    }
+
+    #[test]
+    fn bundled_names_are_reserved() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/oxplow-review/extension.yaml",
+            "name: oxplow-review\n",
+        );
+        let exts = load_extensions(dir.path());
+        let named: Vec<&Extension> = exts.iter().filter(|e| e.name == "oxplow-review").collect();
+        assert_eq!(named.len(), 2);
+        let project = named.iter().find(|e| e.origin == "project").unwrap();
+        assert!(
+            project.errors[0].contains("reserved"),
+            "{:?}",
+            project.errors
+        );
+        // The bundled one still wins lookups.
+        assert_eq!(
+            find_lens(dir.path(), "oxplow-review/decisions")
+                .unwrap()
+                .title,
+            "Decisions Made"
+        );
+        let err = save_lens(
+            dir.path(),
+            "oxplow-review",
+            "x",
+            NewLens {
+                title: "X".into(),
+                description: String::new(),
+                query: "SELECT 1".into(),
+                viz: LensViz::Number,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("bundled")),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn slots_must_name_a_known_slot_and_an_existing_lens() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/mine/extension.yaml",
+            "name: mine\nslots:\n  - { slot: effort-review, lens: nope }\n  - { slot: sidebar, lens: a }\n  - { slot: effort-review, lens: a }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/mine/lenses/a.yaml",
+            "title: A\nquery: SELECT 1\n",
+        );
+        let e = load_extensions(dir.path())
+            .into_iter()
+            .find(|e| e.name == "mine")
+            .unwrap();
+        assert_eq!(e.slots.len(), 1);
+        assert_eq!(e.slots[0].lens_id, "mine/a");
+        assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
+        assert!(e.errors.iter().any(|m| m.contains("nope")));
+        assert!(e.errors.iter().any(|m| m.contains("sidebar")));
     }
 }

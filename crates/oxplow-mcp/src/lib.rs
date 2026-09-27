@@ -6140,7 +6140,15 @@ mod tests {
             .iter()
             .map(|l| l["id"].as_str().unwrap())
             .collect();
-        assert_eq!(ids, vec!["demo/broken", "demo/streams"]);
+        // Project lenses, plus the bundled oxplow-review ones.
+        assert!(
+            ids.contains(&"demo/broken") && ids.contains(&"demo/streams"),
+            "{ids:?}"
+        );
+        assert!(
+            ids.iter().any(|i| i.starts_with("oxplow-review/")),
+            "{ids:?}"
+        );
 
         let lens: serde_json::Value = serde_json::from_str(&text_payload(
             server

@@ -17,6 +17,7 @@ pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
 pub mod boot;
+pub mod bundled_extensions;
 pub mod code_quality_runner;
 pub mod collection;
 pub mod commit_indexer;

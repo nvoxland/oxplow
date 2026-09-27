@@ -2183,6 +2183,13 @@ export type Extension = {
 	source: ExtensionSource | null,
 	// Declared data sources (valid ones; invalid ones are in `errors`).
 	sources: SourceSpec[],
+	/**
+	 *  `project` (in `oxplow/extensions/`) or `bundled` (ships with oxplow,
+	 *  read-only).
+	 */
+	origin: string,
+	// Lenses mounted into core pages.
+	slots: LensSlot[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -2657,6 +2664,16 @@ export type LensRun = {
 	// The parameter values actually used (supplied or default).
 	params: { [key in string]: SqlCell },
 	result: SqlQueryResult,
+};
+
+// A lens an extension mounts into a core page.
+export type LensSlot = {
+	/**
+	 *  Which page: `effort-review` (an effort's diff view, which binds
+	 *  `:effort_id`).
+	 */
+	slot: string,
+	lensId: string,
 };
 
 // How a lens renders its rows.

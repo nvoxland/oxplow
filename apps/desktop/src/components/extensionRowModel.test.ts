@@ -10,6 +10,8 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
   lenses: [],
   source: null,
   sources: [],
+  origin: "project",
+  slots: [],
   ...over,
 });
 
@@ -28,6 +30,12 @@ describe("extensionRowModel", () => {
     );
     expect(m.canUpdate).toBe(true);
     expect(m.origin).toBe("https://github.com/acme/lenses @ v2 (0123456)");
+  });
+
+  test("a bundled extension says it ships with oxplow and can't be updated", () => {
+    const m = extensionRowModel(ext({ origin: "bundled" }));
+    expect(m.origin).toBe("Ships with oxplow");
+    expect(m.canUpdate).toBe(false);
   });
 
   test("errors mark the row unhealthy", () => {

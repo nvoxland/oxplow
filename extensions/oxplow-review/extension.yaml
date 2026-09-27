@@ -1,0 +1,7 @@
+name: oxplow-review
+description: The effort review packet. What to check before accepting an agent's work, shown on each effort's diff.
+slots:
+  - { slot: effort-review, lens: decisions }
+  - { slot: effort-review, lens: unverified-claims }
+  - { slot: effort-review, lens: struggled }
+  - { slot: effort-review, lens: context-read }

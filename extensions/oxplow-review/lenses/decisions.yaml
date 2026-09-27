@@ -1,0 +1,19 @@
+title: Decisions Made
+description: Forks the agent resolved on its own during this effort. Check the ones you'd have decided differently.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT question, choice,
+         (SELECT group_concat(value, '; ') FROM json_each(alternatives)) AS alternatives,
+         confidence, why
+  FROM v_decision
+  WHERE effort_id = :effort_id
+  ORDER BY created_at
+viz: table
+columns:
+  - { key: question, label: Decision }
+  - { key: choice, label: Chose }
+  - { key: alternatives, label: Over }
+  - { key: confidence, label: Confidence }
+  - { key: why, label: Why }
+empty: No decisions were recorded for this effort. On a big change, that's worth asking about.

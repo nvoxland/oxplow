@@ -1,0 +1,13 @@
+title: Context Read
+description: The project docs (.context/*.md) the agent read during this effort. Compare with what it changed.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT DISTINCT path
+  FROM v_context_read
+  WHERE effort_id = :effort_id
+  ORDER BY path
+viz: list
+columns:
+  - { key: path, label: Doc, link: { kind: file } }
+empty: The agent read no .context docs during this effort.

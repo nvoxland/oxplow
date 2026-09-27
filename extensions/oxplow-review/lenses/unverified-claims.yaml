@@ -1,0 +1,11 @@
+title: Unverified Claims
+description: Things the agent said about its work that nothing backs up.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT statement, kind
+  FROM v_claim
+  WHERE effort_id = :effort_id AND verified = 0
+  ORDER BY created_at
+viz: list
+empty: Every claim for this effort is backed by evidence (or none were made).

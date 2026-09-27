@@ -1,0 +1,15 @@
+title: Struggled Here
+description: Files the agent edited over and over, and commands that kept failing. Likely places for mistakes.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  SELECT subject, kind, count
+  FROM v_struggle
+  WHERE effort_id = :effort_id
+  ORDER BY count DESC
+viz: table
+columns:
+  - { key: subject, label: Where }
+  - { key: kind, label: What }
+  - { key: count, label: Times }
+empty: No signs of struggle in this effort.

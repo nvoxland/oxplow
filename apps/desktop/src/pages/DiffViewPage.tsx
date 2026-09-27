@@ -46,6 +46,7 @@ import type { FunctionsBuckets } from "../components/ChangeAnalysis/analysisHelp
 import { AgentNudgesBlock, TestsRun } from "../components/EffortObservations.js";
 import { EffortMetricsBlock } from "../components/EffortMetrics.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
+import { EffortReviewSlots } from "../lens/EffortReviewSlots.js";
 import { useChangeAnalysis } from "../components/ChangeAnalysis/useChangeAnalysis.js";
 import { isTestPath } from "../components/ChangeAnalysis/analysisHelpers.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
@@ -711,6 +712,15 @@ function ResolvedEndpointDiff({
             style={{ marginLeft: 0, marginRight: 0 }}
           />
         </div>
+      ) : null}
+
+      {primaryEffortId ? (
+        <EffortReviewSlots
+          effortId={primaryEffortId}
+          streamId={stream?.id ?? null}
+          onOpenPage={(ref) => onOpenPage(ref)}
+          h2Style={h2Style}
+        />
       ) : null}
 
       {inProgress ? (

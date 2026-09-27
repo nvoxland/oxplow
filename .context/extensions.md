@@ -15,6 +15,9 @@ the bundled `oxplow-analytics` example extension.
 >     `update_extension` and Settings → Extensions;
 >   - the core explorer: the Explore Data page (with Save as Lens) and
 >     lens tiles on dashboards;
+>   - **bundled extensions** (compiled in, read-only, reserved names) and
+>     the `effort-review` **slot**; the bundled `oxplow-review` extension
+>     is the effort review packet;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
@@ -126,6 +129,37 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   into `Extension.sources`. A bad source is reported in `errors` without
   hiding the extension's lenses. Settings → Extensions shows each source
   (schedule, row counts or failure, Approve & Run / Sync Now).
+- **Bundled extensions.**
+  - Their sources live in the repo at `extensions/<name>/`. They're
+    compiled into the binary by `crates/oxplow-app/src/bundled_extensions.rs`
+    (`include_str!`). A test fails if a file in the folder isn't listed.
+  - The loader reads them through the same `load_one` as project
+    extensions, over an `ExtensionFiles` abstraction (`Disk` /
+    `Embedded`). Nothing is written to disk.
+  - `origin` is `bundled` and their path is `bundled:<name>`.
+  - Their names are reserved:
+    - a project folder with that name is listed with an error and never
+      shadows the bundled one;
+    - `install_extension` refuses the name;
+    - `save_lens` refuses to write into a bundled extension.
+- **Slots (current: `effort-review`).**
+  - `extension.yaml` declares `slots: [{slot, lens}]`. They're validated
+    against `SLOTS` and against the extension's own lenses, and loaded as
+    `Extension.slots`.
+  - The effort diff view (`DiffViewPage`) renders `EffortReviewSlots`
+    (`src/lens/EffortReviewSlots.tsx`). Every mounted lens runs with
+    `effort_id` set to the effort's numeric row id (`effortRowId`), and it
+    re-runs on data events.
+- **`oxplow-review` (the review packet).** Its lenses, mounted in
+  `effort-review`:
+  - Decisions Made (`v_decision`)
+  - Unverified Claims (`v_claim` where `verified = 0`)
+  - Struggled Here (`v_struggle`)
+  - Context Read (`v_context_read`)
+
+  It also has a Waiting on Me lens (blocked tasks plus open notes) that's
+  reachable from the launcher. Each empty state says what's *good*, e.g.
+  "Every claim for this effort is backed by evidence."
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.

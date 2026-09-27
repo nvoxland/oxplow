@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, Lens } from "../tauri-bridge/generated/bindings.js";
-import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention } from "./lensModel.js";
+import { cellLinkRef, changedParams, displayColumns, formatCell, lensDirectoryEntries, parseParamInput, shouldRerunLens, limitRows, slugify, adHocLens, rowMention, slotMounts, effortRowId } from "./lensModel.js";
 
 const lens = (over: Partial<Lens> = {}): Lens => ({
   id: "review/waiting",
@@ -71,8 +71,8 @@ describe("formatCell", () => {
 describe("lensDirectoryEntries", () => {
   test("one launcher entry per loaded lens, under Lenses", () => {
     const exts: Extension[] = [
-      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [] },
-      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [] },
+      { name: "review", description: "Review helpers", path: "oxplow/extensions/review", errors: [], lenses: [lens()], source: null, sources: [], origin: "project", slots: [] },
+      { name: "broken", description: "", path: "oxplow/extensions/broken", errors: ["bad"], lenses: [], source: null, sources: [], origin: "project", slots: [] },
     ];
     const entries = lensDirectoryEntries(exts);
     expect(entries).toHaveLength(1);
@@ -145,5 +145,26 @@ describe("rowMention", () => {
     expect(rowMention("review/waiting", ["id", "title", "note"], [42, "Fix it", null])).toBe(
       '[oxplow lens review/waiting row: id=42, title="Fix it", note=null] ',
     );
+  });
+});
+
+describe("slotMounts", () => {
+  test("lens ids mounted in a slot, in extension order", () => {
+    const ext = (name: string, slots: { slot: string; lensId: string }[]): Extension => ({
+      name, description: "", path: "", errors: [], lenses: [], source: null, sources: [], origin: "bundled", slots,
+    });
+    const exts = [
+      ext("oxplow-review", [{ slot: "effort-review", lensId: "oxplow-review/decisions" }, { slot: "effort-review", lensId: "oxplow-review/claims" }]),
+      ext("mine", [{ slot: "effort-review", lensId: "mine/x" }, { slot: "other", lensId: "mine/y" }]),
+    ];
+    expect(slotMounts(exts, "effort-review")).toEqual(["oxplow-review/decisions", "oxplow-review/claims", "mine/x"]);
+  });
+});
+
+describe("effortRowId", () => {
+  test("the numeric id v_* views use, from an effort id like eff262", () => {
+    expect(effortRowId("eff262")).toBe(262);
+    expect(effortRowId("262")).toBe(262);
+    expect(effortRowId("nope")).toBeNull();
   });
 });

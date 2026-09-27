@@ -1,0 +1,15 @@
+title: Waiting on Me
+description: Blocked tasks and open notes-to-self across the project.
+query: |
+  SELECT 'Blocked task' AS what, title, id AS task_id, updated_at AS since
+  FROM v_task WHERE status = 'blocked'
+  UNION ALL
+  SELECT 'Open note', coalesce(body, quote), NULL, last_activity_at
+  FROM v_comment WHERE status = 'open' AND intent = 'note'
+  ORDER BY since DESC
+viz: table
+columns:
+  - { key: what, label: What }
+  - { key: title, label: Item, link: { kind: task, from: task_id } }
+  - { key: since, label: Since }
+empty: Nothing is waiting on you.
