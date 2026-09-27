@@ -1,7 +1,9 @@
-import { expect, test } from "bun:test";
-import { render } from "@testing-library/react";
+import { afterEach, expect, test } from "bun:test";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import type { Lens, LensRun } from "../tauri-bridge/generated/bindings.js";
 import { LensResultView } from "./LensResultView.js";
+
+afterEach(cleanup);
 
 const base: Lens = {
   id: "x/l",
@@ -18,6 +20,7 @@ const base: Lens = {
   children: [],
   launcherCategory: null,
   hidden: false,
+  copy: false,
   path: "",
 };
 const chart = { x: null, y: null, series: null, label: null, size: null, group: null };
@@ -80,4 +83,26 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
   expect(tiles.length).toBe(2);
   (tiles[0] as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(opened).toEqual(["file:a.rs"]);
+});
+
+test("a markdown lens with copy: true copies its text", async () => {
+  const written: string[] = [];
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText: async (t: string) => void written.push(t) },
+    configurable: true,
+  });
+  const { getByTestId, container } = render(
+    <LensResultView run={run({ viz: "markdown", copy: true }, ["prompt"], [["Review **this**"]])} onOpenPage={() => {}} />,
+  );
+  expect(container.textContent).toContain("Review");
+  fireEvent.click(getByTestId("lens-copy"));
+  await Promise.resolve();
+  expect(written).toEqual(["Review **this**"]);
+});
+
+test("a markdown lens without copy has no button", () => {
+  const { queryByTestId } = render(
+    <LensResultView run={run({ viz: "markdown" }, ["t"], [["x"]])} onOpenPage={() => {}} />,
+  );
+  expect(queryByTestId("lens-copy")).toBeNull();
 });

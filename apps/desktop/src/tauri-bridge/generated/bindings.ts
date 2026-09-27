@@ -2236,6 +2236,11 @@ export type Lens = {
 	launcherCategory: LauncherCategory | null,
 	// Not listed in the launcher.
 	hidden: boolean,
+	/**
+	 *  A Copy button copies the rendered markdown (e.g. a prompt to paste
+	 *  into another tool).
+	 */
+	copy: boolean,
 	// Repo-relative path of the lens file.
 	path: string,
 };

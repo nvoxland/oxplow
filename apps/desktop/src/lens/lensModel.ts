@@ -245,6 +245,7 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     children: [],
     launcherCategory: null,
     hidden: false,
+    copy: false,
     path: "",
   };
 }

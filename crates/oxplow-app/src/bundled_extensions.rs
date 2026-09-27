@@ -69,6 +69,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "lenses/context-read.yaml"),
             ext_file!("oxplow-review", "lenses/decisions.yaml"),
             ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
+            ext_file!("oxplow-review", "lenses/review-prompt.yaml"),
             ext_file!("oxplow-review", "lenses/struggled.yaml"),
             ext_file!("oxplow-review", "lenses/tests-weakened.yaml"),
             ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
@@ -477,5 +478,51 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// Copy Review Prompt: a prompt for reviewing the effort with another
+    /// harness, built from the task, the files and the agent's claims.
+    #[tokio::test]
+    async fn review_prompt_names_the_task_and_what_changed() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_domain::stores::TaskStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();
+        t.title = "Fix the hover state".into();
+        t.description = "Buttons flicker on hover.".into();
+        f.svc.task_store.update(&t).await.unwrap();
+        f.svc
+            .effort_store
+            .record_file(
+                &f.effort,
+                "src/ui/button.ts",
+                oxplow_db::EffortFileChange::Updated,
+                oxplow_db::FileRefVersion {
+                    local_snapshot_id: 0,
+                    closest_git_version: None,
+                    git_version_exact: false,
+                },
+            )
+            .await
+            .unwrap();
+        let rows = run_bundled_lens(
+            &f,
+            "oxplow-review/review-prompt",
+            &[("effort_id", f.effort.value())],
+        )
+        .await;
+        let prompt = rows[0][0].as_str().unwrap();
+        for expected in [
+            "Fix the hover state",
+            "Buttons flicker on hover.",
+            "- `src/ui/button.ts` (updated)",
+            "No claims were recorded.",
+            "No decisions were recorded.",
+        ] {
+            assert!(
+                prompt.contains(expected),
+                "missing {expected:?} in:\n{prompt}"
+            );
+        }
     }
 }

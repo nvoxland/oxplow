@@ -88,6 +88,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     time it opens and lists them under their `launcher.category`
     (default **Lenses**; `hidden` ones not at all), merged into the
     static directory by category order (`mergeDirectory`).
+  - `copy: true` on a `markdown` lens adds a Copy button that copies the
+    raw text (the loader refuses it on other viz). The review packet's
+    Review Prompt uses it.
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
@@ -202,6 +205,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `commit` and `uncommitted` slots)
   - Struggled Here (`v_struggle`)
+  - Review Prompt (a copyable markdown prompt for reviewing the effort
+    with a second harness: the task, the agent's summary, the files it
+    changed, its claims and recorded decisions, and what to report)
   - Context Read (`v_context_read`)
 
   It also has a Waiting on Me lens, reachable from the launcher:
@@ -489,6 +495,7 @@ available to every extension:
   links accept a bare `v_task.id`.
 - `task-detail` and `thread` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
+- `copy: true` on markdown lenses (a Copy button).
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
 - `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,

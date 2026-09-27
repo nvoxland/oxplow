@@ -1,0 +1,50 @@
+title: Review Prompt
+description: A prompt for reviewing this effort with a second agent. Copy it and paste it into another harness running in this repo.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  WITH e AS (
+    SELECT e.id, t.title, coalesce(t.description, '') AS description, coalesce(e.summary, '') AS summary
+    FROM v_effort e JOIN v_task t ON t.id = e.task_id
+    WHERE e.id = :effort_id
+  ),
+  files AS (
+    SELECT group_concat('- `' || path || '` (' || change_kind || ')', char(10)) AS list
+    FROM (SELECT path, change_kind FROM v_effort_file WHERE effort_id = :effort_id ORDER BY path)
+  ),
+  claims AS (
+    SELECT group_concat('- ' || statement ||
+             CASE WHEN verified = 1 THEN '' ELSE ' (no evidence cited)' END, char(10)) AS list
+    FROM (SELECT statement, verified FROM v_claim WHERE effort_id = :effort_id ORDER BY created_at)
+  ),
+  decisions AS (
+    SELECT group_concat('- ' || question || ': chose ' || choice ||
+             CASE WHEN why IS NULL OR why = '' THEN '' ELSE ' -- ' || why END, char(10)) AS list
+    FROM (SELECT question, choice, why FROM v_decision
+          WHERE effort_id = :effort_id AND provenance = 'recorded' ORDER BY created_at)
+  )
+  SELECT
+    'Review the work another coding agent did in this repository. Be skeptical: '
+    || 'check it against the task, not against its own summary.' || char(10) || char(10)
+    || '## The task' || char(10) || char(10)
+    || '**' || e.title || '**' || char(10) || char(10)
+    || CASE WHEN e.description = '' THEN '' ELSE e.description || char(10) || char(10) END
+    || CASE WHEN e.summary = '' THEN '' ELSE '## What the agent says it did' || char(10) || char(10) || e.summary || char(10) || char(10) END
+    || '## Files it changed' || char(10) || char(10)
+    || coalesce(files.list, 'No files were recorded.') || char(10) || char(10)
+    || '## Claims to check' || char(10) || char(10)
+    || coalesce(claims.list, 'No claims were recorded.') || char(10) || char(10)
+    || '## Decisions it made on its own' || char(10) || char(10)
+    || coalesce(decisions.list, 'No decisions were recorded.') || char(10) || char(10)
+    || '## What to report' || char(10) || char(10)
+    || '- Does the change do what the task asks, and nothing it does not?' || char(10)
+    || '- Is each claim above true? Run what you need to check.' || char(10)
+    || '- Would you have decided any of the decisions differently? Why?' || char(10)
+    || '- Are the tests meaningful, or were any weakened, skipped or deleted?' || char(10)
+    || '- Anything risky: error handling, edge cases, security, performance.' || char(10) || char(10)
+    || 'List each problem with its file and line, most serious first. Say plainly if you found none.'
+    AS prompt
+  FROM e, files, claims, decisions
+viz: markdown
+copy: true
+hidden: true

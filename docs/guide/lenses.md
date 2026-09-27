@@ -72,6 +72,8 @@ children: [visits, tokens-by-day]
 
 `launcher: { category: Activity }` files a lens under that launcher
 heading; `hidden: true` leaves it out (for lenses only a slot shows).
+`copy: true` on a `markdown` lens adds a Copy button, handy for a lens
+that builds a prompt you paste somewhere else.
 
 ### Showing a lens on a core page
 

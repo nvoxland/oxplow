@@ -92,7 +92,7 @@ export function LensResultView({
     case "number":
       return <NumberViz value={first} compact={compact} />;
     case "markdown":
-      return <MarkdownView body={first === null ? "" : String(first)} />;
+      return <MarkdownViz body={first === null ? "" : String(first)} copy={lens.copy} />;
     case "list":
       return (
         <>
@@ -109,6 +109,33 @@ export function LensResultView({
         </>
       );
   }
+}
+
+/** A markdown lens; with `copy: true`, a Copy button copies the raw text
+ *  (e.g. a prompt to paste into another tool). */
+function MarkdownViz({ body, copy }: { body: string; copy: boolean }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div data-testid="lens-markdown">
+      {copy ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+          <button
+            type="button"
+            data-testid="lens-copy"
+            onClick={() => {
+              void navigator.clipboard.writeText(body).then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              });
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : null}
+      <MarkdownView body={body} />
+    </div>
+  );
 }
 
 function LineViz({ run }: { run: LensRun }) {

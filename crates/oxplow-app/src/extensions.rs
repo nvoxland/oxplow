@@ -201,6 +201,9 @@ struct LensFile {
     /// Keep it out of the launcher (e.g. a lens only a slot shows).
     #[serde(default)]
     hidden: bool,
+    /// Show a Copy button for the rendered text (markdown lenses only).
+    #[serde(default)]
+    copy: bool,
 }
 
 fn default_viz() -> LensViz {
@@ -332,6 +335,9 @@ pub struct Lens {
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
     pub hidden: bool,
+    /// A Copy button copies the rendered markdown (e.g. a prompt to paste
+    /// into another tool).
+    pub copy: bool,
     /// Repo-relative path of the lens file.
     pub path: String,
 }
@@ -579,7 +585,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let parsed = files
             .read(&format!("lenses/{file}"))
             .ok_or_else(|| "unreadable".to_string())
-            .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()));
+            .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
+            .and_then(|l| {
+                if l.copy && l.viz != LensViz::Markdown {
+                    Err("`copy: true` needs `viz: markdown`".to_string())
+                } else {
+                    Ok(l)
+                }
+            });
         match parsed {
             Ok(l) => ext.lenses.push(Lens {
                 id: format!("{name}/{slug}"),
@@ -606,6 +619,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .collect(),
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
+                copy: l.copy,
                 path: lens_rel,
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
@@ -1947,6 +1961,32 @@ empty: No tasks.
         assert_eq!(mounted, vec![("task-detail", "x/t"), ("thread", "x/th")]);
         let errs = ext.errors.join("\n");
         assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+    }
+
+    #[test]
+    fn copy_is_for_markdown_lenses() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    "title: A\nquery: SELECT 'x'\nviz: markdown\ncopy: true\n",
+                ),
+                ("b", "title: B\nquery: SELECT 1\ncopy: true\n"),
+                ("c", "title: C\nquery: SELECT 'x'\nviz: markdown\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        assert!(lens("a").unwrap().copy);
+        assert!(!lens("c").unwrap().copy);
+        assert!(lens("b").is_none());
+        assert!(
+            ext.errors
+                .iter()
+                .any(|e| e.contains("copy") && e.contains("markdown")),
+            "{:?}",
+            ext.errors
+        );
     }
 
     #[test]
