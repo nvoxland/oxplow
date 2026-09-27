@@ -1,0 +1,15 @@
+title: Code Quality Findings
+description: Findings from the latest code-quality scans, newest first.
+query: |
+  SELECT f.id, f.kind, f.path, f.start_line, f.end_line, f.metric_value AS size, f.tool, f.scanned_at
+  FROM v_code_quality_finding f
+  ORDER BY f.id DESC
+  LIMIT 200
+columns:
+  - { key: path, label: File, link: { kind: file, line: start_line } }
+  - { key: kind, label: Kind }
+  - { key: start_line, label: Line }
+  - { key: size, label: Size }
+  - { key: scanned_at, label: Scanned }
+empty: No findings recorded. Duplicate blocks show up after a duplication scan (change analysis runs one for each commit and your uncommitted work).
+launcher: { category: Code }

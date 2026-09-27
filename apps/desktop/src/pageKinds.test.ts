@@ -41,7 +41,6 @@ describe("pageKindIconComponent", () => {
       "directory",
       "wiki",
       "task",
-      "finding",
       "git-commit",
       "diff",
       "duplicate-block",

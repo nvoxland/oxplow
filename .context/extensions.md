@@ -417,12 +417,12 @@ What moves out of core, and what it becomes:
 
 | Today (core) | Becomes |
 |---|---|
-| Planning / Review / Quality dashboards | `grid` lenses |
-| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | exec source + `findings` / `duplicates` lenses |
+| Planning / Review / Quality dashboards | `grid` lenses (**done**: `planning`, `review`, `quality`) |
+| Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | **done:** the `findings` / `duplicate-blocks` lenses; the dup scan runs in core's change analysis; `DuplicateBlockPage` stays core as the compare page |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot lenses |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
 | Gauge-threshold nudges | extension alerts → core nudge primitive |
-| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | lenses + `task-detail` / `rail` slot lenses |
+| Usage / page analytics / token pages, `ThreadTokenTotal`, `EffortTokenUsage` | lenses + `task-detail` / `thread` slot lenses (**done** for Usage / Page Analytics: the `usage` grid) |
 | Local history dashboard | lens over `v_snapshot` |
 | Effort metrics block, effort coverage page | `effort-review` slot lenses |
 

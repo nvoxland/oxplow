@@ -1,0 +1,13 @@
+title: Recent Snapshots
+query: |
+  SELECT id, created_at, coalesce(git_branch, '—') AS branch, substr(coalesce(git_commit, ''), 1, 7) AS commit_sha,
+         'local-history' AS history
+  FROM v_snapshot
+  ORDER BY id DESC
+  LIMIT 10
+columns:
+  - { key: created_at, label: Captured, link: { kind: page, from: history } }
+  - { key: branch, label: Branch }
+  - { key: commit_sha, label: Commit }
+empty: No snapshots yet.
+hidden: true

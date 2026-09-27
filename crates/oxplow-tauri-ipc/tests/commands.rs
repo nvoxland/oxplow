@@ -757,12 +757,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
     let app = TestApp::build();
     let (stream, _) = primary_and_thread(&app).await;
     assert!(
-        commands::generated::list_file_snapshots_for_stream(app.state(), stream.id, Some(10))
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
         commands::generated::list_snapshots_for_stream(app.state(), stream.id, Some(10))
             .await
             .unwrap()

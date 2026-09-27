@@ -1,0 +1,13 @@
+title: Ready Tasks
+query: |
+  SELECT t.id, t.title, t.priority, th.title AS thread
+  FROM v_task t JOIN v_thread th ON th.id = t.thread_id
+  WHERE t.status = 'ready'
+  ORDER BY th.sort_index, t.sort_index
+  LIMIT 50
+columns:
+  - { key: title, label: Task, link: { kind: task, from: id } }
+  - { key: priority, label: Priority }
+  - { key: thread, label: Thread }
+empty: Nothing is ready.
+hidden: true

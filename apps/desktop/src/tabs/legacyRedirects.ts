@@ -12,6 +12,10 @@ import type { TabRef } from "./tabState.js";
 export const LEGACY_PAGE_REDIRECTS: Readonly<Record<string, string>> = {
   usage: "oxplow-analytics/usage",
   "page-analytics": "oxplow-analytics/usage",
+  "dashboard:planning": "oxplow-analytics/planning",
+  "dashboard:review": "oxplow-analytics/review",
+  "dashboard:quality": "oxplow-analytics/quality",
+  finding: "oxplow-analytics/findings",
 };
 
 export function redirectLegacyRef(

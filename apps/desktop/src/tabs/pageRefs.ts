@@ -92,10 +92,6 @@ export function taskRef(itemId: string): TabRef {
   return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
 }
 
-export function findingRef(findingId: string): TabRef {
-  return { id: `finding:${findingId}`, kind: "finding", payload: { findingId } };
-}
-
 export function effortCoverageRef(effortId: string): TabRef {
   return { id: `effort-coverage:${effortId}`, kind: "effort-coverage", payload: { effortId } };
 }
@@ -335,7 +331,7 @@ export function gitCommitRef(sha: string, scope?: ChangeAnalysisScope): TabRef {
   return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
 }
 
-export type DashboardKind = "planning" | "review" | "quality" | "visits";
+export type DashboardKind = "visits";
 
 export function dashboardRef(variant: DashboardKind): TabRef {
   return { id: `dashboard:${variant}`, kind: "dashboard", payload: { variant } };
@@ -442,8 +438,6 @@ function parseTabId(id: string): TabRef {
       return wikiFreshnessRef(rest);
     case "task":
       return taskRef(rest);
-    case "finding":
-      return findingRef(rest);
     case "metric-detail":
       // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
@@ -469,7 +463,7 @@ function parseTabId(id: string): TabRef {
     case "dashboard": {
       // `rest` is the variant. Without this case every variant fell to the
       // default's null payload and reopened as the "planning" default.
-      const variants: readonly string[] = ["planning", "review", "quality", "visits"];
+      const variants: readonly string[] = ["visits"];
       return variants.includes(rest)
         ? dashboardRef(rest as DashboardKind)
         : { id, kind: "dashboard", payload: null };

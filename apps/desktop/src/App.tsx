@@ -129,7 +129,6 @@ import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
 import { TaskPage } from "./pages/TaskPage.js";
-import { FindingPage } from "./pages/FindingPage.js";
 import { EffortCoveragePage } from "./pages/EffortCoveragePage.js";
 import { WikiPage } from "./pages/WikiPage.js";
 import { WikiFreshnessPage } from "./pages/WikiFreshnessPage.js";
@@ -1916,7 +1915,6 @@ export function App() {
       case "wiki-freshness":
       case "directory":
       case "task":
-      case "finding":
       case "dashboard":
       case "settings":
       case "local-history":
@@ -3099,22 +3097,6 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "finding") {
-        const findingId = (ref.payload as { findingId?: string } | null)?.findingId ?? "";
-        tabs.push({
-          id: ref.id,
-          label: `Finding ${findingId}`,
-          closable: true,
-          render: () => (
-            <FindingPage
-              stream={stream}
-              findingId={findingId}
-              threadWork={selectedThreadWork}
-              onOpenPage={navOpen}
-              onOpenFileAtLine={(p) => { navOpenFile(p); }}
-            />
-          ),
-        });
       } else if (ref.kind === "effort-coverage") {
         const effortId = (ref.payload as { effortId?: string } | null)?.effortId ?? "";
         tabs.push({
@@ -3217,20 +3199,12 @@ export function App() {
           ),
         });
       } else if (ref.kind === "dashboard") {
-        const variant = (ref.payload as { variant?: "planning" | "review" | "quality" | "visits" } | null)?.variant ?? "planning";
         tabs.push({
           id: ref.id,
-          label: variant === "visits" ? "Go To" : `${variant.charAt(0).toUpperCase()}${variant.slice(1)}`,
+          label: "Go To",
           closable: true,
           render: () => (
-            <DashboardPage
-              variant={variant}
-              stream={stream}
-              threadId={selectedThreadId}
-              threadWork={selectedThreadWork}
-              backlog={backlogState}
-              onOpenPage={navOpen}
-            />
+            <DashboardPage stream={stream} threadId={selectedThreadId} onOpenPage={navOpen} />
           ),
         });
       }

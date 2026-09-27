@@ -3,8 +3,8 @@ import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import {
   directoryRef,
   fileRef,
-  findingRef,
   gitCommitRef,
+  lensRef,
   wikiPageRef,
   taskRef,
 } from "./pageRefs.js";
@@ -113,10 +113,6 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
     case "git-commit": {
       const p = ref.payload as { sha?: string } | null;
       return p?.sha ?? null;
-    }
-    case "finding": {
-      const p = ref.payload as { findingId?: string } | null;
-      return p?.findingId ?? null;
     }
     default:
       return null;
@@ -240,7 +236,8 @@ function refFor(kind: string, id: string): TabRef | null {
     case "git-commit":
       return gitCommitRef(id);
     case "finding":
-      return findingRef(id);
+      // Findings are listed by the oxplow-analytics Findings lens.
+      return lensRef("oxplow-analytics/findings");
     default:
       return null;
   }

@@ -1,0 +1,12 @@
+title: Backlog
+query: |
+  SELECT id, title, priority
+  FROM v_task
+  WHERE thread_id IS NULL AND status = 'ready'
+  ORDER BY sort_index
+  LIMIT 50
+columns:
+  - { key: title, label: Task, link: { kind: task, from: id } }
+  - { key: priority, label: Priority }
+empty: The backlog is empty.
+hidden: true

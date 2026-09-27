@@ -76,8 +76,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Gauge;
     case "task":
       return CheckSquare;
-    case "finding":
-      return AlertTriangle;
     case "git-commit":
       return GitCommit;
     case "dashboard":

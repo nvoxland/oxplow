@@ -19,7 +19,6 @@ export type PageKind =
   | "wiki"
   | "wiki-freshness"
   | "task"
-  | "finding"
   | "tasks"
   | "done-work"
   | "backlog"

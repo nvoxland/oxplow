@@ -306,9 +306,7 @@ declaring *what it is* and mounting the generic layer.
   virtualization just re-anchors. The Highlight API is feature-detected;
   where it's absent the comment still works, just without an inline
   highlight. Surfaces opted in so far: task rows (`TaskGroupList`), the
-  commit page (`GitCommitPage` meta → `git-commit`), finding pages
-  (`FindingPage`: snippet `file` nested under the `finding` container),
-  and commit-graph rows (`CommitGraphTable` → `git-commit`, under the
+  commit page (`GitCommitPage` meta → `git-commit`), and commit-graph rows (`CommitGraphTable` → `git-commit`, under the
   `git-dashboard` root). The **terminal/agent pane** has its own layer
   (`TerminalCommentLayer`, not the app-level one) because it anchors to
   the xterm buffer rather than DOM text — see `.context/terminal.md`.

@@ -205,7 +205,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::analyze_co_change_surprise,
             // snapshots
             commands::generated::list_snapshots,
-            commands::generated::list_file_snapshots_for_stream,
             commands::generated::list_snapshots_for_stream,
             commands::generated::list_files_for_snapshot,
             commands::generated::list_wiki_slugs_for_snapshots,

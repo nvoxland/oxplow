@@ -9,7 +9,6 @@ import {
   endpointDiffRef,
   externalUrlRef,
   fileRef,
-  findingRef,
   gitCommitRef,
   hookEventsRef,
   indexRef,
@@ -54,9 +53,6 @@ describe("pageRefs", () => {
     expect(taskRef("123").id).toBe("task:123");
   });
 
-  test("findingRef encodes the finding id", () => {
-    expect(findingRef("f-7").id).toBe("finding:f-7");
-  });
 
   test("indexRef returns the same id and kind", () => {
     const ref = indexRef("tasks");
@@ -190,14 +186,10 @@ describe("refFromTabId", () => {
   test("every ref rebuilds from its own tab id", () => {
     const refs = [
       agentRef(),
-      dashboardRef("planning"),
-      dashboardRef("review"),
-      dashboardRef("quality"),
       dashboardRef("visits"),
       directoryRef("src/components"),
       externalUrlRef("https://x.test/p"),
       fileRef("src/a.ts"),
-      findingRef("f1"),
       gitCommitRef("abc123"),
       hookEventsRef(),
       indexRef("tasks"),
@@ -218,10 +210,15 @@ describe("refFromTabId", () => {
     }
   });
 
-  test("each dashboard variant reopens as itself, not the default", () => {
-    for (const v of ["planning", "review", "quality", "visits"] as const) {
-      expect(refFromTabId(dashboardRef(v).id)).toEqual(dashboardRef(v));
-    }
+  test("the Go To dashboard reopens as itself", () => {
+    expect(refFromTabId(dashboardRef("visits").id)).toEqual(dashboardRef("visits"));
+  });
+
+  test("dashboards and findings that moved to oxplow-analytics reopen as lenses", () => {
+    expect(refFromTabId("dashboard:planning").id).toBe("lens:oxplow-analytics/planning");
+    expect(refFromTabId("dashboard:quality").id).toBe("lens:oxplow-analytics/quality");
+    expect(refFromTabId("finding:f-7").id).toBe("lens:oxplow-analytics/findings");
+    expect(refFromTabId("usage").id).toBe("lens:oxplow-analytics/usage");
   });
 
   test("a directory page reopens with its path payload", () => {

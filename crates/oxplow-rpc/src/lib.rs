@@ -401,7 +401,6 @@ macro_rules! oxplow_command_table {
                 lookup_terminal_session => $crate::commands::terminal::lookup_terminal_session { thread_id: ::oxplow_domain::ThreadId, pane: Option<String> } -> Option<String>,
                 // snapshot
                 list_snapshots => $crate::commands::snapshot::list_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
-                list_file_snapshots_for_stream => $crate::commands::snapshot::list_file_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: i64 } -> ::oxplow_db::SnapshotStats,
                 list_snapshot_change_entries => $crate::commands::snapshot::list_snapshot_change_entries { snapshot_id: i64 } -> Vec<::oxplow_db::SnapshotChangeEntry>,

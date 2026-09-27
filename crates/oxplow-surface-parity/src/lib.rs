@@ -383,7 +383,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("analyze_functions_at_refs"),
     ui("analyze_co_change_surprise"),
     // ---- ui-only: snapshots (UI presentation helpers) ----
-    ui("list_file_snapshots_for_stream"),
     ui("list_wiki_slugs_for_snapshots"),
     ui("get_blob_storage_bytes"),
     // ---- ui-only: branches (remote/ref presentation) ----

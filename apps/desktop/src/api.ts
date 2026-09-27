@@ -2037,20 +2037,6 @@ export async function getThreadTokenTotals(
   ) as unknown as import("./tauri-bridge/index.js").TokenUsageTotals;
 }
 
-
-
-
-
-
-export async function listFileSnapshots(
-  streamId: string,
-  limit?: number,
-): Promise<FileSnapshot[]> {
-  return unwrap(
-    await commands.listFileSnapshotsForStream(streamId, limit ?? null),
-  ) as unknown as FileSnapshot[];
-}
-
 /** Snapshot row — one per `request_snapshot()` call that captured
  *  anything. Local History dashboard surfaces this list. */
 export interface Snapshot {

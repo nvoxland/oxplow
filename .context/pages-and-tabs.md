@@ -50,12 +50,9 @@ pages are THE shell.
 | `apps/desktop/src/tabs/BacklinksList.tsx` | Default renderer for the Page chrome's `backlinks` slot — buttons that route via `onOpenPage`. |
 | `apps/desktop/src/pages/TaskPage.tsx` | Single-record page for a task — wraps `TaskDetail` + `ActivityTimeline`. Backlinks computed via `useBacklinks`. |
 | `apps/desktop/src/pages/WikiPage.tsx` | Single-record page for a wiki page (`wiki:<slug>`), rendered through `Page` so it gets the unified chrome (title via `usePageTitle`, back/forward + star, backlinks). Edit/Save/Revert/Delete live in a thin toolbar inside the body. In-tab wikilink clicks route through `PageNavigationContext.navigate(wikiPageRef)` so they join tab history. |
-| `apps/desktop/src/pages/FindingPage.tsx` | Single-record page for a code-quality finding — kind/path/line range/metric + source snippet + "Jump to source". |
 | `apps/desktop/src/pages/CommentsInboxPage.tsx` | Global **Comments Dashboard** (`comments` index kind, `commentsRef()`; titled "Comments Dashboard"). Lists every comment in the current stream (`listCommentsForStream`), grouped by target. The body of a **row opens that comment's full `CommentPopover` inline** (read/reply/intent/resolve/delete — triage the whole backlog from one place); a **group-header click jumps to the target page** (file/wiki/task). Each row also has a **"Go to location" button** that navigates to the target page *and* scrolls to / opens the anchored comment via `comment-reveal-bus.ts` (disabled for orphaned comments). **Defaults to unresolved threads only**; a "Show" dropdown reveals resolved threads bucketed by recency. The bucket thresholds are a tiered ladder — one per day to a week, one per week to a month, then one per month beyond — capped at the oldest actual resolved comment so the largest option reaches all of them (helpers in `comments-filter.ts`: `resolvedWindowOptions` / `visibleThreads`, keyed on `comment.resolved_at`). The holistic "review them all" surface; the agent reaches the same data via the `list_comments` MCP tool. |
-| `apps/desktop/src/pages/DashboardPage.tsx` | Composite Planning / Review / Quality dashboards plus the **Go To** page. Variant chosen via `dashboardRef("planning"\|"review"\|"quality"\|"visits")`. The `visits` variant is the **Go To** page (titled "Go To"): a **purely navigational** hub — the user's **managed bookmarks** (open + inline scope segmented control via `bookmarks.setScope` + remove with Undo toast) and a **toggle-able Recently Visited / Most Visited list** (`VisitsBrowser`, plain link lists, no stats). It's the page the rail's combined Bookmarks pane links to; needs `threadId` (passed from `App.tsx`) to scope bookmark reads/writes. Visit analytics moved to the Usage area (below). |
-| `apps/desktop/src/pages/UsagePage.tsx` | **Usage** hub (`indexRef("usage")`): two `Card`s summarizing + linking to **Page Analytics** and **Token Analytics**. Reachable from the launcher ("Usage"). |
-| `apps/desktop/src/pages/PageAnalyticsPage.tsx` | **Page Analytics** (`indexRef("page-analytics")`): visit analytics moved off Go To — total visits, Most Visited (with counts), and a visits-per-day chart (`DailyBarChart`). |
-| `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`), extracted from the old Go To `DailyChart`; shared by Page Analytics (visits/day) and Token Analytics (tokens/day). |
+| `apps/desktop/src/pages/DashboardPage.tsx` | The **Go To** page (`dashboardRef("visits")`, titled "Go To"): bookmarks with inline scope management, recently and most visited pages. The old Planning / Review / Quality variants are oxplow-analytics lenses now. |
+| `apps/desktop/src/components/Analytics/DailyBarChart.tsx` | Generic daily bar chart (`{ label, value }[]`); renders `bar` lenses. |
 | `apps/desktop/src/pages/StreamSettingsPage.tsx` | Per-stream settings page (custom prompt). Replaces the in-rail StreamRail settings modal. Routed via `streamSettingsRef(streamId)`. |
 | `apps/desktop/src/pages/ThreadSettingsPage.tsx` | Per-thread settings page (custom prompt). Replaces the in-rail ThreadRail settings modal. Routed via `threadSettingsRef(threadId)`. |
 | `apps/desktop/src/components/CollapsibleSections.tsx` | Collapsible page sections (tsk84, tsk86). Three parts: `CollapsibleSections` (state provider), `CollapsibleSection` (chevron header inside the `<h2>` + hideable body), `SectionCollapseControls` (the "Expand all" / "Collapse all" pair). Sections register themselves on mount so the controls know what "all" means — only what's **currently rendered** counts, so a filtered-out section is never silently expanded — and the controls self-hide when nothing is registered. **The page places the controls**: Recorded Metrics renders them in the **details rail** beside its filters, which works because the provider wraps the whole `<Page>` and `rightRail` is *rendered* inside Page's subtree (context follows the render tree, not the creation site). For that to be safe the provider renders `children` **bare** — a wrapper element there would break the page chrome's `height: 100%` column. Collapsed ids persist per page in `localStorage` (`oxplow.page.sectionsCollapsed.v1`, keyed by `pageKey`); default is expanded, and stored ids are deliberately **not** reconciled against the rendered set (a section hidden by a page's search must return still collapsed). Pure state/persistence in the sibling `sectionCollapse.ts`. **Not a `Page` prop** — see `.context/usability.md` → "Collapsible page sections". Adopters: `RecordedMetricsPage`. |
@@ -86,9 +83,11 @@ extension host lands.
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
   `metrics-recorded`, `metric-detail`, `metric-recording`,
   `custom-dashboard`, `dashboards`
-- **Analytics (→ ext):** `usage`, `page-analytics`, `effort-coverage`,
-  `finding`, `duplicate-block`, `dashboard` (`planning` / `review` /
-  `quality` variants)
+- **Analytics (→ ext):** `effort-coverage`. Already moved to
+  oxplow-analytics lenses, with their old ids in `LEGACY_PAGE_REDIRECTS`:
+  `usage`, `page-analytics`, `finding`, `dashboard:planning` / `review` /
+  `quality`. `duplicate-block` stays core as the side-by-side compare page
+  (lens `compare` links).
 
 `agent` is implicit per thread. There is no standalone
 `change-analysis` kind any more: change-analysis drilldowns are a
@@ -115,7 +114,6 @@ and history reopen the lens instead of becoming dead entries.
 | wiki / wiki-freshness | `wiki:<slug>` / `wiki-freshness:<slug>` | `wiki:how-stop-hook-fires` |
 | lens | `lens:<extension>/<slug>` | `lens:review/waiting-on-me` |
 | task | `task:<id>` | `task:tsk142` |
-| finding | `finding:<id>` | `finding:f-7` |
 | effort-coverage | `effort-coverage:<effortId>` | `effort-coverage:eff42` |
 | index kinds | the kind name | `tasks`, `comments`, `settings`, `dashboards` |
 | uncommitted-changes | `uncommitted-changes` or `uncommitted-changes:<scopeKind>:<scopeValue>` | `uncommitted-changes:ext:rs` |
@@ -404,9 +402,6 @@ Adopted lists:
   through a `CommitRowDispatcher` adapter, so the legacy `onSelect`
   callback survives as the rail-side fallback while the in-page path
   picks up siblings.
-- `pages/DashboardPage.tsx` — `RowButton` now optionally takes
-  `navRef` + `siblings` + `onNavigate`; the Planning dashboard wires
-  ready / backlog / recent-notes lists.
 - `pages/RecordedMetricsPage.tsx` — each metric row passes the whole
   page's rows flattened in visual order (`metricSiblings` in
   `recordedMetricsRows.ts` — the chain continues across section

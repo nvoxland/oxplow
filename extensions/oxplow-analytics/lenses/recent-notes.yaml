@@ -1,0 +1,8 @@
+title: Recent Notes
+query: |
+  SELECT slug, title, updated_at FROM v_wiki_page ORDER BY updated_at DESC LIMIT 10
+columns:
+  - { key: title, label: Note, link: { kind: wiki, from: slug } }
+  - { key: updated_at, label: Updated }
+empty: No notes yet.
+hidden: true

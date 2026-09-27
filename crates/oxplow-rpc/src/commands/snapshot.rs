@@ -46,22 +46,6 @@ pub async fn list_snapshots(svc: &Services, path: String) -> Result<Vec<FileSnap
     Ok(svc.snapshot_store.list_for_path(&path).await?)
 }
 
-pub async fn list_file_snapshots_for_stream(
-    svc: &Services,
-    stream_id: StreamId,
-    limit: Option<usize>,
-) -> Result<Vec<FileSnapshot>, IpcError> {
-    let filter = current_filter(svc);
-    let rows = svc
-        .snapshot_store
-        .list_for_stream(stream_id, limit.unwrap_or(200))
-        .await?;
-    Ok(rows
-        .into_iter()
-        .filter(|r| !filter.ignore(Path::new(&r.path), false))
-        .collect())
-}
-
 /// `snapshot` rows for a stream — one entry per `request_snapshot()`
 /// call that captured anything. Newest first.
 pub async fn list_snapshots_for_stream(

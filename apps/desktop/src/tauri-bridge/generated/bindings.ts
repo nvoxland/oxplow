@@ -637,11 +637,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listFileSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots_for_stream", { streamId, limit })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listSnapshotsForStream: (streamId: StreamId, limit: number | null) => typedError<Snapshot[], IpcError>(__TAURI_INVOKE("list_snapshots_for_stream", { streamId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

@@ -5,7 +5,6 @@ import type { BacklinkEntry } from "./backlinkTypes.js";
 import {
   directoryRef,
   fileRef,
-  findingRef,
   gitCommitRef,
   taskRef,
   wikiPageRef,
@@ -38,8 +37,8 @@ describe("canonicalIdForTarget", () => {
     expect(canonicalIdForTarget(gitCommitRef("abc1234"))).toBe("abc1234");
   });
 
-  test("findingRef returns the finding id", () => {
-    expect(canonicalIdForTarget(findingRef("fnd-1"))).toBe("fnd-1");
+  test("findings have no page of their own any more", () => {
+    expect(canonicalIdForTarget({ id: "finding:fnd-1", kind: "finding" as never, payload: { findingId: "fnd-1" } })).toBeNull();
   });
 
   test("untracked kinds return null", () => {
