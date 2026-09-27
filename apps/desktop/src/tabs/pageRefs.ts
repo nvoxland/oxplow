@@ -96,11 +96,8 @@ export function taskRef(itemId: string): TabRef {
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
  *  further exploration). Its own page kind (`metric-detail`); Metrics
  *  and the dashboard tiles both navigate into it. */
-export function metricRef(
-  metricKey: string,
-  effort?: { effortId: string; start: string; end: string | null },
-): TabRef {
-  return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
+export function metricRef(metricKey: string): TabRef {
+  return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey } };
 }
 
 export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "metrics-recorded" | "dashboards" | "explore-data"): TabRef {
@@ -118,23 +115,6 @@ export function customDashboardRef(id: string): TabRef {
 /** The Dashboards index — the list of the user's custom dashboards. */
 export function dashboardsRef(): TabRef {
   return indexRef("dashboards");
-}
-
-/** Drill-in to a single **recording** of a metric — the located items (the
- *  metric's facts for that capture) the gauge counted. Opened by clicking a row
- *  in the Metric Detail recordings table (tsk313, epic tsk12). The metric key
- *  rides in the tab id (after the capture id) because the finding read needs
- *  it — a tab restored from history has no payload (tsk46). */
-export function metricRecordingRef(
-  captureId: number,
-  payload?: { metricKey?: string; capturedAt?: string; value?: number },
-): TabRef {
-  const keySuffix = payload?.metricKey ? `:${payload.metricKey}` : "";
-  return {
-    id: `metric-recording:${captureId}${keySuffix}`,
-    kind: "metric-recording",
-    payload: { captureId, ...payload },
-  };
 }
 
 /** The Metrics page — every catalogued definition with latest value, trend
@@ -405,21 +385,15 @@ function parseTabId(id: string): TabRef {
     case "task":
       return taskRef(rest);
     case "metric-detail":
-      // Effort scope isn't encoded in the id; history reopens the full trend.
       return metricRef(rest);
     case "custom-dashboard":
       // `rest` is the `dsh<n>` id.
       return customDashboardRef(rest);
     case "metric-recording": {
-      // `<captureId>` or `<captureId>:<metricKey>` — the key is needed to
-      // fetch the findings after a restore (tsk46); capturedAt/value stay
-      // best-effort payload.
-      const [idPart, ...keyParts] = rest.split(":");
-      const n = Number(idPart);
-      const metricKey = keyParts.join(":");
-      return Number.isFinite(n) && idPart !== ""
-        ? metricRecordingRef(n, metricKey ? { metricKey } : undefined)
-        : { id, kind: "metric-recording", payload: null };
+      // The recording page is gone; an old `<captureId>:<metricKey>` id
+      // reopens its metric (key-less ones the Metrics page).
+      const metricKey = rest.split(":").slice(1).join(":");
+      return metricKey ? metricRef(metricKey) : metricsIndexRef();
     }
     // The id scheme is `dir:` (see `directoryRef`), not the kind name — spelling
     // this "directory" made the case unreachable, so directory pages fell to the

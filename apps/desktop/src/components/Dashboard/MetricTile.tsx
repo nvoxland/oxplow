@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban } from "lucide-react";
 
 import {
   type DashboardItem,
   type MetricSpec,
-  type RollupRow,
   type SeriesPoint,
   listMetricSamples,
-  metricDimensionRollup,
   subscribeMetricRefresh,
 } from "../../api.js";
 import { formatMetricValue } from "../format.js";
@@ -17,7 +14,7 @@ import { TrendChart } from "../../pages/MetricDetail.js";
 import {
   type TimeRange,
   branchOptions,
-  breakdownDimensions,
+  defaultChartMode,
   deltaVsFirst,
   filterByBranch,
   filterByRange,
@@ -29,32 +26,15 @@ import {
   type TileOptions,
   deltaTone,
   latestValue,
-  resolveGroupFilter,
   resolveTileWindow,
 } from "../../pages/customDashboardData.js";
-import { metricStatus, metricStatusColor } from "../../pages/metricsRows.js";
 import type { MenuItem } from "../../menu.js";
-import { Sparkline } from "../Sparkline.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 
 const SAMPLE_LIMIT = 500;
-/** A grouped fetch returns one point per (capture × group) and the read caps
- *  TOTAL points, so scoping to one group needs headroom for every group's whole
- *  series. Breakdown dims are low-cardinality (package / language), so this is
- *  generous rather than unbounded — same reasoning as the metric detail page. */
-const GROUP_SAMPLE_LIMIT = 20000;
-/** Bars shown on a `bar` tile before truncating — a tile is not the breakdown
- *  page; the metric detail is where the full roll-up lives. */
-const BAR_ROWS = 6;
 
-/** Tile headline numbers go through the SHARED formatter (tsk183). The local
- *  implementation this replaces compacted at 1k where the shared one compacts
- *  at 10k, so the same metric read `1.2k` on a tile and `1,234` on Metrics —
- *  the inconsistency the one-formatter rule exists to prevent.
- *
- *  No `unit` is passed: this tile renders `def.unit` in its own span beside the
- *  number, so letting the formatter append it too would read "1.2k tokens
- *  tokens". */
+/** Tile headline numbers go through the SHARED formatter (tsk183). No `unit`
+ *  is passed: the tile renders `def.unit` in its own span beside the number. */
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
   return formatMetricValue(n);
@@ -66,7 +46,7 @@ const TONE_COLOR: Record<"good" | "bad" | "neutral", string> = {
   neutral: "var(--text-muted, #888)",
 };
 
-/** Shared card shell for every tile kind — the RailHud inset-card visual. */
+/** Card shell for a metric tile — the RailHud inset-card visual. */
 export function TileCard({
   testId,
   title,
@@ -75,9 +55,6 @@ export function TileCard({
   children,
   menu,
   minHeight = 240,
-  alertColor,
-  alertLabel,
-  unscopedReason,
 }: {
   testId: string;
   title: string;
@@ -89,16 +66,6 @@ export function TileCard({
    *  can be one line tall), so a chart tile asserts its own height here
    *  rather than relying on `gridAutoRows` (tsk147). */
   minHeight?: number;
-  /** When set, the card is off target: its border takes this color and a chip
-   *  reading {@link alertLabel} sits beside the title (tsk149). */
-  alertColor?: string;
-  alertLabel?: string;
-  /** Why the dashboard's dimension filter doesn't apply to this tile. Renders a
-   *  compact ⊘ badge carrying this as its tooltip — the chart itself stays fully
-   *  legible. An earlier revision faded the whole card and printed the reason as
-   *  a chip, which made the chart harder to read and put long values (package
-   *  paths) in a space that can't hold them (tsk150). */
-  unscopedReason?: string;
 }) {
   return (
     <section
@@ -106,9 +73,7 @@ export function TileCard({
       onContextMenu={onContextMenu}
       style={{
         background: "var(--surface-card)",
-        // Dashed edge marks "not participating in the filter" without touching
-        // the chart's legibility.
-        border: `1px ${unscopedReason ? "dashed" : "solid"} ${alertColor ?? "var(--border-subtle)"}`,
+        border: "1px solid var(--border-subtle)",
         borderRadius: 6,
         padding: 12,
         display: "flex",
@@ -117,114 +82,30 @@ export function TileCard({
         minWidth: 0,
         height: "100%",
         minHeight,
-        // Anchors the not-applicable X overlay.
-        position: "relative",
       }}
     >
-      {unscopedReason ? (
-        // A corner-to-corner X across the whole pane — the unmissable "this one
-        // isn't in the filter" signal. `pointerEvents: none` so it never
-        // intercepts the title click or the right-click menu underneath, and
-        // `non-scaling-stroke` keeps the line weight even though the viewBox is
-        // stretched to a non-square card.
-        <svg
-          data-testid="tile-unscoped-x"
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "none",
-            zIndex: 1,
-          }}
-        >
-          <line
-            x1="0"
-            y1="0"
-            x2="100"
-            y2="100"
-            stroke="var(--text-muted, #8b949e)"
-            strokeWidth={4}
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            opacity={0.5}
-          />
-          <line
-            x1="100"
-            y1="0"
-            x2="0"
-            y2="100"
-            stroke="var(--text-muted, #8b949e)"
-            strokeWidth={4}
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            opacity={0.5}
-          />
-        </svg>
-      ) : null}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-        <button
-          type="button"
-          onClick={(e) => onTitleClick?.(e.metaKey || e.ctrlKey)}
-          onAuxClick={(e) => {
-            if (e.button === 1) onTitleClick?.(true);
-          }}
-          disabled={!onTitleClick}
-          title={onTitleClick ? "Open metric detail" : undefined}
-          style={{
-            all: "unset",
-            cursor: onTitleClick ? "pointer" : "default",
-            fontWeight: 600,
-            fontSize: "var(--text-base, 14px)",
-            color: "var(--text, #ddd)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            minWidth: 0,
-          }}
-        >
-          {title}
-        </button>
-        {alertColor && alertLabel ? (
-          <span
-            data-testid="tile-off-target"
-            title="This metric is missing its target"
-            style={{
-              flexShrink: 0,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: alertColor,
-              border: `1px solid ${alertColor}`,
-              borderRadius: 4,
-              padding: "1px 5px",
-            }}
-          >
-            {alertLabel}
-          </span>
-        ) : null}
-        {unscopedReason ? (
-          // Icon only — the reason can name a package path, which is far too
-          // long to sit next to a title. It lives in the tooltip instead.
-          <span
-            data-testid="tile-unscoped"
-            title={unscopedReason}
-            aria-label={unscopedReason}
-            style={{
-              flexShrink: 0,
-              display: "inline-flex",
-              alignItems: "center",
-              color: "var(--text-muted, #8b949e)",
-            }}
-          >
-            <Ban size={13} aria-hidden />
-          </span>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        onClick={(e) => onTitleClick?.(e.metaKey || e.ctrlKey)}
+        onAuxClick={(e) => {
+          if (e.button === 1) onTitleClick?.(true);
+        }}
+        disabled={!onTitleClick}
+        title={onTitleClick ? "Open metric detail" : undefined}
+        style={{
+          all: "unset",
+          cursor: onTitleClick ? "pointer" : "default",
+          fontWeight: 600,
+          fontSize: "var(--text-base, 14px)",
+          color: "var(--text, #ddd)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          minWidth: 0,
+        }}
+      >
+        {title}
+      </button>
       {children}
       {menu}
     </section>
@@ -232,92 +113,52 @@ export function TileCard({
 }
 
 /**
- * One dashboard tile for a `metric` item (tsk141/tsk142, epic tsk138). Four
- * visualizations, chosen by the tile's `viz` option:
- *  - `line` (default) — the shared {@link TrendChart};
- *  - `number` — a big headline (latest value) + a signed delta chip colored by
- *    the spec's `direction`;
- *  - `sparkline` — a bare trend line;
- *  - `bar` — the metric rolled up by a dimension (`dim`, default `package`).
+ * One dashboard tile for a `metric` item, as a `line` (the shared
+ * {@link TrendChart}, charted the way the metric rolls up) or a `number` (the
+ * latest value + a signed delta colored by the spec's `direction`).
  *
  * Samples are windowed by {@link resolveTileWindow} — the dashboard's
- * range/branch filter, with any per-tile override winning. (A `bar` tile reads
- * the dimension roll-up, which is inherently latest-state, so the time filter
- * doesn't apply to it.) Live-refreshes on `metricSamplesChanged`; the page
- * passes the resolved `def` so the grid shares one definitions fetch.
+ * range/branch filter, with any per-tile override winning. Live-refreshes on
+ * `metricSamplesChanged`; the page passes the resolved `def` so the grid shares
+ * one definitions fetch.
  */
 export function MetricTile({
   item,
   opts,
   def,
   dashboard,
-  groupFilter,
   onOpenPage,
   onRemove,
   onConfigure,
   onBranches,
-  onGroupValues,
 }: {
   item: DashboardItem;
   opts: TileOptions;
   def: MetricSpec | null;
   dashboard: { range: TimeRange | null; branch: string | null };
-  /** Dashboard-level scope: show only data under `value` of dimension `dim`
-   *  (e.g. package = `crates/oxplow-app`). A tile whose metric can't honour it
-   *  keeps its normal view, dimmed, so it's clear it isn't scoped (tsk150). */
-  groupFilter?: { dim: string | null; value: string | null };
   onOpenPage?: (ref: TabRef, opts?: { newTab?: boolean }) => void;
   onRemove?: () => void;
   onConfigure?: (next: Partial<TileOptions>) => void;
   onBranches?: (branches: string[]) => void;
-  /** Reports the dimension values this metric has, so the page can offer them
-   *  in its value picker (the union across tiles). */
-  onGroupValues?: (values: string[]) => void;
 }) {
   const [samples, setSamples] = useState<SeriesPoint[]>([]);
-  const [rollup, setRollup] = useState<RollupRow[]>([]);
-  // Samples sliced by the dashboard's selected dimension (one point per
-  // capture × group), plus the distinct group values they contain. `loaded`
-  // separates "not fetched yet" from "fetched and this metric has nothing
-  // under that value", so a tile doesn't flash dimmed before its data lands.
-  const [groupSamples, setGroupSamples] = useState<SeriesPoint[]>([]);
-  const [groupValues, setGroupValues] = useState<string[]>([]);
-  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const ctxMenu = useContextMenu();
 
   const metricKey = item.metric_key ?? null;
-
-  // The dashboard can scope every tile to one dimension VALUE (e.g. package
-  // `crates/oxplow-app`). The tile keeps its own visualization — only the
-  // points feeding it change. `resolveGroupFilter` (unit-tested) decides
-  // whether this metric can honour the scope; see its doc for the two ways it
-  // can't (tsk150).
-  const dims = def ? breakdownDimensions(def) : [];
-  const { filtered, notApplicable } = resolveGroupFilter(groupFilter?.dim, groupFilter?.value, dims, {
-    loaded: groupsLoaded,
-    values: groupValues,
-  });
-  // Grouped samples are fetched whenever the metric DECLARES the selected
-  // dimension — the values they yield are what populates the dashboard's value
-  // picker, so the fetch can't wait for a value to be chosen.
-  const wantsGroups = !!groupFilter?.dim && dims.includes(groupFilter.dim);
-
   const viz = opts.viz ?? "line";
-  const dim = opts.dim ?? "package";
 
   // Measure scope for event filtering (tsk198): a base metric reads exactly its
   // `source_measure`, so skip metricSamplesChanged events for other measures. A
-  // formula metric (source_measure null) stays undefined → fail-open (refreshes
-  // on any metric event), which is correct since it aggregates several measures.
+  // formula metric (source_measure null) stays undefined → fail-open.
   const scopeMeasures = useMemo(
     () => (def?.source_measure ? [def.source_measure] : undefined),
     [def?.source_measure],
   );
 
   // Bound each sample fetch to the widest preset (tsk202) unless this tile shows
-  // "all" time (then it must fetch the whole history). Mirrors `resolveTileWindow`'s
-  // all-detection; the tile still filters to its effective range client-side.
+  // "all" time (then it must fetch the whole history). Mirrors
+  // `resolveTileWindow`'s all-detection.
   const tileIsAll = opts.range === "all" || (!opts.range && dashboard.range === null);
 
   useEffect(() => {
@@ -337,99 +178,21 @@ export function MetricTile({
       });
     };
     refresh();
-    // Debounce the OTLP-burst metricSamplesChanged (tsk197) and skip events for
-    // measures this tile doesn't read (tsk198) — a token export no longer wakes
-    // a coverage tile. Fail-open while `def` is still loading (scope undefined).
     const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures });
     return () => {
       cancelled = true;
       off();
     };
-    // `onBranches` is a report-upward callback, excluded from deps on purpose;
-    // `scopeMeasures` changes at most once (null → key) as `def` loads.
-    // `tileIsAll` re-fetches when the tile crosses all↔bounded (tsk202).
+    // `onBranches` is a report-upward callback, excluded from deps on purpose.
   }, [metricKey, scopeMeasures, tileIsAll]);
-
-  // A `bar` tile reads the dimension roll-up rather than the time series.
-  useEffect(() => {
-    if (!metricKey || viz !== "bar") {
-      setRollup([]);
-      return;
-    }
-    let cancelled = false;
-    const refresh = () => {
-      void metricDimensionRollup(metricKey, dim).then((rows) => {
-        if (!cancelled) setRollup(rows);
-      });
-    };
-    refresh();
-    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures }); // tsk197/198
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [metricKey, viz, dim, scopeMeasures]);
-
-  // Grouped samples for the dashboard's selected dimension. Fetched as soon as
-  // the dimension is chosen (before any value): the distinct groups here are
-  // what the page offers in its value picker.
-  const groupDim = wantsGroups ? groupFilter!.dim : null;
-  useEffect(() => {
-    if (!metricKey || !groupDim) {
-      setGroupSamples([]);
-      setGroupValues([]);
-      setGroupsLoaded(false);
-      return;
-    }
-    let cancelled = false;
-    setGroupsLoaded(false);
-    const refresh = () => {
-      const win = tileIsAll ? null : widestPresetWindow(Date.now());
-      void listMetricSamples(metricKey, GROUP_SAMPLE_LIMIT, groupDim, win).then((rows) => {
-        if (cancelled) return;
-        setGroupSamples(rows);
-        const values = [...new Set(rows.map((r) => r.group).filter((g): g is string => !!g))].sort();
-        setGroupValues(values);
-        setGroupsLoaded(true);
-        onGroupValues?.(values);
-      });
-    };
-    refresh();
-    const off = subscribeMetricRefresh(refresh, { measures: scopeMeasures }); // tsk197/198
-    return () => {
-      cancelled = true;
-      off();
-    };
-    // `onGroupValues` is a report-upward callback; depending on it would
-    // re-fetch on every page render.
-  }, [metricKey, groupDim, scopeMeasures, tileIsAll]);
 
   const title = opts.title ?? def?.title ?? metricKey ?? "Metric";
 
-  // The tile's effective series: scoped to the dashboard's selected dimension
-  // value when one applies (the grouped fetch, narrowed to that group), then
-  // windowed by the range/branch filter the tile inherits.
   const windowed = useMemo(() => {
-    const source =
-      filtered && groupFilter?.value
-        ? groupSamples.filter((p) => p.group === groupFilter.value)
-        : samples;
     const { range, branch } = resolveTileWindow(opts, dashboard, Date.now());
-    const byRange = range ? filterByRange(source, range) : source;
+    const byRange = range ? filterByRange(samples, range) : samples;
     return filterByBranch(byRange, branch);
-  }, [filtered, groupFilter?.value, groupSamples, opts, dashboard, samples]);
-
-  // Off-target highlight (tsk149). Uses the project's ONE classifier
-  // (`metricStatus`) and its shared color mapping, so a tile can't disagree
-  // with the Metrics page or its Off-target filter about a verdict.
-  // Defaults on: it only fires for a metric that HAS a target and is missing
-  // it, so it stays silent for the many metrics with no target at all.
-  const alertEnabled = opts.alertOffTarget ?? true;
-  const currentValue = latestValue(windowed);
-  const status = def && currentValue != null ? metricStatus(def, currentValue) : "none";
-  const offTarget = alertEnabled && (status === "warn" || status === "fail");
-  const alertColor =
-    offTarget && def && currentValue != null ? metricStatusColor(def, currentValue) : undefined;
+  }, [opts, dashboard, samples]);
 
   const openDetail = (newTab?: boolean) => {
     if (metricKey && onOpenPage) onOpenPage(metricRef(metricKey), newTab ? { newTab: true } : undefined);
@@ -440,7 +203,7 @@ export function MetricTile({
       id: "viz",
       label: "Visualization",
       enabled: !!onConfigure,
-      submenu: (["line", "number", "sparkline", "bar"] as const).map((v) => ({
+      submenu: (["line", "number"] as const).map((v) => ({
         id: `viz:${v}`,
         label: v[0]!.toUpperCase() + v.slice(1),
         enabled: true,
@@ -467,13 +230,6 @@ export function MetricTile({
         run: () => onConfigure?.({ size: s }),
       })),
     },
-    {
-      id: "alert",
-      label: "Warn when off target",
-      enabled: !!onConfigure,
-      checked: alertEnabled,
-      run: () => onConfigure?.({ alertOffTarget: !alertEnabled }),
-    },
     { id: "sep", label: "", enabled: false, separator: true },
     { id: "open", label: "Open metric detail", enabled: !!metricKey, run: () => openDetail() },
     { id: "open-new", label: "Open in new tab", enabled: !!metricKey, run: () => openDetail(true) },
@@ -499,7 +255,7 @@ export function MetricTile({
           style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}
           data-testid="metric-tile-number"
         >
-          <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1, color: alertColor }}>
+          <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1 }}>
             {value != null ? fmt(value) : "—"}
             {def.unit ? <span style={{ fontSize: 15, opacity: 0.6, marginLeft: 4 }}>{def.unit}</span> : null}
           </div>
@@ -516,70 +272,7 @@ export function MetricTile({
       );
     }
 
-    if (viz === "sparkline") {
-      const values = seriesPoints(windowed).map((p) => p.v);
-      const value = latestValue(windowed);
-      return (
-        <div
-          style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 8 }}
-          data-testid="metric-tile-sparkline"
-        >
-          <div style={{ fontSize: 20, fontWeight: 600 }}>
-            {value != null ? fmt(value) : "—"}
-            {def.unit ? <span style={{ fontSize: 12, opacity: 0.6, marginLeft: 4 }}>{def.unit}</span> : null}
-          </div>
-          <Sparkline values={values} responsive width={240} height={40} />
-        </div>
-      );
-    }
-
-    if (viz === "bar") {
-      const rows = rollup.slice(0, BAR_ROWS);
-      if (rows.length === 0)
-        return (
-          <div style={{ opacity: 0.6, fontSize: 13 }} data-testid="metric-tile-bar-empty">
-            No {dim} breakdown for this metric.
-          </div>
-        );
-      const max = Math.max(...rows.map((r) => r.value)) || 1;
-      return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="metric-tile-bar">
-          {rows.map((r) => (
-            <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-              <span
-                style={{
-                  width: "38%",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  opacity: 0.8,
-                }}
-                title={r.key}
-              >
-                {r.key}
-              </span>
-              <span style={{ flex: 1, background: "var(--border, #2a2a2a)", borderRadius: 3, height: 10 }}>
-                <span
-                  style={{
-                    display: "block",
-                    width: `${(r.value / max) * 100}%`,
-                    background: "var(--accent, #58a6ff)",
-                    height: 10,
-                    borderRadius: 3,
-                  }}
-                />
-              </span>
-              <span style={{ width: 52, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {fmt(r.value)}
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    // line (default)
-    const mode = opts.mode ?? "value";
+    const mode = defaultChartMode(def.aggregation);
     const points = transformSeries(seriesPoints(windowed), mode);
     return (
       <div data-testid="metric-tile-line" style={{ flex: 1, display: "flex", alignItems: "center" }}>
@@ -587,7 +280,6 @@ export function MetricTile({
           points={points}
           target={mode === "value" ? def.target : null}
           unit={def.unit}
-          scale={opts.scale ?? "auto"}
           // Sized near the tile's own width so the drawing renders ~1:1 and the
           // 9px tick labels stay readable instead of scaling down (tsk144).
           width={opts.size === "wide" ? 820 : 400}
@@ -607,19 +299,6 @@ export function MetricTile({
       // `tall` asks for twice the height; with content-sized rows the tile
       // states that directly rather than leaning on the row track.
       minHeight={opts.size === "tall" ? 500 : 240}
-      alertColor={alertColor}
-      // Direction-agnostic wording: "below" would be wrong for a lower-better
-      // metric, where missing the target means being ABOVE it.
-      alertLabel={offTarget ? (status === "fail" ? "Failing" : "Off target") : undefined}
-      // The badge is an icon; the reason goes in its tooltip, where it has room
-      // to name a long value and say what's actually being shown instead.
-      unscopedReason={
-        notApplicable
-          ? dims.includes(groupFilter?.dim ?? "")
-            ? `Not filtered — this metric has no data for ${groupFilter?.dim} “${groupFilter?.value}”. Showing all of its data.`
-            : `Not filtered — this metric has no “${groupFilter?.dim}” dimension. Showing all of its data.`
-          : undefined
-      }
     >
       {body}
     </TileCard>

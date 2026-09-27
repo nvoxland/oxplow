@@ -1,4 +1,4 @@
-import type { MetricSpec, SeriesPoint } from "../api.js";
+import type { SeriesPoint } from "../api.js";
 
 // Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
 // component so they're unit-testable without a DOM — same split as
@@ -83,26 +83,12 @@ export function seriesPoints(samples: SeriesPoint[]): ChartPoint[] {
 /** How the trend chart visualizes the series. */
 export type ChartMode = "value" | "cumulative" | "change" | "avg";
 
-export const CHART_MODES: Array<{ key: ChartMode; label: string }> = [
-  { key: "value", label: "Value" },
-  { key: "cumulative", label: "Cumulative" },
-  { key: "change", label: "Change" },
-  { key: "avg", label: "Moving avg" },
-];
-
 /** Y-axis scaling. `auto` fits the data (+ target) with padding — the same
  *  data-relative scaling the Metrics sparkline uses, so a metric whose
  *  variation is small relative to its value (avg complexity ~1.96, coverage
  *  ~98%) still shows its trend instead of a flat line pinned near the top.
  *  `zero` forces the axis through 0 (honest about absolute magnitude). */
 export type ChartScale = "auto" | "zero";
-
-export const CHART_SCALES: Array<{ key: ChartScale; label: string }> = [
-  { key: "auto", label: "Auto" },
-  { key: "zero", label: "From zero" },
-];
-
-export const DEFAULT_CHART_SCALE: ChartScale = "auto";
 
 /** The chart's Y-axis `[min, max]` for a set of values (+ an optional target
  *  line that always stays in view). `zero` forces the axis through 0; `auto`
@@ -158,42 +144,6 @@ export function transformSeries(points: ChartPoint[], mode: ChartMode): ChartPoi
     default:
       return points;
   }
-}
-
-/**
- * The dimensions a per-file metric can be broken down by: always `package`
- * (the file's directory), plus any per-file `dims_json` key the metric declares
- * (e.g. `language`). Run/time dims that aren't a per-file grain (`git_version`,
- * `branch`) are excluded.
- *
- * Lives here rather than inside `MetricDetail.tsx` (where it started) because
- * more than one surface asks the question: the detail page's breakdown card and
- * the dashboard's breakout picker, which needs to know whether a given tile can
- * participate in a chosen dimension (tsk150). One rule, so the two can't
- * disagree about what a metric is sliceable by.
- */
-export function breakdownDimensions(def: MetricSpec): string[] {
-  // Exactly what the spec declares (tsk179). `package` used to be seeded here
-  // unconditionally, which papered over specs that declared nothing — at the
-  // cost of offering it on metrics whose facts carry no path, where every group
-  // comes back empty. Token metrics got that dead option and lost `model` and
-  // `agent`, which they genuinely carry. `package` isn't special:
-  // `oxplow.package` is a registered dimension like `oxplow.model`, and the
-  // engine's `dim_value` resolves both — so a metric sliceable by package
-  // declares it like anything else.
-  const out: string[] = [];
-  if (def.sliceable_dims_json) {
-    try {
-      for (const d of JSON.parse(def.sliceable_dims_json) as string[]) {
-        // `git_version` and `branch` are spine dimensions with their own
-        // controls on the page — not breakdown choices.
-        if (d !== "git_version" && d !== "branch" && !out.includes(d)) out.push(d);
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  return out;
 }
 
 /** Distinct non-null branches present in the series points, sorted. */

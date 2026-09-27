@@ -268,23 +268,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	setDashboardSettings: (req: SetDashboardSettingsRequest) => typedError<null, IpcError>(__TAURI_INVOKE("set_dashboard_settings", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	duplicateDashboard: (req: DuplicateDashboardRequest) => typedError<{
-	id: DashboardId,
-	title: string,
-	sort_index: number,
-	settings_json: string | null,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-} | null, IpcError>(__TAURI_INVOKE("duplicate_dashboard", { req })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	deleteDashboard: (id: DashboardId) => typedError<null, IpcError>(__TAURI_INVOKE("delete_dashboard", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -939,11 +922,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortMetricDeltas: (effortId: EffortId) => typedError<EffortMetricDelta[], IpcError>(__TAURI_INVOKE("list_effort_metric_deltas", { effortId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listMetricDefinitions: (language: string | null, scope: string | null) => typedError<MetricSpec[], IpcError>(__TAURI_INVOKE("list_metric_definitions", { language, scope })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -954,42 +932,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	metricDimensionRollup: (metricKey: string, dimension: string) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_dimension_rollup", { metricKey, dimension })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listMetricFindings: (metricKey: string, captureId: number | null) => typedError<FactFinding[], IpcError>(__TAURI_INVOKE("list_metric_findings", { metricKey, captureId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	metricSeries: (measureKey: string, aggregation: string, groupBy: string | null, minValue: number | null, severity: string | null, fromMs: number | null, toMs: number | null) => typedError<SeriesPoint[], IpcError>(__TAURI_INVOKE("metric_series", { measureKey, aggregation, groupBy, minValue, severity, fromMs, toMs })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	metricRollup: (measureKey: string, dimension: string | null) => typedError<RollupRow[], IpcError>(__TAURI_INVOKE("metric_rollup", { measureKey, dimension })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listMetricCatalog: () => typedError<MetricCatalogEntry[], IpcError>(__TAURI_INVOKE("list_metric_catalog")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	setMetricEnabled: (key: string, enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_enabled", { key, enabled })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setMetricsEnabled: (keys: string[], enabled: boolean) => typedError<null, IpcError>(__TAURI_INVOKE("set_metrics_enabled", { keys, enabled })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	setMetricOverride: (key: string, target: number | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_metric_override", { key, target })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1862,15 +1810,6 @@ export type DimensionEntry = {
 	promote?: boolean,
 };
 
-export type DuplicateDashboardRequest = {
-	// Dashboard to copy.
-	id: DashboardId,
-	// Title for the copy.
-	title: string,
-	// Saved view for the copy — the caller's current filter row.
-	settingsJson: string | null,
-};
-
 /**
  *  One (snapshot, effort) pair returned from
  *  `list_efforts_at_snapshots`. The renderer derives
@@ -1924,57 +1863,6 @@ export type EffortFileChange = "created" | "updated" | "deleted";
 
 export type EffortId = string;
 
-/**
- *  The joined read view of a fact: its own measurement columns PLUS the spine it
- *  inherits from its capture (`captured_at`, `branch`, version, effort, trust).
- *  One metric's roll-up over a single effort — the wire shape the task/effort
- *  page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
- *  row: derived per request from the substrate using the right attribution key
- *  per metric family (file-attributed for gauges, thread-scoped for operational,
- *  effort-diff for coverage/tests). See metrics.md.
- */
-export type EffortMetricDelta = {
-	key: string,
-	title: string,
-	unit: string | null,
-	// `higher-better` | `lower-better` | `neutral`.
-	direction: string,
-	// The definition `kind` (`gauge` | `coverage` | `test` | `event` | …).
-	kind: string,
-	category: string | null,
-	language: string | null,
-	/**
-	 *  How this delta was computed: `files` (Σ over the effort's claimed files),
-	 *  `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
-	 */
-	agg: string,
-	// The value as the effort began (`None` for a `sum`/flow metric).
-	baseline: number | null,
-	// The value as of the effort's end (or latest, if open).
-	current: number,
-	// `current − baseline` for a level/file metric; the flow total for `sum`.
-	delta: number | null,
-	// Whether the value moved across the effort (false ⇒ show the value only).
-	changed: boolean,
-	// For `files`: how many of the effort's claimed files carry this metric.
-	attributed_files: number | null,
-	// Samples considered (in-window, or per-file for `files`).
-	sample_count: number,
-	target: number | null,
-	warn_at: number | null,
-	fail_at: number | null,
-	/**
-	 *  `warn` | `fail` when `current` (the repo-total headline for gauges) sits
-	 *  in that zone, interpreted via `direction`; else `None`.
-	 */
-	crossing: string | null,
-	/**
-	 *  The latest contributing CAPTURE (the capture is the run, T-E1), for
-	 *  the findings drill-in. Field name kept for wire compatibility.
-	 */
-	latest_run_id: number | null,
-};
-
 // A loaded extension and anything wrong with it.
 export type Extension = {
 	name: string,
@@ -2018,25 +1906,6 @@ export type ExtensionSource = {
 	gitRef: string | null,
 	// The commit actually installed.
 	sha: string,
-};
-
-/**
- *  A located item behind a metric — the read-time "finding" view over a spec's
- *  filtered facts (the offenders drill-in), replacing the baked `metric_finding`
- *  (epic tsk12, tsk26). `severity` is the fact's reported severity (lint) or,
- *  absent one, DERIVED from the value against the spec's thresholds × direction.
- */
-export type FactFinding = {
-	subject_kind: string | null,
-	subject_ref: string | null,
-	path: string | null,
-	line: number | null,
-	value: number,
-	severity: string | null,
-	rule: string | null,
-	message: string | null,
-	branch: string | null,
-	captured_at: Timestamp,
 };
 
 export type FileSnapshot = {
@@ -3288,13 +3157,6 @@ export type RoleStatus = {
 	overridden: boolean,
 };
 
-// One row of a by-dimension rollup (the metric's "breakdown" card).
-export type RollupRow = {
-	key: string,
-	value: number,
-	subject_count: number,
-};
-
 // One documented column of a semantic-layer entity.
 export type SchemaColumn = {
 	name: string,
@@ -3368,12 +3230,6 @@ export type SeriesPoint = {
 	git_version: string | null,
 	// The capture's collector source (e.g. `nextest`, `agent-reported`).
 	source: string | null,
-};
-
-export type SetDashboardSettingsRequest = {
-	id: DashboardId,
-	// Opaque saved-view blob; `None` clears it.
-	settingsJson: string | null,
 };
 
 export type SetStreamPromptRequest = {

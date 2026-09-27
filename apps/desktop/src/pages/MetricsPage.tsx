@@ -35,17 +35,9 @@ import {
   SHOW_MODES,
   type ShowMode,
   filterMetricRows,
-  isOffTarget,
-  metricStatus,
   metricStatusColor,
   metricSiblings,
 } from "./metricsRows.js";
-import {
-  DEFAULT_LINE_STAT,
-  LINE_STATS,
-  type LineStat,
-  lineStatValue,
-} from "./metricsStat.js";
 
 /** One listed metric. Identity/enabled/grouping come from the **catalog** (the
  *  only source that knows about `use:`); `def` is the seeded spec, which carries
@@ -66,52 +58,23 @@ const SAMPLE_LIMIT = 200;
 
 
 
-/** Color a value against the metric's `target`/`fail_at` + `direction` — the
- *  data-driven successor to the hardcoded coverage 50/80 ramp (tsk220). The
- *  mapping now lives beside the `metricStatus` classifier it delegates to
- *  (`metricsRows.ts`), so this page and the dashboard tiles' off-target
- *  highlight paint the same verdict the same way (tsk149). */
-const statusColor = metricStatusColor;
-
-/** The color for a rendered CHANGE: green when the move improved the metric
- *  per its `direction`, red when it worsened it — the same semantics
- *  `EffortMetrics`' delta chips use. Neutral direction / zero / unknown stay
- *  uncolored: silence is the dominant path. */
-function changeColor(def: MetricSpec | null, delta: number | null): string | undefined {
-  if (!def || delta == null || delta === 0 || def.direction === "neutral") return undefined;
-  const improved = def.direction === "higher-better" ? delta > 0 : delta < 0;
-  return improved ? "var(--ok, #3fb950)" : "var(--err, #f85149)";
-}
-
-/** One metric row: title · trend sparkline · the rail-selected stat. A `<tr>`
+/** One metric row: title · trend sparkline · latest value. A `<tr>`
  *  that adopts browser-style click via `useRouteDispatch` (plain → detail
  *  in-tab, modifier/middle/right → new tab). */
 function MetricRow({
   row,
-  stat,
   onOpenPage,
   siblings,
 }: {
   row: Row;
-  stat: LineStat;
   onOpenPage?: (ref: TabRef) => void;
   siblings?: NavSiblings;
 }) {
   const { def, latest, samples } = row;
-  const color = def && latest ? statusColor(def, latest.value) : undefined;
+  // Colored by where the latest value stands against the metric's target.
+  const color = def && latest ? metricStatusColor(def, latest.value) : undefined;
+  const unit = def?.unit;
   const { handlers } = useRouteDispatch(metricRef(row.key), { onNavigate: onOpenPage, siblings });
-  // The stat is computed over the SAME filtered samples the sparkline plots
-  // (tsk82's invariant, generalized by tsk115): the number that terminates the
-  // line always describes the line. `change` gets an explicit `+` and the
-  // improved/worsened color; `distance` is also signed but keeps the metric's
-  // status color (it describes the latest value's standing, like the level
-  // stats); the target stats need the def's `target` (tsk120).
-  const shown = lineStatValue(samples, stat, def?.target ?? null);
-  const valueColor = stat === "change" ? changeColor(def, shown) : color;
-  const signed = stat === "change" || stat === "distance";
-  // Percent-of-target is a percent regardless of the metric's own unit;
-  // distance is in the metric's unit; everything else too.
-  const unit = stat === "pctTarget" ? "%" : def?.unit;
   return (
     <tr
       onClick={handlers.onClick}
@@ -130,12 +93,10 @@ function MetricRow({
         />
       </td>
       <td
-        style={{ padding: "6px 8px", fontWeight: 600, color: valueColor }}
-        title={shown != null ? formatMetricValueExact(shown, unit) : undefined}
+        style={{ padding: "6px 8px", fontWeight: 600, color }}
+        title={latest ? formatMetricValueExact(latest.value, unit) : undefined}
       >
-        {shown != null
-          ? `${signed && shown > 0 ? "+" : ""}${formatMetricValue(shown, unit)}`
-          : "—"}
+        {latest ? formatMetricValue(latest.value, unit) : "—"}
       </td>
     </tr>
   );
@@ -173,7 +134,6 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const [branch, setBranch] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<ShowMode>(DEFAULT_SHOW_MODE);
-  const [lineStat, setLineStat] = useState<LineStat>(DEFAULT_LINE_STAT);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,18 +189,13 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
   const branches = useMemo(() => branchOptions(rows.flatMap((r) => r.samples)), [rows]);
   // Which metrics are LISTED (Show mode + search), each scoped to the range +
   // branch — an in-scope metric with no recording in the window stays listed
-  // and just shows "—". We window FIRST so `off-target` can test each row's
-  // latest value *within the selected filters* (the same value that colors the
-  // row), then narrow: filterMetricRows handles enabled-ness + query, and the
-  // off-target value test runs against the windowed latest (tsk121).
+  // and just shows "—".
   const viewRows = useMemo(() => {
     const range = rangeFromPreset(rangeKey, Date.now());
-    const windowed = filterMetricRows(rows, showMode, query).map((r) => {
+    return filterMetricRows(rows, showMode, query).map((r) => {
       const samples = filterByBranch(filterByRange(r.samples, range), branch);
       return { ...r, latest: samples[0] ?? null, samples };
     });
-    if (showMode !== "off-target") return windowed;
-    return windowed.filter((r) => r.latest != null && isOffTarget(r.def, r.latest.value));
   }, [rows, rangeKey, branch, query, showMode]);
 
   const sections = useMemo(
@@ -288,7 +243,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
               value={showMode}
               onChange={(e) => setShowMode(e.target.value as ShowMode)}
               data-testid="recorded-show-mode"
-              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't; Off target lists just the enabled ones missing their target in the current window."
+              title="Enabled lists only metrics this project has turned on; All also lists the ones it hasn't."
               style={sel}
             >
               {SHOW_MODES.map((m) => (
@@ -325,22 +280,6 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
               {branches.map((b) => (
                 <option key={b} value={b}>
                   {b}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ opacity: 0.6, fontSize: 12 }}>Line value</span>
-            <select
-              value={lineStat}
-              onChange={(e) => setLineStat(e.target.value as LineStat)}
-              data-testid="recorded-line-stat"
-              title="What the number at the end of each line shows — always computed over the plotted range/branch window."
-              style={sel}
-            >
-              {LINE_STATS.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
                 </option>
               ))}
             </select>
@@ -389,11 +328,7 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
           // The Show mode + search can empty the list even though metrics exist,
           // which the "nothing recorded yet" state above doesn't cover.
           <div data-testid="recorded-no-match" style={{ opacity: 0.6, lineHeight: 1.6 }}>
-            {showMode === "off-target"
-              ? query
-                ? "No matching metrics are off target."
-                : "No metrics are off target — everything with a target is meeting it."
-              : "No metrics match."}
+            No metrics match.
             {showMode === "enabled" ? " Try Show: All to include metrics this project hasn't enabled." : ""}
           </div>
         ) : (
@@ -419,7 +354,6 @@ export function MetricsPage({ onOpenPage }: { onOpenPage?: (ref: TabRef) => void
                       <MetricRow
                         key={row.key}
                         row={row}
-                        stat={lineStat}
                         onOpenPage={onOpenPage}
                         siblings={{
                           entries: siblings.entries,

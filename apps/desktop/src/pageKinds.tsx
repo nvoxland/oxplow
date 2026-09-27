@@ -15,7 +15,6 @@
 import {
   Activity,
   AlertCircle,
-  AlertTriangle,
   Archive,
   BarChart3,
   BookOpen,
@@ -132,8 +131,6 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return BarChart3;
     case "metric-detail":
       return Gauge;
-    case "metric-recording":
-      return AlertTriangle;
     case "terminal":
       return Terminal;
     case "new-stream":
@@ -230,8 +227,6 @@ export function pageKindLabel(kind: string): string {
       return "metrics";
     case "metric-detail":
       return "metric";
-    case "metric-recording":
-      return "recording";
     case "custom-dashboard":
       return "dashboard";
     default:

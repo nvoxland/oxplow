@@ -1,31 +1,10 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
-import type {
-  EffortMetricDelta,
-  FactFinding,
-  MetricSpec,
-  RollupRow,
-  SeriesPoint,
-} from "../api.js";
-import { metricDimensionRollup } from "../api.js";
+import type { MetricSpec, SeriesPoint } from "../api.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import {
-  deltaColor,
-  deltaSummary,
-  fmtSigned,
-} from "../components/EffortMetrics.js";
-import { metricRecordingRef } from "../tabs/pageRefs.js";
-import { useRouteDispatch } from "../tabs/RouteLink.js";
-import type { TabRef } from "../tabs/tabState.js";
-import {
-  CHART_MODES,
-  CHART_SCALES,
-  type ChartMode,
-  type ChartPoint,
-  type ChartScale,
   RANGE_PRESETS,
   type TimeRange,
-  breakdownDimensions,
   fromLocalInput,
   inRangeStat,
   matchPresetKey,
@@ -33,10 +12,9 @@ import {
   toLocalInput,
 } from "./metricDetailData.js";
 
-// Composable pieces of the Metric detail page (tsk213, P4 / tsk232 / tsk291).
-// The page (`MetricDetailPage`) lays these out: the right rail carries the
-// stats, the main column carries the trend chart, the recordings table, and the
-// kind-specific drill-in selected from `metric_definition.kind`.
+// Composable pieces of the Metric detail page. The page (`MetricDetailPage`)
+// lays these out: the right rail carries the range/branch controls and the
+// stats, the main column the trend chart and the recordings table.
 
 // Every number on this page goes through the SHARED formatter (tsk183) — the
 // rule in `.context/usability.md`. The local implementation this replaces did
@@ -50,24 +28,16 @@ function fmt(v: number, unit?: string | null): string {
 
 export { TrendChart } from "../components/charts/TrendChart.js";
 
-/** Time-range + chart-mode + branch controls for the metric detail page. */
+/** Time-range + branch controls for the metric detail page. */
 export function MetricControls({
   range,
   onRange,
-  mode,
-  onMode,
-  scale,
-  onScale,
   branch,
   branches,
   onBranch,
 }: {
   range: TimeRange;
   onRange: (r: TimeRange) => void;
-  mode: ChartMode;
-  onMode: (m: ChartMode) => void;
-  scale: ChartScale;
-  onScale: (s: ChartScale) => void;
   branch: string | null;
   branches: string[];
   onBranch: (b: string | null) => void;
@@ -146,32 +116,6 @@ export function MetricControls({
         ) : null}
       </div>
       <div style={rowStyle}>
-        <span style={labelStyle}>Chart</span>
-        <select value={mode} onChange={(e) => onMode(e.target.value as ChartMode)} data-testid="chart-mode" style={selStyle}>
-          {CHART_MODES.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div style={rowStyle}>
-        <span style={labelStyle}>Scale</span>
-        <select
-          value={scale}
-          onChange={(e) => onScale(e.target.value as ChartScale)}
-          title="Auto fits the data; From zero anchors the Y-axis at 0."
-          data-testid="chart-scale"
-          style={selStyle}
-        >
-          {CHART_SCALES.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div style={rowStyle}>
         <span style={labelStyle}>Branch</span>
         <select
           value={branch ?? ""}
@@ -193,35 +137,10 @@ export function MetricControls({
 
 const PAGE_SIZE = 25;
 
-/** One recordings-table row. Each series point is one capture, so every row is
- *  clickable (browser-style via `useRouteDispatch`) → that capture's item-level
- *  findings drill-in. */
-function RecordingRow({
-  s,
-  unit,
-  metricKey,
-  onOpenPage,
-}: {
-  s: SeriesPoint;
-  unit?: string | null;
-  metricKey?: string;
-  onOpenPage?: (ref: TabRef) => void;
-}) {
-  const { handlers } = useRouteDispatch(
-    metricRecordingRef(s.capture_id, {
-      metricKey,
-      capturedAt: String(s.captured_at),
-      value: s.value,
-    }),
-    { onNavigate: onOpenPage },
-  );
+/** One recordings-table row: one capture of the metric. */
+function RecordingRow({ s, unit }: { s: SeriesPoint; unit?: string | null }) {
   return (
-    <tr
-      onClick={handlers.onClick}
-      onAuxClick={handlers.onAuxClick}
-      onContextMenu={handlers.onContextMenu}
-      style={{ borderTop: "1px solid var(--border, #2a2a2a)", cursor: "pointer" }}
-    >
+    <tr style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
       <td style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{new Date(String(s.captured_at)).toLocaleString()}</td>
       <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 600 }}>{fmt(s.value, unit)}</td>
       <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{s.branch ?? "—"}</td>
@@ -238,19 +157,8 @@ function RecordingRow({
   );
 }
 
-/** The actual recordings — every sample, newest first, paginated. Rows with a
- *  run drill into that recording's item-level findings. */
-export function RecordingsTable({
-  samples,
-  unit,
-  metricKey,
-  onOpenPage,
-}: {
-  samples: SeriesPoint[];
-  unit?: string | null;
-  metricKey?: string;
-  onOpenPage?: (ref: TabRef) => void;
-}) {
+/** The actual recordings — every sample, newest first, paginated. */
+export function RecordingsTable({ samples, unit }: { samples: SeriesPoint[]; unit?: string | null }) {
   const [page, setPage] = useState(0);
   // Reset to the first page whenever the (filtered) input set changes.
   useEffect(() => setPage(0), [samples]);
@@ -279,7 +187,7 @@ export function RecordingsTable({
         </thead>
         <tbody>
           {rows.map((s) => (
-            <RecordingRow key={s.capture_id} s={s} unit={unit} metricKey={metricKey} onOpenPage={onOpenPage} />
+            <RecordingRow key={s.capture_id} s={s} unit={unit} />
           ))}
         </tbody>
       </table>
@@ -309,18 +217,8 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Right-rail stats for the metric detail page: latest, change, type, id, … */
-export function MetricStatsRail({
-  def,
-  samples,
-  effort,
-  effortDelta,
-}: {
-  def: MetricSpec;
-  samples: SeriesPoint[];
-  effort?: { effortId: string; start: string; end: string | null };
-  effortDelta?: EffortMetricDelta | null;
-}) {
+/** Right-rail stats for the metric detail page: in-range value, type, id, … */
+export function MetricStatsRail({ def, samples }: { def: MetricSpec; samples: SeriesPoint[] }) {
   const latest = samples[0] ?? null;
   // The "in range" headline follows how the metric rolls up (Σ for sum metrics
   // like tokens, mean for avg, signed last−first for level gauges) — see
@@ -364,301 +262,6 @@ export function MetricStatsRail({
           <code style={{ fontSize: 11 }}>{latest.branch}</code>
         </Stat>
       ) : null}
-      {effort && effortDelta ? (
-        <div
-          data-testid="metric-detail-effort"
-          style={{
-            marginTop: 8,
-            border: "1px solid var(--border-subtle, #2a2a2a)",
-            borderRadius: 6,
-            padding: "8px 10px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-            fontSize: 13,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>In this effort</span>
-          <span style={{ fontFamily: "var(--font-mono)" }}>{deltaSummary(effortDelta)}</span>
-          {effortDelta.changed && effortDelta.delta != null && effortDelta.agg !== "sum" ? (
-            <span style={{ color: deltaColor(effortDelta) }}>Δ {fmtSigned(effortDelta.delta)}</span>
-          ) : null}
-          {effortDelta.attributed_files != null && effortDelta.attributed_files > 0 ? (
-            <span style={{ opacity: 0.6 }}>
-              across {effortDelta.attributed_files}{" "}
-              {effortDelta.attributed_files === 1 ? "file" : "files"}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function FindingsTable({ findings }: { findings: FactFinding[] }) {
-  if (findings.length === 0) return <div style={{ opacity: 0.6 }}>No findings in the latest recording.</div>;
-  return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-      <thead>
-        <tr style={{ textAlign: "left", opacity: 0.6 }}>
-          <th style={{ padding: "4px 8px" }}>Location</th>
-          <th style={{ padding: "4px 8px" }}>Severity</th>
-          <th style={{ padding: "4px 8px" }}>Rule</th>
-          <th style={{ padding: "4px 8px" }}>Message</th>
-        </tr>
-      </thead>
-      <tbody>
-        {findings.map((r, i) => (
-          <tr key={i} style={{ borderTop: "1px solid var(--border, #2a2a2a)" }}>
-            <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>
-              {r.path ?? r.subject_ref ?? "—"}
-              {r.line != null ? `:${r.line}` : ""}
-            </td>
-            <td style={{ padding: "4px 8px" }}>{r.severity ?? "—"}</td>
-            <td style={{ padding: "4px 8px", fontFamily: "monospace", fontSize: 11 }}>{r.rule ?? "—"}</td>
-            <td style={{ padding: "4px 8px" }}>{r.message ?? "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-/** Top subjects behind an `event`-kind metric — the server rolls the metric's
- *  facts up by `subject` (largest first), replacing the old client-side
- *  `topSubjects` over samples (epic tsk12, T-C3). */
-function TopSubjects({ metricKey }: { metricKey: string }) {
-  const [rows, setRows] = useState<RollupRow[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    void metricDimensionRollup(metricKey, "subject").then((r) => {
-      if (!cancelled) setRows(r.slice(0, 10));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [metricKey]);
-  if (rows.length === 0) return <div style={{ opacity: 0.6 }}>No subject breakdown.</div>;
-  const max = Math.max(...rows.map((t) => t.value)) || 1;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      {rows.map((t) => (
-        <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-          <span style={{ width: 200, fontFamily: "monospace", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {t.key}
-          </span>
-          <span style={{ flex: 1, background: "var(--border, #2a2a2a)", borderRadius: 2, height: 12 }}>
-            <span style={{ display: "block", width: `${(t.value / max) * 100}%`, background: "var(--accent, #58a6ff)", height: 12, borderRadius: 2 }} />
-          </span>
-          <span style={{ width: 56, textAlign: "right" }}>{fmt(t.value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** Kind-specific drill-in for the latest recording, or null for plain gauges.
- *  Findings/test/coverage metrics render the uniform per-item finding view over
- *  the recording's facts (`findings_for_spec`); `event` metrics show the
- *  server-rolled subject breakdown (epic tsk12, T-C3). */
-export function KindDrillIn({
-  def,
-  findings,
-  metricKey,
-}: {
-  def: MetricSpec;
-  findings: FactFinding[];
-  metricKey: string;
-}): ReactNode {
-  switch (def.display_kind) {
-    case "findings":
-    case "test":
-    case "coverage":
-      return <FindingsTable findings={findings} />;
-    case "event":
-      return <TopSubjects metricKey={metricKey} />;
-    default:
-      return null;
-  }
-}
-
-// `breakdownDimensions` moved to `metricDetailData.ts` (tsk150) so the
-// dashboard's breakout picker reads the same rule this card does.
-
-/** Breakdown card: roll the metric's latest per-file values up by a chosen
- *  dimension (package / language / …) and render a horizontal bar list,
- *  largest first. Exercises the `metric_subject` package grain + the per-file
- *  dim breakdown (tsk328 package / tsk319 language). Self-hides when the
- *  metric has no per-file samples (e.g. coverage, operational metrics). */
-export function MetricBreakdownCard({
-  def,
-  onAvailability,
-  onSelectGroup,
-  onDimChange,
-  activeGroup,
-}: {
-  def: MetricSpec;
-  /** Reports whether the current dimension's roll-up returned any rows — the
-   *  tab wrapper uses it to decide whether to offer a Breakdown tab (tsk134). */
-  onAvailability?: (has: boolean) => void;
-  /** Click a row to filter the trend chart to that dim value (tsk136). */
-  onSelectGroup?: (dim: string, value: string) => void;
-  /** Switching the dimension clears any active chart filter (it was on the old dim). */
-  onDimChange?: () => void;
-  /** The currently charted group value (for the row highlight), or null. */
-  activeGroup?: string | null;
-}) {
-  const dims = useMemo(() => breakdownDimensions(def), [def]);
-  const [dim, setDim] = useState<string>(dims[0] ?? "package");
-  const [rows, setRows] = useState<RollupRow[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    void metricDimensionRollup(def.key, dim).then((r) => {
-      if (cancelled) return;
-      setRows(r);
-      onAvailability?.(r.length > 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [def.key, dim, onAvailability]);
-
-  // Hide the card only when there is nothing to break down BY — a metric that
-  // declares no sliceable dimensions (coverage, most operational metrics).
-  //
-  // Emphatically NOT when the chosen dimension returned no rows (tsk181): the
-  // early return used to sit below this and above the picker, so an empty
-  // result unmounted the card *including its own <select>*, leaving the tab
-  // selected, blank, and with no control to choose a different dimension —
-  // recoverable only by closing the tab. Any dimension can come back empty for
-  // the current range or branch, so that trap was reachable with a perfectly
-  // valid choice.
-  if (dims.length === 0) return null;
-  const max = Math.max(...rows.map((r) => r.value), 1);
-  const dimLabel = dim.charAt(0).toUpperCase() + dim.slice(1);
-  const valueLabel = "Value";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="metric-breakdown">
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            opacity: 0.6,
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
-          Breakdown by
-        </div>
-        <select
-          value={dim}
-          onChange={(e) => {
-            setDim(e.target.value);
-            onDimChange?.();
-          }}
-          aria-label="Breakdown dimension"
-          style={{ fontSize: 12 }}
-        >
-          {dims.map((d) => (
-            <option key={d} value={d}>
-              {d}
-            </option>
-          ))}
-        </select>
-      </div>
-      {rows.length === 0 ? (
-        <div
-          data-testid="breakdown-empty"
-          style={{ fontSize: 12, opacity: 0.6, padding: "6px 2px" }}
-        >
-          No data for <strong>{dim}</strong> in the selected range. Pick another
-          dimension above, or widen the range.
-        </div>
-      ) : (
-        <>
-      {/* Column header — the value/count numbers are otherwise unlabeled. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontSize: 10,
-          opacity: 0.5,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          borderBottom: "1px solid var(--border, #2a2a2a)",
-          paddingBottom: 2,
-        }}
-      >
-        <span style={{ width: "32%" }}>{dimLabel}</span>
-        <div style={{ flex: 1 }} />
-        <span style={{ width: 64, textAlign: "right" }} title={`Rolled-up ${valueLabel} for the group`}>
-          {valueLabel}
-        </span>
-        <span style={{ width: 56, textAlign: "right" }} title="Number of subjects (functions / files) in the group">
-          Subjects
-        </span>
-      </div>
-      {rows.slice(0, 20).map((r) => {
-        const active = r.key === activeGroup;
-        return (
-        <div
-          key={r.key}
-          onClick={onSelectGroup ? () => onSelectGroup(dim, r.key) : undefined}
-          data-testid={`breakdown-row-${r.key}`}
-          title={
-            onSelectGroup
-              ? `${r.key}: ${fmt(r.value, def.unit)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"} — click to chart this ${dim}`
-              : `${r.key}: ${fmt(r.value, def.unit)} across ${r.subject_count} subject${r.subject_count === 1 ? "" : "s"}`
-          }
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 12,
-            cursor: onSelectGroup ? "pointer" : undefined,
-            background: active ? "var(--accent-bg, rgba(88,166,255,0.12))" : undefined,
-            borderRadius: 3,
-            padding: "1px 3px",
-            margin: "0 -3px",
-          }}
-        >
-          <span
-            style={{
-              width: "32%",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontWeight: active ? 600 : undefined,
-            }}
-          >
-            {r.key}
-          </span>
-          <div style={{ flex: 1, background: "var(--border, #2a2a2a)", borderRadius: 3, height: 12 }}>
-            <div
-              style={{
-                width: `${(r.value / max) * 100}%`,
-                background: "var(--accent, #58a6ff)",
-                height: 12,
-                borderRadius: 3,
-              }}
-            />
-          </div>
-          <span style={{ width: 64, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{fmt(r.value, def.unit)}</span>
-          <span style={{ width: 56, textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: 0.55 }}>
-            {r.subject_count}
-          </span>
-        </div>
-        );
-      })}
-      {rows.length > 20 ? (
-        <div style={{ fontSize: 11, opacity: 0.5, paddingTop: 2 }}>
-          +{rows.length - 20} more {dim === "package" ? "packages" : `${dim} values`}
-        </div>
-      ) : null}
-        </>
-      )}
     </div>
   );
 }

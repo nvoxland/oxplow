@@ -731,42 +731,6 @@ impl MetricsService {
         Ok(())
     }
 
-    /// Set the `target` / `trigger` override for a metric in this project's
-    /// `.oxplow/project.yaml`, then reseed (the Catalog inline edit, tsk233). Enabling
-    /// it if not already present (an override implies the metric is active);
-    /// `None` for a field clears that override (falls back to the definition's
-    /// default). Persists + emits `ConfigChanged`.
-    pub async fn set_metric_override(&self, key: &str, target: Option<f64>) -> Result<(), String> {
-        {
-            let mut cfg = self
-                .config
-                .write()
-                .map_err(|_| "config lock poisoned".to_string())?;
-            let entry = cfg
-                .metrics
-                .iter_mut()
-                .find(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key));
-            match entry {
-                // Only `target` is project-overridable; `trigger` is inherent to
-                // the definition and never set here (tsk290).
-                Some(e) => {
-                    e.target = target;
-                }
-                None => cfg.metrics.push(MetricEntry {
-                    use_key: Some(key.to_string()),
-                    target,
-                    ..Default::default()
-                }),
-            }
-            oxplow_config::write_project_config(&self.project_dir, &cfg)
-                .map_err(|e| e.to_string())?;
-        }
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(())
-    }
-
     /// Scaffold a new gauge-backed metric (epic tsk12, E): write a starter
     /// Starlark gauge script plus the **trio** that wires it up — a `measures:`
     /// entry (`<key>.count`, the fact type the gauge emits), a `gauges:` entry
@@ -4328,54 +4292,6 @@ def transform(input):
                 .unwrap(),
             "all consumers disabled → gate closed → producer stops collecting"
         );
-    }
-
-    #[tokio::test]
-    async fn set_metric_override_writes_target_trigger_stays_inherent() {
-        let (svc, dir) = fixture().await;
-
-        // Setting a target override on a not-yet-enabled metric enables it and
-        // persists the target into .oxplow/project.yaml.
-        svc.metrics
-            .set_metric_override("oxplow.rust.unsafe_blocks", Some(0.0))
-            .await
-            .unwrap();
-
-        let entry = svc
-            .metrics
-            .catalog()
-            .await
-            .into_iter()
-            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
-            .unwrap();
-        assert!(entry.enabled, "override implies enabled");
-        assert_eq!(entry.target, Some(0.0));
-        // Trigger is inherent to the definition (on-snapshot for code gauges),
-        // never overridable (tsk290).
-        assert_eq!(entry.trigger, "on-snapshot");
-
-        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
-        assert!(yaml.contains("target"), "target persisted; got:\n{yaml}");
-        assert!(
-            !yaml.contains("trigger"),
-            "trigger is never written to config; got:\n{yaml}"
-        );
-
-        // Clearing the target override (None) drops it back to the default.
-        svc.metrics
-            .set_metric_override("oxplow.rust.unsafe_blocks", None)
-            .await
-            .unwrap();
-        let entry = svc
-            .metrics
-            .catalog()
-            .await
-            .into_iter()
-            .find(|e| e.key == "oxplow.rust.unsafe_blocks")
-            .unwrap();
-        // unsafe_blocks ships with target 0 in the built-in catalog, so the
-        // resolved target falls back to that default, not the cleared override.
-        assert_eq!(entry.target, Some(0.0));
     }
 
     #[tokio::test]

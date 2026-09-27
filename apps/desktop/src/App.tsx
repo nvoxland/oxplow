@@ -119,7 +119,6 @@ import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
-import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
 import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
@@ -1940,7 +1939,6 @@ export function App() {
       case "external-url":
       case "metrics-recorded":
       case "metric-detail":
-      case "metric-recording":
       case "custom-dashboard":
       case "dashboards":
       case "lens":
@@ -2847,39 +2845,13 @@ export function App() {
           render: () => <MetricsPage onOpenPage={navOpen} />,
         });
       } else if (ref.kind === "metric-detail") {
-        // `metricRef(key, effort)` deep-links into one metric's detail page
-        // (the task-page metrics-panel drill-in).
-        const p = (ref.payload ?? null) as {
-          metricKey?: string;
-          effort?: { effortId: string; start: string; end: string | null };
-        } | null;
+        const p = (ref.payload ?? null) as { metricKey?: string } | null;
         tabs.push({
           id: ref.id,
           label: "Metric",
           closable: true,
           render: () => (
-            <MetricDetailPage metricKey={p?.metricKey} effort={p?.effort} onOpenPage={navOpen} />
-          ),
-        });
-      } else if (ref.kind === "metric-recording") {
-        const p = (ref.payload ?? null) as {
-          captureId?: number;
-          metricKey?: string;
-          capturedAt?: string;
-          value?: number;
-        } | null;
-        tabs.push({
-          id: ref.id,
-          label: "Recording",
-          closable: true,
-          render: () => (
-            <MetricRecordingPage
-              captureId={p?.captureId}
-              metricKey={p?.metricKey}
-              capturedAt={p?.capturedAt}
-              value={p?.value}
-              onOpenPage={navOpen}
-            />
+            <MetricDetailPage metricKey={p?.metricKey} onOpenPage={navOpen} />
           ),
         });
       } else if (ref.kind === "custom-dashboard") {

@@ -180,8 +180,7 @@ welded to collection.
 > fixes, cheapest read to root cause:
 > - **Shared debounce helper** (`subscribeMetricRefresh` in `api.ts`, tsk197).
 >   The 2.5s trailing-debounce discipline now lives in ONE place; all five
->   consumers (`MetricTile`×3, `MetricDetailPage`, `RecordedMetricsPage`,
->   `EffortMetrics`) route through it instead of hand-rolling it. `configChanged`
+>   consumers (`MetricTile`, `MetricDetailPage`, `MetricsPage`) route through it instead of hand-rolling it. `configChanged`
 >   (a user action) still refreshes immediately via `{ alsoConfig: true }`.
 > - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
@@ -1098,7 +1097,7 @@ dimensions:                        # custom conformed slice axes
   `builtin_ast_specs` / `builtin_producer_specs`) first, then EVERY resolved
   config spec — including a `use:` of a built-in, which resolves to scope
   `built-in` carrying the catalog default target plus the project's
-  target/warnAt/failAt overrides (what `set_metric_override` writes). The
+  target/warnAt/failAt overrides (from the `use:` entry). The
   second pass must not skip built-in scope, or those thresholds never reach
   the persisted `metric_spec` the engine reads.
 - **Scaffolds:** `MetricsService::scaffold_measure` / `scaffold_dimension` —
@@ -1317,8 +1316,7 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   package / language holds the most complexity/TODOs"). `dimension` is
   `"package"` (default — parent dir) or any per-file `dims_json` key (e.g.
   `language`, tsk319); `stream` is optional (omit ⇒ all streams), matching the
-  UI. The same store method backs the IPC
-  `metric_dimension_rollup` + the Metric Detail **Breakdown** card (tsk328/319). Authoring/trigger:
+  UI. Authoring/trigger:
   `run_metric` (run a configured gauge now — the `manual` trigger → `MetricsService::run_metric_by_key`;
   returns `facts_recorded`) and `record_metric` (an **asserted FACT** on the
   metric's source measure, under a `provenance: asserted` / `source:
@@ -1340,14 +1338,11 @@ Each producer: `upsert_definition` (idempotent) → `record_run` → `record_sam
   facts (T-C3a, tsk39)**, mirroring the MCP wiring: `list_metric_definitions` →
   `list_specs` (`MetricSpec`), `list_metric_samples(metric_key, limit, group_by?)`
   → `series_for_spec` (`SeriesPoint`, newest-first; `group_by` slices server-side),
-  `metric_dimension_rollup(metric_key, dimension)` → `rollup_for_spec` (`RollupRow`,
-  also serves the `event`-kind `subject` breakdown), `list_metric_findings(metric_key,
-  capture_id?)` → `findings_for_spec` (`FactFinding`, `both`-scoped — the per-capture
-  drill-in, args changed from `run_id`). Two measure-level reads `metric_series` /
-  `metric_rollup` are `both`-scoped mirrors of the MCP tools. Bindings regenerate
-  to `MetricSpec`/`SeriesPoint`/`RollupRow`/`FactFinding`. `list_effort_metric_deltas`
-  (tsk250, `ui`-scoped — `commands/effort.rs`) returns the family-attributed
-  per-effort roll-up (`EffortMetricDelta`) for the task-page panel; the agent
+  and the catalog / enable reads below. The dimension roll-up, per-capture
+  findings, measure series/rollup and effort-delta IPC commands were removed
+  with the UI that used them (tsk309); agents keep `metric_breakdown`,
+  `list_metric_findings`, `metric_series` and `metric_rollup` over MCP, and
+  per-effort deltas are `v_effort_metric_delta`. The agent
   gets the same numbers as prompt text via oxplow-analytics' `metric-deltas`
   advisory (over the stored `v_effort_metric_delta`).
 - **Event**: `OxplowEvent::MetricSamplesChanged { stream_id }` (coarse — the
@@ -1398,47 +1393,24 @@ just carries a Help blurb pointing there.
 > that matches no files yields no point at all. Nothing auto-detects a project's
 > languages.
 
-- **Recorded Metrics** (`RecordedMetricsPage.tsx`, `PageKind`
-  `"metrics-recorded"` / `recordedMetricsRef()`) — every **catalogued** metric as
-  a `title · trend sparkline · latest value` row (row set = `list_metric_catalog`,
-  the only source that knows `use:`; the seeded spec joins in by key for unit /
-  direction / thresholds and is null only for an explicitly-disabled metric whose
-  spec was pruned). The rail's **Show** dropdown picks `Enabled` (**default**) /
-  `All` / `Off target` — see the box above for why the Enabled/All distinction
-  isn't free. Pure row filtering (Show mode + search, composed so a search never
-  resurfaces a disabled metric) lives in `recordedMetricsRows.ts`. **`Off target`
-  (tsk121)** narrows to the enabled metrics whose latest value *within the
-  current range/branch window* misses its target — a two-step filter: the pure
-  `filterMetricRows` narrows enabled-ness + query (it can't see values), then the
-  page applies `isOffTarget(def, latest)` against the windowed latest. Off-target
-  status comes from the shared `metricStatus(def, value)` classifier
-  (`ok`/`warn`/`fail`/`none`), which `statusColor` also delegates to so a row's
-  color and its off-target membership can't drift. A section only renders when it
-  has rows, since `buildMetricSections` groups what it's given; a filtered-empty
-  list falls back to a "No metrics match" / "No metrics are off target" state.
-  Rows are colored by `statusColor` (target/`fail_at`/direction). The value sits **after** the sparkline (tsk82)
-  because it *is* that sparkline's last point — both read the same
-  range+branch-filtered `samples` (newest-first, so `samples[0]`), meaning the
-  "latest value" is the latest **within the selected filters**, not all-time.
-  The rail's **Line value** dropdown (`recordedMetricsStat.ts`, tsk115/tsk120)
-  picks *what* number terminates the line — all computed over that same plotted
-  window: `Latest value` (default) / `Change` (signed newest − oldest) /
-  `Distance to target` (latest − `target`, signed, metric unit) / `Percent of
-  target` (latest ÷ `target` × 100, rendered `%`) / `Mean` / `Min` / `Max`. The
-  two target stats render `—` when the metric has no target (Percent also on a
-  zero target); `Change`/`Distance` carry a sign, `Distance` keeping the
-  metric's status color while `Change` gets improved/worsened coloring. Each
-  `<tr>` adopts browser-style
-  click via `useRouteDispatch(metricRef(key))` (plain-click → detail in-tab,
-  modifier/middle/right → new tab), passing the **sibling chain** (the sections
-  flattened in visual order, `metricSiblings`) so the detail page gets up/down
-  nav (tsk119). Authoring a **new** custom metric is agent work now: the
-  **"+ New metric" scaffold form was retired (tsk122)** in favor of the
-  `scaffold_metric` MCP tool + the `/oxplow:new-metric` skill, and the details
-  rail carries a **Help blurb** (`recorded-new-metric-help`) pointing the user
-  there. Live-refreshes on `metricSamplesChanged`
-  (debounced — see the OTLP-burst note) and `configChanged` (immediate: enable
-  toggles from a detail page are user-action-rate).
+- **Metrics** (`MetricsPage.tsx`, `PageKind` `"metrics-recorded"` /
+  `metricsIndexRef()`) — every **catalogued** metric as a `title · trend
+  sparkline · latest value` row (row set = `list_metric_catalog`, the only
+  source that knows `use:`; the seeded spec joins in by key for unit /
+  direction / thresholds and is null only for an explicitly-disabled metric
+  whose spec was pruned). The rail has **Search**, **Show** (`Enabled`,
+  default, / `All` — see the box above for why that distinction isn't free;
+  pure filtering in `metricsRows.ts`), **Range** and **Branch**. The value
+  sits after the sparkline because it *is* that sparkline's last point —
+  both read the same range+branch-filtered samples — colored by
+  `metricStatusColor` (the shared `metricStatus` classifier:
+  target/`fail_at`/direction). Each `<tr>` adopts browser-style click via
+  `useRouteDispatch(metricRef(key))`, passing the **sibling chain**
+  (`metricSiblings`) so the detail page gets up/down nav (tsk119). A Help
+  blurb (`recorded-new-metric-help`) points at the agent for new metrics
+  (`scaffold_metric` + `/oxplow:new-metric`). Live on `metricSamplesChanged`
+  (debounced) and `configChanged`. **Simplified (tsk309):** the Line value
+  stat picker, the Off target mode and the saved-view presets are gone.
 
 > ### Sectioning — one rule, both pages (`buildMetricSections`, tsk81)
 >
@@ -1480,23 +1452,21 @@ just carries a Help blurb pointing there.
 > `typescript`. A gauge's `language: ""` (the language-agnostic code gauges) maps
 > to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
 > as its "General" bucket.
-- **Metric Detail** (`MetricDetailPage.tsx` wrapping `MetricDetail.tsx`,
-  `PageKind` `"metric-detail"`, routed by `metricRef(key, effort)`) — its own
-  page (tsk283), navigated into from the Explorer, Recorded Metrics (each row is
-  a `RouteLink` to `metricRef(key)`), and the task-page EffortMetrics drill-in
-  (so there's no inline overlay). Back goes
-  through `PageNavigationContext` (`goBack`, falling back to Recorded Metrics).
-  The metric name is the H1; the definition's **`description`** renders as intro
-  text under it (tsk309). Layout is the details layout: a right rail ("Details")
-  holds the range/chart-mode/branch controls + the agg-aware in-range stat + the
-  full **definition metadata** (`MetricStatsRail`, tsk33: ID/key, Type
-  (display_kind), Aggregation, source Measure, Scope, Category, Language, Unit,
-  Direction, Target, Warn/Fail thresholds, Branch) + the **Configure block**
-  (tsk117 — Enabled checkbox + Target input; see "The configure surface"
-  below); the main column has the trend
-  chart → **paginated** recordings table (`RecordingsTable`, 25/page) → kind
-  drill-in. See the `MetricDetail` component bullet below for what each kind
-  renders.
+- **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
+  and pure `metricDetailData.ts`, `PageKind` `"metric-detail"`, routed by
+  `metricRef(key)`). The metric name is the H1 and its `description` the
+  intro. The main column is the trend chart (drag to select a range; charted
+  the way the metric rolls up — `defaultChartMode`: sum → cumulative) and the
+  paginated recordings (`RecordingsTable`, 25/page). The details rail holds
+  Range + Branch (`MetricControls`), the agg-aware in-range stat and the full
+  definition metadata (`MetricStatsRail`), **Add to dashboard ▾** and the
+  **Enabled** checkbox. **Simplified (tsk309):** chart mode/scale controls,
+  the breakdown card and group filter, the per-kind drill-ins (findings
+  table, test tree, coverage lines, top subjects), the Metric Recording page,
+  the target-override input and the "In this effort" callout are gone.
+  Targets live in config; breakdowns and findings are for agents (MCP
+  `metric_breakdown`, `metric_rollup`, `list_metric_findings`) and lenses.
+  Old `metric-recording:<capture>:<key>` tab ids reopen the metric.
 
 > **Definition descriptions (tsk309).** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
@@ -1506,40 +1476,6 @@ just carries a Help blurb pointing there.
 > and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
 > `spec_definition()`).
 
-`MetricsExplorer.tsx` itself (the chart component, P4) is a multi-measure
-overlay on one time
-  axis + group-by a conformed dimension (`branch`/`subject`/declared dims like
-  `model`/`language`) + **line / bar / scatter** viz + target band + legend.
-  Inline SVG (no charting lib, like the codebase's other visuals); pure grouping
-  in `buildExplorerSeries`, pure pairing in `buildScatterPoints` (two measures ×
-  a shared group → one point per group value, e.g. coverage × complexity by
-  module). **Saved views** (`metricsPresets.ts`, localStorage): name the current
-  measures/group-by/viz and reload it later; the picker also offers **built-in
-  presets** (`BUILTIN_PRESETS`: "Tokens by model", "Coverage", "Tests pass/fail")
-  and the page accepts an `initialPreset` deep-link. **Effort bands** (tsk233):
-  the efforts overlapping the charted window (`list_efforts_in_window`) render as
-  faint bands behind the series — hover names the effort, click scopes the chart
-  to that window (Clear resets). A measure's title links to its per-kind
-  **detail** (via `onOpenDetail`).
-
-- **Metric Recording** (`MetricRecordingPage.tsx`, `PageKind` `"metric-recording"`,
-  `metricRecordingRef(runId, {metricKey,capturedAt,value})`, tsk313) — drill-in
-  from a **single recording**. The Recordings-table rows on the Metric Detail
-  page are clickable when the sample has a `run_id`; clicking opens this page,
-  which lists the run's **`metric_finding`s** (`list_metric_findings(runId)`) —
-  the located items the gauge counted (file:line · name · value). This is how a
-  "count of X" gauge (high-complexity functions, long functions) becomes
-  drillable: the gauge **emits findings** alongside its samples (see the gauge
-  findings channel below). Degrades to an empty state when a run has no findings.
-
-`MetricDetail.tsx` (+ pure `metricDetailData.ts`, tsk232) is the renderer
-`MetricDetailPage` mounts: one view selected from `metric_definition.kind`.
-Every kind shows the value trend (+ Δ-vs-first, branch, trust badge); each adds
-its drill-in from the latest run's findings (`list_metric_findings`):
-**findings** → a findings table, **test** → the suite/case tree (from the
-`test-detail` payload), **coverage** → per-file uncovered changed lines
-(`coverage-detail`), **event** → top-N subjects, **gauge** → trend only.
-
 ### The configure surface (tsk282 → folded into Detail/Recorded by tsk117)
 
 There is **no Metric Settings page anymore**. Configuration was a dedicated
@@ -1548,10 +1484,8 @@ folded it into the surfaces where you already look at a metric:
 
 - **Per-metric config lives on the Metric Detail page** — a "Configure" block
   at the bottom of the details rail: an **Enabled** checkbox
-  (`metric-detail-enabled` → `set_metric_enabled`) and, only while enabled, a
-  **Target** input (`metric-detail-target` → `set_metric_override`; empty
-  clears the override, uncontrolled but keyed on the resolved target so an
-  external config edit remounts it). Failures surface via `recordOpError`.
+  (`metric-detail-enabled` → `set_metric_enabled`); targets are set in
+  `.oxplow/project.yaml`. Failures surface via `recordOpError`.
   The block reads the **catalog entry** (`list_metric_catalog`), NOT the spec:
   a disabled metric's spec is pruned, so the spec-driven page body would
   otherwise dead-end. A disabled metric's detail page renders an enable-prompt
@@ -1566,8 +1500,8 @@ folded it into the surfaces where you already look at a metric:
   (the `/oxplow:new-metric` skill).
 - **Retired with the page:** the per-section **tri-state bulk enable/disable**
   (`GroupCheckbox`/`sectionCheckboxState`, tsk32) — enable/disable is
-  per-metric only now (`set_metrics_enabled` batch IPC still exists,
-  currently uncallable from the UI); and the Explorer's "Configure metrics →"
+  per-metric only now (the `set_metrics_enabled` batch IPC is gone;
+  `MetricsService::set_metrics_enabled` remains for tests); and the Explorer's "Configure metrics →"
   header link. The `metrics-catalog` page kind is gone from
   `tabState`/`pageRefs`/`pageKinds`/`RailHud`/`App` — a persisted
   `metrics-catalog` tab id no longer matches any render branch, so stale tabs
@@ -1605,13 +1539,10 @@ The mechanics behind those controls (unchanged by tsk117):
   `oxplow.tokens`/`oxplow.test_case` keep flowing until *all* their metrics
   are off). Historical facts are never deleted, so re-enabling restores the
   chart.
-- **Target** (tsk233) via `set_metric_override` →
-  `MetricsService::set_metric_override` writes the target override onto the
-  `use:` entry. **Trigger is inherent to the definition** — *when* a metric is
-  collected is a property of what it measures, not a per-project knob — so
-  it's never user-pickable; `resolve_one` reads it from the definition (like
-  `compute`), a `use:` entry can't override it, and `set_metric_override` no
-  longer accepts it (tsk290).
+- **Targets** are config: a `use:` entry's `target` / `warn_at` / `fail_at`
+  in `.oxplow/project.yaml`. **Trigger is inherent to the definition** —
+  `resolve_one` reads it from the definition (like `compute`) and a `use:`
+  entry can't override it (tsk290).
 - **`scaffold_metric` (MCP tool, tsk122)** scaffolds the **trio** (measure +
   gauge + metric) at **project** or **global** scope: the agent calls it →
   `MetricsService::scaffold_metric` writes a starter fact-emitting Starlark stub +
@@ -1633,25 +1564,19 @@ effort review (`DiffViewPage`'s `effort-review` slot) shows the oxplow-analytics
 `effort-metric-deltas` lens — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
 (tests, coverage, analysis, tokens and nudges have their own lenses and are
-left out). A row links to the metric's detail page. `MetricDetailPage`
-(`effort` prop) still renders an **"In this effort"** before→after callout
-when opened with an effort window; the formatting helpers live in
-`components/EffortMetrics.tsx`.
+left out). A row links to the metric's detail page.
 
-Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` +
-`set_metric_override` (RPC cores in `commands/metrics.rs`, adapters generated from the command table,
-`ui`-scoped in surface-parity), backed by `MetricsService::{catalog,
-set_metric_enabled, set_metric_override}` and the `MetricCatalogEntry` type —
-consumed by the Metric Detail Configure block and the Recorded Metrics rows.
+Catalog reads/writes: `list_metric_catalog` + `set_metric_enabled` (RPC cores
+in `commands/metrics.rs`, `ui`-scoped in surface-parity), backed by
+`MetricsService::{catalog, set_metric_enabled}` and the `MetricCatalogEntry`
+type — consumed by the Metric Detail Configure block and the Metrics rows.
 **`scaffold_metric` is no longer here** (tsk122): its UI button was retired, so
 it moved off the `ui` surface to an **agent-only MCP tool** (`agent(...)` in
 surface-parity; the handler in `oxplow-mcp` calls `MetricsService::scaffold_metric`
 directly), and the Tauri/RPC `scaffold_metric` command was deleted.
-**Token Analytics is retired** as a bespoke page (tsk233) — its `token-analytics`
-tab now renders the **Metrics Explorer** page with the "Tokens by model" preset.
-(Page/Usage
-analytics stay bespoke: `page_visit`/`usage_event` are deliberately **not**
-projected into the substrate — see the producers note above.)
+Token and page analytics are oxplow-analytics lenses (`usage`) over
+`v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
+**not** projected into the metric substrate — see the producers note above.
 
 ## Adding a metric (today)
 

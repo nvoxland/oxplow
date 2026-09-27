@@ -120,22 +120,18 @@ pub const MANIFEST: &[Capability] = &[
     // Per-effort metric roll-up for the task-page panel (tsk250) — UI-only; the
     // agent gets the same numbers as prompt text via oxplow-analytics'
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
-    ui("list_effort_metric_deltas"),
     // Effort bands on the Metrics Explorer time axis (tsk233) — UI-only overlay.
     ui("list_efforts_in_window"),
     // Unified metric substrate reads (tsk213) — exposed on both surfaces.
     both("list_metric_definitions"),
     both("list_metric_samples"),
-    ui("metric_dimension_rollup"),
     // Per-run finding detail (tsk213/tsk232) — both: the agent drills in via MCP,
     // the renderer's per-kind Metric detail view reads it over IPC.
-    both("list_metric_findings"),
+    agent("list_metric_findings"),
     // Catalog browse + enable-toggle (tsk219) — UI-driven (the agent authors via
     // the `metrics:` config / run_metric, not the catalog toggle).
     ui("list_metric_catalog"),
     ui("set_metric_enabled"),
-    ui("set_metrics_enabled"),
-    ui("set_metric_override"),
     // Metric authoring tools (tsk213, P3) — agent-only: the renderer drives
     // compute via config + the runner, not ad-hoc IPC. `scaffold_metric` joined
     // them (tsk122) when its "+ New metric" UI button was retired in favor of
@@ -161,8 +157,8 @@ pub const MANIFEST: &[Capability] = &[
     // Engine-backed measure-level reads over facts (metrics-as-definitions) —
     // on both surfaces (T-C3): the agent reads them over MCP, the renderer's
     // Explorer/Detail pages compute over IPC.
-    both("metric_series"),
-    both("metric_rollup"),
+    agent("metric_series"),
+    agent("metric_rollup"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),
@@ -340,8 +336,6 @@ pub const MANIFEST: &[Capability] = &[
     both("create_dashboard"),
     both("add_dashboard_item"),
     ui("rename_dashboard"),
-    ui("set_dashboard_settings"),
-    ui("duplicate_dashboard"),
     ui("delete_dashboard"),
     ui("update_dashboard_item"),
     ui("remove_dashboard_item"),

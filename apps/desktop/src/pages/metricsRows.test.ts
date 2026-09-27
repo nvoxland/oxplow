@@ -4,7 +4,6 @@ import {
   DEFAULT_SHOW_MODE,
   SHOW_MODES,
   filterMetricRows,
-  isOffTarget,
   metricStatus,
   metricSiblings,
 } from "./metricsRows.js";
@@ -43,19 +42,6 @@ describe("filterMetricRows", () => {
     expect(filterMetricRows(ROWS, "all", "")).toHaveLength(4);
   });
 
-  it("off-target mode keeps only enabled rows, like `enabled` (the value test is the page's job)", () => {
-    // filterMetricRows can't see values; it narrows to the enabled set + query,
-    // and MetricsPage then drops the on-target rows via isOffTarget.
-    expect(filterMetricRows(ROWS, "off-target", "").map((r) => r.key)).toEqual([
-      "oxplow.rust.unsafe_blocks",
-      "oxplow.tests.failed",
-    ]);
-  });
-
-  it("lists Off target as a Show option", () => {
-    expect(SHOW_MODES.map((m) => m.key)).toContain("off-target");
-  });
-
   it("matches the query against both title and key, case-insensitively", () => {
     expect(filterMetricRows(ROWS, "all", "EMPTY CATCH").map((r) => r.key)).toEqual([
       "oxplow.csharp.empty_catch",
@@ -90,8 +76,8 @@ describe("filterMetricRows", () => {
     ]);
   });
 
-  it("offers exactly the three documented modes", () => {
-    expect(SHOW_MODES.map((m) => m.key)).toEqual(["enabled", "all", "off-target"]);
+  it("offers exactly the two documented modes", () => {
+    expect(SHOW_MODES.map((m) => m.key)).toEqual(["enabled", "all"]);
   });
 });
 
@@ -145,12 +131,3 @@ describe("metricStatus (tsk121)", () => {
   });
 });
 
-describe("isOffTarget (tsk121)", () => {
-  it("is true for warn or fail, false for ok / none / null def", () => {
-    expect(isOffTarget(spec({ target: 80 }), 72)).toBe(true); // warn
-    expect(isOffTarget(spec({ target: 80, fail_at: 50 }), 40)).toBe(true); // fail
-    expect(isOffTarget(spec({ target: 80 }), 85)).toBe(false); // ok
-    expect(isOffTarget(spec({}), 5)).toBe(false); // no threshold
-    expect(isOffTarget(null, 5)).toBe(false); // disabled/pruned spec
-  });
-});

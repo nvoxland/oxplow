@@ -3,6 +3,6 @@
 //! specta TS export sees them.
 
 pub use oxplow_rpc::commands::dashboards::{
-    AddDashboardItemRequest, DuplicateDashboardRequest, RenameDashboardRequest,
-    ReorderDashboardItemsRequest, SetDashboardSettingsRequest, UpdateDashboardItemRequest,
+    AddDashboardItemRequest, RenameDashboardRequest, ReorderDashboardItemsRequest,
+    UpdateDashboardItemRequest,
 };

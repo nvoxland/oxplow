@@ -1730,25 +1730,7 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   });
 }
 
-export type { EffortMetricDelta } from "./tauri-bridge/index.js";
-
-/** Per-metric roll-up over an effort — grouped before→after deltas for the
- *  task/effort page's metrics panel (attributed per family; tsk250). */
-export async function listEffortMetricDeltas(
-  effortId: string,
-): Promise<import("./tauri-bridge/index.js").EffortMetricDelta[]> {
-  return unwrap(
-    await commands.listEffortMetricDeltas(effortId),
-  ) as unknown as import("./tauri-bridge/index.js").EffortMetricDelta[];
-}
-
-export type {
-  MetricSpec,
-  SeriesPoint,
-  FactFinding,
-  MetricCatalogEntry,
-  RollupRow,
-} from "./tauri-bridge/index.js";
+export type { MetricSpec, SeriesPoint, MetricCatalogEntry } from "./tauri-bridge/index.js";
 
 import type { Dashboard, DashboardWithItems } from "./tauri-bridge/index.js";
 export type { Dashboard, DashboardItem, DashboardWithItems } from "./tauri-bridge/index.js";
@@ -1765,20 +1747,6 @@ export async function createDashboard(title: string): Promise<Dashboard> {
 }
 export async function renameDashboard(id: string, title: string): Promise<void> {
   unwrap(await commands.renameDashboard({ id, title }));
-}
-/** Save (or clear, with null) a dashboard's default view — the filter row's
- *  state, restored the next time it's opened. */
-export async function setDashboardSettings(id: string, settingsJson: string | null): Promise<void> {
-  unwrap(await commands.setDashboardSettings({ id, settingsJson }));
-}
-/** "Save as": copy a dashboard (tiles and all) under a new title, with
- *  `settingsJson` as the copy's saved view. Null if the source is gone. */
-export async function duplicateDashboard(
-  id: string,
-  title: string,
-  settingsJson: string | null,
-): Promise<Dashboard | null> {
-  return unwrap(await commands.duplicateDashboard({ id, title, settingsJson }));
 }
 export async function deleteDashboard(id: string): Promise<void> {
   unwrap(await commands.deleteDashboard(id));
@@ -1853,33 +1821,7 @@ export async function listMetricSamples(
   ) as unknown as import("./tauri-bridge/index.js").SeriesPoint[];
 }
 
-/** Roll up a metric (by spec `key`) by a dimension — `"package"` (the file's
- *  parent directory), a conformed dim (`oxplow.severity`), a `subject` roll-up,
- *  or any `dims_json` key — additivity-aware per the source measure's temporal
- *  semantics (level gauges: latest per subject; events: every fact; ratios:
- *  per-group Σnum/Σden), largest first. The Metric Detail Breakdown + subject
- *  breakdown (tsk328 package / tsk319 language). */
-export async function metricDimensionRollup(
-  metricKey: string,
-  dimension: string,
-): Promise<import("./tauri-bridge/index.js").RollupRow[]> {
-  return unwrap(
-    await commands.metricDimensionRollup(metricKey, dimension),
-  ) as unknown as import("./tauri-bridge/index.js").RollupRow[];
-}
 
-/** The located items behind one metric (by spec `key`) — the read-time finding
- *  view over its filtered facts (epic tsk12). `captureId` scopes to one
- *  recording's drill-in (findings table / per-file coverage / per-case tests);
- *  omit for every matching fact. */
-export async function listMetricFindings(
-  metricKey: string,
-  captureId?: number | null,
-): Promise<import("./tauri-bridge/index.js").FactFinding[]> {
-  return unwrap(
-    await commands.listMetricFindings(metricKey, captureId ?? null),
-  ) as unknown as import("./tauri-bridge/index.js").FactFinding[];
-}
 
 /** The available metric catalog (built-in ∪ global ∪ project) + each entry's
  *  enabled-in-this-project flag. Drives the Catalog page (tsk219). */
@@ -1896,21 +1838,7 @@ export async function setMetricEnabled(key: string, enabled: boolean): Promise<v
   unwrap(await commands.setMetricEnabled(key, enabled));
 }
 
-/** Enable/disable MANY metrics in one write — the per-section Enable/Disable-all
- *  action (tsk32). One config write + one reseed for the whole set. */
-export async function setMetricsEnabled(keys: string[], enabled: boolean): Promise<void> {
-  unwrap(await commands.setMetricsEnabled(keys, enabled));
-}
 
-/** Set a metric's `target` override in `.oxplow/project.yaml` (the Catalog inline edit,
- *  tsk233). `null` clears that override. `trigger` is inherent to the
- *  definition and not overridable (tsk290). */
-export async function setMetricOverride(
-  key: string,
-  target: number | null,
-): Promise<void> {
-  unwrap(await commands.setMetricOverride(key, target));
-}
 
 /** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
  *  Metrics Explorer's effort-band overlay (tsk233). */

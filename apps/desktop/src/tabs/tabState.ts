@@ -46,7 +46,6 @@ export type PageKind =
   | "external-url"
   | "metrics-recorded"
   | "metric-detail"
-  | "metric-recording"
   | "custom-dashboard"
   | "dashboards"
   | "lens"

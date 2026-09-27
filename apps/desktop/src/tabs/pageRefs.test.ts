@@ -14,8 +14,8 @@ import {
   hookEventsRef,
   indexRef,
   lensRef,
-  metricRecordingRef,
   metricRef,
+  metricsIndexRef,
   newTaskRef,
   refFromTabId,
   snapshotRef,
@@ -126,20 +126,10 @@ describe("refFromTabId — diff-view", () => {
   });
 });
 
-describe("refFromTabId — metric-recording", () => {
-  test("round-trips the capture id + metric key (the restore needs both)", () => {
-    // tsk46: the finding read is keyed by (metricKey, captureId), so a tab
-    // restored from history must recover the key from the id alone.
-    const ref = metricRecordingRef(42, { metricKey: "oxplow.todos" });
-    expect(ref.id).toBe("metric-recording:42:oxplow.todos");
-    const restored = refFromTabId(ref.id);
-    expect(restored?.kind).toBe("metric-recording");
-    expect(restored?.payload).toEqual({ captureId: 42, metricKey: "oxplow.todos" });
-  });
-
-  test("a key-less legacy id still restores by capture id", () => {
-    const restored = refFromTabId("metric-recording:7");
-    expect(restored?.payload).toEqual({ captureId: 7 });
+describe("refFromTabId — old metric-recording ids", () => {
+  test("reopen the recording's metric, or the Metrics page without a key", () => {
+    expect(refFromTabId("metric-recording:42:oxplow.todos")).toEqual(metricRef("oxplow.todos"));
+    expect(refFromTabId("metric-recording:7")).toEqual(metricsIndexRef());
   });
 });
 
@@ -200,7 +190,6 @@ describe("refFromTabId", () => {
       indexRef("tasks"),
       indexRef("git-dashboard"),
       metricRef("oxplow.todos"),
-      metricRecordingRef(7, { metricKey: "oxplow.todos" }),
       newTaskRef(),
       snapshotRef(112),
       taskRef("42"),

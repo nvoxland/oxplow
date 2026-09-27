@@ -81,7 +81,7 @@ extension host lands.
 - **System:** `settings`, `external-url`, `dashboard` (the `visits`
   variant is the Go To hub, which stays core)
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
-  `metrics-recorded`, `metric-detail`, `metric-recording`,
+  `metrics-recorded`, `metric-detail`,
   `custom-dashboard`, `dashboards`
 - **Analytics (moved to ext):** oxplow-analytics lenses, with the old ids
   in `LEGACY_PAGE_REDIRECTS`: `usage`, `page-analytics`, `finding`,
@@ -119,7 +119,6 @@ and history reopen the lens instead of becoming dead entries.
 | git-dashboard | `git-dashboard` | `git-dashboard` |
 | dashboard | `dashboard:<variant>` | `dashboard:visits` |
 | metric-detail | `metric-detail:<key>` | `metric-detail:oxplow.coverage.abs_pct` |
-| metric-recording | `metric-recording:<runId>` | `metric-recording:42` |
 | custom-dashboard | `custom-dashboard:<dashboardId>` | `custom-dashboard:dsh3` |
 | stream-settings / thread-settings | `stream-settings:<id>` / `thread-settings:<id>` | `thread-settings:t-3` |
 | closed-threads / new-stream / new-task | the kind name | `new-task` |

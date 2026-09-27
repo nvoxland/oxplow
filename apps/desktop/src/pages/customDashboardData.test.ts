@@ -3,12 +3,9 @@ import { describe, expect, it, mock } from "bun:test";
 import type { SeriesPoint } from "../api.js";
 import {
   buildAddToDashboardMenu,
-  dashboardBreakoutDims,
   deltaTone,
-  parseDashboardSettings,
   latestValue,
   parseTileOptions,
-  resolveGroupFilter,
   resolveTileWindow,
   tileSpanStyle,
 } from "./customDashboardData.js";
@@ -31,12 +28,7 @@ describe("parseTileOptions", () => {
   });
 
   it("parses a well-formed options blob", () => {
-    expect(parseTileOptions('{"viz":"number","mode":"cumulative","scale":"zero","title":"Cov"}')).toEqual({
-      viz: "number",
-      mode: "cumulative",
-      scale: "zero",
-      title: "Cov",
-    });
+    expect(parseTileOptions('{"viz":"number","title":"Cov"}')).toEqual({ viz: "number", title: "Cov" });
   });
 
   it("ignores malformed JSON instead of throwing", () => {
@@ -45,13 +37,21 @@ describe("parseTileOptions", () => {
     expect(parseTileOptions("42")).toEqual({});
   });
 
-  it("drops unrecognized viz / mode / scale values", () => {
-    const opts = parseTileOptions('{"viz":"pie","mode":"nonsense","scale":"log","title":123}');
+  it("drops unrecognized viz values and non-string titles", () => {
+    const opts = parseTileOptions('{"viz":"pie","title":123}');
     expect(opts.viz).toBeUndefined();
-    expect(opts.mode).toBeUndefined();
-    expect(opts.scale).toBeUndefined();
-    // A non-string title is dropped too.
     expect(opts.title).toBeUndefined();
+  });
+
+  it("reads tiles saved with the retired options as plain line tiles", () => {
+    // sparkline / bar tiles, chart mode, scale, breakdown dim and the
+    // off-target toggle were removed; old blobs keep what still applies.
+    expect(
+      parseTileOptions(
+        '{"viz":"sparkline","mode":"cumulative","scale":"zero","dim":"package","alertOffTarget":true,"title":"T"}',
+      ),
+    ).toEqual({ title: "T" });
+    expect(parseTileOptions('{"viz":"bar"}')).toEqual({});
   });
 });
 
@@ -71,21 +71,14 @@ describe("latestValue", () => {
   });
 });
 
-describe("parseTileOptions — phase 4 fields", () => {
-  it("parses the added viz kinds, size, dim, text, range and branch", () => {
-    expect(
-      parseTileOptions(
-        '{"viz":"sparkline","size":"wide","dim":"package","text":"# Hi","range":"30d","branch":"main"}',
-      ),
-    ).toEqual({
-      viz: "sparkline",
+describe("parseTileOptions — layout and window fields", () => {
+  it("parses size, text, range and branch", () => {
+    expect(parseTileOptions('{"size":"wide","text":"# Hi","range":"30d","branch":"main"}')).toEqual({
       size: "wide",
-      dim: "package",
       text: "# Hi",
       range: "30d",
       branch: "main",
     });
-    expect(parseTileOptions('{"viz":"bar"}').viz).toBe("bar");
     expect(parseTileOptions('{"size":"tall"}').size).toBe("tall");
   });
 
@@ -95,13 +88,7 @@ describe("parseTileOptions — phase 4 fields", () => {
     expect(opts.size).toBeUndefined();
   });
 
-  it("parses the off-target alert toggle, dropping non-booleans", () => {
-    expect(parseTileOptions('{"alertOffTarget":false}').alertOffTarget).toBe(false);
-    expect(parseTileOptions('{"alertOffTarget":true}').alertOffTarget).toBe(true);
-    // Absent means "unset" — the tile applies its own default.
-    expect(parseTileOptions("{}").alertOffTarget).toBeUndefined();
-    expect(parseTileOptions('{"alertOffTarget":"yes"}').alertOffTarget).toBeUndefined();
-  });
+
 });
 
 describe("tileSpanStyle", () => {
@@ -147,114 +134,6 @@ describe("resolveTileWindow", () => {
     expect(resolveTileWindow({ branch: "feature" }, { range: null, branch: "main" }, now).branch).toBe(
       "feature",
     );
-  });
-});
-
-describe("dashboardBreakoutDims", () => {
-  const spec = (key: string, dims: string[] | null) =>
-    ({ key, sliceable_dims_json: dims ? JSON.stringify(dims) : null }) as unknown as Parameters<
-      typeof dashboardBreakoutDims
-    >[0][number];
-
-  it("unions the dimensions across every tile's metric, sorted", () => {
-    const dims = dashboardBreakoutDims([
-      spec("a", ["language"]),
-      spec("b", ["team", "language"]),
-      spec("c", null),
-    ]);
-    // Union of what the specs DECLARE, de-duped and sorted. A metric that
-    // declares nothing contributes nothing (tsk179) — `package` used to be
-    // added unconditionally here, which offered it on boards whose metrics
-    // couldn't answer it.
-    expect(dims).toEqual(["language", "team"]);
-  });
-
-  it("excludes run/time dims that aren't a per-file grain", () => {
-    const dims = dashboardBreakoutDims([spec("a", ["branch", "git_version", "language"])]);
-    expect(dims).not.toContain("branch");
-    expect(dims).not.toContain("git_version");
-    expect(dims).toContain("language");
-  });
-
-  it("returns nothing when no metric declares a dimension", () => {
-    // `package` is an ordinary declared dimension now, so a metric that
-    // declares none offers none — the filter row hides rather than showing a
-    // choice that yields empty groups.
-    expect(dashboardBreakoutDims([spec("a", null)])).toEqual([]);
-    expect(dashboardBreakoutDims([])).toEqual([]);
-  });
-
-  it("carries package through when a metric declares it", () => {
-    expect(dashboardBreakoutDims([spec("a", ["package", "language"])])).toEqual([
-      "language",
-      "package",
-    ]);
-  });
-});
-
-describe("parseDashboardSettings", () => {
-  it("returns an empty object for null / blank / malformed JSON", () => {
-    expect(parseDashboardSettings(null)).toEqual({});
-    expect(parseDashboardSettings("")).toEqual({});
-    expect(parseDashboardSettings("{nope")).toEqual({});
-    expect(parseDashboardSettings("7")).toEqual({});
-  });
-
-  it("parses a saved view", () => {
-    expect(
-      parseDashboardSettings('{"range":"7d","branch":"main","filterDim":"package","filterValue":"core"}'),
-    ).toEqual({ range: "7d", branch: "main", filterDim: "package", filterValue: "core" });
-  });
-
-  it("drops non-string fields rather than seeding the filter row with junk", () => {
-    expect(parseDashboardSettings('{"range":5,"branch":true,"filterDim":{},"filterValue":[]}')).toEqual({});
-  });
-});
-
-describe("resolveGroupFilter", () => {
-  const groups = (values: string[], loaded = true) => ({ loaded, values });
-
-  it("is inactive when no dimension is selected", () => {
-    expect(resolveGroupFilter(null, null, ["package"], groups(["a"]))).toEqual({
-      filtered: false,
-      notApplicable: false,
-    });
-  });
-
-  it("is inactive (not dimmed) when a dimension is chosen but no value yet", () => {
-    // The tile keeps showing everything until the user narrows to a value.
-    expect(resolveGroupFilter("package", null, ["package"], groups(["a"]))).toEqual({
-      filtered: false,
-      notApplicable: false,
-    });
-  });
-
-  it("filters when the metric declares the dimension and has that value", () => {
-    expect(resolveGroupFilter("package", "core", ["package"], groups(["core", "ui"]))).toEqual({
-      filtered: true,
-      notApplicable: false,
-    });
-  });
-
-  it("is not-applicable when the metric doesn't declare the dimension", () => {
-    expect(resolveGroupFilter("language", "rust", ["package"], groups([]))).toEqual({
-      filtered: false,
-      notApplicable: true,
-    });
-  });
-
-  it("is not-applicable when the metric declares the dimension but has no data for that value", () => {
-    expect(resolveGroupFilter("package", "core", ["package"], groups(["ui", "api"]))).toEqual({
-      filtered: false,
-      notApplicable: true,
-    });
-  });
-
-  it("does not flash not-applicable while the groups are still loading", () => {
-    expect(resolveGroupFilter("package", "core", ["package"], groups([], false))).toEqual({
-      filtered: true,
-      notApplicable: false,
-    });
   });
 });
 

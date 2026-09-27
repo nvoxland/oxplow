@@ -5,8 +5,7 @@ use std::path::Path;
 
 use oxplow_app::Services;
 use oxplow_db::{
-    EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortMetricDelta, TaskEffort,
-    TaskEffortStore as _,
+    EffortAtSnapshot, EffortChangedPaths, EffortFile, TaskEffort, TaskEffortStore as _,
 };
 use oxplow_domain::{EffortId, TaskId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
@@ -122,20 +121,6 @@ pub async fn list_changed_paths_for_effort(
     })
 }
 
-/// Per-metric roll-up over an effort — grouped before→after deltas for the
-/// task/effort page's metrics panel. Attributed per family (see metrics.md):
-/// per-file gauges by the effort's claimed files, operational by thread,
-/// coverage/tests by the effort's own diff.
-pub async fn list_effort_metric_deltas(
-    svc: &Services,
-    effort_id: EffortId,
-) -> Result<Vec<EffortMetricDelta>, IpcError> {
-    Ok(svc
-        .collection
-        .effort_metric_deltas(&effort_id.to_string())
-        .await)
-}
-
 #[cfg(test)]
 mod tests {
     #[tokio::test]
@@ -162,18 +147,5 @@ mod tests {
         .await
         .unwrap();
         assert!(out.is_null(), "missing effort → null, got {out}");
-    }
-
-    #[tokio::test]
-    async fn list_effort_metric_deltas_dispatches() {
-        let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch(
-            "list_effort_metric_deltas",
-            serde_json::json!({"effortId": "eff999999"}),
-            &svc,
-        )
-        .await
-        .unwrap();
-        assert!(out.is_array());
     }
 }

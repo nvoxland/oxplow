@@ -436,6 +436,10 @@ browses the semantic-layer catalog (entities, measures, metrics), shows a
 table or simple chart sliced by a dimension, and can save the result as a
 lens or pin it to a dashboard. Dashboards are a plain grid of pinned
 metrics and lenses. Tracked in the "basic metrics explorer" task.
+**Done (tsk309):** Metrics is a catalog (search, enabled/all, range, branch,
+sparkline + latest value); Metric Detail is trend + recordings + stats +
+enable + Add to dashboard; dashboard tiles are line / number metrics, text
+and lenses under a range/branch filter ([dashboards.md](./dashboards.md)).
 
 **Also stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
