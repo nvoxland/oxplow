@@ -4,7 +4,7 @@ This doc covers how anything that **measures or visualizes** is added to
 oxplow: the `extension.yaml` format, lenses, slots, actions and alerts, and
 the bundled `oxplow-analytics` example extension.
 
-> **Status: mostly built (epic tsk275).**
+> **Status: built (epic tsk275; host finished in tsk278).**
 > - **Current:**
 >   - loading project extensions and their lenses from
 >     `oxplow/extensions/` (see "What works today" below);
