@@ -623,6 +623,37 @@ const CATALOG: &[CatalogView] = &[
             ("duration_ms", "Time on the page, when known."),
         ],
     },
+    CatalogView {
+        name: "v_decision",
+        description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why). What a reviewer most wants to check.",
+        columns: &[
+            ("id", "Decision id."),
+            ("thread_id", "Thread it was made in."),
+            ("task_id", "Task being worked on, if known."),
+            ("effort_id", "Effort it was made during, if one was open."),
+            ("question", "What had to be decided."),
+            ("choice", "What was chosen."),
+            ("alternatives", "Options not taken, as a JSON array of strings."),
+            ("confidence", "`low`, `medium` or `high`."),
+            ("why", "The reasoning."),
+            ("created_at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_claim",
+        description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them.",
+        columns: &[
+            ("id", "Claim id."),
+            ("thread_id", "Thread it was made in."),
+            ("task_id", "Task, if known."),
+            ("effort_id", "Effort, if one was open."),
+            ("statement", "The claim in words."),
+            ("kind", "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."),
+            ("evidence_ref", "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited."),
+            ("verified", "1 if it cites evidence, or is `tests_pass` and its effort has a test report with no failures; else 0."),
+            ("created_at", "RFC 3339 timestamp."),
+        ],
+    },
 ];
 
 #[cfg(test)]
@@ -816,6 +847,8 @@ mod tests {
             "v_agent_turn",
             "v_token_usage",
             "v_page_visit",
+            "v_decision",
+            "v_claim",
         ] {
             assert!(names.contains(&expected), "missing {expected}");
         }

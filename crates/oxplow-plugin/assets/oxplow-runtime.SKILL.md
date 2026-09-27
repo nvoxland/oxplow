@@ -139,7 +139,33 @@ In either case, leave a note (`add_thread_note`) explaining what's
 pending so the stop-hook nudge suppresses itself — it only fires for
 items the agent didn't touch during the turn.
 
-## Talking about items in chat
+## Decisions and claims
+
+The human reviewing your work checks your **decisions** and **claims**
+first, so record them as data rather than burying them in a summary.
+
+**`record_decision`**
+
+- Use it when you resolve a real fork without asking: where something
+  lives, which approach, what you left out, how you read an ambiguous
+  ask.
+- Record it when you make it, not at the end. Include the alternatives
+  you didn't take and why.
+- Skip trivia (naming a local variable).
+
+**`record_claim`**
+
+- Use it for statements like "tests pass", "no behavior change" or
+  "handles empty input", before you report the work done.
+- Cite `evidence_ref` (`run:<id>`, a test name) when you have it.
+- Unbacked claims are shown to the human as **unverified**. Don't claim
+  what you didn't check.
+
+Both attach to your open effort automatically. Pass `task_id` if you're
+a sub-agent working a specific task. They land in `v_decision` and
+`v_claim`, which review lenses read.
+
+
 
 Refer to a task by its **quoted title**, never by id / "#N" / "the
 last task" / "the in_progress one". Ids are internal tool-call handles;

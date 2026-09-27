@@ -188,6 +188,8 @@ pub const MANIFEST: &[Capability] = &[
     ui("save_lens"),
     ui("report_open_page"),
     both("list_sources"),
+    agent("record_decision"),
+    agent("record_claim"),
     both("run_source"),
     agent("get_open_page"),
     agent("list_lenses"),

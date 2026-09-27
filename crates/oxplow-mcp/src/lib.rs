@@ -880,6 +880,36 @@ pub struct RunLensParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordDecisionParams {
+    pub thread_id: String,
+    /// Task it belongs to (`tsk42`); omit to use the thread's open effort.
+    pub task_id: Option<String>,
+    /// The fork: what had to be decided.
+    pub question: String,
+    /// What you chose.
+    pub choice: String,
+    /// The options you didn't take.
+    pub alternatives: Option<Vec<String>>,
+    /// `low`, `medium` (default) or `high`.
+    pub confidence: Option<String>,
+    /// Why, in a sentence or two.
+    pub why: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RecordClaimParams {
+    pub thread_id: String,
+    /// Task it belongs to (`tsk42`); omit to use the thread's open effort.
+    pub task_id: Option<String>,
+    /// The claim in words, e.g. "all oxplow-db tests pass".
+    pub statement: String,
+    /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
+    pub kind: String,
+    /// What backs it: `run:<id>`, a test name, a file. Omit if nothing does.
+    pub evidence_ref: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunSourceParams {
     /// Extension folder name under `oxplow/extensions/`.
     pub extension: String,
@@ -1298,6 +1328,77 @@ impl OxplowMcp {
             oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
         })?;
         json_result(&report)
+    }
+
+    #[tool(
+        description = "Record a DECISION you made while working: a fork where you picked one \
+                       approach over others without asking (where to put something, which \
+                       library, what to leave out, how to interpret an ambiguous ask). Humans \
+                       review these first, so record the non-obvious ones as you make them — \
+                       not trivia. Attaches to the open effort (or `task_id`'s)."
+    )]
+    async fn record_decision(
+        &self,
+        params: Parameters<RecordDecisionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let (thread, task, effort) = resolve_effort(
+            &self.services,
+            "record_decision",
+            &p.thread_id,
+            p.task_id.as_deref(),
+        )
+        .await?;
+        let id = self
+            .services
+            .reasoning_store
+            .record_decision(oxplow_db::NewDecision {
+                thread_id: thread,
+                task_id: task,
+                effort_id: effort,
+                question: p.question,
+                choice: p.choice,
+                alternatives: p.alternatives.unwrap_or_default(),
+                confidence: p.confidence.unwrap_or_else(|| "medium".into()),
+                why: p.why.unwrap_or_default(),
+            })
+            .await
+            .map_err(reasoning_error)?;
+        json_result(&serde_json::json!({ "id": id, "effortId": effort }))
+    }
+
+    #[tool(
+        description = "Record a CLAIM about your work before you report it done: \"tests pass\", \
+                       \"no behavior change\", \"handles empty input\". Cite `evidence_ref` \
+                       (`run:<id>`, a test name) when you have it. Unbacked claims show up as \
+                       unverified for the human to check, so don't claim what you didn't verify."
+    )]
+    async fn record_claim(
+        &self,
+        params: Parameters<RecordClaimParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let (thread, task, effort) = resolve_effort(
+            &self.services,
+            "record_claim",
+            &p.thread_id,
+            p.task_id.as_deref(),
+        )
+        .await?;
+        let id = self
+            .services
+            .reasoning_store
+            .record_claim(oxplow_db::NewClaim {
+                thread_id: thread,
+                task_id: task,
+                effort_id: effort,
+                statement: p.statement,
+                kind: p.kind,
+                evidence_ref: p.evidence_ref,
+            })
+            .await
+            .map_err(reasoning_error)?;
+        json_result(&serde_json::json!({ "id": id, "effortId": effort }))
     }
 
     #[tool(
@@ -5057,6 +5158,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    "record_decision",
+    "record_claim",
     "run_source",
     "install_extension",
     "update_extension",
@@ -5253,6 +5356,48 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
 
 /// Validate an optional `stream_id`: enforce the `s-` prefix when present,
 /// and accept `None` (resolves to the current/primary worktree downstream).
+/// Thread + (task, effort) ids for something recorded "on the current
+/// work": the given task's open effort, else the thread's open effort.
+async fn resolve_effort(
+    services: &Services,
+    tool: &str,
+    thread_id: &str,
+    task_id: Option<&str>,
+) -> Result<(i64, Option<i64>, Option<i64>), McpError> {
+    use oxplow_db::TaskEffortStore as _;
+    expect_id_kind(tool, "thread_id", thread_id, ID_THREAD)?;
+    let tid = parse_thread_id(thread_id)?;
+    let effort = match task_id {
+        Some(raw) => {
+            let task = parse_task_id(tool, "task_id", raw)?;
+            let e = services
+                .effort_store
+                .find_open_for_task(task)
+                .await
+                .map_err(internal)?;
+            return Ok((tid.value(), Some(task.value()), e.map(|e| e.id.value())));
+        }
+        None => services
+            .effort_store
+            .find_open_for_thread(&tid)
+            .await
+            .map_err(internal)?,
+    };
+    Ok((
+        tid.value(),
+        effort.as_ref().map(|e| e.task_id.value()),
+        effort.map(|e| e.id.value()),
+    ))
+}
+
+/// Map a decision/claim validation error to an MCP error.
+fn reasoning_error(e: oxplow_domain::DomainError) -> McpError {
+    match e {
+        oxplow_domain::DomainError::Invalid(m) => McpError::invalid_params(m, None),
+        other => internal(other),
+    }
+}
+
 /// Map an extension install/update error to an MCP error.
 fn extension_error(e: oxplow_domain::DomainError) -> McpError {
     match e {
@@ -7107,6 +7252,84 @@ mod tests {
                 .is_empty(),
             "claiming clears the unattributed residue"
         );
+    }
+
+    #[tokio::test]
+    async fn record_decision_and_claim_attach_to_the_open_effort() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let task_id = services
+            .task_store
+            .insert(&make_task(Some(thread.id), "reasoning task"))
+            .await
+            .unwrap();
+        let effort = services
+            .effort_store
+            .start(task_id, &thread.id, None)
+            .await
+            .unwrap();
+
+        server
+            .record_decision(Parameters(RecordDecisionParams {
+                thread_id: thread.id.to_string(),
+                task_id: None,
+                question: "Store source data where?".into(),
+                choice: "main DB".into(),
+                alternatives: Some(vec!["attached DB per extension".into()]),
+                confidence: Some("medium".into()),
+                why: Some("re-syncable cache".into()),
+            }))
+            .await
+            .unwrap();
+        server
+            .record_claim(Parameters(RecordClaimParams {
+                thread_id: thread.id.to_string(),
+                task_id: Some(task_id.to_string()),
+                statement: "All tests pass".into(),
+                kind: "tests_pass".into(),
+                evidence_ref: None,
+            }))
+            .await
+            .unwrap();
+
+        let q = |sql: &'static str| {
+            let sl = oxplow_db::SemanticLayer::new(services.db.clone());
+            async move {
+                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
+            }
+        };
+        let e = effort.id.value();
+        let t = task_id.value();
+        assert_eq!(
+            q("SELECT effort_id, task_id, confidence FROM v_decision").await,
+            serde_json::json!([[e, t, "medium"]])
+        );
+        assert_eq!(
+            q("SELECT effort_id, kind, verified FROM v_claim").await,
+            serde_json::json!([[e, "tests_pass", 0]])
+        );
+
+        let err = server
+            .record_claim(Parameters(RecordClaimParams {
+                thread_id: thread.id.to_string(),
+                task_id: None,
+                statement: "x".into(),
+                kind: "vibes".into(),
+                evidence_ref: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("kind"), "{err:?}");
     }
 
     #[tokio::test]

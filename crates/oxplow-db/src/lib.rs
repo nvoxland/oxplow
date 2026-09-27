@@ -17,6 +17,7 @@ pub mod fact_store;
 pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
+pub mod reasoning_store;
 pub mod search_store;
 pub mod semantic_layer;
 mod stream_store;
@@ -55,6 +56,7 @@ pub use fact_store::{
 };
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
+pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlQueryResult,

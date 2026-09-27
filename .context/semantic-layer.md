@@ -131,6 +131,8 @@ never the physical tables, which stay internal and free to change.
 | `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |
 | `v_token_usage` | model tokens per thread / effort / model (V74) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
+| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why), via MCP `record_decision` (V76) |
+| `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort has a failure-free test report) (V76) |
 
 Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`,
 `v_decision`, `v_claim` and the rest of the shipped-sources table above.
