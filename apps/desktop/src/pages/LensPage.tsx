@@ -14,6 +14,7 @@ import {
   changedParams,
   displayColumns,
   formatCell,
+  type DisplayColumn,
   parseParamInput,
   shouldRerunLens,
 } from "../lens/lensModel.js";
@@ -136,6 +137,8 @@ export function LensPage({ lensId, stream, onOpenPage }: LensPageProps) {
   );
 }
 
+type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
+
 function LensBody({ run, onOpenPage }: { run: LensRun; onOpenPage(ref: TabRef): void }) {
   const { lens, result } = run;
   if (result.rows.length === 0) {
@@ -146,93 +149,110 @@ function LensBody({ run, onOpenPage }: { run: LensRun; onOpenPage(ref: TabRef): 
     );
   }
   const cols = displayColumns(lens, result.columns);
-  const cell = (row: SqlCell[], c: (typeof cols)[number]): ReactNode => {
+  const cell: CellRenderer = (row, c) => {
     const text = formatCell(row[c.index] ?? null);
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
-    return ref ? (
+    if (!ref) return text;
+    return (
       <RouteLink to={ref} onNavigate={() => onOpenPage(ref)} style={linkStyle}>
         {text}
       </RouteLink>
-    ) : (
-      text
     );
   };
-  const truncated = result.truncated ? (
-    <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>
-      Showing the first {result.rows.length} rows.
-    </p>
-  ) : null;
-
+  const first = result.rows[0]?.[0] ?? null;
   switch (lens.viz) {
-    case "number": {
-      const v = result.rows[0]?.[0] ?? null;
-      return (
-        <div
-          data-testid="lens-number"
-          title={typeof v === "number" ? formatMetricValueExact(v) : undefined}
-          style={{ fontSize: 48, fontWeight: 600, margin: "16px 0" }}
-        >
-          {typeof v === "number" ? formatMetricValue(v) : formatCell(v)}
-        </div>
-      );
-    }
-    case "markdown": {
-      const v = result.rows[0]?.[0] ?? null;
-      return <MarkdownView body={v === null ? "" : String(v)} />;
-    }
+    case "number":
+      return <NumberViz value={first} />;
+    case "markdown":
+      return <MarkdownView body={first === null ? "" : String(first)} />;
     case "list":
-      return (
-        <>
-          <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {result.rows.map((row, i) => (
-              <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle}>
-                <div>{cols[0] ? cell(row, cols[0]) : null}</div>
-                {cols.length > 1 ? (
-                  <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                    {cols.slice(1).map((c, j) => (
-                      <span key={c.key}>
-                        {j > 0 ? " · " : null}
-                        {cell(row, c)}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {truncated}
-        </>
-      );
+      return <ListViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
     case "table":
     default:
-      return (
-        <>
-          <table data-testid="lens-table" style={tableStyle}>
-            <thead>
-              <tr>
-                {cols.map((c) => (
-                  <th key={c.key} style={thStyle}>
-                    {c.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.map((row, i) => (
-                <tr key={i} data-testid={`lens-row-${i}`}>
-                  {cols.map((c) => (
-                    <td key={c.key} style={tdStyle}>
-                      {cell(row, c)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {truncated}
-        </>
-      );
+      return <TableViz rows={result.rows} cols={cols} cell={cell} truncated={result.truncated} />;
   }
+}
+
+function NumberViz({ value }: { value: SqlCell }) {
+  return (
+    <div
+      data-testid="lens-number"
+      title={typeof value === "number" ? formatMetricValueExact(value) : undefined}
+      style={{ fontSize: 48, fontWeight: 600, margin: "16px 0" }}
+    >
+      {typeof value === "number" ? formatMetricValue(value) : formatCell(value)}
+    </div>
+  );
+}
+
+interface RowsVizProps {
+  rows: SqlCell[][];
+  cols: DisplayColumn[];
+  cell: CellRenderer;
+  truncated: boolean;
+}
+
+function TruncatedNote({ rows, truncated }: { rows: number; truncated: boolean }) {
+  if (!truncated) return null;
+  return (
+    <p style={{ color: "var(--text-muted)", fontSize: "var(--text-xs)" }}>Showing the first {rows} rows.</p>
+  );
+}
+
+function ListViz({ rows, cols, cell, truncated }: RowsVizProps) {
+  const [head, ...rest] = cols;
+  return (
+    <>
+      <ul data-testid="lens-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        {rows.map((row, i) => (
+          <li key={i} data-testid={`lens-row-${i}`} style={listRowStyle}>
+            <div>{head ? cell(row, head) : null}</div>
+            {rest.length > 0 ? (
+              <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+                {rest.map((c, j) => (
+                  <span key={c.key}>
+                    {j > 0 ? " · " : null}
+                    {cell(row, c)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      <TruncatedNote rows={rows.length} truncated={truncated} />
+    </>
+  );
+}
+
+function TableViz({ rows, cols, cell, truncated }: RowsVizProps) {
+  return (
+    <>
+      <table data-testid="lens-table" style={tableStyle}>
+        <thead>
+          <tr>
+            {cols.map((c) => (
+              <th key={c.key} style={thStyle}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} data-testid={`lens-row-${i}`}>
+              {cols.map((c) => (
+                <td key={c.key} style={tdStyle}>
+                  {cell(row, c)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <TruncatedNote rows={rows.length} truncated={truncated} />
+    </>
+  );
 }
 
 function ParamsForm({
