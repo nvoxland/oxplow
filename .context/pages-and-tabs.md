@@ -79,12 +79,16 @@ extension host lands.
   `local-history`, `local-history-full`, `local-history-by-commit-full`,
   `terminal`
 - **Knowledge:** `wiki`, `wiki-index`, `wiki-freshness`
+- **Lenses:** `lens` (`lens:<extension>/<slug>`, user/agent-built from
+  `oxplow/extensions/`; see [extensions.md](./extensions.md))
 - **System:** `settings`, `external-url`, `dashboard` (the `visits`
   variant is the Go To hub, which stays core)
-- **Analytics (→ ext):** `metrics`, `metrics-recorded`, `metric-detail`,
-  `metric-recording`, `custom-dashboard`, `dashboards`, `usage`,
-  `page-analytics`, `effort-coverage`, `finding`, `duplicate-block`,
-  `dashboard` (`planning` / `review` / `quality` variants)
+- **Metrics explorer + dashboards (stay core, to be simplified):**
+  `metrics`, `metrics-recorded`, `metric-detail`, `metric-recording`,
+  `custom-dashboard`, `dashboards`
+- **Analytics (→ ext):** `usage`, `page-analytics`, `effort-coverage`,
+  `finding`, `duplicate-block`, `dashboard` (`planning` / `review` /
+  `quality` variants)
 
 `agent` is implicit per thread. There is no standalone
 `change-analysis` kind any more: change-analysis drilldowns are a
@@ -103,6 +107,7 @@ hand-format an id.
 | diff | `diff:<key>` | `diff:src/a.ts\|abc\|def\|` |
 | diff-view | `diff-view:effort:<effortId>` or `diff-view:endpoints:<start>..<end>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `diff-view:effort:eff42` |
 | wiki / wiki-freshness | `wiki:<slug>` / `wiki-freshness:<slug>` | `wiki:how-stop-hook-fires` |
+| lens | `lens:<extension>/<slug>` | `lens:review/waiting-on-me` |
 | task | `task:<id>` | `task:tsk142` |
 | finding | `finding:<id>` | `finding:f-7` |
 | effort-coverage | `effort-coverage:<effortId>` | `effort-coverage:eff42` |

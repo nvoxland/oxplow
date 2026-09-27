@@ -374,6 +374,12 @@ export function threadSettingsRef(threadId: string): TabRef {
   return { id: `thread-settings:${threadId}`, kind: "thread-settings", payload: { threadId } };
 }
 
+/** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
+ *  over the semantic layer from `oxplow/extensions/`. */
+export function lensRef(lensId: string): TabRef {
+  return { id: `lens:${lensId}`, kind: "lens", payload: { lensId } };
+}
+
 export function closedThreadsRef(): TabRef {
   return { id: "closed-threads", kind: "closed-threads", payload: null };
 }
@@ -425,6 +431,8 @@ export function refFromTabId(id: string): TabRef {
     }
     case "wiki":
       return wikiPageRef(rest);
+    case "lens":
+      return lensRef(rest);
     case "wiki-freshness":
       return wikiFreshnessRef(rest);
     case "task":

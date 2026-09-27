@@ -18,7 +18,7 @@ import {
  * Sections the launcher's "start menu" empty state groups pages under.
  * `PAGE_CATEGORY_ORDER` is the render order for those headings.
  */
-export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "System";
+export type PageCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Lenses" | "System";
 
 export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Work",
@@ -26,6 +26,7 @@ export const PAGE_CATEGORY_ORDER: readonly PageCategory[] = [
   "Git",
   "Activity",
   "Knowledge",
+  "Lenses",
   "System",
 ];
 

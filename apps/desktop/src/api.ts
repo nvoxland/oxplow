@@ -13,6 +13,9 @@ import type {
   CommentThread,
   DiffEndpoint,
   DiffEntry,
+  Extension,
+  Lens,
+  LensRun,
   RecentProjectView,
   SchemaEntity,
   SearchHit,
@@ -20,7 +23,7 @@ import type {
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, Lens, LensRun, SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -465,6 +468,31 @@ export async function querySql(
   limit: number | null = null,
 ): Promise<SqlQueryResult> {
   return unwrap(await commands.querySql(sql, params, limit));
+}
+
+/// Project extensions (and their lenses) in the stream's worktree, with
+/// per-extension load errors. See `.context/extensions.md`.
+export async function listExtensions(streamId: string | null): Promise<Extension[]> {
+  return unwrap(await commands.listExtensions(streamId));
+}
+
+/// One lens by `<extension>/<slug>`.
+export async function getLens(id: string, streamId: string | null): Promise<Lens> {
+  return unwrap(await commands.getLens(id, streamId));
+}
+
+/// Run a lens with param overrides (the rest use defaults).
+export async function runLens(
+  id: string,
+  params: Record<string, SqlCell>,
+  streamId: string | null,
+): Promise<LensRun> {
+  return unwrap(await commands.runLens(id, params, streamId));
+}
+
+/// Load an extension and dry-run every lens, returning all problems.
+export async function validateExtension(name: string, streamId: string | null): Promise<Extension> {
+  return unwrap(await commands.validateExtension(name, streamId));
 }
 
 /// The semantic layer's queryable entities with column docs.

@@ -28,7 +28,9 @@ export function setContextRefDrag(e: AnyDragEvent, ref: ContextRef): void {
     ? `@${ref.path}`
     : ref.kind === "wiki"
       ? `@.oxplow/wiki/${ref.slug}.md`
-      : `[oxplow task ${ref.itemId}]`;
+      : ref.kind === "lens"
+        ? `[oxplow lens ${ref.lensId}]`
+        : `[oxplow task ${ref.itemId}]`;
   dt.setData("text/plain", fallback);
   dt.effectAllowed = "copy";
 }

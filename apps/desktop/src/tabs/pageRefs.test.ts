@@ -13,6 +13,7 @@ import {
   gitCommitRef,
   hookEventsRef,
   indexRef,
+  lensRef,
   metricRecordingRef,
   metricRef,
   newTaskRef,
@@ -227,5 +228,11 @@ describe("refFromTabId", () => {
     expect(refFromTabId(directoryRef("src/components").id)).toEqual(
       directoryRef("src/components"),
     );
+  });
+
+  test("lensRef ids the lens and round-trips through refFromTabId", () => {
+    const r = lensRef("review/waiting");
+    expect(r).toEqual({ id: "lens:review/waiting", kind: "lens", payload: { lensId: "review/waiting" } });
+    expect(refFromTabId(r.id)).toEqual(r);
   });
 });

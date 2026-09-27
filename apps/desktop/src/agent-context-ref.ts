@@ -13,7 +13,8 @@
 export type ContextRef =
   | { kind: "file"; path: string }
   | { kind: "wiki"; slug: string }
-  | { kind: "task"; itemId: string; title: string; status: string };
+  | { kind: "task"; itemId: string; title: string; status: string }
+  | { kind: "lens"; lensId: string; params: Record<string, unknown> };
 
 export function formatContextMention(ref: ContextRef): string {
   if (ref.kind === "file") {
@@ -21,6 +22,15 @@ export function formatContextMention(ref: ContextRef): string {
   }
   if (ref.kind === "wiki") {
     return `@.oxplow/wiki/${ref.slug}.md `;
+  }
+  if (ref.kind === "lens") {
+    // `[oxplow lens <id> k=v …]` — the agent reads it with `get_lens` /
+    // `run_lens`. Params sorted so the mention is stable.
+    const params = Object.keys(ref.params)
+      .sort()
+      .map((k) => ` ${k}=${JSON.stringify(ref.params[k])}`)
+      .join("");
+    return `[oxplow lens ${ref.lensId}${params}] `;
   }
   // tasks: keep the title as plain text but strip newlines and
   // collapse internal whitespace so the inserted snippet stays on one

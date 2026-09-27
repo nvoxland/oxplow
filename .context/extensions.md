@@ -9,8 +9,8 @@ the bundled `oxplow-analytics` example extension.
 >   - loading project extensions and their lenses from
 >     `oxplow/extensions/` (see "What works today" below);
 >   - running and validating lenses over IPC and MCP;
->   - the `oxplow-extension` agent skill.
-> - **In progress:** the lens page UI (tsk283).
+>   - the `oxplow-extension` agent skill;
+>   - the lens page and the launcher's "Lenses" section.
 > - **Target:** everything else here, including sources, dimensions,
 >   metrics, slots, actions, alerts and the `oxplow-analytics` extraction
 >   (tsk278 / tsk280).
@@ -54,6 +54,22 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - `scaffold_*`, `get_open_lens` and `run_lens_action` are still target.
     Agents write lens files with their normal Edit tool, under the filing
     guard, taught by the `oxplow-extension` skill.
+- **UI.**
+  - `lens:<extension>/<slug>` pages (`LensPage.tsx`) render `table`,
+    `list`, `number` (through `formatMetricValue`) and `markdown`.
+    Linked cells go through `RouteLink`, so plain-click navigates in the
+    tab.
+  - Params sit in the right rail: Enter or blur applies, Escape reverts.
+  - A run failure shows the error inline, with a nudge to use "Improve
+    with Agent".
+  - The page re-runs, debounced, on data events and on edits under
+    `oxplow/extensions/`; `shouldRerunLens` in `src/lens/lensModel.ts`
+    decides which events count.
+  - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
+    changed params, through the standard add-to-context path.
+  - The Cmd+P launcher re-reads lenses from the stream's worktree every
+    time it opens and lists them under **Lenses**, so they're both
+    browsable and searchable.
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.
@@ -238,8 +254,7 @@ What moves out of core, and what it becomes:
 
 | Today (core) | Becomes |
 |---|---|
-| Metrics / MetricDetail / Recording pages | `metrics-explorer`, `metric-detail` lenses |
-| Custom dashboards; Planning / Review / Quality dashboards | `grid` lenses; `dashboard` tables retired after migration |
+| Planning / Review / Quality dashboards | `grid` lenses |
 | Code-quality runner, dup scan, FindingPage, DuplicateBlockPage | exec source + `findings` / `duplicates` lenses |
 | Change-analysis cards (treemap, look-here-first, functions, co-change, zones) | `effort-review` / `commit` / `uncommitted` slot lenses |
 | Gauges (`oxplow/gauges/*.star`, idiom `.star`) | extension sources (already Starlark) |
@@ -248,7 +263,16 @@ What moves out of core, and what it becomes:
 | Local history dashboard | lens over `v_snapshot` |
 | Effort metrics block, effort coverage page | `effort-review` slot lenses |
 
-**Stays in core** (it is substrate other features need): snapshots,
+**Stays in core, deliberately simple:** a basic **metrics explorer** and
+**simple dashboards** (Nathan, 2026-09-27). The base version must let
+people see what metrics exist and pin a few to a dashboard as a starting
+point, a bit like Metabase. It doesn't need to be fancy. The explorer
+browses the semantic-layer catalog (entities, measures, metrics), shows a
+table or simple chart sliced by a dimension, and can save the result as a
+lens or pin it to a dashboard. Dashboards are a plain grid of pinned
+metrics and lenses. Tracked in the "basic metrics explorer" task.
+
+**Also stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, Go To / bookmarks, the Git
 dashboard. diff-view shrinks to title + file list + diff + the
