@@ -128,8 +128,11 @@ CI runs), add a **source** to the extension:
 
 Rules:
 
-- Pass secrets through `env: [NAME]` from the user's environment. Never
-  hard-code them.
+- Declare secrets as `credentials: [NAME]`; the script reads them as
+  environment variables. The user sets the values in Settings → Extensions
+  (they go to the keychain). You can't set or read them, and never
+  hard-code them. `list_sources` shows which are set. Use `env: [NAME]`
+  only for non-secret settings from the user's environment.
 - **You can't approve a source.** Tell the user to approve it in
   Settings → Extensions → Approve & Run. After that, `run_source`
   (MCP) re-runs it.

@@ -340,7 +340,7 @@ mod instance_lock_tests {
     }
 }
 
-/// Where [`ai_service::AiService`] keeps keys and `ai.yaml`: the OS keychain
+/// Where secrets and `ai.yaml` live: the OS keychain
 /// and global config dir in the app, stand-ins in [`Services::in_memory`].
 struct AiEnv {
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
@@ -422,6 +422,9 @@ pub struct Services {
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
+    /// Secrets store (the OS keychain in the app): AI provider keys and
+    /// extension-source credentials. Values never go to the UI or agents.
+    pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     /// Per-turn agent token usage parsed from the hook transcript (tsk104).
@@ -526,7 +529,7 @@ impl Services {
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let ai = Arc::new(ai_service::AiService::new(
             oxplow_ai::client::Client::default(),
-            ai_env.secrets,
+            ai_env.secrets.clone(),
             Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
             ai_env.config_dir,
         ));
@@ -713,6 +716,7 @@ impl Services {
             reasoning_store,
             tool_call_store,
             ai,
+            secrets: ai_env.secrets,
             collection,
             token_usage_store,
             token_usage,

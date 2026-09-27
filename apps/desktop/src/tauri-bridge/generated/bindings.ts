@@ -385,6 +385,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	setSourceCredential: (extension: string, name: string, value: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("set_source_credential", { extension, name, value })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	aiSettings: () => typedError<AiSettings, IpcError>(__TAURI_INVOKE("ai_settings")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1964,6 +1969,11 @@ export type CreateWorktreeRequest = {
 	title: string,
 	branch: string,
 	branchSource: string,
+};
+
+export type CredentialStatus = {
+	name: string,
+	set: boolean,
 };
 
 /**
@@ -3764,6 +3774,8 @@ export type SourceListing = {
 	state: SourceState | null,
 	// This machine approved the entry script as it is now.
 	approved: boolean,
+	// Each declared credential and whether it has a value (never the value).
+	credentials: CredentialStatus[],
 };
 
 /**
@@ -3802,6 +3814,12 @@ export type SourceSpec = {
 	 *  (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
 	 */
 	env: string[],
+	/**
+	 *  Secrets the entry gets as environment variables of these names.
+	 *  Values live in the OS keychain, set by a person in Settings →
+	 *  Extensions, scoped to this extension.
+	 */
+	credentials: string[],
 	entities: SourceEntity[],
 };
 

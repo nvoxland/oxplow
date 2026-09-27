@@ -46,9 +46,10 @@ describe("extensionRowModel", () => {
 describe("sourceRowModel", () => {
   const listing = (over: Partial<SourceListing> = {}): SourceListing => ({
     extension: "my-gh",
-    spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "every", minutes: 10 }, env: ["GITHUB_TOKEN"], entities: [] },
+    spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "every", minutes: 10 }, env: ["GITHUB_TOKEN"], credentials: [], entities: [] },
     state: null,
     approved: false,
+    credentials: [],
     ...over,
   });
 
@@ -85,5 +86,22 @@ describe("sourceRowModel", () => {
     expect(m.status).toBe("Failed");
     expect(m.error).toBe("boom");
     expect(sourceRowModel(listing({ spec: { ...listing().spec, schedule: { kind: "manual" } } })).schedule).toBe("manual");
+  });
+  test("unset credentials are listed and flagged; the approval hover names them", () => {
+    const m = sourceRowModel(
+      listing({
+        spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"], entities: [] },
+        credentials: [
+          { name: "GH_PAT", set: true },
+          { name: "OTHER", set: false },
+        ],
+      }),
+    );
+    expect(m.credentials).toEqual([
+      { name: "GH_PAT", set: true },
+      { name: "OTHER", set: false },
+    ]);
+    expect(m.missingCredentials).toBe("Needs OTHER (set it below).");
+    expect(m.actionTitle).toContain("GH_PAT");
   });
 });

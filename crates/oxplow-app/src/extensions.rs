@@ -1412,4 +1412,24 @@ empty: No tasks.
         assert!(e.errors.iter().any(|m| m.contains("nope")));
         assert!(e.errors.iter().any(|m| m.contains("sidebar")));
     }
+
+    /// The documented examples in `examples/extensions/` load cleanly, so
+    /// a format change can't silently break what the guide tells people to
+    /// copy.
+    #[test]
+    fn documented_examples_load_without_errors() {
+        let examples =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+        let names: Vec<String> = std::fs::read_dir(&examples)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        assert!(!names.is_empty());
+        for name in names {
+            let ext = load_one(&Disk(examples.join(&name)), &name, &name, "project");
+            assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
+        }
+    }
 }

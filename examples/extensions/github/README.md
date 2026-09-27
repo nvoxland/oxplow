@@ -8,8 +8,9 @@ task its title mentions (`tsk42`).
 
 1. Copy this folder to `oxplow/extensions/github/` in your repo (or publish it
    as its own repo and install it from Settings → Extensions).
-2. Make sure `jq` is installed, and either `gh` is logged in or
-   `GITHUB_TOKEN` is set in the environment oxplow runs in.
+2. Make sure `jq` is installed, and either `gh` is logged in or you set
+   `GITHUB_TOKEN` under the `prs` source in Settings → Extensions (it's
+   stored in your keychain).
 3. Settings → Extensions → **Approve & Run** on the `prs` source.
 
 It re-syncs every 15 minutes after that. The repo comes from `git remote get-url

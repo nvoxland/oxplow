@@ -526,6 +526,12 @@ export async function runSource(extension: string, sourceId: string, approve: bo
   return unwrap(await commands.runSource(extension, sourceId, approve));
 }
 
+/// Set (or clear with null) a credential an extension's source declares.
+/// The value goes to the OS keychain and is never returned.
+export async function setSourceCredential(extension: string, name: string, value: string | null): Promise<void> {
+  unwrap(await commands.setSourceCredential(extension, name, value));
+}
+
 /// Settings → AI: providers (whether each has a key, never the key) and
 /// every role's assignment. See `.context/ai-providers.md`.
 export async function aiSettings(): Promise<AiSettings> {

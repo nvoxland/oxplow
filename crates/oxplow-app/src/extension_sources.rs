@@ -73,6 +73,10 @@ pub struct SourceSpec {
     /// Host environment variables passed through to the entry
     /// (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
     pub env: Vec<String>,
+    /// Secrets the entry gets as environment variables of these names.
+    /// Values live in the OS keychain, set by a person in Settings →
+    /// Extensions, scoped to this extension.
+    pub credentials: Vec<String>,
     pub entities: Vec<SourceEntity>,
 }
 
@@ -131,6 +135,8 @@ struct RawSource {
     schedule: String,
     #[serde(default)]
     env: Vec<String>,
+    #[serde(default)]
+    credentials: Vec<String>,
     entities: Vec<RawEntity>,
 }
 
@@ -242,6 +248,23 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
             "env name `{bad}` isn't a valid environment variable"
         )));
     }
+    for c in &raw.credentials {
+        if !is_env_name(c) {
+            return Err(ctx(format!(
+                "credential `{c}` isn't a valid environment variable name"
+            )));
+        }
+        if raw.env.contains(c) {
+            return Err(ctx(format!(
+                "`{c}` is in both `env` and `credentials`; pick one"
+            )));
+        }
+        if matches!(c.as_str(), "PATH" | "HOME") || c.starts_with("OXPLOW_") {
+            return Err(ctx(format!(
+                "credential `{c}` uses a reserved name (PATH, HOME, OXPLOW_*)"
+            )));
+        }
+    }
     if raw.entities.is_empty() {
         return Err(ctx("declares no entities".into()));
     }
@@ -303,6 +326,7 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
         entry,
         schedule,
         env: raw.env,
+        credentials: raw.credentials,
         entities,
     })
 }
@@ -323,6 +347,7 @@ mod tests {
   entry: bin/sync.sh
   schedule: every 10m
   env: [GITHUB_TOKEN]
+  credentials: [GH_PAT]
   entities:
     - name: pr
       doc: One pull request.
@@ -345,6 +370,7 @@ mod tests {
         assert_eq!(s.entry, "bin/sync.sh");
         assert_eq!(s.schedule, SourceSchedule::Every { minutes: 10 });
         assert_eq!(s.env, vec!["GITHUB_TOKEN"]);
+        assert_eq!(s.credentials, vec!["GH_PAT"]);
         let e = &s.entities[0];
         assert_eq!(e.name, "pr");
         assert_eq!(e.key, "number");
@@ -390,6 +416,22 @@ mod tests {
             ("- id: github", "- id: Git Hub", "source id"),
             ("entry: bin/sync.sh", "entry: ../outside.sh", "entry"),
             ("env: [GITHUB_TOKEN]", "env: [\"not ok\"]", "env"),
+            (
+                "credentials: [GH_PAT]",
+                "credentials: [\"a-b\"]",
+                "credential",
+            ),
+            (
+                "credentials: [GH_PAT]",
+                "credentials: [GITHUB_TOKEN]",
+                "both",
+            ),
+            ("credentials: [GH_PAT]", "credentials: [PATH]", "reserved"),
+            (
+                "credentials: [GH_PAT]",
+                "credentials: [OXPLOW_X]",
+                "reserved",
+            ),
         ] {
             let (s, e) = parse(&GOOD.replace(from, to));
             assert!(s.is_empty(), "{to}: should be rejected");

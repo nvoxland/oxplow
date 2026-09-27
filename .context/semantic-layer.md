@@ -203,7 +203,8 @@ sources:
     runtime: exec              # the only runtime today
     entry: sync.sh             # relative, inside the extension folder
     schedule: every 15m        # or manual; every <n>m | <n>h
-    env: [GITHUB_TOKEN]        # host env vars passed through; nothing else is
+    env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
+    credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Extensions
     entities:
       - name: pr               # view: v_<extension>_<entity> = v_github_pr
         doc: One pull request.
@@ -255,11 +256,27 @@ The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
   - The IPC `approve` flag exists only on the UI path. MCP `run_source`
     never approves, so an agent can't consent on a person's behalf.
 - **Environment.** The entry gets `PATH`, `HOME`, its declared `env`
-  names, `OXPLOW_EXTENSION_DIR` and `OXPLOW_SOURCE_ID`. It runs with a
+  names, its declared `credentials`, `OXPLOW_EXTENSION_DIR` and
+  `OXPLOW_SOURCE_ID`. It runs with a
   120 s timeout and a 64 MB stdout cap, and both pipes are drained so it
   can't deadlock.
   - **Network hosts aren't restricted yet.**
-  - Keychain credentials are planned together with AI providers (tsk279).
+- **Credentials.** `credentials: [NAME]` declares secrets the entry gets
+  as env vars. Values live in the OS keychain (`Services.secrets`, shared
+  with AI provider keys) under account `source:<extension>:<NAME>`, so an
+  extension can't read another's by declaring the same name.
+  - Only a person sets them: IPC `set_source_credential` (UI-only in the
+    parity manifest; only names some source of that extension declares).
+    Listings carry `credentials: [{name, set}]`, never values.
+  - An unset credential is simply not passed; the script decides (the
+    GitHub example falls back to `gh`). A keychain error fails the run.
+  - A name can't be in both `env` and `credentials`, or be `PATH`, `HOME`
+    or `OXPLOW_*`.
+  - Changing `credentials` doesn't need re-approval: approval is bound to
+    the entry script, and a secret reaches it only after the person sets
+    that extension's value.
+  - `source_runner::Sources` bundles root, state dir, store and secrets,
+    the context every list/run/set call takes (`Sources::of(svc, root)`).
 - **Where it runs.** Sources run from the **primary** stream's worktree,
   and their data is project-global, like dashboards.
 - **Errors.**
@@ -282,8 +299,8 @@ tests, removed assertions) needs snapshot content analysis; "missing
 co-change" needs git history as a source.
 
 **Still target:** `starlark` / `jaq` runtimes; incremental upsert +
-tombstones (today: full replace per run); keychain `credentials` and an
-enforced `network` allowlist; expression/join `dimensions` and
+tombstones (today: full replace per run); an enforced `network`
+allowlist; expression/join `dimensions` and
 entity-level `metrics` declared by extensions; AI-role columns.
 
 ## Relation to other docs

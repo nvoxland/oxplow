@@ -80,7 +80,8 @@ sources:
     runtime: exec
     entry: sync.sh               # inside the extension folder
     schedule: every 15m          # or: manual
-    env: [GITHUB_TOKEN]          # passed through from your environment
+    env: [GITHUB_REPOSITORY]     # passed through from your environment
+    credentials: [GITHUB_TOKEN]  # secrets from your keychain
     entities:
       - name: pr
         key: number
@@ -105,8 +106,10 @@ Known limits:
 
 - It only gets the environment variables it declares, plus `PATH` and `HOME`.
   Network access isn't restricted yet.
-- Credentials come from environment variables for now; keychain storage is
-  planned.
+- Secrets go in `credentials:`. Set each one under the source in Settings →
+  Extensions; the value goes to your OS keychain and the script gets it as
+  that environment variable. Values are per extension, and agents can't
+  read or set them.
 - Sources run from the primary stream's worktree. Their data is shared by
   every stream.
 

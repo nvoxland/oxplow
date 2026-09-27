@@ -45,6 +45,10 @@ export interface SourceRowModel {
   actionLabel: string;
   /** Hover text saying exactly what running it does. */
   actionTitle: string;
+  /** Declared credentials and whether each has a value (never the value). */
+  credentials: { name: string; set: boolean }[];
+  /** "Needs X, Y (set it below)." when some are unset, else null. */
+  missingCredentials: string | null;
 }
 
 export function sourceRowModel(l: SourceListing): SourceRowModel {
@@ -56,7 +60,12 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
       : Object.entries(st.rowCounts)
           .map(([entity, n]) => `${n} ${entity}`)
           .join(" · ") || "0 rows";
-  const env = l.spec.env.length > 0 ? ` with ${l.spec.env.join(", ")} from your environment` : "";
+  const passed = [
+    l.spec.env.length > 0 ? `${l.spec.env.join(", ")} from your environment` : null,
+    l.spec.credentials.length > 0 ? `${l.spec.credentials.join(", ")} from your keychain` : null,
+  ].filter(Boolean);
+  const env = passed.length > 0 ? ` with ${passed.join(" and ")}` : "";
+  const missing = l.credentials.filter((c) => !c.set).map((c) => c.name);
   return {
     id: l.spec.id,
     schedule: l.spec.schedule.kind === "manual" ? "manual" : `every ${l.spec.schedule.minutes}m`,
@@ -68,5 +77,7 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
     actionTitle: l.approved
       ? `Run ${l.spec.entry} now`
       : `Runs ${l.extension}/${l.spec.entry} on this machine${env}. Approve only if you trust this extension; a changed script needs approval again.`,
+    credentials: l.credentials,
+    missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it below).` : null,
   };
 }

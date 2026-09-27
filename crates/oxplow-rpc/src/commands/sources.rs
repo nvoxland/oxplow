@@ -4,7 +4,7 @@
 //! project-global. See `.context/semantic-layer.md`.
 
 use oxplow_app::events::OxplowEvent;
-use oxplow_app::source_runner::{self, SourceListing, SourceRunReport};
+use oxplow_app::source_runner::{self, SourceListing, SourceRunReport, Sources};
 use oxplow_app::Services;
 
 use crate::error::IpcError;
@@ -13,7 +13,7 @@ use crate::error::IpcError;
 /// machine has approved its current entry script.
 pub async fn list_sources(svc: &Services) -> Result<Vec<SourceListing>, IpcError> {
     let root = svc.git.resolve_repo_dir(None).await;
-    Ok(source_runner::list_sources(&root, &svc.layout.state_dir, &svc.ext_source_store).await?)
+    Ok(source_runner::list_sources(&Sources::of(svc, &root)).await?)
 }
 
 /// Run a source now. `approve: true` records the human's consent for the
@@ -26,9 +26,7 @@ pub async fn run_source(
 ) -> Result<SourceRunReport, IpcError> {
     let root = svc.git.resolve_repo_dir(None).await;
     let result = source_runner::run_source(
-        &root,
-        &svc.layout.state_dir,
-        &svc.ext_source_store,
+        &Sources::of(svc, &root),
         &extension,
         &source_id,
         approve.unwrap_or(false),
@@ -43,6 +41,23 @@ pub async fn run_source(
         });
     }
     result.map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
+}
+
+/// Set (or clear with `null`) a credential an extension's source declares.
+/// The value goes to the keychain and never comes back. UI only.
+pub async fn set_source_credential(
+    svc: &Services,
+    extension: String,
+    name: String,
+    value: Option<String>,
+) -> Result<(), IpcError> {
+    let root = svc.git.resolve_repo_dir(None).await;
+    Ok(source_runner::set_source_credential(
+        &Sources::of(svc, &root),
+        &extension,
+        &name,
+        value.as_deref(),
+    )?)
 }
 
 #[cfg(test)]
@@ -124,5 +139,49 @@ mod tests {
             .clone();
         assert_eq!(pr["owner"], "my-gh");
         assert_eq!(pr["available"], true);
+    }
+
+    #[tokio::test]
+    async fn credentials_are_set_through_ipc_and_reported_without_values() {
+        let (svc, _dir) = crate::test_support::services();
+        seed(&svc.layout.project_dir);
+        let yaml = svc
+            .layout
+            .project_dir
+            .join("oxplow/extensions/my-gh/extension.yaml");
+        let text = std::fs::read_to_string(&yaml).unwrap();
+        std::fs::write(
+            &yaml,
+            text.replace(
+                "entry: sync.sh\n",
+                "entry: sync.sh\n    credentials: [GH_PAT]\n",
+            ),
+        )
+        .unwrap();
+
+        crate::dispatch(
+            "set_source_credential",
+            json!({ "extension": "my-gh", "name": "GH_PAT", "value": "pat-xyz" }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let list = crate::dispatch("list_sources", json!({}), &svc)
+            .await
+            .unwrap();
+        assert_eq!(
+            list[0]["credentials"],
+            json!([{ "name": "GH_PAT", "set": true }])
+        );
+        assert!(!list.to_string().contains("pat-xyz"));
+
+        let err = crate::dispatch(
+            "set_source_credential",
+            json!({ "extension": "my-gh", "name": "NOPE", "value": "x" }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
     }
 }

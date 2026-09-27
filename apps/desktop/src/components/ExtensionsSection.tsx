@@ -14,12 +14,14 @@ import {
   listExtensions,
   listSources,
   runSource,
+  setSourceCredential,
   subscribeOxplowEvents,
   updateExtension,
   type Extension,
   type SourceListing,
 } from "../api.js";
 import { extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
+import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
@@ -157,6 +159,16 @@ export function ExtensionsSection() {
                           </button>
                         </div>
                         {s.error ? <div style={errorStyle}>{s.error}</div> : null}
+                        {s.missingCredentials ? <div style={mutedStyle}>{s.missingCredentials}</div> : null}
+                        {s.credentials.map((c) => (
+                          <CredentialRow
+                            key={c.name}
+                            extension={l.extension}
+                            name={c.name}
+                            set={c.set}
+                            onChanged={() => void refresh()}
+                          />
+                        ))}
                       </div>
                     );
                   })}
@@ -187,6 +199,76 @@ export function ExtensionsSection() {
         </button>
       </div>
     </div>
+  );
+}
+
+/// One declared credential: set or replace its value (it goes to the OS
+/// keychain and never comes back), or clear it.
+function CredentialRow({
+  extension,
+  name,
+  set,
+  onChanged,
+}: {
+  extension: string;
+  name: string;
+  set: boolean;
+  onChanged(): void;
+}) {
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const id = `${extension}-${name}`;
+
+  async function save(v: string | null) {
+    setSaving(true);
+    try {
+      await setSourceCredential(extension, name, v);
+      setValue("");
+      showToast({ message: v ? `Saved ${name} to your keychain.` : `Cleared ${name}.` });
+      onChanged();
+    } catch (e) {
+      recordOpError({ label: `Set credential ${name}`, message: String(e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      data-testid={`source-credential-${id}`}
+      style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (value.trim()) void save(value.trim());
+      }}
+    >
+      <code>{name}</code>
+      <span style={mutedStyle}>{set ? "Saved in keychain" : "Not set"}</span>
+      <input
+        data-testid={`source-credential-input-${id}`}
+        type="password"
+        autoComplete="off"
+        value={value}
+        placeholder={set ? "New value to replace it" : "Value"}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setValue("");
+        }}
+        style={{ flex: 1 }}
+      />
+      <button type="submit" data-testid={`source-credential-save-${id}`} disabled={!value.trim() || saving}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+      {set ? (
+        <InlineConfirm
+          triggerLabel="Clear"
+          confirmLabel="Clear"
+          testIdPrefix={`source-credential-clear-${id}`}
+          disabled={saving}
+          onConfirm={() => void save(null)}
+        />
+      ) : null}
+    </form>
   );
 }
 

@@ -5,14 +5,15 @@
 //! approvals live in `.oxplow/source-approvals.json`, which is local
 //! state (gitignored), so each person consents on their own machine and
 //! again whenever the script changes. The entry runs with a scrubbed
-//! environment (PATH, HOME, the declared `env` names, OXPLOW_* context)
-//! and must print `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
+//! environment (PATH, HOME, the declared `env` names, its declared
+//! `credentials` from the keychain, OXPLOW_* context) and must print `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 //! See `.context/semantic-layer.md` → "User and extension sources".
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
+use oxplow_ai::secrets::SecretStore;
 use oxplow_db::{EntityTable, SourceState, SqlCell, SqliteExtSourceStore, StoredType};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
@@ -44,31 +45,107 @@ pub struct SourceListing {
     pub state: Option<SourceState>,
     /// This machine approved the entry script as it is now.
     pub approved: bool,
+    /// Each declared credential and whether it has a value (never the value).
+    pub credentials: Vec<CredentialStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialStatus {
+    pub name: String,
+    pub set: bool,
+}
+
+/// Where sources live and what running them needs.
+pub struct Sources<'a> {
+    /// The worktree whose `oxplow/extensions/` declares them.
+    pub root: &'a Path,
+    /// `.oxplow/`, holding the approvals file.
+    pub state_dir: &'a Path,
+    pub store: &'a SqliteExtSourceStore,
+    /// Where credential values are kept (the OS keychain in the app).
+    pub secrets: &'a dyn SecretStore,
+}
+
+impl<'a> Sources<'a> {
+    pub fn of(svc: &'a crate::Services, root: &'a Path) -> Self {
+        Sources {
+            root,
+            state_dir: &svc.layout.state_dir,
+            store: &svc.ext_source_store,
+            secrets: svc.secrets.as_ref(),
+        }
+    }
+}
+
+/// Keychain account for an extension's credential. Scoped by extension,
+/// so one extension can't read another's secret by declaring its name.
+pub fn credential_account(extension: &str, name: &str) -> String {
+    format!("source:{extension}:{name}")
+}
+
+/// Set (or with `None`, clear) a credential some source of `extension`
+/// declares. For the person, from the UI; agents can't reach this.
+pub fn set_source_credential(
+    ctx: &Sources<'_>,
+    extension: &str,
+    name: &str,
+    value: Option<&str>,
+) -> Result<(), DomainError> {
+    let ext = crate::extensions::load_extensions(ctx.root)
+        .into_iter()
+        .find(|e| e.name == extension)
+        .ok_or(DomainError::NotFound)?;
+    if !ext
+        .sources
+        .iter()
+        .any(|s| s.credentials.iter().any(|c| c == name))
+    {
+        return Err(DomainError::Invalid(format!(
+            "no source in `{extension}` declares a credential named `{name}`"
+        )));
+    }
+    let account = credential_account(extension, name);
+    let result = match value.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => ctx.secrets.set(&account, v),
+        None => ctx.secrets.delete(&account),
+    };
+    result.map_err(|e| DomainError::Storage(e.to_string()))
 }
 
 /// Every declared source under `root`, with state and consent.
-pub async fn list_sources(
-    root: &Path,
-    state_dir: &Path,
-    store: &SqliteExtSourceStore,
-) -> Result<Vec<SourceListing>, DomainError> {
-    let states = store.list_states().await?;
+pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, DomainError> {
+    let states = ctx.store.list_states().await?;
     let mut out = Vec::new();
-    for ext in crate::extensions::load_extensions(root) {
-        let ext_dir = root.join(&ext.path);
+    for ext in crate::extensions::load_extensions(ctx.root) {
+        let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.sources {
             let approved = entry_hash(&ext_dir, &spec.entry)
-                .map(|h| is_approved(state_dir, &ext.name, &spec.id, &h))
+                .map(|h| is_approved(ctx.state_dir, &ext.name, &spec.id, &h))
                 .unwrap_or(false);
             let state = states
                 .iter()
                 .find(|s| s.extension == ext.name && s.source_id == spec.id)
                 .cloned();
+            let credentials = spec
+                .credentials
+                .iter()
+                .map(|name| CredentialStatus {
+                    name: name.clone(),
+                    set: ctx
+                        .secrets
+                        .get(&credential_account(&ext.name, name))
+                        .ok()
+                        .flatten()
+                        .is_some(),
+                })
+                .collect();
             out.push(SourceListing {
                 extension: ext.name.clone(),
                 spec,
                 state,
                 approved,
+                credentials,
             });
         }
     }
@@ -107,20 +184,11 @@ pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
         tokio::time::sleep(Duration::from_secs(30)).await;
         loop {
             let root = state.git.resolve_repo_dir(None).await;
-            if let Ok(listings) =
-                list_sources(&root, &state.layout.state_dir, &state.ext_source_store).await
-            {
+            let ctx = Sources::of(&state, &root);
+            if let Ok(listings) = list_sources(&ctx).await {
                 let now = oxplow_domain::Timestamp::now().unix_ms();
                 for (extension, source_id) in due_sources(&listings, now) {
-                    let result = run_source(
-                        &root,
-                        &state.layout.state_dir,
-                        &state.ext_source_store,
-                        &extension,
-                        &source_id,
-                        false,
-                    )
-                    .await;
+                    let result = run_source(&ctx, &extension, &source_id, false).await;
                     if let Err(e) = &result {
                         tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
                     }
@@ -187,6 +255,7 @@ pub fn exec_source(
     ext_dir: &Path,
     spec: &SourceSpec,
     host_env: &dyn Fn(&str) -> Option<String>,
+    credentials: &BTreeMap<String, String>,
     timeout: Duration,
 ) -> Result<BTreeMap<String, Vec<serde_json::Value>>, String> {
     use std::io::Read;
@@ -216,6 +285,9 @@ pub fn exec_source(
         if let Some(v) = host_env(name) {
             cmd.env(name, v);
         }
+    }
+    for (name, value) in credentials {
+        cmd.env(name, value);
     }
     let mut child = cmd
         .spawn()
@@ -373,13 +445,12 @@ impl From<RunSourceError> for DomainError {
 /// Failures after the consent check are also recorded as the source's
 /// state so the UI can show them.
 pub async fn run_source(
-    root: &Path,
-    state_dir: &Path,
-    store: &SqliteExtSourceStore,
+    ctx: &Sources<'_>,
     extension: &str,
     source_id: &str,
     approve_now: bool,
 ) -> Result<SourceRunReport, RunSourceError> {
+    let (root, state_dir, store) = (ctx.root, ctx.state_dir, ctx.store);
     let ext = crate::extensions::load_extensions(root)
         .into_iter()
         .find(|e| e.name == extension)
@@ -406,7 +477,22 @@ pub async fn run_source(
         )));
     }
 
-    let result = run_approved(&ext_dir, extension, &spec, store).await;
+    let mut credentials = BTreeMap::new();
+    let mut missing = None;
+    for name in &spec.credentials {
+        match ctx.secrets.get(&credential_account(extension, name)) {
+            Ok(Some(v)) => {
+                credentials.insert(name.clone(), v);
+            }
+            // Unset: the script decides (it may have a fallback).
+            Ok(None) => {}
+            Err(e) => missing = Some(format!("credential `{name}`: {e}")),
+        }
+    }
+    let result = match missing {
+        Some(e) => Err(e),
+        None => run_approved(&ext_dir, extension, &spec, credentials, store).await,
+    };
     // Timestamp serializes as an RFC 3339 string.
     let now = serde_json::to_value(oxplow_domain::Timestamp::now())
         .ok()
@@ -441,6 +527,7 @@ async fn run_approved(
     ext_dir: &Path,
     extension: &str,
     spec: &SourceSpec,
+    credentials: BTreeMap<String, String>,
     store: &SqliteExtSourceStore,
 ) -> Result<SourceRunReport, String> {
     let dir = ext_dir.to_path_buf();
@@ -450,6 +537,7 @@ async fn run_approved(
             &dir,
             &spec_owned,
             &|k| std::env::var(k).ok(),
+            &credentials,
             SOURCE_TIMEOUT,
         )
     })
@@ -548,6 +636,7 @@ mod tests {
             ext.path(),
             &spec("bin/sync.sh", &["GH_TOKEN"]),
             &env,
+            &BTreeMap::new(),
             Duration::from_secs(10),
         )
         .unwrap();
@@ -563,6 +652,7 @@ mod tests {
             ext.path(),
             &spec("fail.sh", &[]),
             &none,
+            &BTreeMap::new(),
             Duration::from_secs(10),
         )
         .unwrap_err();
@@ -573,6 +663,7 @@ mod tests {
             ext.path(),
             &spec("slow.sh", &[]),
             &none,
+            &BTreeMap::new(),
             Duration::from_millis(300),
         )
         .unwrap_err();
@@ -583,6 +674,7 @@ mod tests {
             ext.path(),
             &spec("junk.sh", &[]),
             &none,
+            &BTreeMap::new(),
             Duration::from_secs(10),
         )
         .unwrap_err();
@@ -597,6 +689,7 @@ mod tests {
             ext.path(),
             &spec("undeclared.sh", &[]),
             &none,
+            &BTreeMap::new(),
             Duration::from_secs(10),
         )
         .unwrap_err();
@@ -606,6 +699,7 @@ mod tests {
             ext.path(),
             &spec("missing.sh", &[]),
             &none,
+            &BTreeMap::new(),
             Duration::from_secs(10),
         )
         .unwrap_err();
@@ -662,10 +756,15 @@ mod tests {
         );
         let db = oxplow_db::Database::in_memory();
         let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            state_dir: &state,
+            store: &store,
+            secrets: &secrets,
+        };
 
-        let err = run_source(root.path(), &state, &store, "my-gh", "gh", false)
-            .await
-            .unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh", false).await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
@@ -676,9 +775,7 @@ mod tests {
             "refused runs record nothing"
         );
 
-        let report = run_source(root.path(), &state, &store, "my-gh", "gh", true)
-            .await
-            .unwrap();
+        let report = run_source(&ctx, "my-gh", "gh", true).await.unwrap();
         assert_eq!(report.row_counts["pr"], 2);
         let out = oxplow_db::SemanticLayer::new(db)
             .query_sql("SELECT title FROM v_my_gh_pr ORDER BY number", vec![], None)
@@ -690,21 +787,15 @@ mod tests {
         );
 
         // Approved now, so a later run needs no approve flag…
-        run_source(root.path(), &state, &store, "my-gh", "gh", false)
-            .await
-            .unwrap();
+        run_source(&ctx, "my-gh", "gh", false).await.unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = run_source(root.path(), &state, &store, "my-gh", "gh", false)
-            .await
-            .unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh", false).await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(_)),
             "script changed: {err:?}"
         );
-        let err = run_source(root.path(), &state, &store, "my-gh", "gh", true)
-            .await
-            .unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh", true).await.unwrap_err();
         assert!(err.ran(), "{err:?}");
         let st = &store.list_states().await.unwrap()[0];
         assert_eq!(st.status, "error");
@@ -722,6 +813,7 @@ mod tests {
                 extension: "e".into(),
                 spec,
                 approved,
+                credentials: vec![],
                 state: last.map(|t| SourceState {
                     extension: "e".into(),
                     source_id: "gh".into(),
@@ -761,5 +853,100 @@ mod tests {
                 l.state.as_ref().map(|s| &s.last_run_at)
             );
         }
+    }
+
+    #[test]
+    fn exec_injects_credentials_as_env() {
+        let ext = tempfile::tempdir().unwrap();
+        script(
+            ext.path(),
+            "bin/sync.sh",
+            r#"printf '{"entities":{"pr":[{"number":1,"title":"%s"}]}}' "$GH_PAT""#,
+        );
+        let creds = BTreeMap::from([("GH_PAT".to_string(), "pat-1".to_string())]);
+        let out = exec_source(
+            ext.path(),
+            &spec("bin/sync.sh", &[]),
+            &|_| None,
+            &creds,
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(out["pr"][0]["title"], json!("pat-1"));
+    }
+
+    /// Two extensions declaring the same credential name, each with a
+    /// script that echoes it into a row.
+    fn two_extensions(root: &Path) {
+        for name in ["one", "two"] {
+            let ext = root.join(format!("oxplow/extensions/{name}"));
+            std::fs::create_dir_all(&ext).unwrap();
+            std::fs::write(
+                ext.join("extension.yaml"),
+                format!("name: {name}\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
+            )
+            .unwrap();
+            script(
+                &ext,
+                "sync.sh",
+                r#"printf '{"entities":{"row":[{"id":1,"token":"%s"}]}}' "$TOKEN""#,
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn credentials_come_from_the_keychain_scoped_per_extension() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        two_extensions(root.path());
+        let db = oxplow_db::Database::in_memory();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            state_dir: &state,
+            store: &store,
+            secrets: &secrets,
+        };
+
+        let list = list_sources(&ctx).await.unwrap();
+        assert_eq!(
+            list[0].credentials,
+            vec![CredentialStatus {
+                name: "TOKEN".into(),
+                set: false
+            }]
+        );
+
+        set_source_credential(&ctx, "one", "TOKEN", Some("secret-one")).unwrap();
+        let list = list_sources(&ctx).await.unwrap();
+        let one = list.iter().find(|l| l.extension == "one").unwrap();
+        let two = list.iter().find(|l| l.extension == "two").unwrap();
+        assert!(one.credentials[0].set);
+        assert!(!two.credentials[0].set, "scoped to its extension");
+        assert!(!serde_json::to_string(&list).unwrap().contains("secret-one"));
+
+        run_source(&ctx, "one", "s", true).await.unwrap();
+        run_source(&ctx, "two", "s", true).await.unwrap();
+        let out = oxplow_db::SemanticLayer::new(db)
+            .query_sql(
+                "SELECT (SELECT token FROM v_one_row), (SELECT token FROM v_two_row)",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["secret-one", ""]]),
+            "the other extension's same-named credential isn't visible"
+        );
+
+        // Only declared names can be set, and None clears.
+        let err = set_source_credential(&ctx, "one", "OTHER", Some("x")).unwrap_err();
+        assert!(err.to_string().contains("OTHER"), "{err}");
+        assert!(set_source_credential(&ctx, "nope", "TOKEN", Some("x")).is_err());
+        set_source_credential(&ctx, "one", "TOKEN", None).unwrap();
+        assert!(!list_sources(&ctx).await.unwrap()[0].credentials[0].set);
     }
 }

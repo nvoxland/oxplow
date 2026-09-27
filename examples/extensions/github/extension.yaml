@@ -6,9 +6,11 @@ sources:
     runtime: exec
     entry: sync.sh
     schedule: every 15m
-    # Passed through from the environment oxplow runs in. Without
-    # GITHUB_TOKEN the script falls back to the `gh` CLI's own login.
-    env: [GITHUB_TOKEN, GITHUB_REPOSITORY]
+    # Optional. Set GITHUB_TOKEN under this source in Settings →
+    # Extensions (it's stored in your keychain); without it the script
+    # uses the `gh` CLI's own login.
+    credentials: [GITHUB_TOKEN]
+    env: [GITHUB_REPOSITORY]
     entities:
       - name: pr
         doc: One GitHub pull request.

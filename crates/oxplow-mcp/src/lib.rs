@@ -1308,9 +1308,7 @@ impl OxplowMcp {
     async fn list_sources(&self) -> Result<CallToolResult, McpError> {
         let root = self.services.git.resolve_repo_dir(None).await;
         let list = oxplow_app::source_runner::list_sources(
-            &root,
-            &self.services.layout.state_dir,
-            &self.services.ext_source_store,
+            &oxplow_app::source_runner::Sources::of(&self.services, &root),
         )
         .await
         .map_err(internal)?;
@@ -1330,9 +1328,7 @@ impl OxplowMcp {
         let p = params.0;
         let root = self.services.git.resolve_repo_dir(None).await;
         let result = oxplow_app::source_runner::run_source(
-            &root,
-            &self.services.layout.state_dir,
-            &self.services.ext_source_store,
+            &oxplow_app::source_runner::Sources::of(&self.services, &root),
             &p.extension,
             &p.source_id,
             false,
