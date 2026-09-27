@@ -244,6 +244,11 @@ pub enum OxplowEvent {
     /// An effort closed (its task left `in_progress`). Background work
     /// that reviews a finished effort (inferred decisions) keys off this.
     EffortFinished { thread_id: ThreadId, effort_id: i64 },
+    /// A change's analysis landed (`v_change*` for `change_id`).
+    ChangeAnalyzed { change_id: i64 },
+    /// A stream's working tree or refs moved: its working-tree and
+    /// open-effort changes are stale, so pages showing them re-ensure.
+    ChangeStale { stream_id: i64 },
     /// An effort's stored metric deltas / observations were recomputed
     /// (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.
     EffortEvidenceChanged { effort_id: i64 },

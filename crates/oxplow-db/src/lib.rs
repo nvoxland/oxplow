@@ -9,6 +9,7 @@ pub mod agent_stores;
 pub mod ai_call_store;
 pub mod analytics_stores;
 pub mod attribution_store;
+pub mod change_store;
 pub mod comment_store;
 pub mod dashboard_store;
 mod database;
@@ -42,6 +43,10 @@ pub use analytics_stores::{
 };
 pub use attribution_store::{
     SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,
+};
+pub use change_store::{
+    ChangeCoChangeRow, ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow,
+    ChangeResults, ChangeRow, SqliteChangeStore,
 };
 pub use comment_store::SqliteCommentStore;
 pub use dashboard_store::{

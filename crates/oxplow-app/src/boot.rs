@@ -146,6 +146,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     crate::source_runner::spawn_scheduler(state.clone());
     crate::inferred_decisions::spawn_on_effort_finished(state.clone());
     crate::effort_evidence::spawn(state.clone());
+    crate::change_analysis::spawn_invalidation(state.clone());
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate

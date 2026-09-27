@@ -910,6 +910,20 @@ pub struct RecordClaimParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EnsureChangeParams {
+    /// `commit` (a commit vs its parent), `effort` (an effort's start →
+    /// end), or `working` (a stream's uncommitted work vs HEAD).
+    pub kind: String,
+    /// For `commit`: a sha or revspec (`HEAD`, `main~2`).
+    pub sha: Option<String>,
+    /// For `effort`: the effort id (`eff42`).
+    pub effort_id: Option<String>,
+    /// For `working` (required) and `commit` (optional): the stream id;
+    /// the primary stream when omitted.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AiQuestionParam {
     /// `noul` (yes/no: returns the probability of yes), `choice` (pick one
     /// of `options`) or `score` (place it on the ordered `levels`).
@@ -1355,6 +1369,53 @@ impl OxplowMcp {
             oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
         })?;
         json_result(&report)
+    }
+
+    #[tool(
+        description = "Analyze a change and return its row (`v_change`): a commit vs its parent, an \
+                       effort (start → end), or a stream's uncommitted work vs HEAD. Then read the \
+                       analysis with query_sql: v_change_file (files, zones, look-here-first \
+                       `interest`), v_change_function (added/deleted/modified functions, deltas, \
+                       churn), v_change_import (cross-zone imports), v_change_co_change (files whose \
+                       usual partners are missing), v_change_duplicate (copied blocks; arrives a \
+                       little later). Cached: commits and closed efforts are analyzed once."
+    )]
+    async fn ensure_change(
+        &self,
+        params: Parameters<EnsureChangeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        use oxplow_app::change_analysis::ChangeTarget;
+        let p = params.0;
+        let need = |v: Option<String>, name: &str| {
+            v.ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("`{name}` is required for kind `{}`", p.kind),
+                    None,
+                )
+            })
+        };
+        let target = match p.kind.as_str() {
+            "commit" => ChangeTarget::Commit {
+                sha: need(p.sha.clone(), "sha")?,
+                stream_id: p.stream_id.clone(),
+            },
+            "effort" => ChangeTarget::Effort {
+                effort_id: need(p.effort_id.clone(), "effort_id")?,
+            },
+            "working" => ChangeTarget::Working {
+                stream_id: need(p.stream_id.clone(), "stream_id")?,
+            },
+            other => {
+                return Err(McpError::invalid_params(
+                    format!("kind `{other}` isn't commit, effort or working"),
+                    None,
+                ))
+            }
+        };
+        let row = oxplow_app::change_analysis::ensure_change(&self.services, target)
+            .await
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        json_result(&row)
     }
 
     #[tool(
@@ -5216,6 +5277,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
     "list_sources",
     "list_ai_roles",
+    "ensure_change",
     "get_open_page",
     "list_extensions",
     "list_lenses",
@@ -8724,5 +8786,44 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(out, "short");
+    }
+
+    #[tokio::test]
+    async fn ensure_change_analyzes_a_commit_for_agents() {
+        let (proj, _services, server) = boot();
+        std::fs::write(proj.path().join("a.rs"), "fn a() {}\n").unwrap();
+        let repo = git2::Repository::open(proj.path()).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("a.rs")).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "a", &tree, &[&parent])
+            .unwrap();
+
+        let out: serde_json::Value = serde_json::from_str(&text_payload(
+            server
+                .ensure_change(Parameters(EnsureChangeParams {
+                    kind: "commit".into(),
+                    sha: Some("HEAD".into()),
+                    effort_id: None,
+                    stream_id: None,
+                }))
+                .await
+                .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(out["status"], "done");
+        let err = server
+            .ensure_change(Parameters(EnsureChangeParams {
+                kind: "sideways".into(),
+                sha: None,
+                effort_id: None,
+                stream_id: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("sideways"), "{}", err.message);
     }
 }

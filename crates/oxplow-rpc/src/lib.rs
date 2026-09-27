@@ -303,6 +303,7 @@ macro_rules! oxplow_command_table {
                 update_extension => $crate::commands::extensions::update_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 set_extension_enabled => $crate::commands::extensions::set_extension_enabled { name: String, enabled: bool } -> Vec<::oxplow_app::extensions::Extension>,
                 list_sources => $crate::commands::sources::list_sources {} -> Vec<::oxplow_app::source_runner::SourceListing>,
+                ensure_change => $crate::commands::changes::ensure_change { target: ::oxplow_app::change_analysis::ChangeTarget } -> ::oxplow_db::ChangeRow,
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 save_ai_provider => $crate::commands::ai::save_ai_provider { provider: ::oxplow_app::ai_service::ProviderConfig, key: Option<String> } -> ::oxplow_app::ai_service::AiSettings,

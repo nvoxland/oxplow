@@ -143,6 +143,7 @@ never the physical tables, which stay internal and free to change.
 | `v_dashboard`, `v_dashboard_item` | user dashboards and their tiles (V80) |
 | `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `EffortFinished` and, debounced 3 s, for open efforts on metric/observation/token events, then emits `EffortEvidenceChanged` (V80) |
 | `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its claimed captures; refreshed the same way (V80) |
+| `v_change`, `v_change_file`, `v_change_function`, `v_change_import`, `v_change_co_change`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 
 Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`
 and the rest of the shipped-sources table above.
@@ -299,6 +300,42 @@ The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 - **Schema.** `describe_schema` lists declared entities even before they
   sync. It sets `available: false` until the view exists, and includes
   column docs, relations and the owner (the extension name).
+
+## Change analysis
+
+A **change** is one diff: a `commit` (vs its first parent), an `effort`
+(start snapshot → end snapshot, or → the working tree while open) or a
+stream's `working` tree (vs HEAD). `crates/oxplow-app/src/change_analysis.rs`
+analyzes it and stores the rows behind `v_change*`; lenses (the
+oxplow-analytics change cards) only read them.
+
+- **Getting one.** `ensure_change(target)` (IPC and MCP, read-only) returns
+  the `v_change` row, computing first if needed. It diffs the endpoints
+  (`endpoint_diff.rs`, shared with the `diff_endpoints` IPC), reads the
+  first 200 changed files' contents, runs `code_analysis::analyze_files`
+  (tree-sitter metrics per side, churn, import deltas), and builds rows:
+  - files: status, +/−, zone (project zone rules), `is_test`, and the
+    "look here first" `interest` score + reasons (ported from the old
+    `interestingness.ts`: `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
+    (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)`);
+  - functions: added / deleted / modified (signature and/or body), deltas,
+    churn and churn share; unchanged ones aren't stored;
+  - imports: added/removed with zones, `cross_zone` for new boundary
+    crossings;
+  - co-change: `analyze_surprise` over a history cached per (repo, HEAD).
+- **Duplicates** come later: a background whole-tree scan
+  (`run_duplication_scan_scoped`, scoped to the changed files) stores
+  `v_change_duplicate` and emits `ChangeAnalyzed` again. Closed efforts
+  (snapshot heads) get none: snapshot trees aren't scannable yet.
+- **Caching.** A change is keyed by (stream, kind, target) — commit shas are
+  resolved to full ids, so `HEAD` and a short sha share one row. Commits
+  and closed efforts are computed once. Working-tree and open-effort
+  changes are recomputed when stale: `spawn_invalidation` bumps a
+  per-stream generation on snapshot and git-ref events and (debounced
+  1.5 s) emits `ChangeStale { stream_id }`, so a page showing one calls
+  `ensure_change` again. Concurrent requests for the same change return it
+  `running`; `ChangeAnalyzed { change_id }` fires when results land.
+- An effort without a start snapshot is an error, not an empty diff.
 
 **Still target (agent activity):** `v_test_change` (deleted / skipped
 tests, removed assertions) needs snapshot content analysis; "missing

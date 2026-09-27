@@ -395,6 +395,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	ensureChange: (target: ChangeTarget) => typedError<ChangeRow, IpcError>(__TAURI_INVOKE("ensure_change", { target })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	aiSettings: () => typedError<AiSettings, IpcError>(__TAURI_INVOKE("ai_settings")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1717,6 +1722,19 @@ export type BranchRefKind = "local" | "remote";
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked";
 
+// A change's identity and state.
+export type ChangeRow = {
+	id: number,
+	streamId: number,
+	kind: string,
+	target: string,
+	baseLabel: string | null,
+	headLabel: string | null,
+	status: string,
+	error: string | null,
+	computedAt: string | null,
+};
+
 /**
  *  "Where am I?" branch context the UI shows above the diff/log
  *  views, plus the live working-tree changeset split by staging
@@ -1739,6 +1757,21 @@ export type ChangeScopes = {
 	 */
 	unstaged: BranchChangeEntry[],
 };
+
+// What to analyze.
+export type ChangeTarget = 
+// The stream's uncommitted work: HEAD → the working tree.
+{ kind: "working"; streamId: string } | 
+/**
+ *  One commit against its first parent. `stream_id` picks the repo
+ *  (default: the primary stream's).
+ */
+{ kind: "commit"; sha: string; streamId?: string | null } | 
+/**
+ *  An effort: its start snapshot → its end snapshot (or the working
+ *  tree while it's open).
+ */
+{ kind: "effort"; effortId: string };
 
 export type CodeQualityFinding = {
 	id: number,
@@ -3411,6 +3444,13 @@ detail: string | null } |
  *  that reviews a finished effort (inferred decisions) keys off this.
  */
 { kind: "effortFinished"; threadId: ThreadId; effortId: number } | 
+// A change's analysis landed (`v_change*` for `change_id`).
+{ kind: "changeAnalyzed"; changeId: number } | 
+/**
+ *  A stream's working tree or refs moved: its working-tree and
+ *  open-effort changes are stale, so pages showing them re-ensure.
+ */
+{ kind: "changeStale"; streamId: number } | 
 /**
  *  An effort's stored metric deltas / observations were recomputed
  *  (`v_effort_metric_delta`, `v_effort_observation`); lenses re-run.

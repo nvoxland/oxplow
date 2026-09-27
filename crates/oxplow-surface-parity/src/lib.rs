@@ -196,6 +196,7 @@ pub const MANIFEST: &[Capability] = &[
     both("run_source"),
     // Secrets are the person's to set; agents only see whether one is set.
     ui("set_source_credential"),
+    both("ensure_change"),
     both_named("ai.settings", "ai_settings", "list_ai_roles"),
     ui("save_ai_provider"),
     ui("remove_ai_provider"),

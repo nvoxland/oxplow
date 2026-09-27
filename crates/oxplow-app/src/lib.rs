@@ -20,6 +20,7 @@ pub mod background_task;
 pub mod blob_store;
 pub mod boot;
 pub mod bundled_extensions;
+pub mod change_analysis;
 pub mod churn;
 pub mod code_analysis;
 pub mod code_quality_runner;
@@ -430,6 +431,9 @@ pub struct Services {
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
+    /// Stored change analysis (`v_change*`) and its producer state.
+    pub change_store: Arc<oxplow_db::SqliteChangeStore>,
+    pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
     /// Runs extension advisories for the hooks (see `advisories`).
     pub advisories: Arc<advisories::AdvisoryRunner>,
     /// Per-effort metric deltas / observations for lenses (see `effort_evidence`).
@@ -540,6 +544,7 @@ impl Services {
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
+        let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -743,6 +748,8 @@ impl Services {
             secrets: ai_env.secrets,
             effort_evidence_store,
             advisories: Arc::new(advisories::AdvisoryRunner::default()),
+            change_store,
+            change_analyzer: Arc::new(change_analysis::ChangeAnalyzer::default()),
             collection,
             token_usage_store,
             token_usage,
