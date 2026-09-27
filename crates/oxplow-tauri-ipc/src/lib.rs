@@ -143,6 +143,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_extensions,
             commands::generated::get_lens,
             commands::generated::run_lens,
+            commands::generated::run_lens_action,
             commands::generated::validate_extension,
             commands::generated::install_extension,
             commands::generated::update_extension,

@@ -72,8 +72,16 @@ children: [visits, tokens-by-day]
 
 `launcher: { category: Activity }` files a lens under that launcher
 heading; `hidden: true` leaves it out (for lenses only a slot shows).
-`copy: true` on a `markdown` lens adds a Copy button, handy for a lens
-that builds a prompt you paste somewhere else.
+`actions:` adds buttons above the result, from a fixed set:
+
+- `copy` copies the result, a markdown lens's text or the table as
+  markdown;
+- `add-to-context` hands the lens to your agent;
+- `run-source` syncs a source, for example
+  `{ action: run-source, source: github/prs, label: Sync PRs }`.
+
+A lens button never approves a source. The first run of a source that
+executes a program is still approved in Settings → Data.
 
 ### Alerts
 

@@ -680,6 +680,27 @@ async fn record(
     result.map_err(RunSourceError::Failed)
 }
 
+/// Run a project source from the primary worktree (source data is
+/// project-wide) and announce `SourceSynced` when it actually ran (ok or
+/// failed). A refused run (no consent) or unknown source changed nothing.
+/// The one entry point for the IPC, MCP and lens-action runs.
+pub async fn sync_source(
+    svc: &crate::Services,
+    extension: &str,
+    source_id: &str,
+    approve: bool,
+) -> Result<SourceRunReport, RunSourceError> {
+    let root = svc.git.resolve_repo_dir(None).await;
+    let result = run_source(&Sources::of(svc, &root), extension, source_id, approve).await;
+    if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
+        svc.events.emit(crate::OxplowEvent::SourceSynced {
+            extension: extension.to_string(),
+            source_id: source_id.to_string(),
+        });
+    }
+    result
+}
+
 async fn run_approved(
     ext_dir: &Path,
     extension: &str,

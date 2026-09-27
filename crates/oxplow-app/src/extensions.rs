@@ -316,11 +316,109 @@ struct LensFile {
     /// Keep it out of the launcher (e.g. a lens only a slot shows).
     #[serde(default)]
     hidden: bool,
-    /// Show a Copy button for the rendered text (markdown lenses only).
+    /// Buttons from the fixed action registry: `copy`, `add-to-context`,
+    /// or `{action: run-source, source: <ext>/<id>}`. Parsed by
+    /// [`parse_actions`].
     #[serde(default)]
-    copy: bool,
+    actions: Vec<serde_yaml::Value>,
     #[serde(default)]
     alert: Option<AlertFile>,
+}
+
+/// What a lens action does. A fixed registry: an extension can't run code
+/// through one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum LensActionKind {
+    /// Copy the lens result as text (markdown).
+    Copy,
+    /// Hand the lens and its params to the agent (UI only).
+    AddToContext,
+    /// Sync a source (an exec source needs a person's approval first).
+    RunSource,
+}
+
+/// A button on a lens (tsk329).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LensAction {
+    /// Unique within the lens; `run_lens_action` names it. Defaults to the
+    /// kind.
+    pub id: String,
+    pub kind: LensActionKind,
+    pub label: String,
+    /// For `run-source`: `<extension>/<source id>`.
+    pub source: Option<String>,
+}
+
+/// Parse a lens's `actions:`. Each is a bare kind (`copy`) or a map with
+/// `action` and optional `id`, `label`, `source`.
+fn parse_actions(raw: Vec<serde_yaml::Value>) -> Result<Vec<LensAction>, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Full {
+        action: String,
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        source: Option<String>,
+    }
+    let mut out: Vec<LensAction> = Vec::new();
+    for v in raw {
+        let f = match v {
+            serde_yaml::Value::String(action) => Full {
+                action,
+                id: None,
+                label: None,
+                source: None,
+            },
+            other => serde_yaml::from_value::<Full>(other).map_err(|e| format!("actions: {e}"))?,
+        };
+        let kind = match f.action.as_str() {
+            "copy" => LensActionKind::Copy,
+            "add-to-context" => LensActionKind::AddToContext,
+            "run-source" => LensActionKind::RunSource,
+            other => {
+                return Err(format!(
+                    "unknown action `{other}` (copy, add-to-context or run-source)"
+                ))
+            }
+        };
+        match (kind, &f.source) {
+            (LensActionKind::RunSource, Some(src))
+                if src
+                    .split_once('/')
+                    .is_some_and(|(e, i)| !e.is_empty() && !i.is_empty()) => {}
+            (LensActionKind::RunSource, _) => {
+                return Err("action `run-source` needs `source: <extension>/<source>`".into())
+            }
+            (_, Some(_)) => return Err("only `run-source` takes a source".into()),
+            _ => {}
+        }
+        let id = f.id.unwrap_or_else(|| f.action.clone());
+        if out.iter().any(|a| a.id == id) {
+            return Err(format!(
+                "action `{id}` is declared twice (give one an `id`)"
+            ));
+        }
+        let label = f.label.unwrap_or_else(|| {
+            match kind {
+                LensActionKind::Copy => "Copy",
+                LensActionKind::AddToContext => "Add to Agent Context",
+                LensActionKind::RunSource => "Sync",
+            }
+            .to_string()
+        });
+        out.push(LensAction {
+            id,
+            kind,
+            label,
+            source: f.source,
+        });
+    }
+    Ok(out)
 }
 
 fn default_viz() -> LensViz {
@@ -465,9 +563,8 @@ pub struct Lens {
     pub launcher_category: Option<LauncherCategory>,
     /// Not listed in the launcher.
     pub hidden: bool,
-    /// A Copy button copies the rendered markdown (e.g. a prompt to paste
-    /// into another tool).
-    pub copy: bool,
+    /// Buttons from the fixed action registry (tsk329).
+    pub actions: Vec<LensAction>,
     /// When the lens needs attention (a rail badge when mounted in `rail`).
     pub alert: Option<LensAlert>,
     /// Repo-relative path of the lens file.
@@ -538,6 +635,61 @@ pub struct LensRun {
     pub result: SqlQueryResult,
     /// The lens's alert on this result, if it declares one.
     pub alert: Option<AlertState>,
+}
+
+/// A lens result as text, for the `copy` action: a markdown lens's text, a
+/// number lens's value, anything else as a markdown table of what the
+/// lens shows.
+pub fn lens_text(run: &LensRun) -> String {
+    let cell = |c: &SqlCell| match c {
+        SqlCell::Null(()) => String::new(),
+        SqlCell::Text(t) => t.clone(),
+        SqlCell::Int(i) => i.to_string(),
+        SqlCell::Real(r) => r.to_string(),
+        SqlCell::Bool(b) => b.to_string(),
+    };
+    let first = run.result.rows.first().and_then(|r| r.first());
+    match run.lens.viz {
+        LensViz::Markdown | LensViz::Number => first.map(cell).unwrap_or_default(),
+        _ => {
+            // What the table shows: the declared columns in their order, or
+            // every result column when none are declared (the UI's
+            // `displayColumns`).
+            let shown: Vec<(usize, String)> = if run.lens.columns.is_empty() {
+                run.result.columns.iter().cloned().enumerate().collect()
+            } else {
+                run.lens
+                    .columns
+                    .iter()
+                    .filter_map(|c| {
+                        let i = run.result.columns.iter().position(|k| k == &c.key)?;
+                        Some((i, c.label.clone().unwrap_or_else(|| c.key.clone())))
+                    })
+                    .collect()
+            };
+            let esc = |t: String| t.replace('|', "\\|").replace('\n', " ");
+            let mut out = format!(
+                "| {} |\n|{}\n",
+                shown
+                    .iter()
+                    .map(|(_, l)| esc(l.clone()))
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                " --- |".repeat(shown.len())
+            );
+            for r in &run.result.rows {
+                out.push_str(&format!(
+                    "| {} |\n",
+                    shown
+                        .iter()
+                        .map(|(i, _)| esc(r.get(*i).map(cell).unwrap_or_default()))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ));
+            }
+            out
+        }
+    }
 }
 
 /// Load bundled extensions plus every project extension under
@@ -822,19 +974,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             .read(&format!("lenses/{file}"))
             .ok_or_else(|| "unreadable".to_string())
             .and_then(|t| serde_yaml::from_str::<LensFile>(&t).map_err(|e| e.to_string()))
-            .and_then(|l| {
-                if l.copy && l.viz != LensViz::Markdown {
-                    Err("`copy: true` needs `viz: markdown`".to_string())
-                } else {
-                    Ok(l)
-                }
-            })
             .and_then(|mut l| {
                 let alert = l.alert.take().map(AlertFile::into_alert).transpose()?;
-                Ok((l, alert))
+                let actions = parse_actions(std::mem::take(&mut l.actions))?;
+                Ok((l, alert, actions))
             });
         match parsed {
-            Ok((l, alert)) => ext.lenses.push(Lens {
+            Ok((l, alert, actions)) => ext.lenses.push(Lens {
                 id: format!("{name}/{slug}"),
                 extension: name.to_string(),
                 slug,
@@ -859,7 +1005,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     .collect(),
                 launcher_category: l.launcher.map(|la| la.category),
                 hidden: l.hidden,
-                copy: l.copy,
+                actions,
                 alert,
                 path: lens_rel,
             }),
@@ -2410,29 +2556,66 @@ empty: No tasks.
     }
 
     #[test]
-    fn copy_is_for_markdown_lenses() {
+    fn lens_actions_come_from_a_fixed_registry() {
         let (_d, ext) = load_x(
             &[
                 (
                     "a",
-                    "title: A\nquery: SELECT 'x'\nviz: markdown\ncopy: true\n",
+                    "title: A\nquery: SELECT 1\nactions:\n  - copy\n  - add-to-context\n  - { action: run-source, source: github/prs, label: Sync PRs }\n",
                 ),
-                ("b", "title: B\nquery: SELECT 1\ncopy: true\n"),
-                ("c", "title: C\nquery: SELECT 'x'\nviz: markdown\n"),
+                ("b", "title: B\nquery: SELECT 1\nactions: [shell]\n"),
+                ("c", "title: C\nquery: SELECT 1\nactions: [{ action: run-source }]\n"),
+                ("d", "title: D\nquery: SELECT 1\nactions: [copy, copy]\n"),
+                ("e", "title: E\nquery: SELECT 1\nactions: [{ action: copy, source: x/y }]\n"),
             ],
             "",
         );
-        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
-        assert!(lens("a").unwrap().copy);
-        assert!(!lens("c").unwrap().copy);
-        assert!(lens("b").is_none());
-        assert!(
-            ext.errors
-                .iter()
-                .any(|e| e.contains("copy") && e.contains("markdown")),
-            "{:?}",
-            ext.errors
+        let a = ext
+            .lenses
+            .iter()
+            .find(|l| l.slug == "a")
+            .expect("valid actions load");
+        let got: Vec<_> = a
+            .actions
+            .iter()
+            .map(|x| (x.id.as_str(), x.kind, x.label.as_str(), x.source.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("copy", LensActionKind::Copy, "Copy", None),
+                (
+                    "add-to-context",
+                    LensActionKind::AddToContext,
+                    "Add to Agent Context",
+                    None
+                ),
+                (
+                    "run-source",
+                    LensActionKind::RunSource,
+                    "Sync PRs",
+                    Some("github/prs")
+                ),
+            ]
         );
+        for (slug, needle) in [
+            ("b", "unknown action `shell`"),
+            ("c", "needs `source: <extension>/<source>`"),
+            ("d", "twice"),
+            ("e", "only `run-source` takes a source"),
+        ] {
+            assert!(
+                ext.lenses.iter().all(|l| l.slug != slug),
+                "{slug} should fail"
+            );
+            assert!(
+                ext.errors
+                    .iter()
+                    .any(|e| e.contains(&format!("{slug}.yaml")) && e.contains(needle)),
+                "{slug}: {:?}",
+                ext.errors
+            );
+        }
     }
 
     #[test]

@@ -43,6 +43,7 @@ pub mod git_service;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
+pub mod lens_actions;
 pub mod link_check;
 pub mod lsp_diagnostics;
 pub mod lsp_installer;

@@ -52,6 +52,27 @@ pub async fn run_lens(
     Ok(extensions::run_lens(&layer(svc), &root, &id, params.unwrap_or_default()).await?)
 }
 
+/// Run one of a lens's declared actions. It never approves an exec
+/// source: that consent is given in Settings → Data, where what runs and
+/// which hosts it reaches are shown.
+pub async fn run_lens_action(
+    svc: &Services,
+    id: String,
+    action: String,
+    params: Option<BTreeMap<String, SqlCell>>,
+    stream_id: Option<String>,
+) -> Result<oxplow_app::lens_actions::LensActionResult, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    Ok(oxplow_app::lens_actions::run_lens_action(
+        svc,
+        &root,
+        &id,
+        &action,
+        params.unwrap_or_default(),
+    )
+    .await?)
+}
+
 /// Load one extension and dry-run each lens, returning every problem.
 pub async fn validate_extension(
     svc: &Services,

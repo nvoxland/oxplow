@@ -46,5 +46,5 @@ query: |
     AS prompt
   FROM e, files, claims, decisions
 viz: markdown
-copy: true
+actions: [copy]
 hidden: true

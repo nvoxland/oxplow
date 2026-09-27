@@ -3,7 +3,6 @@
 //! are read from the primary stream's worktree: their data is
 //! project-global. See `.context/semantic-layer.md`.
 
-use oxplow_app::events::OxplowEvent;
 use oxplow_app::source_runner::{self, SourceListing, SourceRunReport, Sources};
 use oxplow_app::Services;
 
@@ -24,23 +23,9 @@ pub async fn run_source(
     source_id: String,
     approve: Option<bool>,
 ) -> Result<SourceRunReport, IpcError> {
-    let root = svc.git.resolve_repo_dir(None).await;
-    let result = source_runner::run_source(
-        &Sources::of(svc, &root),
-        &extension,
-        &source_id,
-        approve.unwrap_or(false),
-    )
-    .await;
-    // Ran (ok or failed) → data or state changed. A refused run (no
-    // consent) or unknown source changed nothing.
-    if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
-        svc.events.emit(OxplowEvent::SourceSynced {
-            extension,
-            source_id,
-        });
-    }
-    result.map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
+    source_runner::sync_source(svc, &extension, &source_id, approve.unwrap_or(false))
+        .await
+        .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
 }
 
 /// Set (or clear with `null`) a credential an extension's source declares.

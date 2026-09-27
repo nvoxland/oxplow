@@ -338,6 +338,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	runLensAction: (id: string, action: string, params: { [key in string]: SqlCell } | null, streamId: string | null) => typedError<LensActionResult, IpcError>(__TAURI_INVOKE("run_lens_action", { id, action, params, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	validateExtension: (name: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2287,15 +2292,45 @@ export type Lens = {
 	launcherCategory: LauncherCategory | null,
 	// Not listed in the launcher.
 	hidden: boolean,
-	/**
-	 *  A Copy button copies the rendered markdown (e.g. a prompt to paste
-	 *  into another tool).
-	 */
-	copy: boolean,
+	// Buttons from the fixed action registry (tsk329).
+	actions: LensAction[],
 	// When the lens needs attention (a rail badge when mounted in `rail`).
 	alert: LensAlert | null,
 	// Repo-relative path of the lens file.
 	path: string,
+};
+
+// A button on a lens (tsk329).
+export type LensAction = {
+	/**
+	 *  Unique within the lens; `run_lens_action` names it. Defaults to the
+	 *  kind.
+	 */
+	id: string,
+	kind: LensActionKind,
+	label: string,
+	// For `run-source`: `<extension>/<source id>`.
+	source: string | null,
+};
+
+/**
+ *  What a lens action does. A fixed registry: an extension can't run code
+ *  through one.
+ */
+export type LensActionKind = 
+// Copy the lens result as text (markdown).
+"copy" | 
+// Hand the lens and its params to the agent (UI only).
+"add-to-context" | 
+// Sync a source (an exec source needs a person's approval first).
+"run-source";
+
+// What an action produced.
+export type LensActionResult = {
+	// `copy`: the text to copy.
+	text: string | null,
+	// `run-source`: the sync's row counts.
+	report: SourceRunReport | null,
 };
 
 /**

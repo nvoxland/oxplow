@@ -29,6 +29,7 @@ import type {
   SourceRunReport,
   SchemaEntity,
   EntityRowCount,
+  LensActionResult,
   SearchHit,
   SqlCell,
   SqlQueryResult,
@@ -500,6 +501,16 @@ export async function runLens(
   streamId: string | null,
 ): Promise<LensRun> {
   return unwrap(await commands.runLens(id, params, streamId));
+}
+
+/// Run one of a lens's declared buttons (never approves an exec source).
+export async function runLensAction(
+  id: string,
+  action: string,
+  params: Record<string, SqlCell>,
+  streamId: string | null,
+): Promise<LensActionResult> {
+  return unwrap(await commands.runLensAction(id, action, params, streamId));
 }
 
 /// Load an extension and dry-run every lens, returning all problems.

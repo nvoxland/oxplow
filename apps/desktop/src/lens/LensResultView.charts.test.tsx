@@ -20,7 +20,7 @@ const base: Lens = {
   children: [],
   launcherCategory: null,
   hidden: false,
-  copy: false,
+  actions: [],
   alert: null,
   path: "",
 };
@@ -86,24 +86,21 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
   expect(opened).toEqual(["file:a.rs"]);
 });
 
-test("a markdown lens with copy: true copies its text", async () => {
-  const written: string[] = [];
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: async (t: string) => void written.push(t) },
-    configurable: true,
-  });
-  const { getByTestId, container } = render(
-    <LensResultView run={run({ viz: "markdown", copy: true }, ["prompt"], [["Review **this**"]])} onOpenPage={() => {}} />,
+test("a lens with actions shows its buttons; one without shows none", () => {
+  const { getByTestId, queryByTestId, container } = render(
+    <LensResultView
+      run={run(
+        { viz: "markdown", actions: [{ id: "copy", kind: "copy", label: "Copy", source: null }] },
+        ["prompt"],
+        [["Review **this**"]],
+      )}
+      onOpenPage={() => {}}
+    />,
   );
   expect(container.textContent).toContain("Review");
-  fireEvent.click(getByTestId("lens-copy"));
-  await Promise.resolve();
-  expect(written).toEqual(["Review **this**"]);
-});
-
-test("a markdown lens without copy has no button", () => {
-  const { queryByTestId } = render(
-    <LensResultView run={run({ viz: "markdown" }, ["t"], [["x"]])} onOpenPage={() => {}} />,
-  );
-  expect(queryByTestId("lens-copy")).toBeNull();
+  expect(getByTestId("lens-action-copy").textContent).toBe("Copy");
+  cleanup();
+  const plain = render(<LensResultView run={run({ viz: "markdown" }, ["t"], [["x"]])} onOpenPage={() => {}} />);
+  expect(plain.queryByTestId("lens-actions")).toBeNull();
+  expect(queryByTestId("lens-actions")).toBeNull();
 });

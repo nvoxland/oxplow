@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { getLens, runLens, type LensRun, type SqlCell } from "../api.js";
+import { getLens, runLens, runLensAction, type LensRun, type SqlCell } from "../api.js";
 import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
 import { TrendChart } from "../components/charts/TrendChart.js";
 import { squarify } from "../components/charts/squarify.js";
@@ -21,6 +21,9 @@ import {
 } from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
+import { recordOpError } from "../components/opErrorsStore.js";
+import { showToast } from "../components/toastStore.js";
+import { performLensAction } from "./lensActions.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
@@ -29,13 +32,19 @@ type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
  * slots and dashboard lens tiles; `maxRows` caps rows for compact views.
  * A `grid` runs its child lenses with this run's params, in `streamId`.
  */
-export function LensResultView({
-  run,
-  onOpenPage,
-  maxRows,
-  streamId = null,
-  compact = false,
-}: {
+export function LensResultView(props: LensResultViewProps) {
+  const { run, streamId = null, compact = false } = props;
+  // Compact strips (a number inline) have no room for buttons.
+  if (compact || run.lens.actions.length === 0) return <LensBody {...props} />;
+  return (
+    <div>
+      <LensActions run={run} streamId={streamId} />
+      <LensBody {...props} />
+    </div>
+  );
+}
+
+interface LensResultViewProps {
   run: LensRun;
   /** Where links go; without it they navigate through the route context. */
   onOpenPage?(ref: TabRef): void;
@@ -43,7 +52,47 @@ export function LensResultView({
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
-}) {
+}
+
+/** The lens's declared buttons, above its result. */
+function LensActions({ run, streamId }: { run: LensRun; streamId: string | null }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div data-testid="lens-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 6 }}>
+      {run.lens.actions.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          data-testid={`lens-action-${a.id}`}
+          disabled={busy !== null}
+          title={a.kind === "run-source" ? `Syncs ${a.source ?? ""}` : undefined}
+          onClick={() => {
+            setBusy(a.id);
+            void performLensAction(a, run, streamId, {
+              runLensAction,
+              copyText: (t) => navigator.clipboard.writeText(t),
+              insertIntoAgent,
+              toast: (message) => showToast({ message }),
+              recordError: (label, message) => recordOpError({ label, message }),
+            })
+              .then((outcome) => {
+                if (a.kind === "copy" && outcome === "done") {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1500);
+                }
+              })
+              .finally(() => setBusy(null));
+          }}
+        >
+          {busy === a.id && a.kind === "run-source" ? "Syncing…" : a.kind === "copy" && copied ? "Copied" : a.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LensBody({ run, onOpenPage, maxRows, streamId = null, compact = false }: LensResultViewProps) {
   const lens = run.lens;
   if (lens.viz === "grid") {
     return <GridViz childIds={lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
@@ -92,7 +141,7 @@ export function LensResultView({
     case "number":
       return <NumberViz value={first} compact={compact} />;
     case "markdown":
-      return <MarkdownViz body={first === null ? "" : String(first)} copy={lens.copy} />;
+      return <MarkdownViz body={first === null ? "" : String(first)} />;
     case "list":
       return (
         <>
@@ -111,28 +160,9 @@ export function LensResultView({
   }
 }
 
-/** A markdown lens; with `copy: true`, a Copy button copies the raw text
- *  (e.g. a prompt to paste into another tool). */
-function MarkdownViz({ body, copy }: { body: string; copy: boolean }) {
-  const [copied, setCopied] = useState(false);
+function MarkdownViz({ body }: { body: string }) {
   return (
     <div data-testid="lens-markdown">
-      {copy ? (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
-          <button
-            type="button"
-            data-testid="lens-copy"
-            onClick={() => {
-              void navigator.clipboard.writeText(body).then(() => {
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              });
-            }}
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
-      ) : null}
       <MarkdownView body={body} />
     </div>
   );

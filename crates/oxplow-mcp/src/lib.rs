@@ -924,6 +924,18 @@ pub struct RunLensParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunLensActionParams {
+    /// Lens id: `<extension>/<slug>`.
+    pub id: String,
+    /// The action's id, as the lens declares it (see `get_lens` → `actions`).
+    pub action: String,
+    /// Param overrides by name, as for `run_lens`.
+    pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    /// Stream whose worktree to read the lens from; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RecordDecisionParams {
     pub thread_id: String,
     /// Task it belongs to (`tsk42`); omit to use the thread's open effort.
@@ -1384,20 +1396,14 @@ impl OxplowMcp {
         params: Parameters<RunSourceParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let root = self.services.git.resolve_repo_dir(None).await;
-        let result = oxplow_app::source_runner::run_source(
-            &oxplow_app::source_runner::Sources::of(&self.services, &root),
+        // An agent never approves: `approve` is false here, always.
+        let result = oxplow_app::source_runner::sync_source(
+            &self.services,
             &p.extension,
             &p.source_id,
             false,
         )
         .await;
-        if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
-            self.services.events.emit(OxplowEvent::SourceSynced {
-                extension: p.extension.clone(),
-                source_id: p.source_id.clone(),
-            });
-        }
         let report = result.map_err(|e| match e {
             oxplow_app::source_runner::RunSourceError::NotFound => McpError::invalid_params(
                 format!(
@@ -1774,6 +1780,41 @@ impl OxplowMcp {
         .await
         .map_err(|e| lens_error(&p.id, e))?;
         json_result(&run)
+    }
+
+    #[tool(
+        description = "Run one of a lens's declared buttons (its `actions`): `copy` returns the \
+                       result as markdown text; `run-source` syncs the source it names (an exec \
+                       source a person hasn't approved fails; they approve it in Settings → Data). \
+                       `add-to-context` is for a person handing you the lens; use run_lens."
+    )]
+    async fn run_lens_action(
+        &self,
+        params: Parameters<RunLensActionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("run_lens_action", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let overrides = p
+            .params
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
+            .collect();
+        let out = oxplow_app::lens_actions::run_lens_action(
+            &self.services,
+            &root,
+            &p.id,
+            &p.action,
+            overrides,
+        )
+        .await
+        .map_err(|e| lens_error(&p.id, e))?;
+        json_result(&out)
     }
 
     #[tool(
@@ -5418,6 +5459,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    "run_lens_action",
     // Call an outside model provider and record an `ai_call` row.
     "ai_decide",
     "ai_summarize",

@@ -105,8 +105,15 @@ empty: Nothing is waiting on you.
   run returned at least that many rows) or `{ column: pct, below: 80 }` /
   `above:` (the first row's value), with an optional `label`. `run_lens`
   returns the alert state.
-- **`copy: true`** on a `markdown` lens adds a Copy button (for a lens
-  that builds text to paste elsewhere, like a prompt).
+- **`actions:`** adds buttons from a fixed set:
+  - `copy` copies the result (a markdown lens's text, else a markdown
+    table);
+  - `add-to-context` hands the lens to the agent;
+  - `{ action: run-source, source: <ext>/<id>, label: Sync PRs }` syncs a
+    source.
+
+  You can press them too with `run_lens_action`. You can't approve an exec
+  source that way; the person approves it in Settings → Data.
 - **Unknown keys are errors.** Only the keys shown above exist today.
 
 ## 3. Check it

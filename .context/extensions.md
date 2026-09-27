@@ -30,8 +30,8 @@ the bundled `oxplow-analytics` example extension.
 >   - lens alerts and the `rail` slot (tsk316), and extension-declared
 >     measures, metrics and gauges (tsk311; see "Contributing metrics").
 > - **Current:** extension-declared dimensions (tsk328).
-> - **Target:** declarative lens actions (tsk329) and the `settings` slot
->   (tsk330).
+> - **Current:** lens action buttons (tsk329).
+> - **Target:** the `settings` slot (tsk330).
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -101,9 +101,28 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     rail's **Alerts** section (`AlertsSection` in `RailHud.tsx`, first by
     default) runs them and lists each firing one, opening the lens.
     oxplow-review mounts Waiting on Me there.
-  - `copy: true` on a `markdown` lens adds a Copy button that copies the
-    raw text (the loader refuses it on other viz). The review packet's
-    Review Prompt uses it.
+  - **Actions** (tsk329): `actions:` adds buttons above the result, from a
+    fixed registry only (`LensActionKind`). An extension can offer a
+    button but never run code through one.
+    - The forms: `copy`, `add-to-context`, or
+      `{action: run-source, source: <ext>/<id>, label?, id?}`. The `id`
+      defaults to the kind and must be unique within the lens.
+    - `copy` returns `extensions::lens_text`: a markdown/number lens's
+      value, else a markdown table of exactly the displayed columns (the
+      same rule as the UI's `displayColumns`).
+    - `run-source` goes through `source_runner::sync_source`, the one
+      entry point the IPC and MCP source runs use too. It **never
+      approves**: an exec source nobody approved fails with a pointer to
+      Settings → Data, where what runs and its hosts are shown. So the
+      lens click isn't a weaker consent path.
+    - `add-to-context` is UI-only; it pastes `[oxplow lens <id> params…]`.
+    - Core: `lens_actions::run_lens_action`, behind IPC and MCP
+      `run_lens_action` (MCP refuses add-to-context). UI: `LensActions` in
+      `LensResultView.tsx`, logic in `lens/lensActions.ts`, hidden in
+      compact strips.
+    - This replaces the old `copy: true` flag. The review packet's Review
+      Prompt uses `actions: [copy]`, and the GitHub example's PR lens has
+      Sync PRs + Copy.
   - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
     plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
     one chart per `chart.series`), `treemap` (two-level
@@ -467,9 +486,8 @@ tool list stable no matter how many extensions are installed.
     the active page's detail is sent.
 - **Row actions (current):** right-click a lens row → "Add Row to Agent
   Context", which inserts `[oxplow lens <id> row: col=value, …]`.
-- **Deferred:** a declarative `actions:` registry and
-  `run_lens_action`, until a concrete need appears. Agents already act on
-  what a lens shows through the ordinary MCP tools.
+- **Lens buttons (current, tsk329):** `actions:` from the fixed registry,
+  run by an agent with `run_lens_action` (see "What works today").
 
 **Building**
 
@@ -551,7 +569,7 @@ available to every extension:
   links accept a bare `v_task.id`.
 - `task-detail` and `thread` slots, with slot params checked at load.
 - Lens `launcher.category` and `hidden`.
-- `copy: true` on markdown lenses (a Copy button).
+- Lens `actions:` (copy, add-to-context, run-source; tsk329).
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
 - `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,
