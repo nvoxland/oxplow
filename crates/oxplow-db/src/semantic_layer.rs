@@ -513,6 +513,99 @@ const CATALOG: &[CatalogView] = &[
             ("branch", "From the capture."),
         ],
     },
+    CatalogView {
+        name: "v_effort_file",
+        description: "Files each effort touched (as claimed or detected at close), with how they changed.",
+        columns: &[
+            ("effort_id", "The effort (v_effort.id)."),
+            ("task_id", "That effort's task (v_task.id)."),
+            ("path", "Repo-relative file path."),
+            ("change_kind", "`created`, `updated` or `deleted`."),
+            ("closest_git_version", "Nearest git commit when recorded."),
+        ],
+    },
+    CatalogView {
+        name: "v_task_note",
+        description: "Notes: progress notes attached to a task, or thread-level notes (exactly one of task_id / thread_id is set).",
+        columns: &[
+            ("id", "Note id."),
+            ("task_id", "Task it's attached to, if a task note."),
+            ("thread_id", "Thread it's attached to, if a thread note."),
+            ("body", "Markdown body."),
+            ("author", "Who wrote it (`agent`, `user`, …)."),
+            ("created_at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_task_link",
+        description: "Typed links between tasks (one blocks another, duplicates it, …).",
+        columns: &[
+            ("id", "Link id."),
+            ("thread_id", "Thread the link was made in."),
+            ("from_task_id", "Source task (v_task.id)."),
+            ("to_task_id", "Target task (v_task.id)."),
+            ("link_type", "`blocks`, `relates_to`, `discovered_from`, `duplicates`, `supersedes` or `replies_to`."),
+            ("created_at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_task_event",
+        description: "Task history: every create / status change / edit, with who did it.",
+        columns: &[
+            ("id", "Event id."),
+            ("thread_id", "Thread it happened in."),
+            ("task_id", "Task it's about, if any."),
+            ("event_type", "What happened (e.g. `created`, `status_changed`)."),
+            ("actor_kind", "`user`, `agent` or `system`."),
+            ("actor_id", "Who, within that kind."),
+            ("payload_json", "Event details as JSON."),
+            ("created_at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_agent_turn",
+        description: "Agent turns: each human prompt and the agent's answer, per thread (and task when known).",
+        columns: &[
+            ("id", "Turn id."),
+            ("thread_id", "Thread the turn ran in."),
+            ("task_id", "Task in progress at the time, if known."),
+            ("prompt", "What the human typed."),
+            ("answer", "The agent's final answer, once the turn ended."),
+            ("started_at", "RFC 3339 timestamp."),
+            ("ended_at", "RFC 3339 timestamp; NULL while running."),
+        ],
+    },
+    CatalogView {
+        name: "v_token_usage",
+        description: "Model token usage recorded from agent sessions, per thread, effort and model.",
+        columns: &[
+            ("id", "Row id."),
+            ("stream_id", "Stream."),
+            ("thread_id", "Thread."),
+            ("effort_id", "Effort open at the time, if any."),
+            ("agent_kind", "Harness (`claude`, `codex`, …)."),
+            ("model", "Model id, if reported."),
+            ("input_tokens", "Input tokens."),
+            ("output_tokens", "Output tokens."),
+            ("cache_creation_input_tokens", "Tokens written to the prompt cache."),
+            ("cache_read_input_tokens", "Tokens read from the prompt cache."),
+            ("message_count", "Messages in this record."),
+            ("recorded_at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_page_visit",
+        description: "Pages the human opened in oxplow, and for how long — what they've been looking at.",
+        columns: &[
+            ("id", "Visit id."),
+            ("thread_id", "Thread the page was opened in."),
+            ("page_kind", "Page kind (`task`, `file`, `lens`, …)."),
+            ("page_id", "Page id (`task:42`, `file:src/a.rs`, …)."),
+            ("label", "Title shown at the time."),
+            ("visited_at", "RFC 3339 timestamp."),
+            ("duration_ms", "Time on the page, when known."),
+        ],
+    },
 ];
 
 #[cfg(test)]
@@ -699,6 +792,13 @@ mod tests {
             "v_measure",
             "v_capture",
             "v_fact",
+            "v_effort_file",
+            "v_task_note",
+            "v_task_link",
+            "v_task_event",
+            "v_agent_turn",
+            "v_token_usage",
+            "v_page_visit",
         ] {
             assert!(names.contains(&expected), "missing {expected}");
         }

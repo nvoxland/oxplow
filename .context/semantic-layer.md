@@ -108,7 +108,7 @@ Every shipped entity is exposed as a stable **read-only SQL view**. They
 are the **versioned contract**: lenses, extensions and agents read these,
 never the physical tables, which stay internal and free to change.
 
-**Shipped today** (migration `V73__semantic_layer_views.sql`):
+**Shipped today** (migrations `V73__semantic_layer_views.sql`, `V74__semantic_layer_activity_views.sql`):
 
 | View | What it is |
 |---|---|
@@ -122,6 +122,13 @@ never the physical tables, which stay internal and free to change.
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
+| `v_effort_file` | files each effort touched, with change kind (V74) |
+| `v_task_note` | task / thread notes (V74) |
+| `v_task_link` | typed links between tasks (V74) |
+| `v_task_event` | task history log (V74) |
+| `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |
+| `v_token_usage` | model tokens per thread / effort / model (V74) |
+| `v_page_visit` | pages the human opened, and for how long (V74) |
 
 Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`,
 `v_decision`, `v_claim` and the rest of the shipped-sources table above.
