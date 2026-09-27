@@ -35,6 +35,108 @@ pub struct SourceRunReport {
     pub row_counts: BTreeMap<String, i64>,
 }
 
+/// A declared source with its last run and consent status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceListing {
+    pub extension: String,
+    pub spec: SourceSpec,
+    pub state: Option<SourceState>,
+    /// This machine approved the entry script as it is now.
+    pub approved: bool,
+}
+
+/// Every declared source under `root`, with state and consent.
+pub async fn list_sources(
+    root: &Path,
+    state_dir: &Path,
+    store: &SqliteExtSourceStore,
+) -> Result<Vec<SourceListing>, DomainError> {
+    let states = store.list_states().await?;
+    let mut out = Vec::new();
+    for ext in crate::extensions::load_extensions(root) {
+        let ext_dir = root.join(&ext.path);
+        for spec in ext.sources {
+            let approved = entry_hash(&ext_dir, &spec.entry)
+                .map(|h| is_approved(state_dir, &ext.name, &spec.id, &h))
+                .unwrap_or(false);
+            let state = states
+                .iter()
+                .find(|s| s.extension == ext.name && s.source_id == spec.id)
+                .cloned();
+            out.push(SourceListing {
+                extension: ext.name.clone(),
+                spec,
+                state,
+                approved,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Sources the scheduler should run now: approved `every` sources that
+/// never ran or last ran at least their interval before `now_ms`.
+pub fn due_sources(listings: &[SourceListing], now_ms: i64) -> Vec<(String, String)> {
+    listings
+        .iter()
+        .filter(|l| l.approved)
+        .filter(|l| match l.spec.schedule {
+            crate::extension_sources::SourceSchedule::Manual => false,
+            crate::extension_sources::SourceSchedule::Every { minutes } => {
+                let last_ms = l.state.as_ref().and_then(|s| {
+                    serde_json::from_value::<oxplow_domain::Timestamp>(serde_json::Value::String(
+                        s.last_run_at.clone(),
+                    ))
+                    .ok()
+                    .map(|t| t.unix_ms())
+                });
+                last_ms.is_none_or(|last| now_ms - last >= i64::from(minutes) * 60_000)
+            }
+        })
+        .map(|l| (l.extension.clone(), l.spec.id.clone()))
+        .collect()
+}
+
+/// Background loop: once a minute, run every due source (see
+/// [`due_sources`]) from the primary worktree, emitting `SourceSynced`
+/// after each run. Unapproved sources never run here.
+pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
+    tokio::spawn(async move {
+        // Stay out of boot's way.
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        loop {
+            let root = state.git.resolve_repo_dir(None).await;
+            if let Ok(listings) =
+                list_sources(&root, &state.layout.state_dir, &state.ext_source_store).await
+            {
+                let now = oxplow_domain::Timestamp::now().unix_ms();
+                for (extension, source_id) in due_sources(&listings, now) {
+                    let result = run_source(
+                        &root,
+                        &state.layout.state_dir,
+                        &state.ext_source_store,
+                        &extension,
+                        &source_id,
+                        false,
+                    )
+                    .await;
+                    if let Err(e) = &result {
+                        tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
+                    }
+                    if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
+                        state.events.emit(crate::OxplowEvent::SourceSynced {
+                            extension,
+                            source_id,
+                        });
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    });
+}
+
 /// SHA-256 of the entry script: what an approval is bound to.
 pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
@@ -236,6 +338,36 @@ fn stored(t: ColumnType) -> StoredType {
     }
 }
 
+/// Why a source run didn't produce data.
+#[derive(Debug)]
+pub enum RunSourceError {
+    /// No such extension or source.
+    NotFound,
+    /// Nobody on this machine approved the current entry script. Nothing ran.
+    NeedsApproval(String),
+    /// It ran (or tried to) and failed; recorded as the source's state.
+    Failed(String),
+    /// Oxplow's own storage failed.
+    Storage(DomainError),
+}
+
+impl RunSourceError {
+    /// Whether the source actually ran, so its data/state changed.
+    pub fn ran(&self) -> bool {
+        matches!(self, RunSourceError::Failed(_))
+    }
+}
+
+impl From<RunSourceError> for DomainError {
+    fn from(e: RunSourceError) -> Self {
+        match e {
+            RunSourceError::NotFound => DomainError::NotFound,
+            RunSourceError::NeedsApproval(m) | RunSourceError::Failed(m) => DomainError::Invalid(m),
+            RunSourceError::Storage(e) => e,
+        }
+    }
+}
+
 /// Run one source end to end: consent check (recording approval when a
 /// human passed `approve`), exec, coercion, atomic store, run state.
 /// Failures after the consent check are also recorded as the source's
@@ -247,26 +379,27 @@ pub async fn run_source(
     extension: &str,
     source_id: &str,
     approve_now: bool,
-) -> Result<SourceRunReport, DomainError> {
+) -> Result<SourceRunReport, RunSourceError> {
     let ext = crate::extensions::load_extensions(root)
         .into_iter()
         .find(|e| e.name == extension)
-        .ok_or(DomainError::NotFound)?;
+        .ok_or(RunSourceError::NotFound)?;
     let spec = ext
         .sources
         .iter()
         .find(|s| s.id == source_id)
         .cloned()
-        .ok_or(DomainError::NotFound)?;
+        .ok_or(RunSourceError::NotFound)?;
     let ext_dir = root.join(&ext.path);
     let hash = entry_hash(&ext_dir, &spec.entry).map_err(|e| {
-        DomainError::Invalid(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
+        RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
     if approve_now {
-        approve(state_dir, extension, source_id, &hash)
-            .map_err(|e| DomainError::Storage(format!("record approval: {e}")))?;
+        approve(state_dir, extension, source_id, &hash).map_err(|e| {
+            RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}")))
+        })?;
     } else if !is_approved(state_dir, extension, source_id, &hash) {
-        return Err(DomainError::Invalid(format!(
+        return Err(RunSourceError::NeedsApproval(format!(
             "source `{extension}/{source_id}` runs `{}` and needs a person's approval first \
              (Settings → Extensions → Approve & Run). Approval is per machine and per script version.",
             spec.entry
@@ -297,8 +430,11 @@ pub async fn run_source(
             row_counts: BTreeMap::new(),
         },
     };
-    store.record_run(state).await?;
-    result.map_err(DomainError::Invalid)
+    store
+        .record_run(state)
+        .await
+        .map_err(RunSourceError::Storage)?;
+    result.map_err(RunSourceError::Failed)
 }
 
 async fn run_approved(
@@ -531,9 +667,10 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("approval")),
+            matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
         );
+        assert!(!err.ran());
         assert!(
             store.list_states().await.unwrap().is_empty(),
             "refused runs record nothing"
@@ -562,15 +699,67 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, DomainError::Invalid(ref m) if m.contains("approval")),
+            matches!(err, RunSourceError::NeedsApproval(_)),
             "script changed: {err:?}"
         );
-        run_source(root.path(), &state, &store, "my-gh", "gh", true)
+        let err = run_source(root.path(), &state, &store, "my-gh", "gh", true)
             .await
             .unwrap_err();
+        assert!(err.ran(), "{err:?}");
         let st = &store.list_states().await.unwrap()[0];
         assert_eq!(st.status, "error");
         assert!(st.error.as_deref().unwrap().contains("nope"));
         assert_eq!(st.row_counts["pr"], 2, "last good counts kept");
+    }
+
+    #[test]
+    fn due_sources_respects_schedule_approval_and_last_run() {
+        let base = spec("x", &[]);
+        let listing = |schedule: SourceSchedule, approved: bool, last: Option<&str>| {
+            let mut spec = base.clone();
+            spec.schedule = schedule;
+            SourceListing {
+                extension: "e".into(),
+                spec,
+                approved,
+                state: last.map(|t| SourceState {
+                    extension: "e".into(),
+                    source_id: "gh".into(),
+                    status: "ok".into(),
+                    last_run_at: t.into(),
+                    error: None,
+                    row_counts: BTreeMap::new(),
+                }),
+            }
+        };
+        let now = 1_790_000_000_000; // ms
+        let iso = |ms: i64| {
+            serde_json::to_value(oxplow_domain::Timestamp::from_unix_ms(ms))
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let every10 = SourceSchedule::Every { minutes: 10 };
+        let long_ago = iso(now - 11 * 60_000);
+        let recent = iso(now - 5 * 60_000);
+        let cases = vec![
+            (listing(every10, true, None), true),
+            (listing(every10, true, Some(&long_ago)), true),
+            (listing(every10, true, Some(&recent)), false),
+            (listing(every10, false, None), false),
+            (listing(SourceSchedule::Manual, true, None), false),
+        ];
+        for (l, want) in cases {
+            let due = due_sources(std::slice::from_ref(&l), now);
+            assert_eq!(
+                !due.is_empty(),
+                want,
+                "{:?} approved={} last={:?}",
+                l.spec.schedule,
+                l.approved,
+                l.state.as_ref().map(|s| &s.last_run_at)
+            );
+        }
     }
 }

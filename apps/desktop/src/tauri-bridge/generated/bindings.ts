@@ -375,6 +375,16 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listSources: () => typedError<SourceListing[], IpcError>(__TAURI_INVOKE("list_sources")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	runSource: (extension: string, sourceId: string, approve: boolean | null) => typedError<SourceRunReport, IpcError>(__TAURI_INVOKE("run_source", { extension, sourceId, approve })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	addThreadNote: (threadId: ThreadId, body: string, author: string) => typedError<TaskNote, IpcError>(__TAURI_INVOKE("add_thread_note", { threadId, body, author })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3219,6 +3229,12 @@ detail: string | null } |
  */
 { kind: "dashboardsChanged" } | 
 /**
+ *  An extension source finished a run (ok or error): its entity data
+ *  and/or run state changed. Project-global; lenses re-run and the
+ *  Extensions settings refresh.
+ */
+{ kind: "sourceSynced"; extension: string; sourceId: string } | 
+/**
  *  A code-quality scan transitioned states (started / completed /
  *  failed). The renderer refreshes scan + finding lists on receipt.
  */
@@ -3403,6 +3419,21 @@ export type SchemaEntity = {
 	// Who provides it: `core`, or an extension name.
 	owner: string,
 	columns: SchemaColumn[],
+	// Documented joins to other entities (how the data connects).
+	relations: SchemaRelation[],
+	/**
+	 *  False for a declared extension entity whose source hasn't synced
+	 *  yet (its view doesn't exist, so querying it would fail).
+	 */
+	available: boolean,
+};
+
+// A documented join from one entity to another view.
+export type SchemaRelation = {
+	// View it joins to, e.g. `v_task`.
+	to: string,
+	// SQL join condition.
+	on: string,
 };
 
 /**
@@ -3622,6 +3653,15 @@ export type SourceEntity = {
 	view: string,
 };
 
+// A declared source with its last run and consent status.
+export type SourceListing = {
+	extension: string,
+	spec: SourceSpec,
+	state: SourceState | null,
+	// This machine approved the entry script as it is now.
+	approved: boolean,
+};
+
 /**
  *  A documented join from this entity to another view. Not executed;
  *  it tells agents and lens authors how the data connects.
@@ -3631,6 +3671,13 @@ export type SourceRelation = {
 	to: string,
 	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
 	on: string,
+};
+
+// Outcome of one run, as reported to the UI / agent.
+export type SourceRunReport = {
+	extension: string,
+	sourceId: string,
+	rowCounts: { [key in string]: number },
 };
 
 // When a source runs by itself.
@@ -3652,6 +3699,18 @@ export type SourceSpec = {
 	 */
 	env: string[],
 	entities: SourceEntity[],
+};
+
+// Last run of one source.
+export type SourceState = {
+	extension: string,
+	sourceId: string,
+	// `ok` or `error`.
+	status: string,
+	lastRunAt: string,
+	error: string | null,
+	// Row counts per entity from the last successful run.
+	rowCounts: { [key in string]: number },
 };
 
 /**

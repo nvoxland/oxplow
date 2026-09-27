@@ -234,6 +234,13 @@ pub enum OxplowEvent {
     /// deleted (tsk138). Project-global (dashboards aren't stream-scoped), so
     /// fieldless — the renderer refetches the affected dashboard(s).
     DashboardsChanged,
+    /// An extension source finished a run (ok or error): its entity data
+    /// and/or run state changed. Project-global; lenses re-run and the
+    /// Extensions settings refresh.
+    SourceSynced {
+        extension: String,
+        source_id: String,
+    },
     /// A code-quality scan transitioned states (started / completed /
     /// failed). The renderer refreshes scan + finding lists on receipt.
     CodeQualityScanned {

@@ -142,6 +142,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         snapshot_svc.spawn_cleanup_loop(retention_days, Some(state.background_tasks.clone()));
     }
 
+    // Extension-source scheduler (tsk292): runs approved `every <n>` sources.
+    crate::source_runner::spawn_scheduler(state.clone());
+
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
     // worth having). When enabled, a daily pass prunes captures older than

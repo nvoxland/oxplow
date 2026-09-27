@@ -46,6 +46,7 @@ pub mod producer_metrics;
 pub mod recovery;
 pub mod ref_resolver;
 pub mod resume_check;
+pub mod semantic_catalog;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_content;
@@ -402,6 +403,8 @@ pub struct Services {
     pub nudge_store: Arc<SqliteAgentNudgeStore>,
     /// User-created dashboards (grids of metric tiles) — project-global (tsk138).
     pub dashboard_store: Arc<oxplow_db::SqliteDashboardStore>,
+    /// Extension-source entity data + run state (see `source_runner`).
+    pub ext_source_store: Arc<oxplow_db::SqliteExtSourceStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     /// Per-turn agent token usage parsed from the hook transcript (tsk104).
@@ -492,6 +495,7 @@ impl Services {
         let attribution_store = Arc::new(oxplow_db::SqliteAttributionStore::new(db.clone()));
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
+        let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -671,6 +675,7 @@ impl Services {
             metrics,
             nudge_store,
             dashboard_store,
+            ext_source_store,
             collection,
             token_usage_store,
             token_usage,

@@ -90,6 +90,21 @@ pub struct SchemaEntity {
     /// Who provides it: `core`, or an extension name.
     pub owner: String,
     pub columns: Vec<SchemaColumn>,
+    /// Documented joins to other entities (how the data connects).
+    pub relations: Vec<SchemaRelation>,
+    /// False for a declared extension entity whose source hasn't synced
+    /// yet (its view doesn't exist, so querying it would fail).
+    pub available: bool,
+}
+
+/// A documented join from one entity to another view.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaRelation {
+    /// View it joins to, e.g. `v_task`.
+    pub to: String,
+    /// SQL join condition.
+    pub on: String,
 }
 
 /// Read access to the semantic layer.
@@ -189,6 +204,8 @@ impl SemanticLayer {
                         description: view.description.to_string(),
                         owner: "core".to_string(),
                         columns,
+                        relations: Vec::new(),
+                        available: true,
                     });
                 }
                 Ok(out)

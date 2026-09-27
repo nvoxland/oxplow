@@ -9,19 +9,30 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useState } from "react";
 
-import { installExtension, listExtensions, updateExtension, type Extension } from "../api.js";
-import { extensionRowModel } from "./extensionRowModel.js";
+import {
+  installExtension,
+  listExtensions,
+  listSources,
+  runSource,
+  subscribeOxplowEvents,
+  updateExtension,
+  type Extension,
+  type SourceListing,
+} from "../api.js";
+import { extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
 
 export function ExtensionsSection() {
   const [exts, setExts] = useState<Extension[] | null>(null);
+  const [sources, setSources] = useState<SourceListing[]>([]);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       setExts(await listExtensions(null));
+      setSources(await listSources());
     } catch (e) {
       recordOpError({ label: "List extensions", message: String(e) });
       setExts([]);
@@ -30,7 +41,28 @@ export function ExtensionsSection() {
 
   useEffect(() => {
     void refresh();
+    // Scheduled and agent-triggered runs land here too.
+    return subscribeOxplowEvents((event) => {
+      if (event.kind === "sourceSynced") void refresh();
+    });
   }, [refresh]);
+
+  async function run(l: SourceListing) {
+    const key = `${l.extension}/${l.spec.id}`;
+    setBusy(key);
+    try {
+      const report = await runSource(l.extension, l.spec.id, !l.approved);
+      const counts = Object.entries(report.rowCounts)
+        .map(([e, n]) => `${n} ${e}`)
+        .join(", ");
+      showToast({ message: `Synced ${key}: ${counts || "no rows"}.` });
+    } catch (e) {
+      recordOpError({ label: `Run source ${key}`, message: String(e) });
+    } finally {
+      setBusy(null);
+      await refresh();
+    }
+  }
 
   async function install() {
     const gitUrl = url.trim();
@@ -98,6 +130,36 @@ export function ExtensionsSection() {
                     {err}
                   </div>
                 ))}
+                {sources
+                  .filter((l) => l.extension === m.name)
+                  .map((l) => {
+                    const s = sourceRowModel(l);
+                    const key = `${l.extension}/${s.id}`;
+                    return (
+                      <div key={key} data-testid={`source-row-${key}`} style={sourceRowStyle}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span>
+                            Source <code>{s.id}</code>
+                          </span>
+                          <span style={mutedStyle}>
+                            {s.schedule} · {s.status}
+                            {s.lastRunAt ? ` · last run ${new Date(s.lastRunAt).toLocaleString()}` : ""}
+                          </span>
+                          <span style={{ flex: 1 }} />
+                          <button
+                            type="button"
+                            data-testid={`source-run-${key}`}
+                            title={s.actionTitle}
+                            disabled={busy !== null}
+                            onClick={() => void run(l)}
+                          >
+                            {busy === key ? "Running…" : s.actionLabel}
+                          </button>
+                        </div>
+                        {s.error ? <div style={errorStyle}>{s.error}</div> : null}
+                      </div>
+                    );
+                  })}
               </li>
             );
           })}
@@ -130,4 +192,5 @@ export function ExtensionsSection() {
 
 const mutedStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--text-secondary)" };
 const rowStyle: CSSProperties = { padding: "8px 0", borderBottom: "1px solid var(--border-subtle)", fontSize: "var(--text-sm)" };
+const sourceRowStyle: CSSProperties = { marginTop: 6, paddingLeft: 12, borderLeft: "2px solid var(--border-subtle)" };
 const errorStyle: CSSProperties = { fontSize: "var(--text-xs)", color: "var(--severity-critical)", marginTop: 4 };

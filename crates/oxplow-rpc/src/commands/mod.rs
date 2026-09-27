@@ -40,6 +40,7 @@ pub mod page_visit;
 pub mod search;
 pub mod semantic;
 pub mod snapshot;
+pub mod sources;
 pub mod streams;
 pub mod tasks;
 pub mod terminal;

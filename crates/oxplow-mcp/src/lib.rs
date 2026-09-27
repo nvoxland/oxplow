@@ -880,6 +880,14 @@ pub struct RunLensParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunSourceParams {
+    /// Extension folder name under `oxplow/extensions/`.
+    pub extension: String,
+    /// The source's `id` in that extension's `extension.yaml`.
+    pub source_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstallExtensionParams {
     /// Git URL of a repo whose root holds `extension.yaml` (a published
     /// oxplow extension).
@@ -1231,6 +1239,68 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "List extension-declared data sources (code that pulls external records \
+                       like GitHub PRs into the semantic layer): each source's spec (entities, \
+                       schedule, env), its last run (status, row counts, error) and whether a \
+                       person on this machine has approved its current script."
+    )]
+    async fn list_sources(&self) -> Result<CallToolResult, McpError> {
+        let root = self.services.git.resolve_repo_dir(None).await;
+        let list = oxplow_app::source_runner::list_sources(
+            &root,
+            &self.services.layout.state_dir,
+            &self.services.ext_source_store,
+        )
+        .await
+        .map_err(internal)?;
+        json_result(&list)
+    }
+
+    #[tool(
+        description = "Run an approved extension source now, refreshing its entities \
+                       (`v_<extension>_<entity>`). You cannot approve a source: running code the \
+                       human hasn't approved fails, so ask them to use Settings → Extensions → \
+                       Approve & Run. Returns row counts per entity."
+    )]
+    async fn run_source(
+        &self,
+        params: Parameters<RunSourceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        let root = self.services.git.resolve_repo_dir(None).await;
+        let result = oxplow_app::source_runner::run_source(
+            &root,
+            &self.services.layout.state_dir,
+            &self.services.ext_source_store,
+            &p.extension,
+            &p.source_id,
+            false,
+        )
+        .await;
+        if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
+            self.services.events.emit(OxplowEvent::SourceSynced {
+                extension: p.extension.clone(),
+                source_id: p.source_id.clone(),
+            });
+        }
+        let report = result.map_err(|e| match e {
+            oxplow_app::source_runner::RunSourceError::NotFound => McpError::invalid_params(
+                format!(
+                    "no source `{}/{}` (see list_sources)",
+                    p.extension, p.source_id
+                ),
+                None,
+            ),
+            oxplow_app::source_runner::RunSourceError::NeedsApproval(m)
+            | oxplow_app::source_runner::RunSourceError::Failed(m) => {
+                McpError::invalid_params(m, None)
+            }
+            oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
+        })?;
+        json_result(&report)
+    }
+
+    #[tool(
         description = "Install a published extension from a git repo (its root holds \
                        `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's \
                        worktree, recording the source URL, ref and commit. Only do this when \
@@ -1431,10 +1501,13 @@ impl OxplowMcp {
                        and a doc + SQL type for every column. Call this before `query_sql`."
     )]
     async fn describe_schema(&self) -> Result<CallToolResult, McpError> {
-        let schema = oxplow_db::SemanticLayer::new(self.services.db.clone())
-            .describe_schema()
-            .await
-            .map_err(internal)?;
+        let root = self.services.git.resolve_repo_dir(None).await;
+        let schema = oxplow_app::semantic_catalog::describe_schema(
+            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &root,
+        )
+        .await
+        .map_err(internal)?;
         json_result(&schema)
     }
 
@@ -4911,6 +4984,7 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    "list_sources",
     "get_open_page",
     "list_extensions",
     "list_lenses",
@@ -4983,6 +5057,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    "run_source",
     "install_extension",
     "update_extension",
     "create_dashboard",
@@ -5834,6 +5909,49 @@ mod tests {
             open["lensRun"]["result"]["rows"],
             serde_json::json!([["primary"]])
         );
+    }
+
+    #[tokio::test]
+    async fn source_tools_never_approve_and_schema_lists_extension_entities() {
+        use std::os::unix::fs::PermissionsExt;
+        let (proj, _services, server) = boot();
+        let ext = proj.path().join("oxplow/extensions/my-gh");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        )
+        .unwrap();
+        let script = ext.join("sync.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho '{\"entities\":{\"pr\":[{\"number\":1}]}}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let list: serde_json::Value =
+            serde_json::from_str(&text_payload(server.list_sources().await.unwrap())).unwrap();
+        assert_eq!(list[0]["approved"], false);
+
+        // An agent can't consent on the human's behalf.
+        let err = server
+            .run_source(Parameters(RunSourceParams {
+                extension: "my-gh".into(),
+                source_id: "gh".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("approval"), "{err:?}");
+
+        let schema: Vec<serde_json::Value> =
+            serde_json::from_str(&text_payload(server.describe_schema().await.unwrap())).unwrap();
+        let pr = schema
+            .iter()
+            .find(|e| e["name"] == "v_my_gh_pr")
+            .expect("extension entity");
+        assert_eq!(pr["owner"], "my-gh");
+        assert_eq!(pr["available"], false);
     }
 
     #[tokio::test]

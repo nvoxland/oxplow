@@ -301,6 +301,8 @@ macro_rules! oxplow_command_table {
                 validate_extension => $crate::commands::extensions::validate_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 install_extension => $crate::commands::extensions::install_extension { git_url: String, git_ref: Option<String>, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
                 update_extension => $crate::commands::extensions::update_extension { name: String, stream_id: Option<String> } -> ::oxplow_app::extensions::Extension,
+                list_sources => $crate::commands::sources::list_sources {} -> Vec<::oxplow_app::source_runner::SourceListing>,
+                run_source => $crate::commands::sources::run_source { extension: String, source_id: String, approve: Option<bool> } -> ::oxplow_app::source_runner::SourceRunReport,
                 report_open_page => $crate::commands::open_page::report_open_page { thread_id: String, page_id: Option<String>, kind: Option<String>, detail_json: Option<String> } -> (),
                 save_lens => $crate::commands::extensions::save_lens { extension: String, slug: String, lens: ::oxplow_app::extensions::NewLens, stream_id: Option<String> } -> ::oxplow_app::extensions::Lens,
                 // comments

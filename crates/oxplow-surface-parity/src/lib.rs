@@ -187,6 +187,8 @@ pub const MANIFEST: &[Capability] = &[
     both("update_extension"),
     ui("save_lens"),
     ui("report_open_page"),
+    both("list_sources"),
+    both("run_source"),
     agent("get_open_page"),
     agent("list_lenses"),
     // ---- both (names diverge across surfaces) ----

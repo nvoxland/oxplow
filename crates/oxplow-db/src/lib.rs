@@ -56,7 +56,9 @@ pub use fact_store::{
 pub use observation_store::EffortObservation;
 pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
-pub use semantic_layer::{SchemaColumn, SchemaEntity, SemanticLayer, SqlCell, SqlQueryResult};
+pub use semantic_layer::{
+    SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlQueryResult,
+};
 pub use stream_store::SqliteStreamStore;
 pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};

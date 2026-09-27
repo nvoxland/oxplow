@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Extension } from "../tauri-bridge/generated/bindings.js";
-import { extensionRowModel } from "./extensionRowModel.js";
+import type { Extension, SourceListing } from "../tauri-bridge/generated/bindings.js";
+import { extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
 
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
@@ -32,5 +32,50 @@ describe("extensionRowModel", () => {
 
   test("errors mark the row unhealthy", () => {
     expect(extensionRowModel(ext({ errors: ["bad yaml"] })).healthy).toBe(false);
+  });
+});
+
+describe("sourceRowModel", () => {
+  const listing = (over: Partial<SourceListing> = {}): SourceListing => ({
+    extension: "my-gh",
+    spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "every", minutes: 10 }, env: ["GITHUB_TOKEN"], entities: [] },
+    state: null,
+    approved: false,
+    ...over,
+  });
+
+  test("an unapproved source asks for approval and says what it will run", () => {
+    const m = sourceRowModel(listing());
+    expect(m.action).toBe("approve");
+    expect(m.actionLabel).toBe("Approve & Run");
+    expect(m.actionTitle).toContain("bin/sync.sh");
+    expect(m.actionTitle).toContain("GITHUB_TOKEN");
+    expect(m.status).toBe("Never run");
+    expect(m.schedule).toBe("every 10m");
+  });
+
+  test("an approved source syncs and summarizes its last run", () => {
+    const m = sourceRowModel(
+      listing({
+        approved: true,
+        state: { extension: "my-gh", sourceId: "gh", status: "ok", lastRunAt: "2026-09-27T01:00:00Z", error: null, rowCounts: { pr: 12, review: 3 } },
+      }),
+    );
+    expect(m.action).toBe("sync");
+    expect(m.actionLabel).toBe("Sync Now");
+    expect(m.status).toBe("12 pr · 3 review");
+    expect(m.error).toBeNull();
+  });
+
+  test("a failed run surfaces the error", () => {
+    const m = sourceRowModel(
+      listing({
+        approved: true,
+        state: { extension: "my-gh", sourceId: "gh", status: "error", lastRunAt: "2026-09-27T01:00:00Z", error: "boom", rowCounts: {} },
+      }),
+    );
+    expect(m.status).toBe("Failed");
+    expect(m.error).toBe("boom");
+    expect(sourceRowModel(listing({ spec: { ...listing().spec, schedule: { kind: "manual" } } })).schedule).toBe("manual");
   });
 });

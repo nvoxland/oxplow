@@ -19,13 +19,15 @@ import type {
   LensViz,
   NewLens,
   RecentProjectView,
+  SourceListing,
+  SourceRunReport,
   SchemaEntity,
   SearchHit,
   SqlCell,
   SqlQueryResult,
 } from "./tauri-bridge/generated/bindings.js";
 
-export type { Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SqlCell, SqlQueryResult };
+export type { Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -506,6 +508,17 @@ export async function reportOpenPage(
   detailJson: string | null,
 ): Promise<void> {
   unwrap(await commands.reportOpenPage(threadId, pageId, kind, detailJson));
+}
+
+/// Extension-declared data sources with last run state and consent.
+export async function listSources(): Promise<SourceListing[]> {
+  return unwrap(await commands.listSources());
+}
+
+/// Run a source now. `approve` records the person's consent for the
+/// current script first (only the UI may pass it).
+export async function runSource(extension: string, sourceId: string, approve: boolean): Promise<SourceRunReport> {
+  return unwrap(await commands.runSource(extension, sourceId, approve));
 }
 
 /// Save a query as a new lens file (`oxplow/extensions/<extension>/lenses/<slug>.yaml`).
