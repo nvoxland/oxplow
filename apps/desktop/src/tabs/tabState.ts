@@ -46,13 +46,11 @@ export type PageKind =
   | "op-error"
   | "external-url"
   | "effort-coverage"
-  | "usage"
   | "metrics-recorded"
   | "metric-detail"
   | "metric-recording"
   | "custom-dashboard"
   | "dashboards"
-  | "page-analytics"
   | "lens"
   | "explore-data"
 

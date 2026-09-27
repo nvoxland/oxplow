@@ -264,10 +264,6 @@ macro_rules! oxplow_command_table {
                 set_metric_override => $crate::commands::metrics::set_metric_override { key: String, target: Option<f64> } -> (),
                 get_effort_token_totals => $crate::commands::effort::get_effort_token_totals { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::TokenUsageTotals,
                 get_thread_token_totals => $crate::commands::effort::get_thread_token_totals { thread_id: ::oxplow_domain::ThreadId } -> ::oxplow_db::TokenUsageTotals,
-                token_totals_overall => $crate::commands::effort::token_totals_overall {} -> ::oxplow_db::TokenUsageTotals,
-                token_usage_by_agent => $crate::commands::effort::token_usage_by_agent {} -> Vec<::oxplow_db::AgentKindTokenUsage>,
-                token_usage_by_model => $crate::commands::effort::token_usage_by_model {} -> Vec<::oxplow_db::ModelTokenUsage>,
-                token_usage_by_day => $crate::commands::effort::token_usage_by_day { days: u32 } -> Vec<::oxplow_db::TokenUsageByDay>,
                 // followup
                 list_followups => $crate::commands::followup::list_followups { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_app::Followup>,
                 add_followup => $crate::commands::followup::add_followup { thread_id: ::oxplow_domain::ThreadId, body: String } -> ::oxplow_app::Followup,
@@ -331,7 +327,6 @@ macro_rules! oxplow_command_table {
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),
                 list_recently_finished => $crate::commands::page_visit::list_recently_finished { thread_id: Option<String>, limit: u32 } -> Vec<$crate::commands::page_visit::FinishedEntry>,
                 clear_recently_finished => $crate::commands::page_visit::clear_recently_finished { thread_id: Option<String> } -> (),
-                count_page_visits_by_day => $crate::commands::page_visit::count_page_visits_by_day { days: u32 } -> Vec<$crate::commands::page_visit::PageVisitDay>,
                 // usage
                 record_usage => $crate::commands::usage::record_usage { kind: String, payload_json: String } -> ::oxplow_db::UsageEvent,
                 list_recent_usage_rollup => $crate::commands::usage::list_recent_usage_rollup { kind: String, stream_id: Option<String>, limit: u32 } -> Vec<::oxplow_db::UsageRollup>,

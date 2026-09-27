@@ -1,0 +1,15 @@
+title: Tokens by Agent
+query: |
+  SELECT agent_kind AS agent, coalesce(model, '—') AS model,
+         sum(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens) AS tokens,
+         count(*) AS turns
+  FROM v_token_usage
+  GROUP BY agent_kind, model
+  ORDER BY tokens DESC
+columns:
+  - { key: agent, label: Agent }
+  - { key: model, label: Model }
+  - { key: tokens, label: Tokens }
+  - { key: turns, label: Turns }
+empty: No agent token usage recorded yet.
+hidden: true

@@ -111,7 +111,7 @@ export function metricRef(
   return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey, effort } };
 }
 
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "usage" | "metrics-recorded" | "dashboards" | "page-analytics" | "explore-data"): TabRef {
+export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "metrics-recorded" | "dashboards" | "explore-data"): TabRef {
   return { id: kind, kind, payload: null };
 }
 

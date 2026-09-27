@@ -87,7 +87,6 @@ pub trait PageVisitStore: Send + Sync {
         thread_id: Option<&str>,
     ) -> Result<Vec<(String, String, i64)>, DomainError>;
     async fn forget_page(&self, page_kind: &str, page_id: &str) -> Result<(), DomainError>;
-    async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError>;
     /// Distinct (page_kind, page_id) tuples ordered by most recent visit
     /// — drives the "frequent" rail.
     async fn list_frequent(&self, limit: usize) -> Result<Vec<PageVisit>, DomainError>;
@@ -308,25 +307,6 @@ impl PageVisitStore for SqlitePageVisitStore {
                         duration_ms,
                         thread_id,
                     })
-                })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    async fn count_by_day(&self, days: u32) -> Result<Vec<(String, i64)>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT substr(visited_at, 1, 10) AS day, COUNT(*) AS visits
-                     FROM page_visit
-                     WHERE visited_at >= datetime('now', ?1)
-                     GROUP BY day
-                     ORDER BY day DESC",
-                )?;
-                let cutoff = format!("-{} days", days);
-                let rows = stmt.query_map(params![cutoff], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })

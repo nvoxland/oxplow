@@ -1,0 +1,11 @@
+title: Page Visits per Day
+query: |
+  SELECT substr(visited_at, 1, 10) AS day, count(*) AS visits
+  FROM v_page_visit
+  WHERE visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
+  GROUP BY day
+  ORDER BY day
+viz: bar
+chart: { x: day, y: visits }
+empty: No page visits in the last 30 days.
+hidden: true

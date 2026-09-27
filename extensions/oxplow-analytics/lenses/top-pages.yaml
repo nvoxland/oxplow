@@ -1,0 +1,15 @@
+title: Most Visited Pages
+description: The last 30 days.
+query: |
+  SELECT page_id, max(label) AS page, page_kind AS kind, count(*) AS visits
+  FROM v_page_visit
+  WHERE visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
+  GROUP BY page_id
+  ORDER BY visits DESC
+  LIMIT 20
+columns:
+  - { key: page, label: Page, link: { kind: page, from: page_id } }
+  - { key: kind, label: Kind }
+  - { key: visits, label: Visits }
+empty: No page visits in the last 30 days.
+hidden: true

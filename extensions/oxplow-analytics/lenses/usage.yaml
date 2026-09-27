@@ -1,0 +1,6 @@
+title: Usage
+description: Where your attention and your agents' tokens went over the last 30 days.
+query: SELECT 1
+viz: grid
+children: [token-total, tokens-by-agent, tokens-by-day, page-visits-by-day, top-pages]
+launcher: { category: Activity }

@@ -117,7 +117,6 @@ import { TasksPage } from "./pages/TasksPage.js";
 import { DoneWorkPage } from "./pages/DoneWorkPage.js";
 import { BacklogPage } from "./pages/BacklogPage.js";
 import { CommentsInboxPage } from "./pages/CommentsInboxPage.js";
-import { UsagePage } from "./pages/UsagePage.js";
 import { MetricDetailPage } from "./pages/MetricDetailPage.js";
 import { MetricRecordingPage } from "./pages/MetricRecordingPage.js";
 import { MetricsPage } from "./pages/MetricsPage.js";
@@ -126,7 +125,6 @@ import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
-import { PageAnalyticsPage } from "./pages/PageAnalyticsPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
 import { ClosedThreadsPage } from "./pages/ClosedThreadsPage.js";
 import { ExternalUrlPage } from "./pages/ExternalUrlPage.js";
@@ -1943,13 +1941,11 @@ export function App() {
       case "closed-threads":
       case "external-url":
       case "effort-coverage":
-      case "usage":
       case "metrics-recorded":
       case "metric-detail":
       case "metric-recording":
       case "custom-dashboard":
       case "dashboards":
-      case "page-analytics":
       case "lens":
       case "explore-data":
       case "duplicate-block":
@@ -2858,13 +2854,6 @@ export function App() {
           closable: true,
           render: () => <CommentsInboxPage stream={stream} onOpenPage={navOpen} />,
         });
-      } else if (ref.kind === "usage") {
-        tabs.push({
-          id: ref.id,
-          label: "Usage",
-          closable: true,
-          render: () => <UsagePage onOpenPage={navOpen} />,
-        });
       } else if (ref.kind === "metrics-recorded") {
         tabs.push({
           id: ref.id,
@@ -2938,13 +2927,6 @@ export function App() {
           label: lensId,
           closable: true,
           render: () => <LensPage lensId={lensId} stream={stream} onOpenPage={navOpen} />,
-        });
-      } else if (ref.kind === "page-analytics") {
-        tabs.push({
-          id: ref.id,
-          label: "Page Analytics",
-          closable: true,
-          render: () => <PageAnalyticsPage onOpenPage={navOpen} />,
         });
       } else if (
         ref.kind === "tasks"

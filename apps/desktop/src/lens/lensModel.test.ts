@@ -335,3 +335,8 @@ test("slot lenses get only the slot params they declare", () => {
   ] as unknown as Extension[];
   expect(slotRuns(exts, "effort-review", { effort_id: 7, change_id: 9 })).toEqual([{ id: "x/a", params: { effort_id: 7 } }]);
 });
+
+test("page links open any oxplow page by its tab id", () => {
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["task:tsk3"], ["p"])?.id).toBe("task:tsk3");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["git-dashboard"], ["p"])?.kind).toBe("git-dashboard");
+});

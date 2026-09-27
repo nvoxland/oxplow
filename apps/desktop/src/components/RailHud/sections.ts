@@ -79,7 +79,6 @@ export function computePagesDirectory(opts: { backlogReadyCount: number }): Page
     { id: "dashboard-review", label: "Review", ref: dashboardRef("review"), category: "Activity" },
     { id: "dashboard-quality", label: "Quality", ref: dashboardRef("quality"), category: "Activity" },
     { id: "dashboard-visits", label: "Go To", ref: dashboardRef("visits"), category: "Activity" },
-    { id: "usage", label: "Usage", ref: indexRef("usage"), category: "Activity" },
     { id: "wiki-index", label: "Wiki", ref: indexRef("wiki-index"), category: "Knowledge" },
     { id: "explore-data", label: "Explore Data", ref: indexRef("explore-data"), category: "Data", keywords: "sql query schema semantic layer lens" },
     { id: "metrics-recorded", label: "Metrics", ref: indexRef("metrics-recorded"), category: "Data", keywords: "recorded catalog" },

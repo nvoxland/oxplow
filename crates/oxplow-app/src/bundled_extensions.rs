@@ -22,7 +22,15 @@ macro_rules! ext_file {
 pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-analytics",
-        files: &[ext_file!("oxplow-analytics", "extension.yaml")],
+        files: &[
+            ext_file!("oxplow-analytics", "extension.yaml"),
+            ext_file!("oxplow-analytics", "lenses/page-visits-by-day.yaml"),
+            ext_file!("oxplow-analytics", "lenses/token-total.yaml"),
+            ext_file!("oxplow-analytics", "lenses/tokens-by-agent.yaml"),
+            ext_file!("oxplow-analytics", "lenses/tokens-by-day.yaml"),
+            ext_file!("oxplow-analytics", "lenses/top-pages.yaml"),
+            ext_file!("oxplow-analytics", "lenses/usage.yaml"),
+        ],
     },
     BundledExtension {
         name: "oxplow-review",

@@ -9,7 +9,10 @@
 import { lensRef } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
 
-export const LEGACY_PAGE_REDIRECTS: Readonly<Record<string, string>> = {};
+export const LEGACY_PAGE_REDIRECTS: Readonly<Record<string, string>> = {
+  usage: "oxplow-analytics/usage",
+  "page-analytics": "oxplow-analytics/usage",
+};
 
 export function redirectLegacyRef(
   ref: TabRef,

@@ -1,0 +1,7 @@
+title: Agent Tokens
+description: All tokens your agents used (input, output and prompt cache), all time.
+query: |
+  SELECT sum(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens)
+  FROM v_token_usage
+viz: number
+hidden: true

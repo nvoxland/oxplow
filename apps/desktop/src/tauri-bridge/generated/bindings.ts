@@ -564,11 +564,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	countPageVisitsByDay: (days: number) => typedError<PageVisitDay[], IpcError>(__TAURI_INVOKE("count_page_visits_by_day", { days })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listRecentlyFinished: (threadId: string | null, limit: number) => typedError<FinishedEntry[], IpcError>(__TAURI_INVOKE("list_recently_finished", { threadId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1092,26 +1087,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	tokenTotalsOverall: () => typedError<TokenUsageTotals, IpcError>(__TAURI_INVOKE("token_totals_overall")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	tokenUsageByAgent: () => typedError<AgentKindTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_agent")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	tokenUsageByModel: () => typedError<ModelTokenUsage[], IpcError>(__TAURI_INVOKE("token_usage_by_model")),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	tokenUsageByDay: (days: number) => typedError<TokenUsageByDay[], IpcError>(__TAURI_INVOKE("token_usage_by_day", { days })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getGitLog: (streamId: string | null, limit: number | null, all: boolean) => typedError<GitLogResult, IpcError>(__TAURI_INVOKE("get_git_log", { streamId, limit, all })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1429,15 +1404,6 @@ export type AdvisoryOncePer =
 "turn";
 
 export type AgentKind = "claude" | "codex" | "opencode";
-
-/**
- *  Token totals for one agent/harness (`agent_kind`), used by the
- *  Token Analytics page's by-harness rollup.
- */
-export type AgentKindTokenUsage = {
-	agent_kind: string,
-	totals: TokenUsageTotals,
-};
 
 // One persisted nudge row.
 export type AgentNudge = {
@@ -2810,6 +2776,11 @@ export type LensLinkKind =
 // A metric's page; the value is a metric key.
 "metric" | 
 /**
+ *  Any oxplow page by its tab id (`task:tsk42`, `git-dashboard`, …),
+ *  e.g. `v_page_visit.page_id`.
+ */
+"page" | 
+/**
  *  A file's diff within a change: the value is the path; `line`,
  *  `base` and `head` name the columns holding the line and the
  *  change's `base_label` / `head_label` (join `v_change`).
@@ -3154,17 +3125,6 @@ export type MetricSpec = {
 	display_kind: string,
 	created_at: Timestamp,
 	updated_at: Timestamp,
-};
-
-/**
- *  Token totals for one (agent_kind, model) pair. `model` is nullable
- *  (a turn can land without a parsed model). Used by the Token
- *  Analytics page's by-model breakdown, grouped under each harness.
- */
-export type ModelTokenUsage = {
-	agent_kind: string,
-	model: string | null,
-	totals: TokenUsageTotals,
 };
 
 export type MoveTaskRequest = {
@@ -3522,11 +3482,6 @@ export type PageVisit = {
 	visited_at: Timestamp,
 	duration_ms: number | null,
 	thread_id: string | null,
-};
-
-export type PageVisitDay = {
-	day: string,
-	count: number,
 };
 
 /**
@@ -4246,18 +4201,6 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
-
-/**
- *  Token volume bucketed by calendar day (UTC), newest day last.
- *  Drives the tokens-per-day trend chart.
- */
-export type TokenUsageByDay = {
-	// `YYYY-MM-DD`.
-	day: string,
-	total_tokens: number,
-	input_tokens: number,
-	output_tokens: number,
-};
 
 // Aggregated totals across a set of usage rows (per effort or per thread).
 export type TokenUsageTotals = {

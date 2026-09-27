@@ -167,10 +167,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_token_usage_for_effort"),
     ui("get_effort_token_totals"),
     ui("get_thread_token_totals"),
-    ui("token_totals_overall"),
-    ui("token_usage_by_agent"),
-    ui("token_usage_by_model"),
-    ui("token_usage_by_day"),
     both("list_wiki_pages"),
     both("add_followup"),
     both("list_followups"),
@@ -376,7 +372,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_recent_page_visits"),
     ui("top_visited_pages"),
     ui("forget_page"),
-    ui("count_page_visits_by_day"),
     ui("list_recently_finished"),
     ui("clear_recently_finished"),
     // ---- ui-only: usage ----

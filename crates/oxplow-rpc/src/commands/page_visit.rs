@@ -82,12 +82,6 @@ pub async fn forget_page(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct PageVisitDay {
-    pub day: String,
-    pub count: i64,
-}
-
 /// Recently completed tasks merged with recently updated wiki
 /// notes, sorted by timestamp DESC. Drives the rail's "Finished"
 /// section. Items whose timestamp is `<= finished_cleared_at` are
@@ -218,17 +212,6 @@ pub async fn clear_recently_finished(
         .insert(key, Timestamp::now());
     svc.events.emit(OxplowEvent::PageVisitChanged);
     Ok(())
-}
-
-pub async fn count_page_visits_by_day(
-    svc: &Services,
-    days: u32,
-) -> Result<Vec<PageVisitDay>, IpcError> {
-    let rows = svc.page_visit_store.count_by_day(days).await?;
-    Ok(rows
-        .into_iter()
-        .map(|(day, count)| PageVisitDay { day, count })
-        .collect())
 }
 
 #[cfg(test)]

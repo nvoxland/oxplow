@@ -6,7 +6,7 @@
  */
 import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { duplicateBlockRef, effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { DISK, refVersion, type FileVersion } from "../file-version.js";
 import { computeDiffId } from "../diff-id.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -63,6 +63,8 @@ export function cellLinkRef(
       return gitCommitRef(s);
     case "metric":
       return metricRef(s);
+    case "page":
+      return refFromTabId(s);
     case "diff-at": {
       const at = (col: string | null) => {
         const i = col ? resultColumns.indexOf(col) : -1;

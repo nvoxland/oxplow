@@ -132,16 +132,12 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return GitBranch;
     case "hook-events":
       return Activity;
-    case "usage":
-      return Activity;
     case "metrics-recorded":
       return BarChart3;
     case "metric-detail":
       return Gauge;
     case "metric-recording":
       return AlertTriangle;
-    case "page-analytics":
-      return BarChart3;
     case "terminal":
       return Terminal;
     case "new-stream":
@@ -234,8 +230,6 @@ export function pageKindLabel(kind: string): string {
       return "thread settings";
     case "op-error":
       return "error";
-    case "usage":
-      return "usage";
     case "metrics-recorded":
       return "metrics";
     case "metric-detail":
@@ -244,8 +238,6 @@ export function pageKindLabel(kind: string): string {
       return "recording";
     case "custom-dashboard":
       return "dashboard";
-    case "page-analytics":
-      return "page analytics";
     default:
       return kind;
   }
@@ -276,10 +268,8 @@ const INDEX_KINDS = new Set<string>([
   "new-task",
   "closed-threads",
   "uncommitted-changes",
-  "usage",
   "metrics-recorded",
   "dashboards",
-  "page-analytics",
   "explore-data",
 ]);
 

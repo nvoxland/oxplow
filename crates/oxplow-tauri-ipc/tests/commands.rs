@@ -325,15 +325,6 @@ async fn clear_recently_finished_no_throw_on_empty() {
         .unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn count_page_visits_by_day_empty_for_fresh_project() {
-    let app = TestApp::build();
-    let days = commands::generated::count_page_visits_by_day(app.state(), 7)
-        .await
-        .unwrap();
-    assert!(days.is_empty());
-}
-
 // ---- Wiki commands ----
 
 // ---- Effort commands ----

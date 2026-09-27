@@ -116,6 +116,9 @@ pub enum LensLinkKind {
     Commit,
     /// A metric's page; the value is a metric key.
     Metric,
+    /// Any oxplow page by its tab id (`task:tsk42`, `git-dashboard`, …),
+    /// e.g. `v_page_visit.page_id`.
+    Page,
     /// A file's diff within a change: the value is the path; `line`,
     /// `base` and `head` name the columns holding the line and the
     /// change's `base_label` / `head_label` (join `v_change`).
@@ -1898,7 +1901,7 @@ empty: No tasks.
         let (_d, ext) = load_x(
             &[(
                 "l",
-                "title: L\nquery: SELECT 1\ncolumns:\n  - { key: a, link: { kind: commit } }\n  - { key: b, link: { kind: metric } }\n  - { key: d, link: { kind: file, line: n } }\n",
+                "title: L\nquery: SELECT 1\ncolumns:\n  - { key: a, link: { kind: commit } }\n  - { key: b, link: { kind: metric } }\n  - { key: p, link: { kind: page } }\n  - { key: d, link: { kind: file, line: n } }\n",
             )],
             "",
         );
@@ -1913,11 +1916,12 @@ empty: No tasks.
             vec![
                 LensLinkKind::Commit,
                 LensLinkKind::Metric,
+                LensLinkKind::Page,
                 LensLinkKind::File
             ]
         );
         assert_eq!(
-            ext.lenses[0].columns[2]
+            ext.lenses[0].columns[3]
                 .link
                 .as_ref()
                 .unwrap()

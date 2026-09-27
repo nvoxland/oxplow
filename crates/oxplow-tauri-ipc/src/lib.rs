@@ -192,7 +192,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_recent_page_visits,
             commands::generated::top_visited_pages,
             commands::generated::forget_page,
-            commands::generated::count_page_visits_by_day,
             commands::generated::list_recently_finished,
             commands::generated::clear_recently_finished,
             // usage
@@ -292,10 +291,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_token_usage_for_effort,
             commands::generated::get_effort_token_totals,
             commands::generated::get_thread_token_totals,
-            commands::generated::token_totals_overall,
-            commands::generated::token_usage_by_agent,
-            commands::generated::token_usage_by_model,
-            commands::generated::token_usage_by_day,
             // log
             commands::generated::get_git_log,
             commands::generated::get_commit_detail,
