@@ -1,0 +1,30 @@
+[package]
+name = "oxplow-ai"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+specta = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+keyring = "4.2"
+axum = { version = "0.8", features = ["json"], optional = true }
+
+[features]
+# `testing::mock`, a fake provider API for other crates' tests.
+test-support = ["dep:axum"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+axum = { version = "0.8", features = ["json"] }
+
+[lints]
+workspace = true

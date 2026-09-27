@@ -6,6 +6,7 @@
 
 pub mod agent_nudge_store;
 pub mod agent_stores;
+pub mod ai_call_store;
 pub mod analytics_stores;
 pub mod attribution_store;
 pub mod comment_store;
@@ -31,6 +32,7 @@ pub mod wiki_page_thread_updates;
 
 pub use agent_nudge_store::{AgentNudge, NewAgentNudge, SqliteAgentNudgeStore};
 pub use agent_stores::SqliteAgentTurnStore;
+pub use ai_call_store::{NewAiCall, SqliteAiCallStore};
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
     PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotStats,

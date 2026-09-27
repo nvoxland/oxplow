@@ -13,6 +13,7 @@ pub mod agent_path;
 pub mod agent_prompt;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
+pub mod ai_service;
 pub mod attribution;
 pub mod background_task;
 pub mod blob_store;
@@ -412,6 +413,8 @@ pub struct Services {
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
+    /// Oxplow's own model calls by role (`v_ai_call` records each one).
+    pub ai: Arc<ai_service::AiService>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     /// Per-turn agent token usage parsed from the hook transcript (tsk104).
@@ -505,6 +508,12 @@ impl Services {
         let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
+        let ai = Arc::new(ai_service::AiService::new(
+            oxplow_ai::client::Client::default(),
+            Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
+            oxplow_config::global_config_dir(),
+        ));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -687,6 +696,7 @@ impl Services {
             ext_source_store,
             reasoning_store,
             tool_call_store,
+            ai,
             collection,
             token_usage_store,
             token_usage,

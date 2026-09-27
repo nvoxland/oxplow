@@ -136,9 +136,10 @@ never the physical tables, which stay internal and free to change.
 | `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |
 | `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |
+| `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, cost, ok/error (V78; see [ai-providers.md](./ai-providers.md)) |
 
-Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`,
-`v_decision`, `v_claim` and the rest of the shipped-sources table above.
+Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`
+and the rest of the shipped-sources table above.
 
 **Column docs live in code, not here.** `CATALOG` in
 `crates/oxplow-db/src/semantic_layer.rs` documents every column, and

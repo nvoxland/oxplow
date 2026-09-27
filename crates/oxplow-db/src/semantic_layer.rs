@@ -690,6 +690,24 @@ const CATALOG: &[CatalogView] = &[
             ("count", "How many edits / failures."),
         ],
     },
+    CatalogView {
+        name: "v_ai_call",
+        description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and estimated cost. What per-role daily budgets check.",
+        columns: &[
+            ("id", "Row id."),
+            ("role", "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`)."),
+            ("provider", "Provider id from ai.yaml."),
+            ("model", "Model id."),
+            ("caller", "What asked, e.g. `mcp:ai_decide`, `inferred-decisions`."),
+            ("input_tokens", "Input tokens."),
+            ("output_tokens", "Output tokens."),
+            ("latency_ms", "Round-trip time."),
+            ("cost_usd", "Estimated cost; NULL when the model's price is unknown."),
+            ("ok", "1 succeeded, 0 failed."),
+            ("error", "Error message when it failed."),
+            ("at", "RFC 3339 timestamp."),
+        ],
+    },
 ];
 
 #[cfg(test)]
@@ -888,6 +906,7 @@ mod tests {
             "v_tool_call",
             "v_context_read",
             "v_struggle",
+            "v_ai_call",
         ] {
             assert!(names.contains(&expected), "missing {expected}");
         }

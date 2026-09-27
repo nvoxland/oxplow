@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 oxplow-domain = { workspace = true }
 oxplow-db = { workspace = true }
+oxplow-ai = { workspace = true }
 oxplow-config = { workspace = true }
 oxplow-fs-watch = { workspace = true }
 oxplow-code-deps = { workspace = true }
@@ -62,6 +63,7 @@ git2 = { workspace = true }
 # enable the feature and cargo unified it in; a routine `cargo update`
 # removed that leak and the tests stopped building. Declare it explicitly.
 tokio = { workspace = true, features = ["test-util"] }
+oxplow-ai = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
