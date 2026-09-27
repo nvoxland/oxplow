@@ -434,6 +434,33 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
 }
 
 #[tokio::test]
+async fn post_tool_use_is_persisted_as_a_tool_call() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let doc = root.join(".context/usability.md");
+    let resp = post_hook(
+        &cp,
+        "PostToolUse",
+        Some(tid),
+        serde_json::json!({
+            "tool_name": "Read",
+            "tool_input": { "file_path": doc.to_string_lossy() },
+            "session_id": "s1",
+        }),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let out = oxplow_db::SemanticLayer::new(svc.db.clone())
+        .query_sql("SELECT thread_id, path FROM v_context_read", vec![], None)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&out.rows).unwrap(),
+        serde_json::json!([[tid.value(), ".context/usability.md"]])
+    );
+}
+
+#[tokio::test]
 async fn ingest_failure_still_acks_200() {
     // An unknown thread id makes agent_turn's thread FK fail inside
     // ingest. The agent can't do anything useful with a 500 — it just

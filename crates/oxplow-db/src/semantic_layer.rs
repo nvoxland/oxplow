@@ -654,6 +654,42 @@ const CATALOG: &[CatalogView] = &[
             ("created_at", "RFC 3339 timestamp."),
         ],
     },
+    CatalogView {
+        name: "v_tool_call",
+        description: "Every tool call the agent made (from the PostToolUse hook): reads, edits, commands.",
+        columns: &[
+            ("id", "Row id."),
+            ("thread_id", "Thread."),
+            ("effort_id", "Effort open at the time, if any."),
+            ("tool", "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."),
+            ("path", "File it touched, repo-relative when inside the project."),
+            ("detail", "Short context: the Bash command (truncated), a search pattern, …"),
+            ("ok", "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)."),
+            ("at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_context_read",
+        description: "Which `.context/*.md` project docs the agent read, and when. Compare with the files it changed to spot work done without reading the relevant doc.",
+        columns: &[
+            ("id", "Row id."),
+            ("thread_id", "Thread."),
+            ("effort_id", "Effort, if one was open."),
+            ("path", "Doc path, e.g. `.context/usability.md`."),
+            ("at", "RFC 3339 timestamp."),
+        ],
+    },
+    CatalogView {
+        name: "v_struggle",
+        description: "Where the agent had trouble in an effort: a file edited 5+ times (`repeated_edits`) or 3+ failed commands (`failed_commands`). Likely places for mistakes.",
+        columns: &[
+            ("effort_id", "Effort."),
+            ("thread_id", "Thread."),
+            ("kind", "`repeated_edits` or `failed_commands`."),
+            ("subject", "The file path, or `Bash`."),
+            ("count", "How many edits / failures."),
+        ],
+    },
 ];
 
 #[cfg(test)]
@@ -849,6 +885,9 @@ mod tests {
             "v_page_visit",
             "v_decision",
             "v_claim",
+            "v_tool_call",
+            "v_context_read",
+            "v_struggle",
         ] {
             assert!(names.contains(&expected), "missing {expected}");
         }

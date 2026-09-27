@@ -25,6 +25,7 @@ pub mod task_satellite;
 pub mod task_store;
 mod thread_store;
 pub mod token_usage_store;
+pub mod tool_call_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 
@@ -69,5 +70,6 @@ pub use token_usage_store::{
     AgentKindTokenUsage, AgentTokenUsage, ModelTokenUsage, NewAgentTokenUsage,
     SqliteTokenUsageStore, TokenUsageByDay, TokenUsageTotals,
 };
+pub use tool_call_store::{NewToolCall, SqliteToolCallStore};
 pub use wiki_page_store::{SqliteWikiPageStore, WikiPage, WikiPageSearchHit, WikiPageStore};
 pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

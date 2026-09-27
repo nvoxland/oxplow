@@ -568,6 +568,8 @@ async fn handle_hook_inner(
             // Auto-claim structured edits onto the thread's open effort in
             // real time (claim-first attribution) — best-effort.
             attribute_effort_file_edit(&ctx, thread_id, body).await;
+            // Persist the call (v_tool_call / v_context_read / v_struggle).
+            record_tool_call(&ctx, thread_id, &envelope_for_resume.payload_json).await;
 
             // Collection: detect a test-run Bash command, record it
             // (observed), and ride along to coverage/analysis if configured.
@@ -929,6 +931,40 @@ async fn attribute_effort_file_edit(ctx: &AppCtx, thread_id: &ThreadId, body: &s
         .await
     {
         warn!(?err, path = rel, "effort file auto-claim failed");
+    }
+}
+
+/// Persist a PostToolUse as an `agent_tool_call` row on the thread's open
+/// effort. Best-effort: a failure is logged, never surfaced to the agent.
+async fn record_tool_call(ctx: &AppCtx, thread_id: &ThreadId, payload_json: &str) {
+    use oxplow_app::TaskEffortStore as _;
+    let Some(parts) =
+        oxplow_app::tool_calls::parse_tool_call(payload_json, &ctx.services.layout.project_dir)
+    else {
+        return;
+    };
+    let effort_id = match ctx
+        .services
+        .effort_store
+        .find_open_for_thread(thread_id)
+        .await
+    {
+        Ok(e) => e.map(|e| e.id.value()),
+        Err(err) => {
+            warn!(?err, "tool-call effort lookup failed");
+            None
+        }
+    };
+    let call = oxplow_db::NewToolCall {
+        thread_id: thread_id.value(),
+        effort_id,
+        tool: parts.tool,
+        path: parts.path,
+        detail: parts.detail,
+        ok: parts.ok,
+    };
+    if let Err(err) = ctx.services.tool_call_store.record(call).await {
+        warn!(?err, "tool-call record failed");
     }
 }
 

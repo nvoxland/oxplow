@@ -56,6 +56,7 @@ pub mod terminal_sessions;
 pub mod test_outcome;
 pub mod thread_runtime;
 pub mod token_usage;
+pub mod tool_calls;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
@@ -407,6 +408,8 @@ pub struct Services {
     pub ext_source_store: Arc<oxplow_db::SqliteExtSourceStore>,
     /// Agent decisions and claims (`v_decision`, `v_claim`).
     pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
+    /// Persisted agent tool calls (`v_tool_call` and derived views).
+    pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
     /// Per-turn agent token usage parsed from the hook transcript (tsk104).
@@ -499,6 +502,7 @@ impl Services {
         let dashboard_store = Arc::new(oxplow_db::SqliteDashboardStore::new(db.clone()));
         let ext_source_store = Arc::new(oxplow_db::SqliteExtSourceStore::new(db.clone()));
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
+        let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
@@ -680,6 +684,7 @@ impl Services {
             dashboard_store,
             ext_source_store,
             reasoning_store,
+            tool_call_store,
             collection,
             token_usage_store,
             token_usage,

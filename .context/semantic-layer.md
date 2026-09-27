@@ -133,6 +133,9 @@ never the physical tables, which stay internal and free to change.
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why), via MCP `record_decision` (V76) |
 | `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort has a failure-free test report) (V76) |
+| `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77) |
+| `v_context_read` | `Read`s of `.context/*.md` (V77) |
+| `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |
 
 Still target: `v_commit`, `v_branch`, `v_diagnostic`, `v_test_run`,
 `v_decision`, `v_claim` and the rest of the shipped-sources table above.
@@ -272,6 +275,10 @@ The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 - **Schema.** `describe_schema` lists declared entities even before they
   sync. It sets `available: false` until the view exists, and includes
   column docs, relations and the owner (the extension name).
+
+**Still target (agent activity):** `v_test_change` (deleted / skipped
+tests, removed assertions) needs snapshot content analysis; "missing
+co-change" needs git history as a source.
 
 **Still target:** `starlark` / `jaq` runtimes; incremental upsert +
 tombstones (today: full replace per run); keychain `credentials` and an
