@@ -27,7 +27,7 @@ import { PageKindIcon } from "../pageKinds.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { RAIL_HISTORY_EXCLUDE_KINDS } from "./RailHud/history.js";
 import type { PageCategory, PageDirectoryEntry } from "./RailHud/sections.js";
-import { lensDirectoryEntries } from "../lens/lensModel.js";
+import { lensDirectoryEntries, mergeDirectory } from "../lens/lensModel.js";
 
 interface Props {
   open: boolean;
@@ -260,8 +260,8 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
     };
   }, [open, stream?.id, query]);
 
-  // Lenses from this stream's `oxplow/extensions/` join the page
-  // directory under "Lenses", so they're both browsable (start menu) and
+  // Lenses from this stream's extensions join the page directory under
+  // their `launcher.category` ("Lenses" by default), so they're both browsable (start menu) and
   // searchable. Re-read on every open: lens files are ordinary project
   // files the agent may have just written.
   const [lensPages, setLensPages] = useState<PageDirectoryEntry[]>([]);
@@ -279,14 +279,7 @@ export function QuickOpenOverlay({ open, stream, threadId, selectedFilePath, pag
       cancelled = true;
     };
   }, [open, stream?.id]);
-  const pages = useMemo(() => {
-    if (lensPages.length === 0) return staticPages;
-    // Keep category grouping contiguous: slot lenses before "System".
-    const system = staticPages.findIndex((p) => p.category === "System");
-    return system === -1
-      ? [...staticPages, ...lensPages]
-      : [...staticPages.slice(0, system), ...lensPages, ...staticPages.slice(system)];
-  }, [staticPages, lensPages]);
+  const pages = useMemo(() => mergeDirectory(staticPages, lensPages), [staticPages, lensPages]);
 
   // Recent pages for the "Recent" start-menu section: the 10 most recent
   // visits (deduped by ref), reusing the rail History source + exclude set.

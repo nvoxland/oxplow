@@ -700,6 +700,34 @@ pub struct OxplowConfig {
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
     #[serde(rename = "aiRoles")]
     pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
+    /// Extensions turned off for this project (`extensions: { disabled:
+    /// [...] }`), bundled ones included. Committed, so it's team-wide.
+    #[serde(rename = "extensionsDisabled")]
+    pub extensions_disabled: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExtensionsBlock {
+    #[serde(default)]
+    disabled: Vec<String>,
+}
+
+/// Just the `extensions.disabled` list of `project_dir/.oxplow/project.yaml`,
+/// without loading (or failing on) the rest of the file. The extension
+/// loader calls this on every load, per worktree.
+pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
+    #[derive(Deserialize)]
+    struct OnlyExtensions {
+        #[serde(default)]
+        extensions: Option<RawExtensionsBlock>,
+    }
+    std::fs::read_to_string(config_path(project_dir.as_ref()))
+        .ok()
+        .and_then(|raw| serde_yaml::from_str::<OnlyExtensions>(&raw).ok())
+        .and_then(|c| c.extensions)
+        .map(|b| b.disabled)
+        .unwrap_or_default()
 }
 
 /// Role names `ai.roles` accepts. Must match `oxplow_ai::config::Role`
@@ -836,6 +864,8 @@ struct RawConfig {
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
     #[serde(default)]
     ai: Option<RawAiBlock>,
+    #[serde(default)]
+    extensions: Option<RawExtensionsBlock>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -987,6 +1017,7 @@ pub fn write_project_config(
         "zones",
         "agentModels",
         "ai",
+        "extensions",
     ];
 
     let existing_extras: serde_yaml::Mapping = if path.exists() {
@@ -1207,6 +1238,15 @@ pub fn write_project_config(
             "agentModels".into(),
             serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
         );
+    }
+
+    if !config.extensions_disabled.is_empty() {
+        let mut ext = serde_yaml::Mapping::new();
+        ext.insert(
+            "disabled".into(),
+            serde_yaml::to_value(&config.extensions_disabled).expect("disabled serialize"),
+        );
+        doc.insert("extensions".into(), serde_yaml::Value::Mapping(ext));
     }
 
     if !config.ai_roles.is_empty() {
@@ -1465,6 +1505,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         zones: Vec::new(),
         agent_models: Default::default(),
         ai_roles: Default::default(),
+        extensions_disabled: Vec::new(),
     }
 }
 
@@ -1647,6 +1688,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         zones,
         agent_models,
         ai_roles: validate_ai_roles(raw.ai)?,
+        extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })
 }
 
@@ -3262,6 +3304,21 @@ lsp:
             raw.contains("opencode: github-copilot/gpt-5-mini"),
             "got:\n{raw}"
         );
+    }
+
+    #[test]
+    fn disabled_extensions_round_trip_and_read_cheaply() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "extensions:\n  disabled: [oxplow-analytics]\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.extensions_disabled, vec!["oxplow-analytics"]);
+        write_project_config(dir.path(), &cfg).unwrap();
+        assert_eq!(disabled_extensions(dir.path()), vec!["oxplow-analytics"]);
+        assert!(disabled_extensions(tempdir().unwrap().path()).is_empty());
     }
 
     #[test]

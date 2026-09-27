@@ -12,6 +12,7 @@ import type { NavSiblings } from "./PageNavigationContext.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { FileSessionState } from "../editor-session.js";
 import { logUi } from "../logger.js";
+import { redirectLegacyRef } from "./legacyRedirects.js";
 
 export const FILE_SESSIONS_STORAGE_KEY = "oxplow.layout.v1.fileSessions";
 export const CENTER_ACTIVE_STORAGE_KEY = "oxplow.layout.v1.centerActive";
@@ -40,9 +41,11 @@ export function readPersistedThreadPageTabs(): Record<string, TabRef[]> {
     const out: Record<string, TabRef[]> = {};
     for (const [threadId, refs] of Object.entries(parsed as Record<string, unknown>)) {
       if (typeof threadId !== "string" || !Array.isArray(refs)) continue;
-      const clean = refs.filter((r): r is TabRef =>
-        !!r && typeof r === "object" && typeof (r as TabRef).id === "string" && typeof (r as TabRef).kind === "string",
-      );
+      const clean = refs
+        .filter((r): r is TabRef =>
+          !!r && typeof r === "object" && typeof (r as TabRef).id === "string" && typeof (r as TabRef).kind === "string",
+        )
+        .map((r) => redirectLegacyRef(r));
       // Dedupe by id at read time so any pre-existing corrupted
       // state (the duplicate-git-dashboard bug) self-heals on
       // next launch. First occurrence wins so order is preserved.

@@ -1,29 +1,53 @@
-import type { CSSProperties, ReactNode } from "react";
-import type { LensRun, SqlCell } from "../api.js";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { getLens, runLens, type LensRun, type SqlCell } from "../api.js";
+import { DailyBarChart } from "../components/Analytics/DailyBarChart.js";
+import { TrendChart } from "../components/charts/TrendChart.js";
+import { squarify } from "../components/charts/squarify.js";
 import { formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownView } from "../components/Wiki/MarkdownView.js";
 import { RouteLink } from "../tabs/RouteLink.js";
 import type { TabRef } from "../tabs/tabState.js";
-import { cellLinkRef, displayColumns, formatCell, limitRows, rowMention, type DisplayColumn } from "./lensModel.js";
+import {
+  barRows,
+  cellLinkRef,
+  childParams,
+  displayColumns,
+  formatCell,
+  limitRows,
+  lineSeries,
+  rowMention,
+  treemapItems,
+  type DisplayColumn,
+} from "./lensModel.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 
 type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
 
 /**
- * Renders a lens run's result in the lens's viz. Shared by the lens page
- * and dashboard lens tiles; `maxRows` caps rows for compact views.
+ * Renders a lens run's result in the lens's viz. Shared by the lens page,
+ * slots and dashboard lens tiles; `maxRows` caps rows for compact views.
+ * A `grid` runs its child lenses with this run's params, in `streamId`.
  */
 export function LensResultView({
   run,
   onOpenPage,
   maxRows,
+  streamId = null,
+  compact = false,
 }: {
   run: LensRun;
-  onOpenPage(ref: TabRef): void;
+  /** Where links go; without it they navigate through the route context. */
+  onOpenPage?(ref: TabRef): void;
   maxRows?: number;
+  streamId?: string | null;
+  /** Small inline rendering for strips (a number as plain text). */
+  compact?: boolean;
 }) {
   const lens = run.lens;
+  if (lens.viz === "grid") {
+    return <GridViz childIds={lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+  }
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
   if (result.rows.length === 0) {
@@ -39,7 +63,7 @@ export function LensResultView({
     const ref = c.link ? cellLinkRef(c.link, c.key, row, result.columns) : null;
     if (!ref) return text;
     return (
-      <RouteLink to={ref} onNavigate={() => onOpenPage(ref)} style={linkStyle}>
+      <RouteLink to={ref} onNavigate={onOpenPage ? () => onOpenPage(ref) : undefined} style={linkStyle}>
         {text}
       </RouteLink>
     );
@@ -55,8 +79,18 @@ export function LensResultView({
       },
     ]);
   switch (lens.viz) {
+    case "bar":
+      return (
+        <div data-testid="lens-bar">
+          <DailyBarChart rows={barRows(lens, result)} formatValue={(v) => formatMetricValue(v)} />
+        </div>
+      );
+    case "line":
+      return <LineViz run={{ ...run, result }} />;
+    case "treemap":
+      return <TreemapViz run={{ ...run, result }} onOpenPage={onOpenPage} />;
     case "number":
-      return <NumberViz value={first} />;
+      return <NumberViz value={first} compact={compact} />;
     case "markdown":
       return <MarkdownView body={first === null ? "" : String(first)} />;
     case "list":
@@ -77,12 +111,159 @@ export function LensResultView({
   }
 }
 
-function NumberViz({ value }: { value: SqlCell }) {
+function LineViz({ run }: { run: LensRun }) {
+  const series = lineSeries(run.lens, run.result);
+  return (
+    <div data-testid="lens-line">
+      {series.map((s) => (
+        <div key={s.name} data-testid="lens-line-series" style={{ marginBottom: 12 }}>
+          {s.name ? <div style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>{s.name}</div> : null}
+          <TrendChart points={s.points} width={640} height={180} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TREEMAP_W = 800;
+const TREEMAP_H = 280;
+const TREEMAP_PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
+
+/** Two-level squarified treemap: groups first (by total size), then
+ *  items inside each group. A tile follows the lens's first column link. */
+function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef): void }) {
+  const items = treemapItems(run.lens, run.result);
+  const groups = new Map<string, typeof items>();
+  for (const it of items) {
+    const g = it.group ?? "";
+    groups.set(g, [...(groups.get(g) ?? []), it]);
+  }
+  const groupNames = [...groups.keys()];
+  const color = (g: string) => TREEMAP_PALETTE[groupNames.indexOf(g) % TREEMAP_PALETTE.length]!;
+  const groupRects = squarify(
+    groupNames.map((g) => ({ value: groups.get(g)!.reduce((n, i) => n + i.size, 0), payload: g })),
+    0,
+    0,
+    TREEMAP_W,
+    TREEMAP_H,
+  );
+  const linkCol = run.lens.columns.find((c) => c.link);
+  const open = (row: SqlCell[]) => {
+    if (!linkCol?.link) return;
+    const ref = cellLinkRef(linkCol.link, linkCol.key, row, run.result.columns);
+    if (ref) onOpenPage?.(ref);
+  };
+  return (
+    <div data-testid="lens-treemap">
+      <svg viewBox={`0 0 ${TREEMAP_W} ${TREEMAP_H}`} style={{ width: "100%", maxWidth: TREEMAP_W }}>
+        {groupRects.flatMap((g) =>
+          squarify(
+            groups.get(g.payload)!.map((it) => ({ value: it.size, payload: it })),
+            g.x,
+            g.y,
+            g.w,
+            g.h,
+          ).map((t, i) => (
+            <g
+              key={`${g.payload}-${i}`}
+              data-testid="lens-treemap-tile"
+              onClick={() => open(t.payload.row)}
+              style={{ cursor: linkCol ? "pointer" : "default" }}
+            >
+              <title>{`${t.payload.label}: ${formatMetricValue(t.payload.size)}${t.payload.group ? ` (${t.payload.group})` : ""}`}</title>
+              <rect
+                x={t.x}
+                y={t.y}
+                width={t.w}
+                height={t.h}
+                fill={color(g.payload)}
+                stroke="var(--surface-page, #111)"
+                strokeWidth={1}
+                opacity={0.85}
+              />
+              {t.w > 60 && t.h > 16 ? (
+                <text x={t.x + 4} y={t.y + 13} fontSize={11} fill="#fff" style={{ pointerEvents: "none" }}>
+                  {t.payload.label.length > t.w / 7 ? `${t.payload.label.slice(0, Math.floor(t.w / 7) - 1)}…` : t.payload.label}
+                </text>
+              ) : null}
+            </g>
+          )),
+        )}
+      </svg>
+      {groupNames.length > 1 || groupNames[0] ? (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+          {groupNames.map((g) => (
+            <span key={g}>
+              <span style={{ display: "inline-block", width: 10, height: 10, background: color(g), marginRight: 4 }} />
+              {g || "—"}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** `grid`: each child lens, run with the params it declares from ours. */
+function GridViz({
+  childIds,
+  params,
+  streamId,
+  onOpenPage,
+}: {
+  childIds: string[];
+  params: Record<string, SqlCell>;
+  streamId: string | null;
+  onOpenPage?(ref: TabRef): void;
+}) {
+  const [children, setChildren] = useState<{ id: string; run: LensRun | null; error: string | null }[]>([]);
+  const paramsKey = JSON.stringify(params);
+  useEffect(() => {
+    let live = true;
+    void Promise.all(
+      childIds.map(async (id) => {
+        try {
+          const child = await getLens(id, streamId);
+          return { id, run: await runLens(id, childParams(child, params), streamId), error: null };
+        } catch (e) {
+          return { id, run: null, error: e instanceof Error ? e.message : String(e) };
+        }
+      }),
+    ).then((next) => {
+      if (live) setChildren(next);
+    });
+    return () => {
+      live = false;
+    };
+    // paramsKey stands in for `params` (a fresh object each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [childIds.join("|"), paramsKey, streamId]);
+  return (
+    <div data-testid="lens-grid">
+      {children.map(({ id, run, error }) => (
+        <section key={id} data-testid={`lens-grid-child-${id}`} style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: "var(--text-sm)", margin: "0 0 6px" }}>{run?.lens.title ?? id}</h3>
+          {error ? (
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--severity-critical)" }}>{error}</div>
+          ) : run ? (
+            <LensResultView run={run} onOpenPage={onOpenPage} streamId={streamId} maxRows={25} />
+          ) : null}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function NumberViz({ value, compact }: { value: SqlCell; compact: boolean }) {
   return (
     <div
       data-testid="lens-number"
       title={typeof value === "number" ? formatMetricValueExact(value) : undefined}
-      style={{ fontSize: 48, fontWeight: 600, margin: "16px 0" }}
+      style={
+        compact
+          ? { display: "inline", color: "var(--text-secondary)", fontWeight: 500 }
+          : { fontSize: 48, fontWeight: 600, margin: "16px 0" }
+      }
     >
       {typeof value === "number" ? formatMetricValue(value) : formatCell(value)}
     </div>

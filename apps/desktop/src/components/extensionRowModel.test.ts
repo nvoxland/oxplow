@@ -12,6 +12,7 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
   sources: [],
   origin: "project",
   slots: [],
+  enabled: true,
   ...over,
 });
 
@@ -36,6 +37,16 @@ describe("extensionRowModel", () => {
     const m = extensionRowModel(ext({ origin: "bundled" }));
     expect(m.origin).toBe("Ships with oxplow");
     expect(m.canUpdate).toBe(false);
+  });
+
+  test("a disabled extension says so and can be turned back on", () => {
+    const m = extensionRowModel(ext({ enabled: false }));
+    expect(m.enabled).toBe(false);
+    expect(m.toggleLabel).toBe("Enable");
+    expect(m.disabledNote).toBe("Off for this project (extensions.disabled in .oxplow/project.yaml).");
+    const on = extensionRowModel(ext());
+    expect(on.toggleLabel).toBe("Disable");
+    expect(on.disabledNote).toBeNull();
   });
 
   test("errors mark the row unhealthy", () => {

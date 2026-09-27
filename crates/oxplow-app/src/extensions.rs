@@ -32,6 +32,72 @@ pub enum LensViz {
     Number,
     /// The first column of the first row, rendered as markdown.
     Markdown,
+    /// Bars: `chart.x` labels, `chart.y` values.
+    Bar,
+    /// A line over `chart.x` (a time or number), `chart.y` values, one
+    /// line per `chart.series` value when set.
+    Line,
+    /// Nested rectangles sized by `chart.size`, labelled by `chart.label`,
+    /// grouped (and coloured) by `chart.group`.
+    Treemap,
+    /// Other lenses (`children`), stacked, each given the params it
+    /// declares from this lens's params.
+    Grid,
+}
+
+/// Which result columns a chart viz draws from.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct LensChart {
+    #[serde(default)]
+    pub x: Option<String>,
+    #[serde(default)]
+    pub y: Option<String>,
+    #[serde(default)]
+    pub series: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub size: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+}
+
+impl LensChart {
+    /// Every column this chart names.
+    fn columns(&self) -> Vec<&String> {
+        [
+            &self.x,
+            &self.y,
+            &self.series,
+            &self.label,
+            &self.size,
+            &self.group,
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+/// Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
+/// renderer's `PageCategory`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub enum LauncherCategory {
+    Work,
+    Code,
+    Git,
+    Activity,
+    Knowledge,
+    Data,
+    Lenses,
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LauncherFile {
+    category: LauncherCategory,
 }
 
 /// A page a column value can link to.
@@ -46,6 +112,10 @@ pub enum LensLinkKind {
     Wiki,
     /// The effort's diff view; the value is an effort id.
     EffortDiff,
+    /// A git commit; the value is a sha.
+    Commit,
+    /// A metric's page; the value is a metric key.
+    Metric,
 }
 
 /// Makes a column's cells link to a page.
@@ -56,6 +126,9 @@ pub struct LensLink {
     /// Result column holding the target id. Defaults to the column itself.
     #[serde(default)]
     pub from: Option<String>,
+    /// For `file`: result column holding a line number to open at.
+    #[serde(default)]
+    pub line: Option<String>,
 }
 
 /// How one result column is shown.
@@ -101,6 +174,16 @@ struct LensFile {
     /// Shown instead of an empty result.
     #[serde(default)]
     empty: Option<String>,
+    #[serde(default)]
+    chart: Option<LensChart>,
+    /// For `grid`: lens slugs in this extension, or `<ext>/<slug>` ids.
+    #[serde(default)]
+    children: Vec<String>,
+    #[serde(default)]
+    launcher: Option<LauncherFile>,
+    /// Keep it out of the launcher (e.g. a lens only a slot shows).
+    #[serde(default)]
+    hidden: bool,
 }
 
 fn default_viz() -> LensViz {
@@ -129,15 +212,21 @@ struct SlotFile {
     lens: String,
 }
 
-/// Places in core pages an extension can mount a lens.
-pub const SLOTS: &[&str] = &["effort-review"];
+/// Places in core pages an extension can mount a lens, and the params
+/// each binds. A mounted lens must declare every one of them.
+pub const SLOTS: &[(&str, &[&str])] = &[
+    ("effort-review", &["effort_id"]),
+    ("task-detail", &["task_id"]),
+    ("thread", &["thread_id"]),
+];
 
 /// A lens an extension mounts into a core page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LensSlot {
-    /// Which page: `effort-review` (an effort's diff view, which binds
-    /// `:effort_id`).
+    /// Which page, from [`SLOTS`]: `effort-review` (an effort's diff
+    /// view, binds `:effort_id`), `task-detail` (`:task_id`) or `thread`
+    /// (`:thread_id`).
     pub slot: String,
     pub lens_id: String,
 }
@@ -158,6 +247,14 @@ pub struct Lens {
     pub params: Vec<LensParam>,
     pub columns: Vec<LensColumn>,
     pub empty: Option<String>,
+    /// Columns a chart viz draws from.
+    pub chart: Option<LensChart>,
+    /// For `grid`: child lens ids.
+    pub children: Vec<String>,
+    /// Launcher section; `None` = "Lenses".
+    pub launcher_category: Option<LauncherCategory>,
+    /// Not listed in the launcher.
+    pub hidden: bool,
     /// Repo-relative path of the lens file.
     pub path: String,
 }
@@ -184,6 +281,9 @@ pub struct Extension {
     pub origin: String,
     /// Lenses mounted into core pages.
     pub slots: Vec<LensSlot>,
+    /// False when `.oxplow/project.yaml` disables it; a disabled
+    /// extension has no lenses, slots or sources.
+    pub enabled: bool,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -249,7 +349,10 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
-    out
+    let disabled = oxplow_config::disabled_extensions(root);
+    out.into_iter()
+        .map(|e| apply_disabled(e, &disabled))
+        .collect()
 }
 
 /// Where an extension's files come from.
@@ -311,6 +414,7 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         sources: Vec::new(),
         origin: origin.to_string(),
         slots: Vec::new(),
+        enabled: true,
     }
 }
 
@@ -385,20 +489,62 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                 params: l.params,
                 columns: l.columns,
                 empty: l.empty,
+                chart: l.chart,
+                children: l
+                    .children
+                    .into_iter()
+                    .map(|c| {
+                        if c.contains('/') {
+                            c
+                        } else {
+                            format!("{name}/{c}")
+                        }
+                    })
+                    .collect(),
+                launcher_category: l.launcher.map(|la| la.category),
+                hidden: l.hidden,
                 path: lens_rel,
             }),
             Err(e) => ext.errors.push(format!("{lens_rel}: {e}")),
         }
     }
 
+    // Drop lenses whose viz lacks what it needs, so every loaded lens renders.
+    let ids: Vec<String> = ext.lenses.iter().map(|l| l.id.clone()).collect();
+    let mut bad = Vec::new();
+    for l in &ext.lenses {
+        if let Some(problem) = shape_problem(l, &ids) {
+            ext.errors.push(format!("{}: {problem}", l.path));
+            bad.push(l.id.clone());
+        }
+    }
+    ext.lenses.retain(|l| !bad.contains(&l.id));
+
     for s in slot_files {
-        if !SLOTS.contains(&s.slot.as_str()) {
+        let slot_params = SLOTS.iter().find(|(n, _)| *n == s.slot).map(|(_, p)| *p);
+        let lens = ext.lenses.iter().find(|l| l.slug == s.lens);
+        let missing: Vec<&str> = match (slot_params, lens) {
+            (Some(params), Some(l)) => params
+                .iter()
+                .filter(|p| !l.params.iter().any(|lp| lp.name == **p))
+                .copied()
+                .collect(),
+            _ => vec![],
+        };
+        if slot_params.is_none() {
             ext.errors.push(format!(
                 "{rel}/extension.yaml: unknown slot `{}` (known: {})",
                 s.slot,
-                SLOTS.join(", ")
+                SLOTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
             ));
-        } else if !ext.lenses.iter().any(|l| l.slug == s.lens) {
+        } else if !missing.is_empty() {
+            ext.errors.push(format!(
+                "{rel}/extension.yaml: slot `{}` passes {}, which lens `{}` doesn't declare in `params`",
+                s.slot,
+                missing.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "),
+                s.lens
+            ));
+        } else if lens.is_none() {
             ext.errors.push(format!(
                 "{rel}/extension.yaml: slot `{}` mounts lens `{}`, which isn't in lenses/",
                 s.slot, s.lens
@@ -413,8 +559,72 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     ext
 }
 
+/// Why `lens` can't render with its viz, if it can't.
+fn shape_problem(lens: &Lens, ids_in_extension: &[String]) -> Option<String> {
+    let chart = lens.chart.clone().unwrap_or_default();
+    let need = |fields: &[(&str, &Option<String>)]| -> Option<String> {
+        let missing: Vec<&str> = fields
+            .iter()
+            .filter(|(_, v)| v.is_none())
+            .map(|(n, _)| *n)
+            .collect();
+        (!missing.is_empty()).then(|| {
+            format!(
+                "viz `{:?}` needs `chart: {{ {} }}`",
+                lens.viz,
+                missing
+                    .iter()
+                    .map(|m| format!("{m}: <column>"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .to_lowercase()
+        })
+    };
+    match lens.viz {
+        LensViz::Bar | LensViz::Line => need(&[("x", &chart.x), ("y", &chart.y)]),
+        LensViz::Treemap => need(&[("label", &chart.label), ("size", &chart.size)]),
+        LensViz::Grid if lens.children.is_empty() => {
+            Some("viz `grid` needs `children: [lens, ...]`".into())
+        }
+        LensViz::Grid => lens
+            .children
+            .iter()
+            .find(|c| {
+                c.split_once('/').map(|(e, _)| e) == Some(lens.extension.as_str())
+                    && !ids_in_extension.contains(c)
+            })
+            .map(|c| format!("child lens `{c}` isn't in this extension's lenses/")),
+        _ => None,
+    }
+}
+
+/// Clear what a disabled extension contributes; it stays listed so
+/// Settings can turn it back on.
+fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
+    if disabled.iter().any(|d| d == &ext.name) {
+        ext.enabled = false;
+        ext.lenses.clear();
+        ext.slots.clear();
+        ext.sources.clear();
+    }
+    ext
+}
+
+fn disabled_error(name: &str) -> DomainError {
+    DomainError::Invalid(format!(
+        "extension `{name}` is disabled in .oxplow/project.yaml (extensions.disabled); enable it in Settings → Extensions"
+    ))
+}
+
 /// Load the extension named `name`, if its folder exists.
 fn load_named(root: &Path, name: &str) -> Result<Extension, DomainError> {
+    if oxplow_config::disabled_extensions(root)
+        .iter()
+        .any(|d| d == name)
+    {
+        return Err(disabled_error(name));
+    }
     if let Some(b) = crate::bundled_extensions::find(name) {
         return Ok(load_one(
             &Embedded(b),
@@ -547,10 +757,25 @@ pub async fn validate_extension(
             )),
             Ok(run) => {
                 let cols = &run.result.columns;
+                let chart_cols = run
+                    .lens
+                    .chart
+                    .as_ref()
+                    .map(|c| c.columns())
+                    .unwrap_or_default();
+                for k in chart_cols {
+                    if !cols.contains(k) {
+                        ext.errors.push(format!(
+                            "lens {id}: chart column `{k}` isn't in the query result (columns: {})",
+                            cols.join(", ")
+                        ));
+                    }
+                }
                 for c in &run.lens.columns {
                     let mut keys = vec![&c.key];
-                    if let Some(from) = c.link.as_ref().and_then(|l| l.from.as_ref()) {
-                        keys.push(from);
+                    if let Some(link) = c.link.as_ref() {
+                        keys.extend(link.from.iter());
+                        keys.extend(link.line.iter());
                     }
                     for k in keys {
                         if !cols.contains(k) {
@@ -873,7 +1098,8 @@ empty: No tasks.
             l.columns[0].link,
             Some(LensLink {
                 kind: LensLinkKind::Task,
-                from: Some("id".into())
+                from: Some("id".into()),
+                line: None,
             })
         );
     }
@@ -1404,7 +1630,7 @@ empty: No tasks.
         write(
             dir.path(),
             "oxplow/extensions/mine/lenses/a.yaml",
-            "title: A\nquery: SELECT 1\n",
+            "title: A\nparams: [{ name: effort_id }]\nquery: SELECT :effort_id\n",
         );
         let e = load_extensions(dir.path())
             .into_iter()
@@ -1435,5 +1661,207 @@ empty: No tasks.
             let ext = load_one(&Disk(examples.join(&name)), &name, &name, "project");
             assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
         }
+    }
+
+    /// One project extension `x` with the given lens files and
+    /// extension.yaml tail; returns its load result.
+    fn load_x(files: &[(&str, &str)], manifest_tail: &str) -> (tempfile::TempDir, Extension) {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/x/extension.yaml",
+            &format!("name: x\n{manifest_tail}"),
+        );
+        for (slug, body) in files {
+            write(
+                dir.path(),
+                &format!("oxplow/extensions/x/lenses/{slug}.yaml"),
+                body,
+            );
+        }
+        let ext = project_extensions(dir.path()).remove(0);
+        (dir, ext)
+    }
+
+    #[test]
+    fn chart_lenses_parse_and_missing_fields_are_errors() {
+        let (_d, ext) = load_x(
+            &[
+                ("visits", "title: V\nquery: SELECT 'a' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: n }\n"),
+                ("trend", "title: T\nquery: SELECT 1 AS at, 2 AS v, 'm' AS s\nviz: line\nchart: { x: at, y: v, series: s }\n"),
+                ("map", "title: M\nquery: SELECT 'p' AS path, 3 AS churn, 'core' AS zone\nviz: treemap\nchart: { label: path, size: churn, group: zone }\n"),
+                ("all", "title: All\nquery: SELECT 1\nviz: grid\nchildren: [visits, trend]\n"),
+                ("nobar", "title: N\nquery: SELECT 1\nviz: bar\n"),
+                ("badgrid", "title: G\nquery: SELECT 1\nviz: grid\nchildren: [nope]\n"),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        assert_eq!(lens("visits").unwrap().viz, LensViz::Bar);
+        assert_eq!(
+            lens("visits").unwrap().chart.as_ref().unwrap().y.as_deref(),
+            Some("n")
+        );
+        assert_eq!(
+            lens("trend")
+                .unwrap()
+                .chart
+                .as_ref()
+                .unwrap()
+                .series
+                .as_deref(),
+            Some("s")
+        );
+        assert_eq!(
+            lens("map")
+                .unwrap()
+                .chart
+                .as_ref()
+                .unwrap()
+                .group
+                .as_deref(),
+            Some("zone")
+        );
+        assert_eq!(lens("all").unwrap().children, vec!["x/visits", "x/trend"]);
+        assert!(lens("nobar").is_none() && lens("badgrid").is_none());
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("nobar") && errs.contains("chart"), "{errs}");
+        assert!(errs.contains("badgrid") && errs.contains("nope"), "{errs}");
+    }
+
+    #[tokio::test]
+    async fn validate_checks_chart_and_link_columns_exist() {
+        let (d, _) = load_x(
+            &[
+                ("a", "title: A\nquery: SELECT 'x' AS day, 1 AS n\nviz: bar\nchart: { x: day, y: missing }\n"),
+                ("b", "title: B\nquery: SELECT 'f.rs' AS path\ncolumns:\n  - { key: path, link: { kind: file, line: ln } }\n"),
+            ],
+            "",
+        );
+        let v = validate_extension(&layer().await, d.path(), "x")
+            .await
+            .unwrap();
+        let errs = v.errors.join("\n");
+        assert!(
+            errs.contains("`missing`") && errs.contains("`ln`"),
+            "{errs}"
+        );
+    }
+
+    #[test]
+    fn new_link_kinds_parse() {
+        let (_d, ext) = load_x(
+            &[(
+                "l",
+                "title: L\nquery: SELECT 1\ncolumns:\n  - { key: a, link: { kind: commit } }\n  - { key: b, link: { kind: metric } }\n  - { key: d, link: { kind: file, line: n } }\n",
+            )],
+            "",
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        let kinds: Vec<LensLinkKind> = ext.lenses[0]
+            .columns
+            .iter()
+            .map(|c| c.link.as_ref().unwrap().kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                LensLinkKind::Commit,
+                LensLinkKind::Metric,
+                LensLinkKind::File
+            ]
+        );
+        assert_eq!(
+            ext.lenses[0].columns[2]
+                .link
+                .as_ref()
+                .unwrap()
+                .line
+                .as_deref(),
+            Some("n")
+        );
+    }
+
+    #[test]
+    fn slots_bind_params_the_lens_must_declare() {
+        let task_lens = "title: T\nparams: [{ name: task_id }]\nquery: SELECT :task_id\n";
+        let thread_lens = "title: Th\nparams: [{ name: thread_id }]\nquery: SELECT :thread_id\n";
+        let (_d, ext) = load_x(
+            &[("t", task_lens), ("th", thread_lens), ("plain", "title: P\nquery: SELECT 1\n")],
+            "slots:\n  - { slot: task-detail, lens: t }\n  - { slot: thread, lens: th }\n  - { slot: task-detail, lens: plain }\n",
+        );
+        let mounted: Vec<(&str, &str)> = ext
+            .slots
+            .iter()
+            .map(|s| (s.slot.as_str(), s.lens_id.as_str()))
+            .collect();
+        assert_eq!(mounted, vec![("task-detail", "x/t"), ("thread", "x/th")]);
+        let errs = ext.errors.join("\n");
+        assert!(errs.contains("task_id") && errs.contains("plain"), "{errs}");
+    }
+
+    #[test]
+    fn launcher_category_and_hidden_parse() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "a",
+                    "title: A\nquery: SELECT 1\nlauncher: { category: Activity }\n",
+                ),
+                ("b", "title: B\nquery: SELECT 1\nhidden: true\n"),
+                (
+                    "c",
+                    "title: C\nquery: SELECT 1\nlauncher: { category: Nowhere }\n",
+                ),
+            ],
+            "",
+        );
+        let lens = |slug: &str| ext.lenses.iter().find(|l| l.slug == slug);
+        assert_eq!(
+            lens("a").unwrap().launcher_category,
+            Some(LauncherCategory::Activity)
+        );
+        assert!(lens("b").unwrap().hidden);
+        assert!(!lens("a").unwrap().hidden);
+        assert!(lens("c").is_none());
+        assert!(
+            ext.errors.join("\n").contains("Nowhere"),
+            "{:?}",
+            ext.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn disabled_extensions_load_empty_and_their_lenses_refuse_to_run() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/by-status.yaml",
+            LENS,
+        );
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            "extensions:\n  disabled: [review, oxplow-review]\n",
+        );
+        let exts = load_extensions(dir.path());
+        for name in ["review", "oxplow-review"] {
+            let e = exts.iter().find(|e| e.name == name).unwrap();
+            assert!(!e.enabled, "{name}");
+            assert!(
+                e.lenses.is_empty() && e.slots.is_empty() && e.sources.is_empty(),
+                "{name}"
+            );
+        }
+        let err = run_lens(
+            &layer().await,
+            dir.path(),
+            "review/by-status",
+            BTreeMap::new(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("disabled"), "{err}");
     }
 }

@@ -47,7 +47,6 @@ export type PageKind =
   | "external-url"
   | "effort-coverage"
   | "usage"
-  | "metrics"
   | "metrics-recorded"
   | "metric-detail"
   | "metric-recording"

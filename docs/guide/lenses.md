@@ -36,7 +36,7 @@ params:
 query: |
   SELECT id, title, updated_at FROM v_task
   WHERE status = 'blocked' AND stream_id = :stream
-viz: table            # table | list | number | markdown
+viz: table            # table | list | number | markdown | bar | line | treemap | grid
 columns:
   - { key: title, label: Task, link: { kind: task, from: id } }
   - { key: updated_at, label: Updated }
@@ -44,8 +44,52 @@ empty: Nothing is blocked.
 ```
 
 - `params` become inputs on the page and bind as `:name`.
-- `link.kind` is `task`, `file`, `wiki` or `effort-diff`.
+- `link.kind` is `task`, `file` (add `line: <column>` to open at a line),
+  `wiki`, `effort-diff`, `commit` or `metric`.
 - Unknown keys are errors, so typos show up instead of being ignored.
+
+Charts name the columns they draw:
+
+```yaml
+viz: bar              # or line
+chart: { x: day, y: visits }          # line also takes series: <column>
+```
+
+```yaml
+viz: treemap
+chart: { label: path, size: churn, group: zone }
+```
+
+```yaml
+viz: grid             # other lenses, stacked
+children: [visits, tokens-by-day]
+```
+
+`launcher: { category: Activity }` files a lens under that launcher
+heading; `hidden: true` leaves it out (for lenses only a slot shows).
+
+### Showing a lens on a core page
+
+`slots:` in `extension.yaml` mounts a lens into a page. The lens gets the
+page's id as a param, so it must declare it:
+
+| Slot | Page | Param |
+|---|---|---|
+| `effort-review` | an effort's diff view | `effort_id` |
+| `task-detail` | a task's page | `task_id` |
+| `thread` | the Work panel (compact) | `thread_id` |
+
+```yaml
+slots:
+  - { slot: task-detail, lens: task-tokens }
+```
+
+### Turning an extension off
+
+Settings → Extensions → **Disable** turns an extension off for the
+project, including the ones that ship with oxplow. It writes
+`extensions: { disabled: [name] }` to `.oxplow/project.yaml`; commit that
+to turn it off for your team.
 
 Problems show under Settings → Extensions. Agents check their work with
 `validate_extension`.

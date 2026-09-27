@@ -62,6 +62,27 @@ pub async fn validate_extension(
     Ok(extensions::validate_extension(&layer(svc), &root, &name).await?)
 }
 
+/// Turn an extension on or off for the project (`extensions.disabled` in
+/// `.oxplow/project.yaml`, so it's team-wide once committed). Returns the
+/// primary stream's extensions. UI only: agents don't toggle extensions.
+pub async fn set_extension_enabled(
+    svc: &Services,
+    name: String,
+    enabled: bool,
+) -> Result<Vec<Extension>, IpcError> {
+    oxplow_app::config_service::mutate_config(&svc.config, &svc.layout.project_dir, |c| {
+        c.extensions_disabled.retain(|d| d != &name);
+        if !enabled {
+            c.extensions_disabled.push(name.clone());
+        }
+    })
+    .map_err(|e| IpcError::invalid(e.to_string()))?;
+    svc.events
+        .emit(oxplow_app::events::OxplowEvent::ConfigChanged);
+    let root = root(svc, None).await;
+    Ok(extensions::load_extensions(&root))
+}
+
 /// Install an extension from a git repo into this stream's worktree
 /// (`oxplow/extensions/<name>/`). The files are then ordinary project
 /// files: commit them to share with the team.
@@ -250,5 +271,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(run["result"]["rows"], json!([["primary"]]));
+    }
+
+    #[tokio::test]
+    async fn extensions_can_be_disabled_and_reenabled() {
+        let (svc, _dir) = crate::test_support::services();
+        let enabled = |list: &serde_json::Value| {
+            list.as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["name"] == "oxplow-review")
+                .unwrap()["enabled"]
+                .clone()
+        };
+        let list = crate::dispatch(
+            "set_extension_enabled",
+            json!({ "name": "oxplow-review", "enabled": false }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(enabled(&list), json!(false));
+        let yaml =
+            std::fs::read_to_string(svc.layout.project_dir.join(".oxplow/project.yaml")).unwrap();
+        assert!(yaml.contains("oxplow-review"), "{yaml}");
+        let list = crate::dispatch(
+            "set_extension_enabled",
+            json!({ "name": "oxplow-review", "enabled": true }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(enabled(&list), json!(true));
     }
 }

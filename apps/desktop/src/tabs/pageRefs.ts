@@ -6,6 +6,7 @@
 import type { TabRef } from "./tabState.js";
 import { DISK, type FileVersion, versionIdFragment } from "../file-version.js";
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
+import { redirectLegacyRef } from "./legacyRedirects.js";
 
 export function agentRef(): TabRef {
   return { id: "agent", kind: "agent", payload: null };
@@ -419,6 +420,10 @@ export function externalUrlRef(url: string): TabRef {
  * no payload, so the id IS the kind and the fallback is fine.
  */
 export function refFromTabId(id: string): TabRef {
+  return redirectLegacyRef(parseTabId(id));
+}
+
+function parseTabId(id: string): TabRef {
   const colon = id.indexOf(":");
   const scheme = colon === -1 ? id : id.slice(0, colon);
   const rest = colon === -1 ? "" : id.slice(colon + 1);

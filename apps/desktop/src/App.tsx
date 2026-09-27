@@ -1885,11 +1885,20 @@ export function App() {
         setCenterActive("agent");
         return;
       case "file": {
-        const payload = ref.payload as { path?: string; version?: import("./file-version.js").FileVersion } | null;
+        const payload = ref.payload as {
+          path?: string;
+          version?: import("./file-version.js").FileVersion;
+          /** Open at this line (lens `file` links with `line:`). */
+          line?: number;
+        } | null;
         if (!payload?.path) return;
         const version = payload.version ?? DISK;
         if (version.kind === "disk") {
-          void handleOpenFile(payload.path);
+          if (payload.line && payload.line > 0) {
+            void handleNavigateToLocation({ path: payload.path, line: payload.line, column: 1 });
+          } else {
+            void handleOpenFile(payload.path);
+          }
           return;
         }
         // Non-disk: register the ref directly without going through
@@ -1935,7 +1944,6 @@ export function App() {
       case "external-url":
       case "effort-coverage":
       case "usage":
-      case "metrics":
       case "metrics-recorded":
       case "metric-detail":
       case "metric-recording":

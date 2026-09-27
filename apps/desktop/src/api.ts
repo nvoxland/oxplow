@@ -515,6 +515,12 @@ export async function reportOpenPage(
   unwrap(await commands.reportOpenPage(threadId, pageId, kind, detailJson));
 }
 
+/// Turn an extension on or off for the project (`extensions.disabled` in
+/// `.oxplow/project.yaml`). Returns the updated extension list.
+export async function setExtensionEnabled(name: string, enabled: boolean): Promise<Extension[]> {
+  return unwrap(await commands.setExtensionEnabled(name, enabled));
+}
+
 /// Extension-declared data sources with last run state and consent.
 export async function listSources(): Promise<SourceListing[]> {
   return unwrap(await commands.listSources());

@@ -14,6 +14,7 @@ import {
   listExtensions,
   listSources,
   runSource,
+  setExtensionEnabled,
   setSourceCredential,
   subscribeOxplowEvents,
   updateExtension,
@@ -82,6 +83,19 @@ export function ExtensionsSection() {
     }
   }
 
+  async function toggle(name: string, enabled: boolean) {
+    setBusy(name);
+    try {
+      setExts(await setExtensionEnabled(name, enabled));
+      setSources(await listSources());
+      showToast({ message: enabled ? `Enabled ${name}.` : `Disabled ${name} for this project.` });
+    } catch (e) {
+      recordOpError({ label: `${enabled ? "Enable" : "Disable"} extension ${name}`, message: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function update(name: string) {
     setBusy(name);
     try {
@@ -115,6 +129,14 @@ export function ExtensionsSection() {
                     {m.lensCount} {m.lensCount === 1 ? "lens" : "lenses"} · {m.origin}
                   </span>
                   <span style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    data-testid={`extension-toggle-${m.name}`}
+                    disabled={busy !== null}
+                    onClick={() => void toggle(m.name, !m.enabled)}
+                  >
+                    {m.toggleLabel}
+                  </button>
                   {m.canUpdate ? (
                     <button
                       type="button"
@@ -127,6 +149,7 @@ export function ExtensionsSection() {
                   ) : null}
                 </div>
                 {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
+                {m.disabledNote ? <div style={mutedStyle}>{m.disabledNote}</div> : null}
                 {m.errors.map((err, i) => (
                   <div key={i} style={errorStyle}>
                     {err}

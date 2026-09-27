@@ -5,8 +5,9 @@
  * See `.context/extensions.md`.
  */
 import type { Extension, Lens, LensLink, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
-import type { PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { effortDiffRef, fileRef, lensRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
+import { effortDiffRef, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { DISK } from "../file-version.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export interface DisplayColumn {
@@ -49,9 +50,18 @@ export function cellLinkRef(
   const s = String(v);
   switch (link.kind) {
     case "task":
-      return taskRef(s);
-    case "file":
-      return fileRef(s);
+      // `v_task.id` is the bare row id; task pages use `tsk<id>`.
+      return taskRef(/^\d+$/.test(s) ? `tsk${s}` : s);
+    case "file": {
+      const ref = fileRef(s);
+      const lineIdx = link.line ? resultColumns.indexOf(link.line) : -1;
+      const line = lineIdx === -1 ? null : Number(row[lineIdx]);
+      return line && line > 0 ? { ...ref, payload: { path: s, version: DISK, line } } : ref;
+    }
+    case "commit":
+      return gitCommitRef(s);
+    case "metric":
+      return metricRef(s);
     case "wiki":
       return wikiPageRef(s);
     case "effort-diff":
@@ -67,24 +77,45 @@ export function formatCell(v: SqlCell): string {
   return v;
 }
 
-/** Launcher entries for every successfully loaded lens, under the
- *  "Lenses" category. Broken extensions contribute nothing here (their
- *  errors surface through `validate_extension` / Settings). */
+/** Launcher entries for every loaded lens that isn't `hidden`, under its
+ *  `launcher.category` (default "Lenses"). Broken or disabled extensions
+ *  contribute nothing here (their errors surface in Settings). */
 export function lensDirectoryEntries(extensions: Extension[]): PageDirectoryEntry[] {
   const out: PageDirectoryEntry[] = [];
   for (const ext of extensions) {
+    if (!ext.enabled) continue;
     for (const lens of ext.lenses) {
+      if (lens.hidden) continue;
       const ref = lensRef(lens.id);
       out.push({
         id: ref.id,
         label: lens.title,
         ref,
-        category: "Lenses",
+        category: lens.launcherCategory ?? "Lenses",
         keywords: `lens ${ext.name} ${lens.slug} ${lens.description}`,
       });
     }
   }
   return out;
+}
+
+/** The launcher directory: static pages plus lens entries, each lens
+ *  placed after the static pages of its category, categories in
+ *  `PAGE_CATEGORY_ORDER`, so every heading stays contiguous. */
+export function mergeDirectory(
+  staticPages: PageDirectoryEntry[],
+  lensPages: PageDirectoryEntry[],
+): PageDirectoryEntry[] {
+  const all = [...staticPages, ...lensPages];
+  const rank = (c: string) => {
+    const i = (PAGE_CATEGORY_ORDER as readonly string[]).indexOf(c);
+    return i === -1 ? PAGE_CATEGORY_ORDER.length : i;
+  };
+  // Stable sort: within a category, static pages keep their order and come first.
+  return all
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => rank(a.p.category) - rank(b.p.category) || a.i - b.i)
+    .map((x) => x.p);
 }
 
 /** Turn a param input box's text into a bound value: numeric text binds
@@ -155,6 +186,10 @@ export function adHocLens(query: string, viz: LensViz): Lens {
     params: [],
     columns: [],
     empty: "No rows.",
+    chart: null,
+    children: [],
+    launcherCategory: null,
+    hidden: false,
     path: "",
   };
 }
@@ -177,4 +212,86 @@ export function slotMounts(extensions: Extension[], slot: string): string[] {
 export function effortRowId(effortId: string): number | null {
   const m = /^(?:eff)?(\d+)$/.exec(effortId);
   return m ? Number(m[1]) : null;
+}
+
+/** The numeric row id from any prefixed UI id (`tsk42`, `thr7`, `eff262`,
+ *  or a bare number). */
+export function numericRowId(id: string): number | null {
+  const m = /^[a-z]*(\d+)$/.exec(id);
+  return m ? Number(m[1]) : null;
+}
+
+function columnValues(result: SqlQueryResult, column: string | null | undefined): SqlCell[] | null {
+  if (!column) return null;
+  const i = result.columns.indexOf(column);
+  return i === -1 ? null : result.rows.map((r) => r[i] ?? null);
+}
+
+/** `bar` viz rows: `chart.x` labels and `chart.y` values (NULL → 0). */
+export function barRows(lens: Lens, result: SqlQueryResult): { label: string; value: number }[] {
+  const xs = columnValues(result, lens.chart?.x);
+  const ys = columnValues(result, lens.chart?.y);
+  if (!xs || !ys) return [];
+  return xs.map((x, i) => ({ label: formatCell(x), value: Number(ys[i] ?? 0) || 0 }));
+}
+
+/** A time or number as epoch-ms (numbers pass through). */
+function toTime(v: SqlCell): number | null {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isNaN(t) ? null : t;
+  }
+  return null;
+}
+
+/** `line` viz: one series per `chart.series` value (a single unnamed
+ *  series without it), points sorted by time. */
+export function lineSeries(
+  lens: Lens,
+  result: SqlQueryResult,
+): { name: string; points: { t: number; v: number }[] }[] {
+  const xs = columnValues(result, lens.chart?.x);
+  const ys = columnValues(result, lens.chart?.y);
+  if (!xs || !ys) return [];
+  const names = columnValues(result, lens.chart?.series);
+  const bySeries = new Map<string, { t: number; v: number }[]>();
+  xs.forEach((x, i) => {
+    const t = toTime(x);
+    const v = Number(ys[i]);
+    if (t === null || ys[i] === null || Number.isNaN(v)) return;
+    const name = names ? formatCell(names[i] ?? null) : "";
+    const pts = bySeries.get(name) ?? [];
+    pts.push({ t, v });
+    bySeries.set(name, pts);
+  });
+  return [...bySeries.entries()].map(([name, points]) => ({ name, points: points.sort((a, b) => a.t - b.t) }));
+}
+
+/** `treemap` viz items: label, positive size, optional group, and the row
+ *  (so a click can follow the lens's links). */
+export function treemapItems(
+  lens: Lens,
+  result: SqlQueryResult,
+): { label: string; size: number; group: string | null; row: SqlCell[] }[] {
+  const labels = columnValues(result, lens.chart?.label);
+  const sizes = columnValues(result, lens.chart?.size);
+  if (!labels || !sizes) return [];
+  const groups = columnValues(result, lens.chart?.group);
+  const out: { label: string; size: number; group: string | null; row: SqlCell[] }[] = [];
+  labels.forEach((l, i) => {
+    const size = Number(sizes[i]);
+    if (!(size > 0)) return;
+    out.push({ label: formatCell(l), size, group: groups ? formatCell(groups[i] ?? null) : null, row: result.rows[i]! });
+  });
+  return out;
+}
+
+/** The params a `grid` passes to one child: those the child declares. */
+export function childParams(child: Lens, params: Record<string, SqlCell>): Record<string, SqlCell> {
+  const out: Record<string, SqlCell> = {};
+  for (const p of child.params) {
+    if (p.name in params) out[p.name] = params[p.name] ?? null;
+  }
+  return out;
 }

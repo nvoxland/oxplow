@@ -1,4 +1,5 @@
 import type { TabRef } from "./tabState.js";
+import { redirectLegacyRef } from "./legacyRedirects.js";
 
 export type BookmarkScope = "thread" | "stream" | "global";
 
@@ -47,7 +48,9 @@ function safeParse(raw: string | null): Bookmark[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((b) => b && typeof b === "object" && b.ref && typeof b.scope === "string");
+    return parsed
+      .filter((b) => b && typeof b === "object" && b.ref && typeof b.scope === "string")
+      .map((b: Bookmark) => ({ ...b, ref: redirectLegacyRef(b.ref) }));
   } catch {
     return [];
   }

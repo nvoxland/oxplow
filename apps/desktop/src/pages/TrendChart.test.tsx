@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { render } from "@testing-library/react";
 
-import { TrendChart } from "./MetricDetail.js";
+import { TrendChart } from "../components/charts/TrendChart.js";
 
 // Two points a day apart, so the time axis has a real span to label.
 const T0 = Date.parse("2026-07-16T09:00:00Z");

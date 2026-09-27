@@ -1,3 +1,5 @@
+import { LensSlots } from "../../lens/LensSlots.js";
+import { numericRowId } from "../../lens/lensModel.js";
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -486,6 +488,14 @@ export function PlanPane({
     >
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         {mode === "thread" && threadId ? <ThreadTokenTotal threadId={threadId} /> : null}
+        {mode === "thread" && threadId ? (
+          <LensSlots
+            slot="thread"
+            params={numericRowId(threadId) === null ? null : { thread_id: numericRowId(threadId) }}
+            streamId={streamId}
+            variant="strip"
+          />
+        ) : null}
         {(() => {
           const allItems = groups.flatMap((g) => [
             ...g.items,

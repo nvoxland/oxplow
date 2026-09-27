@@ -80,8 +80,17 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - "Improve with Agent" inserts `[oxplow lens <id> k=v…]`, with only the
     changed params, through the standard add-to-context path.
   - The Cmd+P launcher re-reads lenses from the stream's worktree every
-    time it opens and lists them under **Lenses**, so they're both
-    browsable and searchable.
+    time it opens and lists them under their `launcher.category`
+    (default **Lenses**; `hidden` ones not at all), merged into the
+    static directory by category order (`mergeDirectory`).
+  - **Viz** (`LensResultView.tsx`): `table`, `list`, `number`, `markdown`,
+    plus `bar` (`DailyBarChart`), `line` (`components/charts/TrendChart`,
+    one chart per `chart.series`), `treemap` (two-level
+    `components/charts/squarify`) and `grid` (children run with the
+    params they declare). The loader drops a chart lens missing the
+    `chart` columns its viz needs, and `validate_extension` checks those
+    columns exist in the result. Pure data shaping lives in `lensModel.ts`
+    (`barRows`, `lineSeries`, `treemapItems`, `childParams`).
 - **Sharing.** There are three levels:
   - **Yourself.** An extension works in your worktree as soon as it's
     written.
@@ -142,14 +151,23 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       shadows the bundled one;
     - `install_extension` refuses the name;
     - `save_lens` refuses to write into a bundled extension.
-- **Slots (current: `effort-review`).**
-  - `extension.yaml` declares `slots: [{slot, lens}]`. They're validated
-    against `SLOTS` and against the extension's own lenses, and loaded as
+- **Slots (current: `effort-review`, `task-detail`, `thread`).**
+  - `extension.yaml` declares `slots: [{slot, lens}]`. `SLOTS` in
+    `extensions.rs` names each slot and the params it binds; a mounted
+    lens must declare them all, or the mount is an error. Loaded as
     `Extension.slots`.
-  - The effort diff view (`DiffViewPage`) renders `EffortReviewSlots`
-    (`src/lens/EffortReviewSlots.tsx`). Every mounted lens runs with
-    `effort_id` set to the effort's numeric row id (`effortRowId`), and it
-    re-runs on data events.
+  - `src/lens/LensSlots.tsx` renders a slot: every mounted lens, run with
+    the slot's params, re-run on data events. DiffViewPage binds
+    `effort_id`, TaskPage `task_id`, PlanPane `thread_id` (the compact
+    `strip` variant, which hides lenses with no rows). Numeric ids come
+    from `numericRowId` (`tsk42` → 42).
+- **Disabling.** `extensions: { disabled: [name] }` in
+  `.oxplow/project.yaml` (bundled extensions included). `load_extensions`
+  reads the list with `oxplow_config::disabled_extensions` (just that key,
+  from the worktree being read) and returns a disabled extension with
+  `enabled: false` and no lenses, slots or sources, so every consumer
+  ignores it; `find_lens` and `run_lens` say it's disabled. Settings →
+  Extensions toggles it through the UI-only `set_extension_enabled`.
 - **`oxplow-review` (the review packet).** Its lenses, mounted in
   `effort-review`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
@@ -399,5 +417,15 @@ and enabling it restores the old pages' behavior as lenses.
 
 ## Added for extraction
 
-Capabilities added to core because the extraction needed them. Empty
-until tsk280 starts.
+Capabilities added to core because the extraction needed them (tsk280),
+available to every extension:
+
+- `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
+- `commit` and `metric` link kinds; `file` links with `line`; `task`
+  links accept a bare `v_task.id`.
+- `task-detail` and `thread` slots, with slot params checked at load.
+- Lens `launcher.category` and `hidden`.
+- Disabling extensions per project.
+- `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,
+  bookmarks and history for a page kind that moved to a lens open the
+  lens.

@@ -56,7 +56,7 @@ query: |
   FROM v_task
   WHERE status = 'blocked' AND stream_id = :stream
   ORDER BY updated_at DESC
-viz: table                      # table | list | number | markdown
+viz: table                      # table | list | number | markdown | bar | line | treemap | grid
 columns:                        # optional; controls headers, order and links
   - { key: title, label: Task, link: { kind: task, from: id } }
   - { key: status }
@@ -68,14 +68,33 @@ empty: Nothing is waiting on you.
   - `list` shows one line per row, headlined by the first column.
   - `number` shows the first cell as a big number.
   - `markdown` renders the first cell as markdown.
+  - `bar` draws bars: `chart: { x: <label column>, y: <value column> }`.
+  - `line` draws a trend: `chart: { x: <time or number>, y: <value>,
+    series: <optional column, one line each> }`.
+  - `treemap` draws nested rectangles: `chart: { label: <column>, size:
+    <column>, group: <optional column> }`. A tile click follows the
+    lens's first column link.
+  - `grid` stacks other lenses: `children: [slug, other-ext/slug]`. Each
+    child gets the params it declares from this lens's params.
 - **`link.kind`** makes cells clickable:
-  - `task` takes a task id.
-  - `file` takes a repo-relative path.
+  - `task` takes a task id (a bare `v_task.id` number works).
+  - `file` takes a repo-relative path; add `line: <column>` to open at a
+    line.
   - `wiki` takes a slug.
   - `effort-diff` takes an effort id.
+  - `commit` takes a sha.
+  - `metric` takes a metric key.
   
   `from` names the result column that holds the id; it defaults to the
   column itself.
+- **`launcher: { category: Activity }`** lists the lens under that
+  launcher heading (Work, Code, Git, Activity, Knowledge, Data, Lenses,
+  System; default Lenses). **`hidden: true`** keeps it out of the
+  launcher, for lenses only a slot shows.
+- **Slots** mount a lens into a core page (`slots: [{ slot, lens }]` in
+  `extension.yaml`). The lens must declare the params the slot binds:
+  `effort-review` (effort diff view) → `effort_id`; `task-detail` (task
+  page) → `task_id`; `thread` (the Work panel, compact) → `thread_id`.
 - **Unknown keys are errors.** Only the keys shown above exist today.
 
 ## 3. Check it

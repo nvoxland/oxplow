@@ -11,6 +11,11 @@ export interface ExtensionRowModel {
   canUpdate: boolean;
   healthy: boolean;
   errors: string[];
+  enabled: boolean;
+  /** "Enable" or "Disable". */
+  toggleLabel: string;
+  /** Shown while it's off, saying where that's set. */
+  disabledNote: string | null;
 }
 
 export function extensionRowModel(ext: Extension): ExtensionRowModel {
@@ -29,6 +34,9 @@ export function extensionRowModel(ext: Extension): ExtensionRowModel {
     canUpdate: src !== null && ext.origin !== "bundled",
     healthy: ext.errors.length === 0,
     errors: ext.errors,
+    enabled: ext.enabled,
+    toggleLabel: ext.enabled ? "Disable" : "Enable",
+    disabledNote: ext.enabled ? null : "Off for this project (extensions.disabled in .oxplow/project.yaml).",
   };
 }
 

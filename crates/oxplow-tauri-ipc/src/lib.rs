@@ -149,6 +149,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::update_extension,
             commands::generated::save_lens,
             commands::generated::report_open_page,
+            commands::generated::set_extension_enabled,
             commands::generated::list_sources,
             commands::generated::run_source,
             commands::generated::set_source_credential,

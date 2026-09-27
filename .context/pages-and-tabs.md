@@ -99,6 +99,12 @@ extension host lands.
 Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
+**Removed page kinds redirect.** When a page kind moves out of core into
+an extension's lens, add its id or scheme to `LEGACY_PAGE_REDIRECTS`
+(`tabs/legacyRedirects.ts`). `refFromTabId`, the persisted tab lists and
+bookmarks all pass through `redirectLegacyRef`, so saved tabs, bookmarks
+and history reopen the lens instead of becoming dead entries.
+
 | Kind | Id format | Example |
 |---|---|---|
 | agent | `agent` | `agent` |

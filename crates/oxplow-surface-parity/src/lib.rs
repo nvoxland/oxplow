@@ -187,6 +187,8 @@ pub const MANIFEST: &[Capability] = &[
     both("update_extension"),
     ui("save_lens"),
     ui("report_open_page"),
+    // Turning extensions on/off is the person's call.
+    ui("set_extension_enabled"),
     both("list_sources"),
     agent("record_decision"),
     agent("record_claim"),

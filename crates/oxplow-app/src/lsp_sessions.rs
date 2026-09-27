@@ -862,6 +862,7 @@ mod tests {
             zones: Default::default(),
             agent_models: Default::default(),
             ai_roles: Default::default(),
+            extensions_disabled: Vec::new(),
         }))
     }
 

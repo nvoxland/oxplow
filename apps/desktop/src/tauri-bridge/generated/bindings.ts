@@ -375,6 +375,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	setExtensionEnabled: (name: string, enabled: boolean) => typedError<Extension[], IpcError>(__TAURI_INVOKE("set_extension_enabled", { name, enabled })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listSources: () => typedError<SourceListing[], IpcError>(__TAURI_INVOKE("list_sources")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2241,6 +2246,11 @@ export type Extension = {
 	origin: string,
 	// Lenses mounted into core pages.
 	slots: LensSlot[],
+	/**
+	 *  False when `.oxplow/project.yaml` disables it; a disabled
+	 *  extension has no lenses, slots or sources.
+	 */
+	enabled: boolean,
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -2651,6 +2661,12 @@ export type IpcError = {
 	cause: string | null,
 };
 
+/**
+ *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
+ *  renderer's `PageCategory`.
+ */
+export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Lenses" | "System";
+
 // A loaded lens.
 export type Lens = {
 	/**
@@ -2667,8 +2683,26 @@ export type Lens = {
 	params: LensParam[],
 	columns: LensColumn[],
 	empty: string | null,
+	// Columns a chart viz draws from.
+	chart: LensChart | null,
+	// For `grid`: child lens ids.
+	children: string[],
+	// Launcher section; `None` = "Lenses".
+	launcherCategory: LauncherCategory | null,
+	// Not listed in the launcher.
+	hidden: boolean,
 	// Repo-relative path of the lens file.
 	path: string,
+};
+
+// Which result columns a chart viz draws from.
+export type LensChart = {
+	x?: string | null,
+	y?: string | null,
+	series?: string | null,
+	label?: string | null,
+	size?: string | null,
+	group?: string | null,
 };
 
 // How one result column is shown.
@@ -2685,6 +2719,8 @@ export type LensLink = {
 	kind: LensLinkKind,
 	// Result column holding the target id. Defaults to the column itself.
 	from?: string | null,
+	// For `file`: result column holding a line number to open at.
+	line?: string | null,
 };
 
 // A page a column value can link to.
@@ -2696,7 +2732,11 @@ export type LensLinkKind =
 // `wiki:<slug>`.
 "wiki" | 
 // The effort's diff view; the value is an effort id.
-"effort-diff";
+"effort-diff" | 
+// A git commit; the value is a sha.
+"commit" | 
+// A metric's page; the value is a metric key.
+"metric";
 
 /**
  *  A value the viewer (or an agent) can set when running the lens,
@@ -2720,8 +2760,9 @@ export type LensRun = {
 // A lens an extension mounts into a core page.
 export type LensSlot = {
 	/**
-	 *  Which page: `effort-review` (an effort's diff view, which binds
-	 *  `:effort_id`).
+	 *  Which page, from [`SLOTS`]: `effort-review` (an effort's diff
+	 *  view, binds `:effort_id`), `task-detail` (`:task_id`) or `thread`
+	 *  (`:thread_id`).
 	 */
 	slot: string,
 	lensId: string,
@@ -2739,7 +2780,24 @@ export type LensViz =
 // A single value: the first column of the first row.
 "number" | 
 // The first column of the first row, rendered as markdown.
-"markdown";
+"markdown" | 
+// Bars: `chart.x` labels, `chart.y` values.
+"bar" | 
+/**
+ *  A line over `chart.x` (a time or number), `chart.y` values, one
+ *  line per `chart.series` value when set.
+ */
+"line" | 
+/**
+ *  Nested rectangles sized by `chart.size`, labelled by `chart.label`,
+ *  grouped (and coloured) by `chart.group`.
+ */
+"treemap" | 
+/**
+ *  Other lenses (`children`), stacked, each given the params it
+ *  declares from this lens's params.
+ */
+"grid";
 
 /**
  *  Per-line attribution combining git blame with a local "this line was
@@ -3166,6 +3224,11 @@ export type OxplowConfig = {
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
 	 */
 	aiRoles: { [key in string]: AiRoleOverride },
+	/**
+	 *  Extensions turned off for this project (`extensions: { disabled:
+	 *  [...] }`), bundled ones included. Committed, so it's team-wide.
+	 */
+	extensionsDisabled: string[],
 };
 
 /**
