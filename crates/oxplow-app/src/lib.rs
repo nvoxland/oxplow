@@ -25,6 +25,7 @@ pub mod config_watch;
 pub mod daemon_supervisor;
 pub mod diagnostics;
 pub mod events;
+pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;
 pub mod followup;

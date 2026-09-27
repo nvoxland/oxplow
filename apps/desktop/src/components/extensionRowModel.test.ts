@@ -9,6 +9,7 @@ const ext = (over: Partial<Extension> = {}): Extension => ({
   errors: [],
   lenses: [],
   source: null,
+  sources: [],
   ...over,
 });
 

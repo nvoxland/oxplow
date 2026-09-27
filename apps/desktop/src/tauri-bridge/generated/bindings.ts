@@ -1750,6 +1750,11 @@ export type CollectionConfig = {
 	plugins?: PluginConfig[],
 };
 
+// Declared type of an entity column.
+export type ColumnType = "text" | "int" | "real" | "bool" | 
+// An RFC 3339 timestamp, stored as text.
+"time";
+
 /**
  *  The thread anchor + metadata. The conversation lives in
  *  [`CommentMessage`] rows keyed by `id`.
@@ -2166,6 +2171,8 @@ export type Extension = {
 	 *  `install_extension`; `None` for ones written in this repo.
 	 */
 	source: ExtensionSource | null,
+	// Declared data sources (valid ones; invalid ones are in `errors`).
+	sources: SourceSpec[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.
@@ -3596,6 +3603,55 @@ export type SnapshotSummaryCounts = {
 	created: number,
 	updated: number,
 	deleted: number,
+};
+
+export type SourceColumn = {
+	name: string,
+	colType: ColumnType,
+	doc: string,
+};
+
+export type SourceEntity = {
+	name: string,
+	doc: string,
+	// Column that uniquely identifies a row.
+	key: string,
+	columns: SourceColumn[],
+	relations: SourceRelation[],
+	// SQL name lenses and agents query: `v_<extension>_<entity>`.
+	view: string,
+};
+
+/**
+ *  A documented join from this entity to another view. Not executed;
+ *  it tells agents and lens authors how the data connects.
+ */
+export type SourceRelation = {
+	// The view it joins to, e.g. `v_task` or `v_github_review`.
+	to: string,
+	// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
+	on: string,
+};
+
+// When a source runs by itself.
+export type SourceSchedule = 
+// Only when someone asks (Sync Now / `run_source`).
+{ kind: "manual" } | 
+// Every `minutes` minutes, once approved.
+{ kind: "every"; minutes: number };
+
+export type SourceSpec = {
+	id: string,
+	doc: string,
+	// Path to the executable, relative to the extension folder.
+	entry: string,
+	schedule: SourceSchedule,
+	/**
+	 *  Host environment variables passed through to the entry
+	 *  (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
+	 */
+	env: string[],
+	entities: SourceEntity[],
 };
 
 /**

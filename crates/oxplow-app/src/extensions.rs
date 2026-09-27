@@ -114,6 +114,10 @@ struct ExtensionFile {
     name: String,
     #[serde(default)]
     description: String,
+    /// Parsed separately by [`crate::extension_sources::parse_sources`] so
+    /// one bad source doesn't fail the whole manifest.
+    #[serde(default)]
+    sources: Option<serde_yaml::Value>,
 }
 
 /// A loaded lens.
@@ -151,6 +155,8 @@ pub struct Extension {
     /// Where it was installed from, for extensions added with
     /// `install_extension`; `None` for ones written in this repo.
     pub source: Option<ExtensionSource>,
+    /// Declared data sources (valid ones; invalid ones are in `errors`).
+    pub sources: Vec<crate::extension_sources::SourceSpec>,
 }
 
 /// Provenance of an installed extension, kept in its `source.yaml`.
@@ -206,6 +212,7 @@ fn load_one(root: &Path, name: &str) -> Extension {
         errors: Vec::new(),
         lenses: Vec::new(),
         source: None,
+        sources: Vec::new(),
     };
 
     let manifest = match std::fs::read_to_string(dir.join("extension.yaml")) {
@@ -223,7 +230,18 @@ fn load_one(root: &Path, name: &str) -> Extension {
             ));
             return ext;
         }
-        Ok(m) => ext.description = m.description,
+        Ok(m) => {
+            ext.description = m.description;
+            if let Some(v) = m.sources {
+                let (sources, errors) = crate::extension_sources::parse_sources(name, &v);
+                ext.sources = sources;
+                ext.errors.extend(
+                    errors
+                        .into_iter()
+                        .map(|e| format!("{rel}/extension.yaml: {e}")),
+                );
+            }
+        }
         Err(e) => {
             ext.errors.push(format!("{rel}/extension.yaml: {e}"));
             return ext;
@@ -1067,5 +1085,30 @@ empty: No tasks.
             matches!(err, DomainError::Invalid(ref m) if m.contains("installed")),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn loads_declared_sources_and_reports_bad_ones_without_dropping_lenses() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            "name: review\nsources:\n  - id: gh\n    runtime: exec\n    entry: bin/sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n  - id: bad\n    runtime: python\n    entry: x\n    entities: []\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/by-status.yaml",
+            LENS,
+        );
+        let e = &load_extensions(dir.path())[0];
+        assert_eq!(e.sources.len(), 1);
+        assert_eq!(e.sources[0].entities[0].view, "v_review_pr");
+        assert_eq!(e.errors.len(), 1, "{:?}", e.errors);
+        assert!(
+            e.errors[0].contains("extension.yaml") && e.errors[0].contains("runtime"),
+            "{:?}",
+            e.errors
+        );
+        assert_eq!(e.lenses.len(), 1);
     }
 }
