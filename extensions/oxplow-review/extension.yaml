@@ -4,5 +4,6 @@ slots:
   - { slot: effort-review, lens: decisions }
   - { slot: effort-review, lens: inferred-decisions }
   - { slot: effort-review, lens: unverified-claims }
+  - { slot: effort-review, lens: what-deviated }
   - { slot: effort-review, lens: struggled }
   - { slot: effort-review, lens: context-read }

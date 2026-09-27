@@ -72,6 +72,7 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "lenses/struggled.yaml"),
             ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
             ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),
+            ext_file!("oxplow-review", "lenses/what-deviated.yaml"),
         ],
     },
 ];
@@ -368,5 +369,49 @@ mod tests {
             .unwrap();
         let rows = run_bundled_lens(&f, "oxplow-review/waiting-on-me", &[]).await;
         assert!(waiting(rows).is_empty());
+    }
+
+    /// What Deviated: the effort's files outside the area its task names.
+    #[tokio::test]
+    async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
+        use oxplow_db::TaskEffortStore as _;
+        use oxplow_domain::stores::TaskStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let describe = |text: &'static str| {
+            let svc = f.svc.clone();
+            let task = f.task;
+            async move {
+                let mut t = svc.task_store.get(task).await.unwrap().unwrap();
+                t.description = text.into();
+                svc.task_store.update(&t).await.unwrap();
+            }
+        };
+        for path in ["src/ui/panel.ts", "src/ui/button.ts", "crates/db/store.rs"] {
+            f.svc
+                .effort_store
+                .record_file(
+                    &f.effort,
+                    path,
+                    oxplow_db::EffortFileChange::Updated,
+                    oxplow_db::FileRefVersion {
+                        local_snapshot_id: 0,
+                        closest_git_version: None,
+                        git_version_exact: false,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let lens = "oxplow-review/what-deviated";
+        let effort = [("effort_id", f.effort.value())];
+
+        describe("Fix the hover state in [[src/ui/button.ts]].").await;
+        let rows = run_bundled_lens(&f, lens, &effort).await;
+        assert_eq!(rows, serde_json::json!([["crates/db/store.rs", "updated"]]));
+
+        // A task that names no paths states no area, so nothing deviates.
+        describe("Make the buttons feel snappier.").await;
+        let rows = run_bundled_lens(&f, lens, &effort).await;
+        assert_eq!(rows, serde_json::json!([]));
     }
 }

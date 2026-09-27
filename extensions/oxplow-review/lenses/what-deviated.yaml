@@ -1,0 +1,40 @@
+title: What Deviated
+description: Files the effort changed outside the area its task names. A file is in the area when the task's title or description names it, or names one of its directories at least two levels deep (`src/ui`). Silent when the task names no area.
+params:
+  - { name: effort_id, label: Effort }
+query: |
+  WITH RECURSIVE
+  files AS (
+    SELECT path, change_kind FROM v_effort_file WHERE effort_id = :effort_id
+  ),
+  task AS (
+    SELECT t.title || ' ' || coalesce(t.description, '') AS text
+    FROM v_effort e JOIN v_task t ON t.id = e.task_id
+    WHERE e.id = :effort_id
+  ),
+  -- Every directory prefix of every file (`a/`, `a/b/`, …).
+  dirs(path, prefix, rest) AS (
+    SELECT path, '', path FROM files
+    UNION ALL
+    SELECT path, prefix || substr(rest, 1, instr(rest, '/')), substr(rest, instr(rest, '/') + 1)
+    FROM dirs WHERE instr(rest, '/') > 0
+  ),
+  scored AS (
+    SELECT f.path, f.change_kind,
+           instr(task.text, f.path) > 0
+           OR EXISTS (
+             SELECT 1 FROM dirs d
+             WHERE d.path = f.path
+               AND length(d.prefix) - length(replace(d.prefix, '/', '')) >= 2
+               AND instr(task.text, rtrim(d.prefix, '/')) > 0
+           ) AS in_area
+    FROM files f, task
+  )
+  SELECT path, change_kind
+  FROM scored
+  WHERE in_area = 0 AND EXISTS (SELECT 1 FROM scored WHERE in_area = 1)
+  ORDER BY path
+columns:
+  - { key: path, label: File, link: { kind: file } }
+  - { key: change_kind, label: Change }
+empty: Everything the effort changed is in the area its task names (or the task names no area).

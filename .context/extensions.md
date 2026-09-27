@@ -194,6 +194,10 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
   - Unverified Claims (`v_claim` where `verified = 0`)
+  - What Deviated (`v_effort_file` vs the task's title/description: a
+    file is in the task's area when the text names it or one of its
+    directories at least two levels deep; silent when the task names no
+    area)
   - Struggled Here (`v_struggle`)
   - Context Read (`v_context_read`)
 
