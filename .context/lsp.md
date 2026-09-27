@@ -92,6 +92,11 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   registers per mounted editor; unclaimed requests answer
   `applied:false`). Editor wiring details:
   `.context/editor-and-monaco.md`.
+- **Persisted diagnostics**: `lsp_diagnostics.rs` (spawned at boot)
+  subscribes to the session broadcast and stores every
+  `publishDiagnostics` in `lsp_diagnostic`, read as `v_diagnostic`
+  (see `.context/semantic-layer.md`). Cleared at boot and per server on
+  restart/crash/stop; emits a debounced `DiagnosticsChanged`.
 - **MCP**: `lsp_hover` / `lsp_definition` / `lsp_references` /
   `lsp_diagnostics` / `lsp_document_symbols` / `lsp_workspace_symbols` /
   `lsp_call_hierarchy` in `crates/oxplow-mcp/src/lib.rs`, riding the same

@@ -384,6 +384,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         });
     }
 
+    // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
+    crate::lsp_diagnostics::spawn(state.clone());
+
     // Search indexer: backfill the unified FTS index from current
     // state, then keep it fresh off the event bus.
     {

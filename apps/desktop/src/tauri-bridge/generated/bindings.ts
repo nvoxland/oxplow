@@ -2976,6 +2976,11 @@ detail: string | null } |
  *  that reviews a finished effort (inferred decisions) keys off this.
  */
 { kind: "effortFinished"; threadId: ThreadId; effortId: number } | 
+/**
+ *  A language server published diagnostics (or restarted) for
+ *  `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
+ */
+{ kind: "diagnosticsChanged"; streamId: number } | 
 // A change's analysis landed (`v_change*` for `change_id`).
 { kind: "changeAnalyzed"; changeId: number } | 
 /**

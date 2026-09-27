@@ -43,6 +43,7 @@ pub mod hook_ingest;
 pub mod indexer;
 pub mod inferred_decisions;
 pub mod link_check;
+pub mod lsp_diagnostics;
 pub mod lsp_installer;
 pub mod lsp_sessions;
 pub mod metric_cube;
@@ -433,6 +434,7 @@ pub struct Services {
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
     pub git_store: Arc<oxplow_db::SqliteGitStore>,
+    pub diagnostic_store: Arc<oxplow_db::SqliteDiagnosticStore>,
     /// Oxplow's own model calls by role (`v_ai_call` records each one).
     pub ai: Arc<ai_service::AiService>,
     /// Stored change analysis (`v_change*`) and its producer state.
@@ -548,6 +550,7 @@ impl Services {
         let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
+        let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
         let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
@@ -750,6 +753,7 @@ impl Services {
             reasoning_store,
             tool_call_store,
             git_store,
+            diagnostic_store,
             ai,
             secrets: ai_env.secrets,
             effort_evidence_store,

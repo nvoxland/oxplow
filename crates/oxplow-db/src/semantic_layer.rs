@@ -869,6 +869,24 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
+        name: "v_diagnostic",
+        description: "Errors and warnings the language servers have published for open or indexed files, right now (cleared when a server restarts).",
+        columns: &[
+            ("stream_id", "Stream whose worktree it's in (v_stream.id)."),
+            ("language", "The language server that reported it."),
+            ("path", "Repo-relative file."),
+            ("severity", "`error`, `warning`, `information` or `hint`."),
+            ("message", "The diagnostic text."),
+            ("source", "The tool behind it (`rustc`, `ts`, `eslint`, …), if given."),
+            ("code", "Its code (`E0308`, `2304`, …), if given."),
+            ("line", "Start line (1-based)."),
+            ("col", "Start column (1-based)."),
+            ("end_line", "End line (1-based)."),
+            ("end_col", "End column (1-based)."),
+            ("updated_at", "When the server last published this file (RFC 3339)."),
+        ],
+    },
+    CatalogView {
         name: "v_change",
         description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis.",
         columns: &[
