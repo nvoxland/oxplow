@@ -195,6 +195,41 @@ Known limits:
 - Sources run from the primary stream's worktree. Their data is shared by
   every stream.
 
+### Sources over your own data
+
+A source can also compute new data from data oxplow already has, with a
+Starlark or jq script instead of a program. It gets the rows of a SQL query
+and returns entities in the same shape:
+
+```yaml
+sources:
+  - id: hot
+    runtime: starlark            # or: jaq
+    entry: sources/hot.star
+    input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+    entities:
+      - { name: hot_task, key: id, columns: { id: int, title: text } }
+```
+
+```python
+def transform(input):
+    return {"entities": {"hot_task": input["rows"]}}
+```
+
+These scripts can't reach the network, files, environment or keychain, so
+they run without approval.
+
+### Syncing only what changed
+
+By default each run replaces a source's data. With `sync: upsert`, a run
+returns only new and changed rows, plus the keys it removed:
+
+```json
+{"entities": {"pr": [{"number": 12, "title": "Fix login"}]}, "deleted": {"pr": [7]}}
+```
+
+Anything the run doesn't mention stays as it was.
+
 A complete example, which pulls this repo's pull requests and a lens that
 matches them to tasks, is in
 [`examples/extensions/github`](https://github.com/nvoxland/oxplow/tree/main/examples/extensions/github).

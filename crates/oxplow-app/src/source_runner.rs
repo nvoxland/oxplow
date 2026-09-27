@@ -1,12 +1,21 @@
 //! Running extension-declared sources: consent, exec, coercion, storage.
 //!
-//! A source is code an extension ships (`runtime: exec`). It runs only
+//! An `exec` source is a program an extension ships. It runs only
 //! after a human approved that exact entry script (by content hash);
 //! approvals live in `.oxplow/source-approvals.json`, which is local
 //! state (gitignored), so each person consents on their own machine and
 //! again whenever the script changes. The entry runs with a scrubbed
 //! environment (PATH, HOME, the declared `env` names, its declared
 //! `credentials` from the keychain, OXPLOW_* context) and must print `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
+//!
+//! A `starlark` / `jaq` source is *derived*: its script gets the rows of
+//! its read-only SQL `input` as `{"rows": [...]}` and returns the same
+//! shape, in the collector sandbox (no files, network, env or secrets), so
+//! it needs no approval.
+//!
+//! With `sync: upsert` the output may also carry
+//! `"deleted": {"<name>": [key, …]}`; rows update by key and an entity the
+//! run doesn't mention is left alone.
 //! See `.context/semantic-layer.md` → "User and extension sources".
 
 use std::collections::BTreeMap;
@@ -14,11 +23,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use oxplow_ai::secrets::SecretStore;
-use oxplow_db::{EntityTable, SourceState, SqlCell, SqliteExtSourceStore, StoredType};
+use oxplow_db::{
+    EntityTable, EntityWrite, SemanticLayer, SourceState, SqlCell, SqliteExtSourceStore, StoredType,
+};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
-use crate::extension_sources::{ColumnType, SourceEntity, SourceSpec};
+use crate::extension_sources::{ColumnType, SourceEntity, SourceRuntime, SourceSpec, SourceSync};
 
 /// How long a source may run.
 pub const SOURCE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -65,6 +76,8 @@ pub struct Sources<'a> {
     pub store: &'a SqliteExtSourceStore,
     /// Where credential values are kept (the OS keychain in the app).
     pub secrets: &'a dyn SecretStore,
+    /// What a derived source's `input` is read through.
+    pub layer: SemanticLayer,
 }
 
 impl<'a> Sources<'a> {
@@ -74,6 +87,7 @@ impl<'a> Sources<'a> {
             state_dir: &svc.layout.state_dir,
             store: &svc.ext_source_store,
             secrets: svc.secrets.as_ref(),
+            layer: SemanticLayer::new(svc.db.clone()),
         }
     }
 }
@@ -120,9 +134,11 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
     for ext in crate::extensions::load_extensions(ctx.root) {
         let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.sources {
-            let approved = entry_hash(&ext_dir, &spec.entry)
-                .map(|h| is_approved(ctx.state_dir, &ext.name, &spec.id, &h))
-                .unwrap_or(false);
+            // A derived source can't do anything an approval would guard.
+            let approved = spec.runtime.is_derived()
+                || entry_hash(&ext_dir, &spec.entry)
+                    .map(|h| is_approved(ctx.state_dir, &ext.name, &spec.id, &h))
+                    .unwrap_or(false);
             let state = states
                 .iter()
                 .find(|s| s.extension == ext.name && s.source_id == spec.id)
@@ -244,10 +260,45 @@ pub fn approve(state_dir: &Path, extension: &str, source: &str, hash: &str) -> s
     std::fs::write(state_dir.join(APPROVALS_FILE), text)
 }
 
-#[derive(Deserialize)]
+/// What a source run returns: rows per entity, and (with `sync: upsert`)
+/// the keys to remove per entity.
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SourceOutput {
-    entities: BTreeMap<String, Vec<serde_json::Value>>,
+pub struct SourceOutput {
+    pub entities: BTreeMap<String, Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub deleted: BTreeMap<String, Vec<serde_json::Value>>,
+}
+
+impl SourceOutput {
+    /// Parse and check against the declaration: only declared entities,
+    /// and tombstones only for an upsert source.
+    fn parse(spec: &SourceSpec, value: serde_json::Value) -> Result<Self, String> {
+        let out: SourceOutput = serde_json::from_value(value).map_err(|e| {
+            format!(
+                "source `{}` must return JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
+                spec.id
+            )
+        })?;
+        if let Some(unknown) = out
+            .entities
+            .keys()
+            .chain(out.deleted.keys())
+            .find(|k| !spec.entities.iter().any(|e| &e.name == *k))
+        {
+            return Err(format!(
+                "source `{}` returned undeclared entity `{unknown}`",
+                spec.id
+            ));
+        }
+        if !out.deleted.is_empty() && spec.sync != SourceSync::Upsert {
+            return Err(format!(
+                "source `{}` returned `deleted`, which needs `sync: upsert`",
+                spec.id
+            ));
+        }
+        Ok(out)
+    }
 }
 
 /// Run the entry and return its raw rows per entity.
@@ -257,7 +308,7 @@ pub fn exec_source(
     host_env: &dyn Fn(&str) -> Option<String>,
     credentials: &BTreeMap<String, String>,
     timeout: Duration,
-) -> Result<BTreeMap<String, Vec<serde_json::Value>>, String> {
+) -> Result<SourceOutput, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 
@@ -339,23 +390,66 @@ pub fn exec_source(
             spec.id
         ));
     }
-    let parsed: SourceOutput = serde_json::from_slice(&stdout).map_err(|e| {
+    let value: serde_json::Value = serde_json::from_slice(&stdout).map_err(|e| {
         format!(
             "source `{}` must print JSON like {{\"entities\": {{\"<name>\": [...]}}}}: {e}",
             spec.id
         )
     })?;
-    if let Some(unknown) = parsed
-        .entities
-        .keys()
-        .find(|k| !spec.entities.iter().any(|e| &e.name == *k))
-    {
-        return Err(format!(
-            "source `{}` returned undeclared entity `{unknown}`",
-            spec.id
-        ));
-    }
-    Ok(parsed.entities)
+    SourceOutput::parse(spec, value)
+}
+
+/// Run a derived (starlark / jaq) source: read its `input` rows, then run
+/// its script over `{"rows": [...]}` in the collector sandbox.
+pub async fn derive_source(
+    layer: &SemanticLayer,
+    script: String,
+    spec: &SourceSpec,
+) -> Result<SourceOutput, String> {
+    let rows = match &spec.input {
+        None => Vec::new(),
+        Some(sql) => {
+            let limit = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
+            let out = layer
+                .query_sql(sql, vec![], Some(limit))
+                .await
+                .map_err(|e| format!("source `{}` input: {e}", spec.id))?;
+            if out.truncated {
+                return Err(format!(
+                    "source `{}` input returned more than {limit} rows; narrow it",
+                    spec.id
+                ));
+            }
+            out.rows
+                .into_iter()
+                .map(|r| {
+                    serde_json::Value::Object(
+                        out.columns
+                            .iter()
+                            .cloned()
+                            .zip(
+                                r.into_iter()
+                                    .map(|c| serde_json::to_value(c).unwrap_or_default()),
+                            )
+                            .collect(),
+                    )
+                })
+                .collect()
+        }
+    };
+    let input = serde_json::json!({ "rows": rows });
+    let runtime = spec.runtime;
+    let value = tokio::task::spawn_blocking(move || {
+        use oxplow_collect_plugin::runtime::{run_jaq, run_sandboxed, run_starlark, SandboxBudget};
+        run_sandboxed(&SandboxBudget::default(), move || match runtime {
+            SourceRuntime::Jaq => run_jaq(&script, &input),
+            _ => run_starlark(&script, &input),
+        })
+    })
+    .await
+    .map_err(|e| format!("source task panicked: {e}"))?
+    .map_err(|e| format!("source `{}`: {e}", spec.id))?;
+    SourceOutput::parse(spec, value)
 }
 
 /// Coerce raw JSON rows to the entity's declared columns (in order).
@@ -462,6 +556,19 @@ pub async fn run_source(
         .cloned()
         .ok_or(RunSourceError::NotFound)?;
     let ext_dir = root.join(&ext.path);
+    if spec.runtime.is_derived() {
+        let result = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
+            Some(script) => match derive_source(&ctx.layer, script, &spec).await {
+                Ok(output) => store_output(extension, &spec, output, store).await,
+                Err(e) => Err(e),
+            },
+            None => Err(format!(
+                "source `{source_id}`: entry `{}` doesn't exist in the extension",
+                spec.entry
+            )),
+        };
+        return record(store, extension, source_id, result).await;
+    }
     let hash = entry_hash(&ext_dir, &spec.entry).map_err(|e| {
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
@@ -493,6 +600,16 @@ pub async fn run_source(
         Some(e) => Err(e),
         None => run_approved(&ext_dir, extension, &spec, credentials, store).await,
     };
+    record(store, extension, source_id, result).await
+}
+
+/// Record a run's outcome as the source's state, then hand it back.
+async fn record(
+    store: &SqliteExtSourceStore,
+    extension: &str,
+    source_id: &str,
+    result: Result<SourceRunReport, String>,
+) -> Result<SourceRunReport, RunSourceError> {
     // Timestamp serializes as an RFC 3339 string.
     let now = serde_json::to_value(oxplow_domain::Timestamp::now())
         .ok()
@@ -543,13 +660,37 @@ async fn run_approved(
     })
     .await
     .map_err(|e| format!("source task panicked: {e}"))??;
+    store_output(extension, spec, raw, store).await
+}
 
+/// Coerce a run's output to the declared entities and write it, per the
+/// source's `sync` mode, atomically.
+async fn store_output(
+    extension: &str,
+    spec: &SourceSpec,
+    mut output: SourceOutput,
+    store: &SqliteExtSourceStore,
+) -> Result<SourceRunReport, String> {
     let mut writes = Vec::new();
-    let mut row_counts = BTreeMap::new();
     for entity in &spec.entities {
-        // An entity the source didn't mention this run is left empty.
-        let rows = coerce_rows(entity, raw.get(&entity.name).cloned().unwrap_or_default())?;
-        row_counts.insert(entity.name.clone(), rows.len() as i64);
+        let rows = output.entities.remove(&entity.name);
+        let write = match spec.sync {
+            // An entity the source didn't mention this run is left empty.
+            SourceSync::Replace => {
+                EntityWrite::Replace(coerce_rows(entity, rows.unwrap_or_default())?)
+            }
+            SourceSync::Upsert => {
+                let deleted = output.deleted.remove(&entity.name).unwrap_or_default();
+                // Nothing said about it: leave it alone.
+                if rows.is_none() && deleted.is_empty() {
+                    continue;
+                }
+                EntityWrite::Upsert {
+                    rows: coerce_rows(entity, rows.unwrap_or_default())?,
+                    deleted: coerce_keys(entity, deleted)?,
+                }
+            }
+        };
         writes.push((
             EntityTable {
                 extension: extension.to_string(),
@@ -562,18 +703,41 @@ async fn run_approved(
                     .map(|c| (c.name.clone(), stored(c.col_type)))
                     .collect(),
             },
-            rows,
+            write,
         ));
     }
-    store
-        .replace_rows(writes)
-        .await
-        .map_err(|e| e.to_string())?;
+    let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
+    let counts = store.write_rows(writes).await.map_err(|e| e.to_string())?;
     Ok(SourceRunReport {
         extension: extension.to_string(),
         source_id: spec.id.clone(),
-        row_counts,
+        row_counts: names.into_iter().zip(counts).collect(),
     })
+}
+
+/// Coerce tombstone keys to the entity key column's type.
+fn coerce_keys(
+    entity: &SourceEntity,
+    keys: Vec<serde_json::Value>,
+) -> Result<Vec<SqlCell>, String> {
+    let rows = keys
+        .into_iter()
+        .map(|k| serde_json::json!({ entity.key.clone(): k }))
+        .collect();
+    // Reuse the row coercion on one-column rows of just the key.
+    let key_only = SourceEntity {
+        columns: entity
+            .columns
+            .iter()
+            .filter(|c| c.name == entity.key)
+            .cloned()
+            .collect(),
+        ..entity.clone()
+    };
+    Ok(coerce_rows(&key_only, rows)?
+        .into_iter()
+        .filter_map(|mut r| r.pop())
+        .collect())
 }
 
 #[cfg(test)]
@@ -640,7 +804,7 @@ mod tests {
             Duration::from_secs(10),
         )
         .unwrap();
-        assert_eq!(out["pr"][0]["title"], json!("tok|"));
+        assert_eq!(out.entities["pr"][0]["title"], json!("tok|"));
     }
 
     #[test]
@@ -762,6 +926,7 @@ mod tests {
             state_dir: &state,
             store: &store,
             secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
         };
 
         let err = run_source(&ctx, "my-gh", "gh", false).await.unwrap_err();
@@ -872,7 +1037,7 @@ mod tests {
             Duration::from_secs(10),
         )
         .unwrap();
-        assert_eq!(out["pr"][0]["title"], json!("pat-1"));
+        assert_eq!(out.entities["pr"][0]["title"], json!("pat-1"));
     }
 
     /// Two extensions declaring the same credential name, each with a
@@ -907,6 +1072,7 @@ mod tests {
             state_dir: &state,
             store: &store,
             secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
         };
 
         let list = list_sources(&ctx).await.unwrap();
@@ -948,5 +1114,145 @@ mod tests {
         assert!(set_source_credential(&ctx, "nope", "TOKEN", Some("x")).is_err());
         set_source_credential(&ctx, "one", "TOKEN", None).unwrap();
         assert!(!list_sources(&ctx).await.unwrap()[0].credentials[0].set);
+    }
+
+    async fn task_db() -> oxplow_db::Database {
+        let db = oxplow_db::Database::in_memory();
+        db.transaction(|c| {
+            c.execute_batch(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                   VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
+                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                   VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at) VALUES
+                   (1, 1, 'Fix login', 'ready', 'high', 'agent', '2026-01-01', '2026-01-01'),
+                   (2, 1, 'Tidy docs', 'ready', 'low', 'agent', '2026-01-01', '2026-01-01'),
+                   (3, 1, 'Ship it', 'done', 'high', 'agent', '2026-01-01', '2026-01-01');",
+            )
+            .map_err(|e| DomainError::Invalid(e.to_string()))
+        })
+        .await
+        .unwrap();
+        db
+    }
+
+    fn extension(root: &Path, name: &str, manifest: &str, files: &[(&str, &str)]) {
+        let ext = root.join(format!("oxplow/extensions/{name}"));
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
+        for (path, body) in files {
+            let p = ext.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn derived_sources_transform_their_input_without_approval() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        let entity =
+            "    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n";
+        extension(
+            root.path(),
+            "work",
+            &format!(
+                "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT id, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: id, columns: {{ id: int, title: text }} }}\n"
+            ),
+            &[
+                (
+                    "hot.star",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                ),
+                ("hot.jq", "{entities: {upper: [.rows[] | {id, title: (.title | ascii_upcase)}]}}"),
+            ],
+        );
+        let db = task_db().await;
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            state_dir: &state,
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        // No approval asked for, and the listing says it can run.
+        assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
+        let report = run_source(&ctx, "work", "star", false).await.unwrap();
+        assert_eq!(report.row_counts["hot"], 1);
+        run_source(&ctx, "work", "jq", false).await.unwrap();
+        let out = oxplow_db::SemanticLayer::new(db)
+            .query_sql(
+                "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["Fix login", "FIX LOGIN,TIDY DOCS,SHIP IT"]])
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_sources_update_by_key_and_tombstone() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        extension(
+            root.path(),
+            "inc",
+            "name: inc\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    sync: upsert\n    entities:\n      - { name: item, key: id, columns: { id: int, title: text } }\n      - { name: other, key: id, columns: { id: int } }\n",
+            &[],
+        );
+        let ext = root.path().join("oxplow/extensions/inc");
+        let db = task_db().await;
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            state_dir: &state,
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        script(
+            &ext,
+            "sync.sh",
+            r#"echo '{"entities":{"item":[{"id":1,"title":"a"},{"id":2,"title":"b"}],"other":[{"id":9}]}}'"#,
+        );
+        run_source(&ctx, "inc", "s", true).await.unwrap();
+        script(
+            &ext,
+            "sync.sh",
+            r#"echo '{"entities":{"item":[{"id":2,"title":"B"},{"id":3,"title":"c"}]},"deleted":{"item":[1]}}'"#,
+        );
+        let report = run_source(&ctx, "inc", "s", true).await.unwrap();
+        assert_eq!(
+            report.row_counts["item"], 2,
+            "counts are the entity's total"
+        );
+        let out = oxplow_db::SemanticLayer::new(db)
+            .query_sql(
+                "SELECT (SELECT group_concat(id || title, ',') FROM (SELECT * FROM v_inc_item ORDER BY id)), (SELECT count(*) FROM v_inc_other)",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["2B,3c", 1]]),
+            "an entity the run didn't mention is left alone"
+        );
+    }
+
+    #[test]
+    fn tombstones_need_an_upsert_source() {
+        let s = spec("x.sh", &[]);
+        let err =
+            SourceOutput::parse(&s, json!({"entities": {}, "deleted": {"pr": [1]}})).unwrap_err();
+        assert!(err.contains("sync: upsert"), "{err}");
     }
 }

@@ -21,8 +21,10 @@ and agents query.
 >   spine dimensions and time buckets on fact metrics; entity metrics and
 >   entity (expression/join) dimensions (tsk322, see "Entity metrics" in
 >   metrics.md).
-> - **Target:** starlark/jq derived sources and incremental sync, the
->   exec network allowlist, Settings → Data; tracked in tsk277.
+> - **Current (tsk323):** starlark/jq derived sources and `sync: upsert`
+>   with tombstones.
+> - **Target:** the exec network allowlist, Settings → Data; tracked in
+>   tsk277.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -214,7 +216,7 @@ as `v_<ext>_<entity>` (target).
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 
-## User and extension sources (current: exec sources)
+## User and extension sources (current)
 
 Extensions declare **sources**: code that pulls external records into the
 semantic layer as entities. The real, tested example is
@@ -225,7 +227,7 @@ semantic layer as entities. The real, tested example is
 sources:
   - id: prs
     doc: The repo's recent pull requests.
-    runtime: exec              # the only runtime today
+    runtime: exec              # or starlark / jaq (derived, below)
     entry: sync.sh             # relative, inside the extension folder
     schedule: every 15m        # or manual; every <n>m | <n>h
     env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
@@ -242,6 +244,45 @@ sources:
 ```
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
+
+**Derived sources** (`runtime: starlark` or `jaq`, tsk323) compute
+entities from data already in the semantic layer:
+
+```yaml
+  - id: hot
+    runtime: starlark          # def transform(input): return {"entities": {...}}
+    entry: sources/hot.star
+    input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+    entities: [...]
+```
+
+- **Input.** `input` is read-only SQL through `SemanticLayer::query_sql`.
+  More than 10k rows fails the run rather than deriving from a partial
+  set. The script gets `{"rows": [{col: value, …}]}` and returns the exec
+  shape.
+- **Sandbox.** It runs in the collector sandbox (`run_sandboxed` +
+  `run_starlark` / `run_jaq`), with no files, network, env or secrets.
+  So there is **no approval**: `list_sources` reports it as approved, and
+  the scheduler runs it on its `schedule`.
+- **Refused at parse:** `env` / `credentials` on a derived source, `input`
+  on an exec source, and an `input` that names one of the source's own
+  views (a source can't feed on itself). Reading other extensions' views
+  is fine.
+- **Scripts** are read with `extensions::read_extension_file`, so bundled
+  extensions can ship them.
+
+**Incremental sync** (`sync: upsert`, tsk323; default `replace`):
+
+- **What a run writes.** The output may add
+  `"deleted": {"<name>": [key, …]}`. Each mentioned entity's rows are
+  inserted or replaced by key and its tombstoned keys deleted, in the one
+  transaction (`ext_source_store::write_rows` with `EntityWrite::Upsert`).
+- **Unmentioned entities** are left alone. A `replace` source empties
+  them instead.
+- **Refused:** `deleted` from a `replace` source.
+- **Schema changes.** A changed column set still rebuilds the table, so
+  the first run after one holds only that run's rows.
+- **Row counts** are the entity's totals after the write.
 
 **Code map.**
 
@@ -370,10 +411,9 @@ Deleted / skipped tests and removed assertions are `v_change_function`
 oxplow-review Tests Weakened lens. Missing co-change is
 `v_change_co_change`.
 
-**Still target:** `starlark` / `jaq` runtimes; incremental upsert +
-tombstones (today: full replace per run); an enforced `network`
-allowlist; expression/join `dimensions` and
-entity-level `metrics` declared by extensions; AI-role columns.
+**Still target:** an enforced `network` allowlist; `dimensions` declared
+by extensions (entity metrics from extensions are current, see
+extensions.md); AI-role columns.
 
 ## Relation to other docs
 

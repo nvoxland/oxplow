@@ -62,13 +62,51 @@ pub enum SourceSchedule {
     Every { minutes: u32 },
 }
 
+/// What runs a source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceRuntime {
+    /// A program: can reach the network and credentials, so it needs a
+    /// person's approval to run.
+    Exec,
+    /// A Starlark script deriving entities from its `input` rows. No I/O,
+    /// so no approval.
+    Starlark,
+    /// A jq program deriving entities from its `input` rows. No I/O, so no
+    /// approval.
+    Jaq,
+}
+
+impl SourceRuntime {
+    /// Sandboxed in-process: no I/O, no approval.
+    pub fn is_derived(self) -> bool {
+        !matches!(self, SourceRuntime::Exec)
+    }
+}
+
+/// How a run's output lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceSync {
+    /// Each run restates every entity (one it doesn't mention is emptied).
+    Replace,
+    /// Each run adds or updates rows by key, and removes the keys it lists
+    /// under `deleted`; an entity it doesn't mention is left alone.
+    Upsert,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceSpec {
     pub id: String,
     pub doc: String,
-    /// Path to the executable, relative to the extension folder.
+    pub runtime: SourceRuntime,
+    /// Path to the program or script, relative to the extension folder.
     pub entry: String,
+    /// A derived source's input: read-only SQL over the semantic layer,
+    /// handed to the script as `{"rows": [...]}`.
+    pub input: Option<String>,
+    pub sync: SourceSync,
     pub schedule: SourceSchedule,
     /// Host environment variables passed through to the entry
     /// (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
@@ -131,6 +169,10 @@ struct RawSource {
     doc: String,
     runtime: String,
     entry: String,
+    #[serde(default)]
+    input: Option<String>,
+    #[serde(default)]
+    sync: Option<String>,
     #[serde(default = "manual")]
     schedule: String,
     #[serde(default)]
@@ -219,11 +261,38 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
         ));
     }
     let ctx = |m: String| format!("source `{id}`: {m}");
-    if raw.runtime != "exec" {
-        return Err(ctx(format!(
-            "runtime `{}` isn't supported (only `exec`)",
-            raw.runtime
-        )));
+    let runtime = match raw.runtime.as_str() {
+        "exec" => SourceRuntime::Exec,
+        "starlark" => SourceRuntime::Starlark,
+        "jaq" | "jq" => SourceRuntime::Jaq,
+        other => {
+            return Err(ctx(format!(
+                "runtime `{other}` isn't supported (exec, starlark or jaq)"
+            )))
+        }
+    };
+    let sync = match raw.sync.as_deref().unwrap_or("replace") {
+        "replace" => SourceSync::Replace,
+        "upsert" => SourceSync::Upsert,
+        other => return Err(ctx(format!("sync `{other}`: use `replace` or `upsert`"))),
+    };
+    let input = raw
+        .input
+        .map(|i| i.trim().to_string())
+        .filter(|i| !i.is_empty());
+    if runtime.is_derived() {
+        // A derived source runs without anyone's approval, so it gets
+        // nothing an approval would guard.
+        if !raw.env.is_empty() || !raw.credentials.is_empty() {
+            return Err(ctx(format!(
+                "a `{}` source can't take `env` or `credentials`; those need an approved `exec` source",
+                raw.runtime
+            )));
+        }
+    } else if input.is_some() {
+        return Err(ctx(
+            "`input` is for starlark/jaq sources; an exec source fetches its own data".into(),
+        ));
     }
     let entry = raw.entry;
     let entry_path = std::path::Path::new(&entry);
@@ -320,10 +389,22 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
             relations: e.relations,
         });
     }
+    if let Some(sql) = &input {
+        let lower = sql.to_ascii_lowercase();
+        if let Some(own) = entities.iter().find(|e| lower.contains(&e.view)) {
+            return Err(ctx(format!(
+                "`input` reads its own entity `{}`; a source can't feed on itself",
+                own.view
+            )));
+        }
+    }
     Ok(SourceSpec {
         id,
         doc: raw.doc,
+        runtime,
         entry,
+        input,
+        sync,
         schedule,
         env: raw.env,
         credentials: raw.credentials,
@@ -437,6 +518,59 @@ mod tests {
             assert!(s.is_empty(), "{to}: should be rejected");
             assert!(e.iter().any(|m| m.contains(needle)), "{to}: {e:?}");
         }
+    }
+
+    const DERIVED: &str = r#"
+- id: hot
+  runtime: starlark
+  entry: sources/hot.star
+  input: "SELECT id, title FROM v_task WHERE priority = 'high'"
+  sync: upsert
+  entities:
+    - name: hot_task
+      key: id
+      columns: { id: int, title: text }
+"#;
+
+    #[test]
+    fn derived_sources_take_an_input_and_no_secrets() {
+        let (sources, errors) = parse(DERIVED);
+        assert!(errors.is_empty(), "{errors:?}");
+        let s = &sources[0];
+        assert_eq!(
+            (s.runtime, s.sync),
+            (SourceRuntime::Starlark, SourceSync::Upsert)
+        );
+        assert!(s.runtime.is_derived());
+        assert_eq!(
+            s.input.as_deref(),
+            Some("SELECT id, title FROM v_task WHERE priority = 'high'")
+        );
+        assert_eq!(parse(GOOD).0[0].sync, SourceSync::Replace);
+        assert_eq!(
+            parse(&DERIVED.replace("runtime: starlark", "runtime: jaq")).0[0].runtime,
+            SourceRuntime::Jaq
+        );
+        for (from, to, needle) in [
+            ("sync: upsert", "sync: merge", "sync"),
+            ("sync: upsert", "sync: upsert\n  env: [HOME]", "can't take"),
+            (
+                "sync: upsert",
+                "sync: upsert\n  credentials: [TOKEN]",
+                "can't take",
+            ),
+            ("FROM v_task", "FROM v_my_gh_hot_task", "feed on itself"),
+        ] {
+            let (s, e) = parse(&DERIVED.replace(from, to));
+            assert!(s.is_empty(), "{to}: should be rejected");
+            assert!(e.iter().any(|m| m.contains(needle)), "{to}: {e:?}");
+        }
+        let (s, e) = parse(&GOOD.replace(
+            "  entry: bin/sync.sh",
+            "  entry: bin/sync.sh\n  input: SELECT 1",
+        ));
+        assert!(s.is_empty());
+        assert!(e[0].contains("`input` is for"), "{e:?}");
     }
 
     #[test]

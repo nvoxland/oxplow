@@ -61,7 +61,9 @@ pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
-pub use ext_source_store::{EntityTable, SourceState, SqliteExtSourceStore, StoredType};
+pub use ext_source_store::{
+    EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
+};
 pub use fact_store::{
     BatchApply, BatchRows, CubeReadRow, Dimension, EffortMetricDelta, FactRow, FactSliceKey,
     Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,

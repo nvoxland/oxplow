@@ -43,6 +43,18 @@ pub struct EntityTable {
     pub columns: Vec<(String, StoredType)>,
 }
 
+/// How one entity's rows land in a run.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntityWrite {
+    /// These rows are the entity now.
+    Replace(Vec<Vec<SqlCell>>),
+    /// Add or update these rows by key, and remove the `deleted` keys.
+    Upsert {
+        rows: Vec<Vec<SqlCell>>,
+        deleted: Vec<SqlCell>,
+    },
+}
+
 /// Last run of one source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -67,22 +79,48 @@ impl SqliteExtSourceStore {
         Self { db }
     }
 
-    /// Replace every entity's rows for one source run, atomically: on any
-    /// error nothing changes.
+    /// Replace every entity's rows for one source run (the all-`replace`
+    /// form of [`Self::write_rows`]).
     pub async fn replace_rows(
         &self,
         entities: Vec<(EntityTable, Vec<Vec<SqlCell>>)>,
     ) -> Result<(), DomainError> {
+        self.write_rows(
+            entities
+                .into_iter()
+                .map(|(t, rows)| (t, EntityWrite::Replace(rows)))
+                .collect(),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Write one source run's entities, atomically: on any error nothing
+    /// changes. Returns each entity's row count afterwards, in order.
+    pub async fn write_rows(
+        &self,
+        entities: Vec<(EntityTable, EntityWrite)>,
+    ) -> Result<Vec<i64>, DomainError> {
         for (t, _) in &entities {
             validate_table(t)?;
         }
         self.db
             .call_mut(move |conn| {
                 let tx = conn.transaction().map_err(map_sql_err)?;
-                for (t, rows) in &entities {
-                    write_entity(&tx, t, rows)?;
+                let mut counts = Vec::with_capacity(entities.len());
+                for (t, write) in &entities {
+                    write_entity(&tx, t, write)?;
+                    counts.push(
+                        tx.query_row(
+                            &format!("SELECT count(*) FROM {}", quote(&table_name(t))),
+                            [],
+                            |r| r.get(0),
+                        )
+                        .map_err(map_sql_err)?,
+                    );
                 }
-                tx.commit().map_err(map_sql_err)
+                tx.commit().map_err(map_sql_err)?;
+                Ok(counts)
             })
             .await
     }
@@ -231,8 +269,12 @@ fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
 fn write_entity(
     tx: &rusqlite::Transaction<'_>,
     t: &EntityTable,
-    rows: &[Vec<SqlCell>],
+    write: &EntityWrite,
 ) -> Result<(), DomainError> {
+    let (rows, deleted) = match write {
+        EntityWrite::Replace(rows) => (rows, None),
+        EntityWrite::Upsert { rows, deleted } => (rows, Some(deleted)),
+    };
     let table = table_name(t);
     // A view name that exists but doesn't read our table belongs to core
     // or another extension: refuse rather than replace it.
@@ -300,8 +342,24 @@ fn write_entity(
         ))
         .map_err(map_sql_err)?;
     }
-    tx.execute_batch(&format!("DELETE FROM {}", quote(&table)))
-        .map_err(map_sql_err)?;
+    match deleted {
+        // Replace: the run's rows are the whole entity.
+        None => tx
+            .execute_batch(&format!("DELETE FROM {}", quote(&table)))
+            .map_err(map_sql_err)?,
+        Some(keys) => {
+            let mut del = tx
+                .prepare(&format!(
+                    "DELETE FROM {} WHERE {} = ?1",
+                    quote(&table),
+                    quote(&t.key)
+                ))
+                .map_err(map_sql_err)?;
+            for k in keys {
+                del.execute([k.to_sql()]).map_err(map_sql_err)?;
+            }
+        }
+    }
     let placeholders = (1..=t.columns.len())
         .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
@@ -346,6 +404,45 @@ mod tests {
 
     fn rows(v: serde_json::Value) -> Vec<Vec<SqlCell>> {
         serde_json::from_value(v).unwrap()
+    }
+
+    #[tokio::test]
+    async fn upsert_adds_updates_and_tombstones_by_key() {
+        let db = Database::in_memory();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let sl = SemanticLayer::new(db);
+        let t = pr_table(&[("number", StoredType::Integer), ("title", StoredType::Text)]);
+        let counts = store
+            .write_rows(vec![(
+                t.clone(),
+                EntityWrite::Replace(rows(json!([[1, "one"], [2, "two"]]))),
+            )])
+            .await
+            .unwrap();
+        assert_eq!(counts, vec![2]);
+        let counts = store
+            .write_rows(vec![(
+                t,
+                EntityWrite::Upsert {
+                    rows: rows(json!([[2, "TWO"], [3, "three"]])),
+                    deleted: vec![SqlCell::Int(1)],
+                },
+            )])
+            .await
+            .unwrap();
+        assert_eq!(counts, vec![2]);
+        let out = sl
+            .query_sql(
+                "SELECT number, title FROM v_my_gh_pr ORDER BY number",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([[2, "TWO"], [3, "three"]])
+        );
     }
 
     #[tokio::test]

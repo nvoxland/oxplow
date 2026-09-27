@@ -3493,6 +3493,24 @@ export type SourceRunReport = {
 	rowCounts: { [key in string]: number },
 };
 
+// What runs a source.
+export type SourceRuntime = 
+/**
+ *  A program: can reach the network and credentials, so it needs a
+ *  person's approval to run.
+ */
+"exec" | 
+/**
+ *  A Starlark script deriving entities from its `input` rows. No I/O,
+ *  so no approval.
+ */
+"starlark" | 
+/**
+ *  A jq program deriving entities from its `input` rows. No I/O, so no
+ *  approval.
+ */
+"jaq";
+
 // When a source runs by itself.
 export type SourceSchedule = 
 // Only when someone asks (Sync Now / `run_source`).
@@ -3503,8 +3521,15 @@ export type SourceSchedule =
 export type SourceSpec = {
 	id: string,
 	doc: string,
-	// Path to the executable, relative to the extension folder.
+	runtime: SourceRuntime,
+	// Path to the program or script, relative to the extension folder.
 	entry: string,
+	/**
+	 *  A derived source's input: read-only SQL over the semantic layer,
+	 *  handed to the script as `{"rows": [...]}`.
+	 */
+	input: string | null,
+	sync: SourceSync,
 	schedule: SourceSchedule,
 	/**
 	 *  Host environment variables passed through to the entry
@@ -3531,6 +3556,16 @@ export type SourceState = {
 	// Row counts per entity from the last successful run.
 	rowCounts: { [key in string]: number },
 };
+
+// How a run's output lands.
+export type SourceSync = 
+// Each run restates every entity (one it doesn't mention is emptied).
+"replace" | 
+/**
+ *  Each run adds or updates rows by key, and removes the keys it lists
+ *  under `deleted`; an entity it doesn't mention is left alone.
+ */
+"upsert";
 
 /**
  *  One SQL value, serialized as a plain JSON scalar (`null`, boolean,

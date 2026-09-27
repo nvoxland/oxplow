@@ -198,6 +198,26 @@ Rules:
 - `describe_schema` lists declared entities with `available: false`
   until the source first syncs.
 
+**Deriving data you already have (starlark / jaq sources).** When the
+entity can be computed from views that already exist (reshaping tasks,
+combining two extensions' data), use `runtime: starlark` (a script
+defining `def transform(input): ...`) or `runtime: jaq`, with `input:` set
+to a read-only SQL query:
+
+- **Input and output.** The script gets `{"rows": [...]}` and returns the
+  same `{"entities": ...}` shape.
+- **Approval.** It runs sandboxed (no network, files, env or credentials),
+  so it needs no approval and you can `run_source` it yourself.
+- **Input limits.** `input` can't read the source's own views, and more
+  than 10,000 input rows fails the run.
+
+**Incremental sync.** For a big or slow upstream, set `sync: upsert`:
+
+- **What a run returns.** Only new and changed rows, plus
+  `"deleted": {"<name>": [key, …]}` for removed ones.
+- **Unmentioned entities.** One the run doesn't return is left as it was.
+- **Default.** `sync: replace` makes each run restate everything.
+
 ## Sharing and installing
 
 - **Team:** extensions are ordinary committed files under
