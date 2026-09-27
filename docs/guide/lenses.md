@@ -164,6 +164,7 @@ sources:
     schedule: every 15m          # or: manual
     env: [GITHUB_REPOSITORY]     # passed through from your environment
     credentials: [GITHUB_TOKEN]  # secrets from your keychain
+    network: [api.github.com]    # the only host it may reach
     entities:
       - name: pr
         key: number
@@ -187,7 +188,11 @@ them.
 Known limits:
 
 - It only gets the environment variables it declares, plus `PATH` and `HOME`.
-  Network access isn't restricted yet.
+- It can only reach the hosts it lists under `network:` (for example
+  `network: [api.github.com]`). The list is part of what you approve, so a
+  source that adds a host needs approving again. On macOS this is
+  enforced, and anything else the script tries to reach fails. Other
+  systems don't enforce it yet, and the approval says so.
 - Secrets go in `credentials:`. Set each one under the source in Settings →
   Extensions; the value goes to your OS keychain and the script gets it as
   that environment variable. Values are per extension, and agents can't

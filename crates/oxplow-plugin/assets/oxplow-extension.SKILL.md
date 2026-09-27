@@ -191,6 +191,11 @@ Rules:
   (they go to the keychain). You can't set or read them, and never
   hard-code them. `list_sources` shows which are set. Use `env: [NAME]`
   only for non-secret settings from the user's environment.
+- Declare every host the script talks to: `network: [api.github.com]`
+  (`*.example.com` for subdomains). On macOS nothing else is reachable
+  (the script goes through a proxy; `curl`, `gh` and most HTTP clients
+  pick it up from `HTTPS_PROXY`). A missing host shows up as a `403` from
+  the proxy or a connection failure.
 - **You can't approve a source.** Tell the user to approve it in
   Settings → Extensions → Approve & Run. After that, `run_source`
   (MCP) re-runs it.

@@ -54,8 +54,11 @@ pub struct SourceListing {
     pub extension: String,
     pub spec: SourceSpec,
     pub state: Option<SourceState>,
-    /// This machine approved the entry script as it is now.
+    /// This machine approved the entry script (and its `network` list) as
+    /// it is now.
     pub approved: bool,
+    /// Whether this OS enforces the source's `network` list.
+    pub network_enforced: bool,
     /// Each declared credential and whether it has a value (never the value).
     pub credentials: Vec<CredentialStatus>,
 }
@@ -136,7 +139,7 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
         for spec in ext.sources {
             // A derived source can't do anything an approval would guard.
             let approved = spec.runtime.is_derived()
-                || entry_hash(&ext_dir, &spec.entry)
+                || approval_hash(&ext_dir, &spec)
                     .map(|h| is_approved(ctx.state_dir, &ext.name, &spec.id, &h))
                     .unwrap_or(false);
             let state = states
@@ -161,6 +164,7 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
                 spec,
                 state,
                 approved,
+                network_enforced: crate::net_sandbox::enforced(),
                 credentials,
             });
         }
@@ -226,6 +230,29 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let bytes = std::fs::read(ext_dir.join(entry))?;
     Ok(hex::encode(Sha256::digest(&bytes)))
+}
+
+/// What an approval covers: the entry script and the hosts it may reach
+/// (tsk324), so widening `network` needs approving again. A source with no
+/// `network` is just its entry hash.
+pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let entry = entry_hash(ext_dir, &spec.entry)?;
+    if spec.network.is_empty() {
+        return Ok(entry);
+    }
+    let text = format!("{entry}\nnetwork:{}", spec.network.join(","));
+    Ok(hex::encode(Sha256::digest(text.as_bytes())))
+}
+
+/// How an exec source may reach the network.
+#[derive(Debug, Clone)]
+pub enum Egress {
+    /// Unrestricted: an OS without enforcement, and tests of exec itself.
+    Open,
+    /// Under `sandbox-exec`, out only through the egress proxy these
+    /// variables point at (see `net_sandbox`).
+    Sandboxed { proxy_env: Vec<(String, String)> },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -308,6 +335,7 @@ pub fn exec_source(
     host_env: &dyn Fn(&str) -> Option<String>,
     credentials: &BTreeMap<String, String>,
     timeout: Duration,
+    egress: &Egress,
 ) -> Result<SourceOutput, String> {
     use std::io::Read;
     use std::process::{Command, Stdio};
@@ -319,7 +347,14 @@ pub fn exec_source(
             spec.entry
         ));
     }
-    let mut cmd = Command::new(&entry);
+    let mut cmd = match egress {
+        Egress::Open => Command::new(&entry),
+        Egress::Sandboxed { .. } => {
+            let mut c = Command::new(crate::net_sandbox::SANDBOX_EXEC);
+            c.arg("-p").arg(crate::net_sandbox::PROFILE).arg(&entry);
+            c
+        }
+    };
     cmd.current_dir(ext_dir)
         .env_clear()
         .stdin(Stdio::null())
@@ -339,6 +374,11 @@ pub fn exec_source(
     }
     for (name, value) in credentials {
         cmd.env(name, value);
+    }
+    if let Egress::Sandboxed { proxy_env } = egress {
+        for (name, value) in proxy_env {
+            cmd.env(name, value);
+        }
     }
     let mut child = cmd
         .spawn()
@@ -569,7 +609,7 @@ pub async fn run_source(
         };
         return record(store, extension, source_id, result).await;
     }
-    let hash = entry_hash(&ext_dir, &spec.entry).map_err(|e| {
+    let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
     if approve_now {
@@ -649,6 +689,21 @@ async fn run_approved(
 ) -> Result<SourceRunReport, String> {
     let dir = ext_dir.to_path_buf();
     let spec_owned = spec.clone();
+    // Where it's enforced, the program's only way out is a proxy that goes
+    // just to its declared hosts; the proxy stops when this run ends.
+    let proxy = if crate::net_sandbox::enforced() {
+        Some(
+            crate::net_sandbox::EgressProxy::start(spec.network.clone())
+                .await
+                .map_err(|e| format!("couldn't start the egress proxy: {e}"))?,
+        )
+    } else {
+        None
+    };
+    let egress = match &proxy {
+        Some(p) => Egress::Sandboxed { proxy_env: p.env() },
+        None => Egress::Open,
+    };
     let raw = tokio::task::spawn_blocking(move || {
         exec_source(
             &dir,
@@ -656,6 +711,7 @@ async fn run_approved(
             &|k| std::env::var(k).ok(),
             &credentials,
             SOURCE_TIMEOUT,
+            &egress,
         )
     })
     .await
@@ -802,6 +858,7 @@ mod tests {
             &env,
             &BTreeMap::new(),
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap();
         assert_eq!(out.entities["pr"][0]["title"], json!("tok|"));
@@ -818,6 +875,7 @@ mod tests {
             &none,
             &BTreeMap::new(),
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap_err();
         assert!(e.contains("exit") && e.contains("boom"), "{e}");
@@ -829,6 +887,7 @@ mod tests {
             &none,
             &BTreeMap::new(),
             Duration::from_millis(300),
+            &Egress::Open,
         )
         .unwrap_err();
         assert!(e.contains("timed out"), "{e}");
@@ -840,6 +899,7 @@ mod tests {
             &none,
             &BTreeMap::new(),
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap_err();
         assert!(e.contains("JSON"), "{e}");
@@ -855,6 +915,7 @@ mod tests {
             &none,
             &BTreeMap::new(),
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap_err();
         assert!(e.contains("issue"), "{e}");
@@ -865,6 +926,7 @@ mod tests {
             &none,
             &BTreeMap::new(),
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap_err();
         assert!(e.contains("missing.sh"), "{e}");
@@ -978,6 +1040,7 @@ mod tests {
                 extension: "e".into(),
                 spec,
                 approved,
+                network_enforced: false,
                 credentials: vec![],
                 state: last.map(|t| SourceState {
                     extension: "e".into(),
@@ -1035,6 +1098,7 @@ mod tests {
             &|_| None,
             &creds,
             Duration::from_secs(10),
+            &Egress::Open,
         )
         .unwrap();
         assert_eq!(out.entities["pr"][0]["title"], json!("pat-1"));
@@ -1254,5 +1318,91 @@ mod tests {
         let err =
             SourceOutput::parse(&s, json!({"entities": {}, "deleted": {"pr": [1]}})).unwrap_err();
         assert!(err.contains("sync: upsert"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_sandboxed_source_reaches_only_its_declared_hosts() {
+        if !crate::net_sandbox::enforced() {
+            return; // Not enforced on this OS; nothing to check.
+        }
+        // A local origin standing in for a declared API host.
+        let origin = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = origin.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            while let Ok((mut s, _)) = origin.accept().await {
+                let mut b = [0u8; 1024];
+                let _ = s.read(&mut b).await;
+                let _ = s
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await;
+            }
+        });
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        extension(
+            root.path(),
+            "net",
+            "name: net\nsources:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    network: [localhost]\n    entities:\n      - { name: r, key: id, columns: { id: int, declared: text, undeclared: text, direct: text } }\n",
+            &[],
+        );
+        let ext = root.path().join("oxplow/extensions/net");
+        script(
+            &ext,
+            "sync.sh",
+            &format!(
+                r#"a=$(curl -s -o /dev/null -w '%{{http_code}}' http://localhost:{port}/ || true)
+b=$(curl -s -o /dev/null -w '%{{http_code}}' http://example.com/ || true)
+c=$(curl -s --noproxy '*' --max-time 3 -o /dev/null -w '%{{http_code}}' http://1.1.1.1/ || true)
+printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":"%s"}}]}}}}' "$a" "$b" "$c""#
+            ),
+        );
+        let db = task_db().await;
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            state_dir: &state,
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
+        run_source(&ctx, "net", "s", true).await.unwrap();
+        let out = oxplow_db::SemanticLayer::new(db)
+            .query_sql(
+                "SELECT declared, undeclared, direct FROM v_net_r",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&out.rows).unwrap(),
+            json!([["200", "403", "000"]]),
+            "declared host through the proxy; undeclared refused by it; direct blocked by the sandbox"
+        );
+    }
+
+    #[test]
+    fn widening_the_network_list_needs_approving_again() {
+        let ext = tempfile::tempdir().unwrap();
+        script(ext.path(), "s.sh", "echo x");
+        let mut s = spec("s.sh", &[]);
+        let bare = approval_hash(ext.path(), &s).unwrap();
+        assert_eq!(
+            bare,
+            entry_hash(ext.path(), "s.sh").unwrap(),
+            "no network: just the script"
+        );
+        s.network = vec!["api.github.com".into()];
+        let one = approval_hash(ext.path(), &s).unwrap();
+        s.network.push("evil.example.com".into());
+        let two = approval_hash(ext.path(), &s).unwrap();
+        assert!(bare != one && one != two);
     }
 }

@@ -73,6 +73,15 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
     l.spec.credentials.length > 0 ? `${l.spec.credentials.join(", ")} from your keychain` : null,
   ].filter(Boolean);
   const env = passed.length > 0 ? ` with ${passed.join(" and ")}` : "";
+  const hosts = l.spec.network;
+  const network =
+    hosts.length === 0
+      ? l.networkEnforced
+        ? " It gets no network access."
+        : " Network access isn't restricted on this OS."
+      : l.networkEnforced
+        ? ` It can reach only ${hosts.join(", ")}.`
+        : ` It declares ${hosts.join(", ")} (not enforced on this OS).`;
   const missing = l.credentials.filter((c) => !c.set).map((c) => c.name);
   return {
     id: l.spec.id,
@@ -84,7 +93,7 @@ export function sourceRowModel(l: SourceListing): SourceRowModel {
     actionLabel: l.approved ? "Sync Now" : "Approve & Run",
     actionTitle: l.approved
       ? `Run ${l.spec.entry} now`
-      : `Runs ${l.extension}/${l.spec.entry} on this machine${env}. Approve only if you trust this extension; a changed script needs approval again.`,
+      : `Runs ${l.extension}/${l.spec.entry} on this machine${env}.${network} Approve only if you trust this extension; a changed script or host list needs approval again.`,
     credentials: l.credentials,
     missingCredentials: missing.length > 0 ? `Needs ${missing.join(", ")} (set it below).` : null,
   };

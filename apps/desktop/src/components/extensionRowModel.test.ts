@@ -57,9 +57,22 @@ describe("extensionRowModel", () => {
 describe("sourceRowModel", () => {
   const listing = (over: Partial<SourceListing> = {}): SourceListing => ({
     extension: "my-gh",
-    spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "every", minutes: 10 }, env: ["GITHUB_TOKEN"], credentials: [], entities: [] },
+    spec: {
+      id: "gh",
+      doc: "",
+      runtime: "exec",
+      entry: "bin/sync.sh",
+      input: null,
+      sync: "replace",
+      schedule: { kind: "every", minutes: 10 },
+      env: ["GITHUB_TOKEN"],
+      network: [],
+      credentials: [],
+      entities: [],
+    },
     state: null,
     approved: false,
+    networkEnforced: true,
     credentials: [],
     ...over,
   });
@@ -72,6 +85,14 @@ describe("sourceRowModel", () => {
     expect(m.actionTitle).toContain("GITHUB_TOKEN");
     expect(m.status).toBe("Never run");
     expect(m.schedule).toBe("every 10m");
+  });
+
+  test("the approval names the hosts a source may reach, and whether that's enforced", () => {
+    const withHosts = (networkEnforced: boolean) =>
+      listing({ networkEnforced, spec: { ...listing().spec, network: ["api.github.com"] } });
+    expect(sourceRowModel(withHosts(true)).actionTitle).toContain("reach only api.github.com");
+    expect(sourceRowModel(withHosts(false)).actionTitle).toContain("not enforced on this OS");
+    expect(sourceRowModel(listing()).actionTitle).toContain("no network access");
   });
 
   test("an approved source syncs and summarizes its last run", () => {
@@ -101,7 +122,7 @@ describe("sourceRowModel", () => {
   test("unset credentials are listed and flagged; the approval hover names them", () => {
     const m = sourceRowModel(
       listing({
-        spec: { id: "gh", doc: "", entry: "bin/sync.sh", schedule: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"], entities: [] },
+        spec: { ...listing().spec, schedule: { kind: "manual" }, env: [], credentials: ["GH_PAT", "OTHER"] },
         credentials: [
           { name: "GH_PAT", set: true },
           { name: "OTHER", set: false },

@@ -3469,8 +3469,13 @@ export type SourceListing = {
 	extension: string,
 	spec: SourceSpec,
 	state: SourceState | null,
-	// This machine approved the entry script as it is now.
+	/**
+	 *  This machine approved the entry script (and its `network` list) as
+	 *  it is now.
+	 */
 	approved: boolean,
+	// Whether this OS enforces the source's `network` list.
+	networkEnforced: boolean,
 	// Each declared credential and whether it has a value (never the value).
 	credentials: CredentialStatus[],
 };
@@ -3536,6 +3541,12 @@ export type SourceSpec = {
 	 *  (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
 	 */
 	env: string[],
+	/**
+	 *  Hosts an exec source may reach (`api.github.com`,
+	 *  `*.githubusercontent.com`). Part of what a person approves; enforced
+	 *  where the OS allows (see `net_sandbox`). Empty = no network.
+	 */
+	network: string[],
 	/**
 	 *  Secrets the entry gets as environment variables of these names.
 	 *  Values live in the OS keychain, set by a person in Settings →

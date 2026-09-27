@@ -111,6 +111,10 @@ pub struct SourceSpec {
     /// Host environment variables passed through to the entry
     /// (e.g. `GITHUB_TOKEN`). Nothing else from the host env is.
     pub env: Vec<String>,
+    /// Hosts an exec source may reach (`api.github.com`,
+    /// `*.githubusercontent.com`). Part of what a person approves; enforced
+    /// where the OS allows (see `net_sandbox`). Empty = no network.
+    pub network: Vec<String>,
     /// Secrets the entry gets as environment variables of these names.
     /// Values live in the OS keychain, set by a person in Settings →
     /// Extensions, scoped to this extension.
@@ -179,6 +183,8 @@ struct RawSource {
     env: Vec<String>,
     #[serde(default)]
     credentials: Vec<String>,
+    #[serde(default)]
+    network: Vec<String>,
     entities: Vec<RawEntity>,
 }
 
@@ -283,9 +289,9 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
     if runtime.is_derived() {
         // A derived source runs without anyone's approval, so it gets
         // nothing an approval would guard.
-        if !raw.env.is_empty() || !raw.credentials.is_empty() {
+        if !raw.env.is_empty() || !raw.credentials.is_empty() || !raw.network.is_empty() {
             return Err(ctx(format!(
-                "a `{}` source can't take `env` or `credentials`; those need an approved `exec` source",
+                "a `{}` source can't take `env`, `credentials` or `network`; those need an approved `exec` source",
                 raw.runtime
             )));
         }
@@ -334,6 +340,18 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
             )));
         }
     }
+    if let Some(bad) = raw
+        .network
+        .iter()
+        .find(|h| !crate::net_sandbox::valid_host_pattern(h))
+    {
+        return Err(ctx(format!(
+            "network host `{bad}` must be a lowercase host name like `api.github.com` or `*.example.com` (no scheme or port)"
+        )));
+    }
+    let mut network = raw.network;
+    network.sort();
+    network.dedup();
     if raw.entities.is_empty() {
         return Err(ctx("declares no entities".into()));
     }
@@ -407,6 +425,7 @@ fn validate(extension: &str, raw: RawSource) -> Result<SourceSpec, String> {
         sync,
         schedule,
         env: raw.env,
+        network,
         credentials: raw.credentials,
         entities,
     })
@@ -429,6 +448,7 @@ mod tests {
   schedule: every 10m
   env: [GITHUB_TOKEN]
   credentials: [GH_PAT]
+  network: [api.github.com, "*.githubusercontent.com"]
   entities:
     - name: pr
       doc: One pull request.
@@ -452,6 +472,11 @@ mod tests {
         assert_eq!(s.schedule, SourceSchedule::Every { minutes: 10 });
         assert_eq!(s.env, vec!["GITHUB_TOKEN"]);
         assert_eq!(s.credentials, vec!["GH_PAT"]);
+        assert_eq!(
+            s.network,
+            vec!["*.githubusercontent.com", "api.github.com"],
+            "sorted"
+        );
         let e = &s.entities[0];
         assert_eq!(e.name, "pr");
         assert_eq!(e.key, "number");
@@ -508,6 +533,11 @@ mod tests {
                 "both",
             ),
             ("credentials: [GH_PAT]", "credentials: [PATH]", "reserved"),
+            (
+                "network: [api.github.com",
+                "network: [\"https://api.github.com\"",
+                "network host",
+            ),
             (
                 "credentials: [GH_PAT]",
                 "credentials: [OXPLOW_X]",

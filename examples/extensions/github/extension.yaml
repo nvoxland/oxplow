@@ -11,6 +11,9 @@ sources:
     # uses the `gh` CLI's own login.
     credentials: [GITHUB_TOKEN]
     env: [GITHUB_REPOSITORY]
+    # The only host it talks to (curl and `gh api` both go through
+    # api.github.com). On macOS nothing else is reachable.
+    network: [api.github.com]
     entities:
       - name: pr
         doc: One GitHub pull request.

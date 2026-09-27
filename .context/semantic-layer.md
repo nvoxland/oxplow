@@ -23,8 +23,9 @@ and agents query.
 >   metrics.md).
 > - **Current (tsk323):** starlark/jq derived sources and `sync: upsert`
 >   with tombstones.
-> - **Target:** the exec network allowlist, Settings → Data; tracked in
->   tsk277.
+> - **Current (tsk324):** the exec-source `network` allowlist, enforced
+>   on macOS.
+> - **Target:** Settings → Data; tracked in tsk277.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
@@ -326,7 +327,35 @@ entities from data already in the semantic layer:
   `OXPLOW_SOURCE_ID`. It runs with a
   120 s timeout and a 64 MB stdout cap, and both pipes are drained so it
   can't deadlock.
-  - **Network hosts aren't restricted yet.**
+- **Network** (tsk324, `net_sandbox.rs`). `network: [api.github.com,
+  "*.githubusercontent.com"]` lists the hosts an exec source may reach:
+  - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not
+    the bare domain.
+  - **Part of the approval.** `approval_hash` is the entry hash plus the
+    sorted host list, so widening the list needs re-approving. With no
+    `network`, it is just the entry hash, so older approvals stay valid.
+  - **macOS enforcement** (`net_sandbox::enforced()`: `/usr/bin/sandbox-exec`
+    exists). The entry runs as
+    `sandbox-exec -p PROFILE <entry>`, where PROFILE is `(allow default)`
+    minus outbound network, except unix sockets (the resolver) and
+    `localhost:*`.
+  - **The proxy.** A per-run `EgressProxy` (tokio, `127.0.0.1:<random>`)
+    handles `CONNECT host:port` and absolute-form `http://` requests. It
+    forwards only declared hosts, rewrites the request line to origin
+    form, and answers anything else `403`. The entry gets
+    `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, in both cases, pointing at
+    it. Direct connections fail in the sandbox, so the proxy is the only
+    way out. No `network` means no egress.
+  - **Gaps.** Other localhost ports stay reachable. Tools that ignore
+    proxy variables simply can't connect. Other OSes run unsandboxed, and
+    the listing's `network_enforced` is false, so the approval text says
+    "not enforced on this OS". Linux would need unshare/seccomp or a
+    network namespace.
+  - **Verified** (2026-09-27, macOS 27): `gh api` and `curl` in the GitHub
+    example sync through the proxy. The macOS-gated test
+    `a_sandboxed_source_reaches_only_its_declared_hosts` pins
+    declared → 200, undeclared → 403, and direct → blocked.
+  - **Derived sources** can't declare `network`.
 - **Credentials.** `credentials: [NAME]` declares secrets the entry gets
   as env vars. Values live in the OS keychain (`Services.secrets`, shared
   with AI provider keys) under account `source:<extension>:<NAME>`, so an
@@ -411,7 +440,7 @@ Deleted / skipped tests and removed assertions are `v_change_function`
 oxplow-review Tests Weakened lens. Missing co-change is
 `v_change_co_change`.
 
-**Still target:** an enforced `network` allowlist; `dimensions` declared
+**Still target:** network enforcement off macOS; `dimensions` declared
 by extensions (entity metrics from extensions are current, see
 extensions.md); AI-role columns.
 

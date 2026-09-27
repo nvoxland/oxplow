@@ -52,6 +52,7 @@ pub mod metric_cube;
 pub mod metric_engine;
 pub mod metric_visibility;
 pub mod metrics_service;
+pub mod net_sandbox;
 pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
