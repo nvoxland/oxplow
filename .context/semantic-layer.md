@@ -12,9 +12,13 @@ and agents query.
 >   documented in [metrics.md](./metrics.md).
 > - **Current (tsk289):** extension `exec` sources that bring external
 >   entities in (see "User and extension sources").
+> - **Current:** decisions and claims (`v_decision`, `v_claim`, MCP
+>   `record_decision` / `record_claim`), the agent-activity views, stored
+>   change analysis (`v_change*`), and extension-declared measures,
+>   metrics and gauges (tsk311, see extensions.md).
 > - **Target:** expression/join dimensions, entity-level metrics, the
->   remaining shipped sources (git, LSP, tests as entities), decisions and
->   claims; tracked in tsk277.
+>   remaining shipped sources (git, LSP, tests as entities); tracked in
+>   tsk277.
 >
 > When a piece ships, move it from "target" to "current" here, in the same
 > commit.
