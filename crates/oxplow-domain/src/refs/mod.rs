@@ -29,6 +29,8 @@
 //! URLs are stripped before the inline scan so
 //! `https://example.com/path.json` doesn't masquerade as a file ref.
 
+pub mod grammar;
+
 use std::collections::BTreeSet;
 
 /// Tree version a file ref is pinned to. `Disk` = working tree (the

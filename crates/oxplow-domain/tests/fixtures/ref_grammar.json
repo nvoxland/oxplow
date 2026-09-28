@@ -1,0 +1,44 @@
+{
+  "$comment": "Golden cases for the canonical ref grammar `<kind>:<id>[@<rev>][#<frag>]` (target-architecture §4.1). Asserted by crates/oxplow-domain/tests/ref_grammar.rs and by apps/desktop/src/refs/ref.test.ts, so the Rust and TS parsers can't drift. `id` is the DECODED id; `text` is the canonical string form (`format(parse(text)) == text`).",
+  "valid": [
+    { "text": "effort:eff362", "kind": "effort", "id": "eff362", "rev": null, "frag": null },
+    { "text": "thread:thr1", "kind": "thread", "id": "thr1", "rev": null, "frag": null },
+    { "text": "commit:4c44d495", "kind": "commit", "id": "4c44d495", "rev": null, "frag": null },
+    { "text": "dir:src/components", "kind": "dir", "id": "src/components", "rev": null, "frag": null },
+    { "text": "wiki:architecture", "kind": "wiki", "id": "architecture", "rev": null, "frag": null },
+    { "text": "file:src/a.rs", "kind": "file", "id": "src/a.rs", "rev": null, "frag": null },
+    { "text": "file:src/a.rs@snap:01J9ABCDEF", "kind": "file", "id": "src/a.rs", "rev": "snap:01J9ABCDEF", "frag": null },
+    { "text": "file:src/a.rs@git:HEAD#L10-20", "kind": "file", "id": "src/a.rs", "rev": "git:HEAD", "frag": "L10-20" },
+    { "text": "file:src/a.rs#L42", "kind": "file", "id": "src/a.rs", "rev": null, "frag": "L42" },
+    { "text": "file:src/a%40b.rs@git:HEAD#L10-20", "kind": "file", "id": "src/a@b.rs", "rev": "git:HEAD", "frag": "L10-20" },
+    { "text": "file:docs/c%23.md", "kind": "file", "id": "docs/c#.md", "rev": null, "frag": null },
+    { "text": "file:odd/100%25.txt", "kind": "file", "id": "odd/100%.txt", "rev": null, "frag": null },
+    { "text": "work_item:oxplow:tsk42", "kind": "work_item", "id": "oxplow:tsk42", "rev": null, "frag": null },
+    { "text": "work_item:linear:ENG-12", "kind": "work_item", "id": "linear:ENG-12", "rev": null, "frag": null },
+    { "text": "lens:acme/blocked?stream_id=2&thread_id=5", "kind": "lens", "id": "acme/blocked?stream_id=2&thread_id=5", "rev": null, "frag": null },
+    { "text": "symbol:rust/oxplow_app::extensions::run_lens", "kind": "symbol", "id": "rust/oxplow_app::extensions::run_lens", "rev": null, "frag": null },
+    { "text": "page:settings", "kind": "page", "id": "settings", "rev": null, "frag": null },
+    { "text": "page:diff-view?effort=eff3", "kind": "page", "id": "diff-view?effort=eff3", "rev": null, "frag": null },
+    { "text": "snapshot:01J9ABCDEF", "kind": "snapshot", "id": "01J9ABCDEF", "rev": null, "frag": null },
+    { "text": "run:27030", "kind": "run", "id": "27030", "rev": null, "frag": null },
+    { "text": "acme_ext:widget:7", "kind": "acme_ext", "id": "widget:7", "rev": null, "frag": null }
+  ],
+  "invalid": [
+    { "text": "", "reason": "empty" },
+    { "text": "effort", "reason": "missing_colon" },
+    { "text": "effort:", "reason": "empty_id" },
+    { "text": ":eff362", "reason": "empty_kind" },
+    { "text": "Effort:eff362", "reason": "bad_kind" },
+    { "text": "git-commit:abc", "reason": "bad_kind" },
+    { "text": "1kind:abc", "reason": "bad_kind" },
+    { "text": "file:src/a.rs@", "reason": "empty_rev" },
+    { "text": "file:src/a.rs@HEAD", "reason": "bad_rev" },
+    { "text": "file:src/a.rs#", "reason": "empty_frag" },
+    { "text": "file:src/a@b.rs", "reason": "bad_rev", "$comment": "A literal `@` in a file name must be `%40`; the parser reads `b.rs` as a revision and rejects it as one." },
+    { "text": "file:src/a%4.rs", "reason": "bad_escape" },
+    { "text": "file:src/a.rs@git:HEAD@x", "reason": "unescaped" }
+  ],
+  "format": [
+    { "$comment": "Formatting encodes only the three reserved characters, never `/` `:` `?` `=` `&` `+` or spaces.", "kind": "file", "id": "a b/c@d#e%f:g?h=i&j", "rev": "git:HEAD", "frag": "L1", "text": "file:a b/c%40d%23e%25f:g?h=i&j@git:HEAD#L1" }
+  ]
+}
