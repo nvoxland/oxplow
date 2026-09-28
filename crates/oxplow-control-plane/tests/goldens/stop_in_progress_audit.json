@@ -1,0 +1,4 @@
+{
+  "decision": "block",
+  "reason": "AUDIT: this turn is closing with 1 task(s) still `in_progress`:\n  • [1] ship the thing\n\nBefore stopping, walk each one:\n- Done? → `mcp__oxplow__complete_task` with `touchedFiles`.\n- Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n- Waiting on the user? → `mcp__oxplow__await_user`.\n\nAn `in_progress` row with finished work parked in it looks stuck to the user."
+}

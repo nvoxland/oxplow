@@ -1,0 +1,237 @@
+//! Golden tests: the EXACT response bodies the hook route returns to the
+//! agent's harness. The wording steers the agent, so these pin it
+//! byte-for-byte while enforcement and recording move behind the shared
+//! `AgentPolicy` / `AgentActivity` services (tsk281). `hook_marshaling.rs`
+//! checks shapes; these check every byte.
+//!
+//! Goldens live in `tests/goldens/<name>.json` with the temp project path
+//! written as `<ROOT>`. A mismatch fails; `UPDATE_GOLDENS=1` rewrites them
+//! (then review the diff: a changed golden is a changed agent contract).
+
+#![allow(clippy::unwrap_used)]
+
+mod common;
+
+use common::boot;
+
+use oxplow_app::Services;
+use oxplow_control_plane::ControlPlane;
+use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
+use oxplow_domain::{
+    Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
+    ThreadId, ThreadStatus, Timestamp,
+};
+
+fn golden(name: &str, body: &serde_json::Value, root: &std::path::Path) {
+    let text = serde_json::to_string_pretty(body)
+        .unwrap()
+        .replace(&root.to_string_lossy().to_string(), "<ROOT>");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/goldens")
+        .join(format!("{name}.json"));
+    if std::env::var_os("UPDATE_GOLDENS").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{text}\n")).unwrap();
+        return;
+    }
+    let want = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("missing golden {name}; run with UPDATE_GOLDENS=1"));
+    assert_eq!(text.trim_end(), want.trim_end(), "golden {name} changed");
+}
+
+async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
+    let now = Timestamp::from_unix_ms(1);
+    let stream = Stream {
+        id: StreamId::new(1),
+        kind: StreamKind::Primary,
+        title: "p".into(),
+        branch: "main".into(),
+        branch_ref: "refs/heads/main".into(),
+        branch_source: "main".into(),
+        worktree_path: "/p".into(),
+        working_pane: String::new(),
+        talking_pane: String::new(),
+        working_session_id: String::new(),
+        talking_session_id: String::new(),
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    services.stream_store.upsert(&stream).await.unwrap();
+    let thread = Thread {
+        id: ThreadId::new(1),
+        stream_id: stream.id,
+        title: "t".into(),
+        status,
+        sort_index: 0,
+        pane_target: "working".into(),
+        agent: oxplow_domain::AgentKind::Claude,
+        resume_session_id: String::new(),
+        summary: String::new(),
+        summary_updated_at: None,
+        closed_at: None,
+        custom_prompt: None,
+        created_at: now,
+        updated_at: now,
+        archived_at: None,
+    };
+    services.thread_store.upsert(&thread).await.unwrap();
+    thread.id
+}
+
+async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
+    let now = Timestamp::from_unix_ms(1);
+    services
+        .task_store
+        .insert(&Task {
+            id: TaskId::placeholder(),
+            thread_id: Some(thread_id),
+            parent_id: None,
+            title: title.into(),
+            description: "d".into(),
+            status: TaskStatus::InProgress,
+            priority: TaskPriority::Medium,
+            sort_index: 0,
+            created_by: TaskActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            deleted_at: None,
+            note_count: 0,
+            author: None,
+        })
+        .await
+        .unwrap()
+}
+
+async fn post(
+    cp: &ControlPlane,
+    event: &str,
+    thread: ThreadId,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let resp = reqwest::Client::new()
+        .post(format!("{}/{}", cp.hook_base_url(), event))
+        .header("authorization", format!("Bearer {}", cp.hook_token))
+        .header("x-oxplow-thread", thread.to_string())
+        .header("x-oxplow-stream", "str1")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    resp.json().await.unwrap()
+}
+
+fn edit(path: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({ "tool_name": "Edit", "tool_input": { "file_path": path.to_string_lossy() } })
+}
+
+#[tokio::test]
+async fn write_guard_denies() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Queued).await;
+    let with_path = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    golden("pre_tool_write_guard_path", &with_path, &root);
+    let no_path = post(
+        &cp,
+        "PreToolUse",
+        tid,
+        serde_json::json!({ "tool_name": "Write", "tool_input": {} }),
+    )
+    .await;
+    golden("pre_tool_write_guard_no_path", &no_path, &root);
+}
+
+#[tokio::test]
+async fn filing_denies() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let edit_body = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    golden("pre_tool_filing_edit", &edit_body, &root);
+    let notebook = post(
+        &cp,
+        "PreToolUse",
+        tid,
+        serde_json::json!({
+            "tool_name": "NotebookEdit",
+            "tool_input": { "notebook_path": root.join("n.ipynb").to_string_lossy() },
+        }),
+    )
+    .await;
+    golden("pre_tool_filing_notebook", &notebook, &root);
+}
+
+#[tokio::test]
+async fn allowed_edit_and_post_tool_ack() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    seed_task(&svc, tid, "ship the thing").await;
+    let allowed = post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    golden("pre_tool_allowed", &allowed, &root);
+    let mut after = edit(&root.join("src/x.rs"));
+    after["tool_response"] = serde_json::json!({ "success": true });
+    let ack = post(&cp, "PostToolUse", tid, after).await;
+    golden("post_tool_edit_ack", &ack, &root);
+}
+
+#[tokio::test]
+async fn stop_in_progress_audit() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    seed_task(&svc, tid, "ship the thing").await;
+    post(
+        &cp,
+        "UserPromptSubmit",
+        tid,
+        serde_json::json!({ "prompt": "do it", "session_id": "s1" }),
+    )
+    .await;
+    post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    let stop = post(&cp, "Stop", tid, serde_json::json!({ "session_id": "s1" })).await;
+    golden("stop_in_progress_audit", &stop, &root);
+}
+
+#[tokio::test]
+async fn stop_effort_review_with_an_unattributed_run() {
+    use oxplow_app::TaskEffortStore as _;
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    let task = seed_task(&svc, tid, "reviewed work").await;
+    let effort = svc.effort_store.start(task, &tid, None).await.unwrap();
+    svc.attribution_store
+        .set_state(
+            &effort.id,
+            "run",
+            "run:77",
+            oxplow_db::attribution_store::STATE_UNATTRIBUTED,
+            None,
+        )
+        .await
+        .unwrap();
+    svc.thread_runtime
+        .record_pending_effort_review(&tid, effort.id);
+    post(
+        &cp,
+        "UserPromptSubmit",
+        tid,
+        serde_json::json!({ "prompt": "finish", "session_id": "s1" }),
+    )
+    .await;
+    post(&cp, "PreToolUse", tid, edit(&root.join("src/x.rs"))).await;
+    let stop = post(&cp, "Stop", tid, serde_json::json!({ "session_id": "s1" })).await;
+    golden("stop_effort_review_unattributed_run", &stop, &root);
+}
+
+#[tokio::test]
+async fn prompt_context_first_then_deduped() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc, ThreadStatus::Active).await;
+    seed_task(&svc, tid, "ship the thing").await;
+    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
+    let first = post(&cp, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &first, &root);
+    let second = post(&cp, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_second", &second, &root);
+}

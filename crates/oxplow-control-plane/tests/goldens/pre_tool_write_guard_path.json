@@ -1,0 +1,7 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "path `<ROOT>/src/x.rs` is inside the shared worktree and this thread is read-only — only the stream's writer thread may mutate the worktree. Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). Promote this thread to writer from the thread rail if you need to edit."
+  }
+}
