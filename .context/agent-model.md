@@ -566,7 +566,10 @@ policy that every agent transport asks, not logic in the hook route.
 - **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
   `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
   `Allow`, or `Deny { layer: WriteGuard | Filing, reason }`.
-  - An absolute path outside the project is always allowed.
+  - **Scope:** the thread's own stream worktree (`PolicyFacts.worktree_root`). For a worktree stream that's its sibling directory, not the daemon's project dir (tsk350; before that, worktree streams were unguarded).
+  - **Normalization:** paths are normalized first (`normalize_path`: resolve `..`, canonicalize the deepest existing ancestor), so `..` or a symlink can't spell a guarded path as an outside one.
+  - **Other streams:** a path in another stream's worktree (the primary checkout included) is denied for every thread, writer or not (workspace isolation). The primary project's `.oxplow/wiki` is shared and exempt.
+  - **Outside every stream:** any other absolute path is allowed.
   - With several paths, the first refused path wins.
   - The reason text comes from the same cores the Claude builders use
     (`write_guard::read_only_reason`, `filing::filing_reason`), so the
@@ -1485,9 +1488,11 @@ in-progress changes.
 - **Hook enforcement.** The shared agent policy (above) denies `Write`,
   `Edit`, `MultiEdit`, `NotebookEdit` (and, for ACP agents, delete/move)
   from any non-`active` thread; the reason comes from
-  `write_guard::read_only_reason` (`crates/oxplow-runtime/src/write_guard.rs`). When
-  the tool's target path resolves OUTSIDE the project root AND outside
-  the project's `.oxplow/`, the call is allowed (e.g. writing to
+  `write_guard::read_only_reason` (`crates/oxplow-runtime/src/write_guard.rs`).
+  "The worktree" is the thread's own stream's (see "Agent policy"
+  above). A path in another stream's worktree is denied for every
+  thread. When the tool's target path resolves OUTSIDE every stream's
+  worktree AND outside the project's `.oxplow/`, the call is allowed (e.g. writing to
   `~/.claude/plans/foo.md`); the deny message names the specific
   absolute path. Containment checks live alongside the write guard
   in `crates/oxplow-runtime/` and reuse `AppLayout` from

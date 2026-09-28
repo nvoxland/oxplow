@@ -87,11 +87,29 @@ impl AgentPolicy {
             return PolicyDecision::Allow;
         };
         let project_dir = svc.layout.project_dir.as_path();
+        // The thread's own tree is its stream's worktree (a sibling dir for
+        // a worktree stream); every other stream's tree is off limits.
+        let streams = oxplow_domain::stores::StreamStore::list(svc.stream_store.as_ref())
+            .await
+            .unwrap_or_default();
+        let worktree_root = streams
+            .iter()
+            .find(|s| s.id == thread.stream_id)
+            .map(|s| std::path::PathBuf::from(&s.worktree_path))
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| project_dir.to_path_buf());
+        let other_roots: Vec<std::path::PathBuf> = streams
+            .iter()
+            .filter(|s| s.id != thread.stream_id && !s.worktree_path.is_empty())
+            .map(|s| std::path::PathBuf::from(&s.worktree_path))
+            .chain(std::iter::once(project_dir.to_path_buf()))
+            .filter(|p| p != &worktree_root)
+            .collect();
         // Only the writer is subject to filing; skip its lookups otherwise.
         let (has_in_progress_claim, git_operation_in_progress) = if thread.status.is_writer() {
             (
                 stream_has_in_progress_claim(svc, &thread).await,
-                git_operation_in_progress(project_dir),
+                git_operation_in_progress(&worktree_root),
             )
         } else {
             (false, false)
@@ -100,6 +118,8 @@ impl AgentPolicy {
             intent,
             &PolicyFacts {
                 thread: &thread,
+                worktree_root: &worktree_root,
+                other_roots: &other_roots,
                 project_dir,
                 has_in_progress_claim,
                 git_operation_in_progress,

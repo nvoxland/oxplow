@@ -48,7 +48,8 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
         branch: "main".into(),
         branch_ref: "refs/heads/main".into(),
         branch_source: "main".into(),
-        worktree_path: "/p".into(),
+        // The primary stream's worktree is the project itself.
+        worktree_path: services.layout.project_dir.to_string_lossy().into(),
         working_pane: String::new(),
         talking_pane: String::new(),
         working_session_id: String::new(),
