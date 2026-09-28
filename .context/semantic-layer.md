@@ -214,8 +214,8 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 - Lenses never call models or run sources on render; they read what sources
   already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
-  will appear in the same `describe_schema` / `query_sql` /
-  `list_dimensions` / `list_metrics` tools as core data. Agents never need
+  appears in the same `describe_schema` / `query_sql` /
+  `list_dimensions` / `list_metric_definitions` tools as core data. Agents never need
   an extension-specific tool. Full agent surface:
   [extensions.md](./extensions.md) → "Agents: the MCP surface".
 

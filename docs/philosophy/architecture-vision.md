@@ -1,5 +1,22 @@
 # Architecture vision
 
+!!! note "Direction changed (September 2026)"
+    This page predates the current direction. Oxplow is now a small
+    core (streams, threads, tasks, agents, comments, wiki, diff,
+    navigation) plus a data layer that every chart and report reads
+    from. Anything that measures or visualizes is an extension:
+    oxplow's own analytics ship as the bundled `oxplow-analytics`
+    extension, in the same format you'd write one in (see
+    [Lenses](../guide/lenses.md)). Agents can run as terminal
+    harnesses or over ACP, and oxplow can call models directly for
+    small jobs ([AI models](../guide/ai-models.md)).
+
+    Superseded below: **Metrics** and **Change Analysis** under
+    "Today" (the pages are now lenses; the engine is still core),
+    **Acting on what the metrics say** (extensions now nudge the agent
+    through advisories), and **Common control surface for additional
+    agents** (ACP agents are built). The rest still holds.
+
 Where oxplow is heading, in rough order of conviction. This is a
 statement of direction, not a roadmap with dates. Some of this is
 shipped today; most is not.
@@ -29,15 +46,16 @@ shipped today; most is not.
   for a while on the discoverability argument and reverted them —
   right-click won on density once every row had actions.)
 - **Metrics.** A durable, branch-aware metric substrate: measures,
-  gauges, and facts in SQLite, aggregated by an engine and served
-  to the Metrics pages and user-built dashboards. Covers both code
+  gauges, and facts in SQLite, aggregated by an engine in core and
+  served to the Metrics pages, user-built dashboards and lenses. Covers both code
   shape (complexity, duplication, lint suppressions, coverage) and
   the driving itself (steering per effort, redo rate, time to
   green, wasted tokens).
 - **MCP control plane.** Oxplow exposes its primitives (work
   items, wiki pages, threads, dispatch, LSP) over MCP so the
   agent can drive them directly.
-- **Change Analysis.** A diff-aware dashboard that ranks files
+- **Change Analysis.** Lenses from the bundled `oxplow-analytics`
+  extension, shown on diff and commit pages, that rank files
   by interestingness (churn × complexity × tests-missing ×
   duplication) and supports drilldown by extension / directory /
   status. Per-function before/after metrics come from

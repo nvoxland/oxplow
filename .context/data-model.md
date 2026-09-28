@@ -149,7 +149,7 @@ installed one — see [DEV.md](../DEV.md):
 
 ### `streams` — `StreamStore` (`crates/oxplow-db/src/stream_store.rs`)
 
-Top-level workspace context. Exactly one row per user-facing stream tab.
+Top-level workspace context. Exactly one row per user-facing stream (a stream row in the Navigator).
 Each stream owns:
 
 - a `kind` column (migration v34) — `"primary" | "worktree"`:

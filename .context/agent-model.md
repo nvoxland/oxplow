@@ -112,7 +112,10 @@ oxplow agent:
   isn't doing anything; user owes the next move). Brand-new threads,
   finished turns, exited processes, and permission prompts all
   collapse to `waiting`. The UI surfaces this as the colored dot on
-  each thread tab — yellow pulsing for `working`, red for `waiting`.
+  each thread's glyph in the Navigator and on the agent center tab
+  (`AgentStatusDot`) — yellow pulsing for `working`, pale red for
+  `waiting` (plus red `stalled` and blue `awaiting` for a pending
+  `await_user`).
   Poll for the transition *out* of `working` to know a turn finished.
   Looking at terminal rows alone is fragile (scrollback, progress
   indicators, partial lines).

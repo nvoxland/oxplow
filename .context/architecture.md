@@ -109,18 +109,26 @@ None of these run until a person approves that program on their machine.
 
 A new way for config to start a program must go through the same gate.
 
-## Skeleton + semantic layer (target direction)
+## Skeleton + semantic layer (direction, mostly built)
 
-> **Status: target design (epic tsk275), recorded 2026-09.** Today's
-> app still ships analytics pages in core. This section is the direction
-> future decisions follow.
+> **Status (epic tsk275, recorded 2026-09).** Analytics pages no longer
+> ship in core: they are lenses in the bundled `oxplow-analytics`
+> extension (`extensions/oxplow-analytics/`, compiled in by
+> `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
+> disabled. The engine they read stays in core: the fact store, metrics
+> and gauges, the cube, collection ingest, snapshots, plus the basic
+> metrics explorer and dashboards. ACP agents and AI providers are built
+> (see [agent-model.md](./agent-model.md) → ACP,
+> [ai-providers.md](./ai-providers.md)); the semantic layer is partly
+> built ([semantic-layer.md](./semantic-layer.md)). This section is the
+> direction future decisions follow.
 
 The core app is a **skeleton**: the controls you steer with, plus a data
 layer everything else builds on.
 
 - **Controls in core, instruments in extensions.** Core keeps streams,
-  threads, tasks and efforts, agent surfaces (terminal harnesses, and
-  later ACP agents), comments, wiki, diff and file drill-down, and the
+  threads, tasks and efforts, agent surfaces (terminal harnesses and
+  ACP agents), comments, wiki, diff and file drill-down, and the
   page graph (rail, launcher, tabs). Anything that **measures or
   visualizes** is an extension ([extensions.md](./extensions.md)).
 - **All data goes through the [semantic layer](./semantic-layer.md).**
@@ -130,7 +138,7 @@ layer everything else builds on.
   users and their agents add more (GitHub, Linear…) and build **lenses** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
-  analytics become the bundled `oxplow-analytics` example extension,
+  analytics are the bundled `oxplow-analytics` example extension,
   written the same way a user would write one.
 - **Declarative and scripted, no in-app user code.** See
   [extensions.md](./extensions.md) for why.
@@ -157,7 +165,7 @@ That means the app already has a strong custom domain model. In particular, **st
 
 ### Primary vs worktree streams
 
-There is exactly one **primary** stream (`kind: "primary"`). It represents the repo itself: its `worktree_path` IS the daemon's project directory, its `title` is the project basename, and its recorded branch tracks whatever HEAD is currently checked out. The primary is the leftmost tab and cannot be deleted.
+There is exactly one **primary** stream (`kind: "primary"`). It represents the repo itself: its `worktree_path` IS the daemon's project directory, its `title` is the project basename, and its recorded branch tracks whatever HEAD is currently checked out. The primary is always listed first in the Navigator and cannot be removed.
 
 Every other stream is a **worktree** stream (`kind: "worktree"`). At creation it gets its own `git worktree add` at `<parent_of_project>/<project_basename>-<slug>/` — a sibling of the main repo. The slug is fixed at creation; the project-basename prefix prevents collisions when multiple projects share a parent directory. Pre-existing worktree streams created under the legacy `<project>/.oxplow/worktrees/<slug>/` location keep their stored `worktree_path` and continue to work unchanged; only new worktrees use the sibling layout.
 
@@ -442,7 +450,7 @@ The outer shell should remain app-specific and stream-aware.
 The shell should continue to own:
 
 - current stream selection
-- stream tabs
+- the stream + thread Navigator
 - left sidebar modes
 - bottom panel
 - daemon connection state

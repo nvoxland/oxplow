@@ -37,16 +37,17 @@ checked out.
 
 The window is web-style, not IDE-style:
 
-- **Stream tabs** (top row) — one tab per stream. The primary is
-  pinned leftmost.
-- **Thread tabs** (second row) — independent lines of work
-  inside the active stream.
-- **Rail HUD** (left) — your home base. Search trigger, active
+- **Navigator** (thin strip, far left) — a two-letter glyph per
+  stream, with its threads listed under it. The primary stream is
+  always first. Click a stream glyph to switch to that stream, or a
+  thread glyph to switch to that thread. Click the chevron at the
+  bottom (or empty space in the strip) to expand it with full names;
+  right-click a row there for its actions.
+- **Rail HUD** (next to the navigator) — your home base. Search trigger, active
   item, up-next, bookmarks, recent files, and a directory of
   every page you can open.
-- **Page tabs** (center) — files, diffs, tasks, wiki pages,
-  dashboards, the agent terminal, code-quality findings, and
-  more. Each page has back/forward navigation and a Backlinks
+- **Page tabs** (center) — the thread's agent terminal, plus files,
+  diffs, tasks, wiki pages, dashboards, lenses, and more. Each page has back/forward navigation and a Backlinks
   panel.
 - **Status bar** (bottom) — branch chip, background-task
   indicator.
@@ -56,15 +57,17 @@ oxplow added on top of git or your coding agent.
 
 ## 3. Send a prompt
 
-Click the **Agent** tab in the active thread (the agent terminal
-is always available per thread). Type a concrete prompt:
+Click the first page tab, named after the thread's agent (e.g.
+**Claude**). The agent terminal is always there, one per thread.
+Type a concrete prompt:
 
 > List the files in this repo and write a one-paragraph summary
 > of what the project does. Don't change any files.
 
-The agent runs. The thread tab shows a yellow pulsing status dot
-while it's working; it goes red when the agent is waiting on
-you. Asking the agent a question that doesn't need file edits
+The agent runs. The thread's glyph in the navigator (and the agent
+tab) shows a pulsing yellow dot while it's working, and a blue one
+when the agent asked you a question and is waiting on the answer.
+Hover the dot to see which. Asking the agent a question that doesn't need file edits
 just stops cleanly when it's answered — there's nothing to file.
 
 Oxplow supports Claude Code, Codex, and OpenCode. The project Settings page
@@ -100,24 +103,29 @@ revert just that file.
 
 ## 5. Add a second stream
 
-Open the **+** in the stream tabs row. Give it a name and pick a
-branch. Oxplow runs `git worktree add` next to the project root
-and switches focus to it. The first stream keeps running
+Expand the navigator and click **+ Add stream** at the bottom (or
+pick **New Stream…** from the launcher). Give it a name and pick a
+branch: an existing one, a new one from a start point, or a worktree
+you already have. Oxplow runs `git worktree add` next to the project
+root and switches to the new stream. The first stream keeps running
 independently.
 
 You now have two agents on two branches in the same repo, with
-isolated working trees. Switch between them with the stream tabs.
+isolated working trees. Switch between them by clicking their glyphs
+in the navigator.
 
 ## 6. Add a second thread
 
-Click **+** in the thread tabs row to add a research / review
-thread. By default new threads are read-only — their writes are
+Right-click the stream in the expanded navigator → **Add thread**
+(or pick **New Thread…** from the launcher). Type a title, pick the
+agent if you have more than one enabled, and press Enter. By default
+new threads are read-only — their writes are
 denied at the hook level. Use them to ask "how does X work" or
 "trace this codepath" without risking file edits.
 
-Make a thread the writer by right-clicking it in the navigator →
-**Make writer**, when you want
-it to ship changes (only one writer per stream).
+Make a thread the writer by right-clicking it in the expanded
+navigator → **Make writer**, when you want it to ship changes (only
+one writer per stream). The writer's glyph is highlighted.
 
 ## 7. Build your own view
 

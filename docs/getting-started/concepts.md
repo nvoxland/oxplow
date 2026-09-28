@@ -13,6 +13,9 @@ There is exactly one **primary** stream — the one rooted at the
 project directory itself. Every other stream is a **worktree**
 stream with its own checkout next to the project root.
 
+Streams and their threads are listed in the **navigator**, the thin
+strip on the far left. Click a stream's glyph to switch to it.
+
 ## Thread
 
 A **thread** is an independent line of work inside a stream.
@@ -28,14 +31,19 @@ changing behind your back.
 
 Each thread carries its own:
 
-- assigned agent (Claude Code or Codex, fixed at thread creation)
-- agent terminal (a tmux pane that survives oxplow restarts)
+- assigned agent (Claude Code, Codex, OpenCode or an ACP agent,
+  fixed at thread creation)
+- agent view: a terminal (a tmux pane that survives oxplow restarts)
+  for Claude Code, Codex and OpenCode; for an ACP agent, a structured
+  conversation (messages, tool calls with diffs, the plan, permission
+  prompts) with a prompt box
 - set of open tabs and active tab
 - work queue view
 - live agent-status indicator
 
-Switching threads restores its tab set; the agent terminals stay
-alive in the background. Different threads may use different agents;
+Click a thread's glyph in the navigator to switch to it; right-click
+it (with the navigator expanded) to **Make writer**. Switching threads
+restores its tab set; the agents stay alive in the background. Different threads may use different agents;
 the writer/read-only role remains a separate per-stream constraint.
 
 ## Worktree isolation

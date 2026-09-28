@@ -165,8 +165,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
       the user asks, and to offer to commit the result.
-  - Installing runs nothing: exec sources still need a person's
-    approval (Settings → Data) before they run.
+    - Installing runs nothing. An exec source (and a shared extension's
+      advisories) runs only after a person approves it in Settings →
+      Data. Approvals are stored per machine outside the repo, MACed under
+      a keychain key, and bound to a hash of that version of the program,
+      so a changed script needs approving again (`exec_consent.rs`,
+      `source_runner.rs`; see [architecture.md](./architecture.md) → "A
+      repo's config never runs a program without consent").
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
     - Lists every entity from `describe_schema`, with column docs.
@@ -328,24 +333,37 @@ error for that extension only; it never breaks the others or core.
 
 ## `extension.yaml`
 
+These are the only top-level keys the loader accepts (`ExtensionFile` in
+`extensions.rs`, `deny_unknown_fields`):
+
 ```yaml
-name: oxplow-analytics
+name: oxplow-analytics   # must equal the folder name
 description: …
-sources:     [...]   # new data: entities and/or facts (see semantic-layer.md)
-measures:    [...]   # the existing measures: schema
-dimensions:  [...]   # over any entity or fact, including core-owned ones
-metrics:     [...]   # aggregations over entities or facts
-derived:             # named read-only SQL over v_*
-  - {name: hotspot, sql: sql/hotspot.sql}
-ai:                  # AI-function usages by role, cached as facts
-  - {id: effort-risk, role: decide, over: v_effort, questions: …, measure: ext.effort_risk}
-lenses: [lenses/*.yaml]
-slots:               # mount lenses into core pages
-  - {slot: effort-review, lens: read-this-first, order: 20}
-  - {slot: task-detail,  lens: token-usage}
-  - {slot: rail,         lens: waiting-on-me, as: badge}
-  - {slot: launcher,     lens: metrics-explorer, category: Analytics}
+sources:     [...]   # exec / starlark / jaq sources → entities (see semantic-layer.md);
+                     # a starlark/jaq source with `input:` SQL is how you derive data
+measures:    [...]   # same schema as .oxplow/project.yaml
+metrics:     [...]
+gauges:      [...]   # starlark / jaq only
+dimensions:  [...]
+slots:               # mount lenses into core pages; only `slot` and `lens`
+  - {slot: effort-review, lens: change-review}
+  - {slot: task-detail,  lens: task-tokens}
+advisories:  [...]   # see "Advisories"
 ```
+
+Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
+loaded. A lens gets into the launcher through its own `launcher.category`
+(or stays out with `hidden: true`), not a slot.
+
+> **Target (not built yet).** Keys from the original design that the
+> loader rejects today:
+> - `ai:` — AI-function usages by role, cached as facts (see
+>   [ai-providers.md](./ai-providers.md)).
+> - slot `order:` (slots render in declaration order) and `as: badge`
+>   (a `rail` lens is always shown by its alert).
+>
+> Dropped: a top-level `derived:` block (derived sources cover it) and a
+> `lenses:` list (lenses are discovered from the folder).
 
 ## Lenses
 
@@ -353,8 +371,11 @@ A **lens** is a user- or agent-built way of looking at your work: a
 query over the semantic layer plus how to show it. (Not "view", which is
 taken by the SQL `v_*` views; not "data app".)
 
-- `title`, `description`, `params` (typed, with defaults such as `stream`,
-  `effort`, `range`).
+A lens file (`LensFile`, `deny_unknown_fields`) takes `title`,
+`description`, `query`, `viz`, `params`, `columns`, `empty`, `chart`,
+`children`, `launcher`, `hidden`, `actions` and `alert`.
+
+- `params`: `name`, `label`, `default`. Untyped: a value is bound as-is.
 - **Implicit params (tsk375).** A param named `stream_id` or `thread_id`
   is bound to the viewer's context (`extensions::LensContext`, numeric ids)
   unless the caller supplies it; precedence is supplied → context →
@@ -367,39 +388,49 @@ taken by the SQL `v_*` views; not "data app".)
   context (defaults only).
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
-- `viz`: `table`, `list`, `number`, `line`, `bar`, `markdown`, `treemap`,
-  `hunks` (an ordered file/range list with badge columns that opens the
-  diff at the range), `steps` (a guided walkthrough) or `grid` (child
-  lenses).
-- `columns`: label, format, and `link:` to a core ref (task, file, effort
-  diff, wiki page, decision), so rows are page-graph links.
-- `actions`: from a fixed registry only: add-to-context, followup-comment,
-  open-diff, copy-review-prompt, run-source. Never arbitrary code.
+- `viz`: `table`, `list`, `number`, `markdown`, `bar`, `line`, `treemap`
+  or `grid` (child lenses, `children`). Charts name their columns under
+  `chart` (`x`, `y`, `series`, `label`, `size`, `group`).
+- `columns`: `key`, `label`, and `link: {kind, from, line?, base?, head?}`
+  to a core page, so rows are page-graph links. Kinds: `task`, `file`,
+  `wiki`, `effort-diff`, `commit`, `metric`, `page`, `diff-at`,
+  `compare`.
+- `actions`: from a fixed registry only: `copy`, `add-to-context`,
+  `run-source`. Never arbitrary code.
 - `alert`: a row-count or threshold condition that shows a rail badge
-  (current; nudging the agent is what advisories are for).
+  (nudging the agent is what advisories are for).
 
-Lenses render through one core `LensPage` / `LensSlot` in oxplow's design
-system, as a `lens:<slug>` page kind. Bookmarks, backlinks, the launcher
-and sibling navigation work unchanged. Every lens has an "Improve with
-agent" action that pastes `[oxplow lens <slug>]` and its params into the
-agent's context through the existing add-to-context path; oxplow never
-types into the agent.
+> **Target (not built yet).** From the original design: `hunks` (an
+> ordered file/range list that opens the diff at the range) and `steps`
+> (a guided walkthrough) viz; a column `format`; a `decision` link kind;
+> `followup-comment` and `open-diff` actions. (`copy-review-prompt` became
+> `copy` on the Review Prompt lens.)
+
+Lenses render through one core `LensPage` / `LensSlots` in oxplow's design
+system, as a `lens:<ext>/<slug>` page kind. Bookmarks, backlinks, the
+launcher and sibling navigation work unchanged. Every lens has an "Improve
+with Agent" action that pastes `[oxplow lens <ext>/<slug>]` and its params
+into the agent's context through the existing add-to-context path; oxplow
+never types into the agent.
 
 ## Slots
 
 Slots are the **only** way an extension reaches a core page. Core pages
-declare them and render whatever is mounted, in `order`. With nothing
-mounted, the page is plain.
+declare them (`SLOTS` in `extensions.rs`) and render whatever is mounted,
+in declaration order (there is no `order` field). With nothing mounted,
+the page is plain.
 
 | Slot | Core page |
 |---|---|
 | `effort-review` | diff-view for an effort |
 | `task-detail` | TaskPage |
+| `thread` | PlanPane (compact strip) |
 | `commit` | GitCommitPage |
 | `uncommitted` | UncommittedChangesPage |
-| `rail` | rail HUD Alerts section (current) |
-| `launcher` | Cmd+P launcher entries (as a lens's `launcher.category`, not a slot) |
-| `settings` | Settings: a section per mounting extension, titled with its name, before AI (current, tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`). No params. Slots render in declaration order; there is no `order` field |
+| `rail` | rail HUD Alerts section |
+| `settings` | Settings: a section per mounting extension, titled with its name, before AI (tsk330; `SettingsSlotSections`, `slotRuns(…, extension)`). No params |
+
+The launcher isn't a slot: a lens lists itself with `launcher.category`.
 
 ## Contributing metrics (current)
 
@@ -501,18 +532,21 @@ tool list stable no matter how many extensions are installed.
 - `describe_schema`: every entity (core `v_*` and extension
   `v_<ext>_<entity>`) with column docs, declared relations (joins), and the
   owning source/extension.
-- `list_dimensions`, `list_metrics`: including extension-declared ones,
-  each marked with its owner.
+- `list_dimensions`, `list_metric_definitions`, `list_measures`:
+  including extension-declared ones, each with its scope.
 - `query_sql`: read-only SQL across everything above.
-- `get_metric(key, dims?, range?)`: a metric's value or series, sliced by
-  any applicable dimension.
+- A metric's numbers: `get_metric_summary` (headline value vs target),
+  `metric_breakdown` (a metric by one dimension), and per measure
+  `metric_series` (time series, `group_by` / `dim_eq`) and
+  `metric_rollup`.
 
 **Working with lenses**
 
-- `list_lenses`: every lens with its extension, params, slots and alert
-  state.
-- `get_lens(slug)`: the lens definition (YAML) and its resolved query.
-- `run_lens(slug, params?)`: the **same rows, columns and alert state the
+- `list_lenses`: every lens (`<ext>/<slug>` id, title, description, viz,
+  params).
+- `get_lens(id)`: the lens definition: query, params with defaults, viz,
+  columns/links and the file it lives in.
+- `run_lens(id, params?)`: the **same rows, columns and alert state the
   UI shows** for those params, so the agent sees exactly what the human
   sees.
 - `get_open_page(thread_id)` **(current)**: what the human has open in
@@ -541,7 +575,8 @@ tool list stable no matter how many extensions are installed.
   instead, and humans have Save as Lens in Explore Data.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
-- `list_extensions`, `run_source(id)`.
+- `list_extensions`, `list_sources`, `run_source(extension, source_id)`
+  (never approves).
 - **Worktree streams: preview, don't run (tsk377).** Source data is
   project-wide (one `ext__<ext>__<entity>` table), so `run_source` /
   `sync_source` always run the **primary** worktree's copy. An agent
@@ -557,8 +592,8 @@ tool list stable no matter how many extensions are installed.
 
 An `oxplow-extension` skill (shipped in `crates/oxplow-plugin/assets`)
 teaches the format, the `v_*` contract and the loop "describe_schema →
-query_sql → write files → validate_extension → run_lens". "Improve with agent" on a lens pastes
-`[oxplow lens <slug>]` plus its params into the agent's context.
+query_sql → write files → validate_extension → run_lens". "Improve with Agent" on a lens pastes
+`[oxplow lens <ext>/<slug>]` plus its params into the agent's context.
 
 **Getting newcomers there (tsk373).** "New Lens with Your Agent…"
 (`lens.newWithAgent`, Tasks menu, so also in the launcher; needs a

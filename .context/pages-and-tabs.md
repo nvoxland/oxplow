@@ -8,9 +8,15 @@ pages are THE shell.
 
 ## Mental model
 
-- **Streams** = parallel worktrees (top-level tabs). Unchanged.
-- **Threads** = independent lines of thought within a stream (second-row
-  tabs). Unchanged.
+- **Streams** = parallel worktrees; **threads** = independent lines of
+  thought within a stream. Both are rows in the far-left **Navigator**
+  (`components/Navigator.tsx`), not tab rows: a stream glyph with its
+  thread glyphs under it. Clicking a glyph switches stream / selects
+  thread; the expanded panel's right-click menus add a thread (stream
+  menu → Add thread), promote one (thread menu → Make writer), rename,
+  open settings, close or remove; `+ Add stream` at the panel's foot
+  opens the `new-stream` page. The launcher's New Thread… / New Stream…
+  reach the same flows. See the Navigator row in "Modules".
 - **Each thread owns its own set of open tabs and an active tab.**
   Switching threads restores its tab set; switching streams swaps to the
   selected thread of the new stream. The agent terminal is always
@@ -718,7 +724,7 @@ Snapshots are the only path for cross-restart fidelity.
 - **Diff specs are not GC'd.** `diffTabs` grows monotonically per
   session. Cleanup hook on closePageTab could prune.
 - **Stream switch consequences.** When the user changes streams,
-  the rendered thread tabs come from the new stream's selected
+  the rendered page tabs come from the new stream's selected
   thread. `fileSessions` is per-stream, so file content is correct;
   `threadPageTabs` is per-thread, so the *list* is correct. Diff
   specs are per-session (single global registry) — works because

@@ -13,8 +13,10 @@ enabled, choose an agent while creating the thread. The assignment is
 fixed after creation. See [Agents](agents.md) for configuration and
 runtime details.
 
-Type a prompt, hit enter, and watch the agent work. The thread tab's
-status dot flips yellow (working) or red (waiting on you).
+Type a prompt, hit enter, and watch the agent work. The status dot on
+the thread's glyph in the navigator (and on the agent tab) pulses
+yellow while it's working, turns blue when it asked you a question, and
+goes pale red when it's idle and waiting for input.
 
 Per-thread bits worth knowing:
 

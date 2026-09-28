@@ -469,13 +469,9 @@ declaring *what it is* and mounting the generic layer.
   - `plan-add-points-bar` (now a single ⋯ menu — only "New task" lives
     in it; commit/wait point markers were removed)
   - `files-commit`, `files-commit-message`, `files-commit-submit`
-  - `thread-rail-new`, `thread-chip-<threadId>` (chip testid is on
-    the outer wrapper that owns the drop handlers, so drag probes
-    can target it directly). Per-row actions are on the chip's
-    **right-click** menu — `fireEvent.contextMenu` the chip, then click
-    `menu-item-<id>`.
-  - Stream tabs (`stream-tab-<id>` in the rail,
-    `navigator-stream-row-<id>` in the Navigator overlay), center tabs
+  - Stream rows (`navigator-stream-row-<id>` in the Navigator
+    overlay; the stream menu's Add thread opens
+    `navigator-new-thread-input`), center tabs
     (`center-tab-<id>`), task rows (`tasks-row-<id>`), terminal tabs
     (`terminal-tab-<id>`), and Navigator threads
     (`navigator-thread-row-<id>`) all open their action menu on
