@@ -104,3 +104,14 @@ test("a lens with actions shows its buttons; one without shows none", () => {
   expect(plain.queryByTestId("lens-actions")).toBeNull();
   expect(queryByTestId("lens-actions")).toBeNull();
 });
+
+test("a lens switching to and from grid keeps rendering (hook order)", () => {
+  const view = render(<LensResultView run={run({ viz: "grid", children: [] }, [], [])} onOpenPage={() => {}} />);
+  // The agent edits the lens's YAML from grid to table; the page re-runs it.
+  view.rerender(<LensResultView run={run({ viz: "table" }, ["n"], [[1]])} onOpenPage={() => {}} />);
+  expect(view.container.textContent).toContain("1");
+  view.rerender(<LensResultView run={run({ viz: "grid", children: [] }, [], [])} onOpenPage={() => {}} />);
+  // A hook-order error unmounts the tree (React reports it, render() doesn't
+  // throw), so what shows is the proof.
+  expect(view.container.querySelector('[data-testid="lens-grid"]')).not.toBeNull();
+});

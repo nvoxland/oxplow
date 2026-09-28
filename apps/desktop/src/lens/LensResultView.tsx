@@ -92,11 +92,18 @@ function LensActions({ run, streamId }: { run: LensRun; streamId: string | null 
   );
 }
 
-function LensBody({ run, onOpenPage, maxRows, streamId = null, compact = false }: LensResultViewProps) {
-  const lens = run.lens;
-  if (lens.viz === "grid") {
-    return <GridViz childIds={lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
+function LensBody(props: LensResultViewProps) {
+  const { run, onOpenPage, streamId = null } = props;
+  // A grid composes child lenses and has no rows of its own; it's its own
+  // component so the row views' hooks always run in the same order.
+  if (run.lens.viz === "grid") {
+    return <GridViz childIds={run.lens.children} params={run.params} streamId={streamId} onOpenPage={onOpenPage} />;
   }
+  return <RowsBody {...props} />;
+}
+
+function RowsBody({ run, onOpenPage, maxRows, compact = false }: LensResultViewProps) {
+  const lens = run.lens;
   const result = limitRows(run.result, maxRows);
   const ctxMenu = useContextMenu();
   if (result.rows.length === 0) {
