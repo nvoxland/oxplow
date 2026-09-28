@@ -2,6 +2,9 @@
 /// (`oxplow/extensions/`) with its origin, lens count and load errors,
 /// its sources' credentials (set here, kept in the keychain); an Update
 /// action for git-installed ones; and an install strip for a git URL.
+/// Install and Update first show what the extension would bring in (its
+/// programs, hosts, credentials, advisories) and install only the commit
+/// the person confirmed (tsk378).
 /// Running sources is under Data (DataSection.tsx). See
 /// `.context/extensions.md`.
 ///
@@ -15,14 +18,16 @@ import {
   installExtension,
   listExtensions,
   listSources,
+  reviewExtension,
   setExtensionEnabled,
   setSourceCredential,
   subscribeOxplowEvents,
   updateExtension,
   type Extension,
+  type ExtensionReview,
   type SourceListing,
 } from "../api.js";
-import { extensionCredentials, extensionRowModel } from "./extensionRowModel.js";
+import { extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
 import { showToast } from "./toastStore.js";
@@ -32,6 +37,10 @@ export function ExtensionsSection() {
   const [sources, setSources] = useState<SourceListing[]>([]);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /** An install or update waiting on the person's go-ahead. */
+  const [pending, setPending] = useState<
+    { kind: "install"; url: string; review: ExtensionReview } | { kind: "update"; name: string; review: ExtensionReview } | null
+  >(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,17 +60,36 @@ export function ExtensionsSection() {
     });
   }, [refresh]);
 
-  async function install() {
+  async function review() {
     const gitUrl = url.trim();
     if (!gitUrl || busy) return;
     setBusy("install");
     try {
-      const ext = await installExtension(gitUrl, null, null);
-      setUrl("");
-      showToast({ message: `Installed ${ext.name}. Commit oxplow/extensions/${ext.name} to share it with your team.` });
+      setPending({ kind: "install", url: gitUrl, review: await reviewExtension({ gitUrl }, null) });
+    } catch (e) {
+      recordOpError({ label: `Review extension ${gitUrl}`, message: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function confirm() {
+    if (!pending || busy) return;
+    const { review } = pending;
+    setBusy(pending.kind === "install" ? "install" : pending.name);
+    try {
+      if (pending.kind === "install") {
+        const ext = await installExtension(pending.url, null, review.sha, null);
+        setUrl("");
+        showToast({ message: `Installed ${ext.name}. Commit oxplow/extensions/${ext.name} to share it with your team.` });
+      } else {
+        await updateExtension(pending.name, review.sha, null);
+        showToast({ message: `Updated ${pending.name}.` });
+      }
+      setPending(null);
       await refresh();
     } catch (e) {
-      recordOpError({ label: `Install extension from ${gitUrl}`, message: String(e) });
+      recordOpError({ label: `${pending.kind === "install" ? "Install" : "Update"} extension ${review.extension.name}`, message: String(e) });
     } finally {
       setBusy(null);
     }
@@ -83,11 +111,9 @@ export function ExtensionsSection() {
   async function update(name: string) {
     setBusy(name);
     try {
-      await updateExtension(name, null);
-      showToast({ message: `Updated ${name}.` });
-      await refresh();
+      setPending({ kind: "update", name, review: await reviewExtension({ name }, null) });
     } catch (e) {
-      recordOpError({ label: `Update extension ${name}`, message: String(e) });
+      recordOpError({ label: `Review update of ${name}`, message: String(e) });
     } finally {
       setBusy(null);
     }
@@ -128,7 +154,7 @@ export function ExtensionsSection() {
                       disabled={busy !== null}
                       onClick={() => void update(m.name)}
                     >
-                      {busy === m.name ? "Updating…" : "Update"}
+                      {busy === m.name ? "Checking…" : "Update…"}
                     </button>
                   ) : null}
                 </div>
@@ -160,7 +186,7 @@ export function ExtensionsSection() {
           placeholder="Git URL of an extension, e.g. https://github.com/acme/oxplow-lenses"
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") void install();
+            if (e.key === "Enter") void review();
             if (e.key === "Escape") setUrl("");
           }}
           style={{ flex: 1 }}
@@ -168,11 +194,83 @@ export function ExtensionsSection() {
         <button
           type="button"
           data-testid="extension-install"
-          disabled={!url.trim() || busy !== null}
-          onClick={() => void install()}
+          disabled={!url.trim() || busy !== null || pending !== null}
+          onClick={() => void review()}
         >
-          {busy === "install" ? "Installing…" : "Install"}
+          {busy === "install" && !pending ? "Checking…" : "Install…"}
         </button>
+      </div>
+      {pending ? (
+        <ReviewPanel
+          review={pending.review}
+          action={pending.kind === "install" ? "Install" : "Update"}
+          busy={busy !== null}
+          onConfirm={() => void confirm()}
+          onCancel={() => setPending(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/// What an install or update would bring in, with the go-ahead. Inline,
+/// not a modal: the confirm button takes focus, Escape cancels.
+export function ReviewPanel({
+  review,
+  action,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  review: ExtensionReview;
+  action: "Install" | "Update";
+  busy: boolean;
+  onConfirm(): void;
+  onCancel(): void;
+}) {
+  const m = reviewModel(review);
+  return (
+    <div
+      data-testid="extension-review"
+      style={{ ...rowStyle, marginTop: 8 }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onCancel();
+      }}
+    >
+      <div>
+        <strong>{m.name}</strong> <span style={mutedStyle}>from {m.from}</span>
+      </div>
+      {m.description ? <div style={mutedStyle}>{m.description}</div> : null}
+      <ul data-testid="extension-review-declares" style={{ margin: "6px 0", paddingLeft: 18 }}>
+        {m.declares.length === 0 ? <li style={mutedStyle}>Nothing but its manifest.</li> : null}
+        {m.declares.map((line, i) => (
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+      {m.errors.map((err, i) => (
+        <div key={`e${i}`} style={errorStyle}>
+          {err}
+        </div>
+      ))}
+      {m.problems.map((p, i) => (
+        <div key={`p${i}`} style={mutedStyle}>
+          {p}
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+        <button
+          type="button"
+          data-testid="extension-review-confirm"
+          autoFocus
+          disabled={!m.canInstall || busy}
+          onClick={onConfirm}
+        >
+          {busy ? `${action === "Install" ? "Installing" : "Updating"}…` : action}
+        </button>
+        <button type="button" data-testid="extension-review-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        {!m.canInstall ? <span style={errorStyle}>Fix its errors before installing.</span> : null}
       </div>
     </div>
   );

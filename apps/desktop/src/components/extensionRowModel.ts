@@ -1,5 +1,5 @@
 /** Pure row presentation for the Settings → Extensions list. */
-import type { Extension, SourceListing } from "../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionReview, SourceListing } from "../tauri-bridge/generated/bindings.js";
 
 export interface ExtensionRowModel {
   name: string;
@@ -111,4 +111,61 @@ export function extensionCredentials(
     for (const c of l.credentials) out.set(c.name, (out.get(c.name) ?? false) || c.set);
   }
   return [...out].map(([name, set]) => ({ name, set })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** What installing or updating an extension would bring in, as lines a
+ *  person reads before confirming (tsk378). */
+export interface ReviewModel {
+  name: string;
+  description: string;
+  /** `<url> @ <ref> (<sha7>)`. */
+  from: string;
+  /** One line per thing it adds; programs say what they reach and read. */
+  declares: string[];
+  /** Load errors: it can't be installed while there are any. */
+  errors: string[];
+  /** What a dry run of its lenses found; shown, not blocking. */
+  problems: string[];
+  canInstall: boolean;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+export function reviewModel(review: ExtensionReview): ReviewModel {
+  const ext = review.extension;
+  const declares: string[] = [];
+  if (ext.lenses.length > 0) declares.push(plural(ext.lenses.length, "lens", "lenses"));
+  for (const s of ext.sources) {
+    if (s.runtime === "exec") {
+      const parts = [`Source ${s.id} runs the program ${s.entry}`];
+      parts.push(s.network.length > 0 ? `reaches ${s.network.join(", ")}` : "no network");
+      if (s.credentials.length > 0) parts.push(`reads ${s.credentials.join(", ")}`);
+      if (s.env.length > 0) parts.push(`reads env ${s.env.join(", ")}`);
+      declares.push(`${parts.join(" · ")} (you'll approve it before it runs)`);
+    } else {
+      declares.push(`Source ${s.id} runs ${s.entry} (${s.runtime}, sandboxed: no network, files or credentials)`);
+    }
+  }
+  const advisories = ext.advisories ?? [];
+  if (advisories.length > 0) {
+    declares.push(
+      `${plural(advisories.length, "advisory", "advisories")} shown to your agents: ${advisories.map((a) => a.id).join(", ")}`,
+    );
+  }
+  const gauges = ext.gauges ?? [];
+  if (gauges.length > 0) declares.push(`${plural(gauges.length, "gauge")} (starlark/jaq, sandboxed)`);
+  const metrics = ext.metrics ?? [];
+  if (metrics.length > 0) declares.push(plural(metrics.length, "metric"));
+  if (ext.slots.length > 0) {
+    declares.push(`Adds to pages: ${[...new Set(ext.slots.map((s) => s.slot))].join(", ")}`);
+  }
+  return {
+    name: ext.name,
+    description: ext.description,
+    from: `${review.git}${review.gitRef ? ` @ ${review.gitRef}` : ""} (${review.sha.slice(0, 7)})`,
+    declares,
+    errors: ext.errors,
+    problems: review.problems,
+    canInstall: ext.errors.length === 0,
+  };
 }

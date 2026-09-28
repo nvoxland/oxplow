@@ -137,8 +137,20 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - **Your team.** Extensions are committed files under
     `oxplow/extensions/`.
   - **The world.** Publish an extension as a git repo with
-    `extension.yaml` at its root. Others run `install_extension(git_url,
-    git_ref?)` (IPC and MCP, or the install box in Settings → Extensions).
+    `extension.yaml` at its root. Others run `review_extension(git_url,
+    git_ref?)` then `install_extension(git_url, git_ref?, reviewed_sha)`
+    (IPC and MCP, or the install box in Settings → Extensions).
+    - **Review first (tsk378).** `review_extension` (or `(name)` for an
+      update) clones into `.oxplow/tmp/` and returns `ExtensionReview`:
+      the extension as it would load (`errors` = load errors), its commit
+      `sha`, and `problems` from a dry run of its lenses/advisories
+      (reported, not blocking: a lens over an unsynced source can't run
+      yet). Settings shows it as an inline panel spelling out each exec
+      source's program, hosts and credentials, derived sources,
+      advisories, gauges and slots (`reviewModel`); Install/Update
+      confirms. `install_extension` / `update_extension` take the
+      `reviewed_sha` and refuse a clone at any other commit, or one with
+      load errors.
     - The repo is cloned inside `.oxplow/tmp/`, because workspace
       isolation forbids writing outside the project.
     - It's validated, then copied without `.git` into
@@ -153,9 +165,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       git-installed extensions.
     - Installing is a write tool on MCP. The skill says to do it only when
       the user asks, and to offer to commit the result.
-  - Installed extensions are declarative (SQL lenses), so nothing
-    executable runs. Exec sources will need explicit consent when they
-    land.
+  - Installing runs nothing: exec sources still need a person's
+    approval (Settings → Data) before they run.
 - **Core explorer (stays in core, deliberately simple).**
   - **Explore Data** (`explore-data` page, `ExploreDataPage.tsx`):
     - Lists every entity from `describe_schema`, with column docs.

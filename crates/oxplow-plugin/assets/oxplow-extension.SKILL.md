@@ -254,9 +254,13 @@ to a read-only SQL query:
 - **Team:** extensions are ordinary committed files under
   `oxplow/extensions/`. Commit them and the team has them.
 - **World:** to publish, put an extension in its own git repo with
-  `extension.yaml` at the root. To use someone else's, call
-  `install_extension(git_url, git_ref?, stream_id)`, but **only when the
-  user asks**. It records the source in `source.yaml`.
-  `update_extension(name)` pulls the latest from that source. Never
+  `extension.yaml` at the root. To use someone else's, **only when the
+  user asks**: call `review_extension(git_url, git_ref?, stream_id)`, show
+  the user what it declares (the programs its sources run, the hosts they
+  reach, the credentials they read, advisories) and any `errors` /
+  `problems`, and when they say go, call `install_extension(git_url,
+  git_ref?, reviewed_sha: <its sha>, stream_id)`. It records the source in
+  `source.yaml`. Updating is the same: `review_extension(name)`, then
+  `update_extension(name, reviewed_sha)`. Never
   hand-edit an installed extension's files; they're overwritten on update.
   Copy it into a new extension instead.

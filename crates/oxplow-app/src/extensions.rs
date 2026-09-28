@@ -1336,6 +1336,13 @@ pub async fn validate_extension(
     name: &str,
 ) -> Result<Extension, DomainError> {
     let mut ext = load_named(root, name)?;
+    check_extension(layer, root, &mut ext).await;
+    Ok(ext)
+}
+
+/// Dry-run a loaded extension's advisories and lenses, appending what's
+/// wrong to its `errors`. `root` names sources for an unsynced view.
+async fn check_extension(layer: &SemanticLayer, root: &Path, ext: &mut Extension) {
     for a in ext.advisories.clone() {
         let run = layer
             .query_sql_named(
@@ -1410,31 +1417,116 @@ pub async fn validate_extension(
             }
         }
     }
-    Ok(ext)
+}
+
+/// What installing an extension from git would bring in, for a person to
+/// look at first (tsk378): the extension as it would load (its lenses,
+/// sources with their programs, hosts and credentials, advisories,
+/// gauges; `extension.errors` are load errors, which block the install),
+/// the commit it's at, and `problems` a dry run of its lenses and
+/// advisories found (reported, not blocking: a lens over a source that
+/// hasn't synced can't run yet).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionReview {
+    pub extension: Extension,
+    pub git: String,
+    pub git_ref: Option<String>,
+    /// The commit reviewed; pass it back to install exactly this.
+    pub sha: String,
+    pub problems: Vec<String>,
+}
+
+/// Clone an extension and report what it declares, installing nothing.
+/// `replacing` names the installed extension an update must match.
+pub async fn review_extension(
+    layer: &SemanticLayer,
+    root: &Path,
+    git_url: &str,
+    git_ref: Option<&str>,
+    replacing: Option<&str>,
+) -> Result<ExtensionReview, DomainError> {
+    let fetched = {
+        let (root, url, r, rep) = (
+            root.to_path_buf(),
+            git_url.to_string(),
+            git_ref.map(str::to_string),
+            replacing.map(str::to_string),
+        );
+        tokio::task::spawn_blocking(move || fetch(&root, &url, r.as_deref(), rep.as_deref()))
+            .await
+            .map_err(|e| DomainError::Storage(format!("extension review: {e}")))??
+    };
+    let mut extension = fetched.load();
+    let load_errors = extension.errors.len();
+    check_extension(layer, root, &mut extension).await;
+    let problems = extension.errors.split_off(load_errors);
+    Ok(ExtensionReview {
+        extension,
+        git: git_url.to_string(),
+        git_ref: git_ref.map(str::to_string),
+        sha: fetched.sha,
+        problems,
+    })
+}
+
+/// [`review_extension`] for an update: the installed extension's recorded
+/// source.
+pub async fn review_update(
+    layer: &SemanticLayer,
+    root: &Path,
+    name: &str,
+) -> Result<ExtensionReview, DomainError> {
+    let source = installed_source(root, name)?;
+    review_extension(
+        layer,
+        root,
+        &source.git,
+        source.git_ref.as_deref(),
+        Some(name),
+    )
+    .await
 }
 
 /// Install an extension from a git repo whose root holds `extension.yaml`:
 /// clone it (inside `.oxplow/tmp/`, per workspace isolation), copy it to
 /// `oxplow/extensions/<name>/` without `.git`, and record its source.
-/// Refuses to overwrite an existing folder; use [`update_extension`].
+/// Installs only `reviewed_sha`, the commit a person looked at with
+/// [`review_extension`], and only when it loads without errors. Refuses
+/// to overwrite an existing folder; use [`update_extension`].
 pub fn install_extension(
     root: &Path,
     git_url: &str,
     git_ref: Option<&str>,
+    reviewed_sha: &str,
 ) -> Result<Extension, DomainError> {
-    install_from_git(root, git_url, git_ref, None)
+    install_from_git(root, git_url, git_ref, None, reviewed_sha)
 }
 
 /// Re-install an installed extension from its recorded source (same URL
-/// and ref), picking up new commits.
-pub fn update_extension(root: &Path, name: &str) -> Result<Extension, DomainError> {
-    let existing = load_named(root, name)?;
-    let source = existing.source.ok_or_else(|| {
+/// and ref), at the new commit a person reviewed with [`review_update`].
+pub fn update_extension(
+    root: &Path,
+    name: &str,
+    reviewed_sha: &str,
+) -> Result<Extension, DomainError> {
+    let source = installed_source(root, name)?;
+    install_from_git(
+        root,
+        &source.git,
+        source.git_ref.as_deref(),
+        Some(name),
+        reviewed_sha,
+    )
+}
+
+/// Where an installed extension came from.
+fn installed_source(root: &Path, name: &str) -> Result<ExtensionSource, DomainError> {
+    load_named(root, name)?.source.ok_or_else(|| {
         DomainError::Invalid(format!(
             "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
         ))
-    })?;
-    install_from_git(root, &source.git, source.git_ref.as_deref(), Some(name))
+    })
 }
 
 /// Lowercase letters, digits and single dashes — safe as a folder name
@@ -1462,15 +1554,35 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Clone, validate, then copy into place. `replacing` names the
-/// installed extension an update must match; the old folder is removed
-/// only after the new clone validated, so a failed update changes nothing.
-fn install_from_git(
+/// A published extension cloned into `.oxplow/tmp/` (removed on drop).
+struct Fetched {
+    _tmp: tempfile::TempDir,
+    clone: std::path::PathBuf,
+    sha: String,
+    name: String,
+}
+
+impl Fetched {
+    /// The extension as it would load once installed.
+    fn load(&self) -> Extension {
+        load_one(
+            &Disk(self.clone.clone()),
+            &self.name,
+            &format!("{EXTENSIONS_DIR}/{}", self.name),
+            "project",
+        )
+    }
+}
+
+/// Clone `git_url` at `git_ref` and check it is an installable extension:
+/// `extension.yaml` at its root, a safe name that isn't bundled, and for
+/// an update (`replacing`) the same name.
+fn fetch(
     root: &Path,
     git_url: &str,
     git_ref: Option<&str>,
     replacing: Option<&str>,
-) -> Result<Extension, DomainError> {
+) -> Result<Fetched, DomainError> {
     let invalid = |m: String| DomainError::Invalid(m);
     if git_url.starts_with('-') || git_ref.is_some_and(|r| r.starts_with('-')) {
         return Err(invalid("git URL and ref may not start with `-`".into()));
@@ -1499,9 +1611,14 @@ fn install_from_git(
             "{git_url} has no extension.yaml at its root, so it isn't an oxplow extension"
         ))
     })?;
-    let manifest: ExtensionFile = serde_yaml::from_str(&manifest)
-        .map_err(|e| invalid(format!("{git_url}: extension.yaml: {e}")))?;
-    let name = manifest.name;
+    // Only the name matters here; the full load reports the rest.
+    #[derive(Deserialize)]
+    struct Named {
+        name: String,
+    }
+    let name = serde_yaml::from_str::<Named>(&manifest)
+        .map_err(|e| invalid(format!("{git_url}: extension.yaml: {e}")))?
+        .name;
     if crate::bundled_extensions::is_reserved(&name) {
         return Err(invalid(format!(
             "`{name}` is the name of an extension that ships with oxplow; it can't be installed over"
@@ -1519,6 +1636,41 @@ fn install_from_git(
             )));
         }
     }
+    Ok(Fetched {
+        _tmp: tmp,
+        clone,
+        sha,
+        name,
+    })
+}
+
+/// Clone, check it's the reviewed commit and loads cleanly, then copy
+/// into place. The old folder of an update is removed only after all
+/// that, so a failed update changes nothing.
+fn install_from_git(
+    root: &Path,
+    git_url: &str,
+    git_ref: Option<&str>,
+    replacing: Option<&str>,
+    reviewed_sha: &str,
+) -> Result<Extension, DomainError> {
+    let invalid = |m: String| DomainError::Invalid(m);
+    let storage = |e: std::io::Error| DomainError::Storage(format!("extension install: {e}"));
+    let fetched = fetch(root, git_url, git_ref, replacing)?;
+    let name = fetched.name.clone();
+    if fetched.sha != reviewed_sha {
+        return Err(invalid(format!(
+            "{git_url} changed since you reviewed it (now at {}); review it again",
+            &fetched.sha[..fetched.sha.len().min(12)]
+        )));
+    }
+    let loaded = fetched.load();
+    if !loaded.errors.is_empty() {
+        return Err(invalid(format!(
+            "extension `{name}` has errors, so it wasn't installed: {}",
+            loaded.errors.join("; ")
+        )));
+    }
 
     let target = root.join(EXTENSIONS_DIR).join(&name);
     match (target.exists(), replacing) {
@@ -1530,12 +1682,12 @@ fn install_from_git(
         (true, Some(_)) => std::fs::remove_dir_all(&target).map_err(storage)?,
         (false, _) => {}
     }
-    copy_tree_without_git(&clone, &target).map_err(storage)?;
+    copy_tree_without_git(&fetched.clone, &target).map_err(storage)?;
 
     let source = ExtensionSource {
         git: git_url.to_string(),
         git_ref: git_ref.map(str::to_string),
-        sha,
+        sha: fetched.sha.clone(),
     };
     let yaml = serde_yaml::to_string(&source)
         .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
@@ -2035,13 +2187,95 @@ empty: No tasks.
         repo
     }
 
+    fn head(repo: &Path) -> String {
+        run_git(repo, &["rev-parse", "HEAD"]).unwrap()
+    }
+
+    /// Before anything lands in the repo a person sees what the extension
+    /// declares (sources with their programs, hosts and credentials) and
+    /// what's wrong with it; install then takes exactly the commit they
+    /// reviewed (tsk378).
+    #[tokio::test]
+    async fn review_shows_what_an_extension_declares_before_install() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        write(
+            repo.path(),
+            "extension.yaml",
+            "name: shared\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    network: [api.github.com]\n    credentials: [TOKEN]\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        );
+        write(repo.path(), "sync.sh", "echo '{}'\n");
+        write(
+            repo.path(),
+            "lenses/broken.yaml",
+            "title: Broken\nquery: SELECT 1 AS n\ncolumns:\n  - { key: missing }\n",
+        );
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-q", "-m", "source"]);
+        let url = repo.path().to_string_lossy().to_string();
+        let sl = layer().await;
+
+        let review = review_extension(&sl, project.path(), &url, None, None)
+            .await
+            .unwrap();
+        assert_eq!(review.extension.name, "shared");
+        assert_eq!(review.sha, head(repo.path()));
+        let source = &review.extension.sources[0];
+        assert_eq!(source.network, vec!["api.github.com".to_string()]);
+        assert_eq!(source.credentials, vec!["TOKEN".to_string()]);
+        assert!(
+            review.extension.errors.is_empty(),
+            "{:?}",
+            review.extension.errors
+        );
+        assert!(
+            review.problems.iter().any(|p| p.contains("missing")),
+            "{:?}",
+            review.problems
+        );
+        assert!(
+            !project.path().join("oxplow/extensions").exists(),
+            "a review installs nothing"
+        );
+        let tmp = project.path().join(".oxplow/tmp");
+        assert!(!tmp.exists() || std::fs::read_dir(&tmp).unwrap().next().is_none());
+
+        // A commit that isn't the reviewed one is refused.
+        write(repo.path(), "sync.sh", "curl evil.example\n");
+        git(repo.path(), &["commit", "-q", "-am", "swap"]);
+        let err = install_extension(project.path(), &url, None, &review.sha).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("changed since")),
+            "{err:?}"
+        );
+        assert!(!project.path().join("oxplow/extensions").exists());
+        let ext = install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
+        assert_eq!(ext.name, "shared");
+    }
+
+    /// An extension that doesn't load cleanly isn't installed (tsk378).
+    #[test]
+    fn install_refuses_an_extension_with_load_errors() {
+        let project = tempfile::tempdir().unwrap();
+        let repo = published_repo("Count");
+        write(repo.path(), "extension.yaml", "name: shared\nbogus: 1\n");
+        git(repo.path(), &["commit", "-q", "-am", "bad"]);
+        let url = repo.path().to_string_lossy().to_string();
+        let err = install_extension(project.path(), &url, None, &head(repo.path())).unwrap_err();
+        assert!(
+            matches!(err, DomainError::Invalid(ref m) if m.contains("bogus")),
+            "{err:?}"
+        );
+        assert!(!project.path().join("oxplow/extensions").exists());
+    }
+
     #[test]
     fn installs_from_git_and_records_the_source() {
         let project = tempfile::tempdir().unwrap();
         let repo = published_repo("Count");
         let url = repo.path().to_string_lossy().to_string();
 
-        let ext = install_extension(project.path(), &url, None).unwrap();
+        let ext = install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
         assert_eq!(ext.name, "shared");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.lenses[0].title, "Count");
@@ -2069,9 +2303,9 @@ empty: No tasks.
         let project = tempfile::tempdir().unwrap();
         let repo = published_repo("Count");
         let url = repo.path().to_string_lossy().to_string();
-        install_extension(project.path(), &url, None).unwrap();
+        install_extension(project.path(), &url, None, &head(repo.path())).unwrap();
 
-        let err = install_extension(project.path(), &url, None).unwrap_err();
+        let err = install_extension(project.path(), &url, None, &head(repo.path())).unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("already")),
             "{err:?}"
@@ -2083,7 +2317,7 @@ empty: No tasks.
             "title: Count v2\nquery: SELECT 2 AS n\nviz: number\n",
         );
         git(repo.path(), &["commit", "-q", "-am", "v2"]);
-        let ext = update_extension(project.path(), "shared").unwrap();
+        let ext = update_extension(project.path(), "shared", &head(repo.path())).unwrap();
         assert_eq!(ext.lenses[0].title, "Count v2");
     }
 
@@ -2095,13 +2329,13 @@ empty: No tasks.
             "oxplow/extensions/local/extension.yaml",
             "name: local\n",
         );
-        let err = update_extension(project.path(), "local").unwrap_err();
+        let err = update_extension(project.path(), "local", "x").unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("wasn't installed")),
             "{err:?}"
         );
         assert!(matches!(
-            update_extension(project.path(), "nope"),
+            update_extension(project.path(), "nope", "x"),
             Err(DomainError::NotFound)
         ));
     }
@@ -2114,15 +2348,16 @@ empty: No tasks.
         git(repo.path(), &["init", "-q", "-b", "main"]);
         git(repo.path(), &["add", "."]);
         git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err =
-            install_extension(project.path(), &repo.path().to_string_lossy(), None).unwrap_err();
+        let err = install_extension(project.path(), &repo.path().to_string_lossy(), None, "x")
+            .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("extension.yaml")),
             "{err:?}"
         );
         assert!(!project.path().join("oxplow/extensions").exists());
 
-        let err = install_extension(project.path(), "/definitely/not/a/repo", None).unwrap_err();
+        let err =
+            install_extension(project.path(), "/definitely/not/a/repo", None, "x").unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("clone")),
             "{err:?}"
@@ -2137,8 +2372,8 @@ empty: No tasks.
         git(repo.path(), &["init", "-q", "-b", "main"]);
         git(repo.path(), &["add", "."]);
         git(repo.path(), &["commit", "-q", "-m", "init"]);
-        let err =
-            install_extension(project.path(), &repo.path().to_string_lossy(), None).unwrap_err();
+        let err = install_extension(project.path(), &repo.path().to_string_lossy(), None, "x")
+            .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("name")),
             "{err:?}"

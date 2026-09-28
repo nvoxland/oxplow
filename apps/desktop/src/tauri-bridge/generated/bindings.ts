@@ -353,12 +353,17 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	installExtension: (gitUrl: string, gitRef: string | null, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, streamId })),
+	reviewExtension: (gitUrl: string | null, gitRef: string | null, name: string | null, streamId: string | null) => typedError<ExtensionReview, IpcError>(__TAURI_INVOKE("review_extension", { gitUrl, gitRef, name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	updateExtension: (name: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("update_extension", { name, streamId })),
+	installExtension: (gitUrl: string, gitRef: string | null, reviewedSha: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("install_extension", { gitUrl, gitRef, reviewedSha, streamId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	updateExtension: (name: string, reviewedSha: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("update_extension", { name, reviewedSha, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2102,6 +2107,24 @@ export type Extension = {
 	 *  extension toggling would rebuild the metric cube each time.
 	 */
 	dimensions: DimensionEntry[],
+};
+
+/**
+ *  What installing an extension from git would bring in, for a person to
+ *  look at first (tsk378): the extension as it would load (its lenses,
+ *  sources with their programs, hosts and credentials, advisories,
+ *  gauges; `extension.errors` are load errors, which block the install),
+ *  the commit it's at, and `problems` a dry run of its lenses and
+ *  advisories found (reported, not blocking: a lens over a source that
+ *  hasn't synced can't run yet).
+ */
+export type ExtensionReview = {
+	extension: Extension,
+	git: string,
+	gitRef: string | null,
+	// The commit reviewed; pass it back to install exactly this.
+	sha: string,
+	problems: string[],
 };
 
 // Provenance of an installed extension, kept in its `source.yaml`.

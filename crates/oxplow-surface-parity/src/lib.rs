@@ -180,6 +180,7 @@ pub const MANIFEST: &[Capability] = &[
     // A lens's declared buttons; agents can't approve an exec source.
     both("run_lens_action"),
     both("validate_extension"),
+    both("review_extension"),
     both("install_extension"),
     both("update_extension"),
     ui("save_lens"),

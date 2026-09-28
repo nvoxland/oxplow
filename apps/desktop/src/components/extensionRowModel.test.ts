@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, SourceListing } from "../tauri-bridge/generated/bindings.js";
-import { extensionCredentials, extensionRowModel, sourceRowModel } from "./extensionRowModel.js";
+import { extensionCredentials, extensionRowModel, reviewModel, sourceRowModel } from "./extensionRowModel.js";
 
 const ext = (over: Partial<Extension> = {}): Extension => ({
   name: "review",
@@ -154,4 +154,52 @@ test("extensionCredentials lists each declared credential once per extension", (
     { name: "APP", set: false },
     { name: "TOKEN", set: true },
   ]);
+});
+
+describe("reviewModel", () => {
+  const source = (over: Record<string, unknown> = {}) =>
+    ({
+      id: "gh",
+      doc: "",
+      runtime: "exec",
+      entry: "sync.sh",
+      input: null,
+      sync: "replace",
+      schedule: "manual",
+      env: [],
+      network: ["api.github.com"],
+      credentials: ["TOKEN"],
+      entities: [],
+      ...over,
+    }) as unknown as Extension["sources"][number];
+  const review = (over: Partial<Extension> = {}, problems: string[] = []) => ({
+    extension: ext({ name: "shared", ...over }),
+    git: "https://github.com/acme/lenses",
+    gitRef: null,
+    sha: "0123456789abcdef0123456789abcdef01234567",
+    problems,
+  });
+
+  test("spells out what runs, where it reaches and what it reads", () => {
+    const m = reviewModel(
+      review({
+        lenses: [{} as Extension["lenses"][number], {} as Extension["lenses"][number]],
+        sources: [source(), source({ id: "hot", runtime: "starlark", entry: "hot.star", network: [], credentials: [] })],
+      }),
+    );
+    expect(m.from).toBe("https://github.com/acme/lenses (0123456)");
+    expect(m.declares).toEqual([
+      "2 lenses",
+      "Source gh runs the program sync.sh · reaches api.github.com · reads TOKEN (you'll approve it before it runs)",
+      "Source hot runs hot.star (starlark, sandboxed: no network, files or credentials)",
+    ]);
+    expect(m.canInstall).toBe(true);
+  });
+
+  test("load errors block the install; dry-run problems don't", () => {
+    expect(reviewModel(review({ errors: ["extension.yaml: unknown field `bogus`"] })).canInstall).toBe(false);
+    const m = reviewModel(review({}, ["lens shared/x: column `y` isn't in the query result"]));
+    expect(m.canInstall).toBe(true);
+    expect(m.problems).toHaveLength(1);
+  });
 });

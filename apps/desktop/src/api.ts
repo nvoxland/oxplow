@@ -17,6 +17,7 @@ import type {
   DiffEndpoint,
   DiffEntry,
   Extension,
+  ExtensionReview,
   Lens,
   LensRun,
   LensViz,
@@ -59,7 +60,7 @@ export type {
   ToolDiff,
   TranscriptItem,
 };
-export type { EntityRowCount, Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
+export type { EntityRowCount, Extension, ExtensionReview, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
 /// plain promise return. Errors are usually IpcError objects with
@@ -624,18 +625,36 @@ export async function saveLens(
   return unwrap(await commands.saveLens(extension, slug, lens, streamId));
 }
 
-/// Install an extension from a git repo into the stream's worktree.
+/// What installing (`gitUrl`) or updating (`name`) an extension would
+/// bring in, installing nothing: shown for the person to confirm.
+export async function reviewExtension(
+  target: { gitUrl: string; gitRef?: string | null } | { name: string },
+  streamId: string | null,
+): Promise<ExtensionReview> {
+  return "name" in target
+    ? unwrap(await commands.reviewExtension(null, null, target.name, streamId))
+    : unwrap(await commands.reviewExtension(target.gitUrl, target.gitRef ?? null, null, streamId));
+}
+
+/// Install an extension from a git repo into the stream's worktree, at the
+/// commit the person reviewed.
 export async function installExtension(
   gitUrl: string,
   gitRef: string | null,
+  reviewedSha: string,
   streamId: string | null,
 ): Promise<Extension> {
-  return unwrap(await commands.installExtension(gitUrl, gitRef, streamId));
+  return unwrap(await commands.installExtension(gitUrl, gitRef, reviewedSha, streamId));
 }
 
-/// Re-install a git-installed extension from its recorded source.
-export async function updateExtension(name: string, streamId: string | null): Promise<Extension> {
-  return unwrap(await commands.updateExtension(name, streamId));
+/// Re-install a git-installed extension from its recorded source, at the
+/// commit the person reviewed.
+export async function updateExtension(
+  name: string,
+  reviewedSha: string,
+  streamId: string | null,
+): Promise<Extension> {
+  return unwrap(await commands.updateExtension(name, reviewedSha, streamId));
 }
 
 /// The semantic layer's queryable entities with column docs.

@@ -1042,7 +1042,33 @@ pub struct InstallExtensionParams {
     pub git_url: String,
     /// Branch, tag or commit to install; omit for the default branch.
     pub git_ref: Option<String>,
+    /// The `sha` from `review_extension`: only that commit is installed.
+    pub reviewed_sha: String,
     /// Stream whose worktree to install into; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ReviewExtensionParams {
+    /// Git URL to review for an install (a repo whose root holds
+    /// `extension.yaml`). Pass this or `name`.
+    pub git_url: Option<String>,
+    /// Branch, tag or commit; omit for the default branch.
+    pub git_ref: Option<String>,
+    /// An installed extension's name, to review its update. Pass this or
+    /// `git_url`.
+    pub name: Option<String>,
+    /// Stream whose worktree it goes into; omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdateExtensionParams {
+    /// Installed extension's folder name under `oxplow/extensions/`.
+    pub name: String,
+    /// The `sha` from `review_extension(name)`: only that commit is installed.
+    pub reviewed_sha: String,
+    /// Stream whose worktree to update in; omit for the primary.
     pub stream_id: Option<String>,
 }
 
@@ -1720,12 +1746,57 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "Before installing (`git_url`) or updating (`name`) an extension: clone it \
+                       and report what it would bring in, installing nothing: the extension as it \
+                       would load (lenses, sources with the programs they run, the hosts they \
+                       reach and the credentials they read, advisories, gauges; `errors` block \
+                       the install), the commit `sha`, and `problems` a dry run of its lenses \
+                       found. Show the person what it declares and get their go-ahead, then \
+                       pass `sha` as `reviewed_sha` to install_extension / update_extension."
+    )]
+    async fn review_extension(
+        &self,
+        params: Parameters<ReviewExtensionParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("review_extension", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let layer = oxplow_db::SemanticLayer::new(self.services.db.clone());
+        let review = match (p.git_url.as_deref(), p.name.as_deref()) {
+            (Some(url), None) => {
+                oxplow_app::extensions::review_extension(
+                    &layer,
+                    &root,
+                    url,
+                    p.git_ref.as_deref(),
+                    None,
+                )
+                .await
+            }
+            (None, Some(name)) => oxplow_app::extensions::review_update(&layer, &root, name).await,
+            _ => {
+                return Err(McpError::invalid_params(
+                    "pass either git_url (install) or name (update)",
+                    None,
+                ))
+            }
+        }
+        .map_err(extension_error)?;
+        json_result(&review)
+    }
+
+    #[tool(
         description = "Install a published extension from a git repo (its root holds \
                        `extension.yaml`) into `oxplow/extensions/<name>/` of a stream's \
                        worktree, recording the source URL, ref and commit. Only do this when \
-                       the user asks. The installed files are ordinary project files: offer to \
-                       commit them so the team gets them. Refuses to overwrite; use \
-                       `update_extension` for that."
+                       the user asks, after review_extension and their go-ahead; only the \
+                       reviewed commit is installed. The installed files are ordinary project \
+                       files: offer to commit them so the team gets them. Refuses to overwrite; \
+                       use `update_extension` for that."
     )]
     async fn install_extension(
         &self,
@@ -1739,7 +1810,12 @@ impl OxplowMcp {
             .resolve_repo_dir(p.stream_id.as_deref())
             .await;
         let ext = tokio::task::spawn_blocking(move || {
-            oxplow_app::extensions::install_extension(&root, &p.git_url, p.git_ref.as_deref())
+            oxplow_app::extensions::install_extension(
+                &root,
+                &p.git_url,
+                p.git_ref.as_deref(),
+                &p.reviewed_sha,
+            )
         })
         .await
         .map_err(internal)?
@@ -1754,7 +1830,7 @@ impl OxplowMcp {
     )]
     async fn update_extension(
         &self,
-        params: Parameters<ValidateExtensionParams>,
+        params: Parameters<UpdateExtensionParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
         check_optional_stream("update_extension", p.stream_id.as_deref())?;
@@ -1765,7 +1841,7 @@ impl OxplowMcp {
             .await;
         let name = p.name.clone();
         let ext = tokio::task::spawn_blocking(move || {
-            oxplow_app::extensions::update_extension(&root, &name)
+            oxplow_app::extensions::update_extension(&root, &name, &p.reviewed_sha)
         })
         .await
         .map_err(internal)?
@@ -5570,6 +5646,8 @@ const WRITE_TOOLS: &[&str] = &[
     "ensure_change",
     // Runs a source's program (stores nothing, but it executes code).
     "preview_source",
+    // Clones from the network into .oxplow/tmp.
+    "review_extension",
     // Call an outside model provider and record an `ai_call` row.
     "ai_decide",
     "ai_summarize",
@@ -6427,12 +6505,36 @@ mod tests {
         git(&["add", "."]);
         git(&["commit", "-q", "-m", "init"]);
         let url = repo.path().to_string_lossy().to_string();
+        let review = |git_url: Option<String>, name: Option<String>| {
+            let server = &server;
+            async move {
+                let v: serde_json::Value = serde_json::from_str(&text_payload(
+                    server
+                        .review_extension(Parameters(ReviewExtensionParams {
+                            git_url,
+                            git_ref: None,
+                            name,
+                            stream_id: None,
+                        }))
+                        .await
+                        .unwrap(),
+                ))
+                .unwrap();
+                v["sha"].as_str().unwrap().to_string()
+            }
+        };
+        let sha = review(Some(url.clone()), None).await;
+        assert!(
+            !proj.path().join("oxplow/extensions").exists(),
+            "a review installs nothing"
+        );
 
         let ext: serde_json::Value = serde_json::from_str(&text_payload(
             server
                 .install_extension(Parameters(InstallExtensionParams {
                     git_url: url.clone(),
                     git_ref: None,
+                    reviewed_sha: sha.clone(),
                     stream_id: None,
                 }))
                 .await
@@ -6449,6 +6551,7 @@ mod tests {
             .install_extension(Parameters(InstallExtensionParams {
                 git_url: url,
                 git_ref: None,
+                reviewed_sha: sha,
                 stream_id: None,
             }))
             .await
@@ -6461,10 +6564,12 @@ mod tests {
             "title: One v2\nquery: SELECT 1\n",
         );
         git(&["commit", "-q", "-am", "v2"]);
+        let sha = review(None, Some("shared".into())).await;
         let ext: serde_json::Value = serde_json::from_str(&text_payload(
             server
-                .update_extension(Parameters(ValidateExtensionParams {
+                .update_extension(Parameters(UpdateExtensionParams {
                     name: "shared".into(),
+                    reviewed_sha: sha,
                     stream_id: None,
                 }))
                 .await

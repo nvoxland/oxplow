@@ -115,19 +115,44 @@ pub async fn set_extension_enabled(
     Ok(extensions::load_extensions(&root))
 }
 
+/// What installing (`git_url`) or updating (`name`) an extension would
+/// bring in, installing nothing: shown for the person to confirm.
+pub async fn review_extension(
+    svc: &Services,
+    git_url: Option<String>,
+    git_ref: Option<String>,
+    name: Option<String>,
+    stream_id: Option<String>,
+) -> Result<extensions::ExtensionReview, IpcError> {
+    let root = root(svc, stream_id.as_deref()).await;
+    Ok(match (git_url, name) {
+        (Some(url), None) => {
+            extensions::review_extension(&layer(svc), &root, &url, git_ref.as_deref(), None).await?
+        }
+        (None, Some(name)) => extensions::review_update(&layer(svc), &root, &name).await?,
+        _ => {
+            return Err(IpcError::invalid(
+                "pass either gitUrl (install) or name (update)",
+            ))
+        }
+    })
+}
+
 /// Install an extension from a git repo into this stream's worktree
-/// (`oxplow/extensions/<name>/`). The files are then ordinary project
-/// files: commit them to share with the team.
+/// (`oxplow/extensions/<name>/`), at the commit the person reviewed. The
+/// files are then ordinary project files: commit them to share with the
+/// team.
 pub async fn install_extension(
     svc: &Services,
     git_url: String,
     git_ref: Option<String>,
+    reviewed_sha: String,
     stream_id: Option<String>,
 ) -> Result<Extension, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
     // git clone + file copy: blocking work off the async runtime.
     let ext = tokio::task::spawn_blocking(move || {
-        extensions::install_extension(&root, &git_url, git_ref.as_deref())
+        extensions::install_extension(&root, &git_url, git_ref.as_deref(), &reviewed_sha)
     })
     .await
     .map_err(|e| IpcError::internal(format!("install task panicked: {e}")))??;
@@ -138,12 +163,15 @@ pub async fn install_extension(
 pub async fn update_extension(
     svc: &Services,
     name: String,
+    reviewed_sha: String,
     stream_id: Option<String>,
 ) -> Result<Extension, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    let ext = tokio::task::spawn_blocking(move || extensions::update_extension(&root, &name))
-        .await
-        .map_err(|e| IpcError::internal(format!("update task panicked: {e}")))??;
+    let ext = tokio::task::spawn_blocking(move || {
+        extensions::update_extension(&root, &name, &reviewed_sha)
+    })
+    .await
+    .map_err(|e| IpcError::internal(format!("update task panicked: {e}")))??;
     Ok(ext)
 }
 
@@ -261,15 +289,28 @@ mod tests {
         git(repo.path(), &["commit", "-q", "-m", "init"]);
         let url = repo.path().to_string_lossy().to_string();
 
-        let ext = crate::dispatch("install_extension", json!({ "gitUrl": url }), &svc)
+        let review = crate::dispatch("review_extension", json!({ "gitUrl": url }), &svc)
             .await
             .unwrap();
+        assert_eq!(review["extension"]["name"], "shared");
+        let sha = review["sha"].clone();
+        let ext = crate::dispatch(
+            "install_extension",
+            json!({ "gitUrl": url, "reviewedSha": sha }),
+            &svc,
+        )
+        .await
+        .unwrap();
         assert_eq!(ext["name"], "shared");
         assert_eq!(ext["source"]["git"], json!(url));
 
-        let err = crate::dispatch("install_extension", json!({ "gitUrl": url }), &svc)
-            .await
-            .unwrap_err();
+        let err = crate::dispatch(
+            "install_extension",
+            json!({ "gitUrl": url, "reviewedSha": sha }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code, "INVALID");
 
         write(
@@ -278,9 +319,16 @@ mod tests {
             "title: One v2\nquery: SELECT 1\n",
         );
         git(repo.path(), &["commit", "-q", "-am", "v2"]);
-        let ext = crate::dispatch("update_extension", json!({ "name": "shared" }), &svc)
+        let review = crate::dispatch("review_extension", json!({ "name": "shared" }), &svc)
             .await
             .unwrap();
+        let ext = crate::dispatch(
+            "update_extension",
+            json!({ "name": "shared", "reviewedSha": review["sha"] }),
+            &svc,
+        )
+        .await
+        .unwrap();
         assert_eq!(ext["lenses"][0]["title"], "One v2");
     }
 
