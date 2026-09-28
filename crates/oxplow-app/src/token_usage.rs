@@ -317,6 +317,14 @@ struct TokenAgg {
 }
 
 /// Captures per-turn token usage from the agent transcript on Stop.
+/// What [`TokenUsageService::insert_turns`] wrote, for `announce`.
+struct RecordedTurns {
+    last_id: Option<i64>,
+    effort_id: Option<String>,
+    effort_val: Option<i64>,
+    by_model: std::collections::HashMap<String, TokenAgg>,
+}
+
 #[derive(Clone)]
 pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
@@ -399,11 +407,15 @@ impl TokenUsageService {
             self.usage.set_cursor(&session_key, new_offset).await?;
             return Ok(None);
         }
-        let last_id = self
-            .record_turns(thread, &stream_id, kind, &session_key, turns)
+        let recorded = self
+            .insert_turns(thread, &stream_id, kind, &session_key, turns)
             .await?;
+        // Advance the cursor right after the rows land, before anything
+        // slower: if the hook's budget drops this future later on, the next
+        // Stop must not read (and record) the same bytes again.
         self.usage.set_cursor(&session_key, new_offset).await?;
-        Ok(last_id)
+        self.announce(thread, &stream_id, &recorded).await;
+        Ok(recorded.last_id)
     }
 
     /// Record one ACP turn's token counts (from the prompt response), the
@@ -422,20 +434,23 @@ impl TokenUsageService {
             return Ok(None);
         };
         let stream_id = thread_row.stream_id.to_string();
-        self.record_turns(thread, &stream_id, thread_row.agent, session_id, vec![turn])
-            .await
+        let recorded = self
+            .insert_turns(thread, &stream_id, thread_row.agent, session_id, vec![turn])
+            .await?;
+        self.announce(thread, &stream_id, &recorded).await;
+        Ok(recorded.last_id)
     }
 
-    /// One row per turn against the open effort, then the event and the
-    /// metric projection.
-    async fn record_turns(
+    /// One row per turn against the open effort. [`Self::announce`] then
+    /// emits and projects them; `on_stop` advances its cursor in between.
+    async fn insert_turns(
         &self,
         thread: &ThreadId,
         stream_id: &str,
         kind: AgentKind,
         session_key: &str,
         turns: Vec<Turn>,
-    ) -> Result<Option<i64>, DomainError> {
+    ) -> Result<RecordedTurns, DomainError> {
         // Attribute tokens to the effort only when unambiguous; under parallel
         // sub-agents (two open efforts) the turn isn't a single effort's, so it
         // stays unattributed rather than guessing (tsk263).
@@ -479,14 +494,23 @@ impl TokenUsageService {
             last_id = Some(id);
             by_model.entry(model_key).or_default().turns += 1;
         }
+        Ok(RecordedTurns {
+            last_id,
+            effort_id,
+            effort_val,
+            by_model,
+        })
+    }
+
+    /// Tell the UI and project the recorded turns into the metric substrate
+    /// (best-effort).
+    async fn announce(&self, thread: &ThreadId, stream_id: &str, recorded: &RecordedTurns) {
         self.events.emit(OxplowEvent::AgentTokenUsageChanged {
             thread_id: *thread,
-            effort_id,
+            effort_id: recorded.effort_id.clone(),
         });
-        // Project token samples into the unified substrate (best-effort).
-        self.project_token_metrics(thread, stream_id, &by_model, effort_val)
+        self.project_token_metrics(thread, stream_id, &recorded.by_model, recorded.effort_val)
             .await;
-        Ok(last_id)
     }
 
     /// Project per-model token totals into the metric substrate. Best-effort: a
