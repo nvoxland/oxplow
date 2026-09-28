@@ -537,7 +537,20 @@ impl Actor {
                 reply,
                 ..
             } => {
-                let path = self.absolute(&path);
+                let path = match self.confined(&path) {
+                    Ok(p) => p,
+                    Err(reason) => {
+                        reply.deny(&reason);
+                        if !self.replaying {
+                            self.push(ItemBody::PolicyDenied {
+                                tool_call_id: String::new(),
+                                label: "Write".into(),
+                                reason,
+                            });
+                        }
+                        return;
+                    }
+                };
                 let p = path.to_string_lossy().into_owned();
                 let intent = AcpIntent {
                     label: "Write".into(),
@@ -583,7 +596,13 @@ impl Actor {
                 reply,
                 ..
             } => {
-                let path = self.absolute(&path);
+                let path = match self.confined(&path) {
+                    Ok(p) => p,
+                    Err(reason) => {
+                        reply.err(&reason);
+                        return;
+                    }
+                };
                 match std::fs::read_to_string(&path) {
                     Ok(text) => reply.ok(slice_lines(&text, line, limit)),
                     Err(e) => reply.err(&format!("reading {}: {e}", path.display())),
@@ -593,11 +612,23 @@ impl Actor {
         }
     }
 
-    fn absolute(&self, path: &Path) -> PathBuf {
-        if path.is_absolute() {
-            path.to_path_buf()
+    /// `path` resolved for oxplow to read or write on the agent's
+    /// behalf: normalized (`..`, symlinks) and inside this session's
+    /// worktree. The daemon never touches files elsewhere for an agent
+    /// (workspace isolation); the agent's own tools are its business.
+    fn confined(&self, path: &Path) -> Result<PathBuf, String> {
+        use oxplow_runtime::policy::normalize_path;
+        let root = normalize_path(&self.spec.cwd, &self.spec.cwd);
+        let resolved = normalize_path(path, &root);
+        if resolved.starts_with(&root) {
+            Ok(resolved)
         } else {
-            self.spec.cwd.join(path)
+            Err(format!(
+                "`{}` is outside this session's worktree (`{}`); oxplow only reads and writes \
+                 files inside it",
+                resolved.display(),
+                root.display()
+            ))
         }
     }
 
@@ -657,8 +688,12 @@ impl Actor {
             && !self.asked.contains(&id)
         {
             let intent = mapping::intent_for(&tool);
+            let root = oxplow_runtime::policy::normalize_path(&self.spec.cwd, &self.spec.cwd);
             let unseen = intent.paths.is_empty()
-                || intent.paths.iter().any(|p| !self.fs_written.contains(p));
+                || intent.paths.iter().any(|p| {
+                    let n = oxplow_runtime::policy::normalize_path(Path::new(p), &root);
+                    !self.fs_written.contains(n.to_string_lossy().as_ref())
+                });
             if unseen {
                 let payload = self.payload(&tool, &intent);
                 if let PolicyDecision::Deny { reason, .. } = self

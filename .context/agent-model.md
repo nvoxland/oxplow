@@ -487,7 +487,7 @@ the same JSON.
 
 **fs and bypass.**
 - `fs/write_text_file` is policy-checked. A deny returns a JSON-RPC error whose message is the reason, which does reach the model.
-- Relative paths resolve against the cwd.
+- **Confinement (tsk351):** oxplow reads and writes files for an agent only inside the session's worktree. Paths are normalized first (`..`, symlinks); anything outside is refused, with the reason going back to the agent. Relative paths resolve against the cwd.
 - **Bypass detection:** a write-kind tool call that completes without a permission request, and without every path written through `fs/write_text_file`, is checked afterward. If the policy would deny it, a bypass banner item is shown. This is the only backstop for adapter modes that skip asking.
 
 **Turn end.**

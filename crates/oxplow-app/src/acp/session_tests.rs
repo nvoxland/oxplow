@@ -607,3 +607,34 @@ async fn tool_calls_in_different_turns_stay_distinct() {
     assert_eq!(tools, 2);
     assert_eq!(rig.host.count("tool Bash"), 2);
 }
+
+#[tokio::test]
+async fn fs_reads_and_writes_stay_inside_the_sessions_worktree() {
+    let mut rig = open(Host::default()).await;
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("x.txt");
+    std::fs::write(outside.path().join("secret.txt"), "s3cret").unwrap();
+    // `..` out of the worktree is outside too.
+    let escape_name = format!(
+        "escape-{}.txt",
+        rig.dir.path().file_name().unwrap().to_string_lossy()
+    );
+    let dotdot = rig.dir.path().join("..").join(&escape_name);
+    rig.turn(&format!(
+        "fake:fswrite {} hi\nfake:fswrite {} hi\nfake:fsread {}",
+        target.display(),
+        dotdot.display(),
+        outside.path().join("secret.txt").display()
+    ))
+    .await;
+    // Consecutive agent chunks merge into one item; read them as one text.
+    let text = rig.agent_text().join("|");
+    assert_eq!(text.matches("fs error:").count(), 2, "{text}");
+    assert!(text.contains("outside this session's worktree"), "{text}");
+    assert!(
+        text.contains("read: error") && !text.contains("s3cret"),
+        "{text}"
+    );
+    assert!(!target.exists());
+    assert!(!dotdot.exists());
+}
