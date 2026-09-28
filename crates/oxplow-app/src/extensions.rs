@@ -1174,20 +1174,83 @@ pub fn find_lens(root: &Path, id: &str) -> Result<Lens, DomainError> {
         .ok_or(DomainError::NotFound)
 }
 
-/// Run a lens: bind supplied params over defaults and query the
-/// semantic layer. Unknown params are rejected, so a typo doesn't
-/// silently fall back to a default.
+/// Where a lens is being looked at from: the viewer's current stream and
+/// thread (numeric ids, as the `v_*` views use). A lens that declares a
+/// `stream_id` or `thread_id` param gets these unless it's given another
+/// value (tsk375).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LensContext {
+    pub stream_id: Option<i64>,
+    pub thread_id: Option<i64>,
+}
+
+impl LensContext {
+    /// The implicit value for a param named `name`, if it is one.
+    fn value(&self, name: &str) -> Option<SqlCell> {
+        match name {
+            "stream_id" => self.stream_id.map(SqlCell::Int),
+            "thread_id" => self.thread_id.map(SqlCell::Int),
+            _ => None,
+        }
+    }
+}
+
+/// The context a lens is viewed from: `stream` (else `thread`'s stream,
+/// else the primary) and `thread` (else that stream's selected or active
+/// thread). Lookups that fail leave the value unset.
+pub async fn lens_context(
+    svc: &crate::Services,
+    stream: Option<oxplow_domain::StreamId>,
+    thread: Option<oxplow_domain::ThreadId>,
+) -> LensContext {
+    use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+    let mut stream = stream;
+    if stream.is_none() {
+        if let Some(t) = thread {
+            stream = svc
+                .thread_store
+                .get(&t)
+                .await
+                .ok()
+                .flatten()
+                .map(|t| t.stream_id);
+        }
+    }
+    if stream.is_none() {
+        stream = svc.stream_store.list().await.ok().and_then(|all| {
+            all.into_iter()
+                .find(|s| matches!(s.kind, oxplow_domain::StreamKind::Primary))
+                .map(|s| s.id)
+        });
+    }
+    let thread = match (thread, stream) {
+        (Some(t), _) => Some(t),
+        (None, Some(s)) => svc.threads.selected_or_active(&s).await.ok().flatten(),
+        (None, None) => None,
+    };
+    LensContext {
+        stream_id: stream.map(|s| s.value()),
+        thread_id: thread.map(|t| t.value()),
+    }
+}
+
+/// Run a lens: bind supplied params over the viewer's context over
+/// defaults, and query the semantic layer. Unknown params are rejected,
+/// so a typo doesn't silently fall back to a default.
 pub async fn run_lens(
     layer: &SemanticLayer,
     root: &Path,
     id: &str,
     params: BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
     let lens = find_lens(root, id)?;
-    execute(layer, lens, params).await.map_err(|e| match e {
-        DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(root, &m)),
-        other => other,
-    })
+    execute(layer, lens, params, ctx)
+        .await
+        .map_err(|e| match e {
+            DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(root, &m)),
+            other => other,
+        })
 }
 
 /// A lens reading a source entity before its first sync fails with
@@ -1219,6 +1282,7 @@ async fn execute(
     layer: &SemanticLayer,
     lens: Lens,
     supplied: BTreeMap<String, SqlCell>,
+    ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
     if let Some(unknown) = supplied
         .keys()
@@ -1240,6 +1304,7 @@ async fn execute(
         let v = supplied
             .get(&p.name)
             .cloned()
+            .or_else(|| ctx.value(&p.name))
             .or_else(|| p.default.clone())
             .unwrap_or(SqlCell::Null(()));
         params.insert(p.name.clone(), v);
@@ -1304,7 +1369,7 @@ pub async fn validate_extension(
     }
     for lens in ext.lenses.clone() {
         let id = lens.id.clone();
-        match execute(layer, lens, BTreeMap::new()).await {
+        match execute(layer, lens, BTreeMap::new(), &LensContext::default()).await {
             Err(e) => ext.errors.push(explain_unsynced(
                 root,
                 &e.to_string().replacen("invalid value: ", "", 1),
@@ -1756,9 +1821,15 @@ empty: No tasks.
         );
         let sl = layer().await;
 
-        let run = run_lens(&sl, dir.path(), "review/echo", BTreeMap::new())
-            .await
-            .unwrap();
+        let run = run_lens(
+            &sl,
+            dir.path(),
+            "review/echo",
+            BTreeMap::new(),
+            &LensContext::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(run.result.columns, vec!["a", "b"]);
         assert_eq!(
             serde_json::to_value(&run.result.rows).unwrap(),
@@ -1768,12 +1839,87 @@ empty: No tasks.
 
         let mut over = BTreeMap::new();
         over.insert("b".to_string(), SqlCell::Text("three".into()));
-        let run = run_lens(&sl, dir.path(), "review/echo", over)
-            .await
-            .unwrap();
+        let run = run_lens(
+            &sl,
+            dir.path(),
+            "review/echo",
+            over,
+            &LensContext::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             serde_json::to_value(&run.result.rows).unwrap(),
             serde_json::json!([[1, "three"]])
+        );
+    }
+
+    /// A lens declaring `stream_id` / `thread_id` gets the caller's
+    /// current ones unless it's given others; a default applies only with
+    /// no current value (tsk375).
+    #[tokio::test]
+    async fn run_lens_binds_the_current_stream_and_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "oxplow/extensions/review/extension.yaml", EXT);
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/mine.yaml",
+            "title: Mine\nparams:\n  - { name: stream_id }\n  - { name: thread_id, default: 9 }\nquery: SELECT :stream_id AS s, :thread_id AS t\n",
+        );
+        let sl = layer().await;
+        let rows = |run: LensRun| serde_json::to_value(&run.result.rows).unwrap();
+        let here = LensContext {
+            stream_id: Some(2),
+            thread_id: Some(5),
+        };
+        let run = run_lens(&sl, dir.path(), "review/mine", BTreeMap::new(), &here)
+            .await
+            .unwrap();
+        assert_eq!(rows(run), serde_json::json!([[2, 5]]));
+
+        let mut over = BTreeMap::new();
+        over.insert("thread_id".to_string(), SqlCell::Int(7));
+        let run = run_lens(&sl, dir.path(), "review/mine", over, &here)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows(run),
+            serde_json::json!([[2, 7]]),
+            "an explicit value wins"
+        );
+
+        let run = run_lens(
+            &sl,
+            dir.path(),
+            "review/mine",
+            BTreeMap::new(),
+            &LensContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows(run),
+            serde_json::json!([[null, 9]]),
+            "no context: defaults"
+        );
+    }
+
+    /// The viewer's context: the given stream (else the primary) and the
+    /// given thread (else the stream's selected one) (tsk375).
+    #[tokio::test]
+    async fn lens_context_defaults_to_the_primary_stream_and_its_thread() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        use oxplow_domain::stores::ThreadStore as _;
+        let thread = f.svc.thread_store.get(&f.thread).await.unwrap().unwrap();
+        let expect = LensContext {
+            stream_id: Some(thread.stream_id.value()),
+            thread_id: Some(f.thread.value()),
+        };
+        assert_eq!(lens_context(&f.svc, None, None).await, expect);
+        assert_eq!(lens_context(&f.svc, None, Some(f.thread)).await, expect);
+        assert_eq!(
+            lens_context(&f.svc, Some(thread.stream_id), None).await,
+            expect
         );
     }
 
@@ -1795,17 +1941,29 @@ empty: No tasks.
 
         let mut bad = BTreeMap::new();
         bad.insert("stauts".to_string(), SqlCell::Text("done".into()));
-        let err = run_lens(&sl, dir.path(), "review/by-status", bad)
-            .await
-            .unwrap_err();
+        let err = run_lens(
+            &sl,
+            dir.path(),
+            "review/by-status",
+            bad,
+            &LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("stauts")),
             "{err:?}"
         );
 
-        let err = run_lens(&sl, dir.path(), "review/broken", BTreeMap::new())
-            .await
-            .unwrap_err();
+        let err = run_lens(
+            &sl,
+            dir.path(),
+            "review/broken",
+            BTreeMap::new(),
+            &LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, DomainError::Invalid(ref m) if m.contains("review/broken")),
             "{err:?}"
@@ -2088,9 +2246,15 @@ empty: No tasks.
             "title: All\nquery: SELECT number FROM v_gh_pr\n",
         );
         let sl = layer().await;
-        let err = run_lens(&sl, dir.path(), "gh/all", BTreeMap::new())
-            .await
-            .unwrap_err();
+        let err = run_lens(
+            &sl,
+            dir.path(),
+            "gh/all",
+            BTreeMap::new(),
+            &LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't synced"),
@@ -2540,7 +2704,11 @@ empty: No tasks.
             async move {
                 let mut p = BTreeMap::new();
                 p.insert(k.to_string(), SqlCell::Int(v));
-                run_lens(sl, &root, id, p).await.unwrap().alert.unwrap()
+                run_lens(sl, &root, id, p, &LensContext::default())
+                    .await
+                    .unwrap()
+                    .alert
+                    .unwrap()
             }
         };
         let a = run("review/rows", "n", 1).await;
@@ -2701,6 +2869,7 @@ empty: No tasks.
             dir.path(),
             "review/by-status",
             BTreeMap::new(),
+            &LensContext::default(),
         )
         .await
         .unwrap_err();

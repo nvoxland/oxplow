@@ -26,13 +26,14 @@ pub struct LensActionResult {
 }
 
 /// Run action `action_id` of lens `lens_id` (resolved in `lens_root`, the
-/// stream's worktree) with `params`.
+/// stream's worktree) with `params`, seen from `ctx`.
 pub async fn run_lens_action(
     svc: &crate::Services,
     lens_root: &Path,
     lens_id: &str,
     action_id: &str,
     params: BTreeMap<String, SqlCell>,
+    ctx: &extensions::LensContext,
 ) -> Result<LensActionResult, DomainError> {
     let lens = extensions::find_lens(lens_root, lens_id)?;
     let action = lens
@@ -49,7 +50,7 @@ pub async fn run_lens_action(
     match action.kind {
         LensActionKind::Copy => {
             let layer = SemanticLayer::new(svc.db.clone());
-            let run = extensions::run_lens(&layer, lens_root, lens_id, params).await?;
+            let run = extensions::run_lens(&layer, lens_root, lens_id, params, ctx).await?;
             Ok(LensActionResult {
                 text: Some(extensions::lens_text(&run)),
                 report: None,
@@ -111,9 +112,16 @@ mod tests {
     async fn copy_returns_the_result_as_markdown() {
         let (svc, dir) = fixture().await;
         let params = BTreeMap::from([("k".to_string(), SqlCell::Int(3))]);
-        let out = run_lens_action(&svc, dir.path(), "acme/nums", "copy", params)
-            .await
-            .unwrap();
+        let out = run_lens_action(
+            &svc,
+            dir.path(),
+            "acme/nums",
+            "copy",
+            params,
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             out.text.as_deref(),
             Some("| k | Label |\n| --- | --- |\n| 3 | a\\|b |\n"),
@@ -125,9 +133,16 @@ mod tests {
     async fn run_source_syncs_but_never_approves() {
         let (svc, dir) = fixture().await;
         let mut events = svc.events.subscribe();
-        let out = run_lens_action(&svc, dir.path(), "acme/nums", "run-source", BTreeMap::new())
-            .await
-            .unwrap();
+        let out = run_lens_action(
+            &svc,
+            dir.path(),
+            "acme/nums",
+            "run-source",
+            BTreeMap::new(),
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             serde_json::to_value(out.report.unwrap().row_counts).unwrap(),
             json!({"num": 2})
@@ -137,13 +152,27 @@ mod tests {
             Ok(crate::OxplowEvent::SourceSynced { .. })
         ));
         // An exec source nobody approved: refused, nothing ran.
-        let err = run_lens_action(&svc, dir.path(), "acme/nums", "prog", BTreeMap::new())
-            .await
-            .unwrap_err();
+        let err = run_lens_action(
+            &svc,
+            dir.path(),
+            "acme/nums",
+            "prog",
+            BTreeMap::new(),
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("approval"), "{err}");
-        let err = run_lens_action(&svc, dir.path(), "acme/nums", "gone", BTreeMap::new())
-            .await
-            .unwrap_err();
+        let err = run_lens_action(
+            &svc,
+            dir.path(),
+            "acme/nums",
+            "gone",
+            BTreeMap::new(),
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("doesn't exist"), "{err}");
     }
 
@@ -156,13 +185,21 @@ mod tests {
             "acme/nums",
             "add-to-context",
             BTreeMap::new(),
+            &crate::extensions::LensContext::default(),
         )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("run_lens"), "{err}");
-        let err = run_lens_action(&svc, dir.path(), "acme/nums", "shell", BTreeMap::new())
-            .await
-            .unwrap_err();
+        let err = run_lens_action(
+            &svc,
+            dir.path(),
+            "acme/nums",
+            "shell",
+            BTreeMap::new(),
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("no action `shell`"), "{err}");
     }
 }

@@ -213,9 +213,15 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), oxplow_db::SqlCell::Int(*v)))
             .collect();
-        let run = crate::extensions::run_lens(&layer, f._dir.path(), id, params)
-            .await
-            .unwrap();
+        let run = crate::extensions::run_lens(
+            &layer,
+            f._dir.path(),
+            id,
+            params,
+            &crate::extensions::LensContext::default(),
+        )
+        .await
+        .unwrap();
         serde_json::to_value(&run.result.rows).unwrap()
     }
 
@@ -546,6 +552,7 @@ mod tests {
             f._dir.path(),
             "oxplow-review/waiting-on-me",
             Default::default(),
+            &crate::extensions::LensContext::default(),
         )
         .await
         .unwrap();
@@ -564,6 +571,7 @@ mod tests {
             f._dir.path(),
             "oxplow-review/waiting-on-me",
             Default::default(),
+            &crate::extensions::LensContext::default(),
         )
         .await
         .unwrap();

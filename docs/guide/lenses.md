@@ -32,10 +32,10 @@ description: Lenses for reviewing agent work
 # oxplow/extensions/review/lenses/blocked.yaml
 title: Blocked Tasks
 params:
-  - { name: stream, label: Stream, default: 1 }
+  - { name: stream_id, label: Stream }
 query: |
   SELECT id, title, updated_at FROM v_task
-  WHERE status = 'blocked' AND stream_id = :stream
+  WHERE status = 'blocked' AND stream_id = :stream_id
 viz: table            # table | list | number | markdown | bar | line | treemap | grid
 columns:
   - { key: title, label: Task, link: { kind: task, from: id } }
@@ -44,6 +44,9 @@ empty: Nothing is blocked.
 ```
 
 - `params` become inputs on the page and bind as `:name`.
+- A param named `stream_id` or `thread_id` is filled in with the stream
+  you're on and its selected thread, so "my stream" needs no hardcoded
+  id. Type a value to look at another one.
 - `link.kind` is `task`, `file` (add `line: <column>` to open at a line),
   `wiki`, `effort-diff`, `commit`, `metric`, `diff-at` or `compare`.
   - `diff-at` opens a file's diff within a change:

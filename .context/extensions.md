@@ -336,6 +336,16 @@ taken by the SQL `v_*` views; not "data app".)
 
 - `title`, `description`, `params` (typed, with defaults such as `stream`,
   `effort`, `range`).
+- **Implicit params (tsk375).** A param named `stream_id` or `thread_id`
+  is bound to the viewer's context (`extensions::LensContext`, numeric ids)
+  unless the caller supplies it; precedence is supplied → context →
+  `default`. `lens_context(svc, stream?, thread?)` resolves it: the given
+  stream (else the thread's, else the primary) and the given thread (else
+  the stream's selected-or-active one). IPC `run_lens` / `run_lens_action`
+  resolve it from their `stream_id`, so the UI needs no plumbing; MCP
+  `run_lens` / `run_lens_action` also take the agent's `thread_id`;
+  `get_open_page` uses the viewer's thread. Validation dry-runs use no
+  context (defaults only).
 - `query`: SQL over `v_*` and the extension's entities, with `:param`
   binding.
 - `viz`: `table`, `list`, `number`, `line`, `bar`, `markdown`, `treemap`,

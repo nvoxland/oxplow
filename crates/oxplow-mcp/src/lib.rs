@@ -921,6 +921,10 @@ pub struct RunLensParams {
     pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// Stream whose worktree to read from; omit for the primary.
     pub stream_id: Option<String>,
+    /// Your thread (`thr…`): bound into a lens's `thread_id` param (and its
+    /// stream into `stream_id`) unless `params` sets them. Omit to use the
+    /// stream's selected thread — what the person sees.
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -933,6 +937,8 @@ pub struct RunLensActionParams {
     pub params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// Stream whose worktree to read the lens from; omit for the primary.
     pub stream_id: Option<String>,
+    /// Your thread, as for `run_lens`.
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1345,11 +1351,14 @@ impl OxplowMcp {
                             .collect()
                     })
                     .unwrap_or_default();
+                let ctx =
+                    oxplow_app::extensions::lens_context(&self.services, None, Some(thread)).await;
                 lens_run = match oxplow_app::extensions::run_lens(
                     &oxplow_db::SemanticLayer::new(self.services.db.clone()),
                     &root,
                     lens_id,
                     lens_params,
+                    &ctx,
                 )
                 .await
                 {
@@ -1772,11 +1781,15 @@ impl OxplowMcp {
             .into_iter()
             .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
             .collect();
+        let ctx = self
+            .lens_context(p.stream_id.as_deref(), p.thread_id.as_deref())
+            .await?;
         let run = oxplow_app::extensions::run_lens(
             &oxplow_db::SemanticLayer::new(self.services.db.clone()),
             &root,
             &p.id,
             overrides,
+            &ctx,
         )
         .await
         .map_err(|e| lens_error(&p.id, e))?;
@@ -1806,12 +1819,16 @@ impl OxplowMcp {
             .into_iter()
             .map(|(k, v)| (k, oxplow_db::SqlCell::from(v)))
             .collect();
+        let ctx = self
+            .lens_context(p.stream_id.as_deref(), p.thread_id.as_deref())
+            .await?;
         let out = oxplow_app::lens_actions::run_lens_action(
             &self.services,
             &root,
             &p.id,
             &p.action,
             overrides,
+            &ctx,
         )
         .await
         .map_err(|e| lens_error(&p.id, e))?;
@@ -5535,6 +5552,26 @@ fn stamp_read_only_hints(tools: Vec<Tool>) -> Vec<Tool> {
         .collect()
 }
 
+impl OxplowMcp {
+    /// The context a lens runs in for an agent: the given stream and
+    /// thread (checked), defaulting as [`oxplow_app::extensions::lens_context`] does.
+    async fn lens_context(
+        &self,
+        stream_id: Option<&str>,
+        thread_id: Option<&str>,
+    ) -> Result<oxplow_app::extensions::LensContext, McpError> {
+        let stream = stream_id.map(parse_stream_id).transpose()?;
+        let thread = match thread_id {
+            Some(t) => {
+                expect_id_kind("run_lens", "thread_id", t, ID_THREAD)?;
+                Some(parse_thread_id(t)?)
+            }
+            None => None,
+        };
+        Ok(oxplow_app::extensions::lens_context(&self.services, stream, thread).await)
+    }
+}
+
 impl ServerHandler for OxplowMcp {
     fn get_info(&self) -> ServerConfig {
         // `ServerConfig` (née `ServerInfo`, renamed in rmcp 3) is
@@ -6527,6 +6564,7 @@ mod tests {
                             .collect(),
                     ),
                     stream_id: None,
+                    thread_id: None,
                 }))
                 .await
                 .unwrap(),

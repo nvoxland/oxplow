@@ -50,11 +50,11 @@ description: Lenses for reviewing agent work
 title: Waiting on me
 description: Blocked tasks and open follow-up comments in this stream.
 params:                         # optional; bound as :name in the query
-  - { name: stream, label: Stream, default: 1 }
+  - { name: stream_id, label: Stream }   # filled in: the viewer's stream
 query: |
   SELECT id, title, status, thread_id
   FROM v_task
-  WHERE status = 'blocked' AND stream_id = :stream
+  WHERE status = 'blocked' AND stream_id = :stream_id
   ORDER BY updated_at DESC
 viz: table                      # table | list | number | markdown | bar | line | treemap | grid
 columns:                        # optional; controls headers, order and links
@@ -63,6 +63,13 @@ columns:                        # optional; controls headers, order and links
 empty: Nothing is waiting on you.
 ```
 
+- **"Mine" without hardcoding ids**: a param named `stream_id` or
+  `thread_id` is filled in with the viewer's current stream / thread
+  (numeric, like the `v_*` columns) unless a value is given. The lens
+  page uses the stream the person is on and its selected thread;
+  `run_lens` uses the `stream_id` / `thread_id` you pass (default: the
+  stream's selected thread). A `default:` applies only when there is no
+  current value.
 - **`viz`**:
   - `table` shows rows.
   - `list` shows one line per row, headlined by the first column.
@@ -126,8 +133,8 @@ empty: Nothing is waiting on you.
      `columns` keys the query doesn't return).
 
    Fix everything it reports.
-2. `run_lens(id, params?, stream_id)` returns exactly the rows the user
-   will see. Check that they answer the question.
+2. `run_lens(id, params?, stream_id, thread_id?)` returns exactly the
+   rows the user will see. Check that they answer the question.
 3. Pass **your own `stream_id`** to both when you're in a worktree
    stream. Extensions are read from the stream's worktree, so the primary
    stream won't see yours until it's merged.

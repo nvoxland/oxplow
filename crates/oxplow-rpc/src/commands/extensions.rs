@@ -49,7 +49,16 @@ pub async fn run_lens(
     stream_id: Option<String>,
 ) -> Result<LensRun, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::run_lens(&layer(svc), &root, &id, params.unwrap_or_default()).await?)
+    let ctx = context(svc, stream_id.as_deref()).await;
+    Ok(extensions::run_lens(&layer(svc), &root, &id, params.unwrap_or_default(), &ctx).await?)
+}
+
+/// The viewer's context: the stream (primary when omitted) and its
+/// selected thread, bound into lenses that declare `stream_id` /
+/// `thread_id`.
+async fn context(svc: &Services, stream_id: Option<&str>) -> extensions::LensContext {
+    let stream = stream_id.and_then(oxplow_domain::StreamId::try_from_str);
+    extensions::lens_context(svc, stream, None).await
 }
 
 /// Run one of a lens's declared actions. It never approves an exec
@@ -63,12 +72,14 @@ pub async fn run_lens_action(
     stream_id: Option<String>,
 ) -> Result<oxplow_app::lens_actions::LensActionResult, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
+    let ctx = context(svc, stream_id.as_deref()).await;
     Ok(oxplow_app::lens_actions::run_lens_action(
         svc,
         &root,
         &id,
         &action,
         params.unwrap_or_default(),
+        &ctx,
     )
     .await?)
 }
