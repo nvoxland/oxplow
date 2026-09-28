@@ -1,0 +1,21 @@
+title: Recent Decisions
+description: Forks your agents resolved in this stream, newest first, recorded or noticed by oxplow. Check the ones you'd have decided differently.
+launcher: { category: Work }
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.task_id, d.created_at
+  FROM v_decision d
+  JOIN v_thread t ON t.id = d.thread_id
+  WHERE t.stream_id = :stream_id
+  ORDER BY d.created_at DESC, d.id DESC
+  LIMIT 100
+viz: table
+columns:
+  - { key: question, label: Decision, link: { kind: task, from: task_id } }
+  - { key: choice, label: Chose }
+  - { key: confidence, label: Confidence }
+  - { key: provenance, label: Source }
+  - { key: thread, label: Thread }
+  - { key: created_at, label: When }
+empty: No decisions yet in this stream. Agents record them with record_decision as they work.

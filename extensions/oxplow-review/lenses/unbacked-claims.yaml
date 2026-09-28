@@ -1,0 +1,19 @@
+title: Unbacked Claims
+description: Things your agents said about their work in this stream that nothing backs up (no evidence, or no passing latest test run), newest first.
+launcher: { category: Work }
+params:
+  - { name: stream_id, label: Stream }
+query: |
+  SELECT c.statement, c.kind, t.title AS thread, c.task_id, c.created_at
+  FROM v_claim c
+  JOIN v_thread t ON t.id = c.thread_id
+  WHERE t.stream_id = :stream_id AND c.verified = 0
+  ORDER BY c.created_at DESC, c.id DESC
+  LIMIT 100
+viz: table
+columns:
+  - { key: statement, label: Claim, link: { kind: task, from: task_id } }
+  - { key: kind, label: Kind }
+  - { key: thread, label: Thread }
+  - { key: created_at, label: When }
+empty: Every claim in this stream is backed (or none were made).

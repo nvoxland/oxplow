@@ -1,5 +1,6 @@
 title: Struggled Here
 description: Files the agent edited over and over, and commands that kept failing. Likely places for mistakes.
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |

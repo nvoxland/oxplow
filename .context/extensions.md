@@ -255,6 +255,13 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   itself is in memory only (V2 dropped `agent_status`), so this reads
   the durable tool-call log instead. Each empty state says what's *good*, e.g.
   "Every claim for this effort is backed by evidence."
+
+  The slot lenses above need `effort_id` / `change_id`, so they're
+  `hidden` from the launcher (opened there they'd show NULL-param empty
+  states). The launcher gets stream-level starters instead, under Work:
+  **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
+  `stream_id`. `launcher_lenses_need_no_slot_params` enforces the rule
+  for every bundled lens (tsk374).
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
   skill takes one row.

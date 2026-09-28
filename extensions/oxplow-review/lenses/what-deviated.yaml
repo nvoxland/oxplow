@@ -1,5 +1,6 @@
 title: What Deviated
 description: Files the effort changed outside the area its task names. A file is in the area when the task's title or description names it, or names one of its directories at least two levels deep (`src/ui`). Silent when the task names no area.
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |

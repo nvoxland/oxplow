@@ -1,5 +1,6 @@
 title: Decisions Made
 description: Forks the agent resolved on its own during this effort. Check the ones you'd have decided differently.
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |

@@ -1,5 +1,6 @@
 title: Unverified Claims
 description: Things the agent said about its work that nothing backs up.
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |

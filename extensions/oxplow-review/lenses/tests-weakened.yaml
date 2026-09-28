@@ -1,5 +1,6 @@
 title: Tests Weakened
 description: Tests the change deleted, test files that now assert less, and tests newly skipped. Assertion and skip counts are a heuristic across languages (assert*/expect(/t.Error calls; #[ignore], .skip(, xit(, @Disabled, t.Skip markers).
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: change_id, label: Change }
 query: |

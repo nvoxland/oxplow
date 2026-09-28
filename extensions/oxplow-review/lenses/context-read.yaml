@@ -1,5 +1,6 @@
 title: Context Read
 description: The project docs (.context/*.md) the agent read during this effort. Compare with what it changed.
+hidden: true    # needs a slot param (effort_id / change_id); shown on the diff
 params:
   - { name: effort_id, label: Effort }
 query: |

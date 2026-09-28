@@ -69,9 +69,11 @@ pub const BUNDLED: &[BundledExtension] = &[
             ext_file!("oxplow-review", "lenses/context-read.yaml"),
             ext_file!("oxplow-review", "lenses/decisions.yaml"),
             ext_file!("oxplow-review", "lenses/inferred-decisions.yaml"),
+            ext_file!("oxplow-review", "lenses/recent-decisions.yaml"),
             ext_file!("oxplow-review", "lenses/review-prompt.yaml"),
             ext_file!("oxplow-review", "lenses/struggled.yaml"),
             ext_file!("oxplow-review", "lenses/tests-weakened.yaml"),
+            ext_file!("oxplow-review", "lenses/unbacked-claims.yaml"),
             ext_file!("oxplow-review", "lenses/unverified-claims.yaml"),
             ext_file!("oxplow-review", "lenses/waiting-on-me.yaml"),
             ext_file!("oxplow-review", "lenses/what-deviated.yaml"),
@@ -118,6 +120,39 @@ mod tests {
                 b.name
             );
         }
+    }
+
+    /// A lens that needs a param nobody fills in from the launcher (an
+    /// `effort_id` a slot passes) opens empty there, so it's hidden; the
+    /// viewer's `stream_id` / `thread_id` are filled in (tsk374).
+    #[test]
+    fn launcher_lenses_need_no_slot_params() {
+        let exts = crate::extensions::load_extensions(tempfile::tempdir().unwrap().path());
+        let mut shown = Vec::new();
+        for e in exts.iter().filter(|e| e.origin == "bundled") {
+            assert!(e.errors.is_empty(), "{}: {:?}", e.name, e.errors);
+            for l in e.lenses.iter().filter(|l| !l.hidden) {
+                for p in &l.params {
+                    assert!(
+                        p.default.is_some()
+                            || ["stream_id", "thread_id"].contains(&p.name.as_str()),
+                        "{} is in the launcher but needs `{}`",
+                        l.id,
+                        p.name
+                    );
+                }
+                shown.push(l.id.clone());
+            }
+        }
+        assert!(shown.contains(&"oxplow-review/waiting-on-me".to_string()));
+        assert!(
+            shown
+                .iter()
+                .filter(|id| id.starts_with("oxplow-review/"))
+                .count()
+                >= 2,
+            "the review category has something to open: {shown:?}"
+        );
     }
 
     /// The analytics effort-review lenses unnest the stored observation
@@ -530,6 +565,66 @@ mod tests {
                 "missing {expected:?} in:\n{prompt}"
             );
         }
+    }
+
+    /// The stream-level review starters list the viewer's stream's
+    /// decisions and unbacked claims, newest first (tsk374).
+    #[tokio::test]
+    async fn review_starters_read_the_viewers_stream() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let thread = f.thread.value();
+        let store = &f.svc.reasoning_store;
+        store
+            .record_decision(oxplow_db::NewDecision {
+                thread_id: thread,
+                task_id: Some(f.task.value()),
+                effort_id: Some(f.effort.value()),
+                question: "Where does export live?".into(),
+                choice: "src/export".into(),
+                alternatives: vec![],
+                confidence: "high".into(),
+                why: String::new(),
+            })
+            .await
+            .unwrap();
+        for (statement, evidence) in [("tests pass", None), ("handles empty", Some("test:empty"))] {
+            store
+                .record_claim(oxplow_db::NewClaim {
+                    thread_id: thread,
+                    task_id: Some(f.task.value()),
+                    effort_id: Some(f.effort.value()),
+                    statement: statement.into(),
+                    kind: "tests_pass".into(),
+                    evidence_ref: evidence.map(str::to_string),
+                })
+                .await
+                .unwrap();
+        }
+        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let ctx = crate::extensions::lens_context(&f.svc, None, None).await;
+        let first = |id: &'static str, ctx: crate::extensions::LensContext| {
+            let layer = layer.clone();
+            let root = f._dir.path().to_path_buf();
+            async move {
+                let run = crate::extensions::run_lens(&layer, &root, id, Default::default(), &ctx)
+                    .await
+                    .unwrap();
+                serde_json::to_value(&run.result.rows).unwrap()
+            }
+        };
+        let decisions = first("oxplow-review/recent-decisions", ctx).await;
+        assert_eq!(decisions[0][0], "Where does export live?");
+        let claims = first("oxplow-review/unbacked-claims", ctx).await;
+        assert_eq!(claims.as_array().unwrap().len(), 1);
+        assert_eq!(claims[0][0], "tests pass");
+        let elsewhere = crate::extensions::LensContext {
+            stream_id: Some(999),
+            thread_id: None,
+        };
+        assert_eq!(
+            first("oxplow-review/unbacked-claims", elsewhere).await,
+            serde_json::json!([])
+        );
     }
 
     /// Waiting on Me sits in the rail and raises an alert while anything
