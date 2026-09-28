@@ -1881,6 +1881,12 @@ If you add another path that inserts into `fact`, it must call
 
 ## Gotchas
 
+- **Config write-back is generic** (tsk355). Every settings write rewrites
+  `metrics:` / `measures:` / `gauges:` / `dimensions:` in `project.yaml` through
+  `oxplow_config::minimal_yaml`: the entry's own serde form, with nulls and empty
+  lists and maps dropped. A new field on an entry struct is written back
+  automatically. The per-field writers this replaced dropped entity metrics'
+  `entity` / `where` / …, so the next load failed validation.
 - **Provenance is the spine** (carried from collection.md): in-process/parsed →
   `observed`; agent-asserted / exec-tier → `asserted` / `plugin-exec:<name>`. The
   UI must never let an asserted number pass for a measured one.

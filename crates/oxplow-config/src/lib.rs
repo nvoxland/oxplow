@@ -1324,17 +1324,17 @@ pub fn write_project_config(
     }
 
     if !config.metrics.is_empty() {
-        let metrics: Vec<_> = config.metrics.iter().map(metric_entry_to_yaml).collect();
+        let metrics: Vec<_> = config.metrics.iter().map(minimal_yaml).collect();
         doc.insert("metrics".into(), serde_yaml::Value::Sequence(metrics));
     }
 
     if !config.gauges.is_empty() {
-        let gauges: Vec<_> = config.gauges.iter().map(gauge_entry_to_yaml).collect();
+        let gauges: Vec<_> = config.gauges.iter().map(minimal_yaml).collect();
         doc.insert("gauges".into(), serde_yaml::Value::Sequence(gauges));
     }
 
     if !config.measures.is_empty() {
-        let measures: Vec<_> = config.measures.iter().map(measure_entry_to_yaml).collect();
+        let measures: Vec<_> = config.measures.iter().map(minimal_yaml).collect();
         doc.insert("measures".into(), serde_yaml::Value::Sequence(measures));
     }
 
@@ -1402,7 +1402,7 @@ pub fn write_project_config(
 /// Used by the Catalog "New metric" scaffold at global scope; the runner reads
 /// these via [`load_global_metric_entries`].
 pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(metric_entry_to_yaml).collect();
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(minimal_yaml).collect();
     let mut doc = serde_yaml::Mapping::new();
     doc.insert("metrics".into(), serde_yaml::Value::Sequence(seq));
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
@@ -1418,7 +1418,7 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
 /// [`load_global_gauge_entries`]; used by the "New gauge" scaffold at global
 /// scope (epic tsk12, E).
 pub fn write_global_gauges_file(path: &Path, entries: &[GaugeEntry]) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(gauge_entry_to_yaml).collect();
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(minimal_yaml).collect();
     let mut doc = serde_yaml::Mapping::new();
     doc.insert("gauges".into(), serde_yaml::Value::Sequence(seq));
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
@@ -1437,7 +1437,7 @@ pub fn write_global_measures_file(
     path: &Path,
     entries: &[MeasureEntry],
 ) -> Result<(), ConfigError> {
-    let seq: Vec<serde_yaml::Value> = entries.iter().map(measure_entry_to_yaml).collect();
+    let seq: Vec<serde_yaml::Value> = entries.iter().map(minimal_yaml).collect();
     let mut doc = serde_yaml::Mapping::new();
     doc.insert("measures".into(), serde_yaml::Value::Sequence(seq));
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
@@ -1466,149 +1466,44 @@ pub fn write_global_dimensions_file(
     Ok(())
 }
 
-/// Serialize a [`GaugeComputeConfig`] to a YAML mapping (shared by the metric →
-/// gauge migration and the `gauges:` writer).
-fn gauge_compute_to_yaml(c: &GaugeComputeConfig) -> serde_yaml::Value {
-    let mut cm = serde_yaml::Mapping::new();
-    cm.insert("runtime".into(), c.runtime.clone().into());
-    if let Some(i) = &c.input {
-        cm.insert("input".into(), i.clone().into());
-    }
-    if let Some(f) = &c.entry_file {
-        cm.insert("entryFile".into(), f.clone().into());
-    }
-    if !c.args.is_empty() {
-        cm.insert(
-            "args".into(),
-            serde_yaml::to_value(&c.args).expect("args serialize"),
-        );
-    }
-    if let Some(r) = &c.report {
-        cm.insert("report".into(), r.clone().into());
-    }
-    serde_yaml::Value::Mapping(cm)
-}
-
-/// Serialize one [`MetricEntry`] (a spec) to a YAML mapping, omitting unset
-/// fields so a hand-edited `metrics:` block stays minimal across UI-driven
-/// writes (mirrors the per-field plugin serialization above).
-fn metric_entry_to_yaml(e: &MetricEntry) -> serde_yaml::Value {
-    let mut m = serde_yaml::Mapping::new();
-    let mut put_str = |k: &str, v: &Option<String>| {
-        if let Some(s) = v {
-            m.insert(k.into(), s.clone().into());
+/// One config entry as a minimal YAML mapping: its serde form (the very
+/// keys [`load_project_config`] reads) without unset values (null, empty
+/// lists and maps), so a hand-edited block stays minimal across UI-driven
+/// writes. Generic on purpose: the per-field writers it replaced forgot
+/// fields as the structs grew (tsk355 dropped entity metrics' `entity`,
+/// `where`, … and broke loading).
+fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
+    fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
+        use serde_yaml::Value;
+        match v {
+            Value::Null => None,
+            Value::Sequence(s) if s.is_empty() => None,
+            Value::Mapping(m) => {
+                let kept: serde_yaml::Mapping = m
+                    .into_iter()
+                    .filter_map(|(k, v)| prune(v).map(|v| (k, v)))
+                    .collect();
+                (!kept.is_empty()).then_some(Value::Mapping(kept))
+            }
+            other => Some(other),
         }
-    };
-    put_str("use", &e.use_key);
-    put_str("key", &e.key);
-    put_str("title", &e.title);
-    put_str("sourceMeasure", &e.source_measure);
-    put_str("aggregation", &e.aggregation);
-    put_str("unit", &e.unit);
-    put_str("direction", &e.direction);
-    put_str("displayKind", &e.display_kind);
-    put_str("category", &e.category);
-    put_str("language", &e.language);
-    put_str("description", &e.description);
-    // Only the disable marker is written; a bare/enabled entry stays minimal.
-    if let Some(b) = e.enabled {
-        m.insert("enabled".into(), b.into());
     }
-    if !e.sliceable_dims.is_empty() {
-        m.insert(
-            "sliceableDims".into(),
-            serde_yaml::to_value(&e.sliceable_dims).expect("sliceableDims serialize"),
-        );
-    }
-    if let Some(f) = &e.filter {
-        m.insert(
-            "filter".into(),
-            serde_yaml::to_value(f).expect("filter serialize"),
-        );
-    }
-    if let Some(f) = &e.formula {
-        m.insert(
-            "formula".into(),
-            serde_yaml::to_value(f).expect("formula serialize"),
-        );
-    }
-    if let Some(t) = e.target {
-        m.insert("target".into(), t.into());
-    }
-    if let Some(t) = e.warn_at {
-        m.insert("warnAt".into(), t.into());
-    }
-    if let Some(t) = e.fail_at {
-        m.insert("failAt".into(), t.into());
-    }
-    serde_yaml::Value::Mapping(m)
-}
-
-/// Serialize one [`GaugeEntry`] to a YAML mapping, omitting unset fields.
-fn gauge_entry_to_yaml(e: &GaugeEntry) -> serde_yaml::Value {
-    let mut m = serde_yaml::Mapping::new();
-    if let Some(k) = &e.key {
-        m.insert("key".into(), k.clone().into());
-    }
-    if let Some(t) = &e.title {
-        m.insert("title".into(), t.clone().into());
-    }
-    if let Some(t) = &e.trigger {
-        m.insert("trigger".into(), t.clone().into());
-    }
-    if !e.emits.is_empty() {
-        m.insert(
-            "emits".into(),
-            serde_yaml::to_value(&e.emits).expect("emits serialize"),
-        );
-    }
-    if let Some(c) = &e.compute {
-        m.insert("compute".into(), gauge_compute_to_yaml(c));
-    }
-    serde_yaml::Value::Mapping(m)
-}
-
-/// Serialize one [`MeasureEntry`] to a YAML mapping, omitting unset fields so a
-/// hand-edited `measures:` block stays minimal across UI-driven writes.
-fn measure_entry_to_yaml(e: &MeasureEntry) -> serde_yaml::Value {
-    let mut m = serde_yaml::Mapping::new();
-    let mut put_str = |k: &str, v: &Option<String>| {
-        if let Some(s) = v {
-            m.insert(k.into(), s.clone().into());
-        }
-    };
-    put_str("key", &e.key);
-    put_str("title", &e.title);
-    put_str("unit", &e.unit);
-    put_str("subjectKind", &e.subject_kind);
-    put_str("temporalSemantics", &e.temporal_semantics);
-    put_str("componentRole", &e.component_role);
-    put_str("description", &e.description);
-    serde_yaml::Value::Mapping(m)
+    serde_yaml::to_value(entry)
+        .ok()
+        .and_then(prune)
+        .unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
 }
 
 /// Serialize one [`DimensionEntry`] to a YAML mapping, omitting unset fields.
 fn dimension_entry_to_yaml(e: &DimensionEntry) -> serde_yaml::Value {
-    let mut m = serde_yaml::Mapping::new();
-    let mut put_str = |k: &str, v: &Option<String>| {
-        if let Some(s) = v {
-            m.insert(k.into(), s.clone().into());
+    // `promote` is a plain bool; only `true` is worth writing.
+    let mut v = minimal_yaml(e);
+    if let serde_yaml::Value::Mapping(m) = &mut v {
+        if m.get("promote") == Some(&serde_yaml::Value::Bool(false)) {
+            m.remove("promote");
         }
-    };
-    put_str("key", &e.key);
-    put_str("label", &e.label);
-    put_str("valueType", &e.value_type);
-    put_str("subjectKind", &e.subject_kind);
-    if !e.vocabulary.is_empty() {
-        m.insert(
-            "vocabulary".into(),
-            serde_yaml::to_value(&e.vocabulary).expect("vocabulary serialize"),
-        );
     }
-    if e.promote {
-        m.insert("promote".into(), true.into());
-    }
-    serde_yaml::Value::Mapping(m)
+    v
 }
 
 fn default_config(project_name: String) -> OxplowConfig {
@@ -3606,6 +3501,37 @@ lsp:
                 "expected a {needle} error for {yaml:?}, got {err:?}"
             );
         }
+    }
+
+    /// Every settings write rewrites `metrics:` and `dimensions:` from the
+    /// parsed entries, so a field the writer forgets is silently dropped;
+    /// an entity metric without its entity no longer validates and the
+    /// whole config stops loading.
+    #[test]
+    fn write_round_trips_entity_metrics_and_dimensions() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "metrics:\n\
+             - key: work.open_bugs\n  title: Open Bugs\n  entity: v_task\n  aggregation: count\n  where: \"e.status = 'ready'\"\n  time: e.created_at\n\
+             - key: work.mean_priority\n  entity: v_task\n  aggregation: avg\n  value: e.priority_rank\n\
+             dimensions:\n\
+             - key: work.thread_title\n  label: Thread\n  entity: v_task\n  expr: t.title\n  join: LEFT JOIN v_thread t ON t.id = e.thread_id\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        write_project_config(dir.path(), &cfg).unwrap();
+        let reloaded = load_project_config(dir.path()).expect("still loads after a write");
+        assert_eq!(reloaded.metrics, cfg.metrics);
+        assert_eq!(reloaded.dimensions, cfg.dimensions);
+        assert_eq!(
+            reloaded.metrics[0].where_.as_deref(),
+            Some("e.status = 'ready'")
+        );
+        assert_eq!(
+            reloaded.dimensions[0].join.as_deref(),
+            Some("LEFT JOIN v_thread t ON t.id = e.thread_id")
+        );
     }
 
     #[test]
