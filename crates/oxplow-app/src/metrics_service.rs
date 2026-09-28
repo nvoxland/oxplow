@@ -93,6 +93,8 @@ pub struct MetricsService {
     blobs: BlobStore,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
+    /// This machine's program approvals (`exec_consent`).
+    approvals: Arc<crate::exec_consent::ApprovalStore>,
     events: EventBus,
     /// Override for the global config dir (the parent of `metrics/`). `None` →
     /// the platform `global_config_dir()`. A field (not the free fn) so tests
@@ -205,6 +207,7 @@ impl MetricsService {
             blobs,
             config,
             project_dir,
+            approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             events,
             global_dir: None,
             fact_store: None,
@@ -231,6 +234,12 @@ impl MetricsService {
         tasks: crate::background_task::BackgroundTaskStore,
     ) -> Self {
         self.background_tasks = Some(tasks);
+        self
+    }
+
+    /// The program approvals project exec gauges are checked against.
+    pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
+        self.approvals = approvals;
         self
     }
 
@@ -1823,7 +1832,12 @@ impl MetricsService {
         }
         // A global gauge's script lives under the global config dir, not the
         // project; project gauges resolve against the project dir.
-        compute_to_collector(gauge, &self.script_base_dir(gauge), &self.project_dir)
+        compute_to_collector(
+            gauge,
+            &self.script_base_dir(gauge),
+            &self.project_dir,
+            &self.approvals,
+        )
     }
 
     /// Run one gauge: build its collector, execute under the sandbox with the
@@ -2590,6 +2604,7 @@ fn compute_to_collector(
     gauge: &ResolvedGauge,
     project_dir: &Path,
     root: &Path,
+    approvals: &crate::exec_consent::ApprovalStore,
 ) -> Result<Collector, String> {
     let c: &GaugeComputeConfig = &gauge.compute;
     let input = match c.input.as_deref().unwrap_or("text") {
@@ -2624,6 +2639,7 @@ fn compute_to_collector(
             use crate::exec_consent::{may_run, needs_approval, ProgramKind};
             if gauge.scope == "project"
                 && !may_run(
+                    approvals,
                     project_dir,
                     ProgramKind::Gauge,
                     &gauge.key,
@@ -4747,6 +4763,7 @@ def transform(input):
         assert!(err.contains("approval"), "{err}");
         let cfg = svc.config.read().unwrap().clone();
         crate::exec_consent::approve_program(
+            &svc.approvals,
             dir.path(),
             &cfg,
             crate::exec_consent::ProgramKind::Gauge,

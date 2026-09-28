@@ -2,9 +2,9 @@
 //!
 //! An `exec` source is a program an extension ships. It runs only
 //! after a human approved that exact entry script (by content hash);
-//! approvals live in `.oxplow/source-approvals.json`, which is local
-//! state (gitignored), so each person consents on their own machine and
-//! again whenever the script changes. The entry runs with a scrubbed
+//! approvals live in this machine's `exec_consent::ApprovalStore`, outside
+//! the repo, so each person consents on their own machine and again
+//! whenever the script changes. The entry runs with a scrubbed
 //! environment (PATH, HOME, the declared `env` names, its declared
 //! `credentials` from the keychain, OXPLOW_* context) and must print `{"entities": {"<name>": [ {col: value, …}, … ]}}`.
 //!
@@ -36,7 +36,7 @@ pub const SOURCE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Largest stdout a source may produce.
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 /// Local (gitignored) consent file under `.oxplow/` (see `exec_consent`).
-pub use crate::exec_consent::APPROVALS_FILE;
+pub use crate::exec_consent::LEGACY_APPROVALS_FILE;
 
 /// Outcome of one run, as reported to the UI / agent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -74,8 +74,8 @@ pub struct CredentialStatus {
 pub struct Sources<'a> {
     /// The worktree whose `oxplow/extensions/` declares them.
     pub root: &'a Path,
-    /// `.oxplow/`, holding the approvals file.
-    pub state_dir: &'a Path,
+    /// This machine's approvals (outside the repo, see `exec_consent`).
+    pub approvals: &'a crate::exec_consent::ApprovalStore,
     pub store: &'a SqliteExtSourceStore,
     /// Where credential values are kept (the OS keychain in the app).
     pub secrets: &'a dyn SecretStore,
@@ -87,7 +87,7 @@ impl<'a> Sources<'a> {
     pub fn of(svc: &'a crate::Services, root: &'a Path) -> Self {
         Sources {
             root,
-            state_dir: &svc.layout.state_dir,
+            approvals: &svc.approvals,
             store: &svc.ext_source_store,
             secrets: svc.secrets.as_ref(),
             layer: SemanticLayer::new(svc.db.clone()),
@@ -140,7 +140,7 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
             // A derived source can't do anything an approval would guard.
             let approved = spec.runtime.is_derived()
                 || approval_hash(&ext_dir, &spec)
-                    .map(|h| is_approved(ctx.state_dir, &ext.name, &spec.id, &h))
+                    .map(|h| is_approved(ctx.approvals, &ext.name, &spec.id, &h))
                     .unwrap_or(false);
             let state = states
                 .iter()
@@ -256,13 +256,23 @@ pub enum Egress {
 }
 
 /// Whether `extension/source` is approved for this exact entry hash.
-pub fn is_approved(state_dir: &Path, extension: &str, source: &str, hash: &str) -> bool {
-    crate::exec_consent::is_approved(state_dir, &format!("{extension}/{source}"), hash)
+pub fn is_approved(
+    approvals: &crate::exec_consent::ApprovalStore,
+    extension: &str,
+    source: &str,
+    hash: &str,
+) -> bool {
+    approvals.is_approved(&format!("{extension}/{source}"), hash)
 }
 
 /// Record a human's approval of `extension/source` at `hash`.
-pub fn approve(state_dir: &Path, extension: &str, source: &str, hash: &str) -> std::io::Result<()> {
-    crate::exec_consent::approve(state_dir, &format!("{extension}/{source}"), hash)
+pub fn approve(
+    approvals: &crate::exec_consent::ApprovalStore,
+    extension: &str,
+    source: &str,
+    hash: &str,
+) -> std::io::Result<()> {
+    approvals.approve(&format!("{extension}/{source}"), hash)
 }
 
 /// What a source run returns: rows per entity, and (with `sync: upsert`)
@@ -562,7 +572,7 @@ pub async fn run_source(
     source_id: &str,
     approve_now: bool,
 ) -> Result<SourceRunReport, RunSourceError> {
-    let (root, state_dir, store) = (ctx.root, ctx.state_dir, ctx.store);
+    let (root, approvals, store) = (ctx.root, ctx.approvals, ctx.store);
     let ext = crate::extensions::load_extensions(root)
         .into_iter()
         .find(|e| e.name == extension)
@@ -591,10 +601,10 @@ pub async fn run_source(
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
     if approve_now {
-        approve(state_dir, extension, source_id, &hash).map_err(|e| {
+        approve(approvals, extension, source_id, &hash).map_err(|e| {
             RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}")))
         })?;
-    } else if !is_approved(state_dir, extension, source_id, &hash) {
+    } else if !is_approved(approvals, extension, source_id, &hash) {
         return Err(RunSourceError::NeedsApproval(format!(
             "source `{extension}/{source_id}` runs `{}` and needs a person's approval first \
              (Settings → Data → Approve & Run). Approval is per machine and per script version.",
@@ -825,15 +835,16 @@ mod tests {
         let state = tempfile::tempdir().unwrap();
         script(ext.path(), "bin/sync.sh", "echo one");
         let h1 = entry_hash(ext.path(), "bin/sync.sh").unwrap();
-        assert!(!is_approved(state.path(), "my-gh", "gh", &h1));
-        approve(state.path(), "my-gh", "gh", &h1).unwrap();
-        assert!(is_approved(state.path(), "my-gh", "gh", &h1));
-        assert!(!is_approved(state.path(), "my-gh", "other", &h1));
+        let approvals = crate::exec_consent::ApprovalStore::for_tests(state.path());
+        assert!(!is_approved(&approvals, "my-gh", "gh", &h1));
+        approve(&approvals, "my-gh", "gh", &h1).unwrap();
+        assert!(is_approved(&approvals, "my-gh", "gh", &h1));
+        assert!(!is_approved(&approvals, "my-gh", "other", &h1));
         script(ext.path(), "bin/sync.sh", "echo two");
         let h2 = entry_hash(ext.path(), "bin/sync.sh").unwrap();
         assert_ne!(h1, h2);
         assert!(
-            !is_approved(state.path(), "my-gh", "gh", &h2),
+            !is_approved(&approvals, "my-gh", "gh", &h2),
             "a changed script needs re-approval"
         );
     }
@@ -984,7 +995,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
-            state_dir: &state,
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
@@ -1132,7 +1143,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
-            state_dir: &state,
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
@@ -1235,7 +1246,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
-            state_dir: &state,
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
@@ -1275,7 +1286,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
-            state_dir: &state,
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
@@ -1365,7 +1376,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
-            state_dir: &state,
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),

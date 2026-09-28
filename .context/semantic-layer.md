@@ -318,9 +318,10 @@ entities from data already in the semantic layer:
   - `drop_extension` removes an extension's tables, views and state.
 - **Consent.** A source runs code, so it runs only after a person
   approves it.
-  - Approval is bound to the entry script's SHA-256 and stored in local
-    `.oxplow/source-approvals.json`, which is gitignored and so per
-    machine.
+  - Approval is bound to the entry script's SHA-256 and stored per
+    machine outside the repo, MACed under a keychain key (see
+    [architecture.md](./architecture.md) → "A repo's config never runs a
+    program without consent").
   - A teammate who pulls the repo approves it themselves, and a changed
     script needs re-approval.
   - The IPC `approve` flag exists only on the UI path. MCP `run_source`

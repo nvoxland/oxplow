@@ -365,6 +365,8 @@ mod instance_lock_tests {
 struct AiEnv {
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     config_dir: Option<PathBuf>,
+    /// Where program approvals live; `None` = this machine's oxplow home.
+    approvals_file: Option<PathBuf>,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -484,6 +486,8 @@ pub struct Services {
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `acp::host::ServicesAcpHost` holding `Services` weakly.
     pub acp: Arc<acp::manager::AcpManager>,
+    /// This machine's approvals of the project's programs (`exec_consent`).
+    pub approvals: Arc<exec_consent::ApprovalStore>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -517,6 +521,7 @@ impl Services {
         let ai = AiEnv {
             secrets: Arc::new(oxplow_ai::secrets::KeychainSecrets),
             config_dir: oxplow_config::global_config_dir(),
+            approvals_file: None,
         };
         Self::build(layout, config, db, ai)
     }
@@ -597,6 +602,16 @@ impl Services {
         // is paid on first request, not at boot.
         let config_arc = Arc::new(RwLock::new(config));
         let project_config = config_arc.clone();
+        // Program approvals: this machine's, outside the repo (tsk344).
+        let approvals = Arc::new(match ai_env.approvals_file.clone() {
+            Some(f) => {
+                exec_consent::ApprovalStore::at(f, &layout.project_dir, ai_env.secrets.clone())
+            }
+            None => exec_consent::ApprovalStore::for_project(
+                &layout.project_dir,
+                ai_env.secrets.clone(),
+            ),
+        });
         let ai = Arc::new(
             ai_service::AiService::new(
                 oxplow_ai::client::Client::default(),
@@ -703,7 +718,8 @@ impl Services {
             event_bus.clone(),
         )
         .with_fact_store(fact_store.clone())
-        .with_background_tasks(background_tasks.clone());
+        .with_background_tasks(background_tasks.clone())
+        .with_approvals(approvals.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -723,7 +739,8 @@ impl Services {
             layout.project_dir.clone(),
             event_bus.clone(),
             attribution_store.clone(),
-        );
+        )
+        .with_approvals(approvals.clone());
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
@@ -793,6 +810,7 @@ impl Services {
             agent_policy: Arc::new(agent_policy::AgentPolicy::default()),
             agent_activity: Arc::new(agent_activity::AgentActivity::default()),
             acp: Arc::new(acp::manager::AcpManager::new()),
+            approvals,
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,
@@ -820,6 +838,7 @@ impl Services {
         let ai = AiEnv {
             secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             config_dir: Some(state_dir.join("global-config")),
+            approvals_file: Some(state_dir.join("global-config/approvals.json")),
         };
         Self::build(layout, config, Database::in_memory(), ai)
     }

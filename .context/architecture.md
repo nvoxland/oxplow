@@ -74,9 +74,13 @@ None of these run until a person approves that program on their machine.
 - **What an approval covers.** It is bound to a hash of what runs: the
   program's content plus its args, and for a source its `network` list.
   Any change needs approving again.
-- **Where it lives.** Approvals go in the gitignored
-  `.oxplow/source-approvals.json` (`exec_consent.rs`), so each teammate
-  consents for themselves.
+- **Where it lives.** Outside every repo (tsk344): `exec_consent::ApprovalStore`
+  keeps them in `<oxplow home>/approvals/<sha256 of the project path>.json`.
+  Each entry carries an HMAC under a random key kept in the OS keychain
+  (`approvals-mac-key`, created on the first approval). So a repo can't
+  commit an approval, an agent's shell can't forge one, and each teammate
+  consents for themselves. The old in-repo `.oxplow/source-approvals.json`
+  is never read; programs approved there ask once more.
 - **Who approves.** Only a person, in Settings → Data. Agents can't, and a
   lens button never does.
 - **Not gated:** in-process Starlark/jq (sandboxed, no I/O) and the user's

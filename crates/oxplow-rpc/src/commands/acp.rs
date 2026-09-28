@@ -63,7 +63,7 @@ pub async fn acp_open_session(
     let project_dir = svc.layout.project_dir.clone();
     let (agent, source) = agents::find(&config, &name)
         .ok_or_else(|| IpcError::invalid(format!("no ACP agent named '{name}' is configured")))?;
-    if !agents::may_start(&project_dir, &agent, source) {
+    if !agents::may_start(&svc.approvals, &project_dir, &agent, source) {
         return Err(IpcError::invalid(format!(
             "ACP agent '{name}' is a project program; approve it in Settings → Data → Programs first"
         )));

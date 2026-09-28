@@ -23,11 +23,15 @@ pub struct AcpAgentListing {
 }
 
 /// Every ACP agent the project can pick.
-pub fn list(project_dir: &Path, config: &OxplowConfig) -> Vec<AcpAgentListing> {
+pub fn list(
+    approvals: &crate::exec_consent::ApprovalStore,
+    project_dir: &Path,
+    config: &OxplowConfig,
+) -> Vec<AcpAgentListing> {
     oxplow_config::resolve_acp_agents(&config.acp_agents)
         .into_iter()
         .map(|(agent, source)| AcpAgentListing {
-            approved: may_start(project_dir, &agent, source),
+            approved: may_start(approvals, project_dir, &agent, source),
             resolved_path: resolve_command(project_dir, &agent.command),
             name: agent.name,
             command: agent.command,
@@ -46,10 +50,15 @@ pub fn find(config: &OxplowConfig, name: &str) -> Option<(AcpAgentConfig, AcpAge
 
 /// Presets start freely; a project entry names a program from the repo,
 /// so it starts only once approved (see `exec_consent`).
-pub fn may_start(project_dir: &Path, agent: &AcpAgentConfig, source: AcpAgentSource) -> bool {
+pub fn may_start(
+    approvals: &crate::exec_consent::ApprovalStore,
+    project_dir: &Path,
+    agent: &AcpAgentConfig,
+    source: AcpAgentSource,
+) -> bool {
     match source {
         AcpAgentSource::Preset => true,
-        AcpAgentSource::Project => crate::exec_consent::may_run_acp(project_dir, agent),
+        AcpAgentSource::Project => crate::exec_consent::may_run_acp(approvals, project_dir, agent),
     }
 }
 
@@ -88,7 +97,8 @@ mod tests {
         )
         .unwrap();
         let cfg = oxplow_config::load_project_config(dir.path()).unwrap();
-        let listed = list(dir.path(), &cfg);
+        let approvals = crate::exec_consent::ApprovalStore::for_tests(dir.path());
+        let listed = list(&approvals, dir.path(), &cfg);
         let get = |n: &str| listed.iter().find(|a| a.name == n).unwrap();
         assert_eq!(
             (get("claude").source, get("claude").approved),
@@ -106,6 +116,7 @@ mod tests {
             .ends_with("tools/agent"));
         assert!(find(&cfg, "mine").is_some() && find(&cfg, "nope").is_none());
         crate::exec_consent::approve_program(
+            &approvals,
             dir.path(),
             &cfg,
             crate::exec_consent::ProgramKind::AcpAgent,
@@ -113,7 +124,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            list(dir.path(), &cfg)
+            list(&approvals, dir.path(), &cfg)
                 .iter()
                 .find(|a| a.name == "mine")
                 .unwrap()

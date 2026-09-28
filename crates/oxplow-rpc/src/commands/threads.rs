@@ -34,6 +34,7 @@ pub async fn list_acp_agents(
 ) -> Result<Vec<oxplow_app::acp::agents::AcpAgentListing>, IpcError> {
     let config = read_config(&svc.config);
     Ok(oxplow_app::acp::agents::list(
+        &svc.approvals,
         &svc.layout.project_dir,
         &config,
     ))

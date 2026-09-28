@@ -56,6 +56,7 @@ pub async fn list_project_programs(
         .map(|c| c.clone())
         .unwrap_or_else(|p| p.into_inner().clone());
     Ok(oxplow_app::exec_consent::list(
+        &svc.approvals,
         &svc.layout.project_dir,
         &config,
     ))
@@ -73,9 +74,16 @@ pub async fn approve_project_program(
         .read()
         .map(|c| c.clone())
         .unwrap_or_else(|p| p.into_inner().clone());
-    oxplow_app::exec_consent::approve_program(&svc.layout.project_dir, &config, kind, &name)
-        .map_err(IpcError::invalid)?;
+    oxplow_app::exec_consent::approve_program(
+        &svc.approvals,
+        &svc.layout.project_dir,
+        &config,
+        kind,
+        &name,
+    )
+    .map_err(IpcError::invalid)?;
     Ok(oxplow_app::exec_consent::list(
+        &svc.approvals,
         &svc.layout.project_dir,
         &config,
     ))
