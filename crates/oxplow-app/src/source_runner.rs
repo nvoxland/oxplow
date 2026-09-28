@@ -613,7 +613,89 @@ pub async fn run_source(
     source_id: &str,
     reviewed: Option<&str>,
 ) -> Result<SourceRunReport, RunSourceError> {
-    let (root, approvals, store) = (ctx.root, ctx.approvals, ctx.store);
+    let (spec, output) = produce(ctx, extension, source_id, reviewed).await?;
+    let result = match output {
+        Ok(output) => store_output(extension, &spec, output, ctx.store).await,
+        Err(e) => Err(e),
+    };
+    record(ctx.store, extension, source_id, result).await
+}
+
+/// Rows per entity a preview shows.
+const PREVIEW_ROWS: usize = 50;
+
+/// What a source would store, without storing it or recording a run:
+/// how an agent checks a source it's writing in a worktree stream
+/// (source data is project-wide, so a real run there would overwrite the
+/// project's rows, tsk377). The same consent applies: an exec source
+/// runs only at a version a person approved.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcePreview {
+    pub extension: String,
+    pub source_id: String,
+    pub entities: Vec<EntityPreview>,
+}
+
+/// One entity of a [`SourcePreview`]: its first rows, coerced to the
+/// declared columns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityPreview {
+    pub entity: String,
+    pub view: String,
+    pub columns: Vec<String>,
+    /// At most [`PREVIEW_ROWS`].
+    pub rows: Vec<Vec<SqlCell>>,
+    /// Rows the run returned for it.
+    pub total: usize,
+    /// Keys an upsert run would delete.
+    pub deleted: usize,
+}
+
+/// Run a source and return what it would store (see [`SourcePreview`]).
+pub async fn preview_source(
+    ctx: &Sources<'_>,
+    extension: &str,
+    source_id: &str,
+) -> Result<SourcePreview, RunSourceError> {
+    let (spec, output) = produce(ctx, extension, source_id, None).await?;
+    let writes = plan_writes(extension, &spec, output.map_err(RunSourceError::Failed)?)
+        .map_err(RunSourceError::Failed)?;
+    let entities = writes
+        .into_iter()
+        .map(|(table, write)| {
+            let (rows, deleted) = match write {
+                EntityWrite::Replace(rows) => (rows, 0),
+                EntityWrite::Upsert { rows, deleted } => (rows, deleted.len()),
+            };
+            EntityPreview {
+                total: rows.len(),
+                rows: rows.into_iter().take(PREVIEW_ROWS).collect(),
+                deleted,
+                columns: table.columns.iter().map(|(n, _)| n.clone()).collect(),
+                entity: table.entity,
+                view: table.view,
+            }
+        })
+        .collect();
+    Ok(SourcePreview {
+        extension: extension.to_string(),
+        source_id: source_id.to_string(),
+        entities,
+    })
+}
+
+/// Find a source in `ctx.root` and run it, stopping at its output. The
+/// outer error means it didn't run (unknown, or not approved); the inner
+/// one that it ran and failed.
+async fn produce(
+    ctx: &Sources<'_>,
+    extension: &str,
+    source_id: &str,
+    reviewed: Option<&str>,
+) -> Result<(SourceSpec, Result<SourceOutput, String>), RunSourceError> {
+    let (root, approvals) = (ctx.root, ctx.approvals);
     let ext = crate::extensions::load_extensions(root)
         .into_iter()
         .find(|e| e.name == extension)
@@ -626,17 +708,14 @@ pub async fn run_source(
         .ok_or(RunSourceError::NotFound)?;
     let ext_dir = root.join(&ext.path);
     if spec.runtime.is_derived() {
-        let result = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
-            Some(script) => match derive_source(&ctx.layer, script, &spec).await {
-                Ok(output) => store_output(extension, &spec, output, store).await,
-                Err(e) => Err(e),
-            },
+        let output = match crate::extensions::read_extension_file(root, &ext.name, &spec.entry) {
+            Some(script) => derive_source(&ctx.layer, script, &spec).await,
             None => Err(format!(
                 "source `{source_id}`: entry `{}` doesn't exist in the extension",
                 spec.entry
             )),
         };
-        return record(store, extension, source_id, result).await;
+        return Ok((spec, output));
     }
     let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
@@ -674,11 +753,11 @@ pub async fn run_source(
             Err(e) => missing = Some(format!("credential `{name}`: {e}")),
         }
     }
-    let result = match missing {
+    let output = match missing {
         Some(e) => Err(e),
-        None => run_approved(&ext_dir, extension, &spec, credentials, store).await,
+        None => exec_approved(&ext_dir, &spec, credentials).await,
     };
-    record(store, extension, source_id, result).await
+    Ok((spec, output))
 }
 
 /// Record a run's outcome as the source's state, then hand it back.
@@ -739,13 +818,12 @@ pub async fn sync_source(
     result
 }
 
-async fn run_approved(
+/// Run an approved exec source and parse its output.
+async fn exec_approved(
     ext_dir: &Path,
-    extension: &str,
     spec: &SourceSpec,
     credentials: BTreeMap<String, String>,
-    store: &SqliteExtSourceStore,
-) -> Result<SourceRunReport, String> {
+) -> Result<SourceOutput, String> {
     let dir = ext_dir.to_path_buf();
     let spec_owned = spec.clone();
     // Where it's enforced, the program's only way out is a proxy that goes
@@ -775,7 +853,7 @@ async fn run_approved(
     })
     .await
     .map_err(|e| format!("source task panicked: {e}"))??;
-    store_output(extension, spec, raw, store).await
+    Ok(raw)
 }
 
 /// Coerce a run's output to the declared entities and write it, per the
@@ -783,9 +861,25 @@ async fn run_approved(
 async fn store_output(
     extension: &str,
     spec: &SourceSpec,
-    mut output: SourceOutput,
+    output: SourceOutput,
     store: &SqliteExtSourceStore,
 ) -> Result<SourceRunReport, String> {
+    let writes = plan_writes(extension, spec, output)?;
+    let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
+    let counts = store.write_rows(writes).await.map_err(|e| e.to_string())?;
+    Ok(SourceRunReport {
+        extension: extension.to_string(),
+        source_id: spec.id.clone(),
+        row_counts: names.into_iter().zip(counts).collect(),
+    })
+}
+
+/// A run's output as the writes it makes, coerced to the declared columns.
+fn plan_writes(
+    extension: &str,
+    spec: &SourceSpec,
+    mut output: SourceOutput,
+) -> Result<Vec<(EntityTable, EntityWrite)>, String> {
     let mut writes = Vec::new();
     for entity in &spec.entities {
         let rows = output.entities.remove(&entity.name);
@@ -821,13 +915,7 @@ async fn store_output(
             write,
         ));
     }
-    let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-    let counts = store.write_rows(writes).await.map_err(|e| e.to_string())?;
-    Ok(SourceRunReport {
-        extension: extension.to_string(),
-        source_id: spec.id.clone(),
-        row_counts: names.into_iter().zip(counts).collect(),
-    })
+    Ok(writes)
 }
 
 /// Coerce tombstone keys to the entity key column's type.
@@ -1370,6 +1458,68 @@ mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             json!([["Fix login", "FIX LOGIN,TIDY DOCS,SHIP IT"]])
         );
+    }
+
+    /// A preview runs the source as its worktree has it and returns the
+    /// rows, storing nothing: source data is project-wide, so an agent in
+    /// a worktree stream checks its source without overwriting it (tsk377).
+    /// An exec source still needs a person's approval.
+    #[tokio::test]
+    async fn a_preview_returns_rows_and_stores_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        extension(
+            root.path(),
+            "work",
+            "name: work\nsources:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT id, title, priority FROM v_task WHERE status = 'ready'\"\n    entities:\n      - { name: hot, key: id, columns: { id: int, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            &[(
+                "hot.star",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"id\": r[\"id\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+            )],
+        );
+        script(
+            &root.path().join("oxplow/extensions/work"),
+            "sync.sh",
+            r#"echo '{"entities":{"raw":[{"id":1}]}}'"#,
+        );
+        let db = task_db().await;
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            project: "test-project".into(),
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        let preview = preview_source(&ctx, "work", "star").await.unwrap();
+        assert_eq!(preview.entities.len(), 1);
+        let hot = &preview.entities[0];
+        assert_eq!(
+            (hot.entity.as_str(), hot.view.as_str()),
+            ("hot", "v_work_hot")
+        );
+        assert_eq!(hot.columns, vec!["id", "title"]);
+        assert_eq!(
+            serde_json::to_value(&hot.rows).unwrap(),
+            json!([[1, "Fix login"]])
+        );
+        assert_eq!(hot.total, 1);
+        assert!(
+            store.list_states().await.unwrap().is_empty(),
+            "no run recorded"
+        );
+        assert!(
+            oxplow_db::SemanticLayer::new(db)
+                .query_sql("SELECT * FROM v_work_hot", vec![], None)
+                .await
+                .is_err(),
+            "nothing stored"
+        );
+
+        let err = preview_source(&ctx, "work", "sh").await.unwrap_err();
+        assert!(matches!(err, RunSourceError::NeedsApproval(_)), "{err:?}");
     }
 
     #[tokio::test]

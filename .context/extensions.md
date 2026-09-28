@@ -531,6 +531,16 @@ tool list stable no matter how many extensions are installed.
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `run_source(id)`.
+- **Worktree streams: preview, don't run (tsk377).** Source data is
+  project-wide (one `ext__<ext>__<entity>` table), so `run_source` /
+  `sync_source` always run the **primary** worktree's copy. An agent
+  writing a source in a worktree stream checks it with MCP
+  `preview_source(extension, source_id, stream_id)`: `source_runner::
+  preview_source` runs that worktree's version through the same
+  `produce` step (same consent: an exec source needs a person's approval
+  of that exact hash; derived sources don't) and returns the coerced
+  rows per entity (first 50, plus totals), storing nothing and recording
+  no run.
 
 **Teaching the agent**
 

@@ -1025,6 +1025,17 @@ pub struct RunSourceParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct PreviewSourceParams {
+    /// Extension folder name under `oxplow/extensions/`.
+    pub extension: String,
+    /// The source's `id` in that extension's `extension.yaml`.
+    pub source_id: String,
+    /// Stream whose worktree to run it from (yours, in a worktree
+    /// stream); omit for the primary.
+    pub stream_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstallExtensionParams {
     /// Git URL of a repo whose root holds `extension.yaml` (a published
     /// oxplow extension).
@@ -1460,6 +1471,48 @@ impl OxplowMcp {
             oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
         })?;
         json_result(&report)
+    }
+
+    #[tool(
+        description = "Dry-run a source from a stream's worktree and return the rows it would \
+                       store (first 50 per entity, coerced to the declared columns), storing \
+                       nothing. Use it to check a source you're writing, especially in a worktree \
+                       stream: run_source always runs the primary's copy, and source data is \
+                       project-wide. An exec source still needs a person's approval of that exact \
+                       version; starlark/jaq sources run without it."
+    )]
+    async fn preview_source(
+        &self,
+        params: Parameters<PreviewSourceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let p = params.0;
+        check_optional_stream("preview_source", p.stream_id.as_deref())?;
+        let root = self
+            .services
+            .git
+            .resolve_repo_dir(p.stream_id.as_deref())
+            .await;
+        let preview = oxplow_app::source_runner::preview_source(
+            &oxplow_app::source_runner::Sources::of(&self.services, &root),
+            &p.extension,
+            &p.source_id,
+        )
+        .await
+        .map_err(|e| match e {
+            oxplow_app::source_runner::RunSourceError::NotFound => McpError::invalid_params(
+                format!(
+                    "no source `{}/{}` in that stream's worktree (see list_extensions)",
+                    p.extension, p.source_id
+                ),
+                None,
+            ),
+            oxplow_app::source_runner::RunSourceError::NeedsApproval(m)
+            | oxplow_app::source_runner::RunSourceError::Failed(m) => {
+                McpError::invalid_params(m, None)
+            }
+            oxplow_app::source_runner::RunSourceError::Storage(e) => internal(e),
+        })?;
+        json_result(&preview)
     }
 
     #[tool(
@@ -5515,6 +5568,8 @@ const WRITE_TOOLS: &[&str] = &[
     "run_lens_action",
     // Stores the change's analysis and starts its duplicate scan.
     "ensure_change",
+    // Runs a source's program (stores nothing, but it executes code).
+    "preview_source",
     // Call an outside model provider and record an `ai_call` row.
     "ai_decide",
     "ai_summarize",
@@ -7238,6 +7293,32 @@ mod tests {
             .unwrap_err();
         assert!(err.message.contains("oxplow-extension"), "{err:?}");
         assert!(READ_ONLY_TOOLS.contains(&"get_skill"));
+    }
+
+    /// An agent previews a source from its stream's worktree: rows back,
+    /// nothing stored (tsk377).
+    #[tokio::test]
+    async fn preview_source_returns_rows_without_storing() {
+        let (proj, svc, server) = boot();
+        let ext = proj.path().join("oxplow/extensions/work");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: work\nsources:\n  - id: one\n    runtime: jaq\n    entry: one.jq\n    input: \"SELECT 1 AS n\"\n    entities:\n      - { name: nums, key: n, columns: { n: int } }\n",
+        )
+        .unwrap();
+        std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
+        let r = server
+            .preview_source(Parameters(PreviewSourceParams {
+                extension: "work".into(),
+                source_id: "one".into(),
+                stream_id: None,
+            }))
+            .await
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
+        assert_eq!(v["entities"][0]["rows"], serde_json::json!([[1]]));
+        assert!(svc.ext_source_store.list_states().await.unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -220,6 +220,12 @@ Rules:
   Settings → Data → Approve & Run. After that, `run_source`
   (MCP) re-runs it.
 - `list_sources` shows each source's status and last error.
+- **Check a source before it's merged** with
+  `preview_source(extension, source_id, stream_id)`: it runs your
+  worktree's version and returns the rows it would store, storing
+  nothing. `run_source` always runs the primary's copy (source data is
+  shared by the whole project), so in a worktree stream it won't see your
+  changes. An exec source still needs a person's approval for the preview.
 - `describe_schema` lists declared entities with `available: false`
   until the source first syncs.
 

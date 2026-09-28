@@ -108,6 +108,8 @@ pub const MANIFEST: &[Capability] = &[
     both("app_version"),
     // Skills for agents that can't load skill files (ACP); the UI has no use for them.
     agent("get_skill"),
+    // A dry run for an agent writing a source in its worktree.
+    agent("preview_source"),
     both("list_streams"),
     ui("list_backlog"),
     both("get_task"),
