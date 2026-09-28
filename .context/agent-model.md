@@ -403,6 +403,47 @@ new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
 **Not built yet:** a personal (user-global) `acpAgents` file; presets and
 project entries only for now.
 
+## ACP agents: protocol mapping and transcript (tsk336)
+
+**The SDK is pinned (`agent-client-protocol = "=2.2.0"`) and fenced.**
+`acp/wire.rs` is the only module that names its schema types. It
+converts them to oxplow's `acp/model.rs` types (`ToolCall`,
+`ToolCallPatch`, `AcpUpdate`, `PermissionAsk` / `PermissionAnswer`), so
+an SDK bump touches one file. Content text is capped at 64 KiB per
+block.
+
+**Gotcha: the SDK turns on `serde_json/preserve_order` workspace-wide**
+(Cargo features unify). JSON objects serialize in insertion order, not
+sorted order. Anything that needs a stable text form must build it from
+a `BTreeMap` explicitly: `metric_cube::dims_key` does, and approval hashes
+never hash JSON. Hook response bodies changed key order only, which is
+the same JSON.
+
+**`acp/mapping.rs` (pure):**
+- `intent_for` makes the policy intent:
+  - edit, delete and move are `WorktreeWrite`, anything else is `Other`;
+  - paths come from `locations`, then the diffs, then path-like `rawInput` keys (`file_path`, `path`, `absolute_path`, `notebook_path`, `source`/`destination`, `old_path`/`new_path`), deduplicated.
+- `canonical_events` makes the Claude-shaped events `AgentActivity` records:
+  - read → `Read`;
+  - edit → `Edit`, or `Write` when every diff is a new file;
+  - delete and move → one `Edit` per path, so effort claims see them;
+  - search → `Grep`, execute → `Bash`, fetch → `WebFetch`;
+  - `mcp__…` titles or names pass through, and think / switch-mode record nothing.
+- The `tool_response` is `{is_error, …rawOutput}` once the call finishes, so a Bash `exit_code` survives.
+
+**`acp/transcript.rs`: the in-memory conversation (no table).**
+- **Items:**
+  - user, agent, thought;
+  - tool (merged with its updates by tool-call id);
+  - plan (replaced within a turn);
+  - permission;
+  - policy-denied, bypass;
+  - directive.
+- **Ids and seqs:** each item has a stable `id`, plus a `seq` that is bumped from one counter every time the item changes. `since(seq)` returns new and changed items, and clients upsert them by `id`.
+- **Chunks** of the same kind coalesce into the trailing item.
+- **`usage_update`** is transcript state (the context meter), not an item.
+- **Size:** the ring is capped (2000 items by default).
+
 ## Agent policy (shared by every transport, tsk333)
 
 The write guard, filing enforcement and the Stop directive are one

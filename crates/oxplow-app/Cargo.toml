@@ -57,6 +57,7 @@ prost = "0.14"
 # The metric-ancestry oracle (metric_visibility.rs) asks git two questions —
 # ancestor-of and commit-time — directly via git2; oxplow-git wraps neither.
 git2 = { workspace = true }
+agent-client-protocol = "=2.2.0"
 
 [dev-dependencies]
 # `#[tokio::test(start_paused = true)]` in wiki_pages.rs needs the paused
