@@ -438,11 +438,66 @@ the same JSON.
   - plan (replaced within a turn);
   - permission;
   - policy-denied, bypass;
-  - directive.
+  - directive, error.
 - **Ids and seqs:** each item has a stable `id`, plus a `seq` that is bumped from one counter every time the item changes. `since(seq)` returns new and changed items, and clients upsert them by `id`.
 - **Chunks** of the same kind coalesce into the trailing item.
 - **`usage_update`** is transcript state (the context meter), not an item.
 - **Size:** the ring is capped (2000 items by default).
+
+## ACP agents: sessions (tsk337)
+
+**Shape.**
+- `Services.acp` (`acp/manager.rs`) holds each thread's command sender and a shared `SessionView` (status, transcript, directive, stderr tail).
+- One actor task per session (`acp/session.rs`) owns the connection.
+- `wire::run` feeds every agent message into ONE channel, and the prompt's result is an ordered barrier, so the actor sees updates, requests and turn end in wire order.
+- Events for every session go out on one broadcast channel (`AcpEvent`).
+- The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
+
+**Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
+- `AgentBoot` plus the resume id on start;
+- `UserPromptSubmit` on the person's prompt;
+- `PreToolUse` on every policy check;
+- `PostToolUse` plus `AgentActivity::on_post_tool` on each finished tool call (per canonical event);
+- `Stop` (turn signals mined first), then per-turn tokens via `TokenUsageService::record_turn` and `AgentPolicy::on_turn_end` for the directive;
+- `Interrupt` when the agent goes away.
+
+**Starting.**
+- `initialize` offers fs read/write and no terminal.
+- **MCP:** oxplow's MCP rides `session/new|load` as an HTTP MCP entry. An agent without HTTP MCP support is refused with a clear error.
+- **Resume:** `thread.resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
+- **System prompt:** it goes in `_meta.systemPrompt.append` when `system_prompt_via_meta` (the Claude adapter). Otherwise it is a block ahead of the first prompt of a new session.
+
+**Prompts (the no-automation rule).**
+- `acp/human_prompt.rs` `compose` is the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` accepts nothing else.
+- The session calls it only for `Command::Prompt`, which only `AcpManager::submit_human_prompt` sends.
+- A second prompt while a turn runs is `TurnInFlight`, never queued.
+- Session context, advisories, decisions and post-tool nudges ride the person's prompt as a visible leading block (shown behind a disclosure on the user item).
+- `acp/guard_tests.rs` scans the Rust source so that:
+  - `PromptRequest` appears only in `wire.rs`;
+  - no raw `"session/prompt"` appears outside the fake;
+  - `compose(` is called only from the session;
+  - `submit_human_prompt(` has no other callers.
+
+**Permissions.**
+- Each `session/request_permission` is checked by `AgentPolicy`:
+  - **Deny:** answered `reject_once` (or `cancelled` when no reject option exists) with a policy-denied item. The model sees only the rejection; a reason can't be carried.
+  - **Allow:** a permission card waits for the person, with no timeout. "Always allow" is dropped for writes, the status is AwaitingPermission, and the thread status is `AwaitingUser`.
+- Cancel answers every open card `cancelled`, as the protocol requires.
+- "Awaiting" is cleared BEFORE the Stop is ingested; Stop keeps an `AwaitingUser` status for `await_user`.
+
+**fs and bypass.**
+- `fs/write_text_file` is policy-checked. A deny returns a JSON-RPC error whose message is the reason, which does reach the model.
+- Relative paths resolve against the cwd.
+- **Bypass detection:** a write-kind tool call that completes without a permission request, and without every path written through `fs/write_text_file`, is checked afterward. If the policy would deny it, a bypass banner item is shown. This is the only backstop for adapter modes that skip asking.
+
+**Turn end.**
+- Open cards are cancelled.
+- Stop, tokens and directive are recorded.
+- The directive is stored in `SessionView.directive` and shown as an item and event. **It is never sent.** `dismiss_directive` clears it.
+
+**Fake agent.** `crates/oxplow-acp-fake` is a scripted fake speaking raw JSON-RPC, deliberately not the SDK, so the tests exercise real wire JSON. `fake:<step>` lines in a prompt drive it: say, think, edit, bypass, fswrite, fsread, bash, plan, usage, tokens, wait, crash.
+- `acp/session_tests.rs` runs it in-process over a duplex pipe.
+- `tests/acp_services.rs` runs it against real `Services`, and once as its binary.
 
 ## Agent policy (shared by every transport, tsk333)
 

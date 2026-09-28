@@ -239,7 +239,9 @@ impl HookIngestService {
         Ok(())
     }
 
-    async fn set_status(
+    /// Set and announce a thread's status directly (the ACP session's
+    /// awaiting-permission state; hooks go through [`Self::ingest`]).
+    pub async fn set_status(
         &self,
         thread: &ThreadId,
         state: AgentStatusState,

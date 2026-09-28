@@ -399,7 +399,43 @@ impl TokenUsageService {
             self.usage.set_cursor(&session_key, new_offset).await?;
             return Ok(None);
         }
+        let last_id = self
+            .record_turns(thread, &stream_id, kind, &session_key, turns)
+            .await?;
+        self.usage.set_cursor(&session_key, new_offset).await?;
+        Ok(last_id)
+    }
 
+    /// Record one ACP turn's token counts (from the prompt response), the
+    /// counterpart of [`Self::on_stop`]'s transcript parse. `Ok(None)` when
+    /// the thread is gone or the counts are empty.
+    pub async fn record_turn(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        turn: Turn,
+    ) -> Result<Option<i64>, DomainError> {
+        if !turn.is_recordable() {
+            return Ok(None);
+        }
+        let Some(thread_row) = self.threads.get(thread).await? else {
+            return Ok(None);
+        };
+        let stream_id = thread_row.stream_id.to_string();
+        self.record_turns(thread, &stream_id, thread_row.agent, session_id, vec![turn])
+            .await
+    }
+
+    /// One row per turn against the open effort, then the event and the
+    /// metric projection.
+    async fn record_turns(
+        &self,
+        thread: &ThreadId,
+        stream_id: &str,
+        kind: AgentKind,
+        session_key: &str,
+        turns: Vec<Turn>,
+    ) -> Result<Option<i64>, DomainError> {
         // Attribute tokens to the effort only when unambiguous; under parallel
         // sub-agents (two open efforts) the turn isn't a single effort's, so it
         // stays unattributed rather than guessing (tsk263).
@@ -426,10 +462,10 @@ impl TokenUsageService {
             let id = self
                 .usage
                 .record(NewAgentTokenUsage {
-                    stream_id: stream_id.clone(),
+                    stream_id: stream_id.to_string(),
                     thread_id: thread.to_string(),
                     effort_id: effort_id.clone(),
-                    session_id: session_key.clone(),
+                    session_id: session_key.to_string(),
                     agent_kind: kind.as_str().to_string(),
                     model: turn.usage.model,
                     prompt: turn.prompt,
@@ -443,13 +479,12 @@ impl TokenUsageService {
             last_id = Some(id);
             by_model.entry(model_key).or_default().turns += 1;
         }
-        self.usage.set_cursor(&session_key, new_offset).await?;
         self.events.emit(OxplowEvent::AgentTokenUsageChanged {
             thread_id: *thread,
             effort_id,
         });
         // Project token samples into the unified substrate (best-effort).
-        self.project_token_metrics(thread, &stream_id, &by_model, effort_val)
+        self.project_token_metrics(thread, stream_id, &by_model, effort_val)
             .await;
         Ok(last_id)
     }

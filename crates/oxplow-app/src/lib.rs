@@ -481,6 +481,9 @@ pub struct Services {
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
     /// Recording and prompt context shared by every agent transport.
     pub agent_activity: Arc<agent_activity::AgentActivity>,
+    /// Open ACP agent sessions (tsk281). Sessions get a
+    /// `acp::host::ServicesAcpHost` holding `Services` weakly.
+    pub acp: Arc<acp::manager::AcpManager>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -789,6 +792,7 @@ impl Services {
             lsp_sessions: lsp,
             agent_policy: Arc::new(agent_policy::AgentPolicy::default()),
             agent_activity: Arc::new(agent_activity::AgentActivity::default()),
+            acp: Arc::new(acp::manager::AcpManager::new()),
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,

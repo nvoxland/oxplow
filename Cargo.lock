@@ -4105,6 +4105,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxplow-acp-fake"
+version = "0.7.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "oxplow-ai"
 version = "0.7.0"
 dependencies = [
@@ -4136,6 +4144,7 @@ dependencies = [
  "indexmap 2.14.2",
  "libc",
  "opentelemetry-proto",
+ "oxplow-acp-fake",
  "oxplow-ai",
  "oxplow-code-deps",
  "oxplow-code-dup",
@@ -7492,6 +7501,7 @@ checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "futures-util",
  "libc",

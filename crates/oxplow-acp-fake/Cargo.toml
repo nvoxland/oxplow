@@ -1,0 +1,15 @@
+[package]
+name = "oxplow-acp-fake"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A scripted fake ACP agent for oxplow's ACP client tests"
+
+[dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

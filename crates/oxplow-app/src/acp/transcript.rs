@@ -63,6 +63,10 @@ pub enum ItemBody {
     Directive {
         text: String,
     },
+    /// Something failed: the prompt, the agent process, the protocol.
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]

@@ -7,7 +7,16 @@
 //! canonical events, `transcript` holds the conversation.
 
 pub mod agents;
+pub mod host;
+pub mod human_prompt;
+pub mod manager;
 pub mod mapping;
 pub mod model;
+pub mod session;
 pub mod transcript;
 pub mod wire;
+
+#[cfg(test)]
+mod guard_tests;
+#[cfg(test)]
+mod session_tests;

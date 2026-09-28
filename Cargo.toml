@@ -28,6 +28,7 @@ members = [
     "crates/oxplow-tree-source",
     "crates/oxplow-surface-parity",
     "crates/oxplow-ai",
+    "crates/oxplow-acp-fake",
 ]
 
 [workspace.package]
@@ -158,6 +159,7 @@ oxplow-collect-plugin = { path = "crates/oxplow-collect-plugin" }
 oxplow-tree-source = { path = "crates/oxplow-tree-source" }
 oxplow-db = { path = "crates/oxplow-db" }
 oxplow-ai = { path = "crates/oxplow-ai" }
+oxplow-acp-fake = { path = "crates/oxplow-acp-fake" }
 oxplow-config = { path = "crates/oxplow-config" }
 oxplow-fs-watch = { path = "crates/oxplow-fs-watch" }
 oxplow-git = { path = "crates/oxplow-git" }

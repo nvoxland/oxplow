@@ -1,6 +1,7 @@
 //! The only module that names `agent-client-protocol` schema types. It
 //! converts them to and from `model.rs`, so the pinned SDK (`=2.2.0`, a
-//! young 2.x) can change without touching the rest of `acp/`.
+//! young 2.x) can change without touching the rest of `acp/`. It also owns
+//! the connection ([`run`], [`AgentConn`], [`Incoming`]).
 
 use agent_client_protocol::schema::v1 as sdk;
 
@@ -197,6 +198,338 @@ fn cap_value(v: serde_json::Value) -> serde_json::Value {
         _ if v.to_string().len() > MAX_TEXT => serde_json::json!({ "truncated": true }),
         _ => v,
     }
+}
+
+// ---------------------------------------------------------------------
+// The connection: the SDK's client role, fenced behind oxplow types.
+// ---------------------------------------------------------------------
+
+/// What the agent sends us, in arrival order. Every handler only forwards
+/// onto one channel, so the session sees updates, requests and the
+/// prompt's result in the order they came off the wire.
+pub enum Incoming {
+    Update {
+        session_id: String,
+        update: AcpUpdate,
+    },
+    Permission {
+        session_id: String,
+        ask: Box<PermissionAsk>,
+        reply: PermissionReply,
+    },
+    WriteFile {
+        session_id: String,
+        path: std::path::PathBuf,
+        content: String,
+        reply: WriteReply,
+    },
+    ReadFile {
+        session_id: String,
+        path: std::path::PathBuf,
+        line: Option<u32>,
+        limit: Option<u32>,
+        reply: ReadReply,
+    },
+    /// The in-flight prompt finished (or failed).
+    PromptDone(Result<TurnEnd, String>),
+}
+
+/// How a turn ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TurnEnd {
+    /// `end_turn`, `cancelled`, `max_tokens`, `refusal`, …
+    pub stop_reason: String,
+    /// Per-turn token counts, when the agent reports them.
+    pub usage: Option<TurnTokens>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TurnTokens {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+/// What `initialize` told us about the agent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentInfo {
+    pub load_session: bool,
+    pub mcp_http: bool,
+    pub name: Option<String>,
+}
+
+/// oxplow's MCP server as an HTTP MCP entry for `session/new|load`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpHttp {
+    pub name: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+}
+
+pub struct PermissionReply(agent_client_protocol::Responder<sdk::RequestPermissionResponse>);
+
+impl PermissionReply {
+    pub fn answer(self, a: &PermissionAnswer) {
+        let _ = self.0.respond(permission_response(a));
+    }
+}
+
+pub struct WriteReply(agent_client_protocol::Responder<sdk::WriteTextFileResponse>);
+
+impl WriteReply {
+    pub fn ok(self) {
+        let _ = self.0.respond(sdk::WriteTextFileResponse::new());
+    }
+    /// Refuse the write; `reason` reaches the model as the error message.
+    pub fn deny(self, reason: &str) {
+        let _ = self.0.respond_with_error(agent_client_protocol::Error::new(
+            -32000,
+            reason.to_string(),
+        ));
+    }
+}
+
+pub struct ReadReply(agent_client_protocol::Responder<sdk::ReadTextFileResponse>);
+
+impl ReadReply {
+    pub fn ok(self, content: String) {
+        let _ = self.0.respond(sdk::ReadTextFileResponse::new(content));
+    }
+    pub fn err(self, message: &str) {
+        let _ = self.0.respond_with_error(agent_client_protocol::Error::new(
+            -32000,
+            message.to_string(),
+        ));
+    }
+}
+
+type Tx = tokio::sync::mpsc::UnboundedSender<Incoming>;
+
+/// The client side of one agent connection.
+#[derive(Clone)]
+pub struct AgentConn {
+    conn: agent_client_protocol::ConnectionTo<agent_client_protocol::Agent>,
+    tx: Tx,
+}
+
+fn err_text(e: agent_client_protocol::Error) -> String {
+    e.message.clone()
+}
+
+fn from_json<T: serde::de::DeserializeOwned>(v: serde_json::Value) -> Result<T, String> {
+    serde_json::from_value(v).map_err(|e| format!("building request: {e}"))
+}
+
+fn mcp_json(servers: &[McpHttp]) -> serde_json::Value {
+    serde_json::Value::Array(
+        servers
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "type": "http",
+                    "name": s.name,
+                    "url": s.url,
+                    "headers": s.headers.iter().map(|(n, v)| serde_json::json!({"name": n, "value": v})).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+impl AgentConn {
+    /// `initialize`: fs read/write offered, no terminal.
+    pub async fn initialize(&self) -> Result<AgentInfo, String> {
+        let req: sdk::InitializeRequest = from_json(serde_json::json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {"readTextFile": true, "writeTextFile": true},
+                "terminal": false
+            },
+            "clientInfo": {"name": "oxplow", "version": env!("CARGO_PKG_VERSION")}
+        }))?;
+        let r = self
+            .conn
+            .send_request(req)
+            .block_task()
+            .await
+            .map_err(err_text)?;
+        Ok(AgentInfo {
+            load_session: r.agent_capabilities.load_session,
+            mcp_http: r.agent_capabilities.mcp_capabilities.http,
+            name: r.agent_info.map(|i| i.name),
+        })
+    }
+
+    pub async fn new_session(
+        &self,
+        cwd: &std::path::Path,
+        mcp: &[McpHttp],
+        meta: Option<serde_json::Value>,
+    ) -> Result<String, String> {
+        let mut v = serde_json::json!({"cwd": cwd, "mcpServers": mcp_json(mcp)});
+        if let Some(m) = meta {
+            v["_meta"] = m;
+        }
+        let req: sdk::NewSessionRequest = from_json(v)?;
+        let r = self
+            .conn
+            .send_request(req)
+            .block_task()
+            .await
+            .map_err(err_text)?;
+        Ok(r.session_id.0.to_string())
+    }
+
+    /// `session/load`. The agent replays the history as updates BEFORE this
+    /// returns; they arrive on the incoming channel first.
+    pub async fn load_session(
+        &self,
+        session_id: &str,
+        cwd: &std::path::Path,
+        mcp: &[McpHttp],
+    ) -> Result<(), String> {
+        let req: sdk::LoadSessionRequest = from_json(serde_json::json!({
+            "sessionId": session_id,
+            "cwd": cwd,
+            "mcpServers": mcp_json(mcp),
+        }))?;
+        // Ordered: the response is queued behind the replayed updates.
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.conn
+            .send_request(req)
+            .on_receiving_result(async move |r| {
+                let _ = done_tx.send(r.map(|_| ()).map_err(err_text));
+                Ok(())
+            })
+            .map_err(err_text)?;
+        done_rx
+            .await
+            .map_err(|_| "connection closed during session/load".to_string())?
+    }
+
+    /// Send a person's prompt. The result arrives as
+    /// [`Incoming::PromptDone`], after every update of the turn.
+    pub fn prompt(
+        &self,
+        session_id: &str,
+        p: super::human_prompt::HumanPrompt,
+    ) -> Result<(), String> {
+        let blocks: Vec<serde_json::Value> = p
+            .blocks()
+            .iter()
+            .map(|t| serde_json::json!({"type": "text", "text": t}))
+            .collect();
+        let req: sdk::PromptRequest = from_json(serde_json::json!({
+            "sessionId": session_id,
+            "prompt": blocks,
+        }))?;
+        let tx = self.tx.clone();
+        self.conn
+            .send_request(req)
+            .on_receiving_result(async move |r| {
+                let done = r.map_err(err_text).map(|r| TurnEnd {
+                    stop_reason: serde_json::to_value(r.stop_reason)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default(),
+                    usage: r.usage.map(|u| TurnTokens {
+                        input: u.input_tokens,
+                        output: u.output_tokens,
+                        cache_read: u.cached_read_tokens.unwrap_or(0),
+                        cache_write: u.cached_write_tokens.unwrap_or(0),
+                    }),
+                });
+                let _ = tx.send(Incoming::PromptDone(done));
+                Ok(())
+            })
+            .map_err(err_text)
+    }
+
+    pub fn cancel(&self, session_id: &str) {
+        if let Ok(n) =
+            from_json::<sdk::CancelNotification>(serde_json::json!({"sessionId": session_id}))
+        {
+            let _ = self.conn.send_notification(n);
+        }
+    }
+
+    /// Resolves when the agent's output reaches EOF (it exited).
+    pub async fn closed(&self) {
+        self.conn.incoming_closed().await;
+    }
+}
+
+/// Run a client connection over `write`/`read` (the agent's stdin and
+/// stdout). `main` gets the connection and the incoming channel; the
+/// connection lives until `main` returns.
+pub async fn run<W, R, F, Fut>(write: W, read: R, main: F) -> Result<(), String>
+where
+    W: tokio::io::AsyncWrite + Send + 'static,
+    R: tokio::io::AsyncRead + Send + 'static,
+    F: FnOnce(AgentConn, tokio::sync::mpsc::UnboundedReceiver<Incoming>) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+    let transport = agent_client_protocol::ByteStreams::new(write.compat_write(), read.compat());
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Incoming>();
+    let (t1, t2, t3, t4) = (tx.clone(), tx.clone(), tx.clone(), tx.clone());
+    agent_client_protocol::Client
+        .builder()
+        .name("oxplow")
+        .on_receive_notification(
+            async move |n: sdk::SessionNotification, _cx| {
+                let _ = t1.send(Incoming::Update {
+                    session_id: n.session_id.0.to_string(),
+                    update: update(n.update),
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |r: sdk::RequestPermissionRequest, responder, _cx| {
+                let session_id = r.session_id.0.to_string();
+                let _ = t2.send(Incoming::Permission {
+                    session_id,
+                    ask: Box::new(permission_ask(r)),
+                    reply: PermissionReply(responder),
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |r: sdk::WriteTextFileRequest, responder, _cx| {
+                let _ = t3.send(Incoming::WriteFile {
+                    session_id: r.session_id.0.to_string(),
+                    path: r.path,
+                    content: r.content,
+                    reply: WriteReply(responder),
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |r: sdk::ReadTextFileRequest, responder, _cx| {
+                let _ = t4.send(Incoming::ReadFile {
+                    session_id: r.session_id.0.to_string(),
+                    path: r.path,
+                    line: r.line,
+                    limit: r.limit,
+                    reply: ReadReply(responder),
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(transport, async move |conn| {
+            main(AgentConn { conn, tx }, rx).await;
+            Ok(())
+        })
+        .await
+        .map_err(err_text)
 }
 
 #[cfg(test)]
