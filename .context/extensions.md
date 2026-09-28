@@ -268,9 +268,9 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   extraction" below. No private backdoors.
 - **Declarative and scripted only.** An extension is YAML, SQL,
   Starlark/jq/exec sources and declarative lenses. No user-authored code
-  runs in the app window. Reason: the daemon's `/ipc` is unauthenticated
-  and includes `forward_terminal_input`, so agent-written JS in the window
-  could drive the agent. Revisit only after a scoped, read-only IPC
+  runs in the app window. Reason: code in the window holds the daemon's UI
+  token, and `/ipc` includes `forward_terminal_input`, so agent-written JS
+  in the window could drive the agent. Revisit only after a scoped, read-only IPC
   capability exists ([remote-daemon.md](./remote-daemon.md) names the
   extension point).
 - **Exceptions over trends.** Shipped lenses are live exception lists at the

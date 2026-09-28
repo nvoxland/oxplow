@@ -12,9 +12,16 @@
 //!   terminal event channels (wired by the streaming workstream).
 //!
 //! Single-user by design: bind to `127.0.0.1` on the remote box and
-//! reach it through `ssh -L <localPort>:127.0.0.1:<port>`. SSH is the
-//! auth layer; the daemon itself runs no TLS and no token check (a
-//! bearer stub can be added behind a flag for direct-expose later).
+//! reach it through `ssh -L <localPort>:127.0.0.1:<port>`.
+//!
+//! **Only the person's UI may call it** (tsk345). `/ipc` and `/events`
+//! require the per-launch UI token ([`DaemonState::token`]); `/health`
+//! doesn't. Loopback alone isn't a boundary: the agents this daemon runs,
+//! the sources it sandboxes, and any web page the person visits can all
+//! reach 127.0.0.1. The token is handed over on stdin by the supervising
+//! shell (or generated and printed for a hand-started daemon), never put
+//! in an environment variable or a file, so an agent running as the same
+//! user can't read it.
 //!
 //! Library shape (`run_server` + `Daemon`) so integration tests can
 //! boot the full stack on an ephemeral port in-process.
@@ -37,7 +44,61 @@ use futures::{SinkExt, StreamExt};
 /// box's control-plane coordinates, so agent spawn works remotely).
 #[derive(Clone)]
 pub struct DaemonState {
+    /// The UI token every `/ipc` call (`Authorization: Bearer`) and the
+    /// `/events` socket (`?token=`) must carry.
+    pub token: String,
     pub ctx: oxplow_rpc::RpcContext,
+}
+
+/// Equal without an early exit, so response timing can't reveal a prefix.
+fn same_secret(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
+}
+
+/// The token a request presents: the bearer header, or (for the
+/// WebSocket, whose headers a browser can't set) the `token` query.
+fn presented_token(req: &axum::extract::Request, allow_query: bool) -> Option<String> {
+    let header = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+    header.or_else(|| {
+        if !allow_query {
+            return None;
+        }
+        req.uri().query().and_then(|q| {
+            q.split('&')
+                .find_map(|kv| kv.strip_prefix("token="))
+                .map(str::to_string)
+        })
+    })
+}
+
+async fn require_token(
+    State(state): State<DaemonState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let allow_query = req.uri().path() == "/events";
+    match presented_token(&req, allow_query) {
+        Some(t) if same_secret(&t, &state.token) => next.run(req).await,
+        _ => (StatusCode::UNAUTHORIZED, "missing or wrong UI token").into_response(),
+    }
+}
+
+/// A fresh random UI token (256 bits from the OS generator).
+pub fn new_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// Handle returned by [`run_server`]: the bound address (useful when
@@ -198,14 +259,19 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
 /// the exact route table.
 pub fn router(state: DaemonState) -> Router {
     // Permissive CORS so the frontend can run in a plain browser
-    // (Playwright, remote-dev via a served dist/). The daemon binds
-    // loopback only and SSH is the auth layer, so origin checks add
-    // nothing here; revisit alongside the bearer-token direct-expose
-    // mode.
-    Router::new()
-        .route("/health", get(health))
+    // (Playwright, remote-dev via a served dist/). It exposes nothing:
+    // every route but /health needs the bearer UI token, which a page
+    // can't obtain, and no cookies are involved.
+    let guarded = Router::new()
         .route("/events", get(events_ws))
         .route("/ipc/{name}", post(ipc_handler))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_token,
+        ));
+    Router::new()
+        .route("/health", get(health))
+        .merge(guarded)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
@@ -250,8 +316,24 @@ mod tests {
         (svc, dir)
     }
 
+    const UI_TOKEN: &str = "test-ui-token";
+
+    /// A client carrying the renderer's token, as every UI request does.
+    fn client() -> reqwest::Client {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {UI_TOKEN}").parse().unwrap(),
+        );
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap()
+    }
+
     fn daemon_state(services: Arc<Services>) -> DaemonState {
         DaemonState {
+            token: UI_TOKEN.into(),
             ctx: oxplow_rpc::RpcContext {
                 services,
                 plugin_runtime: Some(oxplow_rpc::PluginRuntime {
@@ -265,13 +347,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ipc_and_events_refuse_callers_without_the_ui_token() {
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
+            .await
+            .unwrap();
+        let url = format!("http://{}/ipc/ping", daemon.bind_addr);
+        let bare = reqwest::Client::new();
+        for req in [
+            bare.post(&url),
+            bare.post(&url).bearer_auth("wrong"),
+            bare.post(&url).header("authorization", "test-ui-token"),
+        ] {
+            let resp = req.send().await.unwrap();
+            assert_eq!(resp.status(), 401);
+        }
+        // The token rides the query only for the WebSocket (browsers can't
+        // set its headers); /ipc takes it in the header.
+        let resp = bare
+            .post(format!("{url}?token={UI_TOKEN}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+        assert_eq!(client().post(&url).send().await.unwrap().status(), 200);
+
+        for bad in ["", "?token=wrong"] {
+            let ws = format!("ws://{}/events{bad}", daemon.bind_addr);
+            assert!(
+                tokio_tungstenite::connect_async(&ws).await.is_err(),
+                "{bad}"
+            );
+        }
+        // Liveness stays open for tunnels and scripts.
+        let health = bare
+            .get(format!("http://{}/health", daemon.bind_addr))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(health.status(), 200);
+    }
+
+    #[tokio::test]
     async fn ipc_ping_returns_ok_envelope() {
         let (svc, _dir) = services();
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
         let url = format!("http://{}/ipc/ping", daemon.bind_addr);
-        let resp: serde_json::Value = reqwest::Client::new()
+        let resp: serde_json::Value = client()
             .post(&url)
             .json(&serde_json::Value::Null)
             .send()
@@ -295,7 +419,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), state.clone())
             .await
             .unwrap();
-        let client = reqwest::Client::new();
+        let client = client();
 
         for (name, args) in [
             ("ping", serde_json::Value::Null),
@@ -324,7 +448,7 @@ mod tests {
             .await
             .unwrap();
         let url = format!("http://{}/ipc/ping", daemon.bind_addr);
-        let client = reqwest::Client::new();
+        let client = client();
 
         // Preflight: browsers send OPTIONS before a cross-origin POST
         // with a JSON content-type.
@@ -363,7 +487,7 @@ mod tests {
             .unwrap();
         let url = format!("http://{}/ipc/list_streams", daemon.bind_addr);
         // No body at all — mirrors the renderer omitting args.
-        let resp: serde_json::Value = reqwest::Client::new()
+        let resp: serde_json::Value = client()
             .post(&url)
             .send()
             .await
@@ -385,7 +509,7 @@ mod tests {
             .await
             .unwrap();
         let url = format!("http://{}/ipc/definitely_not_a_command", daemon.bind_addr);
-        let resp: serde_json::Value = reqwest::Client::new()
+        let resp: serde_json::Value = client()
             .post(&url)
             .json(&serde_json::json!({}))
             .send()
@@ -405,7 +529,7 @@ mod tests {
             .await
             .unwrap();
         let url = format!("http://{}/ipc/get_task", daemon.bind_addr);
-        let resp: serde_json::Value = reqwest::Client::new()
+        let resp: serde_json::Value = client()
             .post(&url)
             .json(&serde_json::json!({}))
             .send()
@@ -425,7 +549,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = format!("ws://{}/events", daemon.bind_addr);
+        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         // The server-side forwarders subscribe after the upgrade
         // completes, so a single immediate emit can race them — keep
@@ -455,7 +579,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = format!("ws://{}/events", daemon.bind_addr);
+        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         // Same subscribe-race handling as the oxplow-events test above.
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -492,7 +616,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = format!("ws://{}/events", daemon.bind_addr);
+        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         // Same subscribe-race handling as the oxplow/lsp events tests.
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -530,7 +654,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
             .await
             .unwrap();
-        let url = format!("ws://{}/events", daemon.bind_addr);
+        let url = format!("ws://{}/events?token={UI_TOKEN}", daemon.bind_addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         // Same subscribe-race handling as the other events tests.
         let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {

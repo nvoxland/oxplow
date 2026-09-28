@@ -32,11 +32,10 @@ developer-facing mechanics.
   the `acp` frame carries `AcpEvent` from `Services.acp` — see
   `.context/agent-model.md` → "ACP agents"),
   `GET /health`. Same per-project instance lock as the shell.
-  CORS is fully permissive (`CorsLayer::permissive()`) so the
-  frontend can run in a plain browser (Playwright-driven UX testing,
-  a statically served `dist/`); loopback bind + SSH is the auth
-  layer, so origin checks add nothing. Revisit if a direct-expose
-  mode lands.
+  `/ipc` and `/events` require the UI token (see "Auth" below);
+  `/health` doesn't. CORS stays permissive so the frontend can run in a
+  plain browser (Playwright, a served `dist/`): a page can't obtain the
+  token and no cookies are involved, so it exposes nothing.
 - **Facade guard** — `@tauri-apps/*` may only be imported under
   `apps/desktop/src/tauri-bridge/`; everywhere else funnels native
   access through a bridge module (e.g. `nativeDialog.ts` wraps the OS
@@ -124,10 +123,34 @@ developer-facing mechanics.
 ## Deployment model (v1)
 
 Daemon binds loopback only; reach it with
-`ssh -L 7420:127.0.0.1:7420 <host>`. No TLS, no tokens — adding a
-bearer check behind a flag is the designated extension point for a
-later direct-expose mode (mirror the control-plane's `hook_token`
-pattern). Multi-user is explicitly out of scope.
+`ssh -L 7420:127.0.0.1:7420 <host>`. No TLS. Multi-user is explicitly
+out of scope.
+
+## Auth (tsk345)
+
+Loopback is not a boundary: the agents the daemon runs, the sources it
+sandboxes (localhost is allowed) and any web page the person visits can
+all reach 127.0.0.1. So `/ipc` and `/events` require a per-launch **UI
+token**; only the person's renderer holds it.
+
+- **Minting:** the shell's `DaemonSupervisor` mints 256 random bits per
+  daemon and hands them over on **stdin** (`--token-stdin`). Never argv,
+  the environment or a file: all are readable by other processes of the
+  user, the daemon's own agents included.
+- **Hand-started daemon:** it mints its own and prints `ui token: …`.
+- **Presenting it:** `Authorization: Bearer <token>` on `/ipc`, and
+  `?token=` on the `/events` WebSocket (browsers can't set its headers).
+  The comparison is constant-time.
+- **Where the renderer gets it** (`transport.ts` `resolveToken`), paired
+  with whichever source supplied the base:
+  - the launcher's manual connect: a token field, or
+    `http://host:port#oxplow-token=…`, saved as `oxplow.remoteToken`;
+  - the shell's injected `window.__OXPLOW__.token`;
+  - `VITE_OXPLOW_REMOTE_TOKEN` in dev.
+  A `#oxplow-token=` URL fragment wins (scripted and Playwright
+  sessions).
+- **Headless dev:** start the daemon, read its `ui token:` line, and run
+  vite with `VITE_OXPLOW_REMOTE=… VITE_OXPLOW_REMOTE_TOKEN=…`.
 
 ## Dispatch context
 

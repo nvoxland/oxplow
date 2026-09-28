@@ -16,11 +16,16 @@ const DEFAULT_BIND: &str = "127.0.0.1:7420";
 
 fn usage() -> ! {
     eprintln!(
-        "usage: oxplow-daemon --project <dir> [--bind 127.0.0.1:7420] [--init]\n\
+        "usage: oxplow-daemon --project <dir> [--bind 127.0.0.1:7420] [--init] [--token-stdin]\n\
          \n\
          --init creates the project (`.oxplow/`) if it doesn't exist yet,\n\
          instead of refusing — handy for scripting / profiling a fresh\n\
          project without opening the desktop setup flow first.\n\
+         \n\
+         --token-stdin reads the UI token from the first line of stdin\n\
+         (how the desktop shell hands it over). Otherwise a fresh token\n\
+         is generated and printed; the UI must present it (launcher\n\
+         connect, or VITE_OXPLOW_REMOTE_TOKEN in dev).\n\
          \n\
          The project dir may also come from OXPLOW_PROJECT_DIR. The\n\
          daemon binds loopback only — reach it from another machine\n\
@@ -34,6 +39,8 @@ struct Args {
     bind: SocketAddr,
     /// Create `.oxplow/` if the target dir isn't a project yet.
     init: bool,
+    /// Read the UI token from stdin instead of generating one.
+    token_stdin: bool,
 }
 
 /// Hand-rolled arg parsing — not worth a clap dependency.
@@ -41,12 +48,14 @@ fn parse_args() -> Args {
     let mut project: Option<PathBuf> = None;
     let mut bind: Option<String> = None;
     let mut init = false;
+    let mut token_stdin = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--project" => project = it.next().map(PathBuf::from),
             "--bind" => bind = it.next(),
             "--init" => init = true,
+            "--token-stdin" => token_stdin = true,
             "--help" | "-h" => usage(),
             other => {
                 eprintln!("unknown argument: {other}");
@@ -68,6 +77,7 @@ fn parse_args() -> Args {
         project_dir,
         bind,
         init,
+        token_stdin,
     }
 }
 
@@ -81,6 +91,19 @@ async fn main() {
         .init();
 
     let args = parse_args();
+    // The UI token: from the supervising shell over stdin (never an env
+    // var or a file an agent could read), or fresh for a hand-started
+    // daemon, printed below for the person to use.
+    let (token, generated) = if args.token_stdin {
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
+            eprintln!("oxplow-daemon: --token-stdin but no token on stdin");
+            std::process::exit(2);
+        }
+        (line.trim().to_string(), false)
+    } else {
+        (oxplow_daemon::new_token(), true)
+    };
     let project_dir = args.project_dir.canonicalize().unwrap_or_else(|e| {
         eprintln!(
             "oxplow-daemon: project dir {} not accessible: {e}",
@@ -152,6 +175,7 @@ async fn main() {
         });
 
     let daemon_state = DaemonState {
+        token: token.clone(),
         ctx: oxplow_rpc::RpcContext {
             services: state,
             plugin_runtime: Some(oxplow_rpc::PluginRuntime {
@@ -186,6 +210,9 @@ async fn main() {
         tracing::warn!(error = %e, "could not publish daemon.json");
     }
     println!("oxplow-daemon listening on http://{}", daemon.bind_addr);
+    if generated {
+        println!("  ui token: {token}");
+    }
     println!(
         "  tunnel: ssh -L {0}:127.0.0.1:{0} <host>",
         daemon.bind_addr.port()

@@ -199,14 +199,34 @@ impl DaemonLauncher for BundledDaemon {
             .arg(project_dir)
             // Port 0: the OS picks, so two projects can't collide.
             .arg("--bind")
-            .arg("127.0.0.1:0");
+            .arg("127.0.0.1:0")
+            // The UI token comes on stdin (see `DaemonSupervisor::start`).
+            .arg("--token-stdin");
         cmd
     }
+}
+
+/// How a window reaches its daemon: the loopback base URL and the UI
+/// token every `/ipc` call and the `/events` socket must present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaemonEndpoint {
+    pub base_url: String,
+    pub token: String,
+}
+
+/// A fresh random UI token (256 bits from the OS generator).
+fn new_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 /// One running daemon.
 struct DaemonHandle {
     base_url: String,
+    token: String,
     child: Child,
     /// Drains the daemon's stdout for the life of the process. Joined on
     /// stop so no reader outlives the child that fed it.
@@ -253,15 +273,28 @@ impl DaemonSupervisor {
     /// Blocks until the daemon reports its endpoint, so the caller can
     /// hand the URL straight to a window. A daemon that exits first, or
     /// never reports, is an error and leaves nothing registered.
-    pub fn start(&self, project_dir: &Path) -> std::io::Result<String> {
+    pub fn start(&self, project_dir: &Path) -> std::io::Result<DaemonEndpoint> {
         let key = canonical(project_dir);
         if let Some(existing) = self.lock().get(&key) {
-            return Ok(existing.base_url.clone());
+            return Ok(DaemonEndpoint {
+                base_url: existing.base_url.clone(),
+                token: existing.token.clone(),
+            });
         }
 
         let mut cmd = self.launcher.command(&key);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
         let mut child = cmd.spawn()?;
+        // The UI token goes over stdin: argv and the environment are
+        // readable by every process of this user, the daemon's agents
+        // included. Closing stdin after the line ends the handover.
+        let token = new_token();
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = writeln!(stdin, "{token}");
+        }
         let stdout = child
             .stdout
             .take()
@@ -291,11 +324,12 @@ impl DaemonSupervisor {
                     key,
                     DaemonHandle {
                         base_url: base_url.clone(),
+                        token: token.clone(),
                         child,
                         reader: Some(reader),
                     },
                 );
-                Ok(base_url)
+                Ok(DaemonEndpoint { base_url, token })
             }
             Err(why) => {
                 // `Disconnected` means stdout closed without a handshake:
@@ -333,6 +367,16 @@ impl DaemonSupervisor {
         self.lock()
             .get(&canonical(project_dir))
             .map(|h| h.base_url.clone())
+    }
+
+    /// The running daemon's endpoint (base URL and UI token), if any.
+    pub fn endpoint(&self, project_dir: &Path) -> Option<DaemonEndpoint> {
+        self.lock()
+            .get(&canonical(project_dir))
+            .map(|h| DaemonEndpoint {
+                base_url: h.base_url.clone(),
+                token: h.token.clone(),
+            })
     }
 
     /// Number of daemons this supervisor is running.
@@ -454,8 +498,9 @@ mod tests {
     fn start_returns_the_endpoint_and_registers_the_daemon() {
         let tmp = tempfile::tempdir().unwrap();
         let sup = supervisor("echo 'oxplow-daemon listening on http://127.0.0.1:12345'; sleep 30");
-        let base = sup.start(tmp.path()).expect("daemon starts");
-        assert_eq!(base, "http://127.0.0.1:12345");
+        let ep = sup.start(tmp.path()).expect("daemon starts");
+        assert_eq!(ep.base_url, "http://127.0.0.1:12345");
+        assert_eq!(ep.token.len(), 64);
         assert_eq!(
             sup.base_url(tmp.path()).as_deref(),
             Some("http://127.0.0.1:12345")
@@ -681,5 +726,19 @@ mod tests {
     fn orphan_sweep_tolerates_a_project_with_no_file() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(!kill_orphan_daemon(tmp.path()));
+    }
+
+    /// The UI token reaches the daemon on stdin only: never argv, never
+    /// the environment (both readable by other processes of the user).
+    #[test]
+    fn the_ui_token_is_handed_over_on_stdin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sup = supervisor(
+            "read t; env | grep -q \"$t\" && exit 3; echo \"oxplow-daemon listening on http://127.0.0.1:1/$t\"; sleep 30",
+        );
+        let ep = sup.start(tmp.path()).expect("daemon starts");
+        assert_eq!(ep.base_url, format!("http://127.0.0.1:1/{}", ep.token));
+        assert_eq!(sup.endpoint(tmp.path()), Some(ep));
+        sup.stop_all();
     }
 }

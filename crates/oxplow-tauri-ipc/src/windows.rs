@@ -138,6 +138,9 @@ pub struct WindowContext<'a> {
     /// launcher and setup screens, which have no project and therefore
     /// no backend beyond the shell itself.
     pub base: Option<&'a str>,
+    /// The daemon's UI token (see `oxplow_daemon`): only this window's
+    /// renderer gets it, so only the person's UI can call the daemon.
+    pub token: Option<&'a str>,
     /// One of the `KIND_*` constants above.
     pub kind: &'a str,
     /// The project this window is for — the dir being opened, or the
@@ -150,6 +153,7 @@ pub struct WindowContext<'a> {
 pub fn initialization_script(ctx: &WindowContext<'_>) -> String {
     let payload = serde_json::json!({
         "base": ctx.base,
+        "token": ctx.token,
         "kind": ctx.kind,
         "projectDir": ctx.project_dir,
     });
@@ -275,7 +279,7 @@ impl ShellWindows {
             }
         }
 
-        let base = self.supervisor.start(&dir).map_err(|e| {
+        let endpoint = self.supervisor.start(&dir).map_err(|e| {
             let binary = oxplow_app::daemon_supervisor::BundledDaemon::binary_path();
             if !binary.is_file() {
                 // The usual cause in a dev checkout: the shell was built
@@ -299,7 +303,8 @@ impl ShellWindows {
             &label,
             &title,
             &WindowContext {
-                base: Some(&base),
+                base: Some(&endpoint.base_url),
+                token: Some(&endpoint.token),
                 kind: KIND_PROJECT,
                 project_dir: Some(&dir_str),
             },
@@ -313,7 +318,7 @@ impl ShellWindows {
         self.registry.insert(&label, &dir);
         recents.record(&dir);
         self.write_session();
-        tracing::info!(project = %dir.display(), label, base, "opened project window");
+        tracing::info!(project = %dir.display(), label, base = %endpoint.base_url, "opened project window");
         Ok(label)
     }
 
@@ -582,6 +587,7 @@ mod tests {
     fn initialization_script_states_a_null_base_for_the_launcher() {
         let script = initialization_script(&WindowContext {
             base: None,
+            token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
         });
@@ -595,6 +601,7 @@ mod tests {
     fn initialization_script_carries_the_daemon_base_and_project() {
         let script = initialization_script(&WindowContext {
             base: Some("http://127.0.0.1:60331"),
+            token: Some("t0k"),
             kind: KIND_PROJECT,
             project_dir: Some("/Users/me/src/oxplow"),
         });
@@ -606,6 +613,7 @@ mod tests {
             script.contains("\"projectDir\":\"/Users/me/src/oxplow\""),
             "{script}"
         );
+        assert!(script.contains("\"token\":\"t0k\""), "{script}");
     }
 
     /// The base is interpolated into a page script, so it goes through
@@ -616,6 +624,7 @@ mod tests {
         let hostile = "http://x\";alert(1);//";
         let script = initialization_script(&WindowContext {
             base: Some(hostile),
+            token: None,
             kind: KIND_LAUNCHER,
             project_dir: None,
         });

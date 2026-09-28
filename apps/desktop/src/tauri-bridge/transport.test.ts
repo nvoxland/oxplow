@@ -4,6 +4,8 @@ import {
   listenRoute,
   onRemoteReconnect,
   resolveBase,
+  resolveToken,
+  parseRemoteInput,
   triggerRemoteResync,
 } from "./transport";
 import { EVENT_CHANNELS } from "./channels";
@@ -126,4 +128,36 @@ test("an unsubscribed handler no longer fires", () => {
   off();
   triggerRemoteResync();
   expect(count).toBe(1);
+});
+
+describe("resolveToken", () => {
+  const DAEMON = "http://127.0.0.1:7420";
+  test("pairs with the source the base came from", () => {
+    expect(
+      resolveToken({
+        stored: { base: "http://manual:1", token: "m" },
+        injected: { base: DAEMON, token: "i" },
+      }),
+    ).toBe("m");
+    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, env: { base: DAEMON, token: "e" } })).toBe(
+      "i",
+    );
+    expect(resolveToken({ env: { base: DAEMON, token: "e" } })).toBe("e");
+    expect(resolveToken({})).toBeNull();
+  });
+
+  test("a token in the URL fragment wins (a person pasted it)", () => {
+    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#oxplow-token=f" })).toBe("f");
+    expect(resolveToken({ injected: { base: DAEMON, token: "i" }, fragment: "#other=1" })).toBe("i");
+  });
+});
+
+describe("parseRemoteInput", () => {
+  test("splits a pasted URL into base and token", () => {
+    expect(parseRemoteInput("http://127.0.0.1:7420/#oxplow-token=abc ")).toEqual({
+      base: "http://127.0.0.1:7420",
+      token: "abc",
+    });
+    expect(parseRemoteInput("http://127.0.0.1:7420")).toEqual({ base: "http://127.0.0.1:7420", token: null });
+  });
 });

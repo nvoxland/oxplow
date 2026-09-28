@@ -46,6 +46,8 @@ const SHELL_COMMAND_SET: ReadonlySet<string> = new Set<string>(SHELL_COMMANDS);
 /// script runs. Absent in a plain-browser session.
 export type WindowContext = {
   base: string | null;
+  /// The daemon's UI token (only this window's renderer gets it).
+  token?: string | null;
   kind: string;
   projectDir: string | null;
 };
@@ -97,18 +99,72 @@ export function resolveBase(sources: {
   return cleanBase(sources.stored) ?? cleanBase(sources.injected) ?? cleanBase(sources.env) ?? null;
 }
 
-function readRemoteBase(): string | null {
-  let stored: string | null = null;
-  try {
-    stored = window.localStorage.getItem("oxplow.remoteBase");
-  } catch {
-    // localStorage unavailable (tests) — leave it null.
+type Endpoint = { base?: string | null; token?: string | null };
+
+/// The daemon's UI token for this window: from the same source the base
+/// came from (the manual connect, the shell's injection, or the dev env
+/// override), unless a person put one in the URL fragment
+/// (`#oxplow-token=…`, e.g. a scripted or Playwright session). Every
+/// `/ipc` call and the `/events` socket carry it; the daemon refuses
+/// anything without it. Pure; exported for tests.
+export function resolveToken(sources: {
+  stored?: Endpoint;
+  injected?: Endpoint;
+  env?: Endpoint;
+  fragment?: string | null;
+}): string | null {
+  const fromFragment = /(?:^#|&)oxplow-token=([^&]+)/.exec(sources.fragment ?? "")?.[1];
+  if (fromFragment) return decodeURIComponent(fromFragment);
+  for (const tier of [sources.stored, sources.injected, sources.env]) {
+    if (cleanBase(tier?.base)) return tier?.token?.trim() || null;
   }
-  const env = (import.meta as { env?: Record<string, string> }).env?.VITE_OXPLOW_REMOTE ?? null;
-  return resolveBase({ stored, injected: readWindowContext()?.base ?? null, env });
+  return null;
 }
 
-const remoteBase: string | null = readRemoteBase();
+/// A pasted daemon address, split into its base and an optional
+/// `#oxplow-token=` token. Pure; exported for tests.
+export function parseRemoteInput(input: string): { base: string; token: string | null } {
+  const trimmed = input.trim();
+  const hash = trimmed.indexOf("#");
+  const base = (hash >= 0 ? trimmed.slice(0, hash) : trimmed).replace(/\/+$/, "");
+  const token = hash >= 0 ? resolveToken({ fragment: trimmed.slice(hash) }) : null;
+  return { base, token };
+}
+
+function readRemoteEndpoint(): { base: string | null; token: string | null } {
+  let stored: Endpoint = {};
+  let fragment: string | null = null;
+  try {
+    stored = {
+      base: window.localStorage.getItem("oxplow.remoteBase"),
+      token: window.localStorage.getItem("oxplow.remoteToken"),
+    };
+    fragment = window.location.hash;
+  } catch {
+    // No window/localStorage (tests) — leave them empty.
+  }
+  const env = (import.meta as { env?: Record<string, string> }).env;
+  const ctx = readWindowContext();
+  const sources = {
+    stored,
+    injected: { base: ctx?.base ?? null, token: ctx?.token ?? null },
+    env: { base: env?.VITE_OXPLOW_REMOTE ?? null, token: env?.VITE_OXPLOW_REMOTE_TOKEN ?? null },
+    fragment,
+  };
+  return {
+    base: resolveBase({ stored: stored.base, injected: sources.injected.base, env: sources.env.base }),
+    token: resolveToken(sources),
+  };
+}
+
+const endpoint = readRemoteEndpoint();
+const remoteBase: string | null = endpoint.base;
+const remoteToken: string | null = endpoint.token;
+
+/// Headers every daemon request carries.
+function authHeaders(token: string | null): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /// True when this renderer drives a remote daemon instead of the
 /// in-process backend.
@@ -125,31 +181,41 @@ export function remoteBaseUrl(): string | null {
 /// Persist a remote daemon base and reload into remote mode. The
 /// transport reads the key once at module load, so a reload is the
 /// mode switch.
-export function connectRemote(base: string): void {
+export function connectRemote(base: string, token: string | null): void {
   window.localStorage.setItem("oxplow.remoteBase", base.trim().replace(/\/+$/, ""));
+  if (token) window.localStorage.setItem("oxplow.remoteToken", token);
+  else window.localStorage.removeItem("oxplow.remoteToken");
   window.location.reload();
 }
 
 /// Drop the remote base and reload back into local mode.
 export function disconnectRemote(): void {
   window.localStorage.removeItem("oxplow.remoteBase");
+  window.localStorage.removeItem("oxplow.remoteToken");
   window.location.reload();
 }
 
 /// Probe a daemon base before committing to it: POST /ipc/ping and
 /// expect the ok envelope. Throws with a human-readable message on
 /// any failure (unreachable, non-JSON, wrong service).
-export async function probeRemoteDaemon(base: string, timeoutMs = 4000): Promise<void> {
+export async function probeRemoteDaemon(
+  base: string,
+  token: string | null,
+  timeoutMs = 4000,
+): Promise<void> {
   const cleaned = base.trim().replace(/\/+$/, "");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const resp = await fetch(`${cleaned}/ipc/ping`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders(token) },
       body: "null",
       signal: controller.signal,
     });
+    if (resp.status === 401) {
+      throw new Error("the daemon needs its UI token (printed as \"ui token:\" when it starts)");
+    }
     if (!resp.ok) throw new Error(`daemon replied HTTP ${resp.status}`);
     const envelope = (await resp.json()) as { status?: string; data?: unknown };
     if (envelope.status !== "ok" || envelope.data !== "pong") {
@@ -195,7 +261,7 @@ export async function invoke<T>(name: string, args?: Record<string, unknown>): P
   }
   const resp = await fetch(`${remoteBase}/ipc/${name}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders(remoteToken) },
     body: JSON.stringify(args ?? null),
   });
   if (!resp.ok) {
@@ -263,7 +329,9 @@ let wasDown = false;
 
 function ensureSocket(): void {
   if (remoteBase === null || socket !== null) return;
-  const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events`;
+  // Browsers can't set headers on a WebSocket; the token rides the query.
+  const query = remoteToken ? `?token=${encodeURIComponent(remoteToken)}` : "";
+  const wsUrl = `${remoteBase.replace(/^http/, "ws")}/events${query}`;
   const ws = new WebSocket(wsUrl);
   socket = ws;
   ws.onmessage = (msg) => {

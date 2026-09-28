@@ -289,6 +289,7 @@ fn show_launcher(app: &tauri::AppHandle) {
         "Oxplow",
         &windows::WindowContext {
             base: None,
+            token: None,
             kind: windows::KIND_LAUNCHER,
             project_dir: None,
         },
@@ -308,6 +309,7 @@ fn show_setup(app: &tauri::AppHandle, dir: &Path) {
         "Oxplow",
         &windows::WindowContext {
             base: None,
+            token: None,
             kind: windows::KIND_SETUP,
             project_dir: Some(&dir_str),
         },

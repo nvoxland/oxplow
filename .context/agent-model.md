@@ -536,7 +536,7 @@ the same JSON.
 **Limits (know these before trusting the gate).**
 - **A permission reject carries no reason.** The model sees only "rejected". Only an `fs/write_text_file` denial (an error message) tells it why. The Claude adapter writes to disk itself, so its only gate is the permission request.
 - **Adapter modes that skip asking** (e.g. an "accept edits" / bypass mode set inside the agent) leave bypass detection as the only backstop. That is after the fact: the write already happened, and oxplow flags it with a banner.
-- **"UI-only" is structural, not authentication.** The `ui(...)` rows keep `acp_*` out of the MCP tool surface, so no agent can prompt an agent. But the daemon's loopback `/ipc` is unauthenticated, as it already is for terminal input.
+- **"UI-only" is enforced twice.** The `ui(...)` rows keep `acp_*` out of the MCP tool surface, and the daemon's `/ipc` requires the per-launch UI token that only the renderer holds (tsk345, [remote-daemon.md](./remote-daemon.md) → "Auth"). So no agent can prompt an agent by calling the daemon directly either.
 - **Usage:**
   - per-turn tokens come only from the prompt response's `usage` (an unstable ACP field, enabled via the SDK feature `unstable_end_turn_token_usage`) and are recorded via `record_turn`;
   - `usage_update` (context occupancy plus cumulative cost) drives only the context meter;

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { createProject, listRecentProjects, openProject, removeRecentProject } from "../api.js";
 import type { RecentProjectView } from "../tauri-bridge/generated/bindings.js";
-import { connectRemote, probeRemoteDaemon } from "../tauri-bridge/transport.js";
+import { connectRemote, parseRemoteInput, probeRemoteDaemon } from "../tauri-bridge/transport.js";
 import { pickFolder } from "../tauri-bridge/nativeDialog.js";
 import { useContextMenu, useRowContextMenu } from "../components/useRowContextMenu.js";
 import { logUi } from "../logger.js";
@@ -160,21 +160,26 @@ export function Launcher() {
 /// reloads into remote mode (see tauri-bridge/transport.ts).
 function RemoteConnectSection() {
   const [url, setUrl] = useState("");
+  // The daemon prints its UI token ("ui token: …") when it starts; the
+  // address may also carry it as `#oxplow-token=…`.
+  const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recents, setRecents] = useState<RecentRemote[]>(() =>
     loadRecentRemotes(window.localStorage),
   );
 
-  const connect = useCallback(async (raw: string) => {
-    const base = normalizeBase(raw);
+  const connect = useCallback(async (raw: string, typedToken: string) => {
+    const parsed = parseRemoteInput(raw);
+    const base = normalizeBase(parsed.base);
     if (!base) return;
+    const uiToken = parsed.token ?? (typedToken.trim() || null);
     setError(null);
     setConnecting(true);
     try {
-      await probeRemoteDaemon(base);
+      await probeRemoteDaemon(base, uiToken);
       rememberRemote(window.localStorage, base);
-      connectRemote(base); // reloads the window into remote mode
+      connectRemote(base, uiToken); // reloads the window into remote mode
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -195,7 +200,7 @@ function RemoteConnectSection() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void connect(url);
+          void connect(url, token);
         }}
         style={remoteFormStyle}
       >
@@ -209,10 +214,21 @@ function RemoteConnectSection() {
           style={remoteInputStyle}
           disabled={connecting}
         />
+        <input
+          data-testid="launcher-remote-token"
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="UI token"
+          spellCheck={false}
+          autoComplete="off"
+          style={remoteInputStyle}
+          disabled={connecting}
+        />
         <button
           type="submit"
           data-testid="launcher-remote-connect"
-          disabled={connecting || normalizeBase(url).length === 0}
+          disabled={connecting || normalizeBase(parseRemoteInput(url).base).length === 0}
           style={remoteConnectButtonStyle}
         >
           {connecting ? "Connecting…" : "Connect"}
@@ -220,7 +236,8 @@ function RemoteConnectSection() {
       </form>
       <p style={remoteHintStyle}>
         Start <code>oxplow-daemon --project &lt;dir&gt;</code> on the remote box, tunnel with{" "}
-        <code>ssh -L 7420:127.0.0.1:7420 &lt;host&gt;</code>, then connect.
+        <code>ssh -L 7420:127.0.0.1:7420 &lt;host&gt;</code>, then connect with the{" "}
+        <code>ui token</code> it printed.
       </p>
       {error ? (
         <div data-testid="launcher-remote-error" style={errorStyle}>
@@ -247,7 +264,7 @@ function RemoteConnectSection() {
             >
               <button
                 type="button"
-                onClick={() => void connect(r.base)}
+                onClick={() => void connect(r.base, token)}
                 disabled={connecting}
                 style={rowOpenButtonStyle}
                 title={r.base}
