@@ -217,9 +217,22 @@ describe("buildMenuGroupSnapshots", () => {
       "tasks.dashboard",
       "plan.newTask",
       "dashboard.new",
+      "lens.newWithAgent",
       "thread.new",
       "stream.new",
     ]);
+  });
+
+  // tsk373: building a lens is one launcher/menu entry away; it needs a
+  // thread (an agent) to hand the starter prompt to.
+  test("New Lens with Your Agent needs a thread", () => {
+    const item = (hasThread: boolean) =>
+      buildMenuGroupSnapshots({ hasStream: true, hasSelectedFile: false, canSave: false, hasThread })
+        .flatMap((g) => g.items)
+        .find((i) => i.id === "lens.newWithAgent");
+    expect(item(true)?.label).toBe("New Lens with Your Agent…");
+    expect(item(true)?.enabled).toBe(true);
+    expect(item(false)?.enabled).toBe(false);
   });
 });
 
@@ -237,6 +250,7 @@ function noopHandlers() {
     newTask() {},
     newStream() {},
     newDashboard() {},
+    newLensWithAgent() {},
     newThread() {},
     openHistory() {},
     commitFiles() {},

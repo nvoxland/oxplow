@@ -119,10 +119,28 @@ Make a thread the writer by right-clicking it in the navigator →
 **Make writer**, when you want
 it to ship changes (only one writer per stream).
 
-## 7. What to read next
+## 7. Build your own view
+
+Oxplow's pages are built from **lenses**: a query over oxplow's data
+(tasks, efforts, threads, comments, the wiki, test runs, …) plus how to
+show it. You don't write them by hand. Ask your agent.
+
+Open the launcher (++cmd+p++) and pick **New Lens with Your Agent…**.
+It puts a starter prompt in the agent's input; finish the sentence and
+send it yourself, e.g. "…shows every blocked task in this stream, with
+how long it's been blocked". The agent looks up the data, writes the
+lens under `oxplow/extensions/`, checks it and tells you its name. Open
+it from the launcher like any other page.
+
+Lenses are ordinary files in the repo: commit them and your team gets
+them too. See [Lenses](../guide/lenses.md) for the format.
+
+## 8. What to read next
 
 - [Concepts](concepts.md) — streams, threads, pages, tasks,
   wiki pages, efforts.
+- [Lenses](../guide/lenses.md) — your own pages over oxplow's data,
+  and sharing them.
 - [Work queue](../guide/work-queue.md) — when to file work
   items and how the lifecycle behaves.
 - [Wiki pages](../guide/wiki.md) — wiki pages, wikilinks,

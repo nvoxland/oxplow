@@ -123,6 +123,8 @@ import { MetricsPage } from "./pages/MetricsPage.js";
 import { CustomDashboardPage } from "./pages/CustomDashboardPage.js";
 import { DashboardsIndexPage } from "./pages/DashboardsIndexPage.js";
 import { LensPage } from "./pages/LensPage.js";
+import { NEW_LENS_PROMPT } from "./lens/lensModel.js";
+import { insertIntoAgent } from "./agent-input-bus.js";
 import { getPageDetailStore } from "./tabs/openPageDetail.js";
 import { ExploreDataPage } from "./pages/ExploreDataPage.js";
 import { ArchivedPage } from "./pages/ArchivedPage.js";
@@ -1393,6 +1395,9 @@ export function App() {
       void createDashboard("Untitled dashboard").then((d) => {
         handleOpenPageRef.current?.(customDashboardRef(d.id));
       });
+    },
+    newLensWithAgent() {
+      insertIntoAgent(NEW_LENS_PROMPT);
     },
     newThread() {
       if (!stream) return;

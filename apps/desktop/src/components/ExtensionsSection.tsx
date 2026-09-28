@@ -27,6 +27,8 @@ import {
   type ExtensionReview,
   type SourceListing,
 } from "../api.js";
+import { insertIntoAgent } from "../agent-input-bus.js";
+import { NEW_LENS_PROMPT } from "../lens/lensModel.js";
 import { extensionCredentials, extensionRowModel, reviewModel } from "./extensionRowModel.js";
 import { InlineConfirm } from "./InlineConfirm.js";
 import { recordOpError } from "./opErrorsStore.js";
@@ -125,7 +127,11 @@ export function ExtensionsSection() {
         <div style={mutedStyle}>Loading…</div>
       ) : exts.length === 0 ? (
         <div style={mutedStyle} data-testid="extensions-empty">
-          No extensions yet. Ask your agent for a lens, or install one below.
+          No extensions yet.{" "}
+          <button type="button" data-testid="extensions-new-lens" onClick={() => insertIntoAgent(NEW_LENS_PROMPT)}>
+            New lens with your agent…
+          </button>{" "}
+          or install one below.
         </div>
       ) : (
         <ul style={{ listStyle: "none", margin: "0 0 12px", padding: 0 }}>

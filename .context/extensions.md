@@ -560,6 +560,14 @@ teaches the format, the `v_*` contract and the loop "describe_schema →
 query_sql → write files → validate_extension → run_lens". "Improve with agent" on a lens pastes
 `[oxplow lens <slug>]` plus its params into the agent's context.
 
+**Getting newcomers there (tsk373).** "New Lens with Your Agent…"
+(`lens.newWithAgent`, Tasks menu, so also in the launcher; needs a
+thread) puts `NEW_LENS_PROMPT` (`lens/lensModel.ts`) into the agent's
+input via `insertIntoAgent`. It never sends; the person finishes the
+sentence. The Extensions empty state and Explore Data's intro offer the
+same button, and getting-started's "Your first stream" has a "Build your
+own view" step.
+
 ## The `oxplow-analytics` example extension
 
 What moves out of core, and what it becomes:

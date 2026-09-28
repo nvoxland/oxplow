@@ -390,3 +390,9 @@ export function firingAlerts(
     run?.alert?.firing ? [{ id, title: run.lens.title, message: run.alert.message }] : [],
   );
 }
+
+/** The starter prompt "New Lens with Your Agent…" puts in the agent's
+ *  input for the person to finish and send (it's never sent for them).
+ *  The agent's oxplow-extension skill takes it from there (tsk373). */
+export const NEW_LENS_PROMPT =
+  "Build me an oxplow lens (a page I can open with Cmd+P) that shows ";

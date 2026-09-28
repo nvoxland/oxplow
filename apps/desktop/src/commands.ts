@@ -16,6 +16,7 @@ export type CommandId =
   | "tasks.dashboard"
   | "plan.newTask"
   | "dashboard.new"
+  | "lens.newWithAgent"
   | "stream.new"
   | "thread.new"
   | "project.new"
@@ -88,6 +89,8 @@ export interface CommandHandlers {
   newTask(): void;
   newStream(): void;
   newDashboard(): void;
+  /** Put a starter "build me a lens" prompt in the agent's input (never sent). */
+  newLensWithAgent(): void;
   newThread(): void;
   openHistory(): void;
   commitFiles(): void;
@@ -170,6 +173,7 @@ export function buildMenuGroupSnapshots(state: CommandState): MenuGroupSnapshot[
         { id: "tasks.dashboard", label: "Dashboard", enabled: state.hasStream, opensPage: true },
         { id: "plan.newTask", label: "New Task…", shortcut: "Ctrl/Cmd+Shift+N", enabled: state.hasThread },
         { id: "dashboard.new", label: "New Dashboard…", enabled: state.hasStream },
+        { id: "lens.newWithAgent", label: "New Lens with Your Agent…", enabled: state.hasThread },
         { id: "thread.new", label: "New Thread…", enabled: state.hasStream },
         { id: "stream.new", label: "New Stream…", enabled: true },
       ],
@@ -195,6 +199,7 @@ export function buildMenuGroups(state: CommandState, handlers: CommandHandlers):
     "tasks.dashboard": handlers.showTasks,
     "plan.newTask": handlers.newTask,
     "dashboard.new": handlers.newDashboard,
+    "lens.newWithAgent": handlers.newLensWithAgent,
     "stream.new": handlers.newStream,
     "thread.new": handlers.newThread,
     "project.new": handlers.newProject,
