@@ -5391,7 +5391,6 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
     "list_sources",
     "list_ai_roles",
-    "ensure_change",
     "get_open_page",
     "list_extensions",
     "list_lenses",
@@ -5465,6 +5464,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
     "run_lens_action",
+    // Stores the change's analysis and starts its duplicate scan.
+    "ensure_change",
     // Call an outside model provider and record an `ai_call` row.
     "ai_decide",
     "ai_summarize",
@@ -6149,6 +6150,14 @@ mod tests {
     /// tsk203: every registered tool must be classified read XOR write, so a new
     /// tool can't slip in un-annotated (a write mis-marked read is a safety bug;
     /// a read left un-marked just re-introduces the permission prompt).
+    /// `ensure_change` stores the analysis and starts a duplicate scan, so
+    /// it isn't read-only (tsk371).
+    #[test]
+    fn ensure_change_is_not_hinted_read_only() {
+        assert!(!READ_ONLY_TOOLS.contains(&"ensure_change"));
+        assert!(WRITE_TOOLS.contains(&"ensure_change"));
+    }
+
     #[test]
     fn read_write_split_covers_every_tool() {
         use std::collections::HashSet;

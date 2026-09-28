@@ -261,6 +261,10 @@ value. Naming convention:
 - `--border-<weight>` — divider colors.
 - `--status-<state>` / `--severity-<level>` / `--freshness-<state>` —
   semantic categories.
+- `--chart-<n>` (1–8) — categorical chart series, in order (Tableau 10;
+  the lens treemap's groups), and `--chart-label` for text drawn on a
+  series fill. Charts cycle through them rather than inlining hex
+  (tsk371).
 
 ## Related
 

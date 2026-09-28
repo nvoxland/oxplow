@@ -58,11 +58,12 @@ pub fn claude_intent(body: &serde_json::Value) -> Option<ClaudeIntent> {
     {
         return None;
     }
+    // The first key holding a string: a null `file_path` mustn't hide a
+    // `notebook_path` (tsk371).
     let path = body.get("tool_input").and_then(|t| {
-        t.get("file_path")
-            .or_else(|| t.get("notebook_path"))
-            .or_else(|| t.get("path"))
-            .and_then(|v| v.as_str())
+        ["file_path", "notebook_path", "path"]
+            .iter()
+            .find_map(|k| t.get(k).and_then(|v| v.as_str()))
     });
     Some(ClaudeIntent {
         label: tool_name.to_string(),
@@ -640,6 +641,18 @@ mod tests {
             .find(|t| t.status == ThreadStatus::Active)
             .expect("primary stream has a seeded active writer thread");
         (stream, writer)
+    }
+
+    /// A non-string `file_path` doesn't hide the path under another key
+    /// (tsk371).
+    #[test]
+    fn claude_intent_takes_the_first_string_path() {
+        let i = claude_intent(&serde_json::json!({
+            "tool_name": "NotebookEdit",
+            "tool_input": {"file_path": null, "notebook_path": "nb.ipynb"}
+        }))
+        .unwrap();
+        assert_eq!(i.paths, vec!["nb.ipynb".to_string()]);
     }
 
     #[test]

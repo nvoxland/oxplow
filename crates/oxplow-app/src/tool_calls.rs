@@ -59,13 +59,17 @@ pub fn parse_tool_call(payload_json: &str, project_dir: &Path) -> Option<ToolCal
     })
 }
 
+/// Repo-relative when inside the project; the root itself is `.`.
 fn relativize(path: &str, project_dir: &Path) -> String {
-    Path::new(path)
+    match Path::new(path)
         .strip_prefix(project_dir)
         .ok()
         .and_then(|p| p.to_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| path.to_string())
+    {
+        Some("") => ".".to_string(),
+        Some(rel) => rel.to_string(),
+        None => path.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -75,6 +79,15 @@ mod tests {
 
     fn parse(v: serde_json::Value) -> Option<ToolCallParts> {
         parse_tool_call(&v.to_string(), Path::new("/repo"))
+    }
+
+    /// The project root itself reads as `.`, not an empty path (tsk371).
+    #[test]
+    fn the_project_root_is_dot() {
+        let p =
+            parse(json!({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": "/repo"}}))
+                .unwrap();
+        assert_eq!(p.path.as_deref(), Some("."));
     }
 
     #[test]

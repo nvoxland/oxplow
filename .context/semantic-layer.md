@@ -406,7 +406,7 @@ stream's `working` tree (vs HEAD). `crates/oxplow-app/src/change_analysis.rs`
 analyzes it and stores the rows behind `v_change*`; lenses (the
 oxplow-analytics change cards) only read them.
 
-- **Getting one.** `ensure_change(target)` (IPC and MCP, read-only) returns
+- **Getting one.** `ensure_change(target)` (IPC and MCP; not hinted read-only, since it stores the analysis, tsk371) returns
   the `v_change` row, computing first if needed. It diffs the endpoints
   (`endpoint_diff.rs`, shared with the `diff_endpoints` IPC), reads the
   first 200 changed files' contents, runs `code_analysis::analyze_files`

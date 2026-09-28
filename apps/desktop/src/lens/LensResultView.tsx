@@ -191,7 +191,8 @@ function LineViz({ run }: { run: LensRun }) {
 
 const TREEMAP_W = 800;
 const TREEMAP_H = 280;
-const TREEMAP_PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#b07aa1", "#9c755f"];
+/** Group colours: the `--chart-*` series tokens (index.html). */
+const TREEMAP_PALETTE = Array.from({ length: 8 }, (_, i) => `var(--chart-${i + 1})`);
 
 /** Two-level squarified treemap: groups first (by total size), then
  *  items inside each group. A tile follows the lens's first column link. */
@@ -241,12 +242,12 @@ function TreemapViz({ run, onOpenPage }: { run: LensRun; onOpenPage?(ref: TabRef
                 width={t.w}
                 height={t.h}
                 fill={color(g.payload)}
-                stroke="var(--surface-page, #111)"
+                stroke="var(--surface-app)"
                 strokeWidth={1}
                 opacity={0.85}
               />
               {t.w > 60 && t.h > 16 ? (
-                <text x={t.x + 4} y={t.y + 13} fontSize={11} fill="#fff" style={{ pointerEvents: "none" }}>
+                <text x={t.x + 4} y={t.y + 13} fontSize={11} fill="var(--chart-label)" style={{ pointerEvents: "none" }}>
                   {t.payload.label.length > t.w / 7 ? `${t.payload.label.slice(0, Math.floor(t.w / 7) - 1)}…` : t.payload.label}
                 </text>
               ) : null}

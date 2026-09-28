@@ -82,6 +82,15 @@ test("treemap lenses draw a tile per positive item and link through the lens's c
   );
   const tiles = container.querySelectorAll('[data-testid="lens-treemap-tile"]');
   expect(tiles.length).toBe(2);
+  // Theme tokens, never inline hex (tsk371).
+  for (const tile of tiles) {
+    for (const el of tile.querySelectorAll("rect, text")) {
+      for (const attr of ["fill", "stroke"]) {
+        const v = el.getAttribute(attr);
+        if (v !== null) expect(v).toMatch(/^var\(--[a-z0-9-]+\)$/);
+      }
+    }
+  }
   (tiles[0] as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   expect(opened).toEqual(["file:a.rs"]);
 });
