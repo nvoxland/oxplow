@@ -8,17 +8,29 @@
  * own server-side resume mechanism.
  */
 
-/** Stable identifier for the kind of content a tab renders. */
-export type PageKind =
-  | "agent"
+/**
+ * The kinds of content a tab renders. Every tab id is a canonical ref
+ * (`.context/refs.md`). An **entity** page's id is the entity's own ref
+ * (`work_item:oxplow:tsk42`, `file:src/a.rs@git:HEAD`), and its kind is
+ * the ref's kind. A **route** is a page of the shell rather than a
+ * thing in the graph — its id is `page:<name>[?params]` and its kind is
+ * the route name. Routes never appear in `page_ref`.
+ */
+export type EntityPageKind =
   | "file"
   | "dir"
+  | "wiki"
+  | "work_item"
+  | "commit"
+  | "metric"
+  | "lens";
+
+export type RoutePageKind =
+  | "agent"
   | "diff"
   | "diff-view"
   | "duplicate-block"
-  | "wiki"
   | "wiki-freshness"
-  | "work_item"
   | "tasks"
   | "done-work"
   | "backlog"
@@ -31,7 +43,6 @@ export type PageKind =
   | "local-history-by-commit-full"
   | "git-history"
   | "git-dashboard"
-  | "commit"
   | "uncommitted-changes"
   | "hook-events"
   | "terminal"
@@ -45,12 +56,11 @@ export type PageKind =
   | "op-error"
   | "external-url"
   | "metrics-recorded"
-  | "metric"
   | "custom-dashboard"
   | "dashboards"
-  | "lens"
-  | "explore-data"
+  | "explore-data";
 
+export type PageKind = EntityPageKind | RoutePageKind;
 
 /** Reference to a tab. `id` must be unique across page kinds within a thread. */
 export interface TabRef {

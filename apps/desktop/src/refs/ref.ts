@@ -44,7 +44,9 @@ function decode(s: string): string | null {
   return out;
 }
 
-function encode(s: string): string {
+/** Percent-encode the three reserved characters of an id (or rev)
+ *  segment; everything else stays raw so refs remain readable. */
+export function escapeId(s: string): string {
   let out = "";
   for (const c of s) {
     out += RESERVED.has(c) ? `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}` : c;
@@ -88,8 +90,8 @@ export function parseRef(text: string): CanonicalRef | null {
 
 /** The canonical string form; re-encodes the reserved characters. */
 export function formatRef(r: CanonicalRef): string {
-  let out = `${r.kind}:${encode(r.id)}`;
-  if (r.rev !== null) out += `@${encode(r.rev)}`;
+  let out = `${r.kind}:${escapeId(r.id)}`;
+  if (r.rev !== null) out += `@${escapeId(r.rev)}`;
   if (r.frag !== null) out += `#${r.frag}`;
   return out;
 }

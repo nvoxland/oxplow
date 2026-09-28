@@ -31,7 +31,7 @@ pages are THE shell.
 |---|---|
 | `apps/desktop/src/tabs/tabState.ts` | `createTabStore()` — per-thread tab list + active id, with `openTab`, `ensureTab`, `activate`, `closeTab`, `subscribe`. In memory; no cross-restart persistence in v1. |
 | `apps/desktop/src/tabs/useTabStore.ts` | `getTabStore()` singleton + `useThreadTabs(threadId)` hook backed by `useSyncExternalStore`. |
-| `apps/desktop/src/tabs/pageRefs.ts` | Stable id helpers: `agentRef()`, `fileRef(path)`, `diffRef({...})`, `wikiPageRef(slug)`, `taskRef(id)`, `findingRef(id)`, `indexRef(kind)`, `dashboardRef(variant)`. Centralizing the format keeps cross-component links and ⌘K open-by-id stable. |
+| `apps/desktop/src/tabs/pageRefs.ts` | Every tab id, built here and nowhere else: entity refs (`fileRef`, `directoryRef`, `wikiPageRef`, `taskRef`, `gitCommitRef`, `metricRef`, `lensRef`) and shell routes (`agentRef`, `indexRef(kind)`, `diffRef(spec)`, `snapshotRef`/`effortDiffRef`/`endpointDiffRef`, `dashboardRef`, …). `refFromTabId(id)` is the inverse of every constructor (via the exhaustive `ROUTES` table for `page:` ids); `pageKindOf(id)` names the kind a tab renders as; `diskFilePath(id)` is the one way to ask "which working-tree file is this tab". |
 | `apps/desktop/src/tabs/Page.tsx` | Shared page chrome: title + kind chip + status chips + actions slot, optional **browser-style nav bar** (back/forward + bookmark + backlinks dropdown — auto-mounted from `PageNavigationContext` when present), body, collapsible legacy Backlinks region. Title can be passed as a `title` prop or registered programmatically by the page via `usePageTitle`; the chrome falls back to the context title when `title` is omitted. `showNavBar` / `showHeader` flags (default true) let a page opt out — agent-style bare content sets both false. **`titleInBody`** (default false) says the page renders its OWN title as an `<h1>` in the body (use the exported `pageH1Style` for consistency), so the chrome (nav bar / header) suppresses the title to avoid a duplicate — the tab-strip label via `usePageTitle` is unaffected. Adopters: `MetricDetailPage`, `DiffViewPage` (tsk137). **Body layout** is chosen via `layout?: "full" \| "details"` (default `"full"`); details layout pairs a full-width center column with a 320px sticky right rail (`rightRail` prop). Below ~960px body width the rail doesn't disappear — `DetailsBody` relocates the **same panel** (card surface + tinted header band + ⋯ actions) inline to the top of the center column. Purely responsive, no manual toggle and no per-page logic — consumers just pass `rightRail`. Reads only semantic CSS variables (skin via theme). |
 | `apps/desktop/src/tabs/PageNavBar.tsx` | Dumb nav-bar component: back/forward buttons, optional bookmark toggle, optional backlinks/outbound/snapshots dropdowns (popovers), and an optional **comment navigator** slot (`comments` ReactNode, rendered before Backlinks). Mounted by `Page` when context or explicit `navBar` prop is present. |
 | `apps/desktop/src/components/Comments/CommentNavigator.tsx` | Self-contained per-page comment navigator for the nav bar. `useCommentsForTarget(kind,id)` → shows "Comments (N)", steps through anchored comments with ◀ ▶ (each `requestCommentReveal`s to scroll + open inline on the surface), and a dropdown lists all comments plus an **Orphaned (M)** section. Orphaned entries are clickable too: they `requestCommentReveal`, and the surfaces open the thread popover at a fallback position (no anchor to scroll to) so the comment is readable. The popover then offers a **"Relink to selection"** button (`CommentPopover.onRelink`, wired by RichTextField + MonacoCommentLayer) that re-attaches the comment to the editor's current selection — select the intended text first. (The right-click "Relink orphaned" path still exists.) Comment-bearing pages pass it via `Page`'s `commentsNav` prop (FilePage → file/path, WikiPage → wiki/slug, TaskPage → task/id). Renders nothing when the page has no comments. Pure helpers (`partitionPageComments`, `stepComment`) live in `pageCommentNav.ts` (unit-tested) and are shared with the per-thread stepper: `CommentPopover` takes an `onStep(dir)` prop so an open comment thread shows ◀ Prev / Next ▶ buttons that scroll to + reopen the adjacent comment (wired by RichTextField + MonacoCommentLayer via `stepComment` + `requestCommentReveal`). |
@@ -101,14 +101,35 @@ extension host lands.
 Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
-**Entity pages use canonical refs** ([refs.md](./refs.md)): the tab id
-of a file, directory, wiki page, task, commit or metric *is* its ref, so
-a `[[…]]` link, a `page_ref` row, a backlink and a tab all agree on one
-string. `refFromTabId` and `kindForTabId` parse these through the shared
-grammar (`apps/desktop/src/refs/ref.ts`), so a `:` inside an id
-(`work_item:oxplow:tsk42`) never splits it. The remaining kinds are
-**shell routes** with hand-formatted tails (`diff-view:…`,
-`external-url:…`); they move to `page:<name>[?params]` in P1.3b.
+**Every tab id is a canonical ref** ([refs.md](./refs.md)), parsed
+through the shared grammar (`apps/desktop/src/refs/ref.ts`) so a `:`
+inside an id (`work_item:oxplow:tsk42`) never splits it. Two families:
+
+- **Entity pages** (`EntityPageKind`): the tab id of a file, directory,
+  wiki page, task, commit, metric or lens *is* its ref, so a `[[…]]`
+  link, a `page_ref` row, a backlink and a tab all agree on one string.
+- **Shell routes** (`RoutePageKind`): a page of the shell, not a thing
+  in the graph — `page:<name>[?params]` (`page:tasks`,
+  `page:diff-view?effort=eff9`). The route name is the `TabRef.kind`.
+  Routes never appear in `page_ref`. Params are a query string whose
+  values escape only what would break the id (`&`, `=`, `+`, `%`, `@`,
+  `#`, whitespace), so `path=src/a.ts&left=ref:abc` stays readable; the
+  raw text after `page:` is what gets parsed, not `parseRef`'s decoded
+  id.
+
+`refFromTabId(id)` rebuilds the full ref (with payload) from an id alone
+and returns `null` for text that isn't a ref, an unknown kind, or a route
+whose params don't rebuild — callers (rail History, Go To, the launcher's
+Recent) drop the row rather than open a blank tab. The `ROUTES` table is
+`Record<RoutePageKind, …>`, so a new route can't ship without its
+inverse; the round-trip test in `pageRefs.test.ts` covers every
+constructor. `newTaskRef(payload)`'s defaults deliberately aren't in the
+id (stable id → one form tab), so a history reopen starts empty.
+
+There are no sentinel ids: the agent tab is `AGENT_TAB_ID`
+(`page:agent`), and "is this the editor's working-tree file" is
+`diskFilePath(id)` (null for a pinned revision such as
+`file:src/a.rs@git:HEAD`, which is a read-only viewer tab).
 
 **No compatibility layer for old ids.** When a kind is renamed or a page
 moves into an extension, its saved tabs/bookmarks/history are dropped
@@ -117,25 +138,24 @@ on 2026-09-28) — see the decision in [refs.md](./refs.md).
 
 | Kind | Id format | Example |
 |---|---|---|
-| agent | `agent` | `agent` |
 | file | `file:<path>[@<rev>]` — the working tree has no rev; `@git:<ref>` / `@snap:<id>` pin a version (`revForVersion` in `file-version.ts`); a literal `@`/`#`/`%` in a path is percent-encoded | `file:crates/oxplow-app/src/lib.rs`, `file:src/a.rs@git:HEAD` |
 | dir | `dir:<path>` | `dir:crates/oxplow-app` |
-| diff | `diff:<key>` | `diff:src/a.ts\|abc\|def\|` |
-| diff-view | `diff-view:effort:<effortId>` or `diff-view:endpoints:<start>..<end>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `diff-view:effort:eff42` |
-| wiki / wiki-freshness | `wiki:<slug>` / `wiki-freshness:<slug>` | `wiki:how-stop-hook-fires` |
-| lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-analytics/effort-tests?effort_id=12` |
+| wiki | `wiki:<slug>` | `wiki:how-stop-hook-fires` |
 | work_item | `work_item:oxplow:<taskId>` (`taskRef(itemId)`; only oxplow's provider has a page) | `work_item:oxplow:tsk142` |
-| index kinds | the kind name | `tasks`, `comments`, `settings`, `dashboards` |
-| uncommitted-changes | `uncommitted-changes` (an old `:<scopeKind>:<scopeValue>` suffix is dropped) | `uncommitted-changes` |
 | commit | `commit:<sha>` | `commit:abc1234` |
-| git-dashboard | `git-dashboard` | `git-dashboard` |
-| dashboard | `dashboard:<variant>` | `dashboard:visits` |
 | metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
-| custom-dashboard | `custom-dashboard:<dashboardId>` | `custom-dashboard:dsh3` |
-| stream-settings / thread-settings | `stream-settings:<id>` / `thread-settings:<id>` | `thread-settings:t-3` |
-| closed-threads / new-stream / new-task | the kind name | `new-task` |
-| op-error | `op-error:<errorId>` | `op-error:oe-abc123` |
-| external-url | `external-url:<url>` | `external-url:https://example.com/path` |
+| lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-analytics/effort-tests?effort_id=12` |
+| agent | `page:agent` (`AGENT_TAB_ID`) | `page:agent` |
+| index routes | `page:<kind>` — `tasks`, `done-work`, `backlog`, `archived`, `wiki-index`, `files`, `comments`, `local-history(-full\|-by-commit-full)`, `git-history`, `git-dashboard`, `uncommitted-changes`, `hook-events`, `terminal`, `settings`, `metrics-recorded`, `dashboards`, `explore-data`, `closed-threads`, `new-stream`, `new-task` | `page:tasks` |
+| diff | `page:diff?path=<p>&left=<ver>&right=<ver>[&label=<l>]` (versions `disk` / `ref:<x>` / `snap:<id>`; `diffRef(spec)` / `computeDiffId(spec)` — `revealLine` is not in the id, so re-clicking reuses the tab) | `page:diff?path=src/a.ts&left=ref:abc&right=disk` |
+| diff-view | `page:diff-view?snapshot=<N>` \| `?effort=<effortId>` \| `?start=<tok>&end=<tok>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `page:diff-view?effort=eff42` |
+| duplicate-block | `page:duplicate-block?left=<p>&left_lines=<a>-<b>&left_at=<ver>&right=…` | `page:duplicate-block?left=a.rs&left_lines=1-5&left_at=disk&right=b.rs&right_lines=9-13&right_at=ref:abc` |
+| wiki-freshness | `page:wiki-freshness?slug=<slug>` | `page:wiki-freshness?slug=data-model` |
+| dashboard | `page:dashboard?variant=visits` (the Go To page) | `page:dashboard?variant=visits` |
+| custom-dashboard | `page:custom-dashboard?id=<dashboardId>` | `page:custom-dashboard?id=dsh3` |
+| stream-settings / thread-settings | `page:stream-settings?stream=<id>` / `page:thread-settings?thread=<id>` | `page:thread-settings?thread=thr3` |
+| op-error | `page:op-error?id=<errorId>` | `page:op-error?id=oe-abc123` |
+| external-url | `page:external-url?url=<url>` (`=`, `&`, `#` in the URL are escaped) | `page:external-url?url=https://example.com/path` |
 
 ## Body layouts
 
@@ -496,11 +516,18 @@ each thread's last active tab.
 
 Every per-thread tab lives in `threadPageTabs[threadId]` as a
 `TabRef`, regardless of kind (`wiki`, `file`, `diff`, `work_item`,
-`lens`, `commit`, etc.). The page-tab loop in
-`centerTabs` builds the renderer by switching on `ref.kind` and
-wrapping each tab in a `PageNavigationContext` so in-tab navigation,
-back/forward, sibling navigation, and bookmark/backlinks all work
-the same way.
+`lens`, `commit`, etc.). The page-tab loop in `centerTabs` looks the
+renderer up in **`pageRenderers: Record<PageKind, (ref, nav) => CenterTab
+| null>`** — one entry per kind, so a kind without a renderer (or a
+renderer for a kind that no longer exists) is a compile error rather
+than a blank tab — and wraps each tab in a `PageNavigationContext` so
+in-tab navigation, back/forward, sibling navigation, and
+bookmark/backlinks all work the same way. `nav` is the slot's
+navigation (`navOpen`, `navOpenFile`, `navOpenDiff`, `navRevealCommit`,
+`slotId`): closures bind to the *slot's* current ref, so a back-stack
+page (still mounted, hidden) that navigates mutates the slot exactly as
+the visible page would. `handleOpenPage` special-cases only `agent`,
+`file` and `diff`; every other kind is "push the ref, activate it".
 
 - `fileSessions[stream.id]` is now a **content + dirty-state cache**
   only. Tab membership / order is driven by `threadPageTabs`.
@@ -520,9 +547,11 @@ the same way.
   `showHeader={false}`. A future cleanup may move the agent ref into
   `threadPageTabs` too; today centerTabs prepends it deterministically.
 
-This is the architectural rule for new tab kinds: add a `PageKind`,
-add a `pageRefs.ts` helper, render through `Page`, and dispatch in
-the `centerTabs` page-tab loop. **Don't** add a parallel tab track.
+This is the architectural rule for new tab kinds: add a `PageKind`
+(entity or route), add a `pageRefs.ts` constructor **and** its `ROUTES`
+inverse, render through `Page`, and add the `pageRenderers` entry in
+`App.tsx` (the two `Record`s tell you what's missing). **Don't** add a
+parallel tab track.
 
 Files were stream-scoped historically; lifting them into the
 per-thread list means each thread has its own open-file list within
@@ -549,8 +578,8 @@ kinds slot in without re-discovering the layout.
 - **`threadCenterActive: Record<string, string>`** — per-thread
   active tab id. Switching threads restores each thread's last
   active tab. Mutated by `setCenterActive` (which writes into the
-  per-thread map for the current thread). The agent's `"agent"`
-  literal is the default fallback when nothing else is selected.
+  per-thread map for the current thread). `AGENT_TAB_ID` (`page:agent`)
+  is the default fallback when nothing else is selected.
 - **`threadPageMru: Record<string, string[]>`** — per-thread tab
   recency, most-recently-used first. In-memory (like
   `threadCenterActive`); rebuilt as tabs are activated. A `centerActive`
@@ -664,7 +693,7 @@ tab × / right-click menu close
        ├→ remove from threadPageTabs
        ├→ drop threadPageHistory entry
        ├→ drop pageTitles entry
-       └→ snap centerActive to "agent" if it was the closed tab
+       └→ snap centerActive to AGENT_TAB_ID if it was the closed tab
 ```
 
 ## Persistence across restart

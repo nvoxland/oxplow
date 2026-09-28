@@ -164,9 +164,12 @@ function VisitsBrowser({
             {recent.map((r) => (
               <LinkRow
                 key={r.refId}
-                kind={refFromTabId(r.refId).kind}
+                kind={refFromTabId(r.refId)?.kind ?? r.refKind}
                 label={(r.label?.trim() ?? "") || r.refId}
-                onClick={() => onOpenPage(refFromTabId(r.refId))}
+                onClick={() => {
+                  const ref = refFromTabId(r.refId);
+                  if (ref) onOpenPage(ref);
+                }}
               />
             ))}
           </LinkList>

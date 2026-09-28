@@ -11,26 +11,19 @@ describe("kindForTabId", () => {
     expect(kindForTabId("metric:oxplow.todos")).toBe("metric");
     expect(kindForTabId("dir:src/components")).toBe("dir");
     expect(kindForTabId("commit:abcdef0")).toBe("commit");
-    expect(kindForTabId("dashboard:planning")).toBe("dashboard");
-    expect(kindForTabId("external-url:https://example.com")).toBe("external-url");
     expect(kindForTabId("finding:fnd-1")).toBe("finding");
   });
 
-  test("literal index ids return themselves", () => {
-    expect(kindForTabId("agent")).toBe("agent");
-    expect(kindForTabId("tasks")).toBe("tasks");
-    expect(kindForTabId("done-work")).toBe("done-work");
-    expect(kindForTabId("wiki-index")).toBe("wiki-index");
-    expect(kindForTabId("files")).toBe("files");
-    expect(kindForTabId("settings")).toBe("settings");
-    expect(kindForTabId("uncommitted-changes")).toBe("uncommitted-changes");
+  test("page routes return the page name, with or without params", () => {
+    expect(kindForTabId("page:agent")).toBe("agent");
+    expect(kindForTabId("page:tasks")).toBe("tasks");
+    expect(kindForTabId("page:done-work")).toBe("done-work");
+    expect(kindForTabId("page:dashboard?variant=visits")).toBe("dashboard");
+    expect(kindForTabId("page:external-url?url=https://example.com")).toBe("external-url");
+    expect(kindForTabId("page:diff?path=a/b.ts&left=disk&right=ref:x")).toBe("diff");
   });
 
-  test("uncommitted-changes with scope suffix still resolves to the kind", () => {
-    expect(kindForTabId("uncommitted-changes:dir:src")).toBe("uncommitted-changes");
-  });
-
-  test("unknown bare ids return themselves rather than null", () => {
+  test("text that is not a ref returns itself rather than null", () => {
     expect(kindForTabId("totally-new-page")).toBe("totally-new-page");
   });
 });

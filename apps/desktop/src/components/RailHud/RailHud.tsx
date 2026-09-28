@@ -1626,7 +1626,8 @@ function HistoryRows({
           // Reconstruct the full ref (with payload) from the id —
           // page-visit rows don't persist payload, so a file ref needs
           // its `path` rebuilt or it won't open. See refFromTabId.
-          const ref: TabRef = refFromTabId(e.refId);
+          const ref = refFromTabId(e.refId);
+          if (!ref) return null;
           const trailing = effectiveMode === "top" ? (e as TopVisitedRowApi).count : null;
           // Wiki: prefer the live title over the stored visit label.
           // Falls back to a non-empty stored label, then to the slug,

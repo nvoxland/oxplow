@@ -12,7 +12,7 @@ import {
 
 const FILE_A: TabRef = { id: "file:src/a.ts", kind: "file", payload: { path: "src/a.ts" } };
 const FILE_B: TabRef = { id: "file:src/b.ts", kind: "file", payload: { path: "src/b.ts" } };
-const AGENT: TabRef = { id: "agent", kind: "agent", payload: null };
+const AGENT: TabRef = { id: "page:agent", kind: "agent", payload: null };
 const WORK_ITEM: TabRef = { id: "work_item:oxplow:tsk123", kind: "work_item", payload: { itemId: "tsk123" } };
 
 describe("tabStore", () => {

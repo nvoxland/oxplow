@@ -6,7 +6,8 @@ Target design: [target-architecture.md](./target-architecture.md) §4.
 Built so far: the grammar (P1.1, tsk403); the kind registry, the Rust
 `[[…]]` translation and the canonical `page_ref` vocabulary (P1.2,
 tsk404); the TS parser, tab ids, wikilink hrefs and comment anchors
-(P1.3, tsk405). Shell routes (`page:<name>`) are P1.3b.
+(P1.3, tsk405); shell routes as `page:<name>[?params]` and the
+`Record<PageKind, …>` render registry (P1.3b, tsk418).
 
 ## The grammar (built)
 
@@ -109,13 +110,17 @@ markdown hrefs (`MarkdownView` emits `commit:<sha>` and
 (`data-ref-kind="work_item" data-ref-id="oxplow:tskN"`, `commit`, `dir`,
 matching the backend's `CommentTarget`), and lens `link.kind` targets.
 `kindForTabId` and `refFromTabId` go through `parseRef` first, so a `:`
-inside an id never splits it; non-canonical shell routes (`diff-view:`,
-`external-url:`, hyphenated kinds) still parse their own tails until
-P1.3b moves them to `page:<name>[?params]`.
+inside an id never splits it.
 
-Still to come (P1.3b): `page:<name>[?params]` for bare page ids
-(`agent`, `settings`) and shell routes (`diff:`, `dup:`, `diff-view:`),
-and App.tsx's render chain becoming a `Record<PageKind, …>` registry.
+**Shell routes are `page:<name>[?params]`** (`page:agent`, `page:tasks`,
+`page:diff-view?effort=eff9`, `page:external-url?url=…`). A route is a
+page of the shell, not a thing in the graph, so it never appears in
+`page_ref`; its `TabRef.kind` is the route name. The route names keep
+their hyphenated spelling (`diff-view`) — they are ids inside the
+`page` kind, not kinds, and the snake_case rule is for kinds. The
+params grammar, the exhaustive `ROUTES` inverse table and the
+`pageRenderers` registry are described in
+[pages-and-tabs.md](./pages-and-tabs.md).
 
 Decided 2026-09-28: there is no compatibility layer for old ids. Only
 Nathan uses oxplow; stale `page_ref`/`page_visit` rows are wiped in V92

@@ -1,9 +1,22 @@
 /**
- * Helpers for constructing `TabRef` values consistently. Centralizing the
- * id format keeps cross-component links and ⌘K open-by-id stable.
+ * Helpers for constructing `TabRef` values consistently. Every tab id is
+ * a canonical ref (`.context/refs.md`), built only here — never
+ * hand-format an id.
+ *
+ * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,
+ *   `dir:<path>`, `wiki:<slug>`, `work_item:oxplow:tsk42`, `commit:<sha>`,
+ *   `metric:<key>`, `lens:<ext>/<slug>[?params]`.
+ * - A **route** (a page of the shell, not a thing in the graph) is
+ *   `page:<name>[?params]` — `page:tasks`, `page:diff-view?effort=eff9`.
+ *   Routes never appear in `page_ref`.
+ *
+ * `refFromTabId` is the inverse of every constructor here: history,
+ * bookmarks and the Go To page persist only the id, so each payload
+ * must be rebuildable from it (the round-trip test in `pageRefs.test.ts`
+ * covers every constructor).
  */
 
-import type { TabRef } from "./tabState.js";
+import type { PageKind, RoutePageKind, TabRef } from "./tabState.js";
 import {
   DISK,
   type FileVersion,
@@ -13,13 +26,9 @@ import {
   versionIdFragment,
 } from "../file-version.js";
 import type { DiffEndpoint, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { formatRef, parseRef } from "../refs/ref.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
+import { escapeId, formatRef, parseRef } from "../refs/ref.js";
 
-/** Tab ids for the entity kinds are canonical refs (`.context/refs.md`):
- *  `file:<path>[@rev]`, `dir:<path>`, `work_item:oxplow:tsk42`,
- *  `commit:<sha>`, `wiki:<slug>`, `metric:<key>`. Everything else here is
- *  a shell route whose id is still hand-formatted (they move to
- *  `page:<name>` in P1.3b). */
 function canonicalId(kind: string, id: string, rev: string | null = null): string {
   return formatRef({ kind, id, rev, frag: null });
 }
@@ -27,9 +36,59 @@ function canonicalId(kind: string, id: string, rev: string | null = null): strin
 /** Tasks are work items under the oxplow provider (`oxplow:tsk42`). */
 const OXPLOW_PROVIDER = "oxplow:";
 
-export function agentRef(): TabRef {
-  return { id: "agent", kind: "agent", payload: null };
+// ---------------------------------------------------------------------------
+// Query params: `?k=v&k=v` after a route name or a lens id.
+//
+// Values are percent-encoded the way `URLSearchParams` reads them, but only
+// the characters that would break the id are escaped — the query syntax
+// (`&`, `=`, `+`, `%`) and the ref grammar's reserved `@` and `#` — so
+// `path=src/a.ts&left=ref:abc` stays readable. The encoded text is a
+// valid canonical ref of its kind (`page:` / `lens:`) as written, so it
+// is parsed from the RAW text after the kind, not from `parseRef`'s
+// decoded id (which would turn an escaped `&` back into a separator).
+// ---------------------------------------------------------------------------
+
+type ParamValue = string | number | null | undefined;
+
+function encodeParamValue(v: string): string {
+  return encodeURIComponent(v)
+    .replace(/%2F/gi, "/")
+    .replace(/%3A/gi, ":")
+    .replace(/%3F/gi, "?")
+    .replace(/%2C/gi, ",")
+    .replace(/%20/g, "+");
 }
+
+/** `k=v&k=v` in the given key order; `null`/`undefined` values are skipped. */
+function encodeParams(params: Record<string, ParamValue>): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null || v === undefined) continue;
+    parts.push(`${encodeParamValue(k)}=${encodeParamValue(String(v))}`);
+  }
+  return parts.join("&");
+}
+
+/** Split `<head>?<qs>` at the first `?`; `head` is percent-decoded. */
+function splitParams(raw: string): { head: string; params: URLSearchParams } {
+  const q = raw.indexOf("?");
+  const head = q === -1 ? raw : raw.slice(0, q);
+  return { head: decodeURIComponent(head), params: new URLSearchParams(q === -1 ? "" : raw.slice(q + 1)) };
+}
+
+/** The id of a shell route: `page:<name>[?params]`. */
+function pageId(name: RoutePageKind, params?: Record<string, ParamValue>): string {
+  const qs = params ? encodeParams(params) : "";
+  return qs ? `page:${name}?${qs}` : `page:${name}`;
+}
+
+function route(name: RoutePageKind, payload: unknown = null, params?: Record<string, ParamValue>): TabRef {
+  return { id: pageId(name, params), kind: name, payload };
+}
+
+// ---------------------------------------------------------------------------
+// Entity pages
+// ---------------------------------------------------------------------------
 
 /**
  * Construct a file-tab ref. `version` is required: callers MUST
@@ -46,6 +105,13 @@ export function fileRef(path: string, version: FileVersion = DISK): TabRef {
   return { id: canonicalId("file", path, revForVersion(version)), kind: "file", payload: { path, version } };
 }
 
+/** The working-tree file a tab id shows, or `null` when the id is not a
+ *  file or pins a revision (a read-only viewer, not the editor's file). */
+export function diskFilePath(tabId: string): string | null {
+  const r = parseRef(tabId);
+  return r && r.kind === "file" && r.rev === null ? r.id : null;
+}
+
 export function directoryRef(path: string): TabRef {
   // Trailing slash is normalized away — `[[src/]]` and `[[src]]` (when
   // ever the parser admits the latter) collapse to one tab.
@@ -53,17 +119,116 @@ export function directoryRef(path: string): TabRef {
   return { id: canonicalId("dir", bare), kind: "dir", payload: { path: bare } };
 }
 
-export interface DiffPayload {
-  path: string;
-  fromRef?: string | null;
-  toRef?: string | null;
-  /** Free-form short label, e.g. "wi-142", "snapshot 4h ago". */
-  labelOverride?: string | null;
+export function wikiPageRef(slug: string): TabRef {
+  return { id: canonicalId("wiki", slug), kind: "wiki", payload: { slug } };
 }
 
-export function diffRef(payload: DiffPayload): TabRef {
-  const key = [payload.path, payload.fromRef ?? "", payload.toRef ?? "", payload.labelOverride ?? ""].join("|");
-  return { id: `diff:${key}`, kind: "diff", payload };
+/** A task page. `itemId` is the `tsk<n>` id; the tab id is the canonical
+ *  work-item ref under the oxplow provider (`work_item:oxplow:tsk42`). */
+export function taskRef(itemId: string): TabRef {
+  return { id: canonicalId("work_item", `${OXPLOW_PROVIDER}${itemId}`), kind: "work_item", payload: { itemId } };
+}
+
+/** Single git commit page. */
+export function gitCommitRef(sha: string): TabRef {
+  return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
+}
+
+/** Open one metric's detail page, optionally scoped to an effort's window —
+ *  the task-page metrics-panel drill-in ("In this effort" before→after +
+ *  further exploration). Its own page kind (`metric`); Metrics and the
+ *  dashboard tiles both navigate into it. */
+export function metricRef(metricKey: string): TabRef {
+  return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
+}
+
+/** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
+ *  over the semantic layer from `oxplow/extensions/`. `params` (e.g. a
+ *  slot's `{ effort_id }`) ride in the id as a sorted query string, so
+ *  the tab, its history and bookmarks reopen the lens with the same
+ *  values. */
+export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
+  const keys = Object.keys(params ?? {}).sort();
+  const head = `lens:${escapeId(lensId)}`;
+  if (!params || keys.length === 0) return { id: head, kind: "lens", payload: { lensId } };
+  const qs = encodeParams(Object.fromEntries(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])));
+  return { id: `${head}?${qs}`, kind: "lens", payload: { lensId, params } };
+}
+
+/** Parse a lens id's raw `<lensId>?k=v` tail back into a ref. Numeric
+ *  values come back as numbers, as the params form reads them. */
+function lensRefFromTail(tail: string): TabRef {
+  const { head, params } = splitParams(tail);
+  const out: Record<string, SqlCell> = {};
+  for (const [k, v] of params) {
+    out[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
+  }
+  return lensRef(head, out);
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+export function agentRef(): TabRef {
+  return route("agent");
+}
+
+/** The agent tab's id — the one tab every thread always has. */
+export const AGENT_TAB_ID: string = agentRef().id;
+
+export type IndexKind =
+  | "tasks"
+  | "done-work"
+  | "backlog"
+  | "archived"
+  | "wiki-index"
+  | "files"
+  | "comments"
+  | "local-history"
+  | "local-history-full"
+  | "local-history-by-commit-full"
+  | "git-history"
+  | "hook-events"
+  | "terminal"
+  | "settings"
+  | "metrics-recorded"
+  | "dashboards"
+  | "explore-data";
+
+export function indexRef(kind: IndexKind): TabRef {
+  return route(kind);
+}
+
+export interface DiffPayload {
+  path: string;
+  leftVersion: FileVersion;
+  rightVersion: FileVersion;
+  labelOverride: string | null;
+}
+
+/** Stable id for a diff tab. Keyed off the path + both side versions
+ *  + label override so re-opening the same diff with a new revealLine
+ *  reuses the existing tab. */
+export function computeDiffId(spec: DiffSpec): string {
+  return pageId("diff", {
+    path: spec.path,
+    left: versionIdFragment(spec.leftVersion),
+    right: versionIdFragment(spec.rightVersion),
+    label: spec.labelOverride ?? null,
+  });
+}
+
+/** The TabRef for a diff page. The payload is what `handleOpenDiff`
+ *  registers; the full `DiffSpec` lives in the diff spec registry. */
+export function diffRef(spec: DiffSpec): TabRef {
+  const payload: DiffPayload = {
+    path: spec.path,
+    leftVersion: spec.leftVersion,
+    rightVersion: spec.rightVersion,
+    labelOverride: spec.labelOverride ?? null,
+  };
+  return { id: computeDiffId(spec), kind: "diff", payload };
 }
 
 export interface DuplicateBlockPayload {
@@ -88,44 +253,25 @@ export interface DuplicateBlockPayload {
  * the viewport.
  */
 export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
-  const lv = versionIdFragment(payload.leftVersion);
-  const rv = versionIdFragment(payload.rightVersion);
-  const id = `dup:${payload.leftPath}:${payload.leftStart}-${payload.leftEnd}@${lv}::${payload.rightPath}:${payload.rightStart}-${payload.rightEnd}@${rv}`;
-  return { id, kind: "duplicate-block", payload };
-}
-
-export function wikiPageRef(slug: string): TabRef {
-  return { id: canonicalId("wiki", slug), kind: "wiki", payload: { slug } };
+  return route("duplicate-block", payload, {
+    left: payload.leftPath,
+    left_lines: `${payload.leftStart}-${payload.leftEnd}`,
+    left_at: versionIdFragment(payload.leftVersion),
+    right: payload.rightPath,
+    right_lines: `${payload.rightStart}-${payload.rightEnd}`,
+    right_at: versionIdFragment(payload.rightVersion),
+  });
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
-  return { id: `wiki-freshness:${slug}`, kind: "wiki-freshness", payload: { slug } };
+  return route("wiki-freshness", { slug }, { slug });
 }
 
-/** A task page. `itemId` is the `tsk<n>` id; the tab id is the canonical
- *  work-item ref under the oxplow provider (`work_item:oxplow:tsk42`). */
-export function taskRef(itemId: string): TabRef {
-  return { id: canonicalId("work_item", `${OXPLOW_PROVIDER}${itemId}`), kind: "work_item", payload: { itemId } };
-}
-
-/** Open one metric's detail page, optionally scoped to an effort's window —
- *  the task-page metrics-panel drill-in ("In this effort" before→after +
- *  further exploration). Its own page kind (`metric`); Metrics and the
- *  dashboard tiles both navigate into it. */
-export function metricRef(metricKey: string): TabRef {
-  return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
-}
-
-export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "metrics-recorded" | "dashboards" | "explore-data"): TabRef {
-  return { id: kind, kind, payload: null };
-}
-
-/** One user-created dashboard — a payload-bearing page kind (like
- *  `metric`). The dashboard id (`dsh<n>`) rides in both the tab id and
- *  the payload so a history-restored tab (no payload) still resolves via
+/** One user-created dashboard. The dashboard id (`dsh<n>`) rides in
+ *  both the id and the payload so a history-restored tab resolves via
  *  `refFromTabId`. */
 export function customDashboardRef(id: string): TabRef {
-  return { id: `custom-dashboard:${id}`, kind: "custom-dashboard", payload: { id } };
+  return route("custom-dashboard", { id }, { id });
 }
 
 /** The Dashboards index — the list of the user's custom dashboards. */
@@ -137,9 +283,7 @@ export function dashboardsRef(): TabRef {
  *  sparkline, capture branch, sample count.
  *
  *  `metricsIndexRef`, not `metricsRef`, to stay clearly distinct from
- *  {@link metricRef} (one metric's detail page). The `metrics-recorded` kind id
- *  it returns keeps its old spelling on purpose — it is baked into persisted tab
- *  ids and section-collapse keys, so renaming it would drop saved tabs (tsk222). */
+ *  {@link metricRef} (one metric's detail page). */
 export function metricsIndexRef(): TabRef {
   return indexRef("metrics-recorded");
 }
@@ -154,22 +298,19 @@ export function terminalRef(): TabRef {
   return indexRef("terminal");
 }
 
-/** Convenience helper for the new HookEventsPage. */
 export function hookEventsRef(): TabRef {
   return indexRef("hook-events");
 }
 
 /**
- * Named ref helpers for the four work pages that replaced the legacy
- * single AllWorkPage. Mirrors the GitDashboard pattern
- * (`gitDashboardRef`, `uncommittedChangesRef`) so call sites read as
- * intent rather than as stringly-typed `indexRef("…")`.
+ * Named ref helpers for the four work pages. Mirrors the GitDashboard
+ * pattern (`gitDashboardRef`, `uncommittedChangesRef`) so call sites
+ * read as intent rather than as stringly-typed `indexRef("…")`.
  */
 export function tasksRef(): TabRef {
   return indexRef("tasks");
 }
-/** @deprecated Use `tasksRef()` instead. Kept as an alias for one
- *  release so existing call sites and persisted refs keep working. */
+/** @deprecated Use `tasksRef()` instead. */
 export function planWorkRef(): TabRef {
   return tasksRef();
 }
@@ -185,42 +326,34 @@ export function archivedRef(): TabRef {
 
 /** Git Dashboard — committed-history rollup page. */
 export function gitDashboardRef(): TabRef {
-  return { id: "git-dashboard", kind: "git-dashboard", payload: null };
-}
-
-/** Diff view of a single captured snapshot — framed as `[prev → N]`
- *  (the previous capture in the stream is the start; the page resolves
- *  it on load). Drill-in from the Local History dashboard, file version
- *  history, and snapshot backlinks. */
-export function snapshotRef(snapshotId: number): TabRef {
-  return {
-    id: `diff-view:snapshot:${snapshotId}`,
-    kind: "diff-view",
-    payload: { mode: "snapshot", snapshotId },
-  };
+  return route("git-dashboard");
 }
 
 /**
- * The diff view (`diff-view` kind) reframes the old snapshot detail
- * page as an explicit start→end diff. Two entry shapes, both rendered
- * by `DiffViewPage`:
+ * The diff view (`diff-view` route) frames a change as an explicit
+ * start→end diff. Three entry shapes, all rendered by `DiffViewPage`:
  *
- * - **effort** (`diff-view:effort:<effortId>`) — resolves the effort's
- *   own start/end snapshot bracket on load (survives a cold history
- *   reopen where only the id is in the tab id), carrying the task title
- *   + "in progress" state.
- * - **endpoints** (`diff-view:endpoints:<start>..<end>`) — an explicit
- *   pair of snapshot/commit/working endpoints. `start = null` diffs
+ * - **snapshot** (`?snapshot=<N>`) — a single capture, framed as
+ *   `[prev → N]`; the page resolves the previous snapshot on load.
+ * - **effort** (`?effort=<effortId>`) — resolves the effort's own
+ *   start/end snapshot bracket on load, carrying the task title + "in
+ *   progress" state.
+ * - **endpoints** (`?start=<tok>&end=<tok>`) — an explicit pair of
+ *   snapshot/commit/working endpoints. `start = null` (`none`) diffs
  *   `end` against the empty tree (everything added).
- * - **snapshot** (`diff-view:snapshot:<N>`) — a single capture, framed
- *   as `[prev → N]`; the page resolves the previous snapshot on load.
  */
 export type DiffViewPayload =
   | { mode: "snapshot"; snapshotId: number }
   | { mode: "effort"; effortId: string }
   | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
 
-/** Stable single-token encoding of one endpoint for the tab id. */
+/** Diff view of a single captured snapshot. Drill-in from the Local
+ *  History dashboard, file version history, and snapshot backlinks. */
+export function snapshotRef(snapshotId: number): TabRef {
+  return route("diff-view", { mode: "snapshot", snapshotId }, { snapshot: snapshotId });
+}
+
+/** Stable single-token encoding of one endpoint for the id. */
 function encodeEndpoint(ep: DiffEndpoint | null): string {
   if (ep === null) return "none";
   switch (ep.kind) {
@@ -233,8 +366,6 @@ function encodeEndpoint(ep: DiffEndpoint | null): string {
   }
 }
 
-/** Inverse of `encodeEndpoint` — used by `refFromTabId` to rebuild an
- *  endpoint diff from its tab id alone (history reopen). */
 function decodeEndpoint(token: string): DiffEndpoint | null {
   if (token === "none") return null;
   if (token === "w") return { kind: "working" };
@@ -247,44 +378,31 @@ function decodeEndpoint(token: string): DiffEndpoint | null {
  *  snapshot bracket on load. The 'View diff' button on a completed
  *  effort points here. */
 export function effortDiffRef(effortId: string): TabRef {
-  return {
-    id: `diff-view:effort:${effortId}`,
-    kind: "diff-view",
-    payload: { mode: "effort", effortId },
-  };
+  return route("diff-view", { mode: "effort", effortId }, { effort: effortId });
 }
 
 /** Diff view between two explicit endpoints (snapshot / commit /
  *  working). `start = null` diffs `end` against the empty tree. */
 export function endpointDiffRef(start: DiffEndpoint | null, end: DiffEndpoint): TabRef {
-  return {
-    id: `diff-view:endpoints:${encodeEndpoint(start)}..${encodeEndpoint(end)}`,
-    kind: "diff-view",
-    payload: { mode: "endpoints", start, end },
-  };
+  return route("diff-view", { mode: "endpoints", start, end }, { start: encodeEndpoint(start), end: encodeEndpoint(end) });
 }
 
 /** Uncommitted Changes — the working tree's changed files, commit form
  *  and the `uncommitted` lens slot. */
 export function uncommittedChangesRef(): TabRef {
-  return { id: "uncommitted-changes", kind: "uncommitted-changes", payload: null };
-}
-
-/** Single git commit page. */
-export function gitCommitRef(sha: string): TabRef {
-  return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
+  return route("uncommitted-changes");
 }
 
 export type DashboardKind = "visits";
 
 export function dashboardRef(variant: DashboardKind): TabRef {
-  return { id: `dashboard:${variant}`, kind: "dashboard", payload: { variant } };
+  return route("dashboard", { variant }, { variant });
 }
 
 /**
- * Form pages introduced by phase 5e. These replace the legacy modal
- * dialogs (NewStreamModal / NewtasksModal / Stream-Thread settings)
- * with a focused full-tab workspace, matching `SettingsPage`.
+ * Form pages. These replaced the legacy modal dialogs (NewStreamModal /
+ * NewtasksModal / Stream-Thread settings) with a focused full-tab
+ * workspace, matching `SettingsPage`.
  */
 
 export interface NewtasksPayload {
@@ -295,59 +413,34 @@ export interface NewtasksPayload {
 }
 
 export function newStreamRef(): TabRef {
-  return { id: "new-stream", kind: "new-stream", payload: null };
+  return route("new-stream");
 }
 
+/** The id is stable (no params) so re-opening the page reuses the
+ *  existing tab rather than stacking duplicates; the defaults are read
+ *  on mount, so a history reopen starts from an empty form. Callers
+ *  wanting different defaults should `closeTab` before opening with a
+ *  new payload. */
 export function newTaskRef(payload: NewtasksPayload = {}): TabRef {
-  // Use a stable id so re-opening the page reuses the existing tab
-  // rather than stacking duplicates. "Save and Another" relies on the
-  // form re-mounting in place; the page reads its initial values on
-  // mount, so callers wanting different defaults should `closeTab`
-  // before opening with new payload.
-  return { id: "new-task", kind: "new-task", payload };
+  return route("new-task", payload);
 }
 
 export function streamSettingsRef(streamId: string): TabRef {
-  return { id: `stream-settings:${streamId}`, kind: "stream-settings", payload: { streamId } };
+  return route("stream-settings", { streamId }, { stream: streamId });
 }
 
 export function threadSettingsRef(threadId: string): TabRef {
-  return { id: `thread-settings:${threadId}`, kind: "thread-settings", payload: { threadId } };
-}
-
-/** A lens page (`lens:<extension>/<slug>`): a user/agent-built query
- *  over the semantic layer from `oxplow/extensions/`. */
-/** A lens page. `params` (e.g. a slot's `{ effort_id }`) ride in the id
- *  as a sorted query string, so the tab, its history and bookmarks reopen
- *  the lens with the same values. */
-export function lensRef(lensId: string, params?: Record<string, SqlCell>): TabRef {
-  const keys = Object.keys(params ?? {}).sort();
-  if (!params || keys.length === 0) return { id: `lens:${lensId}`, kind: "lens", payload: { lensId } };
-  const qs = new URLSearchParams(keys.map((k) => [k, params[k] === null ? "" : String(params[k])])).toString();
-  return { id: `lens:${lensId}?${qs}`, kind: "lens", payload: { lensId, params } };
-}
-
-/** Parse a lens tab id's `<lensId>?k=v` tail back into a ref. Numeric
- *  values come back as numbers, as the params form reads them. */
-function lensRefFromTail(tail: string): TabRef {
-  const q = tail.indexOf("?");
-  if (q === -1) return lensRef(tail);
-  const params: Record<string, SqlCell> = {};
-  for (const [k, v] of new URLSearchParams(tail.slice(q + 1))) {
-    params[k] = v === "" ? null : /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
-  }
-  return lensRef(tail.slice(0, q), params);
+  return route("thread-settings", { threadId }, { thread: threadId });
 }
 
 export function closedThreadsRef(): TabRef {
-  return { id: "closed-threads", kind: "closed-threads", payload: null };
+  return route("closed-threads");
 }
 
-/** Async-op error detail page. Id is scoped to the error id so each
- *  failure gets its own tab; closing it discards the view, not the
- *  store entry. */
+/** Async-op error detail page. Scoped to the error id so each failure
+ *  gets its own tab; closing it discards the view, not the store entry. */
 export function opErrorRef(errorId: string): TabRef {
-  return { id: `op-error:${errorId}`, kind: "op-error", payload: { errorId } };
+  return route("op-error", { errorId }, { id: errorId });
 }
 
 export interface ExternalUrlPayload {
@@ -356,15 +449,99 @@ export interface ExternalUrlPayload {
 
 /**
  * Tab ref for an external (http/https) URL rendered inside a sandboxed
- * <webview> in the app. The URL is used as the tab id so reopening the
- * same link reuses the existing tab rather than stacking duplicates.
+ * <webview> in the app. The URL keys the id so reopening the same link
+ * reuses the existing tab rather than stacking duplicates.
  *
  * Callers MUST validate the URL through `classifyExternalUrl` from
  * `src/ui/external-url-allowlist.ts` before constructing this ref —
  * the renderer trusts that the payload has already been gated.
  */
 export function externalUrlRef(url: string): TabRef {
-  return { id: `external-url:${url}`, kind: "external-url", payload: { url } };
+  return route("external-url", { url }, { url });
+}
+
+// ---------------------------------------------------------------------------
+// Inverse: id → ref
+// ---------------------------------------------------------------------------
+
+/** How each route rebuilds itself from its params. Exhaustive over
+ *  `RoutePageKind`, so a new route can't ship without its inverse. */
+const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> = {
+  agent: () => agentRef(),
+  tasks: () => indexRef("tasks"),
+  "done-work": () => indexRef("done-work"),
+  backlog: () => indexRef("backlog"),
+  archived: () => indexRef("archived"),
+  "wiki-index": () => indexRef("wiki-index"),
+  files: () => indexRef("files"),
+  comments: () => indexRef("comments"),
+  "local-history": () => indexRef("local-history"),
+  "local-history-full": () => indexRef("local-history-full"),
+  "local-history-by-commit-full": () => indexRef("local-history-by-commit-full"),
+  "git-history": () => indexRef("git-history"),
+  "hook-events": () => indexRef("hook-events"),
+  terminal: () => indexRef("terminal"),
+  settings: () => indexRef("settings"),
+  "metrics-recorded": () => indexRef("metrics-recorded"),
+  dashboards: () => indexRef("dashboards"),
+  "explore-data": () => indexRef("explore-data"),
+  "git-dashboard": () => gitDashboardRef(),
+  "uncommitted-changes": () => uncommittedChangesRef(),
+  "new-stream": () => newStreamRef(),
+  "new-task": () => newTaskRef(),
+  "closed-threads": () => closedThreadsRef(),
+  diff: (p) => {
+    const path = p.get("path");
+    const left = versionFromIdFragment(p.get("left") ?? "");
+    const right = versionFromIdFragment(p.get("right") ?? "");
+    if (!path || !left || !right) return null;
+    return diffRef({ path, leftVersion: left, rightVersion: right, baseLabel: "", labelOverride: p.get("label") ?? undefined });
+  },
+  "diff-view": (p) => {
+    const snapshot = p.get("snapshot");
+    if (snapshot !== null) {
+      const n = Number(snapshot);
+      return Number.isFinite(n) ? snapshotRef(n) : null;
+    }
+    const effort = p.get("effort");
+    if (effort) return effortDiffRef(effort);
+    const end = decodeEndpoint(p.get("end") ?? "");
+    if (end) return endpointDiffRef(decodeEndpoint(p.get("start") ?? "none"), end);
+    return null;
+  },
+  "duplicate-block": (p) => {
+    const side = (path: string | null, lines: string | null, at: string | null) => {
+      const m = /^(\d+)-(\d+)$/.exec(lines ?? "");
+      const version = versionFromIdFragment(at ?? "");
+      return path && m && version ? { path, start: Number(m[1]), end: Number(m[2]), version } : null;
+    };
+    const l = side(p.get("left"), p.get("left_lines"), p.get("left_at"));
+    const r = side(p.get("right"), p.get("right_lines"), p.get("right_at"));
+    if (!l || !r) return null;
+    return duplicateBlockRef({
+      leftPath: l.path, leftStart: l.start, leftEnd: l.end, leftVersion: l.version,
+      rightPath: r.path, rightStart: r.start, rightEnd: r.end, rightVersion: r.version,
+    });
+  },
+  "wiki-freshness": (p) => (p.get("slug") ? wikiFreshnessRef(p.get("slug")!) : null),
+  "custom-dashboard": (p) => (p.get("id") ? customDashboardRef(p.get("id")!) : null),
+  dashboard: (p) => (p.get("variant") === "visits" ? dashboardRef("visits") : null),
+  "stream-settings": (p) => (p.get("stream") ? streamSettingsRef(p.get("stream")!) : null),
+  "thread-settings": (p) => (p.get("thread") ? threadSettingsRef(p.get("thread")!) : null),
+  "op-error": (p) => (p.get("id") ? opErrorRef(p.get("id")!) : null),
+  "external-url": (p) => (p.get("url") ? externalUrlRef(p.get("url")!) : null),
+};
+
+function isRoute(name: string): name is RoutePageKind {
+  return Object.prototype.hasOwnProperty.call(ROUTES, name);
+}
+
+/** The route name of a `page:` id (`page:diff-view?effort=e` → `diff-view`),
+ *  or `null` when the id is not a page route. */
+export function routeNameOf(tabId: string): RoutePageKind | null {
+  if (!tabId.startsWith("page:")) return null;
+  const { head } = splitParams(tabId.slice("page:".length));
+  return isRoute(head) ? head : null;
 }
 
 /**
@@ -373,108 +550,50 @@ export function externalUrlRef(url: string): TabRef {
  * Page-visit history rows persist only the id (`page_id`) and kind, not
  * the ref payload — so a naive `{ id, kind, payload: null }` rebuild
  * leaves payload-bearing pages broken (a `file` ref with no `path`
- * never opens; `wiki`/`work_item`/etc. render empty). Entity kinds parse
- * through the canonical grammar (so `:` inside `work_item:oxplow:tsk42`
- * is fine); shell routes parse their own hand-formatted tails.
- * Index/dashboard kinds carry no payload, so the id IS the kind and the
- * fallback is fine.
+ * never opens; `wiki`/`work_item`/etc. render empty). Entity kinds
+ * parse through the canonical grammar (so `:` inside
+ * `work_item:oxplow:tsk42` is fine); routes parse their query params.
+ *
+ * Returns `null` for text that is not a ref, an unknown kind, or a route
+ * whose params don't rebuild — a dead row the caller drops, never a tab
+ * that renders blank.
  */
-export function refFromTabId(id: string): TabRef {
+export function refFromTabId(id: string): TabRef | null {
   const canonical = parseRef(id);
-  if (canonical) {
-    switch (canonical.kind) {
-      case "file":
-        return fileRef(canonical.id, versionFromRev(canonical.rev));
-      case "dir":
-        return directoryRef(canonical.id);
-      case "wiki":
-        return wikiPageRef(canonical.id);
-      case "work_item":
-        return taskRef(canonical.id.startsWith(OXPLOW_PROVIDER) ? canonical.id.slice(OXPLOW_PROVIDER.length) : canonical.id);
-      case "commit":
-        return gitCommitRef(canonical.id);
-      case "metric":
-        return metricRef(canonical.id);
-      default:
-        break;
-    }
-  }
-  return routeFromTabId(id);
-}
-
-/** The shell routes: ids whose tail is not a canonical ref id. */
-function routeFromTabId(id: string): TabRef {
-  const colon = id.indexOf(":");
-  const scheme = colon === -1 ? id : id.slice(0, colon);
-  const rest = colon === -1 ? "" : id.slice(colon + 1);
-  switch (scheme) {
+  if (!canonical) return null;
+  const kind: string = canonical.kind;
+  switch (kind) {
+    case "file":
+      return fileRef(canonical.id, versionFromRev(canonical.rev));
+    case "dir":
+      return directoryRef(canonical.id);
+    case "wiki":
+      return wikiPageRef(canonical.id);
+    case "work_item":
+      return canonical.id.startsWith(OXPLOW_PROVIDER)
+        ? taskRef(canonical.id.slice(OXPLOW_PROVIDER.length))
+        : null;
+    case "commit":
+      return gitCommitRef(canonical.id);
+    case "metric":
+      return metricRef(canonical.id);
     case "lens":
-      return lensRefFromTail(rest);
-    case "wiki-freshness":
-      return wikiFreshnessRef(rest);
-    case "custom-dashboard":
-      // `rest` is the `dsh<n>` id.
-      return customDashboardRef(rest);
-    case "dashboard": {
-      const variants: readonly string[] = ["visits"];
-      return variants.includes(rest)
-        ? dashboardRef(rest as DashboardKind)
-        : { id, kind: "dashboard", payload: null };
+      return lensRefFromTail(id.slice("lens:".length));
+    case "page": {
+      const { head, params } = splitParams(id.slice("page:".length));
+      return isRoute(head) ? ROUTES[head](params) : null;
     }
-    case "diff-view": {
-      // `rest` is `snapshot:<N>` | `effort:<id>` | `endpoints:<start>..<end>`.
-      const sub = rest.indexOf(":");
-      const subScheme = sub === -1 ? rest : rest.slice(0, sub);
-      const subRest = sub === -1 ? "" : rest.slice(sub + 1);
-      if (subScheme === "snapshot") {
-        const n = Number(subRest);
-        if (Number.isFinite(n)) return snapshotRef(n);
-      }
-      if (subScheme === "effort") return effortDiffRef(subRest);
-      if (subScheme === "endpoints") {
-        const [startTok, endTok] = subRest.split("..");
-        const end = decodeEndpoint(endTok ?? "");
-        if (end) return endpointDiffRef(decodeEndpoint(startTok ?? "none"), end);
-      }
-      return { id, kind: "diff-view", payload: null };
-    }
-    case "dup": {
-      const dup = duplicateBlockFromTail(rest);
-      return dup ?? { id, kind: "duplicate-block", payload: null };
-    }
-    case "uncommitted-changes":
-      return uncommittedChangesRef();
-    case "external-url":
-      return externalUrlRef(rest);
-    case "op-error":
-      return opErrorRef(rest);
-    case "stream-settings":
-      return streamSettingsRef(rest);
-    case "thread-settings":
-      return threadSettingsRef(rest);
     default:
-      // Index/dashboard kinds (`tasks`, `files`, `git-dashboard`, …) and
-      // any unknown scheme: no payload needed; the id is the kind.
-      return { id, kind: scheme as TabRef["kind"], payload: null };
+      return null;
   }
 }
 
-/** Parse the tail `duplicateBlockRef` writes:
- *  `<left>:<a>-<b>@<ver>::<right>:<c>-<d>@<ver>`. */
-function duplicateBlockFromTail(tail: string): TabRef | null {
-  const sides = tail.split("::");
-  if (sides.length !== 2) return null;
-  const side = (s: string) => {
-    const m = /^(.+):(\d+)-(\d+)@(.+)$/.exec(s);
-    if (!m) return null;
-    const version = versionFromIdFragment(m[4]!);
-    return version ? { path: m[1]!, start: Number(m[2]), end: Number(m[3]), version } : null;
-  };
-  const l = side(sides[0]!);
-  const r = side(sides[1]!);
-  if (!l || !r) return null;
-  return duplicateBlockRef({
-    leftPath: l.path, leftStart: l.start, leftEnd: l.end, leftVersion: l.version,
-    rightPath: r.path, rightStart: r.start, rightEnd: r.end, rightVersion: r.version,
-  });
+/** The `PageKind` a tab id renders as: an entity ref's kind, or a
+ *  route's name. `null` for text that is not a tab id. */
+export function pageKindOf(tabId: string): PageKind | null {
+  const canonical = parseRef(tabId);
+  if (!canonical) return null;
+  if (canonical.kind === "page") return routeNameOf(tabId);
+  const entity: readonly string[] = ["file", "dir", "wiki", "work_item", "commit", "metric", "lens"];
+  return entity.includes(canonical.kind) ? (canonical.kind as PageKind) : null;
 }

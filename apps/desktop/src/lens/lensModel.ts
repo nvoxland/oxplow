@@ -6,9 +6,8 @@
  */
 import type { Extension, Lens, LensLink, LensRun, LensViz, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { computeDiffId, duplicateBlockRef, effortDiffRef, refFromTabId, fileRef, gitCommitRef, lensRef, metricRef, taskRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { DISK, refVersion, snapshotVersion, type FileVersion } from "../file-version.js";
-import { computeDiffId } from "../diff-id.js";
 import type { TabRef } from "../tabs/tabState.js";
 
 export interface DisplayColumn {

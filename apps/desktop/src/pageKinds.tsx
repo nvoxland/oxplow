@@ -3,14 +3,14 @@
  *
  * `kindForTabId` extracts the kind from a tab id like
  * `file:src/foo.ts` → `"file"`, `work_item:oxplow:tsk42` → `"work_item"`,
- * or `tasks` → `"tasks"` (literal index pages have no prefix).
+ * or `page:tasks` → `"tasks"` (a shell route).
  *
  * `pageKindIconComponent` / `PageKindIcon` map that kind to the
  * lucide-react icon used everywhere a page-kind label renders —
  * tabs, rail history/finished, backlinks list, markdown links.
  *
- * Scheme list lives next to this file's mapping; if you add a new
- * tab scheme in `tabs/pageRefs.ts`, add it here too.
+ * If you add a new page kind in `tabs/pageRefs.ts`, add its icon and
+ * label here too.
  */
 import {
   Activity,
@@ -42,6 +42,7 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
+import { pageKindOf } from "./tabs/pageRefs.js";
 import { parseRef } from "./refs/ref.js";
 
 /**
@@ -234,48 +235,15 @@ export function pageKindLabel(kind: string): string {
 }
 
 /**
- * Index-page ids that double as their own kind — these tab ids
- * carry no scheme prefix and the whole id is the kind label.
- */
-const INDEX_KINDS = new Set<string>([
-  "agent",
-  "tasks",
-  "done-work",
-  "backlog",
-  "archived",
-  "wiki-index",
-  "files",
-  "comments",
-  "local-history",
-  "local-history-full",
-  "local-history-by-commit-full",
-  "git-history",
-  "git-dashboard",
-  "hook-events",
-  "terminal",
-  "settings",
-  "new-stream",
-  "new-task",
-  "closed-threads",
-  "uncommitted-changes",
-  "metrics-recorded",
-  "dashboards",
-  "explore-data",
-]);
-
-/**
- * The kind of a tab id. A canonical ref (`work_item:oxplow:tsk42`,
- * `file:src/a.rs@git:HEAD`) yields its kind through the grammar, so the
- * `:` inside an id never splits it. Index pages (`tasks`) are their own
- * kind. Shell routes whose scheme is not a valid ref kind
- * (`external-url:…`, `diff-view:…`, `uncommitted-changes:…`) yield the
- * text before the first `:` until they move to `page:` ids (P1.3b).
+ * The kind a tab id renders as — an entity ref's kind
+ * (`work_item:oxplow:tsk42` → `work_item`, `file:src/a.rs@git:HEAD` →
+ * `file`) or a route's name (`page:diff-view?effort=eff9` → `diff-view`).
+ * Text that is not a tab id comes back unchanged so a caller can still
+ * label it. The chrome uses this for icons and kind chips.
  */
 export function kindForTabId(tabId: string): string {
-  if (INDEX_KINDS.has(tabId)) return tabId;
-  const canonical = parseRef(tabId);
-  if (canonical) return canonical.kind;
-  const idx = tabId.indexOf(":");
-  if (idx === -1) return tabId;
-  return tabId.slice(0, idx);
+  const kind = pageKindOf(tabId);
+  if (kind) return kind;
+  // A ref of a kind with no page of its own (`finding:…`) still has an icon.
+  return parseRef(tabId)?.kind ?? tabId;
 }

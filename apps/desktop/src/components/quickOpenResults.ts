@@ -226,11 +226,10 @@ export type LauncherRow =
 export function buildRecentEntries(
   visits: Array<{ refId: string; label: string }>,
 ): LauncherPageEntry[] {
-  return visits.map((v) => ({
-    id: `recent:${v.refId}`,
-    label: v.label.trim() || v.refId,
-    ref: refFromTabId(v.refId),
-  }));
+  return visits.flatMap((v) => {
+    const ref = refFromTabId(v.refId);
+    return ref ? [{ id: `recent:${v.refId}`, label: v.label.trim() || v.refId, ref }] : [];
+  });
 }
 
 /// Assemble the launcher tree. The `recent` entries lead as a "Recent"

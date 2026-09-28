@@ -4,7 +4,7 @@ import { resolveActiveTabRef } from "./resolveActiveTabRef.js";
 
 describe("resolveActiveTabRef", () => {
   test("agent id resolves to agentRef", () => {
-    expect(resolveActiveTabRef("agent", [], [])).toEqual(agentRef());
+    expect(resolveActiveTabRef("page:agent", [], [])).toEqual(agentRef());
   });
 
   test("matching pageTab id returns that ref", () => {
@@ -21,6 +21,10 @@ describe("resolveActiveTabRef", () => {
 
   test("file:<path> returns null when path is not open", () => {
     expect(resolveActiveTabRef("file:src/missing.ts", [], ["src/a.ts"])).toBeNull();
+  });
+
+  test("a pinned-revision file id is not the open editor file", () => {
+    expect(resolveActiveTabRef("file:src/a.ts@git:HEAD", [], ["src/a.ts"])).toBeNull();
   });
 
   test("unknown id returns null", () => {

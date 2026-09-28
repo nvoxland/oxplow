@@ -7,10 +7,10 @@ afterEach(cleanup);
 
 function makeTabs(): CenterTab[] {
   return [
-    { id: "agent", label: "Agent", closable: false, render: () => null },
+    { id: "page:agent", label: "Agent", closable: false, render: () => null },
     { id: "file:a.ts", label: "a.ts", closable: true, render: () => null },
     { id: "file:b.ts", label: "b.ts", closable: true, render: () => null },
-    { id: "diff:c", label: "c", closable: true, render: () => null },
+    { id: "page:diff?path=c&left=disk&right=disk", label: "c", closable: true, render: () => null },
   ];
 }
 
@@ -44,7 +44,7 @@ test("Close Other Tabs closes every closable tab except the anchor", () => {
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
   fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
-  expect(closed).toEqual(["file:a.ts", "diff:c"]);
+  expect(closed).toEqual(["file:a.ts", "page:diff?path=c&left=disk&right=disk"]);
 });
 
 test("Close Tabs to the Right closes only tabs after the anchor", () => {
@@ -52,12 +52,12 @@ test("Close Tabs to the Right closes only tabs after the anchor", () => {
   const { getByTestId } = renderTabs({ onClose: (id) => closed.push(id) });
   fireEvent.contextMenu(getByTestId("center-tab-file:a.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-right"));
-  expect(closed).toEqual(["file:b.ts", "diff:c"]);
+  expect(closed).toEqual(["file:b.ts", "page:diff?path=c&left=disk&right=disk"]);
 });
 
 test("Close Tabs to the Right is disabled on the last tab", () => {
   const { getByTestId } = renderTabs({});
-  fireEvent.contextMenu(getByTestId("center-tab-diff:c"), { clientX: 10, clientY: 10 });
+  fireEvent.contextMenu(getByTestId("center-tab-page:diff?path=c&left=disk&right=disk"), { clientX: 10, clientY: 10 });
   expect((getByTestId("menu-item-tab.close-right") as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -72,7 +72,7 @@ test("closing a batch that swept the active tab refocuses the anchor", () => {
   });
   fireEvent.contextMenu(getByTestId("center-tab-file:b.ts"), { clientX: 10, clientY: 10 });
   fireEvent.click(getByTestId("menu-item-tab.close-others"));
-  expect(closed).toEqual(["file:a.ts", "diff:c"]);
+  expect(closed).toEqual(["file:a.ts", "page:diff?path=c&left=disk&right=disk"]);
   // The active tab (a.ts) was closed → selection falls back to the anchor.
   expect(activated).toEqual(["file:b.ts"]);
 });
