@@ -672,7 +672,7 @@ const CATALOG: &[CatalogView] = &[
             ("statement", "The claim in words."),
             ("kind", "`tests_pass`, `no_behavior_change`, `handles_case` or `other`."),
             ("evidence_ref", "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited."),
-            ("verified", "1 if it cites evidence, or is `tests_pass` and its effort has a test report with no failures; else 0."),
+            ("verified", "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0."),
             ("created_at", "RFC 3339 timestamp."),
         ],
     },

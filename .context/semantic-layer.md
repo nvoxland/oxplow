@@ -153,7 +153,7 @@ never the physical tables, which stay internal and free to change.
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via MCP `record_decision` (V76), or `inferred` by the summarize model when the effort closed (V79) |
-| `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort has a failure-free test report) (V76) |
+| `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort's **latest** `v_test_run` — its own or one claimed through attribution — has `failed = 0 AND total > 0`) (V76; latest-run rule V91, tsk366) |
 | `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |
 | `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |

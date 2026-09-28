@@ -191,26 +191,31 @@ mod tests {
         )
     }
 
-    /// A `tests` capture on `effort` with test cases of the given statuses.
-    async fn test_report(db: &Database, effort: i64, statuses: &'static [&'static str]) {
+    /// A test run (a `tests` capture with its `test-detail` payload) on
+    /// `effort`, at `at`, with `failed` of `total` cases failing. Returns
+    /// the run's id.
+    async fn test_run(
+        db: &Database,
+        effort: Option<i64>,
+        failed: i64,
+        total: i64,
+        at: &str,
+    ) -> i64 {
+        let at = at.to_string();
         db.call(move |c| {
+            let detail = format!(
+                "{{\"kind\":\"test-detail\",\"payload\":{{\"passed\":{},\"failed\":{failed},\"total\":{total}}}}}",
+                total - failed
+            );
             c.execute(
-                "INSERT INTO metric_capture (stream_id, thread_id, effort_id, producer, status, provenance, source, captured_at)
-                 VALUES (1, 1, ?1, 'tests', 'done', 'observed', 'junit', '2026-01-01')",
-                [effort],
+                "INSERT INTO metric_capture (stream_id, thread_id, effort_id, producer, status, provenance, source, captured_at, detail_json)
+                 VALUES (1, 1, ?1, 'tests', 'done', 'observed', 'junit', ?2, ?3)",
+                rusqlite::params![effort, at, detail],
             )?;
-            let cap = c.last_insert_rowid();
-            let measure: i64 = c.query_row("SELECT id FROM measure WHERE key = 'oxplow.test_case'", [], |r| r.get(0))?;
-            for s in statuses {
-                c.execute(
-                    "INSERT INTO fact (capture_id, measure_id, value, dims_json) VALUES (?1, ?2, 1, ?3)",
-                    rusqlite::params![cap, measure, format!("{{\"oxplow.status\":\"{s}\"}}")],
-                )?;
-            }
-            Ok(())
+            Ok(c.last_insert_rowid())
         })
         .await
-        .unwrap();
+        .unwrap()
     }
 
     #[tokio::test]
@@ -286,9 +291,19 @@ mod tests {
         );
     }
 
+    /// `tests_pass` is verified by the effort's LATEST run (its own or one
+    /// claimed through attribution) passing with at least one test (tsk366).
     #[tokio::test]
-    async fn claims_are_verified_by_evidence_or_a_clean_test_report() {
+    async fn claims_are_verified_by_evidence_or_the_latest_clean_run() {
         let (db, store, sl) = seeded().await;
+        db.call(|c| {
+            c.execute_batch(
+                "INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at) VALUES (3, 1, 1, '2026-01-03', '2026-01-03');
+                 INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at) VALUES (4, 1, 1, '2026-01-04', '2026-01-04');",
+            )
+        })
+        .await
+        .unwrap();
         let claim = |effort: i64, kind: &str, evidence: Option<&str>| NewClaim {
             thread_id: 1,
             task_id: Some(1),
@@ -297,16 +312,32 @@ mod tests {
             kind: kind.into(),
             evidence_ref: evidence.map(str::to_string),
         };
-        test_report(&db, 1, &["passed", "passed"]).await;
-        test_report(&db, 2, &["passed", "failed"]).await;
-        store
-            .record_claim(claim(1, "tests_pass", None))
-            .await
-            .unwrap(); // clean report → verified
-        store
-            .record_claim(claim(2, "tests_pass", None))
-            .await
-            .unwrap(); // failing report → not
+        // Effort 1: passed, then a later failure → not verified.
+        test_run(&db, Some(1), 0, 5, "2026-01-01T00:00:00Z").await;
+        test_run(&db, Some(1), 1, 5, "2026-01-01T01:00:00Z").await;
+        // Effort 2: failed, then fixed → verified.
+        test_run(&db, Some(2), 2, 5, "2026-01-02T00:00:00Z").await;
+        test_run(&db, Some(2), 0, 5, "2026-01-02T01:00:00Z").await;
+        // Effort 3: a clean run it claimed through attribution → verified.
+        let run = test_run(&db, None, 0, 5, "2026-01-03T00:00:00Z").await;
+        db.call(move |c| {
+            c.execute(
+                "INSERT INTO effort_attribution (effort_id, kind, ref, state, recorded_at)
+                 VALUES (3, 'run', ?1, 'claimed', '2026-01-03')",
+                [format!("run:{run}")],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        // Effort 4: a run with no tests → not verified.
+        test_run(&db, Some(4), 0, 0, "2026-01-04T00:00:00Z").await;
+        for effort in 1..=4 {
+            store
+                .record_claim(claim(effort, "tests_pass", None))
+                .await
+                .unwrap();
+        }
         store
             .record_claim(claim(2, "handles_case", Some("test:empty_input")))
             .await
@@ -321,7 +352,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([[1], [0], [1], [0]])
+            json!([[0], [1], [1], [0], [1], [0]])
         );
     }
 
