@@ -5,7 +5,8 @@ how refs replace tab ids, `page_ref` kinds and `[[…]]` wikilink shapes.
 Target design: [target-architecture.md](./target-architecture.md) §4.
 Built so far: the grammar (P1.1, tsk403); the kind registry, the Rust
 `[[…]]` translation and the canonical `page_ref` vocabulary (P1.2,
-tsk404). The TS side lands in P1.3.
+tsk404); the TS parser, tab ids, wikilink hrefs and comment anchors
+(P1.3, tsk405). Shell routes (`page:<name>`) are P1.3b.
 
 ## The grammar (built)
 
@@ -46,8 +47,9 @@ variant. Pure, no IO.
 
 **The golden fixture** `crates/oxplow-domain/tests/fixtures/ref_grammar.json`
 pins the grammar. `tests/ref_grammar.rs` asserts it, and the TS parser
-(`apps/desktop/src/refs/ref.test.ts`, P1.3) asserts the same file, so the
-two parsers can't drift. Add a case there when you extend the grammar;
+(`apps/desktop/src/refs/ref.ts`: `parseRef`, `formatRef`, `ref`,
+`kindOf`; asserted by `ref.test.ts`) asserts the same file, so the two
+parsers can't drift. Add a case there when you extend the grammar;
 never change an existing case's expectation without changing both parsers.
 
 ## The kind registry (built)
@@ -85,18 +87,38 @@ but only ever stores canonical ones. Migration V92 wiped the old rows;
 the boot backfill regenerates them. `v_commit_task` reads the new shape.
 `ref_resolver::resolve_ref` and `CommentTarget` use the same kinds.
 
-## What refs replace (P1.3: the TS side)
+## The TS side is on canonical refs (built)
 
-| Today | Canonical |
+A `TabRef.id` for an entity page *is* its canonical ref, and
+`TabRef.kind` is the ref's kind (`PageKind` in `tabs/tabState.ts`):
+
+| Was | Now |
 |---|---|
-| `task:tskN` (kind `task`) | `work_item:oxplow:tskN` |
+| `task:tskN` (kind `task`) | `work_item:oxplow:tskN` (kind `work_item`, payload `itemId: "tskN"`) |
 | `git-commit:<sha>` | `commit:<sha>` |
-| `dir:<path>` (kind `directory`) | `dir:<path>` |
-| `file:<p>:@<frag>` | `file:<p>@<rev>` |
+| `dir:<path>` (kind `directory`) | `dir:<path>` (kind `dir`) |
+| `file:<p>:@ref:<x>` | `file:<p>@git:<x>` (`@snap:<id>` for snapshots; `revForVersion`/`versionFromRev` in `file-version.ts`) |
 | `metric-detail:<key>` | `metric:<key>` |
-| `task-note` | `task_note` |
-| bare page ids (`agent`, `settings`) and shell routes (`diff:`, `dup:`, `diff-view:`) | `page:<name>[?params]` |
+
+The same vocabulary is used by every TS surface that names an entity, so
+one string round-trips everywhere: the `page_ref` graph reads
+(`useBacklinks.canonicalIdForTarget` returns `oxplow:tskN` for a task),
+markdown hrefs (`MarkdownView` emits `commit:<sha>` and
+`work_item:oxplow:tskN`, collapses them back to `[[git:sha]]` /
+`[[tskN]]`; `InternalLink` allowlists the same schemes), comment anchors
+(`data-ref-kind="work_item" data-ref-id="oxplow:tskN"`, `commit`, `dir`,
+matching the backend's `CommentTarget`), and lens `link.kind` targets.
+`kindForTabId` and `refFromTabId` go through `parseRef` first, so a `:`
+inside an id never splits it; non-canonical shell routes (`diff-view:`,
+`external-url:`, hyphenated kinds) still parse their own tails until
+P1.3b moves them to `page:<name>[?params]`.
+
+Still to come (P1.3b): `page:<name>[?params]` for bare page ids
+(`agent`, `settings`) and shell routes (`diff:`, `dup:`, `diff-view:`),
+and App.tsx's render chain becoming a `Record<PageKind, …>` registry.
 
 Decided 2026-09-28: there is no compatibility layer for old ids. Only
 Nathan uses oxplow; stale `page_ref`/`page_visit` rows are wiped in V92
-and regenerated, and the UI starts new localStorage keys.
+and regenerated, and the UI starts new localStorage keys
+(`oxplow.layout.v2.*`, `oxplow.bookmarks.v2.*`); `legacyRedirects.ts`
+is gone.

@@ -44,7 +44,7 @@ pages are THE shell.
 | `apps/desktop/src/components/Navigator.tsx` | Far-left combined **stream + thread navigator**: a 40px always-visible strip of letter glyphs (`navigator-strip-stream-<id>` / `navigator-strip-thread-<id>`); clicking a glyph navigates directly — a thread glyph selects that thread, a stream glyph switches streams via `onSwitchStream`. **Hovering a glyph shows its full title as a native tooltip and nothing else (tsk269).** The `navigator-overlay` panel (~280px, covering the strip *and* the rail HUD to its right) expands only on an explicit click: the bottom-pinned `navigator-expand` chevron, or dead space in the strip (`navigator-strip-empty`, `e.target === e.currentTarget`). The chevron is pinned *outside* the scroll container and is the load-bearing affordance — once the list scrolls there is no dead space left, and `+ Add stream` lives only in the panel. The open/close state machine — click-to-open, geometric pointer-leave, Escape, outside-press, background-click, and the passive-vs-explicit guard — lives in the shared `apps/desktop/src/components/useSlideoutStrip.ts` hook (chevron in `SlideoutChevron.tsx`), which the Terminal page's `TerminalTabStrip` also runs on; a new slide-out strip adopts the hook rather than re-deriving it. It dismisses on a click in its own **dead background** (anything resolving to `button/input/select/textarea/a/label/[role=button]` is left alone so controls behave normally), on the pointer leaving its bounds (180ms grace), on Escape, and on any pointerdown outside it. The last two are *explicit* dismissals and beat the mid-rename / mid-new-thread form guard; the first two don't. **Pointer departure is measured geometrically** (document `pointermove` vs. the panel's rect), never `mouseleave` — the panel covers the rail and sits in the same DOM subtree as the strip, so the pointer never "leaves" the wrapper while parked over the covered region, which is what used to strand it open on top of the rail and swallow clicks meant for it (tsk131). Each overlay row (`navigator-stream-row-<id>` / `navigator-thread-row-<id>`) opens its action menu on **right-click** (Menu key / Shift+F10 for keyboard). **Thread menu:** a read-only (non-writer / queued) thread leads with **"Make writer"** (`menu-item-thread.promote`) → calls the `promote_thread` IPC (via `onPromoteThread` → `App.handlePromoteThread`), making it the stream's single active writer and demoting the prior one; the active writer omits the item (its accent pill already signals it). Then Rename / Settings / Close. The write guard makes every non-active thread read-only, so this is the discoverable path out of "project file edits are blocked" (tsk132). |
 | `apps/desktop/src/tabs/bookmarks.ts` + `useBookmarks.ts` | Per-scope (thread / stream / global) bookmark store backed by localStorage. Pages bookmark via the `PageNavigationContext.bookmark` binding; the rail HUD reads the merged set. `setScope(threadId, streamId, ref, label, toScope)` re-scopes a bookmark (drops it from every current scope, then adds it once at `toScope`) — used by the Go To page's bookmark manager. |
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_kind` writer in the backend instead. |
-| `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`git-commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `commit` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
+| `apps/desktop/src/pages/GitCommitPage.tsx` | Single-commit page (`commit:<sha>`): commit metadata (collapsing a long body behind "Show more") with cherry-pick / revert, the changed files (`ChangedFilesTree`, parent → commit diffs) and the `commit` lens slot (`change_id` from `useChange`). Routed via `gitCommitRef(sha)`. |
 | `apps/desktop/src/components/RailHud/sections.ts` | Pure helpers: `computeActiveItem`, `computeUpNext`, `computePagesDirectory`. The pages directory is a pure function so it can be unit-tested without mounting the React rail. |
 | `apps/desktop/src/pages/GitDashboardPage.tsx` | Committed-history rollup: branch header (current branch + upstream + ahead/behind + push), small uncommitted mini-card that links to `UncommittedChangesPage`, recent commits rendered through the shared `CommitGraphTable` (last 5, current branch only via `getGitLog({ all: false })`; click a row → reveal in `GitHistoryPage`), worktrees row with per-row "Merge into current", a **"Merge readiness" card** (cross-stream divergence vs the integration branch via `listStreamDivergences()` — per-stream ahead/behind + a clean/will-conflict/integrated badge, naming the overlapping files on conflict, with a one-click "Merge into &lt;base&gt;" offered only while viewing the base stream), recent remote branches with per-row pull/push. All ref-mutating actions confirm the exact `git` command before running. Routed via `gitDashboardRef()`. |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). Used by both `HistoryPanel` (full list with detail pane) and `GitDashboardPage`'s recent-commits card. `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
@@ -73,12 +73,12 @@ extension as `lens:<slug>` pages ([extensions.md](./extensions.md), epic
 tsk275) — don't grow them; new instruments should be lenses once the
 extension host lands.
 
-- **Agent & work:** `agent`, `task`, `tasks`, `done-work`, `backlog`,
+- **Agent & work:** `agent`, `work_item`, `tasks`, `done-work`, `backlog`,
   `archived`, `new-task`, `new-stream`, `stream-settings`,
   `thread-settings`, `closed-threads`, `comments`, `hook-events`,
   `op-error`
-- **Code & review:** `file`, `directory`, `files`, `diff`, `diff-view`,
-  `uncommitted-changes`, `git-commit`, `git-history`, `git-dashboard`,
+- **Code & review:** `file`, `dir`, `files`, `diff`, `diff-view`,
+  `uncommitted-changes`, `commit`, `git-history`, `git-dashboard`,
   `local-history`, `local-history-full`, `local-history-by-commit-full`,
   `terminal`
 - **Knowledge:** `wiki`, `wiki-index`, `wiki-freshness`
@@ -87,14 +87,12 @@ extension host lands.
 - **System:** `settings`, `external-url`, `dashboard` (the `visits`
   variant is the Go To hub, which stays core)
 - **Data (the core explorer; stays core):** `explore-data`, `metrics`,
-  `metrics-recorded`, `metric-detail`,
+  `metrics-recorded`, `metric`,
   `custom-dashboard`, `dashboards`
-- **Analytics (moved to ext):** oxplow-analytics lenses, with the old ids
-  in `LEGACY_PAGE_REDIRECTS`: `usage`, `page-analytics`, `finding`,
-  `dashboard:planning` / `review` / `quality`, and `effort-coverage:<id>`
-  (→ the `effort-tests` lens with `effort_id`, via a `{ lens, param }`
-  redirect). `duplicate-block` stays core as the side-by-side compare page
-  (lens `compare` links).
+- **Analytics (moved to ext):** oxplow-analytics lenses (`usage`,
+  `planning`, `review`, `quality`, `findings`, `effort-tests`).
+  `duplicate-block` stays core as the side-by-side compare page (lens
+  `compare` links).
 
 `agent` is implicit per thread. There is no `change-analysis` kind.
 
@@ -103,28 +101,36 @@ extension host lands.
 Built only by the helpers in `apps/desktop/src/tabs/pageRefs.ts` — never
 hand-format an id.
 
-**Removed page kinds redirect.** When a page kind moves out of core into
-an extension's lens, add its id or scheme to `LEGACY_PAGE_REDIRECTS`
-(`tabs/legacyRedirects.ts`). `refFromTabId`, the persisted tab lists and
-bookmarks all pass through `redirectLegacyRef`, so saved tabs, bookmarks
-and history reopen the lens instead of becoming dead entries.
+**Entity pages use canonical refs** ([refs.md](./refs.md)): the tab id
+of a file, directory, wiki page, task, commit or metric *is* its ref, so
+a `[[…]]` link, a `page_ref` row, a backlink and a tab all agree on one
+string. `refFromTabId` and `kindForTabId` parse these through the shared
+grammar (`apps/desktop/src/refs/ref.ts`), so a `:` inside an id
+(`work_item:oxplow:tsk42`) never splits it. The remaining kinds are
+**shell routes** with hand-formatted tails (`diff-view:…`,
+`external-url:…`); they move to `page:<name>[?params]` in P1.3b.
+
+**No compatibility layer for old ids.** When a kind is renamed or a page
+moves into an extension, its saved tabs/bookmarks/history are dropped
+(the `oxplow.layout.v2.*` / `oxplow.bookmarks.v2.*` keys started fresh
+on 2026-09-28) — see the decision in [refs.md](./refs.md).
 
 | Kind | Id format | Example |
 |---|---|---|
 | agent | `agent` | `agent` |
-| file | `file:<path>` (plus a version suffix for non-disk versions) | `file:crates/oxplow-app/src/lib.rs` |
-| directory | `dir:<path>` | `dir:crates/oxplow-app` |
+| file | `file:<path>[@<rev>]` — the working tree has no rev; `@git:<ref>` / `@snap:<id>` pin a version (`revForVersion` in `file-version.ts`); a literal `@`/`#`/`%` in a path is percent-encoded | `file:crates/oxplow-app/src/lib.rs`, `file:src/a.rs@git:HEAD` |
+| dir | `dir:<path>` | `dir:crates/oxplow-app` |
 | diff | `diff:<key>` | `diff:src/a.ts\|abc\|def\|` |
 | diff-view | `diff-view:effort:<effortId>` or `diff-view:endpoints:<start>..<end>` (endpoint tokens `s<snapshotId>` / `c<sha>` / `w` / `none`) | `diff-view:effort:eff42` |
 | wiki / wiki-freshness | `wiki:<slug>` / `wiki-freshness:<slug>` | `wiki:how-stop-hook-fires` |
 | lens | `lens:<extension>/<slug>[?param=value…]` (params sorted; `lensRef(id, params)`) | `lens:review/waiting-on-me`, `lens:oxplow-analytics/effort-tests?effort_id=12` |
-| task | `task:<id>` | `task:tsk142` |
+| work_item | `work_item:oxplow:<taskId>` (`taskRef(itemId)`; only oxplow's provider has a page) | `work_item:oxplow:tsk142` |
 | index kinds | the kind name | `tasks`, `comments`, `settings`, `dashboards` |
 | uncommitted-changes | `uncommitted-changes` (an old `:<scopeKind>:<scopeValue>` suffix is dropped) | `uncommitted-changes` |
-| git-commit | `git-commit:<sha>` (an old scope suffix is dropped) | `git-commit:abc1234` |
+| commit | `commit:<sha>` | `commit:abc1234` |
 | git-dashboard | `git-dashboard` | `git-dashboard` |
 | dashboard | `dashboard:<variant>` | `dashboard:visits` |
-| metric-detail | `metric-detail:<key>` | `metric-detail:oxplow.coverage.abs_pct` |
+| metric | `metric:<key>` | `metric:oxplow.coverage.abs_pct` |
 | custom-dashboard | `custom-dashboard:<dashboardId>` | `custom-dashboard:dsh3` |
 | stream-settings / thread-settings | `stream-settings:<id>` / `thread-settings:<id>` | `thread-settings:t-3` |
 | closed-threads / new-stream / new-task | the kind name | `new-task` |
@@ -489,8 +495,8 @@ each thread's last active tab.
 ## Unified tab list — every tab holds a Page
 
 Every per-thread tab lives in `threadPageTabs[threadId]` as a
-`TabRef`, regardless of kind (`wiki`, `file`, `diff`, `task`,
-`lens`, `git-commit`, etc.). The page-tab loop in
+`TabRef`, regardless of kind (`wiki`, `file`, `diff`, `work_item`,
+`lens`, `commit`, etc.). The page-tab loop in
 `centerTabs` builds the renderer by switching on `ref.kind` and
 wrapping each tab in a `PageNavigationContext` so in-tab navigation,
 back/forward, sibling navigation, and bookmark/backlinks all work
@@ -534,8 +540,8 @@ kinds slot in without re-discovering the layout.
 - **`threadPageTabs: Record<string, TabRef[]>`** — per-thread tab
   list, keyed by `threadId`. The single source of truth for "what
   tabs exist in this thread, in what order." Every tab kind
-  (`file`, `diff`, `wiki`, `task`, `uncommitted-changes`,
-  `git-commit`, `tasks`, `git-history`, …) lives here. Mutated by
+  (`file`, `diff`, `wiki`, `work_item`, `uncommitted-changes`,
+  `commit`, `tasks`, `git-history`, …) lives here. Mutated by
   `handleOpenPage`, `handleOpenFile`, `handleOpenDiff`,
   `handleNavigateInTab`, `handleStepSibling`, `closePageTab`. Read
   by the `centerTabs` builder + the `effectiveCenterActive`
@@ -672,8 +678,8 @@ including the corrupt-JSON fallbacks and the legacy-blob coercions
 (bare-TabRef history stacks, pre-versioning diff specs) — live in
 `apps/desktop/src/tabs/pageTabsPersistence.ts` and are unit-tested in
 `pageTabsPersistence.test.ts`. Storage keys:
-`oxplow.layout.v1.threadPageTabs`, `oxplow.layout.v1.threadPageHistory`,
-`oxplow.layout.v1.diffSpecs`.
+`oxplow.layout.v2.threadPageTabs`, `oxplow.layout.v2.threadPageHistory`,
+`oxplow.layout.v2.diffSpecs`.
 
 What persists:
 - The full per-thread tab list (every TabRef).
@@ -681,10 +687,10 @@ What persists:
 - Diff specs (the registry indexed by id) — except clipboard /
   selection-vs-clipboard diffs that carry inline `leftContent` /
   `rightContent`. Those are session-only.
-- The active center tab id (`oxplow.layout.v1.centerActive`,
+- The active center tab id (`oxplow.layout.v2.centerActive`,
   unchanged from before).
 - The per-stream open file paths (existing
-  `oxplow.layout.v1.fileSessions` blob; loads file content on first
+  `oxplow.layout.v2.fileSessions` blob; loads file content on first
   stream activation).
 
 Per-page state via `usePageSnapshot`:

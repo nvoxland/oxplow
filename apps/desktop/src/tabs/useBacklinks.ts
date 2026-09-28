@@ -11,6 +11,9 @@ import {
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
+/** Tasks are `work_item`s under the oxplow provider (`oxplow:tsk42`). */
+const OXPLOW_PROVIDER = "oxplow:";
+
 /**
  * Backlinks for a page. One IPC call to the unified `page_ref`
  * graph; the SQLite reader joins source labels (wiki title, work-
@@ -85,10 +88,11 @@ export function usePageOutbound(source: TabRef): BacklinkEntry[] {
 }
 
 /**
- * Extract the canonical SQLite id from a TabRef. Most kinds carry
- * their canonical id directly in `payload`; some encode it inside
- * the prefixed `ref.id`. Returns null for kinds the page-ref graph
- * doesn't track (settings, dialogs, …) so the hook short-circuits.
+ * The `page_ref` id for a TabRef: exactly the canonical ref's id
+ * (`.context/refs.md`), which is what the graph stores. A task is
+ * `oxplow:tsk42` under kind `work_item`. Returns null for kinds the
+ * page-ref graph doesn't track (settings, dialogs, …) so the hook
+ * short-circuits.
  */
 export function canonicalIdForTarget(ref: TabRef): string | null {
   switch (ref.kind) {
@@ -96,21 +100,19 @@ export function canonicalIdForTarget(ref: TabRef): string | null {
       const p = ref.payload as { slug?: string } | null;
       return p?.slug ?? null;
     }
-    case "task": {
-      // payload.itemId is the prefixed `tsk…` id string (see `taskRef`
-      // in pageRefs.ts).
+    case "work_item": {
       const p = ref.payload as { itemId?: string } | null;
-      return p?.itemId ?? null;
+      return p?.itemId ? `${OXPLOW_PROVIDER}${p.itemId}` : null;
     }
     case "file": {
       const p = ref.payload as { path?: string } | null;
       return p?.path ?? null;
     }
-    case "directory": {
+    case "dir": {
       const p = ref.payload as { path?: string } | null;
       return p?.path ?? null;
     }
-    case "git-commit": {
+    case "commit": {
       const p = ref.payload as { sha?: string } | null;
       return p?.sha ?? null;
     }
@@ -227,13 +229,15 @@ function refFor(kind: string, id: string): TabRef | null {
   switch (kind) {
     case "wiki":
       return wikiPageRef(id);
-    case "task":
-      return taskRef(id);
+    case "work_item":
+      // Only oxplow's own tasks have a page; another provider's item
+      // (`linear:ENG-12`) is dropped until a provider renders it.
+      return id.startsWith(OXPLOW_PROVIDER) ? taskRef(id.slice(OXPLOW_PROVIDER.length)) : null;
     case "file":
       return fileRef(id);
-    case "directory":
+    case "dir":
       return directoryRef(id);
-    case "git-commit":
+    case "commit":
       return gitCommitRef(id);
     case "finding":
       // Findings are listed by the oxplow-analytics Findings lens.

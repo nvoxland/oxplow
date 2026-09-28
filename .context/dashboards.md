@@ -90,7 +90,7 @@ stay **`ui(...)`**. Every MCP write also emits `DashboardsChanged`.
 Two page kinds, wired per `.context/pages-and-tabs.md`'s "adding a tab kind"
 checklist:
 
-- **`custom-dashboard`** — payload-bearing (modeled on `metric-detail`): the id
+- **`custom-dashboard`** — payload-bearing (modeled on `metric`): the id
   is `custom-dashboard:dsh<n>`, `customDashboardRef(id)` carries the id in both
   the tab id and payload, and a **`refFromTabId` case** rebuilds it from a
   history-restored tab (no payload). `CustomDashboardPage` uses `Page`

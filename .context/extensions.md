@@ -669,10 +669,6 @@ available to every extension:
 - Lens `actions:` (copy, add-to-context, run-source; tsk329).
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see "Advisories").
-- `LEGACY_PAGE_REDIRECTS` (`tabs/legacyRedirects.ts`): saved tabs,
-  bookmarks and history for a page kind that moved to a lens open the
-  lens. A `{ lens, param }` entry carries the old id's row id into a lens
-  param (`effort-coverage:eff12` → `effort_id=12`).
 - Lens tabs carry params: `lens:<ext>/<slug>?k=v` (`lensRef(id, params)`),
   so a slot lens's heading opens its page with the slot's values, and
   history and bookmarks keep them.

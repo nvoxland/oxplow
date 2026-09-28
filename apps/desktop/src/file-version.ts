@@ -72,6 +72,37 @@ export function versionIdFragment(version: FileVersion): string {
   }
 }
 
+/** Inverse of `versionIdFragment`; `null` for a fragment it never wrote. */
+export function versionFromIdFragment(frag: string): FileVersion | null {
+  if (frag === "disk") return DISK;
+  if (frag.startsWith("ref:")) return refVersion(frag.slice("ref:".length));
+  if (frag.startsWith("snap:")) return snapshotVersion(frag.slice("snap:".length));
+  return null;
+}
+
+/** The canonical ref revision (`.context/refs.md`) for a file version:
+ *  the working tree has none; a git ref is `git:<ref>`; a snapshot is
+ *  `snap:<id>`. */
+export function revForVersion(version: FileVersion): string | null {
+  switch (version.kind) {
+    case "disk":
+      return null;
+    case "ref":
+      return `git:${version.ref}`;
+    case "snapshot":
+      return `snap:${version.id}`;
+  }
+}
+
+/** Inverse of `revForVersion`; an unknown revision kind reads as the
+ *  working tree rather than failing the whole ref. */
+export function versionFromRev(rev: string | null): FileVersion {
+  if (rev === null) return DISK;
+  if (rev.startsWith("git:")) return refVersion(rev.slice("git:".length));
+  if (rev.startsWith("snap:")) return snapshotVersion(rev.slice("snap:".length));
+  return DISK;
+}
+
 /**
  * Coerce an unknown payload (typically read from `localStorage`) into
  * a valid `FileVersion`. Pre-versioning persisted refs had no

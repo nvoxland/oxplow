@@ -562,7 +562,7 @@ Bash (which the hook can't classify reliably).
 each one into the unified `page_ref` graph (see
 [data-model.md](./data-model.md)):
 
-- Diff against parent#0 → one `(git-commit:<sha>) -- touched_file -->
+- Diff against parent#0 → one `(commit:<sha>) -- touched_file -->
   (file:<path>)` edge per file.
 - Subject + body run through `oxplow_domain::refs::extract` so the
   same wikilink + inline-mention rules used by wiki bodies and

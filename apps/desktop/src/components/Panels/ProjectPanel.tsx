@@ -463,7 +463,7 @@ export function ProjectPanel({
           // Rows are draggable, so a drag-select can't start here — anchor
           // the comment to the row's name via its data-ref node instead.
           const el = document.querySelector(
-            `[data-ref-kind="${contextMenu.kind}"][data-ref-id="${cssEscapeAttr(contextMenu.path)}"]`,
+            `[data-ref-kind="${contextMenu.kind === "directory" ? "dir" : "file"}"][data-ref-id="${cssEscapeAttr(contextMenu.path)}"]`,
           );
           setContextMenu(null);
           if (el) {

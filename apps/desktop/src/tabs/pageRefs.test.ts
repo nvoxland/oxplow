@@ -5,6 +5,7 @@ import {
   dashboardRef,
   directoryRef,
   diffRef,
+  duplicateBlockRef,
   effortDiffRef,
   endpointDiffRef,
   externalUrlRef,
@@ -15,7 +16,6 @@ import {
   indexRef,
   lensRef,
   metricRef,
-  metricsIndexRef,
   newTaskRef,
   refFromTabId,
   snapshotRef,
@@ -49,9 +49,20 @@ describe("pageRefs", () => {
     expect(a.id).not.toBe(b.id);
   });
 
-  test("wikiPageRef and taskRef encode their identifiers", () => {
+  test("wikiPageRef and taskRef encode canonical refs", () => {
     expect(wikiPageRef("how-x-works").id).toBe("wiki:how-x-works");
-    expect(taskRef("123").id).toBe("task:123");
+    // A task is a work item under the oxplow provider (.context/refs.md).
+    expect(taskRef("tsk123")).toEqual({
+      id: "work_item:oxplow:tsk123",
+      kind: "work_item",
+      payload: { itemId: "tsk123" },
+    });
+    expect(gitCommitRef("abc1234")).toEqual({ id: "commit:abc1234", kind: "commit", payload: { sha: "abc1234" } });
+    expect(metricRef("oxplow.todos")).toEqual({
+      id: "metric:oxplow.todos",
+      kind: "metric",
+      payload: { metricKey: "oxplow.todos" },
+    });
   });
 
 
@@ -62,8 +73,7 @@ describe("pageRefs", () => {
   });
 
   test("dashboardRef encodes the variant", () => {
-    expect(dashboardRef("planning").id).toBe("dashboard:planning");
-    expect(dashboardRef("review").id).toBe("dashboard:review");
+    expect(dashboardRef("visits").id).toBe("dashboard:visits");
   });
 
   test("hookEventsRef returns the hook-events index ref", () => {
@@ -126,13 +136,6 @@ describe("refFromTabId — diff-view", () => {
   });
 });
 
-describe("refFromTabId — old metric-recording ids", () => {
-  test("reopen the recording's metric, or the Metrics page without a key", () => {
-    expect(refFromTabId("metric-recording:42:oxplow.todos")).toEqual(metricRef("oxplow.todos"));
-    expect(refFromTabId("metric-recording:7")).toEqual(metricsIndexRef());
-  });
-});
-
 describe("refFromTabId", () => {
   test("rebuilds a file ref with its path payload (the rail-History bug)", () => {
     const r = refFromTabId("file:Cargo.toml");
@@ -141,14 +144,19 @@ describe("refFromTabId", () => {
     expect(r.id).toBe(fileRef("Cargo.toml").id);
   });
 
-  test("handles nested paths and strips a versioned-viewer fragment", () => {
+  test("handles nested paths and a versioned-viewer revision", () => {
     expect((refFromTabId("file:src/a/b.ts").payload as { path: string }).path).toBe("src/a/b.ts");
-    expect((refFromTabId("file:src/x.ts:@abc").payload as { path: string }).path).toBe("src/x.ts");
+    const versioned = refFromTabId("file:src/x.ts@git:abc");
+    expect((versioned.payload as { path: string }).path).toBe("src/x.ts");
+    expect((versioned.payload as { version: unknown }).version).toEqual({ kind: "ref", ref: "abc" });
   });
 
   test("rebuilds payload-bearing kinds from their id", () => {
     expect(refFromTabId("wiki:some-slug")).toEqual(wikiPageRef("some-slug"));
-    expect(refFromTabId("task:42")).toEqual(taskRef("42"));
+    // `:` inside an id is legal; a naive split on the first colon breaks here.
+    expect(refFromTabId("work_item:oxplow:tsk42")).toEqual(taskRef("tsk42"));
+    expect(refFromTabId("commit:abc1234")).toEqual(gitCommitRef("abc1234"));
+    expect(refFromTabId("metric:oxplow.todos")).toEqual(metricRef("oxplow.todos"));
     // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
     expect(refFromTabId(snapshotRef(112).id)).toEqual(snapshotRef(112));
     expect(refFromTabId("external-url:https://x.test/p")).toEqual(externalUrlRef("https://x.test/p"));
@@ -156,10 +164,6 @@ describe("refFromTabId", () => {
 
   test("uncommitted-changes drops an old drilldown scope suffix", () => {
     expect(refFromTabId("uncommitted-changes:dir:src")).toEqual(uncommittedChangesRef());
-  });
-
-  test("git-commit drops a scope suffix to the bare sha", () => {
-    expect(refFromTabId("git-commit:abc123:working:src/a.ts")).toEqual(gitCommitRef("abc123"));
   });
 
   test("index/dashboard ids carry no payload (id is the kind)", () => {
@@ -192,10 +196,18 @@ describe("refFromTabId", () => {
       metricRef("oxplow.todos"),
       newTaskRef(),
       snapshotRef(112),
-      taskRef("42"),
+      taskRef("tsk42"),
       wikiPageRef("some-slug"),
       customDashboardRef("dsh1"),
       effortDiffRef("eff9"),
+      lensRef("acme/blocked", { stream_id: 2 }),
+      fileRef("src/a@b.ts"),
+      fileRef("src/a.ts", { kind: "ref", ref: "HEAD" }),
+      externalUrlRef("https://x.test/p?a=1#frag"),
+      duplicateBlockRef({
+        leftPath: "a.rs", leftStart: 1, leftEnd: 5, leftVersion: { kind: "disk" },
+        rightPath: "b.rs", rightStart: 9, rightEnd: 13, rightVersion: { kind: "ref", ref: "abc" },
+      }),
     ];
     for (const ref of refs) {
       const rebuilt = refFromTabId(ref.id);
@@ -206,13 +218,6 @@ describe("refFromTabId", () => {
 
   test("the Go To dashboard reopens as itself", () => {
     expect(refFromTabId(dashboardRef("visits").id)).toEqual(dashboardRef("visits"));
-  });
-
-  test("dashboards and findings that moved to oxplow-analytics reopen as lenses", () => {
-    expect(refFromTabId("dashboard:planning").id).toBe("lens:oxplow-analytics/planning");
-    expect(refFromTabId("dashboard:quality").id).toBe("lens:oxplow-analytics/quality");
-    expect(refFromTabId("finding:f-7").id).toBe("lens:oxplow-analytics/findings");
-    expect(refFromTabId("usage").id).toBe("lens:oxplow-analytics/usage");
   });
 
   test("a directory page reopens with its path payload", () => {

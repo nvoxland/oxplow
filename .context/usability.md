@@ -282,11 +282,12 @@ declaring *what it is* and mounting the generic layer.
 
 - **`data-ref-kind` / `data-ref-id` mark a region as a typed "context
   node."** The `(kind,id)` pair uses the same canonical vocabulary as
-  tab ids and the `page_ref` graph (`file` / `directory` / `wiki` /
-  `task` / `git-commit` / `finding`). Stamp them on the element that
-  *is* that thing (e.g. a task row carries `data-ref-kind="task"
-  data-ref-id="42"`). Nesting is meaningful: a file row inside a commit
-  card yields the chain `[file, git-commit, …]`, innermost first. Treat
+  tab ids and the `page_ref` graph — the canonical ref kinds of
+  [refs.md](./refs.md): `file` / `dir` / `wiki` / `work_item` /
+  `commit` / `finding`. Stamp them on the element that *is* that thing
+  (e.g. a task row carries `data-ref-kind="work_item"
+  data-ref-id="oxplow:tsk42"`). Nesting is meaningful: a file row inside
+  a commit card yields the chain `[file, commit, …]`, innermost first. Treat
   these as a first-class seam like `data-testid` — spread
   `contextNodeProps(kind, id)` from
   `apps/desktop/src/components/Comments/contextNodes.tsx`.
@@ -312,7 +313,7 @@ declaring *what it is* and mounting the generic layer.
   virtualization just re-anchors. The Highlight API is feature-detected;
   where it's absent the comment still works, just without an inline
   highlight. Surfaces opted in so far: task rows (`TaskGroupList`), the
-  commit page (`GitCommitPage` meta → `git-commit`), and commit-graph rows (`CommitGraphTable` → `git-commit`, under the
+  commit page (`GitCommitPage` meta → `commit`), and commit-graph rows (`CommitGraphTable` → `commit`, under the
   `git-dashboard` root). The **terminal/agent pane** has its own layer
   (`TerminalCommentLayer`, not the app-level one) because it anchors to
   the xterm buffer rather than DOM text — see `.context/terminal.md`.

@@ -84,7 +84,7 @@ export function tabRefToContextRef(ref: TabRef): ContextRef | null {
     }
     return null;
   }
-  if (ref.kind === "task") {
+  if (ref.kind === "work_item") {
     const payload = ref.payload as { itemId?: unknown } | null;
     if (payload && typeof payload.itemId === "string") {
       return { kind: "task", itemId: payload.itemId, title: String(payload.itemId), status: "" };
@@ -164,7 +164,7 @@ export function BacklinksList({
           disabled={!onOpenCommit}
           style={listButtonStyle}
         >
-          <PageKindIcon kind="git-commit" size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+          <PageKindIcon kind="commit" size={14} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {entry.label}
           </span>

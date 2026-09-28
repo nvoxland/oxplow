@@ -4,9 +4,28 @@
  */
 
 import type { TabRef } from "./tabState.js";
-import { DISK, type FileVersion, versionIdFragment } from "../file-version.js";
+import {
+  DISK,
+  type FileVersion,
+  revForVersion,
+  versionFromIdFragment,
+  versionFromRev,
+  versionIdFragment,
+} from "../file-version.js";
 import type { DiffEndpoint, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { redirectLegacyRef } from "./legacyRedirects.js";
+import { formatRef, parseRef } from "../refs/ref.js";
+
+/** Tab ids for the entity kinds are canonical refs (`.context/refs.md`):
+ *  `file:<path>[@rev]`, `dir:<path>`, `work_item:oxplow:tsk42`,
+ *  `commit:<sha>`, `wiki:<slug>`, `metric:<key>`. Everything else here is
+ *  a shell route whose id is still hand-formatted (they move to
+ *  `page:<name>` in P1.3b). */
+function canonicalId(kind: string, id: string, rev: string | null = null): string {
+  return formatRef({ kind, id, rev, frag: null });
+}
+
+/** Tasks are work items under the oxplow provider (`oxplow:tsk42`). */
+const OXPLOW_PROVIDER = "oxplow:";
 
 export function agentRef(): TabRef {
   return { id: "agent", kind: "agent", payload: null };
@@ -19,24 +38,19 @@ export function agentRef(): TabRef {
  * "implicit working tree" assumption is what made the duplication
  * scan show stale, mismatched line ranges in commit-target analysis.
  *
- * Disk-version files use the legacy `file:<path>` id so existing
- * persistence and history continue to land on the same tab; non-disk
- * versions get a `:@<version>` suffix so a working-tree view and a
- * historical view of the same path are distinct tabs.
+ * The id is the canonical ref: a working-tree file is `file:<path>`; a
+ * historical view carries its revision (`file:<path>@git:HEAD`,
+ * `@snap:<id>`) so it is a distinct tab from the working-tree view.
  */
 export function fileRef(path: string, version: FileVersion = DISK): TabRef {
-  const id =
-    version.kind === "disk"
-      ? `file:${path}`
-      : `file:${path}:@${versionIdFragment(version)}`;
-  return { id, kind: "file", payload: { path, version } };
+  return { id: canonicalId("file", path, revForVersion(version)), kind: "file", payload: { path, version } };
 }
 
 export function directoryRef(path: string): TabRef {
   // Trailing slash is normalized away — `[[src/]]` and `[[src]]` (when
   // ever the parser admits the latter) collapse to one tab.
   const bare = path.replace(/\/+$/, "");
-  return { id: `dir:${bare}`, kind: "directory", payload: { path: bare } };
+  return { id: canonicalId("dir", bare), kind: "dir", payload: { path: bare } };
 }
 
 export interface DiffPayload {
@@ -81,23 +95,25 @@ export function duplicateBlockRef(payload: DuplicateBlockPayload): TabRef {
 }
 
 export function wikiPageRef(slug: string): TabRef {
-  return { id: `wiki:${slug}`, kind: "wiki", payload: { slug } };
+  return { id: canonicalId("wiki", slug), kind: "wiki", payload: { slug } };
 }
 
 export function wikiFreshnessRef(slug: string): TabRef {
   return { id: `wiki-freshness:${slug}`, kind: "wiki-freshness", payload: { slug } };
 }
 
+/** A task page. `itemId` is the `tsk<n>` id; the tab id is the canonical
+ *  work-item ref under the oxplow provider (`work_item:oxplow:tsk42`). */
 export function taskRef(itemId: string): TabRef {
-  return { id: `task:${itemId}`, kind: "task", payload: { itemId } };
+  return { id: canonicalId("work_item", `${OXPLOW_PROVIDER}${itemId}`), kind: "work_item", payload: { itemId } };
 }
 
 /** Open one metric's detail page, optionally scoped to an effort's window —
  *  the task-page metrics-panel drill-in ("In this effort" before→after +
- *  further exploration). Its own page kind (`metric-detail`); Metrics
- *  and the dashboard tiles both navigate into it. */
+ *  further exploration). Its own page kind (`metric`); Metrics and the
+ *  dashboard tiles both navigate into it. */
 export function metricRef(metricKey: string): TabRef {
-  return { id: `metric-detail:${metricKey}`, kind: "metric-detail", payload: { metricKey } };
+  return { id: canonicalId("metric", metricKey), kind: "metric", payload: { metricKey } };
 }
 
 export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | "wiki-index" | "files" | "comments" | "local-history" | "local-history-full" | "local-history-by-commit-full" | "git-history" | "hook-events" | "terminal" | "settings" | "metrics-recorded" | "dashboards" | "explore-data"): TabRef {
@@ -105,7 +121,7 @@ export function indexRef(kind: "tasks" | "done-work" | "backlog" | "archived" | 
 }
 
 /** One user-created dashboard — a payload-bearing page kind (like
- *  `metric-detail`). The dashboard id (`dsh<n>`) rides in both the tab id and
+ *  `metric`). The dashboard id (`dsh<n>`) rides in both the tab id and
  *  the payload so a history-restored tab (no payload) still resolves via
  *  `refFromTabId`. */
 export function customDashboardRef(id: string): TabRef {
@@ -256,7 +272,7 @@ export function uncommittedChangesRef(): TabRef {
 
 /** Single git commit page. */
 export function gitCommitRef(sha: string): TabRef {
-  return { id: `git-commit:${sha}`, kind: "git-commit", payload: { sha } };
+  return { id: canonicalId("commit", sha), kind: "commit", payload: { sha } };
 }
 
 export type DashboardKind = "visits";
@@ -357,52 +373,49 @@ export function externalUrlRef(url: string): TabRef {
  * Page-visit history rows persist only the id (`page_id`) and kind, not
  * the ref payload — so a naive `{ id, kind, payload: null }` rebuild
  * leaves payload-bearing pages broken (a `file` ref with no `path`
- * never opens; `wiki`/`task`/etc. render empty). Each payload-bearing
- * scheme parses its key out of the id here. Index/dashboard kinds carry
- * no payload, so the id IS the kind and the fallback is fine.
+ * never opens; `wiki`/`work_item`/etc. render empty). Entity kinds parse
+ * through the canonical grammar (so `:` inside `work_item:oxplow:tsk42`
+ * is fine); shell routes parse their own hand-formatted tails.
+ * Index/dashboard kinds carry no payload, so the id IS the kind and the
+ * fallback is fine.
  */
 export function refFromTabId(id: string): TabRef {
-  return redirectLegacyRef(parseTabId(id));
+  const canonical = parseRef(id);
+  if (canonical) {
+    switch (canonical.kind) {
+      case "file":
+        return fileRef(canonical.id, versionFromRev(canonical.rev));
+      case "dir":
+        return directoryRef(canonical.id);
+      case "wiki":
+        return wikiPageRef(canonical.id);
+      case "work_item":
+        return taskRef(canonical.id.startsWith(OXPLOW_PROVIDER) ? canonical.id.slice(OXPLOW_PROVIDER.length) : canonical.id);
+      case "commit":
+        return gitCommitRef(canonical.id);
+      case "metric":
+        return metricRef(canonical.id);
+      default:
+        break;
+    }
+  }
+  return routeFromTabId(id);
 }
 
-function parseTabId(id: string): TabRef {
+/** The shell routes: ids whose tail is not a canonical ref id. */
+function routeFromTabId(id: string): TabRef {
   const colon = id.indexOf(":");
   const scheme = colon === -1 ? id : id.slice(0, colon);
   const rest = colon === -1 ? "" : id.slice(colon + 1);
   switch (scheme) {
-    case "file": {
-      // Disk file id is `file:<path>`; a versioned-viewer id appends
-      // `:@<frag>`. Strip that so history reopens the disk file.
-      const at = rest.lastIndexOf(":@");
-      return fileRef(at === -1 ? rest : rest.slice(0, at));
-    }
-    case "wiki":
-      return wikiPageRef(rest);
     case "lens":
       return lensRefFromTail(rest);
     case "wiki-freshness":
       return wikiFreshnessRef(rest);
-    case "task":
-      return taskRef(rest);
-    case "metric-detail":
-      return metricRef(rest);
     case "custom-dashboard":
       // `rest` is the `dsh<n>` id.
       return customDashboardRef(rest);
-    case "metric-recording": {
-      // The recording page is gone; an old `<captureId>:<metricKey>` id
-      // reopens its metric (key-less ones the Metrics page).
-      const metricKey = rest.split(":").slice(1).join(":");
-      return metricKey ? metricRef(metricKey) : metricsIndexRef();
-    }
-    // The id scheme is `dir:` (see `directoryRef`), not the kind name — spelling
-    // this "directory" made the case unreachable, so directory pages fell to the
-    // default and reopened with a null payload that `handleOpenPage` drops.
-    case "dir":
-      return directoryRef(rest);
     case "dashboard": {
-      // `rest` is the variant. Without this case every variant fell to the
-      // default's null payload and reopened as the "planning" default.
       const variants: readonly string[] = ["visits"];
       return variants.includes(rest)
         ? dashboardRef(rest as DashboardKind)
@@ -425,19 +438,43 @@ function parseTabId(id: string): TabRef {
       }
       return { id, kind: "diff-view", payload: null };
     }
-    case "git-commit":
-      // Old ids may carry a `:scope:value` drilldown suffix (the scope
-      // filter is gone); the bare sha reopens the commit.
-      return gitCommitRef(rest.split(":")[0] ?? rest);
+    case "dup": {
+      const dup = duplicateBlockFromTail(rest);
+      return dup ?? { id, kind: "duplicate-block", payload: null };
+    }
     case "uncommitted-changes":
       return uncommittedChangesRef();
     case "external-url":
       return externalUrlRef(rest);
     case "op-error":
       return opErrorRef(rest);
+    case "stream-settings":
+      return streamSettingsRef(rest);
+    case "thread-settings":
+      return threadSettingsRef(rest);
     default:
       // Index/dashboard kinds (`tasks`, `files`, `git-dashboard`, …) and
       // any unknown scheme: no payload needed; the id is the kind.
       return { id, kind: scheme as TabRef["kind"], payload: null };
   }
+}
+
+/** Parse the tail `duplicateBlockRef` writes:
+ *  `<left>:<a>-<b>@<ver>::<right>:<c>-<d>@<ver>`. */
+function duplicateBlockFromTail(tail: string): TabRef | null {
+  const sides = tail.split("::");
+  if (sides.length !== 2) return null;
+  const side = (s: string) => {
+    const m = /^(.+):(\d+)-(\d+)@(.+)$/.exec(s);
+    if (!m) return null;
+    const version = versionFromIdFragment(m[4]!);
+    return version ? { path: m[1]!, start: Number(m[2]), end: Number(m[3]), version } : null;
+  };
+  const l = side(sides[0]!);
+  const r = side(sides[1]!);
+  if (!l || !r) return null;
+  return duplicateBlockRef({
+    leftPath: l.path, leftStart: l.start, leftEnd: l.end, leftVersion: l.version,
+    rightPath: r.path, rightStart: r.start, rightEnd: r.end, rightVersion: r.version,
+  });
 }

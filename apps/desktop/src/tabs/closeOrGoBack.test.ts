@@ -5,7 +5,7 @@ import type { TabRef } from "./tabState.js";
 
 const refA: TabRef = { id: "wiki:a", kind: "wiki", payload: { slug: "a" } };
 const refB: TabRef = { id: "file:b.ts", kind: "file", payload: null };
-const refC: TabRef = { id: "task:c", kind: "task", payload: { itemId: "c" } };
+const refC: TabRef = { id: "work_item:oxplow:tskc", kind: "work_item", payload: { itemId: "tskc" } };
 
 function entry(over: Partial<HistoryEntry>): HistoryEntry {
   return { back: [], forward: [], siblings: null, ...over };

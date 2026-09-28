@@ -6,10 +6,11 @@ describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
     expect(kindForTabId("file:src/foo.ts")).toBe("file");
     expect(kindForTabId("wiki:url-schemes")).toBe("wiki");
-    expect(kindForTabId("task:42")).toBe("task");
+    expect(kindForTabId("work_item:oxplow:tsk42")).toBe("work_item");
+    expect(kindForTabId("lens:acme/x?stream_id=2")).toBe("lens");
+    expect(kindForTabId("metric:oxplow.todos")).toBe("metric");
     expect(kindForTabId("dir:src/components")).toBe("dir");
-    expect(kindForTabId("git-commit:abcdef0")).toBe("git-commit");
-    expect(kindForTabId("git-commit:abc:scope:value")).toBe("git-commit");
+    expect(kindForTabId("commit:abcdef0")).toBe("commit");
     expect(kindForTabId("dashboard:planning")).toBe("dashboard");
     expect(kindForTabId("external-url:https://example.com")).toBe("external-url");
     expect(kindForTabId("finding:fnd-1")).toBe("finding");
@@ -41,7 +42,7 @@ describe("pageKindIconComponent", () => {
       "directory",
       "wiki",
       "task",
-      "git-commit",
+      "commit",
       "diff",
       "duplicate-block",
       "dashboard",
@@ -85,7 +86,9 @@ describe("pageKindIconComponent", () => {
 
 describe("pageKindLabel", () => {
   test("rewrites hyphenated kinds to space-separated phrases", () => {
-    expect(pageKindLabel("git-commit")).toBe("commit");
+    expect(pageKindLabel("commit")).toBe("commit");
+    expect(pageKindLabel("work_item")).toBe("task");
+    expect(pageKindLabel("metric")).toBe("metric");
     expect(pageKindLabel("wiki")).toBe("wiki page");
     expect(pageKindLabel("done-work")).toBe("done work");
     expect(pageKindLabel("local-history")).toBe("local history");

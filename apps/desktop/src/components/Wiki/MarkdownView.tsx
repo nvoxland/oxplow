@@ -6,12 +6,13 @@ import { MediaLightbox, type LightboxContent } from "./MediaLightbox.js";
 
 /**
  * react-markdown's defaultUrlTransform only allows
- * http/https/ircs/mailto/xmpp; our internal schemes (`file:`, `dir:`,
- * `gitcommit:`) get stripped to empty strings, which makes the click
- * handler see `kind: "empty"` and no-op. Pass our schemes through
- * untouched and defer everything else to the default sanitizer.
+ * http/https/ircs/mailto/xmpp; our internal schemes (the canonical ref
+ * kinds `file:`, `dir:`, `commit:`, `work_item:`; see .context/refs.md)
+ * get stripped to empty strings, which makes the click handler see
+ * `kind: "empty"` and no-op. Pass our schemes through untouched and
+ * defer everything else to the default sanitizer.
  */
-const APP_SCHEMES = /^(file|dir|gitcommit|task|oxplow-invalid):/i;
+const APP_SCHEMES = /^(file|dir|commit|work_item|oxplow-invalid):/i;
 function urlTransform(value: string): string {
   if (APP_SCHEMES.test(value)) return value;
   return defaultUrlTransform(value);
@@ -47,13 +48,20 @@ export type ParsedLink =
       version: import("../../file-version.js").FileVersion | null;
     }
   | { kind: "directory"; path: string }
-  | { kind: "git-commit"; sha: string }
-  | { kind: "task"; id: string }
+  | { kind: "commit"; sha: string }
+  /** A task: `id` is the `tsk<n>` id (the href carries the provider,
+   *  `work_item:oxplow:tsk42`). */
+  | { kind: "work_item"; id: string }
   /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
    *  `[[#13]]` form). Rendered as a broken, non-clickable link. */
   | { kind: "broken"; reason: string };
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
+/** The href prefix of a task link: the canonical `work_item` ref under
+ *  the oxplow provider (`work_item:oxplow:tsk42`). */
+const OXPLOW_PROVIDER = "oxplow:";
+const WORK_ITEM_HREF = `work_item:${OXPLOW_PROVIDER}`;
 
 /**
  * Heuristic: does a wikilink target look like a git commit reference?
@@ -84,11 +92,11 @@ function parsedLinkIconKind(kind: ParsedLink["kind"]): string | null {
     case "file":
       return "file";
     case "directory":
-      return "directory";
-    case "git-commit":
-      return "git-commit";
-    case "task":
-      return "task";
+      return "dir";
+    case "commit":
+      return "commit";
+    case "work_item":
+      return "work_item";
     case "external":
       return "external-url";
     default:
@@ -145,15 +153,18 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
     if (!raw) return { kind: "empty" };
     return { kind: "directory", path: raw };
   }
-  if (rawHref.startsWith("gitcommit:")) {
-    const sha = rawHref.slice("gitcommit:".length);
+  if (rawHref.startsWith("commit:")) {
+    const sha = rawHref.slice("commit:".length);
     if (!sha) return { kind: "empty" };
-    return { kind: "git-commit", sha };
+    return { kind: "commit", sha };
   }
-  if (rawHref.startsWith("task:")) {
-    const id = rawHref.slice("task:".length);
+  if (rawHref.startsWith("work_item:")) {
+    // Only oxplow's own items have a page; the provider prefix is dropped
+    // from the parsed id (`tsk42`).
+    const rest = rawHref.slice("work_item:".length);
+    const id = rest.startsWith(OXPLOW_PROVIDER) ? rest.slice(OXPLOW_PROVIDER.length) : rest;
     if (!id) return { kind: "empty" };
-    return { kind: "task", id };
+    return { kind: "work_item", id };
   }
   if (rawHref.startsWith("oxplow-invalid:")) {
     const target = decodeURIComponent(rawHref.slice("oxplow-invalid:".length));
@@ -179,7 +190,7 @@ export function parseMarkdownLink(rawHref: string): ParsedLink {
  *                              → `[[path|label]]`   otherwise
  * - `[label](dir:path)`         → `[[dir:path]]`     if label === path
  *                              → `[[dir:path|label]]` otherwise
- * - `[label](gitcommit:sha)`    → `[[git:sha]]`      if label is the
+ * - `[label](commit:sha)`       → `[[git:sha]]`      if label is the
  *                                                    7-char-or-longer
  *                                                    hex prefix of sha
  *                              → `[[git:sha|label]]` otherwise
@@ -217,7 +228,7 @@ function collapseLinksOutsideInlineCode(text: string): string {
     // Then collapse `[label](url)` for our internal schemes — but
     // NOT `![alt](url)` (images).
     return unmangled.replace(
-      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|gitcommit|task|oxplow-invalid):[^)\s]+)\)/g,
+      /(^|[^!])\[([^\]\n]+)\]\(((?:file|dir|commit|work_item|oxplow-invalid):[^)\s]+)\)/g,
       (_match, lead: string, label: string, url: string) => {
         const collapsed = collapseInternalLink(label, url);
         return collapsed == null ? _match : `${lead}${collapsed}`;
@@ -237,8 +248,8 @@ function collapseInternalLink(label: string, url: string): string | null {
     if (!path) return null;
     return label === path ? `[[dir:${path}]]` : `[[dir:${path}|${label}]]`;
   }
-  if (url.startsWith("gitcommit:")) {
-    const sha = url.slice("gitcommit:".length);
+  if (url.startsWith("commit:")) {
+    const sha = url.slice("commit:".length);
     if (!sha) return null;
     // If the label is a prefix of the SHA (the bare `[[<sha>]]` form
     // renders as the short 7-char SHA), drop the label and emit the
@@ -246,8 +257,8 @@ function collapseInternalLink(label: string, url: string): string | null {
     const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
     return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
   }
-  if (url.startsWith("task:")) {
-    const id = url.slice("task:".length);
+  if (url.startsWith(WORK_ITEM_HREF)) {
+    const id = url.slice(WORK_ITEM_HREF.length);
     if (!id) return null;
     // Bare `[[tsk42]]` renders with the id as text (the title swap is a
     // render-time overlay, not stored), so a label equal to the id
@@ -337,7 +348,7 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
         // Display short sha when the user didn't supply a label and the
         // raw target is the full hex (avoid 40-char inline link text).
         const shortDisplay = label ? display : sha.slice(0, 7);
-        return `[${shortDisplay}](gitcommit:${sha})`;
+        return `[${shortDisplay}](commit:${sha})`;
       }
       // Directory form: explicit `dir:` prefix (mirrors `git:`).
       // Trailing slash on the path is tolerated and stripped.
@@ -357,7 +368,7 @@ function rewriteWikilinksOutsideInlineCode(text: string): string {
       // ref extractor (refs.rs), which recognizes the same `tsk<digits>`
       // form for backlinks.
       if (/^tsk\d+$/i.test(target)) {
-        return `[${display}](task:${target})`;
+        return `[${display}](${WORK_ITEM_HREF}${target})`;
       }
       if (looksLikeFilePath(target)) {
         // The target may carry a `@<version>` segment; the file:
@@ -454,7 +465,7 @@ function WikiLinkSpan({
  * Every internal link kind resolves through here so they all behave the
  * same under "open in a new tab". They didn't: `task` routed through
  * the nav chokepoint with the caller's `newTab`, while `file`,
- * `directory` and `git-commit` fell through to legacy single-tab
+ * `directory` and `commit` fell through to legacy single-tab
  * callbacks and silently ignored it (tsk265).
  */
 export function linkTarget(parsed: ParsedLink): TabRef | null {
@@ -466,9 +477,9 @@ export function linkTarget(parsed: ParsedLink): TabRef | null {
       return fileRef(parsed.path, parsed.version ?? DISK);
     case "directory":
       return directoryRef(parsed.path);
-    case "git-commit":
+    case "commit":
       return gitCommitRef(parsed.sha);
-    case "task":
+    case "work_item":
       return taskRef(parsed.id);
     case "internal":
       return wikiPageRef(parsed.slug);
@@ -508,7 +519,7 @@ export interface MarkdownViewProps {
   onOpenFile?: (path: string, line?: number) => void;
   /** Optional directory-link handler — invoked for `[[path/to/dir/]]` wikilinks. */
   onOpenDirectory?: (path: string) => void;
-  /** Optional git-commit-link handler — invoked for `[[<sha>]]` / `[[git:<sha>]]` wikilinks. */
+  /** Optional commit-link handler — invoked for `[[<sha>]]` / `[[git:<sha>]]` wikilinks. */
   onOpenCommit?: (sha: string) => void;
   /**
    * Optional handler for external (http/https) link clicks. When present,
@@ -607,11 +618,11 @@ export function MarkdownView({
       onOpenDirectory?.(parsed.path);
       return;
     }
-    if (parsed.kind === "git-commit") {
+    if (parsed.kind === "commit") {
       onOpenCommit?.(parsed.sha);
       return;
     }
-    if (parsed.kind === "task") {
+    if (parsed.kind === "work_item") {
       return; // tasks were never a wikilink target before the chokepoint
     }
     if (newTab && onOpenInNewTab) onOpenInNewTab(parsed.slug);
@@ -676,7 +687,7 @@ export function MarkdownView({
       items.push({ id: "copy-path", label: "Copy path", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.path).catch(() => {}); } });
       return items;
     }
-    if (parsed.kind === "git-commit") {
+    if (parsed.kind === "commit") {
       const items: MenuItem[] = [];
       if (ctxNav) {
         items.push(...openItems(parsed));
@@ -686,7 +697,7 @@ export function MarkdownView({
       items.push({ id: "copy-sha", label: "Copy SHA", enabled: true, run: () => { void navigator.clipboard.writeText(parsed.sha).catch(() => {}); } });
       return items;
     }
-    if (parsed.kind === "task") {
+    if (parsed.kind === "work_item") {
       const id = parsed.id;
       const items: MenuItem[] = [];
       items.push(...openItems(parsed));
@@ -838,7 +849,7 @@ export function MarkdownView({
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
             const internalSlug = parsed.kind === "internal" ? parsed.slug : null;
-            const taskId = parsed.kind === "task" ? parsed.id : null;
+            const taskId = parsed.kind === "work_item" ? parsed.id : null;
             return (
               <WikiLinkSpan
                 anchorProps={props}

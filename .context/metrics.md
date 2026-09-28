@@ -1575,7 +1575,7 @@ just carries a Help blurb pointing there.
 > to spec `None` — `""` is not a language, and `groupByLanguage` reads null/`""`
 > as its "General" bucket.
 - **Metric Detail** (`MetricDetailPage.tsx` + the pieces in `MetricDetail.tsx`
-  and pure `metricDetailData.ts`, `PageKind` `"metric-detail"`, routed by
+  and pure `metricDetailData.ts`, `PageKind` `"metric"`, routed by
   `metricRef(key)`). The metric name is the H1 and its `description` the
   intro. The main column is the trend chart (drag to select a range; charted
   the way the metric rolls up — `defaultChartMode`: sum → cumulative) and the

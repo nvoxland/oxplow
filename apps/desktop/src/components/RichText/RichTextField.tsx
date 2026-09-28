@@ -508,7 +508,7 @@ export function RichTextField({
     ...style,
   };
 
-  // Plain-click on a wikilink / file: / dir: / gitcommit: anchor inside
+  // Plain-click on a wikilink / file: / dir: / commit: anchor inside
   // the editable surface should follow the link, not place a cursor.
   // Mirrors `MarkdownView`'s click semantics so the read-only and
   // editable surfaces feel the same: in-tab navigate via
@@ -540,7 +540,7 @@ export function RichTextField({
       ctxNav?.navigate(directoryRef(parsed.path), { newTab });
       return true;
     }
-    if (parsed.kind === "git-commit") {
+    if (parsed.kind === "commit") {
       ctxNav?.navigate(gitCommitRef(parsed.sha), { newTab });
       return true;
     }

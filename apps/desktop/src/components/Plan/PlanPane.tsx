@@ -872,7 +872,7 @@ const kbPickerStyle: CSSProperties = {
 /// app-level layer via the compose bus.
 function openCommentForTask(item: Task): void {
   const el = document.querySelector(
-    `[data-ref-kind="task"][data-ref-id="${item.id}"]`,
+    `[data-ref-kind="work_item"][data-ref-id="oxplow:${item.id}"]`,
   );
   if (!el) return;
   const req = composeForElement(el, item.title, el.getBoundingClientRect());

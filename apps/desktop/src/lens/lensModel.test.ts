@@ -49,7 +49,7 @@ describe("cellLinkRef", () => {
   const row = [42, "Fix it", "src/a.ts", "auth-flow", 7];
 
   test("task link reads the id from `from`", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)?.id).toBe("task:tsk42");
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "title", row, cols)?.id).toBe("work_item:oxplow:tsk42");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("file:src/a.ts");
@@ -177,8 +177,8 @@ describe("links added for extraction", () => {
   const cols = ["id", "path", "ln", "sha", "key"];
   const row = [42, "src/a.rs", 7, "abc123", "oxplow.complexity"];
   test("a task link from a v_task integer id opens tsk<id>", () => {
-    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "id", row, cols)?.id).toBe("task:tsk42");
-    expect(cellLinkRef({ kind: "task", from: null, line: null, base: null, head: null }, "t", ["tsk9"], ["t"])?.id).toBe("task:tsk9");
+    expect(cellLinkRef({ kind: "task", from: "id", line: null, base: null, head: null }, "id", row, cols)?.id).toBe("work_item:oxplow:tsk42");
+    expect(cellLinkRef({ kind: "task", from: null, line: null, base: null, head: null }, "t", ["tsk9"], ["t"])?.id).toBe("work_item:oxplow:tsk9");
   });
   test("file links can carry a line", () => {
     const ref = cellLinkRef({ kind: "file", from: "path", line: "ln", base: null, head: null }, "path", row, cols);
@@ -186,9 +186,9 @@ describe("links added for extraction", () => {
     expect((ref?.payload as { line?: number }).line).toBe(7);
   });
   test("commit and metric links", () => {
-    expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("git-commit");
+    expect(cellLinkRef({ kind: "commit", from: "sha", line: null, base: null, head: null }, "sha", row, cols)?.kind).toBe("commit");
     expect(cellLinkRef({ kind: "metric", from: "key", line: null, base: null, head: null }, "key", row, cols)?.id).toBe(
-      "metric-detail:oxplow.complexity",
+      "metric:oxplow.complexity",
     );
   });
 });
@@ -354,7 +354,7 @@ test("a slot can be narrowed to one extension, and lists who mounts there", () =
 });
 
 test("page links open any oxplow page by its tab id", () => {
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["task:tsk3"], ["p"])?.id).toBe("task:tsk3");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["work_item:oxplow:tsk3"], ["p"])?.id).toBe("work_item:oxplow:tsk3");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["git-dashboard"], ["p"])?.kind).toBe("git-dashboard");
 });
 

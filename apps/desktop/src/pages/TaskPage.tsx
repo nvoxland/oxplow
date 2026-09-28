@@ -182,7 +182,7 @@ export function TaskPage({
 
   if (!item) {
     return (
-      <Page testId="page-tasks" title={`task:${itemId}`} kind="task" backlinks={backlinks} outbound={outbound}>
+      <Page testId="page-tasks" title={itemId} kind="work_item" backlinks={backlinks} outbound={outbound}>
         <div style={{ padding: "16px 20px", color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
           Loading tasks…
         </div>
@@ -210,7 +210,7 @@ export function TaskPage({
     <Page
       testId="page-tasks"
       title={item.title}
-      kind="task"
+      kind="work_item"
       backlinks={backlinks}
       outbound={outbound}
       commentsNav={stream ? <CommentNavigator targetKind="task" targetId={String(item.id)} /> : undefined}

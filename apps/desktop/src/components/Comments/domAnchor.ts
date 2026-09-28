@@ -61,9 +61,11 @@ export function refFromHref(href: string): RefNode | null {
     case "file":
       return { kind: "file", id: parsed.path };
     case "directory":
-      return { kind: "directory", id: parsed.path };
-    case "git-commit":
-      return { kind: "git-commit", id: parsed.sha };
+      return { kind: "dir", id: parsed.path };
+    case "commit":
+      return { kind: "commit", id: parsed.sha };
+    case "work_item":
+      return { kind: "work_item", id: `oxplow:${parsed.id}` };
     default:
       return null;
   }

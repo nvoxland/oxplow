@@ -5,16 +5,16 @@
 /// Any element that represents a canonical thing carries two data
 /// attributes using the same `(kind,id)` vocabulary as tab ids and the
 /// `page_ref` graph (`file` / `directory` / `wiki` / `task` /
-/// `git-commit` / `finding`, extensible):
+/// `commit` / `finding`, extensible):
 ///
-///   <div data-ref-kind="git-commit" data-ref-id="abc1234"> … </div>
+///   <div data-ref-kind="commit" data-ref-id="abc1234"> … </div>
 ///
 /// Because `window.getSelection()` hands back raw DOM nodes, the only
 /// uniform way to ask "what typed region is this selection in?" across
 /// arbitrary pages (task rows, file lists, the git graph, section
 /// headers) is to walk DOM ancestors. Nesting in the DOM IS the
 /// hierarchy: a file row inside a commit card inside the git dashboard
-/// yields the chain `[file, git-commit, git-dashboard]`, innermost
+/// yields the chain `[file, commit, git-dashboard]`, innermost
 /// first. The innermost node is the comment's primary target; the rest
 /// is its context chain.
 
@@ -96,7 +96,7 @@ export function refOfElement(el: Element): RefNode | null {
 /// The data attributes that mark an element as a context node. Spread
 /// onto any element to declare its canonical identity:
 ///
-///   <tr {...contextNodeProps("task", String(id))}> … </tr>
+///   <tr {...contextNodeProps("work_item", `oxplow:${id}`)}> … </tr>
 export function contextNodeProps(kind: string, id: string): Record<string, string> {
   return { [KIND_ATTR]: kind, [ID_ATTR]: id };
 }

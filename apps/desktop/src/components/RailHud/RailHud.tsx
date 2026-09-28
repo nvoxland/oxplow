@@ -1471,7 +1471,7 @@ function FinishedSection({
               onClick={() => onOpenPage(ref)}
               style={rowHoverStyle()}
             >
-              <PageKindIcon kind={e.kind === "task" ? "task" : "wiki"} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+              <PageKindIcon kind={e.kind === "task" ? "work_item" : "wiki"} size={12} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {e.title}
               </span>

@@ -1121,10 +1121,11 @@ pub struct CreateCommentMcpParams {
     pub stream_id: String,
     /// Optional thread to attribute the comment to.
     pub thread_id: Option<String>,
-    /// Page-kind scheme of the target: `wiki | file | directory | task | \
-    /// git-commit | finding`.
+    /// The target's ref kind: `wiki | file | dir | work_item | commit |
+    /// finding` (see .context/refs.md).
     pub target_kind: String,
-    /// Canonical id for that kind (wiki slug, repo-relative path, task id, …).
+    /// The ref's id for that kind: wiki slug, repo-relative path,
+    /// `oxplow:tsk42` for a task, the sha for a commit.
     pub target_id: String,
     pub body: String,
     /// Optional quoted span the comment is about (empty = whole-target note).
@@ -4938,8 +4939,8 @@ impl OxplowMcp {
     #[tool(
         description = "Unified backlinks: every page (wiki, task, commit, finding, \
                        …) that points AT the given target page. The target is identified \
-                       by `kind` (e.g. \"file\", \"wiki\", \"task\", \"git-commit\", \
-                       \"finding\", \"directory\") and `id` (path / slug / wi-… / sha / id). \
+                       by its ref `kind` (\"file\", \"wiki\", \"work_item\", \"commit\", \
+                       \"finding\", \"dir\") and `id` (path / slug / oxplow:tsk… / sha). \
                        Returns one row per inbound edge, including ref_type so the caller \
                        can distinguish e.g. a commit's touched_file edge from a wiki body \
                        mention."

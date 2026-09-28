@@ -92,12 +92,12 @@ describe("metricSiblings", () => {
     // as the eye reads the page.
     const sibs = metricSiblings(
       [section(["a", "b"]), section(["c"])],
-      (key) => ({ id: `metric-detail:${key}`, kind: "metric-detail", payload: null }),
+      (key) => ({ id: `metric:${key}`, kind: "metric", payload: null }),
     );
     expect(sibs.entries.map((e) => e.ref.id)).toEqual([
-      "metric-detail:a",
-      "metric-detail:b",
-      "metric-detail:c",
+      "metric:a",
+      "metric:b",
+      "metric:c",
     ]);
     // Labels are the row titles — they feed the prev/next hover tooltips.
     expect(sibs.entries.map((e) => e.label)).toEqual(["A", "B", "C"]);
@@ -105,7 +105,7 @@ describe("metricSiblings", () => {
   });
 
   it("returns an empty chain for no sections", () => {
-    expect(metricSiblings([], () => ({ id: "x", kind: "metric-detail", payload: null })).entries).toEqual([]);
+    expect(metricSiblings([], () => ({ id: "x", kind: "metric", payload: null })).entries).toEqual([]);
   });
 });
 

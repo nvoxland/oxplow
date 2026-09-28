@@ -1,5 +1,4 @@
 import type { TabRef } from "./tabState.js";
-import { redirectLegacyRef } from "./legacyRedirects.js";
 
 export type BookmarkScope = "thread" | "stream" | "global";
 
@@ -32,10 +31,10 @@ export interface BookmarksApi {
   subscribe(fn: () => void): () => void;
 }
 
-const KEY_GLOBAL = "oxplow.bookmarks.v1.global";
-const KEY_LAST_SCOPE = "oxplow.bookmarks.v1.lastScope";
-const keyStream = (id: string) => `oxplow.bookmarks.v1.stream.${id}`;
-const keyThread = (id: string) => `oxplow.bookmarks.v1.thread.${id}`;
+const KEY_GLOBAL = "oxplow.bookmarks.v2.global";
+const KEY_LAST_SCOPE = "oxplow.bookmarks.v2.lastScope";
+const keyStream = (id: string) => `oxplow.bookmarks.v2.stream.${id}`;
+const keyThread = (id: string) => `oxplow.bookmarks.v2.thread.${id}`;
 
 interface Storage {
   getItem(k: string): string | null;
@@ -49,8 +48,7 @@ function safeParse(raw: string | null): Bookmark[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .filter((b) => b && typeof b === "object" && b.ref && typeof b.scope === "string")
-      .map((b: Bookmark) => ({ ...b, ref: redirectLegacyRef(b.ref) }));
+      .filter((b) => b && typeof b === "object" && b.ref && typeof b.scope === "string");
   } catch {
     return [];
   }

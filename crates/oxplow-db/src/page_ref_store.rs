@@ -12,9 +12,10 @@
 //!
 //! `kind` is denormalised next to `id` so kind-filtered lookups
 //! ("all backlinks where target is a file") don't need a LIKE on a
-//! synthetic combined column. Canonical ids match the frontend's
-//! `TabRef.id` shape (e.g. `"wiki:architecture"`, `"wi-42"`,
-//! `"file:src/app.rs"`, `"git-commit:abc123"`).
+//! synthetic combined column. `(kind, id)` is exactly a canonical
+//! ref's (.context/refs.md): `("wiki", "architecture")`,
+//! `("work_item", "oxplow:tsk42")`, `("file", "src/app.rs")`,
+//! `("commit", "abc123")`.
 
 use async_trait::async_trait;
 use rusqlite::params;

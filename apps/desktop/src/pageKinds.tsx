@@ -1,9 +1,9 @@
 /**
  * Page-kind scheme metadata.
  *
- * `kindForTabId` extracts the scheme/kind from a tab id like
- * `file:src/foo.ts` → `"file"`, or `tasks` → `"tasks"` (literal
- * index pages have no prefix).
+ * `kindForTabId` extracts the kind from a tab id like
+ * `file:src/foo.ts` → `"file"`, `work_item:oxplow:tsk42` → `"work_item"`,
+ * or `tasks` → `"tasks"` (literal index pages have no prefix).
  *
  * `pageKindIconComponent` / `PageKindIcon` map that kind to the
  * lucide-react icon used everywhere a page-kind label renders —
@@ -42,6 +42,7 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
+import { parseRef } from "./refs/ref.js";
 
 /**
  * Map a page-kind string to its icon component. Returns `null`
@@ -58,10 +59,8 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
     // Scheme-prefixed kinds (TabRef.kind).
     case "file":
       return FileText;
-    // Directory is the one kind whose id scheme (`dir:`) differs from its
-    // TabRef.kind (`directory`), and `kindForTabId` yields the scheme — so
-    // accept both or directory tabs render with no icon (tsk163).
     case "dir":
+    // The file tree's entries (`WorkspaceEntry.kind`) still say `directory`.
     case "directory":
       return Folder;
     case "diff":
@@ -73,9 +72,11 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return BookOpen;
     case "wiki-freshness":
       return Gauge;
+    case "work_item":
+    // Comment anchors and the rail's finished list still say `task`.
     case "task":
       return CheckSquare;
-    case "git-commit":
+    case "commit":
       return GitCommit;
     case "dashboard":
     case "custom-dashboard":
@@ -129,7 +130,7 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Activity;
     case "metrics-recorded":
       return BarChart3;
-    case "metric-detail":
+    case "metric":
       return Gauge;
     case "terminal":
       return Terminal;
@@ -181,8 +182,8 @@ export function pageKindLabel(kind: string): string {
   switch (kind) {
     case "wiki":
       return "wiki page";
-    case "git-commit":
-      return "commit";
+    case "work_item":
+      return "task";
     case "diff-view":
       return "diff";
     case "new-task":
@@ -225,8 +226,6 @@ export function pageKindLabel(kind: string): string {
       return "error";
     case "metrics-recorded":
       return "metrics";
-    case "metric-detail":
-      return "metric";
     case "custom-dashboard":
       return "dashboard";
     default:
@@ -265,26 +264,17 @@ const INDEX_KINDS = new Set<string>([
 ]);
 
 /**
- * Parse the scheme/kind from a tab id. Examples:
- *
- *   `file:src/foo.ts`          → `"file"`
- *   `wiki:url-schemes`         → `"wiki"`
- *   `task:42`                  → `"task"`
- *   `git-commit:abc123:scope`  → `"git-commit"`
- *   `tasks`                    → `"tasks"`
- *   `uncommitted-changes:dir:src` → `"uncommitted-changes"`
- *
- * For prefixed ids the kind is everything before the first `:`,
- * except that two-segment literal kinds (`git-commit`,
- * `uncommitted-changes`, `stream-settings`, `thread-settings`,
- * `op-error`, `duplicate-block`, `external-url`, `done-work`,
- * `wiki-index`, `local-history`, `git-history`,
- * `git-dashboard`, `hook-events`, `new-stream`,
- * `new-task`, `closed-threads`) are hyphenated — the colon split
- * still works for those because the hyphen comes before any `:`.
+ * The kind of a tab id. A canonical ref (`work_item:oxplow:tsk42`,
+ * `file:src/a.rs@git:HEAD`) yields its kind through the grammar, so the
+ * `:` inside an id never splits it. Index pages (`tasks`) are their own
+ * kind. Shell routes whose scheme is not a valid ref kind
+ * (`external-url:…`, `diff-view:…`, `uncommitted-changes:…`) yield the
+ * text before the first `:` until they move to `page:` ids (P1.3b).
  */
 export function kindForTabId(tabId: string): string {
   if (INDEX_KINDS.has(tabId)) return tabId;
+  const canonical = parseRef(tabId);
+  if (canonical) return canonical.kind;
   const idx = tabId.indexOf(":");
   if (idx === -1) return tabId;
   return tabId.slice(0, idx);

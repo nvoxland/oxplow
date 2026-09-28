@@ -2584,7 +2584,8 @@ export type LensLinkKind =
 // A metric's page; the value is a metric key.
 "metric" | 
 /**
- *  Any oxplow page by its tab id (`task:tsk42`, `git-dashboard`, …),
+ *  Any oxplow page by its tab id (`work_item:oxplow:tsk42`,
+ *  `commit:<sha>`, `git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
 "page" | 

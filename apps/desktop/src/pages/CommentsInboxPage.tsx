@@ -16,14 +16,14 @@ import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 function targetRef(kind: string, id: string): TabRef | null {
   if (kind === "file") return fileRef(id);
   if (kind === "wiki") return wikiPageRef(id);
-  if (kind === "task") return taskRef(id);
+  if (kind === "work_item" && id.startsWith("oxplow:")) return taskRef(id.slice("oxplow:".length));
   return null;
 }
 
 function targetLabel(kind: string, id: string): string {
   if (kind === "file") return id;
   if (kind === "wiki") return `wiki/${id}`;
-  if (kind === "task") return `task #${id}`;
+  if (kind === "work_item" && id.startsWith("oxplow:")) return `task ${id.slice("oxplow:".length)}`;
   return `${kind}:${id}`;
 }
 

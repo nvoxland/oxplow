@@ -38,10 +38,10 @@ describe("refFromHref", () => {
   test("maps typed hrefs to canonical refs", () => {
     expect(refFromHref("file:src/app.rs")).toEqual({ kind: "file", id: "src/app.rs" });
     expect(refFromHref("dir:src/components")).toEqual({
-      kind: "directory",
+      kind: "dir",
       id: "src/components",
     });
-    expect(refFromHref("gitcommit:abc1234")).toEqual({ kind: "git-commit", id: "abc1234" });
+    expect(refFromHref("commit:abc1234")).toEqual({ kind: "commit", id: "abc1234" });
   });
 
   test("returns null for external links and anchors", () => {
@@ -54,7 +54,7 @@ describe("refFromHref", () => {
 describe("refsInRange", () => {
   test("collects deduped typed refs from links inside the selection", () => {
     const el = frag(
-      'see <a href="file:src/app.rs">app</a> and <a href="file:src/app.rs">app again</a> and <a href="gitcommit:deadbee">that commit</a>',
+      'see <a href="file:src/app.rs">app</a> and <a href="file:src/app.rs">app again</a> and <a href="commit:deadbee">that commit</a>',
     );
     document.body.appendChild(el);
     const range = document.createRange();
@@ -62,7 +62,7 @@ describe("refsInRange", () => {
     const refs = refsInRange(range);
     expect(refs).toEqual([
       { kind: "file", id: "src/app.rs" },
-      { kind: "git-commit", id: "deadbee" },
+      { kind: "commit", id: "deadbee" },
     ]);
     el.remove();
   });

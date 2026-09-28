@@ -152,34 +152,34 @@ test("preprocessWikilinks: nested-looking brackets do not match", () => {
     .toBe("[[ ]]");
 });
 
-test("preprocessWikilinks: bare 7-char hex resolves to a git-commit link", () => {
+test("preprocessWikilinks: bare 7-char hex resolves to a commit link", () => {
   // The display text shrinks to the canonical short SHA so a 40-char raw
   // target doesn't blow up inline prose.
   expect(preprocessWikilinks("introduced in [[abc1234]]"))
-    .toBe("introduced in [abc1234](gitcommit:abc1234)");
+    .toBe("introduced in [abc1234](commit:abc1234)");
 });
 
 test("preprocessWikilinks: full 40-char SHA renders short display, full target", () => {
   const sha = "0123456789abcdef0123456789abcdef01234567";
   expect(preprocessWikilinks(`see [[${sha}]]`))
-    .toBe(`see [0123456](gitcommit:${sha})`);
+    .toBe(`see [0123456](commit:${sha})`);
 });
 
 test("preprocessWikilinks: explicit git: prefix", () => {
   expect(preprocessWikilinks("[[git:deadbeef]]"))
-    .toBe("[deadbee](gitcommit:deadbeef)");
+    .toBe("[deadbee](commit:deadbeef)");
 });
 
 test("preprocessWikilinks: |display label overrides short-sha shrinking", () => {
   expect(preprocessWikilinks("[[abc1234|the migration commit]]"))
-    .toBe("[the migration commit](gitcommit:abc1234)");
+    .toBe("[the migration commit](commit:abc1234)");
 });
 
 test("preprocessWikilinks: SHA detection is case-insensitive and normalizes to lowercase", () => {
   // Display text + href both normalize to lowercase so two notes spelling
   // the same sha differently render identically and hit the same tab.
   expect(preprocessWikilinks("[[ABC1234]]"))
-    .toBe("[abc1234](gitcommit:abc1234)");
+    .toBe("[abc1234](commit:abc1234)");
 });
 
 test("preprocessWikilinks: 6-char hex is too short to be a SHA — treated as slug", () => {
@@ -192,12 +192,12 @@ test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
     .toBe("[abc-1234](abc-1234)");
 });
 
-test("parseMarkdownLink: gitcommit: scheme", () => {
-  expect(parseMarkdownLink("gitcommit:abc1234")).toEqual({ kind: "git-commit", sha: "abc1234" });
+test("parseMarkdownLink: commit: scheme", () => {
+  expect(parseMarkdownLink("commit:abc1234")).toEqual({ kind: "commit", sha: "abc1234" });
 });
 
-test("parseMarkdownLink: gitcommit: with empty target", () => {
-  expect(parseMarkdownLink("gitcommit:")).toEqual({ kind: "empty" });
+test("parseMarkdownLink: commit: with empty target", () => {
+  expect(parseMarkdownLink("commit:")).toEqual({ kind: "empty" });
 });
 
 test("parseMarkdownLink: dir: scheme strips trailing slash", () => {
@@ -246,12 +246,12 @@ test("postprocessWikilinks: dir link", () => {
 });
 
 test("postprocessWikilinks: gitcommit link with short-sha label drops the label", () => {
-  expect(postprocessWikilinks("see [abc1234](gitcommit:abc1234deadbeef) here"))
+  expect(postprocessWikilinks("see [abc1234](commit:abc1234deadbeef) here"))
     .toBe("see [[git:abc1234deadbeef]] here");
 });
 
 test("postprocessWikilinks: gitcommit link with custom label preserves it", () => {
-  expect(postprocessWikilinks("see [the fix](gitcommit:abc1234deadbeef) here"))
+  expect(postprocessWikilinks("see [the fix](commit:abc1234deadbeef) here"))
     .toBe("see [[git:abc1234deadbeef|the fix]] here");
 });
 
@@ -307,18 +307,18 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
   }
 });
 
-// Task wikilinks: `[[tsk<id>]]` → `task:` scheme; the renderer swaps the
+// Task wikilinks: `[[tsk<id>]]` → the canonical `work_item:oxplow:<id>` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-test("preprocessWikilinks: task ref [[tsk42]] rewrites to task: href", () => {
+test("preprocessWikilinks: task ref [[tsk42]] rewrites to a work_item href", () => {
   expect(preprocessWikilinks("see [[tsk42]] for context"))
-    .toBe("see [tsk42](task:tsk42) for context");
+    .toBe("see [tsk42](work_item:oxplow:tsk42) for context");
 });
 
 test("preprocessWikilinks: task ref with custom display label", () => {
   expect(preprocessWikilinks("[[tsk42|fix the parser]]"))
-    .toBe("[fix the parser](task:tsk42)");
+    .toBe("[fix the parser](work_item:oxplow:tsk42)");
 });
 
 test("preprocessWikilinks: non-numeric tsk token is treated as a wiki slug", () => {
@@ -326,21 +326,21 @@ test("preprocessWikilinks: non-numeric tsk token is treated as a wiki slug", () 
   expect(preprocessWikilinks("[[tsk-notes]]")).toBe("[tsk-notes](tsk-notes)");
 });
 
-test("parseMarkdownLink: task: scheme", () => {
-  expect(parseMarkdownLink("task:tsk42")).toEqual({ kind: "task", id: "tsk42" });
+test("parseMarkdownLink: work_item: scheme", () => {
+  expect(parseMarkdownLink("work_item:oxplow:tsk42")).toEqual({ kind: "work_item", id: "tsk42" });
 });
 
-test("parseMarkdownLink: task: with empty target", () => {
-  expect(parseMarkdownLink("task:")).toEqual({ kind: "empty" });
+test("parseMarkdownLink: work_item: with empty target", () => {
+  expect(parseMarkdownLink("work_item:")).toEqual({ kind: "empty" });
 });
 
 test("postprocessWikilinks: task link with matching label collapses to bare wikilink", () => {
-  expect(postprocessWikilinks("see [tsk42](task:tsk42) here"))
+  expect(postprocessWikilinks("see [tsk42](work_item:oxplow:tsk42) here"))
     .toBe("see [[tsk42]] here");
 });
 
 test("postprocessWikilinks: task link with distinct label preserves the label", () => {
-  expect(postprocessWikilinks("see [fix the parser](task:tsk42) here"))
+  expect(postprocessWikilinks("see [fix the parser](work_item:oxplow:tsk42) here"))
     .toBe("see [[tsk42|fix the parser]] here");
 });
 
@@ -390,7 +390,7 @@ test("linkTarget: a wiki link targets its page", () => {
 });
 
 test("linkTarget: a task link targets its task", () => {
-  expect(linkTarget({ kind: "task", id: "tsk42" })).toEqual(taskRef("tsk42"));
+  expect(linkTarget({ kind: "work_item", id: "tsk42" })).toEqual(taskRef("tsk42"));
 });
 
 test("linkTarget: a directory link targets its directory", () => {
@@ -400,7 +400,7 @@ test("linkTarget: a directory link targets its directory", () => {
 });
 
 test("linkTarget: a commit link targets its commit", () => {
-  expect(linkTarget({ kind: "git-commit", sha: "abc123" })).toEqual(gitCommitRef("abc123"));
+  expect(linkTarget({ kind: "commit", sha: "abc123" })).toEqual(gitCommitRef("abc123"));
 });
 
 // A bare file wikilink means "the working tree"; one that pinned a

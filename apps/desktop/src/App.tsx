@@ -1917,14 +1917,14 @@ export function App() {
       }
       case "wiki":
       case "wiki-freshness":
-      case "directory":
-      case "task":
+      case "dir":
+      case "work_item":
       case "dashboard":
       case "settings":
       case "local-history":
       case "git-history":
       case "git-dashboard":
-      case "git-commit":
+      case "commit":
       case "diff-view":
       case "uncommitted-changes":
       case "hook-events":
@@ -1943,7 +1943,7 @@ export function App() {
       case "closed-threads":
       case "external-url":
       case "metrics-recorded":
-      case "metric-detail":
+      case "metric":
       case "custom-dashboard":
       case "dashboards":
       case "lens":
@@ -2743,7 +2743,7 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "git-commit") {
+      } else if (ref.kind === "commit") {
         const sha = (ref.payload as { sha?: string } | null)?.sha ?? "";
         tabs.push({
           id: ref.id,
@@ -2851,7 +2851,7 @@ export function App() {
           closable: true,
           render: () => <MetricsPage onOpenPage={navOpen} />,
         });
-      } else if (ref.kind === "metric-detail") {
+      } else if (ref.kind === "metric") {
         const p = (ref.payload ?? null) as { metricKey?: string } | null;
         tabs.push({
           id: ref.id,
@@ -3015,7 +3015,7 @@ export function App() {
           closable: true,
           render: () => <WikiFreshnessPage slug={slug} onOpenPage={navOpen} />,
         });
-      } else if (ref.kind === "directory") {
+      } else if (ref.kind === "dir") {
         const dirPath = (ref.payload as { path?: string } | null)?.path ?? "";
         const dirNavOpen = (newRef: TabRef) => handleNavigateInTab(ref.id, newRef);
         tabs.push({
@@ -3030,7 +3030,7 @@ export function App() {
             />
           ),
         });
-      } else if (ref.kind === "task") {
+      } else if (ref.kind === "work_item") {
         const itemId = (ref.payload as { itemId?: string } | null)?.itemId ?? "";
         // ThreadWorkState splits items by status (Ready→items, InProgress→inProgress,
         // Done/Canceled/Archived→done, Blocked→waiting, Epics→epics). Merge them all

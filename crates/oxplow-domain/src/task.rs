@@ -126,8 +126,9 @@ pub struct TaskNote {
 pub struct TaskImpact {
     /// Page kind being impacted — `wiki | task | file | directory
     /// | git_commit | finding`. Stored snake-case on the wire,
-    /// normalized to the unified `page_ref` kinds at projection
-    /// time (`git_commit` → `git-commit`, etc.).
+    /// normalized to the canonical `page_ref` kinds at projection
+    /// time (`git_commit` → `commit`, `directory` → `dir`, `task` →
+    /// `work_item`; see `normalize_impact_kind`).
     pub kind: String,
     /// Canonical id for that page kind (slug, integer string, repo
     /// path, sha — see `page_ref_projections` docs).

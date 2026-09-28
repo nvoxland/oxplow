@@ -11,14 +11,11 @@ import {
 } from "./pageRefs.js";
 
 describe("canonicalIdForTarget", () => {
-  test("taskRef returns the integer id as a string", () => {
-    // Regression: taskRef stores itemId as a number, but Tauri
-    // commands take String — without the stringify, IPC throws and
-    // the Outbound dropdown on a task page silently renders empty.
-    const ref = taskRef("42");
-    const id = canonicalIdForTarget(ref);
-    expect(id).toBe("42");
-    expect(typeof id).toBe("string");
+  test("taskRef returns the work_item id the page_ref graph stores", () => {
+    // page_ref rows are a canonical ref's (kind, id): a task is
+    // `work_item` / `oxplow:tsk42` (.context/refs.md).
+    const ref = taskRef("tsk42");
+    expect(canonicalIdForTarget(ref)).toBe("oxplow:tsk42");
   });
 
   test("wikiPageRef returns slug", () => {

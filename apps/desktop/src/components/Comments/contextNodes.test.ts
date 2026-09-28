@@ -31,12 +31,12 @@ describe("collectContextChain", () => {
   test("collects nested context nodes innermost→outermost", () => {
     const inner = nest([
       ["git-dashboard", "git-dashboard"],
-      ["git-commit", "abc1234"],
+      ["commit", "abc1234"],
       ["file", "src/app.rs"],
     ]);
     expect(collectContextChain(inner)).toEqual([
       { kind: "file", id: "src/app.rs" },
-      { kind: "git-commit", id: "abc1234" },
+      { kind: "commit", id: "abc1234" },
       { kind: "git-dashboard", id: "git-dashboard" },
     ]);
   });
@@ -56,25 +56,25 @@ describe("collectContextChain", () => {
   test("collapses adjacent duplicate declarations", () => {
     // Same (kind,id) on a wrapper and its child collapses to one entry…
     const inner = nest([
-      ["git-commit", "abc"],
+      ["commit", "abc"],
       ["file", "x.rs"],
       ["file", "x.rs"],
     ]);
     expect(collectContextChain(inner)).toEqual([
       { kind: "file", id: "x.rs" },
-      { kind: "git-commit", id: "abc" },
+      { kind: "commit", id: "abc" },
     ]);
   });
 
   test("does NOT collapse a duplicate that reappears non-adjacently", () => {
     const inner = nest([
       ["file", "x.rs"],
-      ["git-commit", "abc"],
+      ["commit", "abc"],
       ["file", "x.rs"],
     ]);
     expect(collectContextChain(inner)).toEqual([
       { kind: "file", id: "x.rs" },
-      { kind: "git-commit", id: "abc" },
+      { kind: "commit", id: "abc" },
       { kind: "file", id: "x.rs" },
     ]);
   });
@@ -97,7 +97,7 @@ describe("collectContextChain", () => {
 
 describe("nearestContextNode", () => {
   test("is the innermost context node", () => {
-    const inner = nest([["git-commit", "abc"], ["file", "x.rs"]]);
+    const inner = nest([["commit", "abc"], ["file", "x.rs"]]);
     expect(nearestContextNode(inner)).toEqual({ kind: "file", id: "x.rs" });
   });
 

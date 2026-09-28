@@ -892,8 +892,8 @@ function EpicInlineRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.id}`}
-      data-ref-kind="task"
-      data-ref-id={String(item.id)}
+      data-ref-kind="work_item"
+      data-ref-id={`oxplow:${item.id}`}
     >
       <InlineStatusPicker status={item.status} onChange={(status) => { void onUpdateTask(item.id, { status }); }} locked={locked} />
       <span
@@ -1159,8 +1159,8 @@ function InlineItemRow({
       title={locked ? `${item.title} (in progress — pinned in place)` : item.title}
       data-key={rowKey}
       data-testid={`tasks-row-${item.id}`}
-      data-ref-kind="task"
-      data-ref-id={String(item.id)}
+      data-ref-kind="work_item"
+      data-ref-id={`oxplow:${item.id}`}
     >
       <InlineStatusPicker
         status={item.status}

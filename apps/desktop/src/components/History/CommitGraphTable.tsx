@@ -267,7 +267,7 @@ function CommitRow({
       onClick={onClick}
       data-testid="commit-graph-row"
       data-sha={row.commit.sha}
-      data-ref-kind="git-commit"
+      data-ref-kind="commit"
       data-ref-id={row.commit.sha}
       style={{
         display: "flex",
