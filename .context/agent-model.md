@@ -327,13 +327,13 @@ to `runtime.handleHookEnvelope`, which:
 3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
    below). The runtime no longer tracks per-turn rows; snapshots and
    per-effort attribution are anchored to `task_effort`.
-4. For `PreToolUse`: returns a deny response if `buildWriteGuardResponse`
-   blocks the tool (read-only thread; see Write guard below) or if
-   `buildFilingEnforcementPreToolDeny` blocks it (Edit / Write /
+4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
+   policy" below). The write guard runs first (read-only thread; see
+   Write guard below), then filing enforcement (Edit / Write /
    MultiEdit / NotebookEdit on a writer thread without an in_progress
-   item; see `crates/oxplow-runtime/src/filing.rs`). Both guards bail to
-   `None` for any tool outside the four worktree-mutating edits, so
-   `pre_tool_check` short-circuits via `pre_tool_check_applies(tool_name)`
+   item). A deny is rendered as Claude's `hookSpecificOutput`.
+   `claude_intent(body)` returns `None` for any tool outside the four
+   worktree-mutating edits, so `pre_tool_check` short-circuits
    *before* any DB read or git-state stat — the common case (Read / Grep
    / Bash / mcp / Task / …) does zero work here. Persistence is
    unaffected: the event is still ingested in `handle_hook_inner`
@@ -372,13 +372,42 @@ a snapshot flush) can never stall the agent. Availability over
 enforcement: the MCP tools re-check write-guard + filing at the call
 site, so a timed-out PreToolUse deny is still caught there.
 
+## Agent policy (shared by every transport, tsk333)
+
+The write guard, filing enforcement and the Stop directive are one
+policy that every agent transport asks, not logic in the hook route.
+
+- **Pure rules** live in `crates/oxplow-runtime/src/policy.rs`.
+  `decide_tool(ToolIntent{label, kind, paths}, PolicyFacts)` returns
+  `Allow`, or `Deny { layer: WriteGuard | Filing, reason }`.
+  - An absolute path outside the project is always allowed.
+  - With several paths, the first refused path wins.
+  - The reason text comes from the same cores the Claude builders use
+    (`write_guard::read_only_reason`, `filing::filing_reason`), so the
+    wording can't drift.
+- **I/O and state** live in `crates/oxplow-app/src/agent_policy.rs`,
+  exposed as `Services.agent_policy`:
+  - `check_tool(svc, thread, intent)` gathers the thread, the stream's
+    `in_progress` claim and git state.
+  - `on_turn_end(svc, thread, signals)` is the Stop pipeline below. It
+    owns `StopState`, the reason builders and `describe_run`.
+  - `claude_intent(body)` maps a Claude-shaped payload to an intent.
+- **Transports only render the answer.**
+  - The hook route renders `hookSpecificOutput` for a deny and
+    `{decision:"block", reason}` for Stop.
+  - An ACP agent gets an automatic permission reject or an fs error,
+    and its directive is shown to the human.
+- **Byte-for-byte pins.** `crates/oxplow-control-plane/tests/hook_goldens.rs`
+  pins the Claude responses byte for byte (`UPDATE_GOLDENS=1` rewrites
+  them; a changed golden is a changed agent contract).
+
 ## Stop-hook pipeline
 
-The decision logic lives in `decideStopDirective` (a pure function in
-`crates/oxplow-runtime/src/stop_hook.rs`). The runtime's
-`computeStopDirective(threadId)` builds a `ThreadSnapshot` from the
-live stores, calls the pure function, then applies any returned side
-effects (currently only `record-audit-signature`). Keeping the decision
+The decision logic lives in `decide_stop_directive` (a pure function in
+`crates/oxplow-runtime/src/stop_hook.rs`). `AgentPolicy::on_turn_end`
+(`crates/oxplow-app/src/agent_policy.rs`) builds a `ThreadSnapshot` from
+the live stores, calls the pure function, then applies any returned side
+effects (the audit signature, the filed-but-didn't-ship flag). Keeping the decision
 separate from the side effects lets every branch be unit-tested with a
 fixture.
 
@@ -1253,9 +1282,10 @@ Non-writer threads share the writer's worktree (same checkout, separate
 agent panes). Letting their agents write would corrupt the writer's
 in-progress changes.
 
-- **Hook enforcement.** `buildWriteGuardResponse`
-  (`crates/oxplow-runtime/src/write_guard.rs`) returns a `PreToolUse` deny for `Write`,
-  `Edit`, `MultiEdit`, `NotebookEdit` from any non-`active` thread. When
+- **Hook enforcement.** The shared agent policy (above) denies `Write`,
+  `Edit`, `MultiEdit`, `NotebookEdit` (and, for ACP agents, delete/move)
+  from any non-`active` thread; the reason comes from
+  `write_guard::read_only_reason` (`crates/oxplow-runtime/src/write_guard.rs`). When
   the tool's target path resolves OUTSIDE the project root AND outside
   the project's `.oxplow/`, the call is allowed (e.g. writing to
   `~/.claude/plans/foo.md`); the deny message names the specific

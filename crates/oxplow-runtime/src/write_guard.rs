@@ -5,7 +5,7 @@
 //! not the stream's writer and the tool would mutate the shared
 //! worktree.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use serde::Serialize;
@@ -75,60 +75,72 @@ pub fn build_write_guard_response(
         return None;
     }
 
-    if let (Some(project_dir), Some(tool_input)) = (context.project_dir, context.tool_input) {
-        if let Some(abs) = extract_abs_target_path(tool_input, project_dir) {
-            let oxplow_dir = project_dir.join(".oxplow");
-            let notes_dir = oxplow_dir.join("wiki");
-            let inside_project = is_inside(&abs, project_dir);
-            let inside_oxplow = is_inside(&abs, &oxplow_dir);
-            let inside_notes = is_inside(&abs, &notes_dir);
-            if inside_notes {
-                return None;
-            }
-            if !inside_project && !inside_oxplow {
-                return None;
-            }
-            return Some(WriteGuardDeny {
-                hook_specific_output: HookSpecificOutput {
-                    hook_event_name: "PreToolUse",
-                    permission_decision: "deny",
-                    permission_decision_reason: format!(
-                        "path `{}` is inside the shared worktree and this thread is read-only — \
-                         only the stream's writer thread may mutate the worktree. \
-                         Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
-                         Promote this thread to writer from the thread rail if you need to edit.",
-                        abs.display()
-                    ),
-                },
-            });
-        }
-    }
-
-    Some(WriteGuardDeny {
+    let raw = context.tool_input.and_then(raw_target_path);
+    // Without a project dir the path can't be placed: the generic reason.
+    let raw = if context.project_dir.is_some() {
+        raw
+    } else {
+        None
+    };
+    read_only_reason(thread, raw, context.project_dir).map(|reason| WriteGuardDeny {
         hook_specific_output: HookSpecificOutput {
             hook_event_name: "PreToolUse",
             permission_decision: "deny",
-            permission_decision_reason:
-                "This thread is read-only — only the stream's writer thread may mutate the worktree. \
-                 Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
-                 Promote this thread to writer from the thread rail if you need to edit."
-                    .into(),
+            permission_decision_reason: reason,
         },
     })
 }
 
-fn extract_abs_target_path(tool_input: &Value, project_dir: &Path) -> Option<PathBuf> {
-    let raw = tool_input
+/// The write guard's reason, if `thread` may not write `raw_path` (absolute
+/// or project-relative; `None` when the call names no path). The core
+/// shared by the Claude hook response and [`crate::policy::decide_tool`].
+/// `None` for a writer thread, a `.oxplow/wiki/` path, or a path outside
+/// both the project and `.oxplow/`.
+pub fn read_only_reason(
+    thread: &Thread,
+    raw_path: Option<&str>,
+    project_dir: Option<&Path>,
+) -> Option<String> {
+    if thread.status.is_writer() {
+        return None;
+    }
+    if let (Some(project_dir), Some(raw)) = (project_dir, raw_path) {
+        let path = Path::new(raw);
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            project_dir.join(path)
+        };
+        let oxplow_dir = project_dir.join(".oxplow");
+        let notes_dir = oxplow_dir.join("wiki");
+        let inside_project = is_inside(&abs, project_dir);
+        let inside_oxplow = is_inside(&abs, &oxplow_dir);
+        if is_inside(&abs, &notes_dir) || (!inside_project && !inside_oxplow) {
+            return None;
+        }
+        return Some(format!(
+            "path `{}` is inside the shared worktree and this thread is read-only — \
+             only the stream's writer thread may mutate the worktree. \
+             Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
+             Promote this thread to writer from the thread rail if you need to edit.",
+            abs.display()
+        ));
+    }
+    Some(
+        "This thread is read-only — only the stream's writer thread may mutate the worktree. \
+         Record the change as a note on the current task via mcp__oxplow tools (or stop this turn). \
+         Promote this thread to writer from the thread rail if you need to edit."
+            .into(),
+    )
+}
+
+/// The target path a Claude-shaped `tool_input` names.
+fn raw_target_path(tool_input: &Value) -> Option<&str> {
+    tool_input
         .get("file_path")
         .and_then(|v| v.as_str())
         .or_else(|| tool_input.get("notebook_path").and_then(|v| v.as_str()))
-        .or_else(|| tool_input.get("path").and_then(|v| v.as_str()))?;
-    let path = Path::new(raw);
-    Some(if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        project_dir.join(path)
-    })
+        .or_else(|| tool_input.get("path").and_then(|v| v.as_str()))
 }
 
 fn is_inside(path: &Path, root: &Path) -> bool {

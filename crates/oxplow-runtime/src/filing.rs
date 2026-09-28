@@ -55,31 +55,45 @@ pub fn build_filing_enforcement_pre_tool_deny(
     ctx: FilingEnforcementContext<'_>,
 ) -> Option<FilingEnforcementDeny> {
     let thread = ctx.thread?;
-    // Filing enforcement only applies to the writer (active) thread.
-    // Queued threads can't write at all (write-guard runs first);
-    // closed threads can't either.
-    if !thread.status.is_writer() {
-        return None;
-    }
     if !ALWAYS_WRITE_INTENT_TOOL_NAMES.contains(&ctx.tool_name) {
         return None;
     }
-    if ctx.has_in_progress_task {
-        return None;
-    }
-    if is_plan_mode_plan_file(ctx.file_path) {
-        return None;
-    }
-    if ctx.git_operation_in_progress {
-        return None;
-    }
-    Some(FilingEnforcementDeny {
+    filing_reason(
+        thread,
+        ctx.tool_name,
+        ctx.has_in_progress_task,
+        ctx.file_path,
+        ctx.git_operation_in_progress,
+    )
+    .map(|reason| FilingEnforcementDeny {
         hook_specific_output: super::write_guard::HookSpecificOutput {
             hook_event_name: "PreToolUse",
             permission_decision: "deny",
-            permission_decision_reason: build_filing_enforcement_pre_tool_reason(ctx.tool_name),
+            permission_decision_reason: reason,
         },
     })
+}
+
+/// Filing enforcement's reason, if the writer `thread` may not write
+/// `file_path` with the tool the agent calls `label` yet. The core shared
+/// by the Claude hook response and [`crate::policy::decide_tool`]. Only
+/// the writer is in scope (queued/closed threads can't write at all:
+/// the write guard runs first).
+pub fn filing_reason(
+    thread: &Thread,
+    label: &str,
+    has_in_progress_task: bool,
+    file_path: Option<&str>,
+    git_operation_in_progress: bool,
+) -> Option<String> {
+    if !thread.status.is_writer()
+        || has_in_progress_task
+        || is_plan_mode_plan_file(file_path)
+        || git_operation_in_progress
+    {
+        return None;
+    }
+    Some(build_filing_enforcement_pre_tool_reason(label))
 }
 
 pub fn build_filing_enforcement_pre_tool_reason(tool_name: &str) -> String {

@@ -40,14 +40,8 @@ use tracing::{info, warn};
 use oxplow_app::{
     build_session_context_block_with_role, role_change_banner, HookEnvelope, RoleMode, Services,
 };
-use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore};
-use oxplow_domain::{HookKind, StreamId, TaskStatus, Thread, ThreadId};
-use oxplow_runtime::filing::{build_filing_enforcement_pre_tool_deny, FilingEnforcementContext};
-use oxplow_runtime::stop_hook::{
-    decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopHookSideEffect,
-    ThreadSnapshot,
-};
-use oxplow_runtime::write_guard::{build_write_guard_response, WriteGuardContext};
+use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore};
+use oxplow_domain::{HookKind, StreamId, ThreadId};
 
 #[derive(Debug, Error)]
 pub enum ControlPlaneError {
@@ -87,21 +81,6 @@ impl ControlPlane {
     }
 }
 
-/// In-memory state the Stop pipeline needs across hook events. Lives
-/// here (not in `Services`) because main treated it as runtime-only
-/// state — losing it on a daemon restart is acceptable: the worst
-/// case is one duplicate audit nudge after restart.
-#[derive(Default)]
-struct StopState {
-    /// Last in-progress audit signature emitted per thread; used to
-    /// dedupe back-to-back audits when the in_progress set hasn't
-    /// changed.
-    last_audit_signature: HashMap<ThreadId, String>,
-    /// Threads where the runtime has already fired the
-    /// "filed-but-didn't-ship" advisory this turn.
-    filed_but_didnt_ship_fired: HashMap<ThreadId, bool>,
-}
-
 /// Captures the thread's writer/read-only role on the FIRST hook the
 /// runtime sees for a given agent session id, then reuses that
 /// snapshot as the comparison baseline for the ROLE CHANGE banner on
@@ -124,7 +103,6 @@ struct RoleState {
 struct AppCtx {
     services: Arc<Services>,
     hook_token: Arc<String>,
-    stop_state: Arc<Mutex<StopState>>,
     role_state: Arc<Mutex<RoleState>>,
     /// Last resume session_id the runtime believes is persisted per
     /// thread. The resume tracker fires on EVERY hook but the session
@@ -145,7 +123,6 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
     let ctx = AppCtx {
         services: services.clone(),
         hook_token: Arc::new(token.clone()),
-        stop_state: Arc::new(Mutex::new(StopState::default())),
         role_state: Arc::new(Mutex::new(RoleState::default())),
         resume_state: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -510,7 +487,7 @@ async fn handle_hook_inner(
     // Mine per-turn signals BEFORE ingest closes the open agent_turn
     // for Stop hooks. Cheap query (capped at 200 recent events) — only
     // runs for Stop, not on every hook.
-    let turn_signals: Option<TurnSignals> = if kind == HookKind::Stop {
+    let turn_signals: Option<oxplow_app::agent_policy::TurnSignals> = if kind == HookKind::Stop {
         if let Some(tid) = thread_id.as_ref() {
             mine_turn_signals(&ctx, tid).await
         } else {
@@ -764,138 +741,42 @@ fn hook_ack() -> Response {
     (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
-/// Whether `pre_tool_check` could possibly produce a deny for this tool.
-/// Both guards bail to `None` for any tool outside the worktree-mutating
-/// set: write_guard checks `WORKTREE_MUTATING_TOOLS`, filing checks
-/// `ALWAYS_WRITE_INTENT_TOOL_NAMES` — identical sets. So for everything
-/// else (Read / Grep / Bash / mcp / Task / WebFetch / …) the full check
-/// is provably a no-op, and the runtime can skip the thread + task-list
-/// DB reads and the git-state stat syscalls entirely. Kept as a pure fn
-/// so the equivalence is unit-testable against the canonical lists.
-fn pre_tool_check_applies(tool_name: &str) -> bool {
-    use oxplow_runtime::filing::ALWAYS_WRITE_INTENT_TOOL_NAMES;
-    use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
-    WORKTREE_MUTATING_TOOLS.contains(&tool_name)
-        || ALWAYS_WRITE_INTENT_TOOL_NAMES.contains(&tool_name)
-}
-
-/// Run write_guard then filing_enforcement against the PreToolUse
-/// payload. Returns the first deny body that fires, or None to allow.
+/// Run the shared agent policy (write guard, then filing) against the
+/// PreToolUse payload and render a deny as Claude's `hookSpecificOutput`.
+/// `None` allows. Tools neither rule can refuse skip the policy's I/O
+/// (`claude_intent` returns `None` for them).
 async fn pre_tool_check(
     ctx: &AppCtx,
     thread_id: Option<&ThreadId>,
     body: Option<&serde_json::Value>,
 ) -> Option<serde_json::Value> {
-    let thread_id = thread_id?;
-    let body = body?;
-    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    // Fast path: neither guard can ever deny a tool that isn't a
-    // worktree-mutating edit, so skip the DB reads + git-state stats for
-    // the common case (Read / Grep / Bash / mcp / Task / …). Persistence
-    // is unaffected — `handle_hook_inner` ingests the event regardless of
-    // what this returns. See `pre_tool_check_applies`.
-    if !pre_tool_check_applies(tool_name) {
-        return None;
-    }
-    let tool_input = body.get("tool_input");
-
-    let thread = ctx
+    use oxplow_runtime::policy::{PolicyDecision, ToolIntent};
+    use oxplow_runtime::write_guard::{HookSpecificOutput, WriteGuardDeny};
+    let intent = oxplow_app::agent_policy::claude_intent(body?)?;
+    let decision = ctx
         .services
-        .thread_store
-        .get(thread_id)
-        .await
-        .ok()
-        .flatten()?;
-
-    let project_dir = ctx.services.layout.project_dir.as_path();
-
-    let file_path = tool_input
-        .and_then(|t| {
-            t.get("file_path")
-                .or_else(|| t.get("notebook_path"))
-                .or_else(|| t.get("path"))
+        .agent_policy
+        .check_tool(
+            &ctx.services,
+            thread_id?,
+            &ToolIntent {
+                label: &intent.label,
+                kind: intent.kind,
+                paths: &intent.paths,
+            },
+        )
+        .await;
+    match decision {
+        PolicyDecision::Allow => None,
+        PolicyDecision::Deny { reason, .. } => serde_json::to_value(WriteGuardDeny {
+            hook_specific_output: HookSpecificOutput {
+                hook_event_name: "PreToolUse",
+                permission_decision: "deny",
+                permission_decision_reason: reason,
+            },
         })
-        .and_then(|v| v.as_str());
-
-    // Out-of-worktree edits are none of oxplow's concern: an absolute path
-    // outside the project root can't be a project file, can't be claimed by an
-    // effort, and can't be in any effort's changed set. Allow cleanly BEFORE
-    // either guard so editing e.g. the Claude Code plan file under `~/.claude/`
-    // never trips the write-guard (read-only thread) or filing enforcement, and
-    // never surfaces a non-blocking hook error (tsk212). (PostToolUse's
-    // auto-claim already no-ops out-of-worktree via `effort_claim_path_from_edit`.)
-    if edit_path_outside_worktree(file_path, project_dir) {
-        return None;
+        .ok(),
     }
-
-    // Layer 1: write_guard for read-only threads.
-    if let Some(deny) = build_write_guard_response(
-        Some(&thread),
-        tool_name,
-        WriteGuardContext {
-            project_dir: Some(project_dir),
-            tool_input,
-        },
-    ) {
-        return serde_json::to_value(deny).ok();
-    }
-
-    // Layer 2: filing_enforcement for the writer thread.
-    let has_in_progress_task = stream_has_in_progress_claim(ctx, &thread).await;
-
-    let git_operation_in_progress = git_operation_in_progress(project_dir);
-
-    if let Some(deny) = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
-        thread: Some(&thread),
-        tool_name,
-        has_in_progress_task,
-        file_path,
-        git_operation_in_progress,
-    }) {
-        return serde_json::to_value(deny).ok();
-    }
-
-    None
-}
-
-/// Whether the stream's active writer has a claimed (`in_progress`) task
-/// that satisfies filing enforcement.
-///
-/// Scoped to the whole STREAM, not just the literal thread the task was
-/// filed on (tsk133). A stream has exactly one active writer (enforced by
-/// the `idx_threads_one_active_per_stream` unique index + the write
-/// guard), so any `in_progress` task on *any* thread in that stream is a
-/// legitimate claim for the writer. This is what makes cross-thread
-/// dispatch work: a task filed on a sibling thread and routed to the
-/// stream's writer no longer needs a manual `move_task` first. The core
-/// invariant is untouched — queued/closed threads still can't write
-/// (the write guard runs first); only which thread's `in_progress` row
-/// counts as the writer's claim changes.
-async fn stream_has_in_progress_claim(ctx: &AppCtx, thread: &Thread) -> bool {
-    let threads = match ctx
-        .services
-        .thread_store
-        .list_for_stream(&thread.stream_id)
-        .await
-    {
-        Ok(threads) => threads,
-        // On a lookup failure, fall back to the literal thread so the
-        // guard still works for the common (same-thread) case.
-        Err(_) => vec![thread.clone()],
-    };
-    for t in &threads {
-        let claimed = ctx
-            .services
-            .task_store
-            .list_for_thread(&t.id)
-            .await
-            .map(|items| items.iter().any(|i| i.status == TaskStatus::InProgress))
-            .unwrap_or(false);
-        if claimed {
-            return true;
-        }
-    }
-    false
 }
 
 /// When a PostToolUse hook reports an Edit/Write/MultiEdit/NotebookEdit
@@ -991,20 +872,6 @@ async fn record_tool_call(ctx: &AppCtx, thread_id: &ThreadId, payload_json: &str
     };
     if let Err(err) = ctx.services.tool_call_store.record(call).await {
         warn!(?err, "tool-call record failed");
-    }
-}
-
-/// True when a structured-edit `file_path` is an **absolute path outside** the
-/// project worktree — none of oxplow's concern, so both PreToolUse guards
-/// short-circuit to a clean allow (tsk212). Relative paths (resolved against
-/// the worktree) and `None` fall through to the normal guards.
-fn edit_path_outside_worktree(file_path: Option<&str>, project_dir: &Path) -> bool {
-    match file_path {
-        Some(p) => {
-            let path = Path::new(p);
-            path.is_absolute() && !path.starts_with(project_dir)
-        }
-        None => false,
     }
 }
 
@@ -1166,54 +1033,10 @@ async fn clear_resume_on_session_end(
     }
 }
 
-/// Returns true when the worktree is mid git merge / rebase /
-/// cherry-pick / revert. Filing enforcement exempts edits in these
-/// states because conflict resolution can't dead-lock against the
-/// filing rule. Mirrors `src/electron/filing-enforcement.ts`.
-fn git_operation_in_progress(project_dir: &Path) -> bool {
-    let gitdir = project_dir.join(".git");
-    for marker in [
-        "MERGE_HEAD",
-        "REBASE_HEAD",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-    ] {
-        if gitdir.join(marker).exists() {
-            return true;
-        }
-    }
-    // Worktrees: .git is a file pointing at the real gitdir.
-    if let Ok(contents) = std::fs::read_to_string(&gitdir) {
-        if let Some(real_dir) = contents.strip_prefix("gitdir: ") {
-            let real = Path::new(real_dir.trim());
-            for marker in [
-                "MERGE_HEAD",
-                "REBASE_HEAD",
-                "CHERRY_PICK_HEAD",
-                "REVERT_HEAD",
-            ] {
-                if real.join(marker).exists() {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Per-turn signals reconstructed from the hook_event_store between
-/// the open agent_turn's started_at and now. Powers the Stop
-/// pipeline's Q&A-turn carve-out and the writes-vs-no-writes branch
-/// of the filed-but-didn't-ship advisory.
-#[derive(Debug, Clone, Default)]
-struct TurnSignals {
-    /// At least one PreToolUse / PostToolUse fired since the turn opened.
-    had_activity: bool,
-    /// At least one Edit/Write/MultiEdit/NotebookEdit fired since the turn opened.
-    had_writes: bool,
-}
-
-async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSignals> {
+async fn mine_turn_signals(
+    ctx: &AppCtx,
+    thread_id: &ThreadId,
+) -> Option<oxplow_app::agent_policy::TurnSignals> {
     let open = ctx
         .services
         .agent_turn_store
@@ -1227,7 +1050,7 @@ async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSig
         .list_recent(Some(thread_id), 200)
         .await
         .ok()?;
-    let mut signals = TurnSignals::default();
+    let mut signals = oxplow_app::agent_policy::TurnSignals::default();
     for evt in events {
         if evt.received_at < started_at {
             continue;
@@ -1247,356 +1070,19 @@ async fn mine_turn_signals(ctx: &AppCtx, thread_id: &ThreadId) -> Option<TurnSig
     Some(signals)
 }
 
-/// Build a Stop directive for the writer thread. Pulls the current
-/// in_progress set, runs `decide_stop_directive` with the in-memory
-/// audit-signature dedup, and persists the side effects back to
-/// `StopState`.
+/// The shared policy's end-of-turn directive, rendered as Claude's Stop
+/// `{decision: "block", reason}`.
 async fn stop_directive(
     ctx: &AppCtx,
     thread_id: Option<&ThreadId>,
-    turn_signals: Option<&TurnSignals>,
+    turn_signals: Option<&oxplow_app::agent_policy::TurnSignals>,
 ) -> Option<serde_json::Value> {
-    use oxplow_db::TaskEffortStore as _;
-    let thread_id = thread_id?;
-    let thread = ctx
+    let directive = ctx
         .services
-        .thread_store
-        .get(thread_id)
-        .await
-        .ok()
-        .flatten()?;
-
-    let tasks = ctx
-        .services
-        .task_store
-        .list_for_thread(thread_id)
-        .await
-        .ok()
-        .unwrap_or_default();
-
-    let last_signature = ctx
-        .stop_state
-        .lock()
-        .last_audit_signature
-        .get(thread_id)
-        .cloned();
-    let filed_but_didnt_ship_fired = ctx
-        .stop_state
-        .lock()
-        .filed_but_didnt_ship_fired
-        .get(thread_id)
-        .copied()
-        .unwrap_or(false);
-
-    // Drain any pending effort review ids the MCP `complete_task`
-    // handler stashed for this thread. For each, recompute the
-    // review against the live `task_effort_file` rows so an agent
-    // that already amended doesn't get a stale prompt. Drop the ones
-    // that no longer carry a discrepancy. Title resolution joins
-    // each effort's task title for the directive text.
-    let pending_ids = ctx
-        .services
-        .thread_runtime
-        .take_pending_effort_reviews(thread_id);
-    let mut pending_reviews: Vec<PendingEffortReview> = Vec::new();
-    if !pending_ids.is_empty() {
-        let titles_by_id: std::collections::HashMap<i64, String> = tasks
-            .iter()
-            .map(|t| (t.id.value(), t.title.clone()))
-            .collect();
-        for eid in pending_ids {
-            // Two reconcilable kinds share this surface: files (recomputed
-            // against live `task_effort_file` rows) and test runs (the
-            // `effort_attribution` ledger's unattributed residue). An effort
-            // is worth surfacing if EITHER still carries something to triage.
-            let file_review = oxplow_app::task_service::recompute_effort_file_review(
-                &ctx.services.effort_store,
-                &ctx.services.snapshot_store,
-                &eid,
-            )
-            .await;
-            let unattributed_refs = ctx
-                .services
-                .attribution_store
-                .list_refs(&eid, "run", oxplow_db::STATE_UNATTRIBUTED)
-                .await
-                .unwrap_or_default();
-            if file_review.is_none() && unattributed_refs.is_empty() {
-                continue;
-            }
-            // Enrich each bare `run:<id>` ref into a human descriptor the agent
-            // can actually recognize ("run:47 — cargo test (419 passed, 0
-            // failed) @ 10:03") — the ref stays at the front so `claim_runs`
-            // still parses it (tsk266).
-            let mut unattributed_runs = Vec::with_capacity(unattributed_refs.len());
-            for r in &unattributed_refs {
-                unattributed_runs.push(describe_run(&ctx.services.fact_store, r).await);
-            }
-            // task_id/title come from the file review when present; otherwise
-            // resolve from the effort (run-only residue, no file discrepancy).
-            let task_id = match file_review.as_ref() {
-                Some(r) => r.task_id,
-                None => ctx
-                    .services
-                    .effort_store
-                    .get_effort(&eid)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|e| e.task_id.value())
-                    .unwrap_or(0),
-            };
-            let title = titles_by_id
-                .get(&task_id)
-                .cloned()
-                .unwrap_or_else(|| format!("task {task_id}"));
-            pending_reviews.push(PendingEffortReview {
-                effort_id: file_review
-                    .as_ref()
-                    .map(|r| r.effort_id.clone())
-                    .unwrap_or_else(|| eid.value().to_string()),
-                task_id,
-                task_title: title,
-                claimed_but_not_changed: file_review
-                    .as_ref()
-                    .map(|r| r.claimed_but_not_changed.clone())
-                    .unwrap_or_default(),
-                changed_but_not_claimed: file_review
-                    .as_ref()
-                    .map(|r| r.changed_but_not_claimed.clone())
-                    .unwrap_or_default(),
-                unclaimed_overflow: file_review.as_ref().and_then(|r| r.unclaimed_overflow),
-                unattributed_runs,
-            });
-        }
-    }
-
-    let snapshot = ThreadSnapshot {
-        thread: Some(&thread),
-        tasks: &tasks,
-        last_in_progress_audit_signature: last_signature.as_deref(),
-        // Mined from hook_event_store between this turn's started_at
-        // and now. Letting the Q&A-turn carve-out fire silences the
-        // audit nudge on read-only / one-off question turns where
-        // there's no work to claim.
-        turn_had_activity: turn_signals.map(|s| s.had_activity),
-        turn_had_writes: turn_signals.map(|s| s.had_writes).unwrap_or(false),
-        // Not yet wired (default false ⇒ branches stay silent rather
-        // than emit wrong directives):
-        // - subagent_in_flight: would need PreToolUse(Task) /
-        //   SubagentStop correlation
-        // - turn_had_filing / turn_filed_ready_item: would need MCP
-        //   call attribution back to this thread/turn
-        // - awaiting_user: only set when await_user MCP tool fires,
-        //   which is tracked via agent_status_store but not surfaced
-        //   here yet
-        subagent_in_flight: false,
-        awaiting_user: false,
-        turn_had_filing: false,
-        turn_filed_ready_item: false,
-        filed_but_didnt_ship_fired,
-        pending_effort_reviews: &pending_reviews,
-    };
-
-    let outcome = decide_stop_directive(
-        snapshot,
-        DirectiveBuilders {
-            build_in_progress_audit_reason: Some(&build_in_progress_audit_reason),
-            build_filed_but_didnt_ship_reason: Some(&build_filed_but_didnt_ship_reason),
-            build_stale_epic_children_reason: None,
-            build_effort_file_review_reason: Some(&build_effort_file_review_reason),
-        },
-    );
-
-    // Apply side effects to the in-memory state.
-    {
-        let mut st = ctx.stop_state.lock();
-        for eff in &outcome.side_effects {
-            match eff {
-                StopHookSideEffect::RecordAuditSignature(sig) => {
-                    st.last_audit_signature.insert(*thread_id, sig.clone());
-                }
-                StopHookSideEffect::RecordFiledButDidntShipFired => {
-                    st.filed_but_didnt_ship_fired.insert(*thread_id, true);
-                }
-            }
-        }
-    }
-
-    outcome.directive.and_then(|d| serde_json::to_value(d).ok())
-}
-
-fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
-    let titles: Vec<String> = items
-        .iter()
-        .map(|i| format!("  • [{}] {}", i.id.value(), i.title))
-        .collect();
-    format!(
-        "AUDIT: this turn is closing with {} task(s) still `in_progress`:\n{}\n\n\
-         Before stopping, walk each one:\n\
-         - Done? → `mcp__oxplow__complete_task` with `touchedFiles`.\n\
-         - Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n\
-         - Waiting on the user? → `mcp__oxplow__await_user`.\n\n\
-         An `in_progress` row with finished work parked in it looks stuck to the user.",
-        items.len(),
-        titles.join("\n")
-    )
-}
-
-/// Compose the human descriptor for a run from its already-fetched parts. Pure
-/// so it's unit-testable; [`describe_run`] does the I/O and calls this (tsk266).
-/// The `run:<id>` ref leads so `claim_runs`/`disclaim_runs` can still parse it.
-fn format_run_descriptor(
-    run_ref: &str,
-    summary: Option<&str>,
-    time_hm: Option<(u8, u8)>,
-) -> String {
-    let mut out = run_ref.to_string();
-    if let Some(s) = summary.map(str::trim).filter(|s| !s.is_empty()) {
-        out.push_str(&format!(" — {s}"));
-    }
-    if let Some((h, m)) = time_hm {
-        out.push_str(&format!(" @ {h:02}:{m:02}"));
-    }
-    out
-}
-
-/// Render the kind-specific middle of a run descriptor from its `*-detail`
-/// finding payload — tests show command + pass/fail, coverage shows the diff %,
-/// analysis shows the analyzer + error/warning counts (tsk269). Pure for testing.
-fn run_summary_from_detail(detail_kind: &str, payload: &serde_json::Value) -> Option<String> {
-    let counts = |parts: &[(&str, &str)]| -> String {
-        let joined: Vec<String> = parts
-            .iter()
-            .filter_map(|(key, label)| {
-                payload
-                    .get(*key)
-                    .and_then(serde_json::Value::as_i64)
-                    .map(|n| format!("{n} {label}"))
-            })
-            .collect();
-        if joined.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", joined.join(", "))
-        }
-    };
-    let str_field = |key: &str| payload.get(key).and_then(|v| v.as_str());
-    match detail_kind {
-        "test-detail" => {
-            let cmd = str_field("command").unwrap_or("test run").trim();
-            Some(format!(
-                "{cmd}{}",
-                counts(&[("passed", "passed"), ("failed", "failed")])
-            ))
-        }
-        "coverage-detail" => Some(
-            match payload
-                .get("summaryPct")
-                .and_then(serde_json::Value::as_f64)
-            {
-                Some(pct) => format!("coverage ({pct:.0}% of changed lines)"),
-                None => "coverage report".to_string(),
-            },
-        ),
-        "analysis-detail" => {
-            let who = str_field("analyzer")
-                .or_else(|| str_field("command"))
-                .unwrap_or("analysis")
-                .trim();
-            Some(format!(
-                "{who}{}",
-                counts(&[("errorCount", "errors"), ("warningCount", "warnings")])
-            ))
-        }
-        _ => None,
-    }
-}
-
-/// Turn a bare `run:<id>` ledger ref into a descriptor by joining the
-/// `metric_run` row (timestamp) + its `*-detail` finding (test/coverage/analysis)
-/// from the substrate. Dispatches on the finding kind so a coverage/analysis run
-/// renders as such, not a malformed test run (tsk266/tsk269). Falls back to the
-/// bare ref when the run can't be looked up — never blocks the review.
-async fn describe_run(facts: &oxplow_db::SqliteFactStore, run_ref: &str) -> String {
-    let Some(id) = run_ref
-        .strip_prefix("run:")
-        .and_then(|s| s.parse::<i64>().ok())
-    else {
-        return run_ref.to_string();
-    };
-    // The capture IS the run (T-E1, tsk48): the verbatim payload rides in its
-    // `detail_json` envelope `{"kind": …, "payload": …}`.
-    let capture = facts.get_capture(id).await.ok().flatten();
-    let summary = capture.as_ref().and_then(|c| {
-        let envelope = serde_json::from_str::<serde_json::Value>(c.detail_json.as_deref()?).ok()?;
-        run_summary_from_detail(envelope["kind"].as_str()?, envelope.get("payload")?)
-    });
-    let time_hm = capture
-        .as_ref()
-        .map(|c| (c.captured_at.0.hour(), c.captured_at.0.minute()));
-    format_run_descriptor(run_ref, summary.as_deref(), time_hm)
-}
-
-fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
-    let mut out = String::from(
-        "EFFORT REVIEW: one or more efforts you just closed have a discrepancy between \
-         what you declared and what oxplow observed — in the files you touched and/or \
-         the test/coverage/analysis runs that happened during your effort. For each:\n\n",
-    );
-    for r in reviews {
-        out.push_str(&format!(
-            "  • [{}] {} (effort {})\n",
-            r.task_id, r.task_title, r.effort_id
-        ));
-        if !r.claimed_but_not_changed.is_empty() {
-            out.push_str("      You claimed these files but the worktree didn't change:\n");
-            for p in &r.claimed_but_not_changed {
-                out.push_str(&format!("        - {p}\n"));
-            }
-        }
-        if !r.changed_but_not_claimed.is_empty() {
-            out.push_str(
-                "      These files changed during your effort but you didn't list them:\n",
-            );
-            for p in &r.changed_but_not_claimed {
-                out.push_str(&format!("        - {p}\n"));
-            }
-        }
-        if let Some(total) = r.unclaimed_overflow {
-            out.push_str(&format!(
-                "      ({total} files changed during your effort that you didn't claim — \
-                 too many to triage; skipping. Likely from another effort, formatter, \
-                 or external activity.)\n"
-            ));
-        }
-        if !r.unattributed_runs.is_empty() {
-            out.push_str(
-                "      These test/coverage/analysis runs happened during your effort but \
-                 weren't attributed to you (a concurrent effort was open, so oxplow couldn't \
-                 auto-assign them):\n",
-            );
-            for run in &r.unattributed_runs {
-                out.push_str(&format!("        - {run}\n"));
-            }
-        }
-    }
-    out.push_str(
-        "\nIf any are wrong, call `mcp__oxplow__amend_effort(effort_id, add_files, \
-         remove_files, claim_runs, disclaim_runs)` to correct — `claim_runs` for runs \
-         that were yours, `disclaim_runs` for ones that weren't. If your original \
-         declaration was right (you reverted an edit, or another actor/effort produced \
-         those changes/runs), no amend is needed — silent agreement is fine and the \
-         prompt won't repeat.",
-    );
-    out
-}
-
-fn build_filed_but_didnt_ship_reason() -> String {
-    "FILED BUT DIDN'T SHIP: you filed a `ready` task this turn but didn't open one as `in_progress` and didn't make any code edits. \
-     If you meant to start the work, mark one in_progress and re-issue the edit. \
-     If you meant to queue it for later, reply with that intent and the next turn picks it up."
-        .into()
+        .agent_policy
+        .on_turn_end(&ctx.services, thread_id?, turn_signals)
+        .await?;
+    serde_json::to_value(directive).ok()
 }
 
 /// Look up (or capture, if first time we see this session) the role
@@ -1771,222 +1257,6 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{
-        AgentKind, Stream, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, ThreadStatus,
-        Timestamp,
-    };
-
-    #[test]
-    fn format_run_descriptor_renders_summary_and_time() {
-        // tsk266: the agent gets a recognizable line, not an opaque id.
-        assert_eq!(
-            format_run_descriptor(
-                "run:47",
-                Some("cargo test (419 passed, 0 failed)"),
-                Some((10, 3))
-            ),
-            "run:47 — cargo test (419 passed, 0 failed) @ 10:03"
-        );
-        // Every piece is optional; the ref always leads so claim_runs can parse it.
-        assert_eq!(format_run_descriptor("run:9", None, None), "run:9");
-        assert_eq!(format_run_descriptor("run:9", Some("   "), None), "run:9");
-    }
-
-    #[test]
-    fn run_summary_dispatches_per_detail_kind() {
-        // tsk269: a coverage/analysis run renders as such, not a malformed test.
-        let test = serde_json::json!({"command": "cargo test", "passed": 419, "failed": 0});
-        assert_eq!(
-            run_summary_from_detail("test-detail", &test).as_deref(),
-            Some("cargo test (419 passed, 0 failed)")
-        );
-        let cov = serde_json::json!({"summaryPct": 83.4});
-        assert_eq!(
-            run_summary_from_detail("coverage-detail", &cov).as_deref(),
-            Some("coverage (83% of changed lines)")
-        );
-        let analysis =
-            serde_json::json!({"analyzer": "clippy", "errorCount": 0, "warningCount": 2});
-        assert_eq!(
-            run_summary_from_detail("analysis-detail", &analysis).as_deref(),
-            Some("clippy (0 errors, 2 warnings)")
-        );
-        assert_eq!(run_summary_from_detail("other", &test), None);
-    }
-
-    /// Build an `AppCtx` over an in-memory DB for filing-claim tests.
-    /// The session layer refuses non-git dirs, so init a repo first.
-    fn test_ctx() -> (AppCtx, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| {
-            let ok = std::process::Command::new("git")
-                .args(args)
-                .current_dir(dir.path())
-                .status()
-                .unwrap()
-                .success();
-            assert!(ok, "git {args:?} failed");
-        };
-        git(&["init", "-q"]);
-        git(&["config", "user.name", "test"]);
-        git(&["config", "user.email", "test@example.com"]);
-        git(&["commit", "-q", "--allow-empty", "-m", "init"]);
-        let services = Arc::new(Services::in_memory(dir.path()).unwrap());
-        let ctx = AppCtx {
-            services,
-            hook_token: Arc::new("t".into()),
-            stop_state: Arc::new(Mutex::new(StopState::default())),
-            role_state: Arc::new(Mutex::new(RoleState::default())),
-            resume_state: Arc::new(Mutex::new(HashMap::new())),
-        };
-        (ctx, dir)
-    }
-
-    fn test_stream() -> Stream {
-        Stream {
-            id: StreamId::placeholder(),
-            kind: StreamKind::Worktree,
-            title: "feat".into(),
-            branch: "feat".into(),
-            branch_ref: "refs/heads/feat".into(),
-            branch_source: "main".into(),
-            worktree_path: "/repo/wt".into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            custom_prompt: None,
-            created_at: Timestamp::from_unix_ms(1),
-            updated_at: Timestamp::from_unix_ms(1),
-            archived_at: None,
-        }
-    }
-
-    fn test_thread(stream_id: StreamId, status: ThreadStatus) -> Thread {
-        Thread {
-            id: ThreadId::placeholder(),
-            stream_id,
-            title: "thread".into(),
-            status,
-            sort_index: 0,
-            pane_target: "working".into(),
-            agent: AgentKind::Claude,
-            resume_session_id: String::new(),
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: Timestamp::now(),
-            updated_at: Timestamp::now(),
-            archived_at: None,
-        }
-    }
-
-    fn in_progress_task(thread_id: ThreadId) -> Task {
-        Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(thread_id),
-            parent_id: None,
-            title: "work".into(),
-            description: String::new(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: Timestamp::now(),
-            updated_at: Timestamp::now(),
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: None,
-        }
-    }
-
-    /// The primary stream and its seeded active (writer) thread, which
-    /// `Services::in_memory` creates via `ensure_primary` at boot.
-    async fn primary_writer(ctx: &AppCtx) -> (Stream, Thread) {
-        let stream = ctx.services.stream_store.primary().await.unwrap().unwrap();
-        let writer = ctx
-            .services
-            .thread_store
-            .list_for_stream(&stream.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|t| t.status == ThreadStatus::Active)
-            .expect("primary stream has a seeded active writer thread");
-        (stream, writer)
-    }
-
-    #[tokio::test]
-    async fn claim_filed_on_sibling_thread_satisfies_writer() {
-        // tsk133: a task filed on a sibling thread A (queued) but
-        // dispatched to the stream's active writer thread B must satisfy
-        // filing enforcement for B — no manual move_task required.
-        // Cross-thread dispatch within a stream just works because a
-        // stream has exactly one active writer.
-        let (ctx, _dir) = test_ctx();
-        let (stream, writer_b) = primary_writer(&ctx).await;
-        // Sibling queued thread A in the same stream.
-        let sibling_a_id = ctx
-            .services
-            .thread_store
-            .upsert(&test_thread(stream.id, ThreadStatus::Queued))
-            .await
-            .unwrap();
-        // The in_progress claim lives on the SIBLING thread A, not B.
-        ctx.services
-            .task_store
-            .insert(&in_progress_task(sibling_a_id))
-            .await
-            .unwrap();
-
-        assert!(
-            stream_has_in_progress_claim(&ctx, &writer_b).await,
-            "an in_progress task on a sibling thread in the same stream must \
-             satisfy the writer's filing guard"
-        );
-    }
-
-    #[tokio::test]
-    async fn claim_in_another_stream_does_not_satisfy() {
-        // Scoping is per-stream, not global: an in_progress task in a
-        // DIFFERENT stream must NOT unblock this stream's writer.
-        let (ctx, _dir) = test_ctx();
-        let (_stream, writer) = primary_writer(&ctx).await;
-        let other_stream_id = ctx
-            .services
-            .stream_store
-            .upsert(&test_stream())
-            .await
-            .unwrap();
-        let other_thread_id = ctx
-            .services
-            .thread_store
-            .upsert(&test_thread(other_stream_id, ThreadStatus::Active))
-            .await
-            .unwrap();
-        ctx.services
-            .task_store
-            .insert(&in_progress_task(other_thread_id))
-            .await
-            .unwrap();
-
-        assert!(
-            !stream_has_in_progress_claim(&ctx, &writer).await,
-            "an in_progress task in another stream must not satisfy this writer"
-        );
-    }
-
-    #[tokio::test]
-    async fn no_claim_anywhere_does_not_satisfy() {
-        let (ctx, _dir) = test_ctx();
-        let (_stream, writer) = primary_writer(&ctx).await;
-        assert!(
-            !stream_has_in_progress_claim(&ctx, &writer).await,
-            "no in_progress task anywhere → guard not satisfied"
-        );
-    }
 
     #[tokio::test]
     async fn bounded_hook_response_passes_through_fast_futures() {
@@ -2058,26 +1328,6 @@ mod tests {
     }
 
     #[test]
-    fn out_of_worktree_edit_short_circuits_guards() {
-        let wt = Path::new("/Users/x/proj");
-        // Absolute path outside the worktree (e.g. the Claude Code plan file)
-        // → short-circuit (true).
-        assert!(edit_path_outside_worktree(
-            Some("/Users/x/.claude/plans/p.md"),
-            wt
-        ));
-        // In-worktree absolute → guards still apply (false).
-        assert!(!edit_path_outside_worktree(
-            Some("/Users/x/proj/src/a.rs"),
-            wt
-        ));
-        // Relative path → falls through to the guards (false).
-        assert!(!edit_path_outside_worktree(Some("src/a.rs"), wt));
-        // No path → falls through (false).
-        assert!(!edit_path_outside_worktree(None, wt));
-    }
-
-    #[test]
     fn parse_hook_kind_known() {
         assert!(matches!(
             parse_hook_kind("PreToolUse"),
@@ -2090,60 +1340,6 @@ mod tests {
     fn parse_hook_kind_unknown_returns_none() {
         assert!(parse_hook_kind("SessionStart").is_none());
         assert!(parse_hook_kind("garbage").is_none());
-    }
-
-    #[test]
-    fn git_op_in_progress_detects_merge_head() {
-        use std::fs;
-        let tmp = tempfile::TempDir::new().unwrap();
-        fs::create_dir_all(tmp.path().join(".git")).unwrap();
-        assert!(!git_operation_in_progress(tmp.path()));
-        fs::write(tmp.path().join(".git/MERGE_HEAD"), b"deadbeef\n").unwrap();
-        assert!(git_operation_in_progress(tmp.path()));
-    }
-
-    #[test]
-    fn git_op_in_progress_detects_each_marker() {
-        use std::fs;
-        for marker in ["REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
-            let tmp = tempfile::TempDir::new().unwrap();
-            fs::create_dir_all(tmp.path().join(".git")).unwrap();
-            assert!(!git_operation_in_progress(tmp.path()));
-            fs::write(tmp.path().join(".git").join(marker), b"deadbeef\n").unwrap();
-            assert!(
-                git_operation_in_progress(tmp.path()),
-                "expected {marker} to count"
-            );
-        }
-    }
-
-    #[test]
-    fn git_op_in_progress_follows_worktree_gitdir_pointer() {
-        // In a secondary worktree, `.git` is a *file* pointing at the
-        // real gitdir. The function must follow that pointer so a
-        // mid-merge worktree still trips the carve-out.
-        use std::fs;
-        let tmp = tempfile::TempDir::new().unwrap();
-        let real_gitdir = tmp.path().join("real-gitdir");
-        let worktree = tmp.path().join("worktree");
-        fs::create_dir_all(&real_gitdir).unwrap();
-        fs::create_dir_all(&worktree).unwrap();
-        fs::write(
-            worktree.join(".git"),
-            format!("gitdir: {}\n", real_gitdir.display()),
-        )
-        .unwrap();
-        assert!(!git_operation_in_progress(&worktree));
-        fs::write(real_gitdir.join("MERGE_HEAD"), b"x\n").unwrap();
-        assert!(git_operation_in_progress(&worktree));
-    }
-
-    #[test]
-    fn git_op_in_progress_no_dot_git_returns_false() {
-        // Bare directory with no .git at all — function must not
-        // panic and must report no-op.
-        let tmp = tempfile::TempDir::new().unwrap();
-        assert!(!git_operation_in_progress(tmp.path()));
     }
 
     #[test]
@@ -2284,46 +1480,6 @@ mod tests {
         assert!(!resume_cache_allows_skip(Some("s0"), "s1"));
         // Degenerate empty cached value never matches a real id.
         assert!(!resume_cache_allows_skip(Some(""), "s1"));
-    }
-
-    #[test]
-    fn pre_tool_check_applies_only_to_worktree_mutating_tools() {
-        // The four structured-edit tools are the only ones either guard
-        // can deny — pre_tool_check must run for them.
-        for t in ["Write", "Edit", "MultiEdit", "NotebookEdit"] {
-            assert!(pre_tool_check_applies(t), "{t} must run the full check");
-        }
-        // Everything else short-circuits: both guards provably return None,
-        // so the DB reads + git stats are skipped.
-        for t in [
-            "Read",
-            "Grep",
-            "Glob",
-            "Bash",
-            "Task",
-            "WebFetch",
-            "WebSearch",
-            "TodoWrite",
-            "mcp__oxplow__create_task",
-            "",
-        ] {
-            assert!(!pre_tool_check_applies(t), "{t} must short-circuit");
-        }
-    }
-
-    #[test]
-    fn pre_tool_check_gate_matches_canonical_guard_lists() {
-        // Equivalence guard: the gate must admit exactly the union of the
-        // two guards' tool sets, so narrowing the gate can never silently
-        // drop a tool a guard would have denied.
-        use oxplow_runtime::filing::ALWAYS_WRITE_INTENT_TOOL_NAMES;
-        use oxplow_runtime::write_guard::WORKTREE_MUTATING_TOOLS;
-        for t in WORKTREE_MUTATING_TOOLS
-            .iter()
-            .chain(ALWAYS_WRITE_INTENT_TOOL_NAMES.iter())
-        {
-            assert!(pre_tool_check_applies(t), "gate must admit guarded {t}");
-        }
     }
 
     #[test]

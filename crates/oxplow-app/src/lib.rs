@@ -11,6 +11,7 @@ pub mod advisories;
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_path;
+pub mod agent_policy;
 pub mod agent_prompt;
 pub mod agent_stall_watch;
 pub mod agent_status_derive;
@@ -473,6 +474,9 @@ pub struct Services {
     pub agent_panes: agent_pane::AgentPaneService,
     pub blobs: blob_store::BlobStore,
     pub lsp_sessions: lsp_sessions::LspSessionManager,
+    /// Write guard, filing and the Stop directive, shared by every agent
+    /// transport (the hook route, ACP).
+    pub agent_policy: Arc<agent_policy::AgentPolicy>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -779,6 +783,7 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
+            agent_policy: Arc::new(agent_policy::AgentPolicy::default()),
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,

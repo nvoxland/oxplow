@@ -9,6 +9,7 @@
 //! the `oxplow-app` layer.
 
 pub mod filing;
+pub mod policy;
 pub mod stop_hook;
 pub mod write_guard;
 
@@ -16,6 +17,10 @@ pub use filing::{
     build_filing_enforcement_pre_tool_deny, build_filing_enforcement_pre_tool_reason,
     is_plan_mode_plan_file, FilingEnforcementContext, FilingEnforcementDeny,
     ALWAYS_WRITE_INTENT_TOOL_NAMES,
+};
+pub use policy::{
+    decide_tool, path_outside_worktree, DenyLayer, IntentKind, PolicyDecision, PolicyFacts,
+    ToolIntent,
 };
 pub use stop_hook::{
     compute_audit_signature, decide_stop_directive, find_stale_epic_children_pairs,
