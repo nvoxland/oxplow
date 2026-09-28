@@ -158,6 +158,7 @@ pub enum Command {
 struct Pending {
     reply: PermissionReply,
     item_id: u64,
+    tool_call_id: String,
     options: Vec<PermissionOption>,
 }
 
@@ -175,8 +176,11 @@ pub(super) struct Actor {
     turn: Option<String>,
     pending: HashMap<String, Pending>,
     next_request: u64,
-    /// Tool calls that went through a permission request.
-    asked: HashSet<String>,
+    /// Tool calls a person allowed (their writes are theirs to make).
+    allowed: HashSet<String>,
+    /// Tool calls the policy or a person rejected (or cancelled): if one
+    /// completes anyway, the agent ignored the answer.
+    rejected: HashSet<String>,
     /// Tool calls already recorded as finished.
     recorded: HashSet<String>,
     /// Paths written through `fs/write_text_file` this turn.
@@ -208,7 +212,8 @@ impl Actor {
             turn: None,
             pending: HashMap::new(),
             next_request: 0,
-            asked: HashSet::new(),
+            allowed: HashSet::new(),
+            rejected: HashSet::new(),
             recorded: HashSet::new(),
             fs_written: HashSet::new(),
             nudges: Vec::new(),
@@ -440,6 +445,14 @@ impl Actor {
             None => PermissionAnswer::Cancelled,
         };
         p.reply.answer(&answer);
+        let allows = matches!(&answer, PermissionAnswer::Selected { option_id }
+            if p.options.iter().any(|o| &o.id == option_id
+                && matches!(o.kind, PermissionKind::AllowOnce | PermissionKind::AllowAlways)));
+        if allows {
+            self.allowed.insert(p.tool_call_id.clone());
+        } else {
+            self.rejected.insert(p.tool_call_id.clone());
+        }
         self.mark_answered(p.item_id, answer);
         if self.pending.is_empty() {
             self.host.awaiting_user(self.thread(), None).await;
@@ -468,6 +481,7 @@ impl Actor {
     fn cancel_pending(&mut self) {
         for (_, p) in self.pending.drain().collect::<Vec<_>>() {
             p.reply.answer(&PermissionAnswer::Cancelled);
+            self.rejected.insert(p.tool_call_id.clone());
             self.mark_answered(p.item_id, PermissionAnswer::Cancelled);
         }
     }
@@ -493,7 +507,6 @@ impl Actor {
                     .tool(&tool_id)
                     .cloned()
                     .unwrap_or_else(|| ToolCall::from_patch(&ask.tool));
-                self.asked.insert(tool_id.clone());
                 let intent = mapping::intent_for(&tool);
                 let payload = self.payload(&tool, &intent);
                 match self
@@ -513,6 +526,7 @@ impl Actor {
                             None => PermissionAnswer::Cancelled,
                         };
                         reply.answer(&answer);
+                        self.rejected.insert(tool_id.clone());
                         self.push(ItemBody::PolicyDenied {
                             tool_call_id: tool_id,
                             label: intent.label,
@@ -535,7 +549,7 @@ impl Actor {
                         };
                         let item = self.push(ItemBody::Permission {
                             request_id: request_id.clone(),
-                            tool_call_id: tool_id,
+                            tool_call_id: tool_id.clone(),
                             title: title.clone(),
                             options: options.clone(),
                             answer: None,
@@ -545,6 +559,7 @@ impl Actor {
                             Pending {
                                 reply,
                                 item_id: item.id,
+                                tool_call_id: tool_id,
                                 options,
                             },
                         );
@@ -704,12 +719,24 @@ impl Actor {
         {
             return;
         }
-        // A write that finished without asking and without going through
-        // fs/write_text_file slipped past the gate: say so if the policy
-        // would have refused it.
+        // A write that finished after being rejected ignored the answer.
         if mapping::is_write(tool.kind)
             && tool.status == ToolStatus::Completed
-            && !self.asked.contains(&id)
+            && self.rejected.contains(&id)
+        {
+            let intent = mapping::intent_for(&tool);
+            self.push(ItemBody::Bypass {
+                tool_call_id: id.clone(),
+                label: intent.label,
+                reason: "it completed after being rejected; the agent ignored the answer".into(),
+            });
+        }
+        // A write that finished without anyone allowing it and without going
+        // through fs/write_text_file slipped past the gate: say so if the
+        // policy would have refused it.
+        else if mapping::is_write(tool.kind)
+            && tool.status == ToolStatus::Completed
+            && !self.allowed.contains(&id)
         {
             let intent = mapping::intent_for(&tool);
             let root = oxplow_runtime::policy::normalize_path(&self.spec.cwd, &self.spec.cwd);

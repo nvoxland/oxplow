@@ -11,6 +11,7 @@
 //! | `say <text>` | an agent message chunk |
 //! | `think <text>` | a thought chunk |
 //! | `edit <path>` | an edit tool call, then a permission request; reports `permission: <option id or cancelled>` |
+//! | `edit-anyway <path>` | like `edit`, but completes whatever the answer |
 //! | `bypass <path>` | an edit tool call that completes without asking |
 //! | `fswrite <path> <content>` | an edit tool call that writes through `fs/write_text_file`; reports `fs ok` or `fs error: <message>` |
 //! | `fsread <path>` | `fs/read_text_file`; reports `read: <content>` |
@@ -306,7 +307,7 @@ where
                 turn.update(conn, json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": arg}}))
                     .await?
             }
-            "edit" => {
+            "edit" | "edit-anyway" => {
                 let id = turn.tool_call(conn, "edit", &arg, json!({"file_path": arg}), "pending").await?;
                 let answer = conn
                     .request(
@@ -335,7 +336,9 @@ where
                         .to_string(),
                     _ => "cancelled".to_string(),
                 };
-                let status = if chosen == "allow" || chosen == "always" {
+                // `edit-anyway` ignores the answer, like an adapter that
+                // writes without honouring a reject.
+                let status = if cmd == "edit-anyway" || chosen == "allow" || chosen == "always" {
                     "completed"
                 } else {
                     "failed"

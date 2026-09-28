@@ -495,7 +495,10 @@ the same JSON.
 **fs and bypass.**
 - `fs/write_text_file` is policy-checked. A deny returns a JSON-RPC error whose message is the reason, which does reach the model.
 - **Confinement (tsk351):** oxplow reads and writes files for an agent only inside the session's worktree. Paths are normalized first (`..`, symlinks); anything outside is refused, with the reason going back to the agent. Relative paths resolve against the cwd.
-- **Bypass detection:** a write-kind tool call that completes without a permission request, and without every path written through `fs/write_text_file`, is checked afterward. If the policy would deny it, a bypass banner item is shown. This is the only backstop for adapter modes that skip asking.
+- **Bypass detection (tsk362):**
+  - A write-kind tool call that completes after the policy or a person **rejected** (or cancelled) it gets a bypass banner: the agent ignored the answer.
+  - One that completes without anyone **allowing** it, and without every path written through `fs/write_text_file`, is checked afterward; if the policy would deny it, it gets a banner too.
+  - This is the only backstop for adapter modes that skip asking.
 
 **Turn end.**
 - Open cards are cancelled.

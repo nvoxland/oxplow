@@ -789,3 +789,66 @@ async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
     rig.mgr.cancel(&thread()).unwrap();
     rig.wait_status(AcpStatus::Idle).await;
 }
+
+#[tokio::test]
+async fn a_write_completed_after_a_reject_is_flagged() {
+    // Rejected by the policy.
+    let mut rig = open(Host {
+        deny_writes: Some("read-only".into()),
+        ..Default::default()
+    })
+    .await;
+    rig.turn("fake:edit-anyway /w/a.rs").await;
+    assert!(rig
+        .items()
+        .iter()
+        .any(|b| matches!(b, ItemBody::Bypass { .. })));
+
+    // Rejected by the person.
+    let mut rig = open(Host::default()).await;
+    rig.prompt("fake:edit-anyway /w/b.rs").await;
+    let AcpEventBody::Item { item } = rig
+        .wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+        .await
+    else {
+        unreachable!()
+    };
+    let ItemBody::Permission { request_id, .. } = item.body else {
+        unreachable!()
+    };
+    rig.mgr
+        .respond_permission(&thread(), request_id, Some("reject".into()))
+        .await
+        .unwrap();
+    rig.wait_status(AcpStatus::Idle).await;
+    let bypass = rig.items().into_iter().find_map(|b| match b {
+        ItemBody::Bypass { reason, .. } => Some(reason),
+        _ => None,
+    });
+    assert!(
+        bypass.is_some_and(|r| r.contains("rejected")),
+        "a reject was ignored"
+    );
+
+    // Allowed: no flag.
+    let mut rig = open(Host::default()).await;
+    rig.prompt("fake:edit /w/c.rs").await;
+    let AcpEventBody::Item { item } = rig
+        .wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+        .await
+    else {
+        unreachable!()
+    };
+    let ItemBody::Permission { request_id, .. } = item.body else {
+        unreachable!()
+    };
+    rig.mgr
+        .respond_permission(&thread(), request_id, Some("allow".into()))
+        .await
+        .unwrap();
+    rig.wait_status(AcpStatus::Idle).await;
+    assert!(!rig
+        .items()
+        .iter()
+        .any(|b| matches!(b, ItemBody::Bypass { .. })));
+}
