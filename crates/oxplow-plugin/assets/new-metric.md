@@ -28,19 +28,25 @@ metrics:
 
 ## 3. Otherwise define the trio (measure + gauge + metric)
 
-Fastest path — the **`scaffold_metric` MCP tool**: it writes the measure +
-gauge + metric trio into `.oxplow/project.yaml` (or the global config dir with
-`scope: "global"`) plus a starter gauge script, and returns the script path.
+Fastest path — the **`scaffold_metric` MCP tool**. It writes nothing: it
+returns a starter gauge script and the measure + gauge + metric trio as a
+`.oxplow/project.yaml` snippet, and **you write them** with your normal file
+tools, under your task like any other edit.
 
 ```
 scaffold_metric { key: "repo.todo_count", title: "TODO comments", language: "rust" }
-→ { "script_path": "oxplow/gauges/repo_todo_count.star" }
+→ { "scriptPath": "oxplow/gauges/repo_todo_count.star", "script": "…", "projectYaml": "measures: …" }
 ```
 
-The starter just counts TODO/FIXME per file — **open the returned script and
-edit it** to compute what the user actually asked for (it can call
-`files(glob)` / `ast_query(text, language, sexpr)` / `code_metrics(text,
-language)`). Then jump to **Verify**.
+1. Write `script` at `scriptPath`, changed to compute what the user
+   actually asked for (the starter just counts TODO/FIXME per file; it can
+   call `files(glob)` / `ast_query(text, language, sexpr)` /
+   `code_metrics(text, language)`).
+2. Merge `projectYaml` into `.oxplow/project.yaml`: append each entry to
+   the `measures:` / `gauges:` / `metrics:` list already there, or add the
+   list. The catalog reseeds when the file changes.
+
+Then jump to **Verify**.
 
 By hand instead, add the trio (namespaced — `oxplow.*` is reserved) + a gauge
 script under `oxplow/gauges/`:

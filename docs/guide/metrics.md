@@ -109,9 +109,10 @@ you want counted:
 > Track how many `unwrap()` calls are in the Rust crates, and set a
 > target of zero.
 
-The agent has a `scaffold_metric` MCP tool that writes the
-measure/gauge/metric trio plus the gauge script, then runs it to
-confirm it produces a number. The `/oxplow:new-metric` skill walks
+The agent has a `scaffold_metric` MCP tool that hands it a template
+for the measure/gauge/metric trio plus the gauge script. It writes
+them like any other edit (under a task, in its own worktree), then
+runs the metric to confirm it produces a number. The `/oxplow:new-metric` skill walks
 the same path with more structure.
 
 This is deliberate: a metric is a small program, and describing what

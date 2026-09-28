@@ -291,8 +291,6 @@ pub struct ScaffoldMetricParams {
     pub language: Option<String>,
     /// Snapshot glob the starter gauge sweeps (default `**/*`).
     pub glob: Option<String>,
-    /// `project` (default — this repo) or `global` (shared across your projects).
-    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -3389,12 +3387,14 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Scaffold a NEW custom metric. Writes a measure + gauge + metric trio into \
-            .oxplow/project.yaml (project scope) or the global config dir (global scope), plus a \
-            starter Starlark gauge script, then reseeds — and returns the script path. The starter \
-            gauge counts TODO/FIXME per file; EDIT the returned script to compute what you actually \
-            want (it can call files(glob) / ast_query(text, language, sexpr) / code_metrics(text, \
-            language)), then call `run_metric { key }` (or `rebuild_metrics`) to compute it. `key` \
+        description = "Template for a NEW custom metric; writes nothing. Returns `scriptPath` + \
+            `script` (a starter Starlark gauge that counts TODO/FIXME per file) and `projectYaml` \
+            (the measure + gauge + metric trio). Write the script at scriptPath and merge the \
+            entries into .oxplow/project.yaml (append to lists already there) with your own file \
+            tools, under your task like any edit; the catalog reseeds when the config changes. \
+            Adapt the script to compute what you actually want (it can call files(glob) / \
+            ast_query(text, language, sexpr) / code_metrics(text, language)), then call \
+            `run_metric { key }` (or `rebuild_metrics`) to compute it. `key` \
             must be namespaced (contain a `.`) and NOT under the reserved `oxplow.` prefix. Prefer \
             an existing built-in first — check `list_metric_definitions { scope: \"built-in\" }` \
             and just `use:` it if one already measures this."
@@ -3404,13 +3404,12 @@ impl OxplowMcp {
         params: Parameters<ScaffoldMetricParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let path = self
+        let scaffold = self
             .services
             .metrics
-            .scaffold_metric(&p.key, p.title, p.language, p.glob, p.scope)
-            .await
+            .metric_scaffold(&p.key, p.title, p.language, p.glob)
             .map_err(|e| McpError::invalid_params(e, None))?;
-        json_result(&serde_json::json!({ "key": p.key, "script_path": path }))
+        json_result(&scaffold)
     }
 
     #[tool(
@@ -5566,6 +5565,8 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    // A template: the agent writes it with its own tools (tsk391).
+    "scaffold_metric",
     "get_skill",
     "list_sources",
     "list_ai_roles",
@@ -5676,7 +5677,6 @@ const WRITE_TOOLS: &[&str] = &[
     "ingest_analysis",
     "record_test_run",
     "run_metric",
-    "scaffold_metric",
     "set_zones",
     "rebuild_metrics",
     "record_metric",
@@ -9031,46 +9031,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scaffold_metric_writes_the_trio_and_returns_the_script_path() {
-        let (project, services, server) = boot();
-        services.metrics.seed_catalog().await;
-
+    async fn scaffold_metric_returns_a_template_and_writes_nothing() {
+        let (project, _services, server) = boot();
         let out = server
             .scaffold_metric(Parameters(ScaffoldMetricParams {
                 key: "acme.todo_density".into(),
                 title: Some("TODO density".into()),
                 language: None,
                 glob: None,
-                scope: None,
             }))
             .await
             .unwrap();
-        // Returns the project-relative script path for the agent to edit.
-        let payload = text_payload(out);
-        assert!(
-            payload.contains("oxplow/gauges/acme_todo_density.star"),
-            "got:\n{payload}"
-        );
-
-        // The starter gauge script landed on disk...
-        assert!(
-            project
-                .path()
-                .join("oxplow/gauges/acme_todo_density.star")
-                .exists(),
-            "starter gauge script written"
-        );
-        // ...and the metric spec is seeded (the trio wired through seed_catalog),
-        // so the agent's follow-up run_metric / reads can find it.
-        assert!(
-            services
-                .fact_store
-                .get_spec("acme.todo_density")
-                .await
-                .unwrap()
-                .is_some(),
-            "scaffolded spec seeded"
-        );
+        let v: serde_json::Value = serde_json::from_str(&text_payload(out)).unwrap();
+        assert_eq!(v["scriptPath"], "oxplow/gauges/acme_todo_density.star");
+        assert!(v["script"].as_str().unwrap().contains("def transform"));
+        assert!(v["projectYaml"].as_str().unwrap().contains("gauges:"));
+        // tsk391: the agent writes these with its own tools.
+        assert!(!project.path().join("oxplow/gauges").exists());
     }
 
     #[tokio::test]
@@ -9082,7 +9059,6 @@ mod tests {
                 title: None,
                 language: None,
                 glob: None,
-                scope: None,
             }))
             .await;
         assert!(result.is_err(), "`oxplow.` is reserved for built-ins");

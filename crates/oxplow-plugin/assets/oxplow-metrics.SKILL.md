@@ -45,8 +45,10 @@ metrics:
 
 ## Step 2 — a new metric: declare the trio (measure + gauge + metric)
 
-The fastest path is the `scaffold_metric` MCP tool — it writes all three entries
-plus a starter gauge script, then reseeds. To do it by hand, add the trio:
+The fastest path is the `scaffold_metric` MCP tool. It writes nothing: it
+returns a starter gauge script (`scriptPath`, `script`) and the three entries
+(`projectYaml`); write the script and merge the entries into
+`.oxplow/project.yaml` with your own file tools. The trio looks like this:
 
 ```yaml
 measures:

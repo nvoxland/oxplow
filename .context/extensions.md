@@ -571,8 +571,10 @@ tool list stable no matter how many extensions are installed.
   `oxplow/extensions/<name>/` with their normal Edit tool, under the usual
   filing guard. The loader hot-reloads.
 - **No scaffold tools (decided).** A scaffold tool would write project
-  files outside the filing guard. The skill carries the templates
-  instead, and humans have Save as Lens in Explore Data.
+  files outside the filing guard (and the write guard, and the caller's
+  worktree). The skill carries the templates instead, and humans have
+  Save as Lens in Explore Data. The same rule holds for metrics:
+  `scaffold_metric` returns a template the agent writes itself (tsk391).
 - `validate_extension(name)` returns load errors, schema errors and a dry
   run of every lens query, so the agent can check its work without the UI.
 - `list_extensions`, `list_sources`, `run_source(extension, source_id)`

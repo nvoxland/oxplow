@@ -1665,21 +1665,21 @@ The mechanics behind those controls (unchanged by tsk117):
   in `.oxplow/project.yaml`. **Trigger is inherent to the definition** —
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
   entry can't override it (tsk290).
-- **`scaffold_metric` (MCP tool, tsk122)** scaffolds the **trio** (measure +
-  gauge + metric) at **project** or **global** scope: the agent calls it →
-  `MetricsService::scaffold_metric` writes a starter fact-emitting Starlark stub +
-  a `measures:` entry (`<key>.count`) + a `gauges:` entry (`<key>`) + a `metrics:`
-  spec (`<key>`, `sum` over the measure). *Project* writes the script under
-  `oxplow/gauges/<slug>.star` + the three entries in `.oxplow/project.yaml`,
-  returns the project-relative path, and the bar opens it in the editor.
-  *Global* writes the
-  script + three manifests under `<global_config_dir>/{gauges,measures,metrics}/`
-  (via `write_global_{gauges,measures,metrics}_file`) **and** adds a project `use:`
-  so the metric is active here (the global gauge + measure are active
-  automatically; a global metric is library content until a project opts in). The
-  runner resolves each gauge's `entryFile` against the right base dir
-  (`script_base_dir`: `<global>/gauges` for a global-scope gauge, else the project
-  dir).
+- **`scaffold_metric` (MCP tool, tsk122; a template since tsk391)** returns the
+  **trio** (measure + gauge + metric) and a starter fact-emitting Starlark stub,
+  and **writes nothing**: `MetricsService::metric_scaffold` → `MetricScaffold {
+  scriptPath: oxplow/gauges/<slug>.star, script, projectYaml }`, the entries a
+  `measures:` entry (`<key>.count`, per-path), a `gauges:` entry (`<key>`) and a
+  `metrics:` spec (`<key>`, `sum` over the measure), rendered by
+  `oxplow_config::entries_yaml`. The agent writes the script and merges the
+  snippet with its own Edit/Write tools, so the write guard, filing and its own
+  worktree apply; `ConfigChanged` reseeds. It used to write the files itself
+  (and had a `global` scope writing the global config dir), which let a
+  read-only thread change the repo and always wrote to the primary worktree.
+  Global metrics are authored by hand in the global config dir; the runner
+  resolves each gauge's `entryFile` against the right base dir
+  (`script_base_dir`: `<global>/gauges` for a global-scope gauge, else the
+  project dir).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
 effort review (`DiffViewPage`'s `effort-review` slot) shows the oxplow-analytics
@@ -1694,7 +1694,7 @@ in `commands/metrics.rs`, `ui`-scoped in surface-parity), backed by
 type — consumed by the Metric Detail Configure block and the Metrics rows.
 **`scaffold_metric` is no longer here** (tsk122): its UI button was retired, so
 it moved off the `ui` surface to an **agent-only MCP tool** (`agent(...)` in
-surface-parity; the handler in `oxplow-mcp` calls `MetricsService::scaffold_metric`
+surface-parity; the handler in `oxplow-mcp` calls `MetricsService::metric_scaffold`
 directly), and the Tauri/RPC `scaffold_metric` command was deleted.
 Token and page analytics are oxplow-analytics lenses (`usage`) over
 `v_token_usage` / `v_page_visit`; `page_visit`/`usage_event` are deliberately
@@ -1817,9 +1817,10 @@ The in-oxplow agent authors these on request via the **`oxplow-metrics`** skill
 materialized for Claude/Codex/opencode) — "make a metric that counts TODOs" →
 the measure+gauge+metric trio + script + verification, no oxplow-team involvement.
 The skill's fast path is the **`scaffold_metric` MCP tool** (tsk122) →
-`MetricsService::scaffold_metric`, which writes that trio (measure `<key>.count`,
-gauge `<key>`, metric `<key>`) + a starter fact-emitting gauge script the agent
-then edits; or the agent hand-authors the four blocks.
+`MetricsService::metric_scaffold`, which returns that trio (measure `<key>.count`,
+gauge `<key>`, metric `<key>`) + a starter fact-emitting gauge script as a
+template the agent writes and adapts with its own tools (tsk391); or the agent
+hand-authors the four blocks.
 
 ## Targets & feedback (advise-only, P5/tsk220)
 

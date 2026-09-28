@@ -1466,6 +1466,26 @@ pub fn write_global_dimensions_file(
     Ok(())
 }
 
+/// `measures:` / `gauges:` / `metrics:` entries as a `.oxplow/project.yaml`
+/// snippet (empty lists omitted), each entry minimal as the writer makes it.
+/// What a scaffold hands an agent to merge into the file itself (tsk391).
+pub fn entries_yaml(
+    measures: &[MeasureEntry],
+    gauges: &[GaugeEntry],
+    metrics: &[MetricEntry],
+) -> String {
+    let mut doc = serde_yaml::Mapping::new();
+    let mut put = |key: &str, seq: Vec<serde_yaml::Value>| {
+        if !seq.is_empty() {
+            doc.insert(key.into(), serde_yaml::Value::Sequence(seq));
+        }
+    };
+    put("measures", measures.iter().map(minimal_yaml).collect());
+    put("gauges", gauges.iter().map(minimal_yaml).collect());
+    put("metrics", metrics.iter().map(minimal_yaml).collect());
+    serde_yaml::to_string(&doc).unwrap_or_default()
+}
+
 /// One config entry as a minimal YAML mapping: its serde form (the very
 /// keys [`load_project_config`] reads) without unset values (null, empty
 /// lists and maps), so a hand-edited block stays minimal across UI-driven
@@ -3073,6 +3093,43 @@ mod global_config_dir_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scaffold's entries render as a `project.yaml` snippet that loads
+    /// back to the same entries (tsk391): the agent pastes it in.
+    #[test]
+    fn entries_yaml_loads_back() {
+        let measure = MeasureEntry {
+            key: Some("acme.x.count".into()),
+            capture_scope: Some("per-path".into()),
+            ..Default::default()
+        };
+        let metric = MetricEntry {
+            key: Some("acme.x".into()),
+            source_measure: Some("acme.x.count".into()),
+            aggregation: Some("sum".into()),
+            ..Default::default()
+        };
+        let gauge = GaugeEntry {
+            key: Some("acme.x".into()),
+            emits: vec!["acme.x.count".into()],
+            compute: Some(GaugeComputeConfig {
+                runtime: "starlark".into(),
+                input: None,
+                entry_file: Some("oxplow/gauges/acme_x.star".into()),
+                args: vec![],
+                report: None,
+            }),
+            ..Default::default()
+        };
+        let yaml = entries_yaml(&[measure.clone()], &[gauge.clone()], &[metric.clone()]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(config_path(dir.path()), &yaml).unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.measures, vec![measure], "{yaml}");
+        assert_eq!(cfg.gauges, vec![gauge]);
+        assert_eq!(cfg.metrics, vec![metric]);
+    }
 
     #[test]
     fn acp_agents_parse_validate_round_trip_and_layer_over_presets() {

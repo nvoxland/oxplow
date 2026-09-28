@@ -879,26 +879,22 @@ impl MetricsService {
         Ok(())
     }
 
-    /// Scaffold a new gauge-backed metric (epic tsk12, E): write a starter
-    /// Starlark gauge script plus the **trio** that wires it up — a `measures:`
-    /// entry (`<key>.count`, the fact type the gauge emits), a `gauges:` entry
-    /// (`<key>`, the producer) and a `metrics:` spec (`<key>`, a `sum` over that
-    /// measure). Then reseed. Returns the path to the script stub.
-    ///
-    /// `scope`: `project` (default) writes the script under `oxplow/gauges/` and
-    /// the three entries into `.oxplow/project.yaml`, returning the
-    /// **project-relative** script path. `global` writes the script + three
-    /// manifests under `<global_config_dir>/{gauges,measures,metrics}/` (shared
-    /// across the user's projects) plus a project `use:` so the metric charts
-    /// here, returning the **absolute** script path.
-    pub async fn scaffold_metric(
+    /// A new gauge-backed metric, as a template (epic tsk12, E; tsk391): a
+    /// starter Starlark gauge script plus the **trio** that wires it up —
+    /// a `measures:` entry (`<key>.count`, the fact type the gauge emits), a
+    /// `gauges:` entry (`<key>`, the producer) and a `metrics:` spec
+    /// (`<key>`, a `sum` over that measure) as a `.oxplow/project.yaml`
+    /// snippet. Writes nothing: the agent writes the script and merges the
+    /// snippet with its own file tools, so the write guard, filing and its
+    /// worktree apply (the extensions "no scaffold tools" rule). A config
+    /// change reseeds the catalog once they land.
+    pub fn metric_scaffold(
         &self,
         key: &str,
         title: Option<String>,
         language: Option<String>,
         glob: Option<String>,
-        scope: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<MetricScaffold, String> {
         let key = key.trim();
         if key.is_empty() || !key.contains('.') {
             return Err("key must be namespaced, e.g. acme.my_metric".to_string());
@@ -906,7 +902,19 @@ impl MetricsService {
         if key.starts_with("oxplow.") {
             return Err("`oxplow.` is reserved for built-in metrics".to_string());
         }
-        let global = matches!(scope.as_deref(), Some("global"));
+        {
+            let cfg = self
+                .config
+                .read()
+                .map_err(|_| "config lock poisoned".to_string())?;
+            if cfg.metrics.iter().any(|e| e.key.as_deref() == Some(key))
+                || cfg.gauges.iter().any(|e| e.key.as_deref() == Some(key))
+            {
+                return Err(format!(
+                    "metric `{key}` already exists in .oxplow/project.yaml"
+                ));
+            }
+        }
         let glob = glob
             .filter(|g| !g.is_empty())
             .unwrap_or_else(|| "**/*".into());
@@ -915,6 +923,7 @@ impl MetricsService {
         let measure_key = format!("{key}.count");
         let title = title.filter(|t| !t.is_empty());
         let script = starter_gauge_script(key, &measure_key, &glob, language.as_deref());
+        let script_path = format!("oxplow/gauges/{slug}.star");
 
         // The `<key>.count` measure the gauge emits (per-file counts). A scaffolded
         // gauge is snapshot-triggered and emits per-FILE facts over a delta, so it
@@ -940,11 +949,7 @@ impl MetricsService {
             compute: Some(GaugeComputeConfig {
                 runtime: "starlark".to_string(),
                 input: None,
-                entry_file: Some(if global {
-                    format!("{slug}.star")
-                } else {
-                    format!("oxplow/gauges/{slug}.star")
-                }),
+                entry_file: Some(script_path.clone()),
                 args: vec![],
                 report: None,
             }),
@@ -960,97 +965,12 @@ impl MetricsService {
             ..Default::default()
         };
 
-        let returned_path = if global {
-            let gdir = self
-                .effective_global_dir()
-                .ok_or_else(|| "no global config dir available on this platform".to_string())?;
-            let already = load_global_metric_entries(&gdir)
-                .iter()
-                .any(|e| e.key.as_deref() == Some(key))
-                || load_global_gauge_entries(&gdir)
-                    .iter()
-                    .any(|e| e.key.as_deref() == Some(key));
-            if already {
-                return Err(format!("global metric `{key}` already exists"));
-            }
-            let gauges_dir = gdir.join("gauges");
-            std::fs::create_dir_all(&gauges_dir).map_err(|e| e.to_string())?;
-            let script_abs = gauges_dir.join(format!("{slug}.star"));
-            if !script_abs.exists() {
-                std::fs::write(&script_abs, script).map_err(|e| e.to_string())?;
-            }
-            oxplow_config::write_global_measures_file(
-                &gdir.join("measures").join(format!("{slug}.yaml")),
-                &[measure],
-            )
-            .map_err(|e| e.to_string())?;
-            oxplow_config::write_global_gauges_file(
-                &gauges_dir.join(format!("{slug}.yaml")),
-                &[gauge],
-            )
-            .map_err(|e| e.to_string())?;
-            oxplow_config::write_global_metrics_file(
-                &gdir.join("metrics").join(format!("{slug}.yaml")),
-                &[metric],
-            )
-            .map_err(|e| e.to_string())?;
-            // The global metric is library content — enable it here with a project
-            // `use:` so it charts in this project. The global gauge + measure are
-            // active automatically (loaded from the global dir at seed time).
-            {
-                let mut cfg = self
-                    .config
-                    .write()
-                    .map_err(|_| "config lock poisoned".to_string())?;
-                if !cfg
-                    .metrics
-                    .iter()
-                    .any(|e| e.use_key.as_deref() == Some(key) || e.key.as_deref() == Some(key))
-                {
-                    cfg.metrics.push(MetricEntry {
-                        use_key: Some(key.to_string()),
-                        ..Default::default()
-                    });
-                    oxplow_config::write_project_config(&self.project_dir, &cfg)
-                        .map_err(|e| e.to_string())?;
-                }
-            }
-            script_abs.to_string_lossy().into_owned()
-        } else {
-            let script_rel = format!("oxplow/gauges/{slug}.star");
-            {
-                let mut cfg = self
-                    .config
-                    .write()
-                    .map_err(|_| "config lock poisoned".to_string())?;
-                if cfg.metrics.iter().any(|e| e.key.as_deref() == Some(key))
-                    || cfg.gauges.iter().any(|e| e.key.as_deref() == Some(key))
-                {
-                    return Err(format!(
-                        "metric `{key}` already exists in .oxplow/project.yaml"
-                    ));
-                }
-                let abs = self.project_dir.join(&script_rel);
-                if let Some(parent) = abs.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                // Don't clobber an existing script (a re-run after manual edits).
-                if !abs.exists() {
-                    std::fs::write(&abs, script).map_err(|e| e.to_string())?;
-                }
-                cfg.measures.push(measure);
-                cfg.gauges.push(gauge);
-                cfg.metrics.push(metric);
-                oxplow_config::write_project_config(&self.project_dir, &cfg)
-                    .map_err(|e| e.to_string())?;
-            }
-            script_rel
-        };
-
-        self.invalidate_global_catalog();
-        self.events.emit(OxplowEvent::ConfigChanged);
-        self.seed_catalog().await;
-        Ok(returned_path)
+        Ok(MetricScaffold {
+            key: key.to_string(),
+            project_yaml: oxplow_config::entries_yaml(&[measure], &[gauge], &[metric]),
+            script_path,
+            script,
+        })
     }
 
     /// True when at least one on-snapshot gauge still needs a full-tree
@@ -2566,13 +2486,27 @@ fn builtin_collector(key: &str) -> Option<Collector> {
 
 /// A filesystem-safe slug from a namespaced key (non-alphanumerics → `_`), for
 /// naming the global scaffold's `<slug>.yaml` / `<slug>.star` files.
+/// What [`MetricsService::metric_scaffold`] hands the agent to write.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricScaffold {
+    pub key: String,
+    /// Where the script goes, project-relative.
+    pub script_path: String,
+    /// The starter gauge script.
+    pub script: String,
+    /// `measures:` / `gauges:` / `metrics:` entries to merge into
+    /// `.oxplow/project.yaml` (appending to lists already there).
+    pub project_yaml: String,
+}
+
 fn slugify(key: &str) -> String {
     key.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
 }
 
-/// The starter Starlark gauge written by [`MetricsService::scaffold_metric`]. A
+/// The starter Starlark gauge from [`MetricsService::metric_scaffold`]. A
 /// working tree-derived gauge that emits one per-file `<measure>` FACT per
 /// matched file (TODO/FIXME count) — the metric spec (`sum` over `<measure>`)
 /// charts it. Emits facts only (no baked sample), the clean substrate model
@@ -5077,70 +5011,64 @@ def transform(input):
         );
     }
 
+    /// A metric scaffold writes nothing: the agent writes the returned
+    /// script and pastes the entries with its own tools, under the write
+    /// guard and filing (tsk391). Done that way, the metric seeds.
     #[tokio::test]
-    async fn scaffold_metric_writes_script_entry_and_seeds() {
+    async fn metric_scaffold_is_a_template_that_seeds_once_written() {
         let (svc, dir) = fixture().await;
+        let config_before = std::fs::read_to_string(oxplow_config::config_path(dir.path())).ok();
 
-        let rel = svc
+        let t = svc
             .metrics
-            .scaffold_metric(
+            .metric_scaffold(
                 "acme.todo_density",
                 Some("TODO density".to_string()),
                 Some("rust".to_string()),
                 Some("**/*.rs".to_string()),
-                None,
             )
-            .await
             .unwrap();
-        assert_eq!(rel, "oxplow/gauges/acme_todo_density.star");
-
-        // Script stub written + uses the public capability surface + emits facts.
-        let script = std::fs::read_to_string(dir.path().join(&rel)).unwrap();
-        assert!(script.contains("def transform(input):"), "got:\n{script}");
+        assert_eq!(t.script_path, "oxplow/gauges/acme_todo_density.star");
+        assert!(t.script.contains("def transform(input):"), "{}", t.script);
+        assert!(t.script.contains("files(\"**/*.rs\")"), "{}", t.script);
+        assert!(t.script.contains("acme.todo_density.count"), "{}", t.script);
         assert!(
-            script.contains("files(\"**/*.rs\")"),
-            "glob threaded; got:\n{script}"
+            t.project_yaml.contains("acme_todo_density.star"),
+            "{}",
+            t.project_yaml
         );
-        assert!(
-            script.contains("acme.todo_density.count"),
-            "emits the measure; got:\n{script}"
-        );
-
-        // The trio (measure + gauge + metric) persisted to project.yaml.
-        let yaml = std::fs::read_to_string(oxplow_config::config_path(dir.path())).unwrap();
-        assert!(yaml.contains("metrics:"), "metric spec; got:\n{yaml}");
-        assert!(yaml.contains("gauges:"), "gauge; got:\n{yaml}");
-        assert!(yaml.contains("measures:"), "measure; got:\n{yaml}");
-        assert!(
-            yaml.contains("acme.todo_density.count"),
-            "measure key persisted; got:\n{yaml}"
-        );
-        assert!(
-            yaml.contains("acme_todo_density.star"),
-            "entryFile persisted; got:\n{yaml}"
+        assert!(!dir.path().join(&t.script_path).exists(), "nothing written");
+        assert_eq!(
+            std::fs::read_to_string(oxplow_config::config_path(dir.path())).ok(),
+            config_before,
+            "project.yaml untouched"
         );
 
-        // Metric SPEC seeded as a project-scoped gauge (T-E2).
+        // What the agent does with it.
+        let script = dir.path().join(&t.script_path);
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, &t.script).unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(oxplow_config::config_path(dir.path()), &t.project_yaml).unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.metrics.seed_catalog().await;
         let spec = svc
             .fact_store
             .get_spec("acme.todo_density")
             .await
             .unwrap()
-            .expect("scaffolded spec seeded");
+            .expect("scaffolded spec seeds once written");
         assert_eq!(spec.display_kind, "gauge");
         assert_eq!(spec.scope, "project");
 
-        // Scaffolding the same key again is rejected (no duplicate entry).
+        // An existing key and the reserved namespace are refused.
         assert!(svc
             .metrics
-            .scaffold_metric("acme.todo_density", None, None, None, None)
-            .await
+            .metric_scaffold("acme.todo_density", None, None, None)
             .is_err());
-        // Reserved namespace is rejected.
         assert!(svc
             .metrics
-            .scaffold_metric("oxplow.nope", None, None, None, None)
-            .await
+            .metric_scaffold("oxplow.nope", None, None, None)
             .is_err());
     }
 
@@ -5172,66 +5100,6 @@ def transform(input):
         // After invalidation the reload picks it up.
         m.invalidate_global_catalog();
         assert_eq!(m.with_global_catalog(|g| g.measures.len()), 1, "reloaded");
-    }
-
-    #[tokio::test]
-    async fn scaffold_metric_global_writes_to_global_dir_and_seeds() {
-        let (svc, _dir) = fixture().await;
-        let gtmp = tempfile::tempdir().unwrap();
-        // A handle pointed at an isolated global dir (no env race).
-        let m = svc
-            .metrics
-            .clone()
-            .with_global_dir(gtmp.path().to_path_buf());
-
-        let path = m
-            .scaffold_metric(
-                "myglobal.todo",
-                Some("Global TODO".to_string()),
-                None,
-                Some("**/*".to_string()),
-                Some("global".to_string()),
-            )
-            .await
-            .unwrap();
-
-        // Gauge script under <global>/gauges/; metric manifest under
-        // <global>/metrics/; both, not the project.
-        assert!(std::path::Path::new(&path).exists(), "script at {path}");
-        assert!(path.ends_with("gauges/myglobal_todo.star"), "got {path}");
-        let manifest =
-            std::fs::read_to_string(gtmp.path().join("metrics/myglobal_todo.yaml")).unwrap();
-        assert!(manifest.contains("myglobal.todo"), "got:\n{manifest}");
-        // The gauge manifest names the script; the measure manifest the fact type.
-        let gauge_manifest =
-            std::fs::read_to_string(gtmp.path().join("gauges/myglobal_todo.yaml")).unwrap();
-        assert!(
-            gauge_manifest.contains("myglobal_todo.star"),
-            "got:\n{gauge_manifest}"
-        );
-        assert!(gtmp.path().join("measures/myglobal_todo.yaml").exists());
-
-        // Seeded at scope `global` (the resolver read it from the global dir).
-        let entry = m
-            .catalog()
-            .await
-            .into_iter()
-            .find(|e| e.key == "myglobal.todo")
-            .expect("global metric in catalog");
-        assert_eq!(entry.scope, "global");
-        assert!(entry.enabled);
-
-        // A second scaffold of the same global key is rejected.
-        assert!(m
-            .scaffold_metric(
-                "myglobal.todo",
-                None,
-                None,
-                None,
-                Some("global".to_string())
-            )
-            .await
-            .is_err());
     }
 
     #[tokio::test]
