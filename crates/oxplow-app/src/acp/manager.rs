@@ -254,14 +254,22 @@ impl AcpManager {
         } = reservation;
         let (ready_tx, ready_rx) = oneshot::channel();
         let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
+        let teardown = actor.teardown_handle();
         tokio::spawn(async move {
             let r = wire::run(write, read, move |conn, incoming| {
                 actor.run(conn, incoming, cmd_rx, ready_tx)
             })
             .await;
-            if let Err(e) = r {
-                tracing::warn!(error = %e, "acp: connection ended with an error");
-            }
+            // A transport error drops the actor mid-loop, before its own
+            // teardown; end the session here (a no-op when it already ran).
+            let reason = match r {
+                Ok(()) => "the agent connection ended".to_string(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "acp: connection ended with an error");
+                    format!("the agent connection failed: {e}")
+                }
+            };
+            teardown.run(Some(reason)).await;
             // Dropping the child kills it (`kill_on_drop`).
             drop(child);
         });

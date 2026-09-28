@@ -756,3 +756,36 @@ async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
         "the old session's teardown clobbered the new: {log:?}"
     );
 }
+
+#[tokio::test]
+async fn cancelling_a_card_mid_turn_returns_the_view_to_running() {
+    let mut rig = open(Host::default()).await;
+    rig.prompt("fake:edit /w/a.rs\nfake:wait").await;
+    rig.wait("card", |b| matches!(b, AcpEventBody::Item { item } if matches!(item.body, ItemBody::Permission { .. })))
+        .await;
+    rig.wait_status(AcpStatus::AwaitingPermission).await;
+    let request_id = rig
+        .items()
+        .into_iter()
+        .find_map(|b| match b {
+            ItemBody::Permission { request_id, .. } => Some(request_id),
+            _ => None,
+        })
+        .unwrap();
+    // Answering the card while the turn keeps going: the view says Running.
+    rig.mgr
+        .respond_permission(&thread(), request_id, Some("reject".into()))
+        .await
+        .unwrap();
+    let next = rig
+        .wait("status", |b| matches!(b, AcpEventBody::Status { .. }))
+        .await;
+    assert_eq!(
+        next,
+        AcpEventBody::Status {
+            status: AcpStatus::Running
+        }
+    );
+    rig.mgr.cancel(&thread()).unwrap();
+    rig.wait_status(AcpStatus::Idle).await;
+}

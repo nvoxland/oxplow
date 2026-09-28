@@ -62,6 +62,9 @@ pub trait AcpHost: Send + Sync + 'static {
 pub struct ServicesAcpHost {
     svc: Weak<Services>,
     stream_id: Option<StreamId>,
+    /// The thread status a permission card interrupted, restored when the
+    /// cards are answered (so an `await_user` question survives one).
+    before_card: parking_lot::Mutex<Option<(AgentStatusState, Option<String>)>>,
 }
 
 impl ServicesAcpHost {
@@ -69,6 +72,7 @@ impl ServicesAcpHost {
         Self {
             svc: Arc::downgrade(svc),
             stream_id,
+            before_card: parking_lot::Mutex::new(None),
         }
     }
 
@@ -226,9 +230,47 @@ impl AcpHost for ServicesAcpHost {
         let Some(svc) = self.svc.upgrade() else {
             return;
         };
+        use oxplow_domain::stores::AgentTurnStore as _;
         let (state, detail) = match question {
-            Some(q) => (AgentStatusState::AwaitingUser, Some(q)),
-            None => (AgentStatusState::Running, None),
+            Some(q) => {
+                // Remember what the first card interrupted.
+                if self.before_card.lock().is_none() {
+                    let now = svc
+                        .agent_status_store
+                        .get(thread, "working")
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|s| (s.state, s.detail));
+                    *self.before_card.lock() = now;
+                }
+                (AgentStatusState::AwaitingUser, Some(q))
+            }
+            None => {
+                // Taken into a local: the guard mustn't live across an await.
+                let before = self.before_card.lock().take();
+                match before {
+                    // The agent had parked on the person before the card.
+                    Some((AgentStatusState::AwaitingUser, detail)) => {
+                        (AgentStatusState::AwaitingUser, detail)
+                    }
+                    // Otherwise: working if a turn is open, else idle.
+                    _ => {
+                        let open = svc
+                            .agent_turn_store
+                            .list_open(thread)
+                            .await
+                            .map(|t| !t.is_empty())
+                            .unwrap_or(false);
+                        let state = if open {
+                            AgentStatusState::Running
+                        } else {
+                            AgentStatusState::Idle
+                        };
+                        (state, None)
+                    }
+                }
+            }
         };
         if let Err(err) = svc.hook_ingest.set_status(thread, state, detail).await {
             warn!(?err, "acp: status update failed");

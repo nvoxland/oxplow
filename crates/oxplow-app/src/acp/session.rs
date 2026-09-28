@@ -362,6 +362,12 @@ impl Actor {
                     self.cancel_pending();
                     self.host.awaiting_user(self.thread(), None).await;
                 }
+                // No card left waiting: the view says what's happening.
+                self.set_status(if self.turn.is_some() {
+                    AcpStatus::Running
+                } else {
+                    AcpStatus::Idle
+                });
             }
             Command::Respond {
                 request_id,
@@ -437,9 +443,11 @@ impl Actor {
         self.mark_answered(p.item_id, answer);
         if self.pending.is_empty() {
             self.host.awaiting_user(self.thread(), None).await;
-            if self.turn.is_some() {
-                self.set_status(AcpStatus::Running);
-            }
+            self.set_status(if self.turn.is_some() {
+                AcpStatus::Running
+            } else {
+                AcpStatus::Idle
+            });
         }
         Ok(())
     }
@@ -766,18 +774,87 @@ impl Actor {
     }
 
     async fn shut_down(&mut self, reason: Option<String>) {
-        // Answers can't reach an agent that's gone; mark the cards.
-        for (_, p) in self.pending.drain().collect::<Vec<_>>() {
-            self.mark_answered(p.item_id, PermissionAnswer::Cancelled);
-        }
-        if let Some(r) = &reason {
-            self.push(ItemBody::Error { message: r.clone() });
-        }
+        // Answers can't reach an agent that's gone; drop the replies.
+        self.pending.clear();
         self.turn = None;
-        if self.current.load(std::sync::atomic::Ordering::SeqCst) {
-            self.host.interrupted(self.thread()).await;
+        self.teardown_handle().run(reason).await;
+    }
+
+    pub(super) fn teardown_handle(&self) -> Teardown {
+        Teardown {
+            thread: self.spec.thread_id,
+            generation: self.generation,
+            view: self.view.clone(),
+            host: self.host.clone(),
+            events: self.events.clone(),
+            current: self.current.clone(),
         }
-        self.set_status(AcpStatus::Stopped);
+    }
+}
+
+/// Everything ending a session needs, apart from the actor: the actor
+/// runs it on a clean exit, and the task driving the connection runs it
+/// when the actor never got to (a transport error drops the actor
+/// mid-loop). Idempotent: a session already stopped is left alone.
+pub(super) struct Teardown {
+    thread: ThreadId,
+    generation: u64,
+    view: Arc<Mutex<SessionView>>,
+    host: Arc<dyn AcpHost>,
+    events: broadcast::Sender<AcpEvent>,
+    current: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Teardown {
+    fn emit(&self, body: AcpEventBody) {
+        let _ = self.events.send(AcpEvent {
+            thread_id: self.thread.to_string(),
+            generation: self.generation,
+            body,
+        });
+    }
+
+    pub(super) async fn run(&self, reason: Option<String>) {
+        let mut changed = Vec::new();
+        {
+            let mut v = self.view.lock();
+            if v.status == AcpStatus::Stopped {
+                return;
+            }
+            // Open cards can't be answered any more.
+            let open: Vec<u64> = v
+                .transcript
+                .since(0)
+                .into_iter()
+                .filter(|i| matches!(i.body, ItemBody::Permission { answer: None, .. }))
+                .map(|i| i.id)
+                .collect();
+            for id in open {
+                if let Some(item) = v.transcript.update(id, |b| {
+                    if let ItemBody::Permission { answer, .. } = b {
+                        *answer = Some(PermissionAnswer::Cancelled);
+                    }
+                }) {
+                    changed.push(item);
+                }
+            }
+            if let Some(r) = &reason {
+                changed.push(v.transcript.push(ItemBody::Error { message: r.clone() }));
+            }
+            v.status = AcpStatus::Stopped;
+        }
+        for item in changed {
+            self.emit(AcpEventBody::Item {
+                item: Box::new(item),
+            });
+        }
+        // A newer session owns the thread's status once this one is replaced.
+        if self.current.load(std::sync::atomic::Ordering::SeqCst) {
+            self.host.interrupted(&self.thread).await;
+        }
+        self.emit(AcpEventBody::Status {
+            status: AcpStatus::Stopped,
+        });
         self.emit(AcpEventBody::Closed { reason });
     }
 }

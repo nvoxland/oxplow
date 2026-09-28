@@ -489,6 +489,8 @@ the same JSON.
   - **Allow:** a permission card waits for the person, with no timeout. "Always allow" is dropped for writes, the status is AwaitingPermission, and the thread status is `AwaitingUser`.
 - Cancel answers every open card `cancelled`, as the protocol requires.
 - "Awaiting" is cleared BEFORE the Stop is ingested; Stop keeps an `AwaitingUser` status for `await_user`.
+- **Status after the cards (tsk361).** When the cards are answered or cancelled, the host restores what the first card interrupted: an earlier `await_user` question survives, and otherwise the status is Running if a turn is open, else Idle. The view likewise goes to Running inside a turn and Idle outside one.
+- **Teardown is one path (tsk361).** `session::Teardown` cancels unanswered cards, adds the error item, records the Interrupt (only while the session is current) and emits Stopped/Closed. The actor runs it on a clean exit. The task driving the connection runs it again afterwards, which is a no-op once stopped, so a transport error that drops the actor mid-loop still ends the session.
 
 **fs and bypass.**
 - `fs/write_text_file` is policy-checked. A deny returns a JSON-RPC error whose message is the reason, which does reach the model.

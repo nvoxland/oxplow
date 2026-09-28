@@ -388,3 +388,49 @@ async fn closing_an_acp_thread_stops_its_session() {
         "the agent process is stopped with its thread"
     );
 }
+
+#[tokio::test]
+async fn a_permission_card_restores_the_status_it_interrupted() {
+    use oxplow_app::acp::host::AcpHost as _;
+    use oxplow_domain::AgentStatusState;
+    let (svc, root, _dir) = boot().await;
+    let thread = seed(&svc, &root, ThreadStatus::Active).await;
+    let host = ServicesAcpHost::new(&svc, Some(StreamId::new(1)));
+    let status = || async {
+        let s = svc
+            .agent_status_store
+            .get(&thread, "working")
+            .await
+            .unwrap()
+            .unwrap();
+        (s.state, s.detail)
+    };
+    // The agent already parked on the person (`await_user`).
+    svc.hook_ingest
+        .set_status(
+            &thread,
+            AgentStatusState::AwaitingUser,
+            Some("Which DB?".into()),
+        )
+        .await
+        .unwrap();
+    host.awaiting_user(&thread, Some("Permission: Edit a.rs".into()))
+        .await;
+    assert_eq!(status().await.0, AgentStatusState::AwaitingUser);
+    host.awaiting_user(&thread, None).await;
+    assert_eq!(
+        status().await,
+        (AgentStatusState::AwaitingUser, Some("Which DB?".into())),
+        "the earlier question survives the card"
+    );
+
+    // No turn open and nothing parked: answering leaves it idle, not running.
+    svc.hook_ingest
+        .set_status(&thread, AgentStatusState::Idle, None)
+        .await
+        .unwrap();
+    host.awaiting_user(&thread, Some("Permission: x".into()))
+        .await;
+    host.awaiting_user(&thread, None).await;
+    assert_eq!(status().await.0, AgentStatusState::Idle);
+}
