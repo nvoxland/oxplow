@@ -62,6 +62,8 @@ pub struct FakeState {
     /// The params of every `session/load` received.
     pub loads: Vec<Value>,
     next_session: u64,
+    /// Tool-call ids are unique per connection lifetime, like a real agent's.
+    next_tool: u64,
 }
 
 pub type Shared = Arc<Mutex<FakeState>>;
@@ -275,7 +277,6 @@ where
     let mut turn = Turn {
         sid: sid.clone(),
         state: state.clone(),
-        tool: 0,
     };
     for t in &texts {
         turn.update(
@@ -448,7 +449,6 @@ where
 struct Turn {
     sid: String,
     state: Shared,
-    tool: u64,
 }
 
 impl Turn {
@@ -493,8 +493,12 @@ impl Turn {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        self.tool += 1;
-        let id = format!("{}-t{}", self.sid, self.tool);
+        let n = {
+            let mut s = lock(&self.state);
+            s.next_tool += 1;
+            s.next_tool
+        };
+        let id = format!("{}-t{n}", self.sid);
         let mut call = json!({
             "sessionUpdate": "tool_call",
             "toolCallId": id,
@@ -555,7 +559,12 @@ impl FakeState {
     }
 
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let v = json!({"history": self.history, "nextSession": self.next_session});
+        // `newSessions` is for inspection (what the client sent), not reloaded.
+        let v = json!({
+            "history": self.history,
+            "nextSession": self.next_session,
+            "newSessions": self.new_sessions,
+        });
         std::fs::write(path, v.to_string())
     }
 }

@@ -87,7 +87,7 @@ pub async fn acp_open_session(
         }],
         None => vec![],
     };
-    let system_prompt = oxplow_app::agent_prompt::assemble_system_prompt(
+    let system_prompt = oxplow_app::agent_prompt::assemble_acp_system_prompt(
         &project_dir,
         &config,
         &stream,

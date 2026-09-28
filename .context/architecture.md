@@ -47,11 +47,16 @@ has no exceptions.
   model over its API to classify, score or summarize data for the semantic
   layer. That is oxplow's own computation. It never prompts the agent doing
   the work and never touches an agent terminal.
-- **ACP agents** (tsk281): an agent spoken to over the Agent Client
-  Protocol receives a prompt **only** when a human types one into oxplow's
-  UI. Stop-hook directives are shown to the human; they are never sent
-  automatically. The same source-scan test that guards terminal input will
-  guard ACP prompts.
+- **ACP agents** (tsk281, built): an agent spoken to over the Agent Client
+  Protocol receives a prompt **only** when a human presses Enter in the
+  thread's prompt box. oxplow's context (session context, advisories,
+  decisions, post-tool nudges) rides **only** on that human prompt, as a
+  visible block. The Stop directive is shown as a banner; "Put in input"
+  fills the draft and never sends. Two source-scan tests pin this: the
+  Rust `acp/guard_tests.rs` (the prompt type is built only on the human
+  submit path) and the TS `no-agent-input-automation.test.ts` (only the
+  prompt box calls `acpPrompt`). See [agent-model.md](./agent-model.md) →
+  "ACP agents".
 
 ## A repo's config never runs a program without consent
 

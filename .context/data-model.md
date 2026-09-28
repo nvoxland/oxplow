@@ -277,6 +277,12 @@ Protocol.
   `DROP COLUMN`). The recreated `v_thread` adds `acp_agent`.
 - **Test:** `v90_keeps_thread_children_and_accepts_acp` migrates a real DB
   to V89, adds children, then finishes; the children must survive.
+- **Session state:** `threads.resume_session_id` holds the ACP session id
+  (`session/load` on the next open). The conversation itself has **no
+  table**: it lives in memory (`acp::transcript::Transcript`) and a load
+  replay rebuilds it. What an ACP turn records lands in the same tables as
+  a hooked turn (hook events, agent turns, tool calls, effort files,
+  token usage).
 
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now

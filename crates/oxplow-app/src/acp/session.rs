@@ -625,6 +625,12 @@ impl Actor {
     }
 
     async fn on_update(&mut self, update: AcpUpdate) {
+        // The person's prompt is already an item (pushed when it was
+        // sent); a live echo of it would be appended to it. User chunks
+        // belong to a `session/load` replay.
+        if !self.replaying && matches!(update, AcpUpdate::UserChunk(_)) {
+            return;
+        }
         let tool_id = match &update {
             AcpUpdate::ToolCall(t) => Some(t.id.clone()),
             AcpUpdate::ToolCallUpdate(p) => Some(p.id.clone()),

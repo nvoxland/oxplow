@@ -250,7 +250,12 @@ async fn a_prompt_streams_the_reply_and_records_the_turn_once() {
         .await;
 
     let items = rig.items();
-    assert!(matches!(&items[0], ItemBody::User { text, context: None } if text.starts_with("hi")));
+    // Exactly what was typed: the agent's live user_message_chunk echo is
+    // not appended to it.
+    assert!(matches!(
+        &items[0],
+        ItemBody::User { text, context: None } if text == "hi\nfake:say hello\nfake:bash ls\nfake:tokens 10 5"
+    ));
     assert_eq!(rig.agent_text(), vec!["hello".to_string()]);
     assert!(items
         .iter()
@@ -587,4 +592,18 @@ async fn an_agent_crash_interrupts_the_session() {
         rig.mgr.submit_human_prompt(&thread(), "x".into()).await,
         Err(AcpError::NotOpen)
     );
+}
+
+#[tokio::test]
+async fn tool_calls_in_different_turns_stay_distinct() {
+    let mut rig = open(Host::default()).await;
+    rig.turn("fake:bash one").await;
+    rig.turn("fake:bash two").await;
+    let tools = rig
+        .items()
+        .into_iter()
+        .filter(|b| matches!(b, ItemBody::Tool { .. }))
+        .count();
+    assert_eq!(tools, 2);
+    assert_eq!(rig.host.count("tool Bash"), 2);
 }

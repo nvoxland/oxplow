@@ -533,6 +533,27 @@ the same JSON.
 - **Component test:** `AcpAgentView.test.tsx` asserts that "Put in input" never sends and Enter sends once.
 - **Bindings:** `ItemBody` / `PermissionAnswer` / `AcpEventBody` use `rename_all_fields = "camelCase"` so TS sees `requestId` / `optionId`. `AcpEvent` is exported to the bindings (`.typ::<AcpEvent>()`).
 
+**Limits (know these before trusting the gate).**
+- **A permission reject carries no reason.** The model sees only "rejected". Only an `fs/write_text_file` denial (an error message) tells it why. The Claude adapter writes to disk itself, so its only gate is the permission request.
+- **Adapter modes that skip asking** (e.g. an "accept edits" / bypass mode set inside the agent) leave bypass detection as the only backstop. That is after the fact: the write already happened, and oxplow flags it with a banner.
+- **"UI-only" is structural, not authentication.** The `ui(...)` rows keep `acp_*` out of the MCP tool surface, so no agent can prompt an agent. But the daemon's loopback `/ipc` is unauthenticated, as it already is for terminal input.
+- **Usage:**
+  - per-turn tokens come only from the prompt response's `usage` (an unstable ACP field, enabled via the SDK feature `unstable_end_turn_token_usage`) and are recorded via `record_turn`;
+  - `usage_update` (context occupancy plus cumulative cost) drives only the context meter;
+  - ACP agents get no OTEL env, so nothing double-counts.
+- **System prompt:** `assemble_acp_system_prompt` omits the `<session-context>` block. The first human prompt always carries a fresh one via `prompt_context`, so including it here would send it twice.
+
+**Verification.**
+- **Headless (tsk340):** the daemon plus Playwright, with `oxplow-acp-fake` as a project `acpAgents` entry, confirmed:
+  - the approval gate (with "Open settings");
+  - a prompt → reply with plan, tool and context meter;
+  - a read-only thread's edit blocked with no card;
+  - a writer's card without "always allow", which round-trips;
+  - the Stop audit shown as a banner, with "Put in input" filling the draft and nothing sent;
+  - the MCP entry the agent received (URL plus Bearer / `X-Oxplow-*`) initializing against oxplow's MCP, where a wrong token gets 401.
+- **Live smoke:** `tests/acp_live.rs` is `#[ignore]`d. Run it with `OXPLOW_ACP_LIVE_CMD="<adapter command>" cargo test -p oxplow-app --test acp_live -- --ignored` (e.g. `bunx @zed-industries/claude-code-acp`).
+- **Not done:** recorded traces from real adapters, because this machine has no Node.
+
 **Fake agent.** `crates/oxplow-acp-fake` is a scripted fake speaking raw JSON-RPC, deliberately not the SDK, so the tests exercise real wire JSON. `fake:<step>` lines in a prompt drive it: say, think, edit, bypass, fswrite, fsread, bash, plan, usage, tokens, wait, crash.
 - `acp/session_tests.rs` runs it in-process over a duplex pipe.
 - `tests/acp_services.rs` runs it against real `Services`, and once as its binary.

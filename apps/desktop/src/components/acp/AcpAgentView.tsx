@@ -428,7 +428,7 @@ function ToolCard({
     <div style={{ ...bubble("var(--surface-card)"), fontSize: 12 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
         <span style={{ color: "var(--text-secondary)" }}>{call.kind}</span>
-        <span style={{ color: "var(--text-primary)", flex: 1 }}>{call.title || call.name || "Tool call"}</span>
+        <span style={{ color: "var(--text-primary)", flex: 1 }}>{relTitle(call.title || call.name || "Tool call", relPath)}</span>
         <span style={{ color: toolStatusColor(call.status) }}>{call.status.replace("_", " ")}</span>
       </div>
       {call.locations.length > 0 && (
@@ -474,6 +474,14 @@ function ToolCard({
       )}
     </div>
   );
+}
+
+/** Agents put absolute paths in titles; show worktree paths relative. */
+function relTitle(title: string, relPath: (p: string) => string): string {
+  return title
+    .split(" ")
+    .map((w) => (w.startsWith("/") ? relPath(w) : w))
+    .join(" ");
 }
 
 function statusLabel(s: AcpViewState["status"]): string {

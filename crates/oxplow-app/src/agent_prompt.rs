@@ -130,14 +130,39 @@ pub fn assemble_system_prompt(
     stream: &Stream,
     thread: Option<&Thread>,
 ) -> String {
+    assemble(project_dir, config, stream, thread, true)
+}
+
+/// The system prompt for an ACP agent: the same, minus the
+/// `<session-context>` block. An ACP session's first human prompt always
+/// carries a fresh one (`AgentActivity::prompt_context`), so including it
+/// here too would send it twice.
+pub fn assemble_acp_system_prompt(
+    project_dir: &Path,
+    config: &OxplowConfig,
+    stream: &Stream,
+    thread: Option<&Thread>,
+) -> String {
+    assemble(project_dir, config, stream, thread, false)
+}
+
+fn assemble(
+    project_dir: &Path,
+    config: &OxplowConfig,
+    stream: &Stream,
+    thread: Option<&Thread>,
+    session_context: bool,
+) -> String {
     let mut out = String::new();
     let claude_md = load_claude_md(project_dir);
     if !claude_md.is_empty() {
         out.push_str(&claude_md);
         out.push_str("\n\n");
     }
-    out.push_str(&build_session_context_block(stream, thread));
-    out.push_str("\n\n");
+    if session_context {
+        out.push_str(&build_session_context_block(stream, thread));
+        out.push_str("\n\n");
+    }
     if let Some(t) = thread {
         if let Some(prompt) = t.custom_prompt.as_deref().filter(|p| !p.is_empty()) {
             out.push_str(prompt);
@@ -341,5 +366,15 @@ mod tests {
         // turn or hook fired before capture) — no banner.
         let block = build_session_context_block_with_role(&stream(), Some(&thread()), None);
         assert!(!block.contains("**Access changed:**"));
+    }
+
+    #[test]
+    fn the_acp_system_prompt_leaves_session_context_to_the_first_prompt() {
+        let dir = tempdir().unwrap();
+        let full = assemble_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        let acp = assemble_acp_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        assert!(full.contains("<session-context>"));
+        assert!(!acp.contains("<session-context>"), "{acp}");
+        assert!(acp.contains("be precise"));
     }
 }
