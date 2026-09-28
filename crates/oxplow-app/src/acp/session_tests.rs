@@ -685,3 +685,74 @@ async fn each_open_is_a_new_generation_and_its_events_say_so() {
     .expect("an event from the new session");
     assert!(seen.iter().all(|g| *g == g1 || *g == g2), "{seen:?}");
 }
+
+#[tokio::test]
+async fn concurrent_opens_start_one_agent() {
+    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let mgr = AcpManager::new();
+    let host = Arc::new(Host::default());
+    let dir = tempfile::tempdir().unwrap();
+    let transport = || {
+        let (client, agent) = tokio::io::duplex(1 << 16);
+        let (ar, aw) = tokio::io::split(agent);
+        let f = fake.clone();
+        tokio::spawn(async move {
+            let _ = oxplow_acp_fake::serve(ar, aw, f, FakeOptions::default()).await;
+        });
+        tokio::io::split(client)
+    };
+    let (r1, w1) = transport();
+    let (r2, w2) = transport();
+    let (a, b) = tokio::join!(
+        mgr.open_with_io(host.clone(), spec(dir.path()), w1, r1),
+        mgr.open_with_io(host.clone(), spec(dir.path()), w2, r2),
+    );
+    a.unwrap();
+    b.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        fake.lock().unwrap().new_sessions.len(),
+        1,
+        "one agent session, not two"
+    );
+    assert_eq!(host.count("started"), 1);
+}
+
+#[tokio::test]
+async fn close_is_immediate_and_a_replaced_sessions_teardown_records_nothing() {
+    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let (rig, r) = open_with(
+        Host::default(),
+        fake.clone(),
+        FakeOptions::default(),
+        |_| {},
+        tempfile::tempdir().unwrap(),
+    )
+    .await;
+    r.unwrap();
+    rig.mgr.close(&thread()).unwrap();
+    assert!(!rig.mgr.is_open(&thread()), "closed at once");
+    // Reopen right away (a Restart) while the old actor may still be
+    // shutting down.
+    let (client, agent) = tokio::io::duplex(1 << 16);
+    let (ar, aw) = tokio::io::split(agent);
+    tokio::spawn(async move {
+        let _ = oxplow_acp_fake::serve(ar, aw, fake, FakeOptions::default()).await;
+    });
+    let (cr, cw) = tokio::io::split(client);
+    rig.mgr
+        .open_with_io(rig.host.clone(), spec(rig.dir.path()), cw, cr)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let log = rig.host.log();
+    let last = log
+        .iter()
+        .rev()
+        .find(|l| l.starts_with("started") || l == &"interrupted")
+        .unwrap();
+    assert!(
+        last.starts_with("started"),
+        "the old session's teardown clobbered the new: {log:?}"
+    );
+}

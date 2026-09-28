@@ -451,6 +451,10 @@ the same JSON.
 - One actor task per session (`acp/session.rs`) owns the connection.
 - `wire::run` feeds every agent message into ONE channel, and the prompt's result is an ordered barrier, so the actor sees updates, requests and turn end in wire order.
 - Events for every session go out on one broadcast channel (`AcpEvent`).
+- **Open and close are race-free (tsk359).**
+  - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
+  - `close` marks the handle closed at once.
+  - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:

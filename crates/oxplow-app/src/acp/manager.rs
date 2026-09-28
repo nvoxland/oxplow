@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use oxplow_domain::ThreadId;
@@ -50,6 +51,28 @@ pub struct AcpSnapshot {
 struct Handle {
     commands: mpsc::UnboundedSender<Command>,
     view: Arc<Mutex<SessionView>>,
+    generation: u64,
+    /// Set the moment `close` is called, before the actor has wound down.
+    closed: Arc<AtomicBool>,
+    /// Cleared when a newer session replaces this one; its actor then
+    /// records nothing on its way out (the new session owns the thread).
+    current: Arc<AtomicBool>,
+}
+
+impl Handle {
+    fn alive(&self) -> bool {
+        !self.closed.load(Ordering::SeqCst) && !self.commands.is_closed()
+    }
+}
+
+/// A thread's slot, claimed before anything is spawned (see
+/// [`AcpManager::reserve`]).
+struct Reservation {
+    thread: ThreadId,
+    generation: u64,
+    commands: mpsc::UnboundedReceiver<Command>,
+    view: Arc<Mutex<SessionView>>,
+    current: Arc<AtomicBool>,
 }
 
 pub struct AcpManager {
@@ -86,10 +109,53 @@ impl AcpManager {
 
     /// Is a session running for `thread`?
     pub fn is_open(&self, thread: &ThreadId) -> bool {
-        self.sessions
-            .lock()
+        self.sessions.lock().get(thread).is_some_and(Handle::alive)
+    }
+
+    /// Claim `thread`'s slot for a new session, under one lock, before
+    /// anything is spawned: two concurrent opens can't both start an
+    /// agent. `None` when a session is already live. A closed session
+    /// still winding down is replaced and marked not current.
+    fn reserve(&self, spec: &SessionSpec) -> Option<Reservation> {
+        let mut sessions = self.sessions.lock();
+        if let Some(old) = sessions.get(&spec.thread_id) {
+            if old.alive() {
+                return None;
+            }
+            old.current.store(false, Ordering::SeqCst);
+        }
+        let generation = self.generation();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, generation)));
+        let current = Arc::new(AtomicBool::new(true));
+        sessions.insert(
+            spec.thread_id,
+            Handle {
+                commands: tx,
+                view: view.clone(),
+                generation,
+                closed: Arc::new(AtomicBool::new(false)),
+                current: current.clone(),
+            },
+        );
+        Some(Reservation {
+            thread: spec.thread_id,
+            generation,
+            commands: rx,
+            view,
+            current,
+        })
+    }
+
+    /// Give up a reservation whose start failed (only if it's still ours).
+    fn release(&self, thread: &ThreadId, generation: u64) {
+        let mut sessions = self.sessions.lock();
+        if sessions
             .get(thread)
-            .is_some_and(|h| !h.commands.is_closed())
+            .is_some_and(|h| h.generation == generation)
+        {
+            sessions.remove(thread);
+        }
     }
 
     /// Start the agent process and its session. A session already running
@@ -100,9 +166,9 @@ impl AcpManager {
         spec: SessionSpec,
         launch: Launch,
     ) -> Result<(), AcpError> {
-        if self.is_open(&spec.thread_id) {
+        let Some(reservation) = self.reserve(&spec) else {
             return Ok(());
-        }
+        };
         let mut cmd = tokio::process::Command::new(&launch.program);
         cmd.args(&launch.args)
             .current_dir(&spec.cwd)
@@ -116,15 +182,22 @@ impl AcpManager {
         for (k, v) in &launch.env {
             cmd.env(k, v);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| AcpError::Agent(format!("starting {}: {e}", launch.program.display())))?;
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                self.release(&reservation.thread, reservation.generation);
+                return Err(AcpError::Agent(format!(
+                    "starting {}: {e}",
+                    launch.program.display()
+                )));
+            }
+        };
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            self.release(&reservation.thread, reservation.generation);
             return Err(AcpError::Agent("the agent's stdio is unavailable".into()));
         };
-        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, self.generation())));
         if let Some(stderr) = child.stderr.take() {
-            let view = view.clone();
+            let view = reservation.view.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
@@ -132,7 +205,7 @@ impl AcpManager {
                 }
             });
         }
-        self.start(host, spec, view, stdin, stdout, Some(child))
+        self.start(host, spec, reservation, stdin, stdout, Some(child))
             .await
     }
 
@@ -149,11 +222,10 @@ impl AcpManager {
         W: AsyncWrite + Send + 'static,
         R: AsyncRead + Send + 'static,
     {
-        if self.is_open(&spec.thread_id) {
+        let Some(reservation) = self.reserve(&spec) else {
             return Ok(());
-        }
-        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, self.generation())));
-        self.start(host, spec, view, write, read, None).await
+        };
+        self.start(host, spec, reservation, write, read, None).await
     }
 
     fn generation(&self) -> u64 {
@@ -165,7 +237,7 @@ impl AcpManager {
         &self,
         host: Arc<dyn AcpHost>,
         spec: SessionSpec,
-        view: Arc<Mutex<SessionView>>,
+        reservation: Reservation,
         write: W,
         read: R,
         child: Option<tokio::process::Child>,
@@ -174,17 +246,14 @@ impl AcpManager {
         W: AsyncWrite + Send + 'static,
         R: AsyncRead + Send + 'static,
     {
-        let thread = spec.thread_id;
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let Reservation {
+            commands: cmd_rx,
+            view,
+            current,
+            ..
+        } = reservation;
         let (ready_tx, ready_rx) = oneshot::channel();
-        let actor = Actor::new(spec, host, view.clone(), self.events.clone());
-        self.sessions.lock().insert(
-            thread,
-            Handle {
-                commands: cmd_tx,
-                view: view.clone(),
-            },
-        );
+        let actor = Actor::new(spec, host, view.clone(), self.events.clone(), current);
         tokio::spawn(async move {
             let r = wire::run(write, read, move |conn, incoming| {
                 actor.run(conn, incoming, cmd_rx, ready_tx)
@@ -213,7 +282,7 @@ impl AcpManager {
         self.sessions
             .lock()
             .get(thread)
-            .filter(|h| !h.commands.is_closed())
+            .filter(|h| h.alive())
             .map(|h| h.commands.clone())
             .ok_or(AcpError::NotOpen)
     }
@@ -292,8 +361,11 @@ impl AcpManager {
 
     /// Stop the session and its agent process.
     pub fn close(&self, thread: &ThreadId) -> Result<(), AcpError> {
-        self.commands(thread)?
-            .send(Command::Close)
-            .map_err(|_| AcpError::NotOpen)
+        let commands = self.commands(thread)?;
+        // Closed from this moment, not when the actor gets around to it.
+        if let Some(h) = self.sessions.lock().get(thread) {
+            h.closed.store(true, Ordering::SeqCst);
+        }
+        commands.send(Command::Close).map_err(|_| AcpError::NotOpen)
     }
 }

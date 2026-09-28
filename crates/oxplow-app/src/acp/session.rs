@@ -164,6 +164,9 @@ struct Pending {
 pub(super) struct Actor {
     spec: SessionSpec,
     generation: u64,
+    /// False once a newer session replaced this one: its teardown then
+    /// records nothing (the new session owns the thread's status).
+    current: std::sync::Arc<std::sync::atomic::AtomicBool>,
     host: Arc<dyn AcpHost>,
     view: Arc<Mutex<SessionView>>,
     events: broadcast::Sender<AcpEvent>,
@@ -191,11 +194,13 @@ impl Actor {
         host: Arc<dyn AcpHost>,
         view: Arc<Mutex<SessionView>>,
         events: broadcast::Sender<AcpEvent>,
+        current: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let generation = view.lock().generation;
         Self {
             spec,
             generation,
+            current,
             host,
             view,
             events,
@@ -769,7 +774,9 @@ impl Actor {
             self.push(ItemBody::Error { message: r.clone() });
         }
         self.turn = None;
-        self.host.interrupted(self.thread()).await;
+        if self.current.load(std::sync::atomic::Ordering::SeqCst) {
+            self.host.interrupted(self.thread()).await;
+        }
         self.set_status(AcpStatus::Stopped);
         self.emit(AcpEventBody::Closed { reason });
     }
