@@ -280,18 +280,22 @@ pub async fn gather(layer: &SemanticLayer, effort_id: i64) -> Result<EffortActiv
     let Some(effort) = effort.first() else {
         return Err(format!("no effort {effort_id}"));
     };
+    // Newest first under the row cap, so a long effort keeps its latest
+    // activity (tsk369); reversed back to chronological order below.
     // The effort's thread's turns that overlap its time window.
-    let turns = q(
+    let mut turns = q(
         "SELECT a.prompt, coalesce(a.answer, '') FROM v_agent_turn a, v_effort e
                    WHERE e.id = ?1 AND a.thread_id = e.thread_id
                      AND a.started_at <= coalesce(e.ended_at, '9999')
                      AND coalesce(a.ended_at, '9999') >= e.started_at
-                   ORDER BY a.started_at",
+                   ORDER BY a.started_at DESC, a.id DESC",
     )
     .await?;
-    let tools =
-        q("SELECT tool, path, detail, ok FROM v_tool_call WHERE effort_id = ?1 ORDER BY id")
+    let mut tools =
+        q("SELECT tool, path, detail, ok FROM v_tool_call WHERE effort_id = ?1 ORDER BY id DESC")
             .await?;
+    turns.reverse();
+    tools.reverse();
     let recorded = q("SELECT question FROM v_decision
                       WHERE effort_id = ?1 AND provenance = 'recorded' ORDER BY id")
     .await?;
@@ -404,6 +408,32 @@ mod tests {
         assert_eq!(got[1].question, "q0");
         assert_eq!(got[1].confidence, "low", "missing confidence defaults low");
         assert!(parse_proposals("not json", 1, None).is_err());
+    }
+
+    /// A long effort keeps its newest activity, in order (tsk369).
+    #[tokio::test]
+    async fn gather_keeps_the_newest_tool_calls() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let (thread, effort) = (f.thread.value(), f.effort.value());
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 2499)
+                     INSERT INTO agent_tool_call (thread_id, effort_id, tool, detail, ok, at)
+                     SELECT ?1, ?2, 'Bash', 'call ' || i, 1, '2026-09-28T00:00:00Z' FROM n",
+                    [thread, effort],
+                )
+                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let layer = SemanticLayer::new(f.svc.db.clone());
+        let got = gather(&layer, effort).await.unwrap();
+        let detail = |i: usize| got.tool_calls[i].detail.clone().unwrap();
+        assert_eq!(detail(got.tool_calls.len() - 1), "call 2499");
+        assert_eq!(detail(0), format!("call {}", 2500 - got.tool_calls.len()));
     }
 
     #[tokio::test]
