@@ -220,6 +220,9 @@ pub enum ProgramKind {
     /// An agent spoken to over ACP (`acpAgents`, tsk335).
     #[serde(rename = "acp-agent")]
     AcpAgent,
+    /// A shared extension's advisories: SQL whose results go into the
+    /// agent's context (tsk352). Bundled extensions' aren't gated.
+    Advisories,
 }
 
 /// A program the project's config would run.
@@ -247,6 +250,7 @@ impl ProjectProgram {
             ProgramKind::Gauge => format!("gauge:{}", self.name),
             ProgramKind::Plugin => format!("plugin:{}", self.name),
             ProgramKind::AcpAgent => format!("acp:{}", self.name),
+            ProgramKind::Advisories => format!("advisories:{}", self.name),
         }
     }
 
@@ -280,6 +284,8 @@ impl ProjectProgram {
                     h.update(tree_hash(&project_dir.join(dir))?.as_bytes());
                 }
             }
+            // Covered by what it says: each advisory is an arg (below).
+            ProgramKind::Advisories => h.update(self.program.as_bytes()),
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
                 if self.program.contains('/') && file.is_file() {
@@ -292,7 +298,7 @@ impl ProjectProgram {
             h.update([0u8]);
             h.update(a.as_bytes());
             let arg_file = cwd.join(a);
-            if !a.starts_with('-') && arg_file.is_file() {
+            if self.kind != ProgramKind::Advisories && !a.starts_with('-') && arg_file.is_file() {
                 h.update([3u8]);
                 h.update(std::fs::read(&arg_file)?);
             }
@@ -419,6 +425,49 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 }
 
 /// Whether a project ACP agent may start: approved as it is now.
+/// A shared extension's advisories as a program to approve: each
+/// advisory (its id, trigger, repeat rule, heading and query) is an arg,
+/// so the person reads exactly what may speak into the agent's context
+/// and any change needs approving again.
+pub fn advisory_program(ext: &crate::extensions::Extension) -> ProjectProgram {
+    let text = |v: serde_json::Value| v.as_str().unwrap_or_default().to_string();
+    ProjectProgram {
+        kind: ProgramKind::Advisories,
+        name: ext.name.clone(),
+        program: format!("{}/extension.yaml", ext.path.trim_end_matches('/')),
+        args: ext
+            .advisories
+            .iter()
+            .map(|a| {
+                format!(
+                    "{} (on {}, once per {}{}): {}",
+                    a.id,
+                    text(serde_json::to_value(a.on).unwrap_or_default()),
+                    text(serde_json::to_value(a.once_per).unwrap_or_default()),
+                    a.heading
+                        .as_deref()
+                        .map(|h| format!(", heading {h:?}"))
+                        .unwrap_or_default(),
+                    a.query.trim()
+                )
+            })
+            .collect(),
+        env: Vec::new(),
+        approved: false,
+        version: None,
+    }
+}
+
+/// Extensions whose advisories need a person's approval: enabled,
+/// shared (not bundled with oxplow) and declaring some.
+pub fn gated_advisories(
+    extensions: &[crate::extensions::Extension],
+) -> impl Iterator<Item = &crate::extensions::Extension> {
+    extensions
+        .iter()
+        .filter(|e| e.enabled && e.origin != "bundled" && !e.advisories.is_empty())
+}
+
 /// Whether a project ACP agent may start in `cwd` (its stream's
 /// worktree): approved as it is now, with its script args read there.
 pub fn may_run_acp(
@@ -436,6 +485,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
         ProgramKind::Gauge => "gauge",
         ProgramKind::Plugin => "collection plugin",
         ProgramKind::AcpAgent => "ACP agent",
+        ProgramKind::Advisories => "extension advisories",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -449,6 +499,7 @@ pub fn list(
     store: &ApprovalStore,
     project_dir: &Path,
     config: &oxplow_config::OxplowConfig,
+    extensions: &[crate::extensions::Extension],
 ) -> Vec<ProjectProgram> {
     let mut out = Vec::new();
     let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
@@ -487,6 +538,7 @@ pub fn list(
         }
     }
     out.extend(config.acp_agents.iter().map(acp_program));
+    out.extend(gated_advisories(extensions).map(advisory_program));
     for p in &mut out {
         p.version = p.hash(project_dir).ok();
         p.approved = p
@@ -507,7 +559,7 @@ pub fn version_of(
     kind: ProgramKind,
     name: &str,
 ) -> String {
-    list(store, project_dir, config)
+    list(store, project_dir, config, &[])
         .into_iter()
         .find(|p| p.kind == kind && p.name == name)
         .and_then(|p| p.version)
@@ -523,11 +575,12 @@ pub fn approve_program(
     store: &ApprovalStore,
     project_dir: &Path,
     config: &oxplow_config::OxplowConfig,
+    extensions: &[crate::extensions::Extension],
     kind: ProgramKind,
     name: &str,
     version: &str,
 ) -> Result<(), String> {
-    let p = list(store, project_dir, config)
+    let p = list(store, project_dir, config, extensions)
         .into_iter()
         .find(|p| p.kind == kind && p.name == name)
         .ok_or_else(|| format!("no exec {kind:?} named `{name}` in the project's config"))?;
@@ -564,7 +617,7 @@ mod tests {
         cfg: &oxplow_config::OxplowConfig,
         name: &str,
     ) -> String {
-        list(st, dir, cfg)
+        list(st, dir, cfg, &[])
             .into_iter()
             .find(|p| p.name == name)
             .and_then(|p| p.version)
@@ -589,7 +642,7 @@ mod tests {
             dir.path(),
             "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh, args: [--fast] }\n  - key: repo.star\n    emits: [repo.n]\n    compute: { runtime: starlark, entryFile: tools/x.star }\ncollection:\n  plugins:\n    - { name: acme.parse, kind: coverage, formats: [mine], runtime: exec, entryFile: tools/parse.sh }\n",
         );
-        let listed = list(&st, dir.path(), &cfg);
+        let listed = list(&st, dir.path(), &cfg, &[]);
         assert_eq!(
             listed
                 .iter()
@@ -614,6 +667,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Gauge,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
@@ -658,6 +712,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Plugin,
             "nope",
             &current(&st, dir.path(), &cfg, "nope")
@@ -676,7 +731,7 @@ mod tests {
             dir.path(),
             "acpAgents:\n  - { name: mine, command: tools/agent, args: [--acp], env: { MODE: fast } }\n  - { name: gemini, command: gemini, args: [--acp] }\n",
         );
-        let listed = list(&st, dir.path(), &cfg);
+        let listed = list(&st, dir.path(), &cfg, &[]);
         let acp: Vec<_> = listed
             .iter()
             .filter(|p| p.kind == ProgramKind::AcpAgent)
@@ -693,6 +748,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::AcpAgent,
             "mine",
             &current(&st, dir.path(), &cfg, "mine"),
@@ -717,6 +773,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::AcpAgent,
             "gemini",
             &current(&st, dir.path(), &cfg, "gemini"),
@@ -786,6 +843,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Gauge,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
@@ -823,6 +881,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Gauge,
             "repo.count",
             &current(&st, dir.path(), &cfg, "repo.count"),
@@ -832,6 +891,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::AcpAgent,
             "js",
             &current(&st, dir.path(), &cfg, "js"),
@@ -858,6 +918,7 @@ mod tests {
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::AcpAgent,
             "js",
             &current(&st, dir.path(), &cfg, "js"),
@@ -881,30 +942,32 @@ mod tests {
             dir.path(),
             "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
         );
-        let seen = list(&st, dir.path(), &cfg)[0].version.clone().unwrap();
+        let seen = list(&st, dir.path(), &cfg, &[])[0].version.clone().unwrap();
         // Swapped between the listing and the click: refused.
         std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
         let err = approve_program(
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Gauge,
             "repo.count",
             &seen,
         )
         .unwrap_err();
         assert!(err.contains("changed"), "{err}");
-        assert!(!list(&st, dir.path(), &cfg)[0].approved);
-        let now = list(&st, dir.path(), &cfg)[0].version.clone().unwrap();
+        assert!(!list(&st, dir.path(), &cfg, &[])[0].approved);
+        let now = list(&st, dir.path(), &cfg, &[])[0].version.clone().unwrap();
         approve_program(
             &st,
             dir.path(),
             &cfg,
+            &[],
             ProgramKind::Gauge,
             "repo.count",
             &now,
         )
         .unwrap();
-        assert!(list(&st, dir.path(), &cfg)[0].approved);
+        assert!(list(&st, dir.path(), &cfg, &[])[0].approved);
     }
 }

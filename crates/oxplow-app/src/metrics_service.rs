@@ -4766,6 +4766,7 @@ def transform(input):
             &svc.approvals,
             dir.path(),
             &cfg,
+            &[],
             crate::exec_consent::ProgramKind::Gauge,
             "repo.count",
             &crate::exec_consent::version_of(

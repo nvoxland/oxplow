@@ -60,7 +60,14 @@ pub async fn list_project_programs(
         &svc.approvals,
         &svc.layout.project_dir,
         &config,
+        &shared_extensions(svc).await,
     ))
+}
+
+/// The primary worktree's extensions, whose advisories are approved here.
+async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
+    let root = svc.git.resolve_repo_dir(None).await;
+    oxplow_app::extensions::load_extensions(&root)
 }
 
 /// Approve one of the project's programs as it is now. UI only: consent to
@@ -76,10 +83,12 @@ pub async fn approve_project_program(
         .read()
         .map(|c| c.clone())
         .unwrap_or_else(|p| p.into_inner().clone());
+    let extensions = shared_extensions(svc).await;
     oxplow_app::exec_consent::approve_program(
         &svc.approvals,
         &svc.layout.project_dir,
         &config,
+        &extensions,
         kind,
         &name,
         &version,
@@ -89,6 +98,7 @@ pub async fn approve_project_program(
         &svc.approvals,
         &svc.layout.project_dir,
         &config,
+        &shared_extensions(svc).await,
     ))
 }
 

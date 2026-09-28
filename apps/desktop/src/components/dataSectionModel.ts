@@ -54,7 +54,19 @@ export interface ProgramRowModel {
 
 /// A program the project's config would run (an `exec` gauge or collection
 /// plugin): unapproved ones don't run until a person approves them here.
+/// A shared extension's advisories are shown as what they'd say.
 export function programRow(p: ProjectProgram): ProgramRowModel {
+  if (p.kind === "advisories") {
+    const command = p.args.join("\n");
+    return {
+      key: `${p.kind}:${p.name}`,
+      label: `Advisories from ${p.name}`,
+      command,
+      status: p.approved ? "Approved on this machine" : "Not approved: they won't reach your agent",
+      approved: p.approved,
+      approveTitle: `Lets these queries' results into your agent's context (${p.program}). Approve only if you trust this extension; any change needs approval again.`,
+    };
+  }
   const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
   const what = p.kind === "gauge" ? "Gauge" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
   return {

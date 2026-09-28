@@ -48,3 +48,19 @@ test("programRow says what runs and whether it will", () => {
   const agent = programRow({ kind: "acp-agent", name: "mine", program: "tools/agent", args: ["--acp"], env: ["MODE=fast"], approved: false });
   expect([agent.label, agent.command]).toEqual(["ACP agent mine", "MODE=fast tools/agent --acp"]);
 });
+
+test("programRow shows a shared extension's advisories as what they'd say", () => {
+  const m = programRow({
+    kind: "advisories",
+    name: "team",
+    program: "oxplow/extensions/team/extension.yaml",
+    args: ["nag (on prompt, once per effort): SELECT 'x' AS message"],
+    env: [],
+    approved: false,
+    version: "abc",
+  });
+  expect(m.label).toBe("Advisories from team");
+  expect(m.command).toBe("nag (on prompt, once per effort): SELECT 'x' AS message");
+  expect(m.status).toBe("Not approved: they won't reach your agent");
+  expect(m.approveTitle).toContain("agent's context");
+});

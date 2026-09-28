@@ -430,6 +430,14 @@ advisories:
   in-memory, bounded fired-set (like the nudges it replaced, a restart may
   repeat one). Marks are recorded only after every query ran. A failing
   query is logged and skipped.
+- **Consent (tsk352).** A shared extension's advisories (committed by a
+  teammate, or installed from git) speak into the agent's context, so they
+  run only once a person approved them. `exec_consent::advisory_program`
+  turns an extension's advisories into a program (kind `advisories`), with
+  one arg per advisory: its id, trigger, repeat rule, heading and query.
+  Settings → Data → Programs lists them, and any change needs approving
+  again. `advisories::consented` filters before running; bundled
+  extensions aren't gated.
 - `for_thread(svc, thread, on)` runs them for the thread's **single** open
   effort (none under parallel efforts), reading extensions from the
   thread's stream worktree. Post-tool-use hits are persisted as nudges

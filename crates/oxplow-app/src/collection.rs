@@ -3473,6 +3473,7 @@ mod tests {
             &approvals,
             dir.path(),
             &cfg,
+            &[],
             crate::exec_consent::ProgramKind::Plugin,
             "acme.parse",
             &crate::exec_consent::version_of(

@@ -5,6 +5,7 @@
 //! hook response. Post-tool-use hits are also recorded as nudges
 //! (`v_agent_nudge`). See `.context/extensions.md` → "Advisories".
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use oxplow_db::{SemanticLayer, SqlCell};
@@ -143,7 +144,7 @@ pub async fn for_thread(
         _ => None,
     };
     let root = svc.git.resolve_repo_dir(stream_id.as_deref()).await;
-    let extensions = crate::extensions::load_extensions(&root);
+    let extensions = consented(&svc.approvals, crate::extensions::load_extensions(&root));
     let layer = SemanticLayer::new(svc.db.clone());
     let hits = svc
         .advisories
@@ -157,6 +158,26 @@ pub async fn for_thread(
         }
     }
     hits
+}
+
+/// The extensions whose advisories may run: bundled ones, and shared ones
+/// a person approved as they are now (tsk352). A teammate's or a
+/// git-installed extension can't speak into the agent's context unseen.
+pub fn consented(
+    approvals: &crate::exec_consent::ApprovalStore,
+    extensions: Vec<Extension>,
+) -> Vec<Extension> {
+    extensions
+        .into_iter()
+        .filter(|e| {
+            if e.origin == "bundled" || e.advisories.is_empty() {
+                return true;
+            }
+            let p = crate::exec_consent::advisory_program(e);
+            p.hash(Path::new(""))
+                .is_ok_and(|h| approvals.is_approved(&p.key(), &h))
+        })
+        .collect()
 }
 
 fn cell_text(c: &SqlCell) -> String {
@@ -301,6 +322,18 @@ mod tests {
             "name: guide\nadvisories:\n  - id: hello\n    on: post-tool-use\n    query: SELECT 'effort ' || :effort_id AS message\n",
         )
         .unwrap();
+        // A project extension's advisories are silent until a person
+        // approves them (tsk352).
+        assert!(for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse)
+            .await
+            .is_empty());
+        let exts = crate::extensions::load_extensions(&f.svc.layout.project_dir);
+        let program =
+            crate::exec_consent::advisory_program(exts.iter().find(|e| e.name == "guide").unwrap());
+        f.svc
+            .approvals
+            .approve(&program.key(), &program.hash(Path::new("")).unwrap())
+            .unwrap();
         let hits = for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse).await;
         assert_eq!(
             hits,
@@ -441,6 +474,49 @@ mod tests {
                 .await
                 .is_empty(),
             "once per effort"
+        );
+    }
+
+    #[test]
+    fn a_shared_extensions_advisories_speak_only_once_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        let approvals = crate::exec_consent::ApprovalStore::for_tests(dir.path());
+        let mut shared = ext(vec![adv(
+            "nag",
+            AdvisoryOn::Prompt,
+            AdvisoryOncePer::Effort,
+            "SELECT 'x' AS message",
+        )]);
+        shared.origin = "project".into();
+        shared.name = "team".into();
+        let mut bundled = ext(vec![adv(
+            "b",
+            AdvisoryOn::Prompt,
+            AdvisoryOncePer::Effort,
+            "SELECT 'y' AS message",
+        )]);
+        bundled.origin = "bundled".into();
+        let names = |exts: Vec<Extension>| exts.into_iter().map(|e| e.name).collect::<Vec<_>>();
+        let all = vec![shared.clone(), bundled.clone()];
+
+        assert_eq!(
+            names(consented(&approvals, all.clone())),
+            vec![bundled.name.clone()]
+        );
+
+        let program = crate::exec_consent::advisory_program(&shared);
+        let version = program.hash(dir.path()).unwrap();
+        approvals.approve(&program.key(), &version).unwrap();
+        assert_eq!(
+            names(consented(&approvals, all.clone())),
+            vec!["team".to_string(), bundled.name.clone()]
+        );
+
+        // Changing what it says needs approving again.
+        shared.advisories[0].query = "SELECT 'rm -rf everything' AS message".into();
+        assert_eq!(
+            names(consented(&approvals, vec![shared, bundled.clone()])),
+            vec![bundled.name]
         );
     }
 }

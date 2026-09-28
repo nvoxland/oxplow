@@ -65,6 +65,10 @@ tsk162). Its committed config can name programs:
 
 - `exec` gauges and collection plugins in `.oxplow/project.yaml`;
 - `exec` sources in `oxplow/extensions/*/extension.yaml`;
+- advisories in a shared extension (committed or git-installed): SQL whose
+  results go into the agent's context (tsk352). Approved as a unit per
+  extension, and the listing shows each advisory's query. Bundled
+  extensions' aren't gated;
 - `acpAgents` in `.oxplow/project.yaml` (tsk335). The hash covers the
   command, its args and env, and the file's content when the command is
   a project path. The built-in presets aren't gated.

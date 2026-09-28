@@ -176,7 +176,7 @@ export function DataSection() {
             <div key={m.key} data-testid={`program-row-${m.key}`} style={rowStyle}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{m.label}</span>
-                <code style={mutedStyle}>{m.command}</code>
+                <code style={{ ...mutedStyle, whiteSpace: "pre-wrap" }}>{m.command}</code>
                 <span style={{ flex: 1 }} />
                 <span style={m.approved ? mutedStyle : errorStyle}>{m.status}</span>
                 {m.approved ? null : (

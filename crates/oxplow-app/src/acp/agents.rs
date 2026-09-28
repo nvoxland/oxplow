@@ -122,6 +122,7 @@ mod tests {
             &approvals,
             dir.path(),
             &cfg,
+            &[],
             crate::exec_consent::ProgramKind::AcpAgent,
             "mine",
             &crate::exec_consent::version_of(

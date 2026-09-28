@@ -3342,7 +3342,12 @@ export type ProgramKind =
 // A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
 "plugin" | 
 // An agent spoken to over ACP (`acpAgents`, tsk335).
-"acp-agent";
+"acp-agent" | 
+/**
+ *  A shared extension's advisories: SQL whose results go into the
+ *  agent's context (tsk352). Bundled extensions' aren't gated.
+ */
+"advisories";
 
 // A program the project's config would run.
 export type ProjectProgram = {
