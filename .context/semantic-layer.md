@@ -116,7 +116,8 @@ New primitives that don't exist yet:
 - `decision`: the forks an agent resolved during an effort (fork, choice,
   alternatives, confidence, why). Written via a `record_decision` MCP tool.
 - `claim`: statements like "tests pass", joined to observations so each one
-  reads as verified or unverified. Written via `record_claim`.
+  reads as verified or unverified. Written via `record_claim`. Both attach to the given task's open effort, or else the
+  thread's; a given task must be in the calling thread's stream (tsk353).
 - `context_read`: which `.context/*.md` docs the agent read before touching
   a subsystem.
 - `struggle`: retries, repeated reads of the same file, reverted edits.

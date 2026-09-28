@@ -5669,10 +5669,11 @@ fn analysis_ingest_json(outcome: &oxplow_app::collection::AnalysisIngest) -> ser
     }
 }
 
-/// Validate an optional `stream_id`: enforce the `s-` prefix when present,
-/// and accept `None` (resolves to the current/primary worktree downstream).
 /// Thread + (task, effort) ids for something recorded "on the current
-/// work": the given task's open effort, else the thread's open effort.
+/// work": the given task's open effort, else the thread's open effort. A
+/// given task must be in the calling thread's stream (as filing claims
+/// are), so an agent can't file decisions or claims onto another stream's
+/// work.
 async fn resolve_effort(
     services: &Services,
     tool: &str,
@@ -5684,7 +5685,27 @@ async fn resolve_effort(
     let tid = parse_thread_id(thread_id)?;
     let effort = match task_id {
         Some(raw) => {
+            use oxplow_domain::stores::{TaskStore as _, ThreadStore as _};
             let task = parse_task_id(tool, "task_id", raw)?;
+            let stream_of = |t: Option<oxplow_domain::Thread>| t.map(|t| t.stream_id);
+            let caller_stream = stream_of(services.thread_store.get(&tid).await.map_err(internal)?);
+            let task_thread = services
+                .task_store
+                .get(task)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| McpError::invalid_params(format!("{tool}: no task {raw}"), None))?
+                .thread_id;
+            let task_stream = match task_thread {
+                Some(t) => stream_of(services.thread_store.get(&t).await.map_err(internal)?),
+                None => None,
+            };
+            if task_stream.is_some() && task_stream != caller_stream {
+                return Err(McpError::invalid_params(
+                    format!("{tool}: task {raw} belongs to another stream's work"),
+                    None,
+                ));
+            }
             let e = services
                 .effort_store
                 .find_open_for_task(task)
@@ -5733,6 +5754,8 @@ fn lens_error(id: &str, e: oxplow_domain::DomainError) -> McpError {
     }
 }
 
+/// Validate an optional `stream_id`: enforce the `s-` prefix when present,
+/// and accept `None` (resolves to the current/primary worktree downstream).
 fn check_optional_stream(tool: &str, stream_id: Option<&str>) -> Result<(), McpError> {
     match stream_id {
         Some(id) => expect_id_kind(tool, "stream_id", id, ID_STREAM),
@@ -7667,6 +7690,54 @@ mod tests {
                 .is_empty(),
             "claiming clears the unattributed residue"
         );
+    }
+
+    #[tokio::test]
+    async fn a_claim_on_another_streams_task_is_refused() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let caller = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let mut other_stream = stream.clone();
+        other_stream.id = oxplow_domain::StreamId::placeholder();
+        other_stream.title = "other".into();
+        other_stream.branch = "other".into();
+        other_stream.kind = oxplow_domain::StreamKind::Worktree;
+        other_stream.worktree_path = "/elsewhere".into();
+        let other_stream_id = services.stream_store.upsert(&other_stream).await.unwrap();
+        let other_thread = services
+            .threads
+            .create(
+                &other_stream_id,
+                "t",
+                "working",
+                oxplow_domain::AgentKind::Claude,
+            )
+            .await
+            .unwrap();
+        let foreign = services
+            .task_store
+            .insert(&make_task(Some(other_thread.id), "not yours"))
+            .await
+            .unwrap();
+        let err = server
+            .record_claim(Parameters(RecordClaimParams {
+                thread_id: caller.id.to_string(),
+                task_id: Some(foreign.to_string()),
+                statement: "All tests pass".into(),
+                kind: "tests_pass".into(),
+                evidence_ref: None,
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("another stream"), "{}", err.message);
     }
 
     #[tokio::test]
