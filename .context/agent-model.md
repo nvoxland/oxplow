@@ -513,7 +513,7 @@ the same JSON.
 - **Bindings:** raw agent JSON (`rawInput` / `rawOutput`) is TS `unknown`, via `specta_typescript::Unknown`, because specta's own `serde_json::Value` rendering doesn't typecheck.
 
 **UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` for `agent: acp` threads instead of the terminal.
-- **Transcript state:** `acpTranscript.ts` is a pure reducer over the `acpTranscript` snapshot and live `acp:event`s. Items upsert by id and the newer seq wins. A seq gap, or a remote reconnect (`onRemoteReconnect`), refetches `since(headSeq)`. The view subscribes to events before fetching, so nothing between the two is lost.
+- **Transcript state:** `acpTranscript.ts` is a pure reducer over the `acpTranscript` snapshot and live `acp:event`s. Items upsert by id and the newer seq wins. A seq gap, or a remote reconnect (`onRemoteReconnect`), refetches `since(headSeq)`. Past a gap, `headSeq` stays at the last contiguous seq, so that refetch includes the missed items (tsk356). The view subscribes to events before fetching, so nothing between the two is lost.
 - **Opening:** it opens the session on mount when none exists. A failure shows the error with Retry, plus "Open settings" when the agent needs approval.
 - **Items:**
   - the user message, with an "oxplow context" disclosure;

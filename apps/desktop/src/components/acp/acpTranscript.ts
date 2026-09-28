@@ -71,12 +71,15 @@ export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState
 export function applyEvent(state: AcpViewState, e: AcpEvent): AcpViewState {
   switch (e.type) {
     case "item": {
-      const gap = e.item.seq > state.headSeq + 1;
+      // Past a gap the head stays put: it's the last seq known to have
+      // nothing missing before it, which is what the refetch asks from.
+      // A merged snapshot moves it on.
+      const gap = state.stale || e.item.seq > state.headSeq + 1;
       return {
         ...state,
         items: upsertItems(state.items, [e.item]),
-        headSeq: Math.max(state.headSeq, e.item.seq),
-        stale: state.stale || gap,
+        headSeq: gap ? state.headSeq : Math.max(state.headSeq, e.item.seq),
+        stale: gap,
       };
     }
     case "status":

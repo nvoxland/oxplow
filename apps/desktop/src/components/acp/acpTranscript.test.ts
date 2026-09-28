@@ -59,6 +59,9 @@ describe("acp transcript reducer", () => {
     let s = fromSnapshot(snap([agent(1, 1, "a")]));
     s = applyEvent(s, itemEvent(agent(3, 4, "c")));
     expect(s.stale).toBe(true);
+    // The head stays at the last seq seen without a gap, so the refetch
+    // (\`since(headSeq)\`) asks for the missed items too.
+    expect(s.headSeq).toBe(1);
     s = mergeSnapshot(s, snap([agent(2, 2, "b"), agent(3, 4, "c")], { headSeq: 4 }));
     expect(s.stale).toBe(false);
     expect(s.items.map((i) => i.id)).toEqual([1, 2, 3]);
