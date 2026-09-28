@@ -44,6 +44,10 @@ pub struct Thread {
     pub pane_target: String,
     /// Agent implementation assigned to this thread at creation time.
     pub agent: AgentKind,
+    /// For an `Acp` thread, the ACP agent's name (see `acpAgents`);
+    /// `None` otherwise.
+    #[serde(default)]
+    pub acp_agent: Option<String>,
     pub resume_session_id: String,
     pub summary: String,
     pub summary_updated_at: Option<Timestamp>,
@@ -76,6 +80,7 @@ mod tests {
             sort_index: 0,
             pane_target: "working".into(),
             agent: AgentKind::Claude,
+            acp_agent: None,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

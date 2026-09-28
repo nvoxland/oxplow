@@ -7,6 +7,7 @@
 //! Held inside `Arc<Services>` and registered as Tauri state. Methods
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
+pub mod acp;
 pub mod advisories;
 pub mod agent_activity;
 pub mod agent_command;

@@ -328,6 +328,8 @@ pub const MANIFEST: &[Capability] = &[
     ui("reorder_streams"),
     // ---- ui-only: threads ----
     ui("create_thread"),
+    // The thread picker's ACP agents (tsk335).
+    ui("list_acp_agents"),
     ui("set_thread_prompt"),
     ui("set_agents"),
     ui("list_closed_threads"),

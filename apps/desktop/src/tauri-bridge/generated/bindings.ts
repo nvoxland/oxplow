@@ -142,6 +142,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listAcpAgents: () => typedError<AcpAgentListing[], IpcError>(__TAURI_INVOKE("list_acp_agents")),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	renameThread: (req: RenameThreadRequest) => typedError<Thread, IpcError>(__TAURI_INVOKE("rename_thread", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1232,6 +1237,42 @@ export const commands = {
 };
 
 /* Types */
+/**
+ *  An agent oxplow talks to over the Agent Client Protocol (tsk335): a
+ *  program that speaks ACP on its stdio. Presets cover the common ones
+ *  ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
+ *  overrides by name. A project entry names a program from the repo, so it
+ *  runs only once a person approved it (see `exec_consent`).
+ */
+export type AcpAgentConfig = {
+	// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
+	name: string,
+	// The program: a name on PATH or a path.
+	command: string,
+	args?: string[],
+	// Extra environment for the program.
+	env?: { [key in string]: string },
+};
+
+// One ACP agent, as the thread picker and Settings see it.
+export type AcpAgentListing = {
+	name: string,
+	command: string,
+	args: string[],
+	source: AcpAgentSource,
+	// May start on this machine: a preset, or an approved project entry.
+	approved: boolean,
+	// The command's absolute path, or `None` when it isn't installed.
+	resolvedPath: string | null,
+};
+
+// Where an ACP agent definition came from.
+export type AcpAgentSource = 
+// Built into oxplow; runs without approval.
+"preset" | 
+// The project's `acpAgents:`; needs a person's approval to run.
+"project";
+
 export type AddDashboardItemRequest = {
 	dashboardId: DashboardId,
 	// `metric` | `text`.
@@ -1278,7 +1319,12 @@ export type AdvisoryOncePer =
 // Every time, whenever the query returns rows.
 "turn";
 
-export type AgentKind = "claude" | "codex" | "opencode";
+export type AgentKind = "claude" | "codex" | "opencode" | 
+/**
+ *  An agent spoken to over the Agent Client Protocol (tsk335); which one
+ *  is the thread's `acp_agent`.
+ */
+"acp";
 
 export type AgentStatus = {
 	thread_id: ThreadId,
@@ -1734,6 +1780,8 @@ export type CreateThreadRequest = {
 	title: string,
 	paneTarget: string | null,
 	agent: AgentKind | null,
+	// For an ACP thread, which ACP agent (see `list_acp_agents`).
+	acpAgent?: string | null,
 };
 
 export type CreateWorktreeRequest = {
@@ -2913,6 +2961,11 @@ export type OxplowConfig = {
 	 */
 	agentModels: Partial<{ [key in AgentKind]: string }>,
 	/**
+	 *  The project's ACP agents (`acpAgents:`), layered over
+	 *  [`acp_presets`] by [`resolve_acp_agents`].
+	 */
+	acpAgents: AcpAgentConfig[],
+	/**
 	 *  This project's AI role assignments (`ai: { roles: … }`), layered
 	 *  over the user-global `ai.yaml`. Keyed by role name (one of
 	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -3176,7 +3229,9 @@ export type ProgramKind =
 // A metric gauge (`gauges:`).
 "gauge" | 
 // A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
-"plugin";
+"plugin" | 
+// An agent spoken to over ACP (`acpAgents`, tsk335).
+"acp-agent";
 
 // A program the project's config would run.
 export type ProjectProgram = {
@@ -3186,6 +3241,8 @@ export type ProjectProgram = {
 	// Project-relative path of the program.
 	program: string,
 	args: string[],
+	// Extra environment it runs with, as `NAME=value` (ACP agents).
+	env: string[],
 	// This machine approved it as it is now.
 	approved: boolean,
 };
@@ -3817,6 +3874,11 @@ export type Thread = {
 	pane_target: string,
 	// Agent implementation assigned to this thread at creation time.
 	agent: AgentKind,
+	/**
+	 *  For an `Acp` thread, the ACP agent's name (see `acpAgents`);
+	 *  `None` otherwise.
+	 */
+	acp_agent?: string | null,
 	resume_session_id: string,
 	summary: string,
 	summary_updated_at: Timestamp | null,

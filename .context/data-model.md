@@ -265,6 +265,19 @@ for new threads and the first configured agent is the default. Existing
 threads migrated at V30 default to `claude`; the assignment is immutable in
 v1 so resume/session history stays unambiguous.
 
+`agent = 'acp'` (V90, tsk335) is an agent spoken to over the Agent Client
+Protocol.
+
+- **Which agent:** `acp_agent` (nullable TEXT, V90) names it, a preset
+  (`claude`, `gemini`, `codex`) or a project `acpAgents` entry.
+  `ThreadService::create_with_acp` enforces that an ACP thread names one
+  and only an ACP thread does.
+- **Migration:** V90 is the same column swap as V32, and it drops and
+  recreates `v_thread` around it (a view reading the column blocks
+  `DROP COLUMN`). The recreated `v_thread` adds `acp_agent`.
+- **Test:** `v90_keeps_thread_children_and_accepts_acp` migrates a real DB
+  to V89, adds children, then finishes; the children must survive.
+
 **Removed in v42:** the `auto_commit` column (added in v15) and the
 `commit_point` / `wait_point` tables (added in v6/v7). Commits are now
 user-driven only — the harness has no `git commit` path, no queueable

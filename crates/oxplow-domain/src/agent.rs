@@ -13,14 +13,23 @@ pub enum AgentKind {
     Claude,
     Codex,
     Opencode,
+    /// An agent spoken to over the Agent Client Protocol (tsk335); which one
+    /// is the thread's `acp_agent`.
+    Acp,
 }
 
 impl AgentKind {
+    /// Runs in a terminal (a PTY / tmux pane), as opposed to ACP.
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, AgentKind::Acp)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             AgentKind::Claude => "claude",
             AgentKind::Codex => "codex",
             AgentKind::Opencode => "opencode",
+            AgentKind::Acp => "acp",
         }
     }
 }

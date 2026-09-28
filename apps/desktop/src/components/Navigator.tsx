@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useSlideoutStrip } from "./useSlideoutStrip.js";
 import { SlideoutChevron } from "./SlideoutChevron.js";
 import { archiveStream, type AgentKind, type Stream, type Thread, type ThreadState } from "../api.js";
-import { agentLabel } from "../agentKinds.js";
+import { agentChoices, parseAgentChoice } from "../agentKinds.js";
+import { listAcpAgents } from "../api.js";
+import type { AcpAgentListing } from "../tauri-bridge/generated/bindings.js";
 import { subscribeNewThreadRequests } from "../new-thread-bus.js";
 import { AgentStatusDot, type AgentStatusDotState } from "./AgentStatusDot.js";
 import { useRowContextMenu } from "./useRowContextMenu.js";
@@ -24,7 +26,7 @@ interface NavigatorProps {
   enabledAgents: AgentKind[];
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
-  onCreateThread(streamId: string, title: string, agent?: AgentKind): Promise<void>;
+  onCreateThread(streamId: string, title: string, agent?: AgentKind, acpAgent?: string | null): Promise<void>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
@@ -430,8 +432,8 @@ export function Navigator({
                   {pendingNewThreadFor === g.stream.id ? (
                     <InlineNewThread
                       enabledAgents={enabledAgents}
-                      onSubmit={async (title, agent) => {
-                        await onCreateThread(g.stream.id, title, agent);
+                      onSubmit={async (title, agent, acpAgent) => {
+                        await onCreateThread(g.stream.id, title, agent, acpAgent);
                         setPendingNewThreadFor(null);
                       }}
                       onCancel={() => setPendingNewThreadFor(null)}
@@ -866,13 +868,22 @@ function InlineNewThread({
   onCancel,
 }: {
   enabledAgents: AgentKind[];
-  onSubmit(title: string, agent?: AgentKind): Promise<void>;
+  onSubmit(title: string, agent?: AgentKind, acpAgent?: string | null): Promise<void>;
   onCancel(): void;
 }) {
   const [value, setValue] = useState("");
-  const [agent, setAgent] = useState<AgentKind>(enabledAgents[0] ?? "claude");
   const [busy, setBusy] = useState(false);
-  const choices = enabledAgents.length > 0 ? enabledAgents : ["claude" as AgentKind];
+  const [acpAgents, setAcpAgents] = useState<AcpAgentListing[]>([]);
+  const acpEnabled = enabledAgents.includes("acp");
+  useEffect(() => {
+    if (!acpEnabled) return;
+    void listAcpAgents()
+      .then(setAcpAgents)
+      .catch(() => setAcpAgents([]));
+  }, [acpEnabled]);
+  const choices = agentChoices(enabledAgents.length > 0 ? enabledAgents : ["claude"], acpAgents);
+  const [choice, setChoice] = useState<string>(choices[0]?.value ?? "claude");
+  const picked = choices.some((c) => c.value === choice) ? choice : (choices[0]?.value ?? "claude");
   return (
     <form
       onSubmit={async (e) => {
@@ -881,7 +892,8 @@ function InlineNewThread({
         if (!t) return onCancel();
         setBusy(true);
         try {
-          await onSubmit(t, agent);
+          const { agent, acpAgent } = parseAgentChoice(picked);
+          await onSubmit(t, agent, acpAgent);
         } finally {
           setBusy(false);
         }
@@ -923,9 +935,10 @@ function InlineNewThread({
       />
       {choices.length > 1 ? (
         <select
-          value={agent}
+          data-testid="navigator-new-thread-agent"
+          value={picked}
           disabled={busy}
-          onChange={(e) => setAgent(e.target.value as AgentKind)}
+          onChange={(e) => setChoice(e.target.value)}
           style={{
             background: "var(--surface-card)",
             color: "var(--text-primary)",
@@ -935,9 +948,9 @@ function InlineNewThread({
             fontSize: "var(--text-xs)",
           }}
         >
-          {choices.map((choice) => (
-            <option key={choice} value={choice}>
-              {agentLabel(choice)}
+          {choices.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
             </option>
           ))}
         </select>

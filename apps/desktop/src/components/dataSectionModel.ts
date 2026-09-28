@@ -55,8 +55,8 @@ export interface ProgramRowModel {
 /// A program the project's config would run (an `exec` gauge or collection
 /// plugin): unapproved ones don't run until a person approves them here.
 export function programRow(p: ProjectProgram): ProgramRowModel {
-  const command = [p.program, ...p.args].join(" ");
-  const what = p.kind === "gauge" ? "Gauge" : "Collection plugin";
+  const command = [...(p.env ?? []), p.program, ...p.args].join(" ");
+  const what = p.kind === "gauge" ? "Gauge" : p.kind === "plugin" ? "Collection plugin" : "ACP agent";
   return {
     key: `${p.kind}:${p.name}`,
     label: `${what} ${p.name}`,

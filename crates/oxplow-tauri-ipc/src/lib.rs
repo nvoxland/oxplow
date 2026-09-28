@@ -103,6 +103,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // threads
             commands::generated::list_threads,
             commands::generated::create_thread,
+            commands::generated::list_acp_agents,
             commands::generated::rename_thread,
             commands::generated::set_thread_prompt,
             commands::generated::promote_thread,

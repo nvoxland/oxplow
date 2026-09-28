@@ -59,7 +59,10 @@ A cloned or pulled repo is **untrusted** (decided 2026-09-27, tsk331 /
 tsk162). Its committed config can name programs:
 
 - `exec` gauges and collection plugins in `.oxplow/project.yaml`;
-- `exec` sources in `oxplow/extensions/*/extension.yaml`.
+- `exec` sources in `oxplow/extensions/*/extension.yaml`;
+- `acpAgents` in `.oxplow/project.yaml` (tsk335). The hash covers the
+  command, its args and env, and the file's content when the command is
+  a project path. The built-in presets aren't gated.
 
 None of these run until a person approves that program on their machine.
 

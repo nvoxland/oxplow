@@ -90,6 +90,66 @@ const DEFAULT_METRIC_DETAIL_RETENTION_DAYS: u32 = 30;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
+/// An agent oxplow talks to over the Agent Client Protocol (tsk335): a
+/// program that speaks ACP on its stdio. Presets cover the common ones
+/// ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
+/// overrides by name. A project entry names a program from the repo, so it
+/// runs only once a person approved it (see `exec_consent`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(deny_unknown_fields)]
+pub struct AcpAgentConfig {
+    /// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
+    pub name: String,
+    /// The program: a name on PATH or a path.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra environment for the program.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// Where an ACP agent definition came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum AcpAgentSource {
+    /// Built into oxplow; runs without approval.
+    Preset,
+    /// The project's `acpAgents:`; needs a person's approval to run.
+    Project,
+}
+
+/// The built-in ACP agents: the vendors' ACP adapters.
+pub fn acp_presets() -> Vec<AcpAgentConfig> {
+    let preset = |name: &str, command: &str, args: &[&str]| AcpAgentConfig {
+        name: name.into(),
+        command: command.into(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+        env: Default::default(),
+    };
+    vec![
+        preset("claude", "claude-agent-acp", &[]),
+        preset("gemini", "gemini", &["--acp"]),
+        preset("codex", "codex-acp", &[]),
+    ]
+}
+
+/// Presets, then the project's entries (a project entry replaces a
+/// preset of the same name), in that order.
+pub fn resolve_acp_agents(project: &[AcpAgentConfig]) -> Vec<(AcpAgentConfig, AcpAgentSource)> {
+    let mut out: Vec<(AcpAgentConfig, AcpAgentSource)> = acp_presets()
+        .into_iter()
+        .map(|a| (a, AcpAgentSource::Preset))
+        .collect();
+    for a in project {
+        match out.iter().position(|(p, _)| p.name == a.name) {
+            Some(i) => out[i] = (a.clone(), AcpAgentSource::Project),
+            None => out.push((a.clone(), AcpAgentSource::Project)),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct LspServerConfig {
     #[serde(rename = "languageId")]
@@ -749,6 +809,10 @@ pub struct OxplowConfig {
     /// entries fall back to the built-in constant.
     #[serde(rename = "agentModels")]
     pub agent_models: std::collections::BTreeMap<AgentKind, String>,
+    /// The project's ACP agents (`acpAgents:`), layered over
+    /// [`acp_presets`] by [`resolve_acp_agents`].
+    #[serde(rename = "acpAgents")]
+    pub acp_agents: Vec<AcpAgentConfig>,
     /// This project's AI role assignments (`ai: { roles: … }`), layered
     /// over the user-global `ai.yaml`. Keyed by role name (one of
     /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
@@ -916,6 +980,8 @@ struct RawConfig {
     zones: Option<Vec<RawZoneRule>>,
     #[serde(rename = "agentModels", default)]
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
+    #[serde(rename = "acpAgents", default)]
+    acp_agents: Option<Vec<AcpAgentConfig>>,
     #[serde(default)]
     ai: Option<RawAiBlock>,
     #[serde(default)]
@@ -1070,6 +1136,7 @@ pub fn write_project_config(
         "dimensions",
         "zones",
         "agentModels",
+        "acpAgents",
         "ai",
         "extensions",
     ];
@@ -1291,6 +1358,13 @@ pub fn write_project_config(
         doc.insert(
             "agentModels".into(),
             serde_yaml::to_value(&config.agent_models).expect("agent models serialize"),
+        );
+    }
+
+    if !config.acp_agents.is_empty() {
+        doc.insert(
+            "acpAgents".into(),
+            serde_yaml::to_value(&config.acp_agents).expect("acp agents serialize"),
         );
     }
 
@@ -1558,9 +1632,44 @@ fn default_config(project_name: String) -> OxplowConfig {
         dimensions: Vec::new(),
         zones: Vec::new(),
         agent_models: Default::default(),
+        acp_agents: Vec::new(),
         ai_roles: Default::default(),
         extensions_disabled: Vec::new(),
     }
+}
+
+/// Validate `acpAgents:`: lowercase-dash names, unique, with a command.
+fn validate_acp_agents(raw: Vec<AcpAgentConfig>) -> Result<Vec<AcpAgentConfig>, ConfigError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(raw.len());
+    for (i, mut a) in raw.into_iter().enumerate() {
+        a.name = a.name.trim().to_string();
+        a.command = a.command.trim().to_string();
+        let ok_name = !a.name.is_empty()
+            && a.name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !ok_name {
+            return Err(ConfigError::Invalid(format!(
+                "acpAgents[{i}].name must be lowercase letters, digits and dashes (got \"{}\")",
+                a.name
+            )));
+        }
+        if a.command.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "acpAgents[{i}] ({}) needs a command",
+                a.name
+            )));
+        }
+        if !seen.insert(a.name.clone()) {
+            return Err(ConfigError::Invalid(format!(
+                "acpAgents: `{}` is declared twice",
+                a.name
+            )));
+        }
+        out.push(a);
+    }
+    Ok(out)
 }
 
 fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
@@ -1681,6 +1790,8 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         out
     };
 
+    let acp_agents = validate_acp_agents(raw.acp_agents.unwrap_or_default())?;
+
     let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
         Some(servers) => {
             let mut out = Vec::with_capacity(servers.len());
@@ -1741,6 +1852,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         dimensions,
         zones,
         agent_models,
+        acp_agents,
         ai_roles: validate_ai_roles(raw.ai)?,
         extensions_disabled: raw.extensions.map(|b| b.disabled).unwrap_or_default(),
     })
@@ -3066,6 +3178,58 @@ mod global_config_dir_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_agents_parse_validate_round_trip_and_layer_over_presets() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            config_path(dir.path()),
+            "acpAgents:\n  - { name: gemini, command: /opt/gemini, args: [--acp, --yolo] }\n  - { name: mine, command: ./tools/agent, env: { MODE: fast } }\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert_eq!(cfg.acp_agents.len(), 2);
+        let resolved = resolve_acp_agents(&cfg.acp_agents);
+        let names: Vec<(&str, AcpAgentSource)> = resolved
+            .iter()
+            .map(|(a, s)| (a.name.as_str(), *s))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("claude", AcpAgentSource::Preset),
+                ("gemini", AcpAgentSource::Project),
+                ("codex", AcpAgentSource::Preset),
+                ("mine", AcpAgentSource::Project),
+            ]
+        );
+        assert_eq!(resolved[1].0.args, vec!["--acp", "--yolo"]);
+        // Written back as it was.
+        write_project_config(dir.path(), &cfg).unwrap();
+        assert_eq!(
+            load_project_config(dir.path()).unwrap().acp_agents,
+            cfg.acp_agents
+        );
+        for (bad, needle) in [
+            (
+                "acpAgents:\n  - { name: Bad Name, command: x }\n",
+                "lowercase",
+            ),
+            (
+                "acpAgents:\n  - { name: a, command: \"\" }\n",
+                "needs a command",
+            ),
+            (
+                "acpAgents:\n  - { name: a, command: x }\n  - { name: a, command: y }\n",
+                "twice",
+            ),
+        ] {
+            std::fs::write(config_path(dir.path()), bad).unwrap();
+            let err = load_project_config(dir.path()).unwrap_err().to_string();
+            assert!(err.contains(needle), "{bad}: {err}");
+        }
+    }
 
     #[test]
     fn entity_metrics_and_dimensions_validate_and_resolve() {

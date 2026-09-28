@@ -36,12 +36,15 @@ test("an entity missing from the counts reads as a dash, not zero", () => {
 });
 
 test("programRow says what runs and whether it will", () => {
-  const m = programRow({ kind: "plugin", name: "acme.parse", program: "tools/parse.sh", args: ["--x"], approved: false });
+  const m = programRow({ kind: "plugin", name: "acme.parse", program: "tools/parse.sh", args: ["--x"], env: [], approved: false });
   expect(m.label).toBe("Collection plugin acme.parse");
   expect(m.command).toBe("tools/parse.sh --x");
   expect(m.status).toBe("Not approved: it won't run");
   expect(m.approveTitle).toContain("tools/parse.sh --x");
-  expect(programRow({ kind: "gauge", name: "repo.n", program: "t.sh", args: [], approved: true }).status).toBe(
+  expect(programRow({ kind: "gauge", name: "repo.n", program: "t.sh", args: [], env: [], approved: true }).status).toBe(
     "Approved on this machine",
   );
+  // An ACP agent shows the env it runs with, since that's part of what's approved.
+  const agent = programRow({ kind: "acp-agent", name: "mine", program: "tools/agent", args: ["--acp"], env: ["MODE=fast"], approved: false });
+  expect([agent.label, agent.command]).toEqual(["ACP agent mine", "MODE=fast tools/agent --acp"]);
 });

@@ -93,10 +93,17 @@ pub fn resolve_program_in(
 
 /// [`resolve_program_in`] for an agent, against the live environment.
 pub fn resolve_agent_program(kind: AgentKind) -> Option<String> {
+    resolve_program(kind.as_str())
+}
+
+/// [`resolve_program_in`] for any program (an ACP agent's command),
+/// against the live environment plus the well-known install dirs, so a
+/// GUI-launched daemon with a thin PATH still finds it (tsk245).
+pub fn resolve_program(bin: &str) -> Option<String> {
     let extra = home_dir()
         .map(|h| well_known_bin_dirs(&h))
         .unwrap_or_default();
-    resolve_program_in(kind.as_str(), std::env::var_os("PATH").as_deref(), &extra)
+    resolve_program_in(bin, std::env::var_os("PATH").as_deref(), &extra)
         .map(|p| p.to_string_lossy().into_owned())
 }
 

@@ -300,6 +300,13 @@ pub async fn open_terminal_session(
         .as_ref()
         .map(|t| t.agent)
         .unwrap_or_else(|| config.agents.first().copied().unwrap_or(AgentKind::Claude));
+    // An ACP agent speaks the protocol on its stdio: it has no terminal
+    // (the thread's agent tab shows the ACP view instead).
+    if !agent.is_terminal() {
+        return Err(IpcError::invalid(
+            "this thread runs an ACP agent, which has no terminal",
+        ));
+    }
     let cols = cols.max(20);
     let rows = rows.max(5);
 

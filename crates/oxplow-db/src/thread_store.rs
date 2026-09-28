@@ -45,6 +45,7 @@ fn str_to_agent(s: &str) -> Result<AgentKind, DomainError> {
         "claude" => Ok(AgentKind::Claude),
         "codex" => Ok(AgentKind::Codex),
         "opencode" => Ok(AgentKind::Opencode),
+        "acp" => Ok(AgentKind::Acp),
         other => Err(DomainError::Invalid(format!(
             "unknown thread agent: {other}"
         ))),
@@ -71,6 +72,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
     let sort_index: i64 = row.get("sort_index")?;
     let pane_target: String = row.get("pane_target")?;
     let agent: String = row.get("agent")?;
+    let acp_agent: Option<String> = row.get("acp_agent")?;
     let resume_session_id: String = row.get("resume_session_id")?;
     let summary: String = row.get("summary")?;
     let summary_updated_at: Option<String> = row.get("summary_updated_at")?;
@@ -90,6 +92,7 @@ fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         sort_index,
         pane_target,
         agent: str_to_agent(&agent).map_err(map_err)?,
+        acp_agent,
         resume_session_id,
         summary,
         summary_updated_at: summary_updated_at
@@ -154,14 +157,15 @@ impl ThreadStore for SqliteThreadStore {
                     "INSERT INTO threads (
                         id, stream_id, title, status, sort_index, pane_target, agent,
                         resume_session_id, summary, summary_updated_at, closed_at,
-                        custom_prompt, created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                        custom_prompt, created_at, updated_at, acp_agent
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                      ON CONFLICT(id) DO UPDATE SET
                         title = excluded.title,
                         status = excluded.status,
                         sort_index = excluded.sort_index,
                         pane_target = excluded.pane_target,
                         agent = excluded.agent,
+                        acp_agent = excluded.acp_agent,
                         resume_session_id = excluded.resume_session_id,
                         summary = excluded.summary,
                         summary_updated_at = excluded.summary_updated_at,
@@ -183,6 +187,7 @@ impl ThreadStore for SqliteThreadStore {
                         thread.custom_prompt,
                         ts_to_string(thread.created_at),
                         ts_to_string(thread.updated_at),
+                        thread.acp_agent,
                     ],
                 )?;
                 Ok(if thread.id.is_placeholder() {
@@ -307,6 +312,7 @@ mod tests {
             sort_index: 0,
             pane_target: "working".into(),
             agent: oxplow_domain::AgentKind::Claude,
+            acp_agent: None,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,
@@ -333,6 +339,7 @@ mod tests {
             oxplow_domain::AgentKind::Claude,
             oxplow_domain::AgentKind::Codex,
             oxplow_domain::AgentKind::Opencode,
+            oxplow_domain::AgentKind::Acp,
         ]
         .into_iter()
         .enumerate()
@@ -341,8 +348,10 @@ mod tests {
             t.id = ThreadId::new(100 + i as i64);
             t.status = ThreadStatus::Queued;
             t.agent = agent;
+            t.acp_agent = (agent == oxplow_domain::AgentKind::Acp).then(|| "gemini".to_string());
             store.upsert(&t).await.unwrap();
-            assert_eq!(store.get(&t.id).await.unwrap().unwrap().agent, agent);
+            let back = store.get(&t.id).await.unwrap().unwrap();
+            assert_eq!((back.agent, back.acp_agent), (agent, t.acp_agent));
         }
     }
 

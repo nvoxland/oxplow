@@ -66,6 +66,10 @@ pub enum PluginError {
     Io(#[from] io::Error),
     #[error("serialize: {0}")]
     Serialize(#[from] serde_json::Error),
+    /// The agent doesn't run in a terminal (an ACP agent): it has no
+    /// terminal runtime to write.
+    #[error("{0} agents don't run in a terminal")]
+    NotTerminal(&'static str),
 }
 
 /// Paths emitted by `write_plugin`. The only required output for the
@@ -145,6 +149,7 @@ pub fn write_agent_runtime(
             write_codex_runtime(project_dir, mcp_endpoint_url).map(AgentRuntimePaths::Codex)
         }
         AgentKind::Opencode => write_opencode_runtime(project_dir).map(AgentRuntimePaths::Opencode),
+        AgentKind::Acp => Err(PluginError::NotTerminal("ACP")),
     }
 }
 

@@ -29,6 +29,7 @@ import type {
   SourceRunReport,
   SchemaEntity,
   EntityRowCount,
+  AcpAgentListing,
   ProgramKind,
   ProjectProgram,
   LensActionResult,
@@ -626,6 +627,11 @@ export async function approveProjectProgram(kind: ProgramKind, name: string): Pr
   return unwrap(await commands.approveProjectProgram(kind, name));
 }
 
+/// The ACP agents this project can run (the new-thread picker).
+export async function listAcpAgents(): Promise<AcpAgentListing[]> {
+  return unwrap(await commands.listAcpAgents());
+}
+
 /// Rows in every entity right now (Settings → Data).
 export async function semanticRowCounts(): Promise<EntityRowCount[]> {
   return unwrap(await commands.semanticRowCounts());
@@ -937,9 +943,14 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
   return unwrap(await commands.getThreadState(streamId)) as unknown as ThreadState;
 }
 
-export async function createThread(streamId: string, title: string, agent?: AgentKind): Promise<ThreadState> {
+export async function createThread(
+  streamId: string,
+  title: string,
+  agent?: AgentKind,
+  acpAgent?: string | null,
+): Promise<ThreadState> {
   unwrap(
-    await commands.createThread({ streamId, title, paneTarget: null, agent: agent ?? null }),
+    await commands.createThread({ streamId, title, paneTarget: null, agent: agent ?? null, acpAgent: acpAgent ?? null }),
   );
   return getThreadState(streamId);
 }

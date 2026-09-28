@@ -372,6 +372,37 @@ a snapshot flush) can never stall the agent. Availability over
 enforcement: the MCP tools re-check write-guard + filing at the call
 site, so a timed-out PreToolUse deny is still caught there.
 
+## ACP agents: configuration (tsk335)
+
+**Threads.** `AgentKind::Acp` threads name an ACP agent in
+`thread.acp_agent`. `AgentKind::is_terminal()` is false for them:
+`open_terminal_session` refuses them, and `write_agent_runtime` returns
+`PluginError::NotTerminal`.
+
+**Configuration.** Agents come from `oxplow_config::acp_presets()`:
+- claude: `claude-agent-acp`;
+- gemini: `gemini --acp`;
+- codex: `codex-acp`.
+
+These are layered with the project's `acpAgents: [{name, command, args,
+env}]` by `resolve_acp_agents`; a project entry replaces a preset of the
+same name.
+
+**Listing.** `oxplow_app::acp::agents::list` (IPC `list_acp_agents`,
+UI-only) reports each agent's source, whether it may start here, and its
+resolved path (`agent_path::resolve_program`). Presets may always start;
+a project entry needs a person's approval in Settings → Data → Programs
+(`exec_consent`, `ProgramKind::AcpAgent`).
+
+**Creating threads.** `create_thread` takes `acpAgent`. It's required for
+`agent: acp`, refused otherwise, and must name a known agent. The
+new-thread picker lists "ACP · <name>" per agent when ACP is enabled in
+`agents:`, flagged "not installed" or "needs approval" (`agentChoices` in
+`agentKinds.ts`).
+
+**Not built yet:** a personal (user-global) `acpAgents` file; presets and
+project entries only for now.
+
 ## Agent policy (shared by every transport, tsk333)
 
 The write guard, filing enforcement and the Stop directive are one

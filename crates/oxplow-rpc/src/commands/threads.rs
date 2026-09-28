@@ -23,6 +23,20 @@ pub struct CreateThreadRequest {
     #[serde(rename = "paneTarget")]
     pub pane_target: Option<String>,
     pub agent: Option<AgentKind>,
+    /// For an ACP thread, which ACP agent (see `list_acp_agents`).
+    #[serde(rename = "acpAgent", default)]
+    pub acp_agent: Option<String>,
+}
+
+/// The ACP agents this project can run, with approval and install state.
+pub async fn list_acp_agents(
+    svc: &Services,
+) -> Result<Vec<oxplow_app::acp::agents::AcpAgentListing>, IpcError> {
+    let config = read_config(&svc.config);
+    Ok(oxplow_app::acp::agents::list(
+        &svc.layout.project_dir,
+        &config,
+    ))
 }
 
 pub async fn create_thread(svc: &Services, req: CreateThreadRequest) -> Result<Thread, IpcError> {
@@ -36,9 +50,24 @@ pub async fn create_thread(svc: &Services, req: CreateThreadRequest) -> Result<T
             "agent {agent:?} is not enabled for this project"
         )));
     }
+    let acp_agent = match (agent, req.acp_agent) {
+        (AgentKind::Acp, Some(name)) => {
+            if oxplow_app::acp::agents::find(&config, &name).is_none() {
+                return Err(IpcError::invalid(format!("no ACP agent named `{name}`")));
+            }
+            Some(name)
+        }
+        (AgentKind::Acp, None) => {
+            return Err(IpcError::invalid("an ACP thread needs an acpAgent"));
+        }
+        (_, Some(_)) => {
+            return Err(IpcError::invalid("acpAgent is only for ACP threads"));
+        }
+        (_, None) => None,
+    };
     let t = svc
         .threads
-        .create(&req.stream_id, req.title, pane, agent)
+        .create_with_acp(&req.stream_id, req.title, pane, agent, acp_agent)
         .await?;
     svc.events.emit(OxplowEvent::ThreadsChanged {
         stream_id: req.stream_id,
@@ -254,5 +283,55 @@ mod tests {
         .unwrap();
         assert!(out.is_object());
         assert!(out.get("threads").is_some());
+    }
+
+    #[tokio::test]
+    async fn acp_threads_name_a_known_acp_agent() {
+        let (svc, _dir) = crate::test_support::services();
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        svc.config
+            .write()
+            .unwrap()
+            .agents
+            .push(oxplow_domain::AgentKind::Acp);
+        let create = |body: serde_json::Value| {
+            let svc = &svc;
+            async move {
+                crate::dispatch("create_thread", serde_json::json!({ "req": body }), svc).await
+            }
+        };
+        let sid = stream.id.to_string();
+        let t = create(serde_json::json!({"streamId": sid, "title": "g", "agent": "acp", "acpAgent": "gemini"}))
+            .await
+            .unwrap();
+        assert_eq!(
+            (t["agent"].as_str(), t["acp_agent"].as_str()),
+            (Some("acp"), Some("gemini"))
+        );
+        for (body, needle) in [
+            (
+                serde_json::json!({"streamId": sid, "title": "x", "agent": "acp"}),
+                "needs an acpAgent",
+            ),
+            (
+                serde_json::json!({"streamId": sid, "title": "x", "agent": "acp", "acpAgent": "nope"}),
+                "no ACP agent",
+            ),
+            (
+                serde_json::json!({"streamId": sid, "title": "x", "agent": "claude", "acpAgent": "gemini"}),
+                "only for ACP",
+            ),
+        ] {
+            let err = create(body).await.unwrap_err();
+            assert!(err.message.contains(needle), "{}", err.message);
+        }
+        let agents = crate::dispatch("list_acp_agents", serde_json::json!({}), &svc)
+            .await
+            .unwrap();
+        assert!(agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["name"] == "claude" && a["source"] == "preset"));
     }
 }

@@ -804,6 +804,63 @@ mod tests {
         assert!(r.is_err(), "task_note with both parents should fail CHECK");
     }
 
+    /// V90 widens `threads.agent` with a column swap. A table rebuild
+    /// would cascade-delete every child row; the swap must not. Migrate to
+    /// V89, add a thread with a task and a turn, then finish migrating.
+    #[test]
+    fn v90_keeps_thread_children_and_accepts_acp() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(89))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-09-28T00:00:00Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO threads (id, stream_id, title, status, agent, created_at, updated_at)
+               VALUES (1, 1, 't', 'active', 'codex', '{now}', '{now}');
+             INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
+               VALUES (1, 1, 't', 'in_progress', 'medium', 'user', '{now}', '{now}');"
+        ))
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let (agent, acp): (String, Option<String>) = conn
+            .query_row(
+                "SELECT agent, acp_agent FROM threads WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((agent.as_str(), acp), ("codex", None));
+        let tasks: i64 = conn
+            .query_row("SELECT count(*) FROM task WHERE thread_id = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(tasks, 1, "the thread's task survived the column swap");
+        conn.execute(
+            &format!("INSERT INTO threads (id, stream_id, title, status, agent, acp_agent, created_at, updated_at)
+               VALUES (2, 1, 'g', 'queued', 'acp', 'gemini', '{now}', '{now}')"),
+            [],
+        )
+        .unwrap();
+        let view: String = conn
+            .query_row("SELECT acp_agent FROM v_thread WHERE id = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(view, "gemini");
+        assert!(conn
+            .execute(
+                &format!("INSERT INTO threads (id, stream_id, title, status, agent, created_at, updated_at)
+                   VALUES (3, 1, 'x', 'queued', 'emacs', '{now}', '{now}')"),
+                [],
+            )
+            .is_err());
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

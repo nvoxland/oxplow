@@ -202,6 +202,7 @@ macro_rules! oxplow_command_table {
                 // threads
                 list_threads => $crate::commands::threads::list_threads { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::Thread>,
                 create_thread => $crate::commands::threads::create_thread { req: $crate::commands::threads::CreateThreadRequest } -> ::oxplow_domain::Thread,
+                list_acp_agents => $crate::commands::threads::list_acp_agents {} -> Vec<::oxplow_app::acp::agents::AcpAgentListing>,
                 rename_thread => $crate::commands::threads::rename_thread { req: $crate::commands::threads::RenameThreadRequest } -> ::oxplow_domain::Thread,
                 set_thread_prompt => $crate::commands::threads::set_thread_prompt { req: $crate::commands::threads::SetThreadPromptRequest } -> ::oxplow_domain::Thread,
                 promote_thread => $crate::commands::threads::promote_thread { id: ::oxplow_domain::ThreadId } -> ::oxplow_domain::Thread,

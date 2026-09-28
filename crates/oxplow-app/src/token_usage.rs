@@ -119,6 +119,8 @@ pub fn parse_usage_delta(kind: AgentKind, content: &str) -> Option<UsageDelta> {
         // Codex / opencode session formats differ (opencode surfaces its
         // own $cost). Stubbed until their parsers land.
         AgentKind::Codex | AgentKind::Opencode => None,
+        // ACP agents have no transcript: usage arrives on the protocol.
+        AgentKind::Acp => None,
     }
 }
 
@@ -242,6 +244,8 @@ pub fn parse_turns(kind: AgentKind, content: &str) -> Vec<Turn> {
         // Codex / opencode session formats differ. Stubbed until their
         // parsers land (mirrors `parse_usage_delta`).
         AgentKind::Codex | AgentKind::Opencode => Vec::new(),
+        // ACP agents have no transcript: turns arrive on the protocol.
+        AgentKind::Acp => Vec::new(),
     }
 }
 

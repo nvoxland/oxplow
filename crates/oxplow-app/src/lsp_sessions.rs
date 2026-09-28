@@ -861,6 +861,7 @@ mod tests {
             dimensions: Default::default(),
             zones: Default::default(),
             agent_models: Default::default(),
+            acp_agents: Vec::new(),
             ai_roles: Default::default(),
             extensions_disabled: Vec::new(),
         }))

@@ -58,6 +58,9 @@ pub enum ProgramKind {
     Gauge,
     /// A collection plugin (`collection.plugins`) parsing test/coverage/analysis reports.
     Plugin,
+    /// An agent spoken to over ACP (`acpAgents`, tsk335).
+    #[serde(rename = "acp-agent")]
+    AcpAgent,
 }
 
 /// A program the project's config would run.
@@ -70,6 +73,8 @@ pub struct ProjectProgram {
     /// Project-relative path of the program.
     pub program: String,
     pub args: Vec<String>,
+    /// Extra environment it runs with, as `NAME=value` (ACP agents).
+    pub env: Vec<String>,
     /// This machine approved it as it is now.
     pub approved: bool,
 }
@@ -79,21 +84,51 @@ impl ProjectProgram {
         match self.kind {
             ProgramKind::Gauge => format!("gauge:{}", self.name),
             ProgramKind::Plugin => format!("plugin:{}", self.name),
+            ProgramKind::AcpAgent => format!("acp:{}", self.name),
         }
+    }
+
+    /// What its approval covers: the program's content (when it's a file
+    /// in the project) plus its args and env. A gauge or plugin names a
+    /// project file, which must exist; an ACP agent's command may be a
+    /// program on PATH, covered by its name.
+    pub fn hash(&self, project_dir: &Path) -> std::io::Result<String> {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        let file = project_dir.join(&self.program);
+        match self.kind {
+            ProgramKind::Gauge | ProgramKind::Plugin => h.update(std::fs::read(&file)?),
+            ProgramKind::AcpAgent => {
+                h.update(self.program.as_bytes());
+                if self.program.contains('/') && file.is_file() {
+                    h.update([0u8]);
+                    h.update(std::fs::read(&file)?);
+                }
+            }
+        }
+        for a in &self.args {
+            h.update([0u8]);
+            h.update(a.as_bytes());
+        }
+        for e in &self.env {
+            h.update([1u8]);
+            h.update(e.as_bytes());
+        }
+        Ok(hex::encode(h.finalize()))
     }
 }
 
 /// What an approval of a program covers: its content and its args.
 pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::io::Result<String> {
-    use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(project_dir.join(program))?;
-    let mut h = Sha256::new();
-    h.update(&bytes);
-    for a in args {
-        h.update([0u8]);
-        h.update(a.as_bytes());
+    ProjectProgram {
+        kind: ProgramKind::Gauge,
+        name: String::new(),
+        program: program.to_string(),
+        args: args.to_vec(),
+        env: Vec::new(),
+        approved: false,
     }
-    Ok(hex::encode(h.finalize()))
+    .hash(project_dir)
 }
 
 /// Whether `kind`/`name` running `program args` may run: approved on this
@@ -110,10 +145,35 @@ pub fn may_run(
         name: name.to_string(),
         program: program.to_string(),
         args: args.to_vec(),
+        env: Vec::new(),
         approved: false,
     };
+    approved_now(project_dir, &p)
+}
+
+/// Whether `p` is approved on this machine as it is now.
+fn approved_now(project_dir: &Path, p: &ProjectProgram) -> bool {
     let state_dir = crate::AppLayout::for_project(project_dir).state_dir;
-    program_hash(project_dir, program, args).is_ok_and(|h| is_approved(&state_dir, &p.key(), &h))
+    p.hash(project_dir)
+        .is_ok_and(|h| is_approved(&state_dir, &p.key(), &h))
+}
+
+/// A project ACP agent as a program to approve. Presets aren't project
+/// programs and never need approval.
+pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
+    ProjectProgram {
+        kind: ProgramKind::AcpAgent,
+        name: agent.name.clone(),
+        program: agent.command.clone(),
+        args: agent.args.clone(),
+        env: agent.env.iter().map(|(k, v)| format!("{k}={v}")).collect(),
+        approved: false,
+    }
+}
+
+/// Whether a project ACP agent may start: approved as it is now.
+pub fn may_run_acp(project_dir: &Path, agent: &oxplow_config::AcpAgentConfig) -> bool {
+    approved_now(project_dir, &acp_program(agent))
 }
 
 /// Why an unapproved program didn't run, for logs and errors.
@@ -121,6 +181,7 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
     let what = match kind {
         ProgramKind::Gauge => "gauge",
         ProgramKind::Plugin => "collection plugin",
+        ProgramKind::AcpAgent => "ACP agent",
     };
     format!(
         "{what} `{name}` runs `{program}` from the project's config and needs a person's approval first \
@@ -131,20 +192,17 @@ pub fn needs_approval(kind: ProgramKind, name: &str, program: &str) -> String {
 /// Every project-scope exec gauge and collection plugin in `config`, with
 /// whether it's approved.
 pub fn list(project_dir: &Path, config: &oxplow_config::OxplowConfig) -> Vec<ProjectProgram> {
-    let state_dir = crate::AppLayout::for_project(project_dir).state_dir;
     let mut out = Vec::new();
     let mut push = |kind, name: &str, program: Option<&str>, args: &[String]| {
         let Some(program) = program else { return };
-        let mut p = ProjectProgram {
+        out.push(ProjectProgram {
             kind,
             name: name.to_string(),
             program: program.to_string(),
             args: args.to_vec(),
+            env: Vec::new(),
             approved: false,
-        };
-        p.approved = program_hash(project_dir, program, args)
-            .is_ok_and(|h| is_approved(&state_dir, &p.key(), &h));
-        out.push(p);
+        });
     };
     for g in &config.gauges {
         let Some(c) = g.compute.as_ref() else {
@@ -169,6 +227,10 @@ pub fn list(project_dir: &Path, config: &oxplow_config::OxplowConfig) -> Vec<Pro
             );
         }
     }
+    out.extend(config.acp_agents.iter().map(acp_program));
+    for p in &mut out {
+        p.approved = approved_now(project_dir, p);
+    }
     out
 }
 
@@ -184,7 +246,8 @@ pub fn approve_program(
         .into_iter()
         .find(|p| p.kind == kind && p.name == name)
         .ok_or_else(|| format!("no exec {kind:?} named `{name}` in the project's config"))?;
-    let hash = program_hash(project_dir, &p.program, &p.args)
+    let hash = p
+        .hash(project_dir)
         .map_err(|e| format!("{}: {e}", p.program))?;
     let state_dir = crate::AppLayout::for_project(project_dir).state_dir;
     approve(&state_dir, &p.key(), &hash).map_err(|e| format!("record approval: {e}"))
@@ -263,5 +326,37 @@ mod tests {
             &[]
         ));
         assert!(approve_program(dir.path(), &cfg, ProgramKind::Plugin, "nope").is_err());
+    }
+
+    #[test]
+    fn project_acp_agents_need_approval_bound_to_command_args_env_and_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/agent"), "v1").unwrap();
+        let cfg = config(
+            dir.path(),
+            "acpAgents:\n  - { name: mine, command: tools/agent, args: [--acp], env: { MODE: fast } }\n  - { name: gemini, command: gemini, args: [--acp] }\n",
+        );
+        let listed = list(dir.path(), &cfg);
+        let acp: Vec<_> = listed
+            .iter()
+            .filter(|p| p.kind == ProgramKind::AcpAgent)
+            .collect();
+        assert_eq!(acp.len(), 2);
+        assert_eq!(acp[0].env, vec!["MODE=fast".to_string()]);
+        assert!(!may_run_acp(dir.path(), &cfg.acp_agents[0]));
+        approve_program(dir.path(), &cfg, ProgramKind::AcpAgent, "mine").unwrap();
+        assert!(may_run_acp(dir.path(), &cfg.acp_agents[0]));
+        // A different env, or a changed program file, isn't what was approved.
+        let mut changed = cfg.acp_agents[0].clone();
+        changed
+            .env
+            .insert("NODE_OPTIONS".into(), "--require ./x.js".into());
+        assert!(!may_run_acp(dir.path(), &changed));
+        std::fs::write(dir.path().join("tools/agent"), "v2").unwrap();
+        assert!(!may_run_acp(dir.path(), &cfg.acp_agents[0]));
+        // A PATH program is covered by its name and args.
+        approve_program(dir.path(), &cfg, ProgramKind::AcpAgent, "gemini").unwrap();
+        assert!(may_run_acp(dir.path(), &cfg.acp_agents[1]));
     }
 }

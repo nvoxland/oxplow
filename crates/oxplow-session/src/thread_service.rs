@@ -52,6 +52,25 @@ impl ThreadService {
         pane_target: impl Into<String>,
         agent: AgentKind,
     ) -> Result<Thread, ThreadError> {
+        self.create_with_acp(stream, title, pane_target, agent, None)
+            .await
+    }
+
+    /// [`Self::create`] naming the ACP agent for an `Acp` thread. An ACP
+    /// thread must name one and only an ACP thread may.
+    pub async fn create_with_acp(
+        &self,
+        stream: &StreamId,
+        title: impl Into<String>,
+        pane_target: impl Into<String>,
+        agent: AgentKind,
+        acp_agent: Option<String>,
+    ) -> Result<Thread, ThreadError> {
+        if (agent == AgentKind::Acp) != acp_agent.is_some() {
+            return Err(ThreadError::Storage(DomainError::Invalid(
+                "an ACP thread names its ACP agent, and only an ACP thread does".into(),
+            )));
+        }
         let existing = self.threads.list_for_stream(stream).await?;
         let any_active = existing.iter().any(|t| t.status == ThreadStatus::Active);
         let next_sort = existing
@@ -74,6 +93,7 @@ impl ThreadService {
             sort_index: next_sort,
             pane_target: pane_target.into(),
             agent,
+            acp_agent,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

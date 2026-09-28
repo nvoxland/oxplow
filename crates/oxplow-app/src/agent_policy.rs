@@ -575,6 +575,7 @@ mod tests {
             sort_index: 0,
             pane_target: "working".into(),
             agent: AgentKind::Claude,
+            acp_agent: None,
             resume_session_id: String::new(),
             summary: String::new(),
             summary_updated_at: None,

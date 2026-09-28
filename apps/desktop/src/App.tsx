@@ -108,7 +108,7 @@ import { GitHistoryPage } from "./pages/GitHistoryPage.js";
 import { GitDashboardPage } from "./pages/GitDashboardPage.js";
 import { UncommittedChangesPage } from "./pages/UncommittedChangesPage.js";
 import { AgentPage } from "./pages/AgentPage.js";
-import { agentLabel } from "./agentKinds.js";
+import { agentLabel, threadAgentLabel } from "./agentKinds.js";
 import { TerminalPage } from "./pages/TerminalPage.js";
 import { HookEventsPage } from "./pages/HookEventsPage.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -784,10 +784,10 @@ export function App() {
     }
   }
 
-  async function handleCreateThread(title: string, agent?: AgentKind) {
+  async function handleCreateThread(title: string, agent?: AgentKind, acpAgent?: string | null) {
     if (!stream) return;
     try {
-      const next = await createThread(stream.id, title, agent);
+      const next = await createThread(stream.id, title, agent, acpAgent);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
       const thread = next.threads.find((candidate) => candidate.id === next.selectedThreadId);
       if (thread) {
@@ -2394,7 +2394,7 @@ export function App() {
     const tabs: CenterTab[] = [
       {
         id: "agent",
-        label: selectedThread ? agentLabel(selectedThread.agent) : "Agent",
+        label: selectedThread ? threadAgentLabel(selectedThread) : "Agent",
         closable: false,
         agentStatus: agentThreadStatus,
         contextMenu: selectedThread ? [
@@ -3318,9 +3318,9 @@ export function App() {
           enabledAgents={enabledAgents}
           onSwitchStream={handleSwitch}
           onSelectThread={handleSelectThread}
-          onCreateThread={async (streamId, title, agent) => {
+          onCreateThread={async (streamId, title, agent, acpAgent) => {
             if (streamId !== stream?.id) await handleSwitch(streamId);
-            await handleCreateThread(title, agent);
+            await handleCreateThread(title, agent, acpAgent);
           }}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}
