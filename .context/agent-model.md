@@ -1896,8 +1896,13 @@ tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — auto-claims the
 file it just wrote onto the thread's OPEN effort in real time, from the
 same PostToolUse path that attributes wiki edits
 (`attribute_effort_file_edit` → `effort_claim_path_from_edit` in
-`crates/oxplow-control-plane/src/lib.rs`, delegating to
+`crates/oxplow-app/src/agent_activity.rs`, delegating to
 `TaskService::claim_open_effort_file` in `crates/oxplow-app/src/task_service.rs`).
+Paths are made repo-relative against the thread's own tree,
+`Services::thread_worktree` (its stream's worktree, a sibling directory
+for a worktree stream), as are `agent_tool_call.path` and the write
+guard's (tsk386/tsk350). Wiki attribution stays on the project dir, where
+`.oxplow/wiki` lives.
 The claim is best-effort (never fails the hook), idempotent (`record_file`
 is `INSERT OR REPLACE` keyed on `(effort_id, path)`), and resolves the
 open effort **per thread** via `find_single_open_for_thread` — which

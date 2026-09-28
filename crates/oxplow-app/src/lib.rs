@@ -511,6 +511,26 @@ pub struct Services {
 }
 
 impl Services {
+    /// The tree a thread works in: its stream's worktree (a sibling
+    /// directory for a worktree stream), else the project dir. What its
+    /// tool paths are relative to (tsk350 policy, tsk386 claims).
+    pub async fn thread_worktree(&self, thread: &oxplow_domain::ThreadId) -> PathBuf {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let project = self.layout.project_dir.clone();
+        let Some(t) = self.thread_store.get(thread).await.ok().flatten() else {
+            return project;
+        };
+        self.stream_store
+            .list()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|s| s.id == t.stream_id)
+            .map(|s| PathBuf::from(s.worktree_path))
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(project)
+    }
+
     /// Bootstrap. Run once at app startup.
     pub fn boot(layout: AppLayout) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;

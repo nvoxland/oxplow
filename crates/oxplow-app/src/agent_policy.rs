@@ -93,12 +93,7 @@ impl AgentPolicy {
         let streams = oxplow_domain::stores::StreamStore::list(svc.stream_store.as_ref())
             .await
             .unwrap_or_default();
-        let worktree_root = streams
-            .iter()
-            .find(|s| s.id == thread.stream_id)
-            .map(|s| std::path::PathBuf::from(&s.worktree_path))
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| project_dir.to_path_buf());
+        let worktree_root = svc.thread_worktree(thread_id).await;
         let other_roots: Vec<std::path::PathBuf> = streams
             .iter()
             .filter(|s| s.id != thread.stream_id && !s.worktree_path.is_empty())

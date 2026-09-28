@@ -230,8 +230,10 @@ impl AgentActivity {
         payload_json: &str,
     ) -> Option<String> {
         attribute_wiki_page_edit(svc, thread_id, body).await;
-        attribute_effort_file_edit(svc, thread_id, body).await;
-        record_tool_call(svc, thread_id, payload_json).await;
+        // Tool paths are the thread's tree's, not the project's (tsk386).
+        let worktree = svc.thread_worktree(thread_id).await;
+        attribute_effort_file_edit(svc, thread_id, body, &worktree).await;
+        record_tool_call(svc, thread_id, payload_json, &worktree).await;
 
         let services = svc.clone();
         let collection_thread = *thread_id;
@@ -460,16 +462,15 @@ async fn attribute_effort_file_edit(
     svc: &Services,
     thread_id: &ThreadId,
     body: &serde_json::Value,
+    worktree: &Path,
 ) {
     let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    let project_dir = &svc.layout.project_dir;
-    let Some(rel) = effort_claim_path_from_edit(tool_name, body.get("tool_input"), project_dir)
-    else {
+    let Some(rel) = effort_claim_path_from_edit(tool_name, body.get("tool_input"), worktree) else {
         return;
     };
     if let Err(err) = svc
         .tasks
-        .claim_open_effort_file(&svc.effort_store, thread_id, &rel, Some(project_dir))
+        .claim_open_effort_file(&svc.effort_store, thread_id, &rel, Some(worktree))
         .await
     {
         warn!(?err, path = rel, "effort file auto-claim failed");
@@ -478,10 +479,14 @@ async fn attribute_effort_file_edit(
 
 /// Persist a finished tool call as an `agent_tool_call` row on the
 /// thread's open effort (`v_tool_call`). Best-effort.
-async fn record_tool_call(svc: &Services, thread_id: &ThreadId, payload_json: &str) {
+async fn record_tool_call(
+    svc: &Services,
+    thread_id: &ThreadId,
+    payload_json: &str,
+    worktree: &Path,
+) {
     use crate::TaskEffortStore as _;
-    let Some(parts) = crate::tool_calls::parse_tool_call(payload_json, &svc.layout.project_dir)
-    else {
+    let Some(parts) = crate::tool_calls::parse_tool_call(payload_json, worktree) else {
         return;
     };
     let effort_id = match svc.effort_store.find_open_for_thread(thread_id).await {
@@ -568,6 +573,60 @@ fn resume_should_clear(reason: Option<&str>, ended_session: &str, current_resume
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// In a worktree stream (a sibling directory of the project) an edit's
+    /// absolute path is inside the thread's worktree, not the project: it
+    /// is claimed and recorded repo-relative all the same (tsk386).
+    #[tokio::test]
+    async fn worktree_stream_edits_are_claimed_and_recorded_relative() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let worktree = tempfile::tempdir().unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        let thread = {
+            use oxplow_domain::stores::ThreadStore as _;
+            f.svc.thread_store.get(&f.thread).await.unwrap().unwrap()
+        };
+        let stream = thread.stream_id.value();
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "UPDATE streams SET worktree_path = ?1 WHERE id = ?2",
+                    (wt.as_str(), stream),
+                )
+                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(f.svc.thread_worktree(&f.thread).await, worktree.path());
+
+        let file = worktree.path().join("src/a.rs");
+        let body = serde_json::json!({
+            "tool_name": "Edit",
+            "tool_input": { "file_path": file.to_string_lossy() },
+            "tool_response": {},
+        });
+        f.svc
+            .agent_activity
+            .on_post_tool(&f.svc, &f.thread, None, &body, &body.to_string())
+            .await;
+        let sl = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let q = |sql: &'static str| {
+            let sl = sl.clone();
+            async move {
+                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
+            }
+        };
+        assert_eq!(
+            q("SELECT path FROM v_tool_call").await,
+            serde_json::json!([["src/a.rs"]])
+        );
+        assert_eq!(
+            q("SELECT path FROM v_effort_file").await,
+            serde_json::json!([["src/a.rs"]])
+        );
+    }
 
     #[test]
     fn resume_clear_decision() {
