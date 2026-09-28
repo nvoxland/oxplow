@@ -383,7 +383,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	runSource: (extension: string, sourceId: string, approve: boolean | null) => typedError<SourceRunReport, IpcError>(__TAURI_INVOKE("run_source", { extension, sourceId, approve })),
+	runSource: (extension: string, sourceId: string, approve: string | null) => typedError<SourceRunReport, IpcError>(__TAURI_INVOKE("run_source", { extension, sourceId, approve })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -398,7 +398,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	approveProjectProgram: (kind: ProgramKind, name: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("approve_project_program", { kind, name })),
+	approveProjectProgram: (kind: ProgramKind, name: string, version: string) => typedError<ProjectProgram[], IpcError>(__TAURI_INVOKE("approve_project_program", { kind, name, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3356,6 +3356,11 @@ export type ProjectProgram = {
 	env: string[],
 	// This machine approved it as it is now.
 	approved: boolean,
+	/**
+	 *  Its approval hash as it is now (`None` when it can't be read). The
+	 *  person's approve click sends back the version they reviewed.
+	 */
+	version: string | null,
 };
 
 export type ProviderConfig = {
@@ -3727,6 +3732,12 @@ export type SourceListing = {
 	networkEnforced: boolean,
 	// Each declared credential and whether it has a value (never the value).
 	credentials: CredentialStatus[],
+	/**
+	 *  Its approval hash as it is now: the person's Approve & Run sends
+	 *  back the version they reviewed (tsk349). `None` for derived sources
+	 *  and unreadable entries.
+	 */
+	version: string | null,
 };
 
 /**

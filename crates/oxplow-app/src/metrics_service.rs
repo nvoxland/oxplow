@@ -4768,6 +4768,13 @@ def transform(input):
             &cfg,
             crate::exec_consent::ProgramKind::Gauge,
             "repo.count",
+            &crate::exec_consent::version_of(
+                &svc.approvals,
+                dir.path(),
+                &cfg,
+                crate::exec_consent::ProgramKind::Gauge,
+                "repo.count",
+            ),
         )
         .unwrap();
         assert_eq!(

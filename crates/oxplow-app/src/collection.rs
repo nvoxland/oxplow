@@ -3475,6 +3475,13 @@ mod tests {
             &cfg,
             crate::exec_consent::ProgramKind::Plugin,
             "acme.parse",
+            &crate::exec_consent::version_of(
+                &approvals,
+                dir.path(),
+                &cfg,
+                crate::exec_consent::ProgramKind::Plugin,
+                "acme.parse",
+            ),
         )
         .unwrap();
         assert!(plugin_to_collector(&p, dir.path(), &approvals).is_ok());

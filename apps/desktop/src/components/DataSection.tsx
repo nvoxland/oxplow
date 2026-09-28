@@ -64,7 +64,8 @@ export function DataSection() {
     const key = `${l.extension}/${l.spec.id}`;
     setBusy(key);
     try {
-      const report = await runSource(l.extension, l.spec.id, !l.approved);
+      // Approve & Run approves exactly the version this listing showed.
+      const report = await runSource(l.extension, l.spec.id, l.approved ? null : l.version);
       const counts = Object.entries(report.rowCounts)
         .map(([e, n]) => `${n} ${e}`)
         .join(", ");
@@ -81,7 +82,8 @@ export function DataSection() {
     const key = `${p.kind}:${p.name}`;
     setBusy(key);
     try {
-      setPrograms(await approveProjectProgram(p.kind, p.name));
+      if (!p.version) throw new Error(`${p.program} can't be read, so it can't be approved`);
+      setPrograms(await approveProjectProgram(p.kind, p.name, p.version));
       showToast({ message: `Approved ${p.name}. It runs from the next trigger on this machine.` });
     } catch (e) {
       recordOpError({ label: `Approve ${p.name}`, message: String(e) });

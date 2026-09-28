@@ -95,6 +95,11 @@ None of these run until a person approves that program on their machine.
   is never read; programs approved there ask once more.
 - **Who approves.** Only a person, in Settings → Data. Agents can't, and a
   lens button never does.
+- **What is approved is what they saw** (tsk349). Listings carry each
+  program's and source's `version` (its approval hash as it is now).
+  Approving sends that version back, and a program that changed between
+  the listing and the click is refused, so nothing can swap it in the
+  meantime.
 - **Not gated:** in-process Starlark/jq (sandboxed, no I/O) and the user's
   own global-scope config.
 

@@ -15,15 +15,16 @@ pub async fn list_sources(svc: &Services) -> Result<Vec<SourceListing>, IpcError
     Ok(source_runner::list_sources(&Sources::of(svc, &root)).await?)
 }
 
-/// Run a source now. `approve: true` records the human's consent for the
-/// current entry script first (UI only; agents can't approve).
+/// Run a source now. `approve` is the listing's `version` the person
+/// reviewed: consent is recorded for exactly that version first, and a
+/// source that changed since is refused (UI only; agents can't approve).
 pub async fn run_source(
     svc: &Services,
     extension: String,
     source_id: String,
-    approve: Option<bool>,
+    approve: Option<String>,
 ) -> Result<SourceRunReport, IpcError> {
-    source_runner::sync_source(svc, &extension, &source_id, approve.unwrap_or(false))
+    source_runner::sync_source(svc, &extension, &source_id, approve.as_deref())
         .await
         .map_err(|e| IpcError::from(oxplow_domain::DomainError::from(e)))
 }
@@ -68,6 +69,7 @@ pub async fn approve_project_program(
     svc: &Services,
     kind: oxplow_app::exec_consent::ProgramKind,
     name: String,
+    version: String,
 ) -> Result<Vec<oxplow_app::exec_consent::ProjectProgram>, IpcError> {
     let config = svc
         .config
@@ -80,6 +82,7 @@ pub async fn approve_project_program(
         &config,
         kind,
         &name,
+        &version,
     )
     .map_err(IpcError::invalid)?;
     Ok(oxplow_app::exec_consent::list(
@@ -120,7 +123,7 @@ mod tests {
         assert_eq!(out, serde_json::json!([]), "no exec programs configured");
         let err = crate::dispatch(
             "approve_project_program",
-            serde_json::json!({ "kind": "gauge", "name": "repo.nope" }),
+            serde_json::json!({ "kind": "gauge", "name": "repo.nope", "version": "x" }),
             &svc,
         )
         .await
@@ -152,7 +155,7 @@ mod tests {
 
         let report = crate::dispatch(
             "run_source",
-            json!({ "extension": "my-gh", "sourceId": "gh", "approve": true }),
+            json!({ "extension": "my-gh", "sourceId": "gh", "approve": list[0]["version"] }),
             &svc,
         )
         .await

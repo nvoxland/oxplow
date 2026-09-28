@@ -62,7 +62,7 @@ pub async fn run_lens_action(
         LensActionKind::RunSource => {
             let source = action.source.unwrap_or_default();
             let (ext, id) = source.split_once('/').unwrap_or_default();
-            match crate::source_runner::sync_source(svc, ext, id, false).await {
+            match crate::source_runner::sync_source(svc, ext, id, None).await {
                 Ok(report) => Ok(LensActionResult {
                     text: None,
                     report: Some(report),

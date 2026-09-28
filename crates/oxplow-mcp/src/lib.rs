@@ -1401,7 +1401,8 @@ impl OxplowMcp {
             &self.services,
             &p.extension,
             &p.source_id,
-            false,
+            // An agent never approves.
+            None,
         )
         .await;
         let report = result.map_err(|e| match e {

@@ -563,10 +563,16 @@ export async function listSources(): Promise<SourceListing[]> {
   return unwrap(await commands.listSources());
 }
 
-/// Run a source now. `approve` records the person's consent for the
-/// current script first (only the UI may pass it).
-export async function runSource(extension: string, sourceId: string, approve: boolean): Promise<SourceRunReport> {
-  return unwrap(await commands.runSource(extension, sourceId, approve));
+/// Run a source now. `approveVersion` is the listing's `version` the
+/// person reviewed: their consent is recorded for exactly that version
+/// first, and a source that changed since is refused (only the UI may
+/// pass it).
+export async function runSource(
+  extension: string,
+  sourceId: string,
+  approveVersion: string | null,
+): Promise<SourceRunReport> {
+  return unwrap(await commands.runSource(extension, sourceId, approveVersion));
 }
 
 /// Analyze a change (a commit, an effort, or a stream's working tree) if
@@ -643,8 +649,14 @@ export async function listProjectPrograms(): Promise<ProjectProgram[]> {
 }
 
 /// A person approves one of the project's programs (Settings → Data).
-export async function approveProjectProgram(kind: ProgramKind, name: string): Promise<ProjectProgram[]> {
-  return unwrap(await commands.approveProjectProgram(kind, name));
+/// `version` is the listing's, the one the person reviewed; a program that
+/// changed since is refused.
+export async function approveProjectProgram(
+  kind: ProgramKind,
+  name: string,
+  version: string,
+): Promise<ProjectProgram[]> {
+  return unwrap(await commands.approveProjectProgram(kind, name, version));
 }
 
 /// The ACP agents this project can run (the new-thread picker).
