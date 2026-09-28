@@ -430,8 +430,9 @@ oxplow-analytics change cards) only read them.
   changed files (`duplication_scan::DuplicationRecorder`) stores
   `v_change_duplicate` and emits `ChangeAnalyzed` again. The same scan is
   recorded as a code-quality scan (`v_code_quality_scan` /
-  `v_code_quality_finding`) with `oxplow.duplicate_lines` facts — it is
-  the only duplication producer now ([code-quality.md](./code-quality.md)).
+  `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
+  facts: only a full-tree scan may restate that metric (tsk365,
+  [code-quality.md](./code-quality.md)).
   Closed efforts (snapshot heads) get none: snapshot trees aren't
   scannable yet.
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are

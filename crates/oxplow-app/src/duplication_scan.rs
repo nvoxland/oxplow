@@ -4,9 +4,12 @@
 //!
 //! - the scan and its findings in the code-quality store, read through
 //!   `v_code_quality_scan` / `v_code_quality_finding`;
-//! - `oxplow.duplicate_lines` facts under one capture, an empty one when
-//!   nothing was found, so the metric's current state clears after a
-//!   refactor removes every duplicate (tsk44);
+//! - for a full-tree scan only, `oxplow.duplicate_lines` facts under one
+//!   `complete` capture, an empty one when nothing was found, so the
+//!   metric's current state clears after a refactor removes every
+//!   duplicate (tsk44). A scoped scan anchors only its paths, so its
+//!   capture would restate the whole tree from a slice of it (tsk365);
+//!   its findings still land in the code-quality store;
 //! - a status-bar background task and `CodeQualityScanned` events.
 
 use std::path::PathBuf;
@@ -71,6 +74,8 @@ impl DuplicationRecorder {
         };
         let kind_tag = tree_version.kind_tag().to_string();
         let value = tree_version.value().map(str::to_string);
+        // Only a full-tree scan speaks for the whole tree (tsk365).
+        let full_tree = paths.is_none();
         let (filter, fingerprint): (Arc<dyn FileFilter>, String) = match paths {
             None => (Arc::new(AllFiles), "all".into()),
             Some(paths) => {
@@ -164,8 +169,10 @@ impl DuplicationRecorder {
             svc.background_tasks.fail(&task.id, e.to_string(), None);
             return Err(e);
         }
-        if let Err(error) = write_facts(svc, &findings, &kind_tag, value.as_deref()).await {
-            tracing::warn!(%error, scan_id, "duplication: writing facts failed");
+        if full_tree {
+            if let Err(error) = write_facts(svc, &findings, &kind_tag, value.as_deref()).await {
+                tracing::warn!(%error, scan_id, "duplication: writing facts failed");
+            }
         }
         svc.events.emit(scanned(CodeQualityScanPhase::Completed));
         svc.background_tasks.complete(&task.id, None);
@@ -197,8 +204,8 @@ fn short_ref(r#ref: &str) -> String {
     }
 }
 
-/// One `oxplow.duplicate_lines` fact per duplicate block, under a single
-/// capture stamped with the primary stream (the scan has no stream of its
+/// One `oxplow.duplicate_lines` fact per duplicate block of a full-tree
+/// scan, under a single capture stamped with the primary stream (the scan has no stream of its
 /// own) and the scanned tree version. Written even when empty.
 async fn write_facts(
     svc: &DuplicationRecorder,
@@ -347,6 +354,42 @@ mod tests {
         assert!(
             rollup(f.svc.clone()).await.is_empty(),
             "a zero-hit rescan clears the current state"
+        );
+    }
+
+    /// A change-scoped scan sees only its changed files, so it can't speak
+    /// for the whole tree: it leaves the full-tree metric alone (tsk365).
+    #[tokio::test]
+    async fn a_scoped_scan_leaves_the_metric_alone() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        std::fs::write(root.join("a.rs"), BODY).unwrap();
+        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        scan(&f).await;
+        let rollup = || async {
+            f.svc
+                .metric_engine
+                .rollup("oxplow.duplicate_lines", "oxplow.package")
+                .await
+                .unwrap()
+        };
+        let before = rollup().await;
+        assert!(!before.is_empty());
+        std::fs::write(root.join("c.rs"), "fn unrelated() {}\n").unwrap();
+        let findings = DuplicationRecorder::new(&f.svc)
+            .record(
+                root.clone(),
+                TreeVersion::Disk,
+                Some(vec!["c.rs".into()]),
+                "change 1".into(),
+            )
+            .await
+            .unwrap();
+        assert!(findings.is_empty());
+        assert_eq!(
+            serde_json::to_value(rollup().await).unwrap(),
+            serde_json::to_value(before).unwrap(),
+            "the scoped scan didn't restate the tree"
         );
     }
 

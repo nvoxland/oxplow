@@ -128,9 +128,14 @@ changed files, in the background. `DuplicationRecorder::record`
   tree version and a path-list fingerprint) and its findings, read through
   `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-analytics
   `findings` and `duplicate-blocks` lenses);
-- `oxplow.duplicate_lines` facts under one capture stamped with the
-  primary stream; an **empty** capture when nothing is found, so the
-  metric's current state clears after a refactor (tsk44);
+- for a **full-tree** scan only (`paths = None`), `oxplow.duplicate_lines`
+  facts under one `complete` capture stamped with the primary stream; an
+  **empty** capture when nothing is found, so the metric's current state
+  clears after a refactor (tsk44). A change scan anchors only its changed
+  files, so a capture from it would restate the whole tree from a slice
+  and zero out every untouched file's duplicates (tsk365). Change scans
+  therefore write no facts, and the metric has **no production producer**
+  until a full-tree scan runs somewhere;
 - a status-bar background task and `CodeQualityScanned` events.
 
 The change's own `v_change_duplicate` rows are the findings anchored in
