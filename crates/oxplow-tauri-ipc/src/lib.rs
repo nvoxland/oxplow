@@ -313,6 +313,14 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::respond_lsp_apply_edit,
             // terminal
             commands::terminal::open_terminal_session,
+            // acp
+            commands::terminal::acp_open_session,
+            commands::generated::acp_prompt,
+            commands::generated::acp_cancel,
+            commands::generated::acp_respond_permission,
+            commands::generated::acp_transcript,
+            commands::generated::acp_dismiss_directive,
+            commands::generated::acp_close_session,
             commands::generated::forward_terminal_input,
             commands::generated::close_terminal_session,
             commands::generated::terminal_session_cwd,

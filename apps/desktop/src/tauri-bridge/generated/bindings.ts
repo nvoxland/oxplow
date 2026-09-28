@@ -1167,6 +1167,50 @@ export const commands = {
 	 */
 	openTerminalSession: (paneTarget: string, cols: number, rows: number, transportMode: string) => typedError<AttachResult, IpcError>(__TAURI_INVOKE("open_terminal_session", { paneTarget, cols, rows, transportMode })),
 	/**
+	 *  Open (or reattach to) an ACP thread's agent session. Hand-written like
+	 *  `open_terminal_session`: the MCP endpoint comes from the plugin runtime.
+	 */
+	acpOpenSession: (threadId: ThreadId) => typedError<AcpSnapshot, IpcError>(__TAURI_INVOKE("acp_open_session", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpPrompt: (threadId: ThreadId, text: string) => typedError<null, IpcError>(__TAURI_INVOKE("acp_prompt", { threadId, text })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpCancel: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_cancel", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpRespondPermission: (threadId: ThreadId, requestId: string, optionId: string | null) => typedError<null, IpcError>(__TAURI_INVOKE("acp_respond_permission", { threadId, requestId, optionId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpTranscript: (threadId: ThreadId, sinceSeq: number) => typedError<{
+	agent: string,
+	status: AcpStatus,
+	directive: string | null,
+	usage: ContextUsage | null,
+	// The highest `seq` in the transcript; ask `since` this next time.
+	headSeq: number,
+	items: TranscriptItem[],
+	stderrTail: string[],
+} | null, IpcError>(__TAURI_INVOKE("acp_transcript", { threadId, sinceSeq })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpDismissDirective: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_dismiss_directive", { threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	acpCloseSession: (threadId: ThreadId) => typedError<null, IpcError>(__TAURI_INVOKE("acp_close_session", { threadId })),
+	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
@@ -1272,6 +1316,20 @@ export type AcpAgentSource =
 "preset" | 
 // The project's `acpAgents:`; needs a person's approval to run.
 "project";
+
+// A session as the UI reads it.
+export type AcpSnapshot = {
+	agent: string,
+	status: AcpStatus,
+	directive: string | null,
+	usage: ContextUsage | null,
+	// The highest `seq` in the transcript; ask `since` this next time.
+	headSeq: number,
+	items: TranscriptItem[],
+	stderrTail: string[],
+};
+
+export type AcpStatus = "starting" | "idle" | "running" | "awaiting_permission" | "stopped";
 
 export type AddDashboardItemRequest = {
 	dashboardId: DashboardId,
@@ -1738,6 +1796,17 @@ export type CommitRefLabel = {
 };
 
 export type CommitRefLabelKind = "branch" | "tag";
+
+/**
+ *  Context-window occupancy and cumulative cost from `usage_update`. It
+ *  drives the context meter only — never token accounting.
+ */
+export type ContextUsage = {
+	used: number,
+	size: number,
+	costAmount: number | null,
+	costCurrency: string | null,
+};
 
 /**
  *  Bundled args for [`create_comment`]. A single struct keeps the
@@ -2319,6 +2388,23 @@ export type IpcError = {
 	message: string,
 	cause: string | null,
 };
+
+export type ItemBody = 
+/**
+ *  What the human sent. `context` is the oxplow block attached to it,
+ *  shown behind a disclosure.
+ */
+{ type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
+// A permission request waiting on (or answered by) the human.
+{ type: "permission"; request_id: string; tool_call_id: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
+// oxplow's policy rejected the call without asking the human.
+{ type: "policy_denied"; tool_call_id: string; label: string; reason: string } | 
+// A write the policy would deny ran without asking first.
+{ type: "bypass"; tool_call_id: string; label: string; reason: string } | 
+// The turn-end directive, shown to the human. Never sent.
+{ type: "directive"; text: string } | 
+// Something failed: the prompt, the agent process, the protocol.
+{ type: "error"; message: string };
 
 /**
  *  Launcher (Cmd+K) sections a lens can be listed under. Mirrors the
@@ -3192,6 +3278,24 @@ export type PageVisit = {
 	thread_id: string | null,
 };
 
+// How a permission request was answered.
+export type PermissionAnswer = { type: "selected"; option_id: string } | { type: "cancelled" };
+
+export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+
+export type PermissionOption = {
+	id: string,
+	name: string,
+	kind: PermissionKind,
+};
+
+export type PlanEntry = {
+	content: string,
+	status: PlanStatus,
+};
+
+export type PlanStatus = "pending" | "in_progress" | "completed";
+
 /**
  *  A project-defined collection plugin — the generic, kind-agnostic
  *  definition mechanism. Mirrors `oxplow_collect_plugin::CollectorDescriptor`
@@ -3932,6 +4036,44 @@ export type ThreadWorkState = {
 
 // Wall-clock UTC timestamp serialized as RFC 3339 strings.
 export type Timestamp = string;
+
+/**
+ *  A tool call as last reported: the initial `tool_call` with every
+ *  `tool_call_update` for its id applied.
+ */
+export type ToolCall = {
+	id: string,
+	title: string,
+	// The agent's programmatic tool name, when it sends one.
+	name: string | null,
+	kind: ToolKind,
+	status: ToolStatus,
+	// Paths from `locations` (absolute, per the protocol).
+	locations: string[],
+	// The agent's own JSON for the call; `unknown` to the renderer.
+	rawInput: unknown | null,
+	rawOutput: unknown | null,
+	diffs: ToolDiff[],
+	// Text content blocks (command output, messages).
+	text: string[],
+};
+
+// One file change a tool call reports. `old_text: None` means a new file.
+export type ToolDiff = {
+	path: string,
+	oldText: string | null,
+	newText: string,
+};
+
+// The ACP tool categories, mirrored so the SDK's enum stays in `wire.rs`.
+export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other";
+
+export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
+
+export type TranscriptItem = {
+	id: number,
+	seq: number,
+} & (ItemBody);
 
 /**
  *  Identifies which version of the tree a `TreeSource` represents.

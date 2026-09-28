@@ -609,8 +609,8 @@ impl Actor {
         let item = self.view.lock().transcript.apply(update);
         if let Some(item) = &item {
             self.emit(AcpEventBody::Item {
-            item: Box::new(item.clone()),
-        });
+                item: Box::new(item.clone()),
+            });
         }
         if usage {
             if let Some(u) = self.view.lock().transcript.usage().cloned() {

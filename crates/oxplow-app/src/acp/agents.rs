@@ -63,6 +63,15 @@ pub fn resolve_command(project_dir: &Path, command: &str) -> Option<String> {
     crate::agent_path::resolve_program(command)
 }
 
+/// The Claude adapter takes oxplow's system prompt in
+/// `_meta.systemPrompt.append` on `session/new`; other agents get it
+/// ahead of the first prompt.
+pub fn system_prompt_via_meta(agent: &AcpAgentConfig) -> bool {
+    Path::new(&agent.command)
+        .file_name()
+        .is_some_and(|n| n == "claude-agent-acp")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

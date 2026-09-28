@@ -16,6 +16,7 @@
 //! NOT here (Tauri-only, never dispatched): `launch`, `menu`, `webview`
 //! — they touch the OS window/clipboard and stay in the shell.
 
+pub mod acp;
 pub mod ai;
 pub mod app;
 pub mod background;

@@ -72,20 +72,19 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// `GET /events` — WebSocket multiplexing the three event channels the
-/// Tauri shell bridges natively (`oxplow:event`, `lsp:event`,
-/// `terminal:event`). Each frame is `{"channel":"oxplow"|"lsp"|
-/// "terminal","payload":<existing event shape>}` — the payloads are
-/// the same serialized types `app.emit` sends locally, so the
-/// renderer's handlers are transport-agnostic.
+/// `GET /events` — WebSocket multiplexing the backend event channels
+/// (`oxplow:event`, `lsp:event`, `terminal:event`, `acp:event`). Each
+/// frame is `{"channel":"oxplow"|"lsp"|"terminal"|"acp","payload":<event>}`
+/// with the event's serialized shape, so the renderer's handlers are
+/// transport-agnostic.
 async fn events_ws(State(state): State<DaemonState>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| events_stream(socket, state))
 }
 
-/// The three `/events` frame keys in [oxplow, lsp, terminal] order,
+/// The `/events` frame keys in [oxplow, lsp, terminal, acp] order,
 /// resolved from `oxplow_app::event_channels::FRAMES` by the channel
 /// each key demuxes onto.
-fn ws_frame_keys() -> [&'static str; 3] {
+fn ws_frame_keys() -> [&'static str; 4] {
     use oxplow_app::event_channels as ch;
     let key_for = |channel: &str| -> &'static str {
         ch::FRAMES
@@ -94,7 +93,12 @@ fn ws_frame_keys() -> [&'static str; 3] {
             .map(|(k, _)| *k)
             .unwrap_or_else(|| unreachable!("channel {channel} missing from FRAMES"))
     };
-    [key_for(ch::OXPLOW), key_for(ch::LSP), key_for(ch::TERMINAL)]
+    [
+        key_for(ch::OXPLOW),
+        key_for(ch::LSP),
+        key_for(ch::TERMINAL),
+        key_for(ch::ACP),
+    ]
 }
 
 /// Spawn a forwarder per broadcast source into one mpsc, then pump the
@@ -147,7 +151,7 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
 
     // Frame keys come from the shared channel registry so the daemon,
     // the Tauri shell, and the renderer's demux table can't drift.
-    let [oxplow_key, lsp_key, terminal_key] = ws_frame_keys();
+    let [oxplow_key, lsp_key, terminal_key, acp_key] = ws_frame_keys();
     let forwarders = [
         forward(state.ctx.events.subscribe(), tx.clone(), move |e| {
             frame_json(oxplow_key, e)
@@ -160,6 +164,9 @@ async fn events_stream(socket: WebSocket, state: DaemonState) {
             tx.clone(),
             move |e| frame_json(terminal_key, e),
         ),
+        forward(state.ctx.acp.subscribe(), tx.clone(), move |e| {
+            frame_json(acp_key, e)
+        }),
     ];
     drop(tx);
 
@@ -513,6 +520,42 @@ mod tests {
             v["payload"]["message"].is_string(),
             "terminal frame carries the JSON-encoded protocol message"
         );
+    }
+
+    #[tokio::test]
+    async fn events_ws_streams_acp_events() {
+        use futures::StreamExt as _;
+        use oxplow_app::acp::session::{AcpEvent, AcpEventBody, AcpStatus};
+        let (svc, _dir) = services();
+        let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc.clone()))
+            .await
+            .unwrap();
+        let url = format!("ws://{}/events", daemon.bind_addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        // Same subscribe-race handling as the other events tests.
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                svc.acp.emit_event_for_tests(AcpEvent {
+                    thread_id: "thr3".into(),
+                    body: AcpEventBody::Status {
+                        status: AcpStatus::Running,
+                    },
+                });
+                match tokio::time::timeout(std::time::Duration::from_millis(200), ws.next()).await {
+                    Ok(Some(Ok(msg))) if msg.is_text() => {
+                        return msg.into_text().unwrap().to_string()
+                    }
+                    _ => continue,
+                }
+            }
+        })
+        .await
+        .expect("ws frame within timeout");
+        let v: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(v["channel"], "acp");
+        assert_eq!(v["payload"]["threadId"], "thr3");
+        assert_eq!(v["payload"]["type"], "status");
+        assert_eq!(v["payload"]["status"], "running");
     }
 
     #[tokio::test]

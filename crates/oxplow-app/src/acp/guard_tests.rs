@@ -118,6 +118,8 @@ fn only_the_prompt_box_command_submits_human_prompts() {
     let allowed = [
         // The definition.
         "crates/oxplow-app/src/acp/manager.rs",
+        // `acp_prompt`, the prompt box's Enter (a `ui(...)` row).
+        "crates/oxplow-rpc/src/commands/acp.rs",
     ];
     let hits: Vec<String> = files_containing(&lines, "submit_human_prompt(")
         .into_iter()

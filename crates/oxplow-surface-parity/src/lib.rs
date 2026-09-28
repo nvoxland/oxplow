@@ -330,6 +330,15 @@ pub const MANIFEST: &[Capability] = &[
     ui("create_thread"),
     // The thread picker's ACP agents (tsk335).
     ui("list_acp_agents"),
+    // ACP sessions: the prompt box, permission cards and banners. Never
+    // agent tools — an agent must not prompt an agent (tsk281).
+    ui("acp_open_session"),
+    ui("acp_prompt"),
+    ui("acp_cancel"),
+    ui("acp_respond_permission"),
+    ui("acp_transcript"),
+    ui("acp_dismiss_directive"),
+    ui("acp_close_session"),
     ui("set_thread_prompt"),
     ui("set_agents"),
     ui("list_closed_threads"),

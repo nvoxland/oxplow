@@ -73,6 +73,11 @@ impl AcpManager {
         self.events.subscribe()
     }
 
+    /// Publish an event as a session would (transport tests).
+    pub fn emit_event_for_tests(&self, event: AcpEvent) {
+        let _ = self.events.send(event);
+    }
+
     /// Is a session running for `thread`?
     pub fn is_open(&self, thread: &ThreadId) -> bool {
         self.sessions

@@ -495,6 +495,23 @@ the same JSON.
 - Stop, tokens and directive are recorded.
 - The directive is stored in `SessionView.directive` and shown as an item and event. **It is never sent.** `dismiss_directive` clears it.
 
+**RPC and events (tsk338).** `oxplow-rpc/src/commands/acp.rs`; every command is a `ui(...)` parity row, so none can become an MCP tool.
+- **`acp_open_session`** (a ctx row with a hand-written Tauri adapter, because it needs `plugin_runtime` for oxplow's MCP URL and token). It:
+  - checks the thread is ACP;
+  - resolves the agent (`find`, `may_start`, `resolve_command`);
+  - assembles the system prompt (`system_prompt_via_meta` is true when the command is `claude-agent-acp`);
+  - passes the thread's resume id;
+  - opens the session and returns the `AcpSnapshot`.
+- **The rest:**
+  - `acp_prompt`, the prompt box's Enter, and the only caller of `submit_human_prompt`, which the guard pins;
+  - `acp_cancel`;
+  - `acp_respond_permission` (no option means cancel);
+  - `acp_transcript(sinceSeq)`, which returns `null` when there's no session;
+  - `acp_dismiss_directive`;
+  - `acp_close_session`.
+- **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { threadId, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
+- **Bindings:** raw agent JSON (`rawInput` / `rawOutput`) is TS `unknown`, via `specta_typescript::Unknown`, because specta's own `serde_json::Value` rendering doesn't typecheck.
+
 **Fake agent.** `crates/oxplow-acp-fake` is a scripted fake speaking raw JSON-RPC, deliberately not the SDK, so the tests exercise real wire JSON. `fake:<step>` lines in a prompt drive it: say, think, edit, bypass, fswrite, fsread, bash, plan, usage, tokens, wait, crash.
 - `acp/session_tests.rs` runs it in-process over a duplex pipe.
 - `tests/acp_services.rs` runs it against real `Services`, and once as its binary.

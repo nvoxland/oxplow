@@ -30,11 +30,18 @@ pub mod event_channels {
     pub const LSP: &str = "lsp:event";
     /// Terminal bridge events.
     pub const TERMINAL: &str = "terminal:event";
+    /// ACP session events (`acp::session::AcpEvent`, tsk281).
+    pub const ACP: &str = "acp:event";
 
     /// Frame keys used as `{"channel": <key>, "payload": …}` on the
     /// daemon's multiplexed `/events` socket, keyed to the channel
     /// each frame demuxes back onto.
-    pub const FRAMES: &[(&str, &str)] = &[("oxplow", OXPLOW), ("lsp", LSP), ("terminal", TERMINAL)];
+    pub const FRAMES: &[(&str, &str)] = &[
+        ("oxplow", OXPLOW),
+        ("lsp", LSP),
+        ("terminal", TERMINAL),
+        ("acp", ACP),
+    ];
 }
 
 /// fs-watch classification mirrored onto the wire so the renderer can

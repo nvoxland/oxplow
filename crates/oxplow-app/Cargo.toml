@@ -41,6 +41,8 @@ serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 specta = { workspace = true }
+# `Unknown` types raw agent JSON as TS `unknown` (acp::model).
+specta-typescript = { workspace = true }
 async-trait = { workspace = true }
 indexmap = "2.14"
 parking_lot = "0.12"

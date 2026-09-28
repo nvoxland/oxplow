@@ -11,6 +11,7 @@ export const EVENT_CHANNELS = {
   oxplow: "oxplow:event",
   lsp: "lsp:event",
   terminal: "terminal:event",
+  acp: "acp:event",
 } as const;
 
 export type EventChannelFrameKey = keyof typeof EVENT_CHANNELS;
@@ -34,6 +35,7 @@ export const CHANNEL_ROUTING = {
   [EVENT_CHANNELS.oxplow]: "multiplexed",
   [EVENT_CHANNELS.lsp]: "multiplexed",
   [EVENT_CHANNELS.terminal]: "multiplexed",
+  [EVENT_CHANNELS.acp]: "multiplexed",
   "menu:command": "shellLocal",
 } as const satisfies Record<string, ChannelRouting>;
 

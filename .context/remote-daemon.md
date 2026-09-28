@@ -26,9 +26,11 @@ developer-facing mechanics.
   the byte-identical shape via the TS `typedError` wrapper + the same
   `IpcError`, so the two hosts can't diverge on error mapping),
   `GET /events` (WebSocket multiplexing
-  `{channel:"oxplow"|"lsp"|"terminal", payload}` with the exact
+  `{channel:"oxplow"|"lsp"|"terminal"|"acp", payload}` with the exact
   payload shapes the Tauri bridges emit; the `lsp` frame carries
-  `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`),
+  `LspSessionEvent` from `LspSessionManager` — see `.context/lsp.md`;
+  the `acp` frame carries `AcpEvent` from `Services.acp` — see
+  `.context/agent-model.md` → "ACP agents"),
   `GET /health`. Same per-project instance lock as the shell.
   CORS is fully permissive (`CorsLayer::permissive()`) so the
   frontend can run in a plain browser (Playwright-driven UX testing,

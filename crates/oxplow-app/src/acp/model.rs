@@ -53,7 +53,10 @@ pub struct ToolCall {
     pub status: ToolStatus,
     /// Paths from `locations` (absolute, per the protocol).
     pub locations: Vec<String>,
+    /// The agent's own JSON for the call; `unknown` to the renderer.
+    #[specta(type = Option<specta_typescript::Unknown>)]
     pub raw_input: Option<serde_json::Value>,
+    #[specta(type = Option<specta_typescript::Unknown>)]
     pub raw_output: Option<serde_json::Value>,
     pub diffs: Vec<ToolDiff>,
     /// Text content blocks (command output, messages).
