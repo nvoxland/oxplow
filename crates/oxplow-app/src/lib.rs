@@ -77,6 +77,7 @@ pub mod terminal_sessions;
 pub(crate) mod test_fixtures;
 pub mod test_outcome;
 pub mod test_signals;
+pub mod thread_lifecycle;
 pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_calls;

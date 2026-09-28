@@ -455,6 +455,7 @@ the same JSON.
   - `open` reserves the thread's slot under one lock before spawning anything, so concurrent opens start one agent.
   - `close` marks the handle closed at once.
   - A closed session still winding down is replaced and marked not current; its actor then records no Interrupt over the new session's status.
+- **Thread lifecycle (tsk360).** Closing an ACP thread (`thread_lifecycle::close_thread`, shared by RPC and MCP) stops its session and agent process. `fork_thread` keeps the parent's `acp_agent`.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:

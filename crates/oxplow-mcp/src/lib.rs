@@ -2325,7 +2325,9 @@ impl OxplowMcp {
     ) -> Result<CallToolResult, McpError> {
         expect_id_kind("close_thread", "thread_id", &params.0.thread_id, ID_THREAD)?;
         let id = parse_thread_id(&params.0.thread_id)?;
-        let thread = self.services.threads.close(&id).await.map_err(internal)?;
+        let thread = oxplow_app::thread_lifecycle::close_thread(&self.services, &id)
+            .await
+            .map_err(internal)?;
         self.emit_threads_changed(thread.stream_id);
         json_result(&thread)
     }
@@ -4744,11 +4746,13 @@ impl OxplowMcp {
         let child = self
             .services
             .threads
-            .create(
+            // Same agent, and for an ACP thread the same ACP agent.
+            .create_with_acp(
                 &parent.stream_id,
                 params.0.title,
                 parent.pane_target,
                 parent.agent,
+                parent.acp_agent.clone(),
             )
             .await
             .map_err(|e| internal(e.to_string()))?;
@@ -7690,6 +7694,33 @@ mod tests {
                 .is_empty(),
             "claiming clears the unattributed residue"
         );
+    }
+
+    #[tokio::test]
+    async fn forking_an_acp_thread_keeps_its_agent() {
+        use oxplow_domain::stores::StreamStore as _;
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let parent = services
+            .threads
+            .create_with_acp(
+                &stream.id,
+                "acp",
+                "working",
+                oxplow_domain::AgentKind::Acp,
+                Some("gemini".into()),
+            )
+            .await
+            .unwrap();
+        let out = server
+            .fork_thread(Parameters(ForkThreadParams {
+                source_thread_id: parent.id.to_string(),
+                title: "fork".into(),
+            }))
+            .await
+            .unwrap();
+        let text = format!("{:?}", out.content);
+        assert!(text.contains("gemini"), "{text}");
     }
 
     #[tokio::test]

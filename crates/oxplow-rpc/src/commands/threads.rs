@@ -116,7 +116,7 @@ pub async fn promote_thread(svc: &Services, id: ThreadId) -> Result<Thread, IpcE
 }
 
 pub async fn close_thread(svc: &Services, id: ThreadId) -> Result<Thread, IpcError> {
-    let t = svc.threads.close(&id).await?;
+    let t = oxplow_app::thread_lifecycle::close_thread(svc, &id).await?;
     svc.events.emit(OxplowEvent::ThreadsChanged {
         stream_id: t.stream_id,
     });

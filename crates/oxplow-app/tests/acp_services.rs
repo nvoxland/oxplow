@@ -373,3 +373,18 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn closing_an_acp_thread_stops_its_session() {
+    let (svc, root, _dir) = boot().await;
+    let thread = seed(&svc, &root, ThreadStatus::Queued).await;
+    open_in_process(&svc, thread, &root).await;
+    assert!(svc.acp.is_open(&thread));
+    oxplow_app::thread_lifecycle::close_thread(&svc, &thread)
+        .await
+        .unwrap();
+    assert!(
+        !svc.acp.is_open(&thread),
+        "the agent process is stopped with its thread"
+    );
+}
