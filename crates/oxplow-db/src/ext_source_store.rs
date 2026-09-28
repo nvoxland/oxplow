@@ -191,7 +191,9 @@ impl SqliteExtSourceStore {
                 let tx = conn.transaction().map_err(map_sql_err)?;
                 let owned: Vec<(String, String)> = {
                     let mut st = tx
-                        .prepare("SELECT type, name FROM sqlite_master WHERE (type = 'view' AND sql LIKE '%' || ?1 || '%') OR (type = 'table' AND substr(name, 1, length(?1)) = ?1)")
+                        // Exact substring, not LIKE: `_` is a LIKE wildcard, so
+                        // `ext__gh__` would match `ext__gh_extra__` (tsk368).
+                        .prepare("SELECT type, name FROM sqlite_master WHERE (type = 'view' AND instr(sql, ?1) > 0) OR (type = 'table' AND substr(name, 1, length(?1)) = ?1)")
                         .map_err(map_sql_err)?;
                     let rows = st
                         .query_map([&prefix], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
@@ -571,6 +573,37 @@ mod tests {
             .query_sql("SELECT * FROM v_my_gh_pr", vec![], None)
             .await
             .is_err());
+    }
+
+    /// `_` is a LIKE wildcard: dropping `gh` must leave `gh-extra`'s view
+    /// (`ext__gh_extra__…`) alone (tsk368).
+    #[tokio::test]
+    async fn dropping_an_extension_leaves_similar_names_alone() {
+        let db = Database::in_memory();
+        let store = SqliteExtSourceStore::new(db.clone());
+        let sl = SemanticLayer::new(db);
+        let table = |extension: &str, view: &str| EntityTable {
+            extension: extension.into(),
+            view: view.into(),
+            ..pr_table(&[("number", StoredType::Integer)])
+        };
+        store
+            .replace_rows(vec![
+                (table("gh", "v_gh_pr"), rows(json!([[1]]))),
+                (table("gh-extra", "v_gh_extra_pr"), rows(json!([[2]]))),
+            ])
+            .await
+            .unwrap();
+        store.drop_extension("gh").await.unwrap();
+        assert!(sl
+            .query_sql("SELECT * FROM v_gh_pr", vec![], None)
+            .await
+            .is_err());
+        let out = sl
+            .query_sql("SELECT number FROM v_gh_extra_pr", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(serde_json::to_value(out.rows).unwrap(), json!([[2]]));
     }
 
     #[tokio::test]
