@@ -20,6 +20,7 @@ import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { insertIntoAgent } from "../agent-input-bus.js";
 import { formatContextMention } from "../agent-context-ref.js";
 import { changedParams, parseParamInput, shouldRerunLens } from "../lens/lensModel.js";
+import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "../lens/LensResultView.js";
 
 export interface LensPageProps {
@@ -48,14 +49,24 @@ export function LensPage({ lensId, initialParams, stream, onOpenPage }: LensPage
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
 
+  const guard = useRequestGuard();
+
   const refresh = useCallback(async () => {
+    const current = guard.begin();
     try {
       const next = await runLens(lensId, overridesRef.current, streamId);
+      if (!current()) return;
       setRun(next);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (current()) setError(e instanceof Error ? e.message : String(e));
     }
+  }, [lensId, streamId, guard]);
+
+  // Another lens or stream: its old result mustn't show under the new one.
+  useEffect(() => {
+    setRun(null);
+    setError(null);
   }, [lensId, streamId]);
 
   useEffect(() => {

@@ -204,6 +204,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     PlanPane `thread_id` (the compact `strip` variant, which hides lenses
     with no rows), GitCommitPage and UncommittedChangesPage `change_id`.
     Numeric ids come from `numericRowId` (`tsk42` → 42).
+  - **Latest request wins** (`src/request-guard.ts`, tsk370). LensSlots,
+    LensPage and ExploreDataPage `begin()` each fetch and apply its result
+    only while it's still the newest; new params (another thread, lens or
+    stream) clear the old results first, so thread A's rows never show
+    under thread B.
   - `change_id` comes from `src/lens/useChange.ts`: it calls
     `ensure_change` on mount, again on `ChangeStale` for its stream
     (working tree / effort targets) and on `ChangeAnalyzed` for its

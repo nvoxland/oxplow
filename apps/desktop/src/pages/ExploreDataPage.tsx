@@ -14,6 +14,7 @@ import {
 import { LensResultView } from "../lens/LensResultView.js";
 import { adHocLens, slugify } from "../lens/lensModel.js";
 import { recordOpError } from "../components/opErrorsStore.js";
+import { useRequestGuard } from "../request-guard.js";
 
 export interface ExploreDataPageProps {
   stream: Stream | null;
@@ -37,6 +38,7 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   const [viz, setViz] = useState<LensViz>("table");
   const [run, setRun] = useState<LensRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const guard = useRequestGuard();
 
   useEffect(() => {
     describeSchema()
@@ -45,11 +47,14 @@ export function ExploreDataPage({ stream, onOpenPage }: ExploreDataPageProps) {
   }, []);
 
   async function execute(query: string, as: LensViz = viz) {
+    // A slower earlier query mustn't land over this one.
+    const current = guard.begin();
     setError(null);
     try {
       const result = await querySql(query, [], null);
-      setRun({ lens: adHocLens(query, as), params: {}, result, alert: null });
+      if (current()) setRun({ lens: adHocLens(query, as), params: {}, result, alert: null });
     } catch (e) {
+      if (!current()) return;
       setRun(null);
       setError(e instanceof Error ? e.message : String(e));
     }

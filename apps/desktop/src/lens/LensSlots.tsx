@@ -3,6 +3,7 @@ import { listExtensions, runLens, subscribeOxplowEvents, type LensRun, type SqlC
 import type { TabRef } from "../tabs/tabState.js";
 import { lensRef } from "../tabs/pageRefs.js";
 import { RouteLink } from "../tabs/RouteLink.js";
+import { useRequestGuard } from "../request-guard.js";
 import { LensResultView } from "./LensResultView.js";
 import { shouldRerunLens, slotRuns } from "./lensModel.js";
 
@@ -42,9 +43,11 @@ export function LensSlots({
     { id: string; params: Record<string, SqlCell>; run: LensRun | null; error: string | null }[]
   >([]);
   const paramsKey = JSON.stringify(params);
+  const guard = useRequestGuard();
 
   const refresh = useCallback(async () => {
     if (params === null) return;
+    const current = guard.begin();
     try {
       const mounts = slotRuns(await listExtensions(streamId), slot, params, extension);
       const next = await Promise.all(
@@ -56,15 +59,19 @@ export function LensSlots({
           }
         }),
       );
-      setRuns(next);
+      if (current()) setRuns(next);
     } catch {
-      setRuns([]);
+      if (current()) setRuns([]);
     }
     // paramsKey stands in for `params` (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot, paramsKey, streamId, extension]);
+  }, [slot, paramsKey, streamId, extension, guard]);
 
   useEffect(() => {
+    // New inputs: drop the old results (another thread's rows) and any
+    // answer still in flight for them.
+    guard.cancel();
+    setRuns([]);
     void refresh();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const off = subscribeOxplowEvents((event) => {
@@ -76,7 +83,7 @@ export function LensSlots({
       if (timer) clearTimeout(timer);
       off();
     };
-  }, [refresh]);
+  }, [refresh, guard]);
 
   if (runs.length === 0) return null;
   if (variant === "strip") {
