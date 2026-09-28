@@ -1215,15 +1215,15 @@ intermediate `ready` step.
     `RefSummary { kind, id, title?, detail?, body_excerpt? }`;
     `context_chain` is the nesting of page regions the selection sat
     inside (innermost→outermost — e.g. a file row highlighted under a
-    commit yields `[git-commit …]`); `referenced` are the canonical refs
+    commit yields `[commit …]`); `referenced` are the canonical refs
     found inside the selection itself (links + inline mentions). So a
     follow-up on a commit row arrives with the commit subject + diffstat
     (primary), the dashboard it lives in (chain), and any file the quote
     linked to (referenced) — the agent gets *what the highlighted thing
     is* in one call. Hydration runs through
     `oxplow_app::ref_resolver::{resolve_ref, resolve_refs}`, which resolves
-    every canonical kind: `task` → title+status, `git-commit` →
-    subject+diffstat, `file` → size + head excerpt, `directory` → entry
+    every canonical kind: `work_item` → title+status, `commit` →
+    subject+diffstat, `file` → size + head excerpt, `dir` → entry
     count + names, `wiki` → title + lead, `finding` → kind + location;
     unknown kinds return a bare `{kind,id}`. The IPC
     `list_comments_for_target` stays raw — the renderer already has the
@@ -1256,10 +1256,10 @@ directions of any edge:
 - `list_outbound({ kind, id, limit? })` — what `(kind, id)` itself
   points at.
 
-Canonical id shapes: `wiki:<slug>` uses just the slug; `task` uses
-the integer rowid as a string (e.g. `"42"`); `file` uses the bare
-repo-relative path; `directory` the bare path with no trailing
-slash; `git-commit` the full sha; `finding` the rowid as a string.
+Canonical id shapes (`.context/refs.md`): `wiki` the slug;
+`work_item` `oxplow:tsk<n>`; `file` the bare repo-relative path; `dir`
+the bare path with no trailing slash; `commit` the full sha; `finding`
+the rowid as a string.
 Each row carries `ref_type` so you can tell e.g. a commit's
 `touched_file` edge from a wiki body's `wikilink`.
 

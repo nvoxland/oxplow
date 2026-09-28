@@ -7,27 +7,46 @@
 //! testable and lets the boot-time backfill replay the exact same
 //! mapping from existing rows.
 //!
-//! Canonical id shapes (matching the frontend's `TabRef.id`):
-//! - wiki:        `"<slug>"` for the wiki source kind
-//! - task:        `"<integer id as string>"`
-//! - file:        `"<repo-relative path>"`
-//! - directory:   `"<repo-relative path, no trailing slash>"`
-//! - finding:     `"<finding id>"`
-//! - git-commit:  `"<sha>"`
+//! Every stored `(kind, id)` is a canonical ref's `(kind, id)`
+//! (`.context/refs.md`), so a row can be turned back into a ref by
+//! `format!("{kind}:{id}")` and nothing downstream needs a per-kind id
+//! scheme:
+//! - wiki:      `"<slug>"`
+//! - work_item: `"oxplow:tsk<n>"` — a task, provider-scoped ([`work_item_id`])
+//! - file:      `"<repo-relative path>"`
+//! - dir:       `"<repo-relative path, no trailing slash>"`
+//! - finding:   `"<finding id>"`
+//! - commit:    `"<sha>"`
+//! - task_note: `"not<n>"`
 
 use oxplow_domain::refs::{extract, RefVersion};
-use oxplow_domain::{Task, TaskImpact, TaskLink, TaskLinkType};
+use oxplow_domain::{Task, TaskId, TaskImpact, TaskLink, TaskLinkType};
 
 use crate::effort_store::FileRefVersion;
 use crate::page_ref_store::PageRefEdge;
 
 pub const KIND_WIKI: &str = "wiki";
-pub const KIND_TASK: &str = "task";
-pub const KIND_TASK_NOTE: &str = "task-note";
+pub const KIND_WORK_ITEM: &str = "work_item";
+pub const KIND_TASK_NOTE: &str = "task_note";
 pub const KIND_FILE: &str = "file";
-pub const KIND_DIRECTORY: &str = "directory";
+pub const KIND_DIR: &str = "dir";
 pub const KIND_FINDING: &str = "finding";
-pub const KIND_GIT_COMMIT: &str = "git-commit";
+pub const KIND_COMMIT: &str = "commit";
+
+/// The provider oxplow's own tasks are filed under in a `work_item` ref.
+pub const OXPLOW_PROVIDER: &str = "oxplow";
+
+/// The `work_item` id of an oxplow task: `oxplow:tsk<n>`.
+pub fn work_item_id(task: TaskId) -> String {
+    format!("{OXPLOW_PROVIDER}:{task}")
+}
+
+/// The task behind a `work_item` id, when it's one of ours (`oxplow:tsk<n>`
+/// or, from an agent's impact declaration, a bare `tsk<n>` / `<n>`).
+pub fn task_from_work_item_id(id: &str) -> Option<TaskId> {
+    let native = id.strip_prefix("oxplow:").unwrap_or(id);
+    TaskId::try_from_str(native).or_else(|| native.parse::<i64>().ok().map(TaskId::new))
+}
 
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
@@ -52,7 +71,7 @@ pub const RT_SUMMARY_FILE: &str = "summary_file_ref";
 /// version.
 pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_>) {
     for edge in edges.iter_mut() {
-        let is_versioned = edge.target_kind == KIND_FILE || edge.target_kind == KIND_DIRECTORY;
+        let is_versioned = edge.target_kind == KIND_FILE || edge.target_kind == KIND_DIR;
         if !is_versioned {
             continue;
         }
@@ -120,15 +139,16 @@ pub fn effort_ref_types() -> Vec<String> {
     ]
 }
 
-/// Normalize a `TaskImpact.kind` value (snake_case on the wire) to
-/// the canonical `page_ref` target_kind string.
+/// Normalize a `TaskImpact.kind` an agent wrote (`task`, `git_commit`,
+/// `directory`, …) to the canonical ref kind it means. Input
+/// normalization only: what's stored is always canonical.
 pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "wiki" => Some(KIND_WIKI),
-        "task" => Some(KIND_TASK),
+        "task" | "work_item" => Some(KIND_WORK_ITEM),
         "file" => Some(KIND_FILE),
-        "directory" | "dir" => Some(KIND_DIRECTORY),
-        "git_commit" | "git-commit" | "commit" => Some(KIND_GIT_COMMIT),
+        "directory" | "dir" => Some(KIND_DIR),
+        "git_commit" | "git-commit" | "commit" => Some(KIND_COMMIT),
         "finding" => Some(KIND_FINDING),
         _ => None,
     }
@@ -137,11 +157,9 @@ pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
 /// Edges contributed by the union of every effort's declared
 /// impacts. Self-task references are filtered out (an effort on
 /// tsk7 declaring it "completed" tsk7 is implicit).
-pub fn effort_impact_edges(task_id: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
+pub fn effort_impact_edges(task: &TaskId, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
     let mut out = Vec::new();
-    let self_id: Option<i64> = oxplow_domain::TaskId::try_from_str(task_id)
-        .map(|t| t.value())
-        .or_else(|| task_id.parse().ok());
+    let source = work_item_id(*task);
     for imp in impacts {
         let Some(target_kind) = normalize_impact_kind(&imp.kind) else {
             continue;
@@ -149,14 +167,19 @@ pub fn effort_impact_edges(task_id: &str, impacts: &[TaskImpact]) -> Vec<PageRef
         if imp.id.trim().is_empty() {
             continue;
         }
-        if target_kind == KIND_TASK {
-            if let Ok(t) = imp.id.parse::<i64>() {
-                if Some(t) == self_id {
-                    continue;
-                }
+        // A task target is stored canonical however the agent wrote it.
+        let target_id = if target_kind == KIND_WORK_ITEM {
+            let Some(t) = task_from_work_item_id(imp.id.trim()) else {
+                continue;
+            };
+            if t == *task {
+                continue;
             }
-        }
-        let mut edge = PageRefEdge::new(KIND_TASK, task_id, target_kind, imp.id.clone(), RT_IMPACT);
+            work_item_id(t)
+        } else {
+            imp.id.clone()
+        };
+        let mut edge = PageRefEdge::new(KIND_WORK_ITEM, &source, target_kind, target_id, RT_IMPACT);
         if let Some(action) = &imp.action {
             if !action.trim().is_empty() {
                 edge = edge.with_extra(serde_json::json!({ "action": action.trim() }).to_string());
@@ -192,13 +215,7 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(edge);
     }
     for d in refs.dirs {
-        out.push(PageRefEdge::new(
-            KIND_WIKI,
-            slug,
-            KIND_DIRECTORY,
-            d,
-            RT_WIKI_DIR,
-        ));
+        out.push(PageRefEdge::new(KIND_WIKI, slug, KIND_DIR, d, RT_WIKI_DIR));
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(KIND_WIKI, slug, KIND_WIKI, w, RT_WIKILINK));
@@ -207,8 +224,8 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_WIKI,
             slug,
-            KIND_TASK,
-            oxplow_domain::TaskId::new(t).to_string(),
+            KIND_WORK_ITEM,
+            work_item_id(TaskId::new(t)),
             RT_BODY_TASK,
         ));
     }
@@ -225,7 +242,7 @@ pub fn wiki_edges(slug: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_WIKI,
             slug,
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             c,
             RT_BODY_COMMIT,
         ));
@@ -250,7 +267,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_TASK_NOTE,
             note_id,
-            KIND_DIRECTORY,
+            KIND_DIR,
             d,
             RT_WIKI_DIR,
         ));
@@ -268,8 +285,8 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_TASK_NOTE,
             note_id,
-            KIND_TASK,
-            oxplow_domain::TaskId::new(t).to_string(),
+            KIND_WORK_ITEM,
+            work_item_id(TaskId::new(t)),
             RT_BODY_TASK,
         ));
     }
@@ -286,7 +303,7 @@ pub fn note_edges(note_id: &str, body: &str) -> Vec<PageRefEdge> {
         out.push(PageRefEdge::new(
             KIND_TASK_NOTE,
             note_id,
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             c,
             RT_BODY_COMMIT,
         ));
@@ -301,11 +318,11 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     combined.push('\n');
     combined.push_str(&item.description);
     let refs = extract(&combined);
-    let id = item.id.to_string();
+    let id = work_item_id(item.id);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             &id,
             KIND_FILE,
             fd.path,
@@ -314,31 +331,37 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     }
     for d in refs.dirs {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             &id,
-            KIND_DIRECTORY,
+            KIND_DIR,
             d,
             RT_WIKI_DIR,
         ));
     }
     for w in refs.wikis {
-        out.push(PageRefEdge::new(KIND_TASK, &id, KIND_WIKI, w, RT_WIKILINK));
+        out.push(PageRefEdge::new(
+            KIND_WORK_ITEM,
+            &id,
+            KIND_WIKI,
+            w,
+            RT_WIKILINK,
+        ));
     }
     for t in refs.tasks {
         if t == item.id.value() {
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             &id,
-            KIND_TASK,
-            oxplow_domain::TaskId::new(t).to_string(),
+            KIND_WORK_ITEM,
+            work_item_id(TaskId::new(t)),
             RT_BODY_TASK,
         ));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             &id,
             KIND_FINDING,
             f,
@@ -347,9 +370,9 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
     }
     for c in refs.commits {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             &id,
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             c,
             RT_BODY_COMMIT,
         ));
@@ -365,13 +388,20 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
 /// `{"change_kind":"..."}` so the renderer can display "created"
 /// / "modified" / "deleted" instead of a single "touched" label.
 /// The renderer normalizes `updated` → "modified" for display.
-pub fn effort_touched_file_edges(task_id: &str, entries: &[(String, String)]) -> Vec<PageRefEdge> {
+pub fn effort_touched_file_edges(task: &TaskId, entries: &[(String, String)]) -> Vec<PageRefEdge> {
+    let source = work_item_id(*task);
     entries
         .iter()
         .map(|(path, change_kind)| {
             let extra = serde_json::json!({ "change_kind": change_kind }).to_string();
-            PageRefEdge::new(KIND_TASK, task_id, KIND_FILE, path.clone(), RT_TOUCHED_FILE)
-                .with_extra(extra)
+            PageRefEdge::new(
+                KIND_WORK_ITEM,
+                &source,
+                KIND_FILE,
+                path.clone(),
+                RT_TOUCHED_FILE,
+            )
+            .with_extra(extra)
         })
         .collect()
 }
@@ -382,16 +412,17 @@ pub fn effort_touched_file_edges(task_id: &str, entries: &[(String, String)]) ->
 /// mentions all flow through as outbound edges from `(task, id)`.
 /// Owned slice = the `summary_*` ref_types above (paired with
 /// `RT_TOUCHED_FILE` under `effort_ref_types()`).
-pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefEdge> {
+pub fn effort_summary_edges(task: &TaskId, summaries: &[String]) -> Vec<PageRefEdge> {
     if summaries.is_empty() {
         return Vec::new();
     }
     let combined = summaries.join("\n\n");
     let refs = extract(&combined);
+    let task_id = &work_item_id(*task);
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
             KIND_FILE,
             fd.path,
@@ -400,40 +431,37 @@ pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefE
     }
     for d in refs.dirs {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
-            KIND_DIRECTORY,
+            KIND_DIR,
             d,
             RT_SUMMARY_DIR,
         ));
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
             KIND_WIKI,
             w,
             RT_SUMMARY_WIKILINK,
         ));
     }
-    let self_id: Option<i64> = oxplow_domain::TaskId::try_from_str(task_id)
-        .map(|t| t.value())
-        .or_else(|| task_id.parse().ok());
     for t in refs.tasks {
-        if Some(t) == self_id {
+        if t == task.value() {
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
-            KIND_TASK,
-            oxplow_domain::TaskId::new(t).to_string(),
+            KIND_WORK_ITEM,
+            work_item_id(TaskId::new(t)),
             RT_SUMMARY_TASK,
         ));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
             KIND_FINDING,
             f,
@@ -442,9 +470,9 @@ pub fn effort_summary_edges(task_id: &str, summaries: &[String]) -> Vec<PageRefE
     }
     for c in refs.commits {
         out.push(PageRefEdge::new(
-            KIND_TASK,
+            KIND_WORK_ITEM,
             task_id,
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             c,
             RT_SUMMARY_COMMIT,
         ));
@@ -467,10 +495,10 @@ fn link_type_str(t: TaskLinkType) -> &'static str {
 /// `to_item`, ref_type encodes the link sub-type.
 pub fn link_edge(link: &TaskLink) -> PageRefEdge {
     PageRefEdge::new(
-        KIND_TASK,
-        link.from_item_id.to_string(),
-        KIND_TASK,
-        link.to_item_id.to_string(),
+        KIND_WORK_ITEM,
+        work_item_id(link.from_item_id),
+        KIND_WORK_ITEM,
+        work_item_id(link.to_item_id),
         format!("task_link:{}", link_type_str(link.link_type)),
     )
 }
@@ -524,11 +552,22 @@ mod tests {
         let kinds: std::collections::BTreeSet<_> =
             edges.iter().map(|e| e.target_kind.as_str()).collect();
         assert!(kinds.contains("file"));
-        assert!(kinds.contains("directory"));
+        assert!(kinds.contains("dir"));
         assert!(kinds.contains("wiki"));
-        assert!(kinds.contains("task"));
+        assert!(kinds.contains("work_item"));
         assert!(kinds.contains("finding"));
-        assert!(kinds.contains("git-commit"));
+        assert!(kinds.contains("commit"));
+        // Every stored (kind, id) is a canonical ref's (kind, id) (tsk404).
+        for e in &edges {
+            let text = format!("{}:{}", e.target_kind, e.target_id);
+            let r = oxplow_domain::refs::grammar::CanonicalRef::parse(&text)
+                .unwrap_or_else(|err| panic!("{text}: {err}"));
+            oxplow_domain::refs::kind::core_kinds()
+                .validate(&r)
+                .unwrap_or_else(|err| panic!("{text}: {err}"));
+        }
+        let task = edges.iter().find(|e| e.target_kind == "work_item").unwrap();
+        assert_eq!(task.target_id, "oxplow:tsk7");
     }
 
     #[test]
@@ -544,10 +583,16 @@ mod tests {
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
         assert!(targets.contains(&("file", "src/app.rs")));
-        assert!(targets.contains(&("task", "tsk2")));
+        assert!(targets.contains(&("work_item", "oxplow:tsk2")));
         assert!(targets.contains(&("finding", "fnd-9")));
         // self-mention filtered out
-        assert!(!targets.iter().any(|(k, id)| *k == "task" && *id == "1"));
+        assert!(!targets
+            .iter()
+            .any(|(k, id)| *k == "work_item" && *id == "oxplow:tsk1"));
+        // The source is the task's own canonical (kind, id).
+        assert!(edges
+            .iter()
+            .all(|e| e.source_kind == "work_item" && e.source_id == "oxplow:tsk1"));
     }
 
     #[test]
@@ -557,9 +602,10 @@ mod tests {
             ("b.rs".to_string(), "updated".to_string()),
             ("c.rs".to_string(), "deleted".to_string()),
         ];
-        let edges = effort_touched_file_edges("7", &entries);
+        let edges = effort_touched_file_edges(&TaskId::new(7), &entries);
         assert_eq!(edges.len(), 3);
-        assert_eq!(edges[0].source_id, "7");
+        assert_eq!(edges[0].source_kind, "work_item");
+        assert_eq!(edges[0].source_id, "oxplow:tsk7");
         assert_eq!(edges[0].ref_type, "touched_file");
         assert!(edges[0]
             .source_extra
@@ -581,7 +627,7 @@ mod tests {
             "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
             "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
         ];
-        let edges = effort_summary_edges("7", &summaries);
+        let edges = effort_summary_edges(&TaskId::new(7), &summaries);
         let by_kind: std::collections::BTreeMap<_, Vec<_>> =
             edges
                 .iter()
@@ -597,14 +643,14 @@ mod tests {
         assert!(by_kind.get("file").is_some_and(|v| v
             .iter()
             .any(|(id, rt)| *id == "src/foo.rs" && *rt == "summary_file_ref")));
-        assert!(by_kind.get("task").is_some_and(|v| v
+        assert!(by_kind.get("work_item").is_some_and(|v| v
             .iter()
-            .any(|(id, rt)| *id == "tsk99" && *rt == "summary_task_mention")));
+            .any(|(id, rt)| *id == "oxplow:tsk99" && *rt == "summary_task_mention")));
         assert!(by_kind.get("finding").is_some_and(|v| v
             .iter()
             .any(|(id, rt)| *id == "fnd-2" && *rt == "summary_finding_mention")));
-        assert!(by_kind.get("git-commit").is_some_and(|v| !v.is_empty()));
-        assert!(by_kind.get("directory").is_some_and(|v| v
+        assert!(by_kind.get("commit").is_some_and(|v| !v.is_empty()));
+        assert!(by_kind.get("dir").is_some_and(|v| v
             .iter()
             .any(|(id, rt)| *id == "src/x" && *rt == "summary_dir_ref")));
     }
@@ -612,18 +658,18 @@ mod tests {
     #[test]
     fn effort_summary_edges_filter_self_task() {
         let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
-        let edges = effort_summary_edges("tsk7", &summaries);
+        let edges = effort_summary_edges(&TaskId::new(7), &summaries);
         let task_ids: Vec<_> = edges
             .iter()
-            .filter(|e| e.target_kind == "task")
+            .filter(|e| e.target_kind == "work_item")
             .map(|e| e.target_id.as_str())
             .collect();
-        assert_eq!(task_ids, vec!["tsk9"]);
+        assert_eq!(task_ids, vec!["oxplow:tsk9"]);
     }
 
     #[test]
     fn effort_summary_edges_empty_input_yields_no_edges() {
-        assert!(effort_summary_edges("7", &[]).is_empty());
+        assert!(effort_summary_edges(&TaskId::new(7), &[]).is_empty());
     }
 
     #[test]
@@ -661,7 +707,7 @@ mod tests {
                 action: None,
             }, // empty id — filtered
         ];
-        let edges = effort_impact_edges("7", &impacts);
+        let edges = effort_impact_edges(&TaskId::new(7), &impacts);
         assert_eq!(edges.len(), 3, "got {edges:?}");
         let wiki = edges
             .iter()
@@ -674,15 +720,37 @@ mod tests {
             .is_some_and(|s| s.contains("created")));
         let commit = edges
             .iter()
-            .find(|e| e.target_kind == "git-commit")
+            .find(|e| e.target_kind == "commit")
             .expect("commit edge");
         assert_eq!(commit.target_id, "abc1234");
         let dir = edges
             .iter()
-            .find(|e| e.target_kind == "directory")
+            .find(|e| e.target_kind == "dir")
             .expect("dir edge");
         assert_eq!(dir.target_id, "src/x");
         assert!(dir.source_extra.is_none());
+    }
+
+    #[test]
+    fn impact_task_ids_are_stored_canonical_whatever_the_agent_wrote() {
+        use oxplow_domain::TaskImpact;
+        let impacts = vec![
+            TaskImpact {
+                kind: "task".into(),
+                id: "tsk9".into(),
+                action: None,
+            },
+            TaskImpact {
+                kind: "task".into(),
+                id: "11".into(),
+                action: None,
+            },
+        ];
+        let ids: Vec<String> = effort_impact_edges(&TaskId::new(7), &impacts)
+            .into_iter()
+            .map(|e| e.target_id)
+            .collect();
+        assert_eq!(ids, vec!["oxplow:tsk9", "oxplow:tsk11"]);
     }
 
     #[test]
@@ -697,8 +765,9 @@ mod tests {
             created_at: ts(),
         };
         let edge = link_edge(&link);
-        assert_eq!(edge.source_id, "tsk10");
-        assert_eq!(edge.target_id, "tsk20");
+        assert_eq!(edge.source_kind, "work_item");
+        assert_eq!(edge.source_id, "oxplow:tsk10");
+        assert_eq!(edge.target_id, "oxplow:tsk20");
         assert_eq!(edge.ref_type, "task_link:blocks");
     }
 

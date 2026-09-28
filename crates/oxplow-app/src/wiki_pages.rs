@@ -1391,7 +1391,7 @@ mod tests {
 
         // wi-1 backlink picks up the wiki source.
         let inbound_wi = page_refs
-            .list_backlinks("task", "tsk1", None)
+            .list_backlinks("work_item", "oxplow:tsk1", None)
             .await
             .unwrap();
         assert_eq!(inbound_wi.len(), 1);
@@ -1424,7 +1424,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("task", "tsk1")));
+        assert!(targets.contains(&("work_item", "oxplow:tsk1")));
         assert!(targets.contains(&("file", "src/app.rs")));
         assert!(targets.contains(&("finding", "fnd-1")));
     }
@@ -1529,12 +1529,12 @@ mod tests {
             .unwrap();
 
         let inbound_2 = page_refs
-            .list_backlinks("task", "tsk2", None)
+            .list_backlinks("work_item", "oxplow:tsk2", None)
             .await
             .unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
         let inbound_1 = page_refs
-            .list_backlinks("task", "tsk1", None)
+            .list_backlinks("work_item", "oxplow:tsk1", None)
             .await
             .unwrap();
         assert_eq!(inbound_1.len(), 1);

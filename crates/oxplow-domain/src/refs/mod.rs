@@ -30,8 +30,13 @@
 //! `https://example.com/path.json` doesn't masquerade as a file ref.
 
 pub mod grammar;
+pub mod kind;
 
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
+
+use grammar::CanonicalRef;
+use kind::KindRegistry;
 
 /// Tree version a file ref is pinned to. `Disk` = working tree (the
 /// default, also `@disk` / `@local` literal). `Ref(s)` = a git ref
@@ -89,50 +94,137 @@ pub enum Reference {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassifiedWikilink {
     pub raw: String,
+    /// The canonical ref the interior names, or `None` when it matches no
+    /// known shape.
+    pub canonical: Option<CanonicalRef>,
+    /// The typed view of `canonical` for the kinds the link checker and
+    /// graph writers understand today; `None` for other kinds.
     pub reference: Option<Reference>,
 }
 
-/// Classify a single `[[…]]` interior (already `|`-split and trimmed)
-/// into its recognized [`Reference`], or `None` if it matches no known
-/// shape. The single source of truth for what counts as a valid ref —
-/// shared by [`extract`] and [`classify_wikilinks`] so the graph writer
-/// and the link checker never drift.
-fn classify_interior(interior: &str) -> Option<Reference> {
+/// The registry every `[[…]]` translation validates against.
+fn registry() -> &'static KindRegistry {
+    static REG: OnceLock<KindRegistry> = OnceLock::new();
+    REG.get_or_init(kind::core_kinds)
+}
+
+/// Translate one `[[…]]` interior (already `|`-split and trimmed) into
+/// the canonical ref it names, or `None` when it matches no known shape.
+/// Accepts the canonical form itself (`[[commit:abc1234]]`,
+/// `[[work_item:linear:ENG-12]]`) and the human sugar:
+/// - `tsk<digits>` → `work_item:oxplow:tsk<digits>`
+/// - `git:<sha>` or a bare 7–40 hex sha → `commit:<sha>`
+/// - `dir:<path>` → `dir:<path>`
+/// - `finding:<id>` → `finding:<id>`
+/// - `path/file.ext[@version][:line]` → `file:<path>[@git:<version>][#L<line>]`
+///   (`@disk` / `@local` mean the working tree and add no revision)
+/// - `bare-slug` → `wiki:<slug>`
+pub fn canonical_wikilink(interior: &str) -> Option<CanonicalRef> {
+    let interior = interior.trim();
     if interior.is_empty() {
         return None;
     }
-    // dir:<path>
+    let reg = registry();
+    // Sugar with a registered `[[prefix:…]]` (today only `git:`).
+    if let Some((prefix, rest)) = interior.split_once(':') {
+        if let Some(spec) = reg.kind_for_wikilink_prefix(&prefix.to_ascii_lowercase()) {
+            let r = CanonicalRef::new(&spec.kind, rest.trim(), None, None).ok()?;
+            return reg.validate(&r).is_ok().then_some(r);
+        }
+    }
+    // dir:<path> keeps its own cleaning (trailing slash, no leading slash).
     if let Some(rest) = strip_prefix_ci(interior, "dir:") {
-        return clean_dir(rest).map(Reference::Dir);
+        let d = clean_dir(rest)?;
+        return CanonicalRef::new("dir", &d, None, None).ok();
     }
-    // git:<sha>
-    if let Some(rest) = strip_prefix_ci(interior, "git:") {
-        return clean_commit(rest).map(Reference::Commit);
-    }
-    // finding:<id>
     if let Some(rest) = strip_prefix_ci(interior, "finding:") {
-        return clean_finding(rest).map(Reference::Finding);
+        let f = clean_finding(rest)?;
+        return CanonicalRef::new("finding", &f, None, None).ok();
     }
-    // tsk<digits> — falls through to slug/file when the tail isn't
-    // all-digits (e.g. `[[tskfoo]]` is a wiki slug, matching `extract`).
+    // tsk<digits>; anything else after `tsk` falls through (a slug or path).
     if let Some(rest) = strip_prefix_ci(interior, "tsk") {
         if let Some(id) = parse_task_id(rest) {
-            return Some(Reference::Task(id));
+            return CanonicalRef::new("work_item", &format!("oxplow:tsk{id}"), None, None).ok();
+        }
+    }
+    // The canonical form itself, for a registered kind.
+    if let Ok(r) = CanonicalRef::parse(interior) {
+        if reg.validate(&r).is_ok() {
+            return Some(r);
         }
     }
     // path/file.ext[@version][:line]
     if let Some(detail) = parse_file_ref(interior) {
-        return Some(Reference::File(detail));
+        let rev = match &detail.version {
+            RefVersion::Disk => None,
+            RefVersion::Ref(v) => Some(format!("git:{v}")),
+        };
+        let frag = detail.line.map(|l| format!("L{l}"));
+        return CanonicalRef::new("file", &detail.path, rev.as_deref(), frag.as_deref()).ok();
     }
-    // bare commit sha or wiki slug
-    let bare = interior.split(':').next().unwrap_or(interior);
-    if !bare.is_empty() && looks_like_commit_sha(bare) {
-        return Some(Reference::Commit(bare.to_string()));
+    // bare commit sha or wiki slug. `word:tail` is an attempted `kind:id`
+    // with an unknown or malformed kind, not a slug named `word`.
+    if interior.contains(':') {
+        return None;
     }
-    if looks_like_slug(bare) {
-        return Some(Reference::Wiki(bare.to_string()));
+    if looks_like_commit_sha(interior) {
+        return CanonicalRef::new("commit", interior, None, None).ok();
+    }
+    if looks_like_slug(interior) {
+        return CanonicalRef::new("wiki", interior, None, None).ok();
     }
     None
+}
+
+/// The first line of an `L<n>` or `L<n>-<m>` fragment.
+fn line_from_frag(frag: &str) -> Option<u32> {
+    frag.strip_prefix('L')?.split('-').next()?.parse().ok()
+}
+
+impl TryFrom<&CanonicalRef> for Reference {
+    type Error = ();
+
+    /// The typed view for the six kinds the link checker and graph
+    /// writers handle; other kinds (`effort`, `lens`, …) have no view yet.
+    fn try_from(r: &CanonicalRef) -> Result<Self, ()> {
+        match r.kind.as_str() {
+            "dir" => Ok(Reference::Dir(r.id.clone())),
+            "wiki" => Ok(Reference::Wiki(r.id.clone())),
+            "finding" => Ok(Reference::Finding(r.id.clone())),
+            "commit" => Ok(Reference::Commit(r.id.clone())),
+            "work_item" => {
+                let native = r.id.strip_prefix("oxplow:").ok_or(())?;
+                parse_task_id(native.strip_prefix("tsk").ok_or(())?)
+                    .map(Reference::Task)
+                    .ok_or(())
+            }
+            "file" => {
+                let version = match r.rev.as_deref().and_then(|v| v.strip_prefix("git:")) {
+                    Some(v) => RefVersion::Ref(v.to_string()),
+                    None if r.rev.is_some() => return Err(()),
+                    None => RefVersion::Disk,
+                };
+                let line = match r.frag.as_deref() {
+                    Some(f) => Some(line_from_frag(f).ok_or(())?),
+                    None => None,
+                };
+                Ok(Reference::File(FileRefDetail {
+                    path: r.id.clone(),
+                    version,
+                    line,
+                }))
+            }
+            _ => Err(()),
+        }
+    }
+}
+
+/// The typed [`Reference`] a `[[…]]` interior names, if it names one of
+/// the kinds that have a typed view. Shared by [`extract`] and
+/// [`classify_wikilinks`] so the graph writer and the link checker never
+/// drift; both go through [`canonical_wikilink`].
+fn classify_interior(interior: &str) -> Option<Reference> {
+    Reference::try_from(&canonical_wikilink(interior)?).ok()
 }
 
 /// Classify every `[[…]]` wikilink in `body`. Code spans / fenced
@@ -150,9 +242,12 @@ pub fn classify_wikilinks(body: &str) -> Vec<ClassifiedWikilink> {
         if interior.is_empty() {
             continue;
         }
+        let canonical = canonical_wikilink(interior);
+        let reference = canonical.as_ref().and_then(|c| Reference::try_from(c).ok());
         out.push(ClassifiedWikilink {
             raw: interior.to_string(),
-            reference: classify_interior(interior),
+            canonical,
+            reference,
         });
     }
     out
@@ -310,15 +405,6 @@ fn clean_dir(raw: &str) -> Option<String> {
         return None;
     }
     Some(bare.to_string())
-}
-
-fn clean_commit(raw: &str) -> Option<String> {
-    let bare = raw.trim();
-    if looks_like_commit_sha(bare) {
-        Some(bare.to_string())
-    } else {
-        None
-    }
 }
 
 fn clean_finding(raw: &str) -> Option<String> {

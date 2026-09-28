@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
     effort_ref_types, effort_summary_edges, effort_touched_file_edges, finding_edges, link_edge,
-    note_edges, task_body_ref_types, task_edges, task_link_ref_types, KIND_FINDING, KIND_TASK,
-    KIND_TASK_NOTE,
+    note_edges, task_body_ref_types, task_edges, task_link_ref_types, work_item_id, KIND_FINDING,
+    KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
 use oxplow_db::TaskEffortStore as _;
 use oxplow_db::{
@@ -57,9 +57,9 @@ pub async fn run(
     if let Ok(items) = tasks.list_all_for_backfill().await {
         for item in items {
             let edges = task_edges(&item);
-            let id_str = item.id.to_string();
+            let id_str = work_item_id(item.id);
             if let Err(e) = page_refs
-                .replace_source_for_ref_types(KIND_TASK, &id_str, task_body_ref_types(), edges)
+                .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, task_body_ref_types(), edges)
                 .await
             {
                 tracing::warn!(?e, id = %item.id, "page-ref backfill: task failed");
@@ -98,11 +98,11 @@ pub async fn run(
                 }
             }
             let path_vec: Vec<(String, String)> = paths.into_iter().collect();
-            let mut edges = effort_touched_file_edges(&id_str, &path_vec);
-            edges.extend(effort_summary_edges(&id_str, &summaries));
+            let mut edges = effort_touched_file_edges(&item.id, &path_vec);
+            edges.extend(effort_summary_edges(&item.id, &summaries));
             let had_payload = !path_vec.is_empty() || !summaries.is_empty();
             let _ = page_refs
-                .replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
+                .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, effort_ref_types(), edges)
                 .await;
             if had_payload {
                 counts.efforts += 1;
@@ -121,9 +121,14 @@ pub async fn run(
                 Err(_) => continue,
             };
             let edges: Vec<_> = outgoing.iter().map(link_edge).collect();
-            let from_str = from.to_string();
+            let from_str = work_item_id(from);
             if let Err(e) = page_refs
-                .replace_source_for_ref_types(KIND_TASK, &from_str, task_link_ref_types(), edges)
+                .replace_source_for_ref_types(
+                    KIND_WORK_ITEM,
+                    &from_str,
+                    task_link_ref_types(),
+                    edges,
+                )
                 .await
             {
                 tracing::warn!(?e, id = %from, "page-ref backfill: link slice failed");
@@ -256,7 +261,7 @@ mod tests {
         // Wipe the slice the insert just projected so the table looks
         // like a DB written before ref mirroring existed.
         page_refs
-            .replace_source("task", &task_id.to_string(), Vec::new())
+            .replace_source("work_item", &format!("oxplow:{task_id}"), Vec::new())
             .await
             .unwrap();
         let pre = page_refs
@@ -288,6 +293,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(post.len(), 1, "got {post:?}");
-        assert_eq!(post[0].source_id, task_id.to_string());
+        assert_eq!(post[0].source_id, format!("oxplow:{task_id}"));
     }
 }

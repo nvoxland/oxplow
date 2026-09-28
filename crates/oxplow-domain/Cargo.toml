@@ -13,6 +13,7 @@ specta = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 async-trait = { workspace = true }
+regex = { workspace = true }
 
 [lints]
 workspace = true

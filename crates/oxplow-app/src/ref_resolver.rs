@@ -59,16 +59,16 @@ impl RefSummary {
 const EXCERPT_LEN: usize = 280;
 
 /// Resolve a single `(kind,id)` reference into a [`RefSummary`].
-/// Hydrates the canonical page kinds — `task`, `git-commit`, `file`,
-/// `directory`, `wiki`, `finding`; any other kind returns a bare summary
-/// (its canonical id is its own meaningful display). New kinds slot in as
-/// additional arms.
+/// Hydrates the canonical ref kinds (`.context/refs.md`) — `work_item`,
+/// `commit`, `file`, `dir`, `wiki`, `finding`; any other kind returns a
+/// bare summary (its canonical id is its own meaningful display). New
+/// kinds slot in as additional arms.
 pub async fn resolve_ref(services: &Services, kind: &str, id: &str) -> RefSummary {
     match kind {
-        "task" => resolve_task(services, id).await,
-        "git-commit" => resolve_commit(services, id).await,
+        "work_item" => resolve_work_item(services, id).await,
+        "commit" => resolve_commit(services, id).await,
         "file" => resolve_file(services, id).await,
-        "directory" => resolve_directory(services, id).await,
+        "dir" => resolve_directory(services, id).await,
         "wiki" => resolve_wiki(services, id).await,
         "finding" => resolve_finding(services, id).await,
         _ => RefSummary::bare(kind, id),
@@ -85,10 +85,15 @@ pub async fn resolve_refs(services: &Services, refs: &[CommentTarget]) -> Vec<Re
     out
 }
 
-async fn resolve_task(services: &Services, id: &str) -> RefSummary {
+/// An oxplow task (`oxplow:tsk<n>`); another provider's item stays bare
+/// until its provider resolves it (P5).
+async fn resolve_work_item(services: &Services, id: &str) -> RefSummary {
     use oxplow_domain::stores::TaskStore as _;
-    let mut summary = RefSummary::bare("task", id);
-    let Some(tid) = oxplow_domain::TaskId::try_from_str(id) else {
+    let mut summary = RefSummary::bare("work_item", id);
+    let Some(tid) = id
+        .strip_prefix("oxplow:")
+        .and_then(oxplow_domain::TaskId::try_from_str)
+    else {
         return summary;
     };
     if let Ok(Some(task)) = services.task_store.get(tid).await {
@@ -100,7 +105,7 @@ async fn resolve_task(services: &Services, id: &str) -> RefSummary {
 }
 
 async fn resolve_commit(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("git-commit", id);
+    let mut summary = RefSummary::bare("commit", id);
     // Resolve against the primary worktree; `commit_detail` accepts both
     // full and short shas.
     if let Some(detail) = services.git.commit_detail(None, id.to_string()).await {
@@ -149,7 +154,7 @@ async fn resolve_file(services: &Services, id: &str) -> RefSummary {
 }
 
 async fn resolve_directory(services: &Services, id: &str) -> RefSummary {
-    let mut summary = RefSummary::bare("directory", id);
+    let mut summary = RefSummary::bare("dir", id);
     let path = services.layout.project_dir.join(id);
     let listed = tokio::task::spawn_blocking(move || -> Option<(usize, Vec<String>)> {
         let mut names: Vec<String> = Vec::new();
@@ -299,8 +304,8 @@ mod tests {
             .await
             .unwrap();
 
-        let summary = resolve_ref(&services, "task", &task.id.to_string()).await;
-        assert_eq!(summary.kind, "task");
+        let summary = resolve_ref(&services, "work_item", &format!("oxplow:{}", task.id)).await;
+        assert_eq!(summary.kind, "work_item");
         assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
         assert_eq!(summary.detail.as_deref(), Some("in_progress"));
         assert!(summary
@@ -314,10 +319,10 @@ mod tests {
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).unwrap();
-        let summary = resolve_ref(&services, "task", "999999").await;
+        let summary = resolve_ref(&services, "work_item", "oxplow:tsk999999").await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
-        assert_eq!(summary.id, "999999");
+        assert_eq!(summary.id, "oxplow:tsk999999");
     }
 
     #[tokio::test]
@@ -326,7 +331,7 @@ mod tests {
         let services = Services::in_memory(dir.path()).unwrap();
         let sha = head_sha(dir.path());
 
-        let summary = resolve_ref(&services, "git-commit", &sha).await;
+        let summary = resolve_ref(&services, "commit", &sha).await;
         assert_eq!(summary.title.as_deref(), Some("Add the widget"));
         // a.rs is one added file.
         let detail = summary.detail.unwrap();
@@ -336,6 +341,23 @@ mod tests {
             summary.body_excerpt.as_deref(),
             Some("Longer rationale here.")
         );
+    }
+
+    /// The pre-P1 kind names are gone, not aliased (tsk404): a caller
+    /// still saying `task` or `git-commit` gets a bare summary.
+    #[tokio::test]
+    async fn legacy_kind_names_are_not_resolved() {
+        let dir = git_repo_with_commit("Add the widget", "");
+        let services = Services::in_memory(dir.path()).unwrap();
+        let sha = head_sha(dir.path());
+        for (kind, id) in [
+            ("git-commit", sha.as_str()),
+            ("task", "tsk1"),
+            ("directory", "."),
+        ] {
+            let summary = resolve_ref(&services, kind, id).await;
+            assert_eq!(summary.title, None, "{kind} should be bare");
+        }
     }
 
     #[tokio::test]
@@ -378,7 +400,7 @@ mod tests {
         std::fs::write(dir.path().join("sub/x.rs"), "x").unwrap();
         std::fs::write(dir.path().join("sub/y.rs"), "y").unwrap();
         let services = Services::in_memory(dir.path()).unwrap();
-        let summary = resolve_ref(&services, "directory", "sub").await;
+        let summary = resolve_ref(&services, "dir", "sub").await;
         assert_eq!(summary.detail.as_deref(), Some("2 entries"));
         let names = summary.body_excerpt.unwrap();
         assert!(
@@ -460,7 +482,7 @@ mod tests {
                 id: "a.rs".into(),
             },
             CommentTarget {
-                kind: "directory".into(),
+                kind: "dir".into(),
                 id: "src".into(),
             },
         ];

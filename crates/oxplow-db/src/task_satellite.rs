@@ -15,7 +15,7 @@ use oxplow_domain::{
 
 use crate::database::Database;
 use crate::page_ref_projections::{
-    link_edge, note_edges, task_link_ref_types, KIND_TASK, KIND_TASK_NOTE,
+    link_edge, note_edges, task_link_ref_types, work_item_id, KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -305,8 +305,8 @@ impl SqliteTaskLinkStore {
             .await?;
         let edges: Vec<_> = links.iter().map(link_edge).collect();
         refs.replace_source_for_ref_types(
-            KIND_TASK,
-            &from_item.to_string(),
+            KIND_WORK_ITEM,
+            &work_item_id(from_item),
             task_link_ref_types(),
             edges,
         )
@@ -641,13 +641,13 @@ mod tests {
             .await
             .unwrap();
         let inbound_task = page_refs
-            .list_backlinks("task", "tsk99", None)
+            .list_backlinks("work_item", "oxplow:tsk99", None)
             .await
             .unwrap();
         assert!(
             inbound_task
                 .iter()
-                .any(|e| e.source_kind == "task-note" && e.source_id == note.id.to_string()),
+                .any(|e| e.source_kind == "task_note" && e.source_id == note.id.to_string()),
             "expected note to backlink tsk99; got {inbound_task:?}"
         );
         let inbound_file = page_refs
@@ -669,7 +669,7 @@ mod tests {
 
         store.delete(&note.id).await.unwrap();
         let inbound_task = page_refs
-            .list_backlinks("task", "tsk99", None)
+            .list_backlinks("work_item", "oxplow:tsk99", None)
             .await
             .unwrap();
         assert!(inbound_task
@@ -725,12 +725,12 @@ mod tests {
             .unwrap();
 
         let inbound_to = page_refs
-            .list_backlinks("task", &to_id.to_string(), None)
+            .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
             .await
             .unwrap();
-        assert!(inbound_to
-            .iter()
-            .any(|e| e.source_id == from_id.to_string() && e.ref_type == "task_link:blocks"));
+        assert!(inbound_to.iter().any(
+            |e| e.source_id == format!("oxplow:{from_id}") && e.ref_type == "task_link:blocks"
+        ));
 
         let inbound_file = page_refs
             .list_backlinks("file", "src/app.rs", None)
@@ -738,11 +738,11 @@ mod tests {
             .unwrap();
         assert!(inbound_file
             .iter()
-            .any(|e| e.source_id == from_id.to_string()));
+            .any(|e| e.source_id == format!("oxplow:{from_id}")));
 
         links.delete(link.id).await.unwrap();
         let inbound_to = page_refs
-            .list_backlinks("task", &to_id.to_string(), None)
+            .list_backlinks("work_item", &format!("oxplow:{to_id}"), None)
             .await
             .unwrap();
         assert!(inbound_to.is_empty(), "link backlink should clear");
@@ -753,7 +753,7 @@ mod tests {
         assert!(
             inbound_file
                 .iter()
-                .any(|e| e.source_id == from_id.to_string()),
+                .any(|e| e.source_id == format!("oxplow:{from_id}")),
             "body-mention slice must survive link deletion"
         );
     }

@@ -1779,7 +1779,7 @@ export type CommentStatus = "open" | "resolved";
 
 /**
  *  A canonical cross-page reference: `kind` is the page-kind scheme
- *  (`"wiki" | "file" | "directory" | "task" | "git-commit" | "finding"`,
+ *  (`"wiki" | "file" | "dir" | "work_item" | "commit" | "finding"`,
  *  extensible) and `id` is the canonical id for that kind — wiki slug,
  *  worktree-relative path, task id as a string, commit sha, etc. This is
  *  the same `(kind,id)` vocabulary the `page_ref` graph and tab ids use.

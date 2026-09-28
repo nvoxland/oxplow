@@ -3,9 +3,9 @@
 What this doc covers: the canonical ref grammar, the kind registry, and
 how refs replace tab ids, `page_ref` kinds and `[[…]]` wikilink shapes.
 Target design: [target-architecture.md](./target-architecture.md) §4.
-Built so far: the grammar (P1.1, tsk403). The registry, the Rust `[[…]]`
-translation and the TS side land in P1.2–P1.3 and are described here as
-they arrive.
+Built so far: the grammar (P1.1, tsk403); the kind registry, the Rust
+`[[…]]` translation and the canonical `page_ref` vocabulary (P1.2,
+tsk404). The TS side lands in P1.3.
 
 ## The grammar (built)
 
@@ -50,7 +50,42 @@ pins the grammar. `tests/ref_grammar.rs` asserts it, and the TS parser
 two parsers can't drift. Add a case there when you extend the grammar;
 never change an existing case's expectation without changing both parsers.
 
-## What refs replace (coming in P1.2–P1.3)
+## The kind registry (built)
+
+`crates/oxplow-domain/src/refs/kind.rs`: `KindSpec { kind, id_regex,
+revisioned, provider_scoped, lifecycle, wikilink_prefixes }` and
+`KindRegistry` (`register` refuses a collision; `validate` checks a ref's
+kind, id shape and whether it may carry `@rev`). `core_kinds()` registers
+the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only
+`work_item` is provider-scoped in P1 (`oxplow:tsk42`,
+`linear:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
+capability's active provider.
+
+## `[[…]]` sugar → canonical refs (built)
+
+`refs::canonical_wikilink(interior)` turns a wikilink interior into a
+`CanonicalRef`: `tsk42` → `work_item:oxplow:tsk42`, `git:abc1234` and a
+bare sha → `commit:abc1234`, `dir:src/` → `dir:src`, `src/a.rs@HEAD:42` →
+`file:src/a.rs@git:HEAD#L42` (`@disk`/`@local` add no rev), a kebab slug
+→ `wiki:<slug>`, and the canonical form itself passes through when its
+kind is registered. `word:tail` with an unknown kind is **not** a slug
+named `word`; it's a malformed ref and translates to nothing.
+`ClassifiedWikilink` carries both `canonical` and the typed `Reference`
+view (derived from it via `TryFrom<&CanonicalRef>`), so the graph writer
+and the link checker never drift.
+
+## Stored `page_ref` rows are canonical (built)
+
+`crates/oxplow-db/src/page_ref_projections.rs` writes `(kind, id)` pairs
+that are exactly a canonical ref's: kinds `work_item`, `commit`, `dir`,
+`task_note`, `wiki`, `file`, `finding`; a task's id is
+`work_item_id(TaskId)` = `oxplow:tsk<n>`. `normalize_impact_kind` still
+accepts the spellings agents write (`task`, `git_commit`, `directory`)
+but only ever stores canonical ones. Migration V92 wiped the old rows;
+the boot backfill regenerates them. `v_commit_task` reads the new shape.
+`ref_resolver::resolve_ref` and `CommentTarget` use the same kinds.
+
+## What refs replace (P1.3: the TS side)
 
 | Today | Canonical |
 |---|---|

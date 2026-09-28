@@ -8,7 +8,7 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
-use crate::page_ref_projections::{task_body_ref_types, task_edges, KIND_TASK};
+use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
 use crate::page_ref_store::SqlitePageRefStore;
 
 #[derive(Clone)]
@@ -123,8 +123,8 @@ impl SqliteTaskStore {
         let edges = task_edges(&edges_item);
         self.page_refs
             .replace_source_for_ref_types(
-                KIND_TASK,
-                &edges_item.id.to_string(),
+                KIND_WORK_ITEM,
+                &work_item_id(edges_item.id),
                 task_body_ref_types(),
                 edges,
             )
@@ -452,8 +452,8 @@ impl TaskStore for SqliteTaskStore {
             placed.id = new_id;
             let edges = task_edges(&placed);
             refs.replace_source_for_ref_types(
-                KIND_TASK,
-                &new_id.to_string(),
+                KIND_WORK_ITEM,
+                &work_item_id(new_id),
                 task_body_ref_types(),
                 edges,
             )
@@ -476,8 +476,8 @@ impl TaskStore for SqliteTaskStore {
             let refs = &self.page_refs;
             let edges = task_edges(&edges_item);
             refs.replace_source_for_ref_types(
-                KIND_TASK,
-                &edges_item.id.to_string(),
+                KIND_WORK_ITEM,
+                &work_item_id(edges_item.id),
                 task_body_ref_types(),
                 edges,
             )
@@ -500,8 +500,8 @@ impl TaskStore for SqliteTaskStore {
         {
             let refs = &self.page_refs;
             refs.replace_source_for_ref_types(
-                KIND_TASK,
-                &id.to_string(),
+                KIND_WORK_ITEM,
+                &work_item_id(id),
                 task_body_ref_types(),
                 vec![],
             )
@@ -751,7 +751,9 @@ mod tests {
             .list_backlinks("file", "src/app.rs", None)
             .await
             .unwrap();
-        assert!(inbound.iter().any(|e| e.source_id == new_id.to_string()));
+        assert!(inbound
+            .iter()
+            .any(|e| e.source_id == format!("oxplow:{new_id}")));
 
         let mut latest = store.get(new_id).await.unwrap().unwrap();
         latest.description = "no refs anymore".into();

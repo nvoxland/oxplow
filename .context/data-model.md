@@ -876,20 +876,25 @@ backed by `mark_wiki_ref_verified` / `mark_all_wiki_refs_verified`
 IPCs. The wiki page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
-Canonical id shapes match the frontend's `TabRef.id`:
-- `wiki:<slug>` source kind uses just the slug as the id
-- `task:wi-…`
-- `file:<repo-relative path>` (id is the bare path; the `file:`
-  prefix is implicit from the kind)
-- `directory:<repo-relative path, no trailing slash>`
-- `git-commit:<full sha>`
-- `finding:<rowid as string>`
+Every stored `(source_kind, source_id)` / `(target_kind, target_id)`
+is a canonical ref's `(kind, id)` (see `.context/refs.md`, tsk404), so
+`format!("{kind}:{id}")` is the ref and nothing needs a per-kind id
+scheme:
+- `wiki` — the slug
+- `work_item` — `oxplow:tsk<n>` (`page_ref_projections::work_item_id`)
+- `file` — the repo-relative path
+- `dir` — the repo-relative path, no trailing slash
+- `commit` — the full sha
+- `finding` — the rowid as a string
+- `task_note` — `not<n>`
+
+V92 wiped the pre-canonical rows; the boot backfill regenerates them.
 
 **Writers own slices by `ref_type`.** A single `(source_kind,
 source_id)` can have rows from multiple owners — a task's
 body-mention edges (from `task_store`), link edges (from the
 link store), and touched-file edges (from the effort store) all
-land under `(task, wi-X)` but with distinct `ref_type`s.
+land under `(work_item, oxplow:tskN)` but with distinct `ref_type`s.
 `SqlitePageRefStore::replace_source_for_ref_types` lets each
 writer wipe + re-insert only the rows whose `ref_type` it owns,
 so other owners' rows survive.
@@ -899,11 +904,11 @@ Writers (one per source kind / slice):
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `wiki_pages.rs` (`oxplow-app`) | `wiki:<slug>` | full source — uses `replace_source` |
-| `task_store::upsert` | `task:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| `work_satellite::SqliteTaskLinkStore` create/delete | `task:<id>` link slice | `task_link:blocks` / `relates_to` / … |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `task:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `task_store::upsert` | `work_item:oxplow:<id>` body slice | `task_body_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| `work_satellite::SqliteTaskLinkStore` create/delete | `work_item:oxplow:<id>` link slice | `task_link:blocks` / `relates_to` / … |
+| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | `work_item:oxplow:<id>` effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_task_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | `finding:<id>` | full source |
-| `commit_indexer.rs` (`oxplow-app`) | `git-commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
+| `commit_indexer.rs` (`oxplow-app`) | `commit:<sha>` | full source — diff yields `touched_file`, message yields the same body-mention set |
 
 The shared extractor `oxplow_domain::refs::extract(body) ->
 ExtractedRefs` is the single parser used by every writer that
@@ -1286,7 +1291,7 @@ status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
   context it was made in. `context_chain_json` is a JSON array of
   `{kind,id}` refs — the nesting of page regions the selection sat inside
   (innermost→outermost, excluding the primary target; e.g. a file row
-  under a commit yields `[{git-commit,sha}]`). `referenced_refs_json` is
+  under a commit yields `[{commit,sha}]`). `referenced_refs_json` is
   the canonical refs found INSIDE the selection (rendered links + inline
   mentions), so highlighting a filename tells the agent it is a file.
   The store's `create` is the single source of truth for "what's

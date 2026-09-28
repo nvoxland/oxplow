@@ -24,7 +24,7 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    KIND_FILE, KIND_FINDING, KIND_GIT_COMMIT, KIND_TASK, KIND_WIKI, RT_BODY_COMMIT,
+    work_item_id, KIND_COMMIT, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM, RT_BODY_COMMIT,
     RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
@@ -48,7 +48,7 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             sha,
             KIND_FILE,
             f.path.clone(),
@@ -68,16 +68,16 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     let refs = extract(&combined);
     for task_id in refs.tasks {
         out.push(PageRefEdge::new(
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             sha,
-            KIND_TASK,
-            oxplow_domain::TaskId::new(task_id).to_string(),
+            KIND_WORK_ITEM,
+            work_item_id(oxplow_domain::TaskId::new(task_id)),
             RT_BODY_TASK,
         ));
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             sha,
             KIND_WIKI,
             w,
@@ -86,7 +86,7 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             sha,
             KIND_FINDING,
             f,
@@ -100,9 +100,9 @@ pub fn commit_edges(detail: &CommitDetail) -> Vec<PageRefEdge> {
             continue;
         }
         out.push(PageRefEdge::new(
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             sha,
-            KIND_GIT_COMMIT,
+            KIND_COMMIT,
             c,
             RT_BODY_COMMIT,
         ));
@@ -160,7 +160,7 @@ pub async fn index_recent(
         };
         let edges = commit_edges(&detail);
         if let Err(e) = page_refs
-            .replace_source(KIND_GIT_COMMIT, &commit.sha, edges)
+            .replace_source(KIND_COMMIT, &commit.sha, edges)
             .await
         {
             tracing::warn!(?e, sha = %commit.sha, "commit indexer write failed");
@@ -327,7 +327,7 @@ mod tests {
             .iter()
             .map(|e| (e.target_kind.as_str(), e.target_id.as_str()))
             .collect();
-        assert!(targets.contains(&("task", "tsk42")));
+        assert!(targets.contains(&("work_item", "oxplow:tsk42")));
         assert!(targets.contains(&("wiki", "architecture")));
         assert!(targets.contains(&("finding", "fnd-7")));
     }
@@ -406,16 +406,16 @@ mod tests {
 
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
-            .list_backlinks("task", "tsk42", None)
+            .list_backlinks("work_item", "oxplow:tsk42", None)
             .await
             .unwrap();
-        assert!(inbound.iter().any(|e| e.source_kind == "git-commit"));
+        assert!(inbound.iter().any(|e| e.source_kind == "commit"));
         // file backlink covers a.rs.
         let file_inbound = page_refs
             .list_backlinks("file", "a.rs", None)
             .await
             .unwrap();
-        assert!(file_inbound.iter().any(|e| e.source_kind == "git-commit"));
+        assert!(file_inbound.iter().any(|e| e.source_kind == "commit"));
 
         // Re-index — nothing new.
         let n2 = index_recent(dir.path(), &page_refs, &git, 50).await;

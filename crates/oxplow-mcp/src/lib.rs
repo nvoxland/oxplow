@@ -645,12 +645,12 @@ pub struct FindNotesForNoteParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PageRefParams {
-    /// Page kind, e.g. "wiki", "task", "file", "git-commit",
-    /// "finding", "directory".
+    /// Ref kind: `wiki`, `work_item`, `file`, `dir`, `commit`,
+    /// `finding`, `task_note` (see .context/refs.md).
     pub kind: String,
-    /// Canonical page id within the kind. For files this is the
-    /// repo-relative path; for tasks the `wi-…` id; for
-    /// commits the full sha; for wiki pages the slug.
+    /// The ref's id within the kind: a repo-relative path for files and
+    /// dirs, `oxplow:tsk42` for a task, the sha for a commit, the slug
+    /// for a wiki page.
     pub id: String,
     #[serde(default = "default_page_ref_limit")]
     pub limit: u32,
@@ -7282,14 +7282,14 @@ mod tests {
                 &stream,
                 None,
                 &CommentTarget {
-                    kind: "task".into(),
-                    id: primary_task.to_string(),
+                    kind: "work_item".into(),
+                    id: format!("oxplow:{primary_task}"),
                 },
                 "the highlighted text",
                 "[]",
                 &[CommentTarget {
-                    kind: "task".into(),
-                    id: parent_task.to_string(),
+                    kind: "work_item".into(),
+                    id: format!("oxplow:{parent_task}"),
                 }],
                 &[CommentTarget {
                     kind: "file".into(),
@@ -7315,7 +7315,7 @@ mod tests {
         let row = &parsed.as_array().unwrap()[0];
 
         // Primary target resolved to the task title.
-        assert_eq!(row["primary"]["kind"], "task");
+        assert_eq!(row["primary"]["kind"], "work_item");
         assert_eq!(row["primary"]["title"], "Primary item");
         // Context chain ancestor resolved.
         assert_eq!(row["context_chain"][0]["title"], "Parent epic");

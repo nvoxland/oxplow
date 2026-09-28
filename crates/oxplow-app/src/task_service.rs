@@ -2107,8 +2107,8 @@ mod tests {
                     &StreamId::new(1),
                     Some(&tid),
                     &oxplow_domain::CommentTarget {
-                        kind: "task".into(),
-                        id: item.id.to_string(),
+                        kind: "work_item".into(),
+                        id: format!("oxplow:{}", item.id),
                     },
                     "",
                     "[]",

@@ -409,8 +409,8 @@ mod tests {
                 &stream.id,
                 Some(&thread.id),
                 &CommentTarget {
-                    kind: "task".into(),
-                    id: task.id.to_string(),
+                    kind: "work_item".into(),
+                    id: format!("oxplow:{}", task.id),
                 },
                 "quoted sprocket text",
                 "{}",

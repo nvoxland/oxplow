@@ -17,7 +17,7 @@ use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timesta
 use crate::database::{canonical_ts, Database};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
-    KIND_TASK,
+    work_item_id, KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -558,12 +558,16 @@ impl SqliteTaskEffortStore {
                 }
             }
         }
-        let id_str = task_id.to_string();
-        let mut edges = effort_touched_file_edges(&id_str, &paths);
-        edges.extend(effort_summary_edges(&id_str, &summaries));
-        edges.extend(effort_impact_edges(&id_str, &impacts));
-        refs.replace_source_for_ref_types(KIND_TASK, &id_str, effort_ref_types(), edges)
-            .await
+        let mut edges = effort_touched_file_edges(&task_id, &paths);
+        edges.extend(effort_summary_edges(&task_id, &summaries));
+        edges.extend(effort_impact_edges(&task_id, &impacts));
+        refs.replace_source_for_ref_types(
+            KIND_WORK_ITEM,
+            &work_item_id(task_id),
+            effort_ref_types(),
+            edges,
+        )
+        .await
     }
 
     /// Other efforts on the same thread whose time-window is **strictly nested**
@@ -1787,8 +1791,8 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            wiki_back.iter().any(|e| e.source_kind == "task"
-                && e.source_id == tid.to_string()
+            wiki_back.iter().any(|e| e.source_kind == "work_item"
+                && e.source_id == format!("oxplow:{tid}")
                 && e.ref_type == "summary_wikilink"),
             "wiki backlink missing; got {wiki_back:?}"
         );
@@ -1800,18 +1804,19 @@ mod tests {
         assert!(
             file_back
                 .iter()
-                .any(|e| e.ref_type == "summary_file_ref" && e.source_id == tid.to_string()),
+                .any(|e| e.ref_type == "summary_file_ref" && e.source_id == format!("oxplow:{tid}")),
             "file backlink missing; got {file_back:?}"
         );
 
         let task_back = page_refs
-            .list_backlinks("task", "tsk99", None)
+            .list_backlinks("work_item", "oxplow:tsk99", None)
             .await
             .unwrap();
         assert!(
             task_back
                 .iter()
-                .any(|e| e.ref_type == "summary_task_mention" && e.source_id == tid.to_string()),
+                .any(|e| e.ref_type == "summary_task_mention"
+                    && e.source_id == format!("oxplow:{tid}")),
             "task backlink missing; got {task_back:?}"
         );
     }
@@ -1849,7 +1854,7 @@ mod tests {
             .unwrap();
         let row = wiki
             .iter()
-            .find(|e| e.source_id == tid.to_string())
+            .find(|e| e.source_id == format!("oxplow:{tid}"))
             .expect("wiki impact edge missing");
         assert_eq!(row.ref_type, "impact");
         assert!(row
@@ -1858,12 +1863,12 @@ mod tests {
             .is_some_and(|s| s.contains("created")));
 
         let commit = page_refs
-            .list_backlinks("git-commit", "abc1234", None)
+            .list_backlinks("commit", "abc1234", None)
             .await
             .unwrap();
         assert!(commit
             .iter()
-            .any(|e| e.source_id == tid.to_string() && e.ref_type == "impact"));
+            .any(|e| e.source_id == format!("oxplow:{tid}") && e.ref_type == "impact"));
 
         // Replacing the impact set clears old edges
         store
@@ -1927,7 +1932,9 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            wiki_back.iter().any(|e| e.source_id == tid.to_string()),
+            wiki_back
+                .iter()
+                .any(|e| e.source_id == format!("oxplow:{tid}")),
             "summary slice was clobbered by record_file: {wiki_back:?}"
         );
     }

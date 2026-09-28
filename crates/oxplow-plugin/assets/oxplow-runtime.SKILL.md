@@ -124,9 +124,10 @@ committed, or that git doesn't ignore.
 
 **Declare `impacts` for non-file outcomes.** `complete_task` accepts
 `impacts: { kind, id, action? }[]` — one per cross-page outcome beyond
-raw edits: a wiki page (`kind:"wiki"`), task (`"task"`), commit
-(`"git_commit"`), finding (`"finding"`), or directory (`"directory"`)
-you created/updated/completed/resolved. Each becomes a `page_ref`
+raw edits: a wiki page (`kind:"wiki"`), task (`"work_item"`, id
+`tsk42`), commit (`"commit"`), finding (`"finding"`), or directory
+(`"dir"`) you created/updated/completed/resolved. The older spellings
+`task`, `git_commit` and `directory` are still accepted as input. Each becomes a `page_ref`
 backlink so the target lists this task as the cause without parsing the
 summary body. In particular, name any wiki page you touched mid-turn.
 

@@ -83,7 +83,7 @@ fn refs_to_json(refs: &[CommentTarget]) -> String {
 /// when the surface never rendered them as links.
 fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
     use crate::page_ref_projections::{
-        KIND_DIRECTORY, KIND_FILE, KIND_FINDING, KIND_GIT_COMMIT, KIND_TASK, KIND_WIKI,
+        work_item_id, KIND_COMMIT, KIND_DIR, KIND_FILE, KIND_FINDING, KIND_WIKI, KIND_WORK_ITEM,
     };
     let r = oxplow_domain::refs::extract(quote);
     let mut out = Vec::new();
@@ -97,19 +97,19 @@ fn refs_from_quote(quote: &str) -> Vec<CommentTarget> {
         push(KIND_FILE, f);
     }
     for d in r.dirs {
-        push(KIND_DIRECTORY, d);
+        push(KIND_DIR, d);
     }
     for w in r.wikis {
         push(KIND_WIKI, w);
     }
     for t in r.tasks {
-        push(KIND_TASK, t.to_string());
+        push(KIND_WORK_ITEM, work_item_id(oxplow_domain::TaskId::new(t)));
     }
     for f in r.findings {
         push(KIND_FINDING, f);
     }
     for c in r.commits {
-        push(KIND_GIT_COMMIT, c);
+        push(KIND_COMMIT, c);
     }
     out
 }
@@ -592,11 +592,11 @@ mod tests {
         let store = SqliteCommentStore::new(db);
         let context_chain = vec![
             CommentTarget {
-                kind: "git-commit".into(),
+                kind: "commit".into(),
                 id: "abc1234".into(),
             },
             CommentTarget {
-                kind: "git-dashboard".into(),
+                kind: "page".into(),
                 id: "git-dashboard".into(),
             },
         ];
@@ -670,7 +670,8 @@ mod tests {
         );
         // …and the quote's inline mentions are unioned in as typed refs.
         assert!(
-            refs.iter().any(|r| r.kind == "task" && r.id == "42"),
+            refs.iter()
+                .any(|r| r.kind == "work_item" && r.id == "oxplow:tsk42"),
             "task ref not extracted: {refs:?}",
         );
         assert!(
@@ -690,8 +691,8 @@ mod tests {
         // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
         let provided = vec![CommentTarget {
-            kind: "task".into(),
-            id: "42".into(),
+            kind: "work_item".into(),
+            id: "oxplow:tsk42".into(),
         }];
         let created = store
             .create(
@@ -712,7 +713,7 @@ mod tests {
             .comment
             .referenced_refs
             .iter()
-            .filter(|r| r.kind == "task" && r.id == "42")
+            .filter(|r| r.kind == "work_item" && r.id == "oxplow:tsk42")
             .count();
         assert_eq!(
             n, 1,
