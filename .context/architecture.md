@@ -71,9 +71,19 @@ tsk162). Its committed config can name programs:
 
 None of these run until a person approves that program on their machine.
 
-- **What an approval covers.** It is bound to a hash of what runs: the
-  program's content plus its args, and for a source its `network` list.
-  Any change needs approving again.
+- **What an approval covers.** It is bound to a hash of what runs
+  (tsk347):
+  - the program's content, plus for a gauge or plugin every file in its
+    directory (a helper it sources), unless that's the project root;
+  - its args, plus the content of any arg that names a file, read where
+    the program runs (an ACP agent from its stream's worktree), so
+    `node tools/agent.js` covers `agent.js`;
+  - for an extension source, every file in the extension, plus its
+    `network` list.
+
+  Any change needs approving again. A directory of more than 500 files
+  or 16 MB can't be approved as a whole: give the program its own
+  directory.
 - **Where it lives.** Outside every repo (tsk344): `exec_consent::ApprovalStore`
   keeps them in `<oxplow home>/approvals/<sha256 of the project path>.json`.
   Each entry carries an HMAC under a random key kept in the OS keychain

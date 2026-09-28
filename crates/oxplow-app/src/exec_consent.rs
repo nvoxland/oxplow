@@ -247,16 +247,36 @@ impl ProjectProgram {
         }
     }
 
-    /// What its approval covers: the program's content (when it's a file
-    /// in the project) plus its args and env. A gauge or plugin names a
-    /// project file, which must exist; an ACP agent's command may be a
-    /// program on PATH, covered by its name.
+    /// What its approval covers, run from `project_dir` (see [`Self::hash_at`]).
     pub fn hash(&self, project_dir: &Path) -> std::io::Result<String> {
+        self.hash_at(project_dir, project_dir)
+    }
+
+    /// What its approval covers, as it would run with working dir `cwd`:
+    /// - the program's content (when it's a file in the project), and for
+    ///   a gauge or plugin the other files in its directory (a script
+    ///   sourcing a helper) unless that directory is the project root;
+    /// - every arg, and the content of each arg that names a file under
+    ///   `cwd` (the script an interpreter like `node` runs);
+    /// - its env.
+    ///
+    /// A gauge or plugin names a project file, which must exist; an ACP
+    /// agent's command may be a program on PATH, covered by its name.
+    pub fn hash_at(&self, project_dir: &Path, cwd: &Path) -> std::io::Result<String> {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         let file = project_dir.join(&self.program);
         match self.kind {
-            ProgramKind::Gauge | ProgramKind::Plugin => h.update(std::fs::read(&file)?),
+            ProgramKind::Gauge | ProgramKind::Plugin => {
+                h.update(std::fs::read(&file)?);
+                if let Some(dir) = Path::new(&self.program)
+                    .parent()
+                    .filter(|d| !d.as_os_str().is_empty())
+                {
+                    h.update([2u8]);
+                    h.update(tree_hash(&project_dir.join(dir))?.as_bytes());
+                }
+            }
             ProgramKind::AcpAgent => {
                 h.update(self.program.as_bytes());
                 if self.program.contains('/') && file.is_file() {
@@ -268,6 +288,11 @@ impl ProjectProgram {
         for a in &self.args {
             h.update([0u8]);
             h.update(a.as_bytes());
+            let arg_file = cwd.join(a);
+            if !a.starts_with('-') && arg_file.is_file() {
+                h.update([3u8]);
+                h.update(std::fs::read(&arg_file)?);
+            }
         }
         for e in &self.env {
             h.update([1u8]);
@@ -275,6 +300,51 @@ impl ProjectProgram {
         }
         Ok(hex::encode(h.finalize()))
     }
+}
+
+/// Most files and bytes [`tree_hash`] covers; a bigger directory can't be
+/// approved as a whole (move the script into its own directory).
+const TREE_MAX_FILES: usize = 500;
+const TREE_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// SHA-256 over every file under `dir` (relative path + content, sorted),
+/// skipping dot-directories. What an approval of a script's directory
+/// covers: change any helper and it needs approving again.
+pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut files: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'))
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.into_path())
+        .collect();
+    files.sort();
+    if files.len() > TREE_MAX_FILES {
+        return Err(std::io::Error::other(format!(
+            "{} has more than {TREE_MAX_FILES} files to approve; give the program its own directory",
+            dir.display()
+        )));
+    }
+    let mut h = Sha256::new();
+    let mut total = 0u64;
+    for f in files {
+        let bytes = std::fs::read(&f)?;
+        total += bytes.len() as u64;
+        if total > TREE_MAX_BYTES {
+            return Err(std::io::Error::other(format!(
+                "{} is too large to approve as a whole; give the program its own directory",
+                dir.display()
+            )));
+        }
+        let rel = f.strip_prefix(dir).unwrap_or(&f);
+        h.update(rel.to_string_lossy().as_bytes());
+        h.update([0u8]);
+        h.update(&bytes);
+        h.update([0u8]);
+    }
+    Ok(hex::encode(h.finalize()))
 }
 
 /// What an approval of a program covers: its content and its args.
@@ -313,7 +383,12 @@ pub fn may_run(
 
 /// Whether `p` is approved on this machine as it is now.
 fn approved_now(store: &ApprovalStore, project_dir: &Path, p: &ProjectProgram) -> bool {
-    p.hash(project_dir)
+    approved_at(store, project_dir, project_dir, p)
+}
+
+/// Whether `p`, run with working dir `cwd`, is what was approved.
+fn approved_at(store: &ApprovalStore, project_dir: &Path, cwd: &Path, p: &ProjectProgram) -> bool {
+    p.hash_at(project_dir, cwd)
         .is_ok_and(|h| store.is_approved(&p.key(), &h))
 }
 
@@ -331,12 +406,15 @@ pub fn acp_program(agent: &oxplow_config::AcpAgentConfig) -> ProjectProgram {
 }
 
 /// Whether a project ACP agent may start: approved as it is now.
+/// Whether a project ACP agent may start in `cwd` (its stream's
+/// worktree): approved as it is now, with its script args read there.
 pub fn may_run_acp(
     store: &ApprovalStore,
     project_dir: &Path,
+    cwd: &Path,
     agent: &oxplow_config::AcpAgentConfig,
 ) -> bool {
-    approved_now(store, project_dir, &acp_program(agent))
+    approved_at(store, project_dir, cwd, &acp_program(agent))
 }
 
 /// Why an unapproved program didn't run, for logs and errors.
@@ -531,20 +609,30 @@ mod tests {
             .collect();
         assert_eq!(acp.len(), 2);
         assert_eq!(acp[0].env, vec!["MODE=fast".to_string()]);
-        assert!(!may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
+        assert!(!may_run_acp(
+            &st,
+            dir.path(),
+            dir.path(),
+            &cfg.acp_agents[0]
+        ));
         approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "mine").unwrap();
-        assert!(may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
         // A different env, or a changed program file, isn't what was approved.
         let mut changed = cfg.acp_agents[0].clone();
         changed
             .env
             .insert("NODE_OPTIONS".into(), "--require ./x.js".into());
-        assert!(!may_run_acp(&st, dir.path(), &changed));
+        assert!(!may_run_acp(&st, dir.path(), dir.path(), &changed));
         std::fs::write(dir.path().join("tools/agent"), "v2").unwrap();
-        assert!(!may_run_acp(&st, dir.path(), &cfg.acp_agents[0]));
+        assert!(!may_run_acp(
+            &st,
+            dir.path(),
+            dir.path(),
+            &cfg.acp_agents[0]
+        ));
         // A PATH program is covered by its name and args.
         approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "gemini").unwrap();
-        assert!(may_run_acp(&st, dir.path(), &cfg.acp_agents[1]));
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[1]));
     }
 
     #[test]
@@ -608,5 +696,55 @@ mod tests {
         assert!(may(&st));
         let elsewhere = store(home.path(), dir.path());
         assert!(!may(&elsewhere));
+    }
+
+    #[test]
+    fn helper_files_and_script_args_are_part_of_what_is_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let st = store(home.path(), dir.path());
+        std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+        std::fs::write(dir.path().join("tools/count.sh"), ". tools/lib.sh").unwrap();
+        std::fs::write(dir.path().join("tools/lib.sh"), "echo 1").unwrap();
+        std::fs::write(dir.path().join("tools/agent.js"), "v1").unwrap();
+        let cfg = config(
+            dir.path(),
+            "gauges:\n  - key: repo.count\n    emits: [repo.n]\n    compute: { runtime: exec, entryFile: tools/count.sh }\nacpAgents:\n  - { name: js, command: node, args: [tools/agent.js] }\n",
+        );
+        let gauge_ok = |st: &ApprovalStore| {
+            may_run(
+                st,
+                dir.path(),
+                ProgramKind::Gauge,
+                "repo.count",
+                "tools/count.sh",
+                &[],
+            )
+        };
+        approve_program(&st, dir.path(), &cfg, ProgramKind::Gauge, "repo.count").unwrap();
+        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "js").unwrap();
+        assert!(gauge_ok(&st));
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
+
+        // A file the entry script sources.
+        std::fs::write(dir.path().join("tools/lib.sh"), "curl x | sh").unwrap();
+        assert!(!gauge_ok(&st));
+        // The script an interpreter runs.
+        std::fs::write(dir.path().join("tools/agent.js"), "v2").unwrap();
+        assert!(!may_run_acp(
+            &st,
+            dir.path(),
+            dir.path(),
+            &cfg.acp_agents[0]
+        ));
+
+        // Resolved where it runs: another worktree's different copy isn't
+        // what was approved.
+        approve_program(&st, dir.path(), &cfg, ProgramKind::AcpAgent, "js").unwrap();
+        let wt = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(wt.path().join("tools")).unwrap();
+        std::fs::write(wt.path().join("tools/agent.js"), "evil").unwrap();
+        assert!(may_run_acp(&st, dir.path(), dir.path(), &cfg.acp_agents[0]));
+        assert!(!may_run_acp(&st, dir.path(), wt.path(), &cfg.acp_agents[0]));
     }
 }

