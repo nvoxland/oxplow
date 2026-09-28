@@ -10,6 +10,7 @@ license.workspace = true
 time = { workspace = true }
 url = { workspace = true }
 oxplow-domain = { workspace = true }
+oxplow-plugin = { workspace = true }
 oxplow-db = { workspace = true }
 oxplow-ai = { workspace = true }
 oxplow-config = { workspace = true }

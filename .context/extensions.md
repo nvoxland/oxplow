@@ -264,7 +264,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   for every bundled lens (tsk374).
 - **One skill list.** Every agent runtime writes its skills from the single
   `OXPLOW_SKILLS` list in `crates/oxplow-plugin/src/lib.rs`, so adding a
-  skill takes one row.
+  skill takes one row. ACP agents get the same list as an index in their
+  system prompt plus the MCP `get_skill` tool (see agent-model.md → ACP).
 
 ## The rules
 

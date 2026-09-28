@@ -172,13 +172,7 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
     // assets' frontmatter (name matching the dir, description) is
     // already opencode-compatible. Each generated dir gets a `*`
     // .gitignore so these never land in the user's commits.
-    let skills_dir = project_dir.join(".opencode").join("skills");
-    for (name, body) in OXPLOW_SKILLS {
-        let dir = skills_dir.join(name);
-        fs::create_dir_all(&dir)?;
-        fs::write(dir.join("SKILL.md"), body)?;
-        fs::write(dir.join(".gitignore"), "*\n")?;
-    }
+    let skills_dir = write_opencode_skills(project_dir)?;
 
     Ok(OpencodeRuntimePaths {
         runtime_dir,
@@ -186,6 +180,69 @@ pub fn write_opencode_runtime(project_dir: &Path) -> Result<OpencodeRuntimePaths
         prompts_dir,
         skills_dir,
     })
+}
+
+/// opencode's skills: `<project>/.opencode/skills/<name>/SKILL.md`, each
+/// dir with a `*` `.gitignore`. Returns the skills dir.
+fn write_opencode_skills(project_dir: &Path) -> Result<PathBuf, PluginError> {
+    let skills_dir = project_dir.join(".opencode").join("skills");
+    for (name, body) in OXPLOW_SKILLS {
+        let dir = skills_dir.join(name);
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join("SKILL.md"), body)?;
+        fs::write(dir.join(".gitignore"), "*\n")?;
+    }
+    Ok(skills_dir)
+}
+
+/// Rewrite the skills of every agent runtime already materialized under
+/// `project_dir`, creating none. A runtime is written on each spawn, so
+/// this is for what outlives one: an agent still running (or resumed)
+/// across an oxplow upgrade reads the current skills (tsk376).
+pub fn refresh_skills(project_dir: &Path) -> Result<(), PluginError> {
+    for rel in [PLUGIN_DIR_REL, CODEX_RUNTIME_DIR_REL] {
+        let skills_dir = project_dir.join(rel).join("skills");
+        if skills_dir.is_dir() {
+            write_oxplow_skills(&skills_dir)?;
+        }
+    }
+    if project_dir.join(OPENCODE_RUNTIME_DIR_REL).is_dir() {
+        write_opencode_skills(project_dir)?;
+    }
+    Ok(())
+}
+
+/// Every oxplow skill as `(name, description)`, the description taken
+/// from its frontmatter: the index an agent that can't discover skill
+/// files (an ACP agent) is given, to fetch bodies with `get_skill`.
+pub fn skill_index() -> Vec<(&'static str, &'static str)> {
+    OXPLOW_SKILLS
+        .iter()
+        .map(|(name, body)| (*name, frontmatter_description(body)))
+        .collect()
+}
+
+/// One skill's `SKILL.md` body by name.
+pub fn skill_body(name: &str) -> Option<&'static str> {
+    OXPLOW_SKILLS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, body)| *body)
+}
+
+/// The `description:` line of a `---`-fenced frontmatter block.
+fn frontmatter_description(body: &'static str) -> &'static str {
+    let Some(front) = body
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split("\n---").next())
+    else {
+        return "";
+    };
+    front
+        .lines()
+        .find_map(|l| l.strip_prefix("description:"))
+        .map(str::trim)
+        .unwrap_or("")
 }
 
 /// Write every skill in [`OXPLOW_SKILLS`] as `<skills_dir>/<name>/SKILL.md`.
@@ -687,6 +744,47 @@ mod tests {
                 .join("SKILL.md");
             assert!(skill.exists(), "codex runtime missing skill {name}");
         }
+    }
+
+    /// Agents that can't discover skill files get an index instead
+    /// (tsk376): every skill, with its frontmatter description.
+    #[test]
+    fn the_skill_index_names_every_skill_with_its_description() {
+        let index = skill_index();
+        assert_eq!(index.len(), OXPLOW_SKILLS.len());
+        let (name, description) = index
+            .iter()
+            .find(|(n, _)| *n == "oxplow-extension")
+            .unwrap();
+        assert_eq!(*name, "oxplow-extension");
+        assert!(
+            description.starts_with("Build oxplow lenses"),
+            "{description}"
+        );
+        assert!(index.iter().all(|(_, d)| !d.is_empty()));
+        assert!(skill_body("oxplow-extension")
+            .unwrap()
+            .contains("# Building oxplow lenses"));
+        assert_eq!(skill_body("nope"), None);
+    }
+
+    /// Boot refreshes the skills of runtimes already on disk, so a running
+    /// or resumed agent reads the current ones; it creates none (tsk376).
+    #[test]
+    fn refresh_skills_rewrites_existing_runtimes_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(PLUGIN_DIR_REL).join("skills");
+        std::fs::create_dir_all(claude.join("oxplow-extension")).unwrap();
+        std::fs::write(claude.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        refresh_skills(tmp.path()).unwrap();
+        for (name, body) in OXPLOW_SKILLS {
+            assert_eq!(
+                std::fs::read_to_string(claude.join(name).join("SKILL.md")).unwrap(),
+                *body
+            );
+        }
+        assert!(!tmp.path().join(CODEX_RUNTIME_DIR_REL).exists());
+        assert!(!tmp.path().join(".opencode").exists());
     }
 
     #[test]

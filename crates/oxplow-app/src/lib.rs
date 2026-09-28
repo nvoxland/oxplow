@@ -517,6 +517,10 @@ impl Services {
 
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
         info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
+        // An agent that outlived an upgrade reads current skills (tsk376).
+        if let Err(error) = oxplow_plugin::refresh_skills(&layout.project_dir) {
+            tracing::warn!(%error, "refreshing agent skills failed");
+        }
 
         let db = Database::open(&layout.state_db_path)?;
         let ai = AiEnv {
@@ -1018,6 +1022,24 @@ fn bridge_background_task_events(store: &BackgroundTaskStore, bus: &EventBus) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Boot refreshes an existing agent runtime's skills, so an agent that
+    /// outlived an upgrade reads the current ones (tsk376).
+    #[tokio::test]
+    async fn boot_refreshes_existing_agent_skills() {
+        let project = tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(project.path());
+        let skill = project
+            .path()
+            .join(".oxplow/runtime/claude-plugin/skills/oxplow-extension/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, "stale").unwrap();
+        let _svc = Services::boot(AppLayout::for_project(project.path())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&skill).unwrap(),
+            oxplow_plugin::skill_body("oxplow-extension").unwrap()
+        );
+    }
 
     #[tokio::test]
     async fn boot_creates_state_dir() {

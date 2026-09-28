@@ -471,6 +471,7 @@ the same JSON.
 - **MCP:** oxplow's MCP rides `session/new|load` as an HTTP MCP entry. An agent without HTTP MCP support is refused with a clear error.
 - **Resume:** `thread.resume_session_id` is `session/load`ed when the agent supports it. The replay rebuilds the transcript and records nothing: no hooks, no tool rows, no bypass checks, and fs writes are refused.
 - **System prompt:** it goes in `_meta.systemPrompt.append` when `system_prompt_via_meta` (the Claude adapter). Otherwise it is a block ahead of the first prompt of a new session.
+- **Skills (tsk376):** an ACP agent discovers no skill files, so its system prompt ends with an `# oxplow skills` index (`oxplow_plugin::skill_index`: name + frontmatter description) and it reads a body with the read-only, agent-only MCP tool `get_skill(name)`. Terminal runtimes still ship the files; `Services::boot` calls `oxplow_plugin::refresh_skills` to rewrite the skills of runtimes already on disk (never creating one), so an agent outliving an upgrade reads the current ones.
 
 **Prompts (the no-automation rule).**
 - `acp/human_prompt.rs` `compose` is the only way to make a `HumanPrompt`, and `wire::AgentConn::prompt` accepts nothing else.

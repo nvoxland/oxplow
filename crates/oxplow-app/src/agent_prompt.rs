@@ -187,7 +187,25 @@ fn assemble(
         out.push_str(hint);
         out.push('\n');
     }
+    if !session_context {
+        // An ACP agent: no skill files to discover (tsk376).
+        out.push_str(&skill_index_block());
+    }
     out.trim_end().to_string()
+}
+
+/// The oxplow skills for an agent that can't discover skill files: one
+/// line each, to be fetched with the MCP `get_skill` tool when the work
+/// matches.
+fn skill_index_block() -> String {
+    let mut out = String::from(
+        "\n# oxplow skills\nBefore doing work one of these describes, call the oxplow MCP tool \
+         `get_skill` with its name and follow what it says.\n",
+    );
+    for (name, description) in oxplow_plugin::skill_index() {
+        out.push_str(&format!("- {name}: {description}\n"));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -376,5 +394,21 @@ mod tests {
         assert!(full.contains("<session-context>"));
         assert!(!acp.contains("<session-context>"), "{acp}");
         assert!(acp.contains("be precise"));
+    }
+
+    /// An ACP agent can't discover skill files, so its prompt indexes
+    /// them for `get_skill`; a terminal agent's runtime ships the files
+    /// (tsk376).
+    #[test]
+    fn the_acp_system_prompt_indexes_the_skills() {
+        let dir = tempdir().unwrap();
+        let full = assemble_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        let acp = assemble_acp_system_prompt(dir.path(), &config(), &stream(), Some(&thread()));
+        assert!(acp.contains("get_skill"), "{acp}");
+        assert!(
+            acp.contains("- oxplow-extension: Build oxplow lenses"),
+            "{acp}"
+        );
+        assert!(!full.contains("get_skill"));
     }
 }

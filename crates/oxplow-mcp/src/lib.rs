@@ -1126,6 +1126,12 @@ pub struct SwitchStreamParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct GetSkillParams {
+    /// Skill name, e.g. `oxplow-extension`.
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RenameStreamParams {
     pub stream_id: String,
     pub title: String,
@@ -1174,6 +1180,31 @@ impl OxplowMcp {
     #[tool(description = "Liveness check: returns \"pong\".")]
     async fn ping(&self) -> Result<CallToolResult, McpError> {
         Ok(CallToolResult::success(vec![ContentBlock::text("pong")]))
+    }
+
+    #[tool(
+        description = "Read one of oxplow's skills (its SKILL.md): how to do a kind of oxplow \
+                       work, e.g. `oxplow-extension` for building lenses. For agents that don't \
+                       load skill files themselves; your instructions list the names."
+    )]
+    async fn get_skill(
+        &self,
+        params: Parameters<GetSkillParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let name = params.0.name;
+        match oxplow_plugin::skill_body(&name) {
+            Some(body) => Ok(CallToolResult::success(vec![ContentBlock::text(body)])),
+            None => {
+                let names: Vec<&str> = oxplow_plugin::skill_index()
+                    .into_iter()
+                    .map(|(n, _)| n)
+                    .collect();
+                Err(McpError::invalid_params(
+                    format!("no skill `{name}` (skills: {})", names.join(", ")),
+                    None,
+                ))
+            }
+        }
     }
 
     #[tool(description = "Get the running oxplow daemon version.")]
@@ -5406,6 +5437,7 @@ fn parse_link_type(s: &str) -> Result<TaskLinkType, McpError> {
 /// tool isn't classified here or in [`WRITE_TOOLS`].
 const READ_ONLY_TOOLS: &[&str] = &[
     "ping",
+    "get_skill",
     "list_sources",
     "list_ai_roles",
     "get_open_page",
@@ -7184,6 +7216,28 @@ mod tests {
             !instructions.contains(".context/"),
             "leaked repo path: {instructions}"
         );
+    }
+
+    /// An agent that can't discover skill files reads them by name
+    /// (tsk376); it's read-only.
+    #[tokio::test]
+    async fn get_skill_returns_a_skill_body() {
+        let (_proj, _svc, server) = boot();
+        let r = server
+            .get_skill(Parameters(GetSkillParams {
+                name: "oxplow-extension".into(),
+            }))
+            .await
+            .unwrap();
+        assert!(text_payload(r).contains("# Building oxplow lenses"));
+        let err = server
+            .get_skill(Parameters(GetSkillParams {
+                name: "nope".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("oxplow-extension"), "{err:?}");
+        assert!(READ_ONLY_TOOLS.contains(&"get_skill"));
     }
 
     #[tokio::test]

@@ -106,6 +106,8 @@ pub const MANIFEST: &[Capability] = &[
     // ---- both (identical names) ----
     both("ping"),
     both("app_version"),
+    // Skills for agents that can't load skill files (ACP); the UI has no use for them.
+    agent("get_skill"),
     both("list_streams"),
     ui("list_backlog"),
     both("get_task"),
