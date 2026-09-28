@@ -136,6 +136,17 @@ changed files, in the background. `DuplicationRecorder::record`
 The change's own `v_change_duplicate` rows are the findings anchored in
 its changed files. There is no manual "Scan now" any more.
 
+**Scans are coalesced per change (tsk364).**
+- `change_analysis::DupQueue` runs at most one scan per change; a newer
+  request replaces a queued one, so rapid agent edits don't pile up
+  whole-tree parses.
+- A scan stores its rows only if its analysis generation is still the
+  change's latest.
+- A failure while storing marks the scan and its task failed rather than
+  leaving them "running".
+- An effort analyzed while open is recomputed once it closes: the change
+  store reports a moved head (working tree → end snapshot).
+
 ## Function analysis for a change
 
 `code_analysis::analyze_files` (`crates/oxplow-app/src/code_analysis.rs`)

@@ -4,6 +4,7 @@
 //! See `.context/semantic-layer.md`.
 
 use oxplow_domain::DomainError;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::database::map_sql_err;
@@ -122,6 +123,10 @@ impl SqliteChangeStore {
     }
 
     /// The change for `(stream_id, kind, target)`, creating it `pending`.
+    /// The change keyed `(stream_id, kind, target)`, created if new, with
+    /// its labels updated. The flag says whether an existing row's head
+    /// moved (its `head_label` differs from the given one): its stored
+    /// results are then of another head and must be recomputed.
     pub async fn get_or_create(
         &self,
         stream_id: i64,
@@ -129,11 +134,19 @@ impl SqliteChangeStore {
         target: &str,
         base_label: Option<String>,
         head_label: Option<String>,
-    ) -> Result<ChangeRow, DomainError> {
+    ) -> Result<(ChangeRow, bool), DomainError> {
         let (kind, target) = (kind.to_string(), target.to_string());
-        let id: i64 = self
+        let wanted_head = head_label.clone();
+        let (id, previous_head): (i64, Option<Option<String>>) = self
             .db
             .call(move |c| {
+                let previous: Option<Option<String>> = c
+                    .query_row(
+                        "SELECT head_label FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
+                        rusqlite::params![stream_id, kind, target],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
                 c.execute(
                     "INSERT INTO change (stream_id, kind, target, base_label, head_label, status)
                      VALUES (?1, ?2, ?3, ?4, ?5, 'pending')
@@ -142,14 +155,20 @@ impl SqliteChangeStore {
                        head_label = coalesce(excluded.head_label, change.head_label)",
                     rusqlite::params![stream_id, kind, target, base_label, head_label],
                 )?;
-                c.query_row(
+                let id = c.query_row(
                     "SELECT id FROM change WHERE stream_id = ?1 AND kind = ?2 AND target = ?3",
                     rusqlite::params![stream_id, kind, target],
                     |r| r.get(0),
-                )
+                )?;
+                Ok((id, previous))
             })
             .await?;
-        self.get(id).await?.ok_or(DomainError::NotFound)
+        let moved = match (previous_head, wanted_head) {
+            (Some(before), Some(now)) => before.as_deref() != Some(now.as_str()),
+            _ => false,
+        };
+        let row = self.get(id).await?.ok_or(DomainError::NotFound)?;
+        Ok((row, moved))
     }
 
     pub async fn get(&self, id: i64) -> Result<Option<ChangeRow>, DomainError> {
@@ -314,6 +333,30 @@ mod tests {
     use crate::SemanticLayer;
     use serde_json::json;
 
+    /// An effort analyzed while open (head: the working tree) that has since
+    /// closed (head: its end snapshot) must be recomputed; the store says
+    /// when the head moved.
+    #[tokio::test]
+    async fn get_or_create_reports_a_moved_head() {
+        let store = SqliteChangeStore::new(Database::in_memory());
+        let (_, moved) = store
+            .get_or_create(1, "effort", "7", None, Some("working tree".into()))
+            .await
+            .unwrap();
+        assert!(!moved, "new rows didn't move");
+        let (_, moved) = store
+            .get_or_create(1, "effort", "7", None, Some("working tree".into()))
+            .await
+            .unwrap();
+        assert!(!moved);
+        let (row, moved) = store
+            .get_or_create(1, "effort", "7", None, Some("snapshot 12".into()))
+            .await
+            .unwrap();
+        assert!(moved);
+        assert_eq!(row.head_label.as_deref(), Some("snapshot 12"));
+    }
+
     #[tokio::test]
     async fn changes_are_keyed_and_results_replace_and_read_through_views() {
         let db = Database::in_memory();
@@ -321,17 +364,20 @@ mod tests {
         let c = store
             .get_or_create(1, "commit", "abc", Some("abc^".into()), Some("abc".into()))
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(c.status, "pending");
         let again = store
             .get_or_create(1, "commit", "abc", None, None)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(again.id, c.id, "same key, same change");
         let other = store
             .get_or_create(1, "working", "", None, None)
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_ne!(other.id, c.id);
 
         let results = |path: &str| ChangeResults {

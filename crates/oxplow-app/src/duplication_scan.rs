@@ -130,26 +130,40 @@ impl DuplicationRecorder {
                 }
             };
 
-        for f in &findings {
-            svc.code_quality_store
-                .append_finding(
-                    scan_id,
-                    oxplow_db::CodeQualityFinding {
-                        id: 0,
+        // Storing can fail too; the scan and its task must not be left
+        // "running" when it does (tsk364).
+        let stored: Result<(), DomainError> = async {
+            for f in &findings {
+                svc.code_quality_store
+                    .append_finding(
                         scan_id,
-                        path: f.path.clone(),
-                        start_line: f.start_line as i32,
-                        end_line: f.end_line as i32,
-                        kind: f.kind.clone(),
-                        metric_value: f.metric_value,
-                        extra_json: f.extra_json.clone(),
-                    },
-                )
-                .await?;
+                        oxplow_db::CodeQualityFinding {
+                            id: 0,
+                            scan_id,
+                            path: f.path.clone(),
+                            start_line: f.start_line as i32,
+                            end_line: f.end_line as i32,
+                            kind: f.kind.clone(),
+                            metric_value: f.metric_value,
+                            extra_json: f.extra_json.clone(),
+                        },
+                    )
+                    .await?;
+            }
+            svc.code_quality_store
+                .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
+                .await
         }
-        svc.code_quality_store
-            .finish_scan(scan_id, CodeQualityScanStatus::Done, None)
-            .await?;
+        .await;
+        if let Err(e) = stored {
+            let _ = svc
+                .code_quality_store
+                .finish_scan(scan_id, CodeQualityScanStatus::Failed, Some(e.to_string()))
+                .await;
+            svc.events.emit(scanned(CodeQualityScanPhase::Failed));
+            svc.background_tasks.fail(&task.id, e.to_string(), None);
+            return Err(e);
+        }
         if let Err(error) = write_facts(svc, &findings, &kind_tag, value.as_deref()).await {
             tracing::warn!(%error, scan_id, "duplication: writing facts failed");
         }

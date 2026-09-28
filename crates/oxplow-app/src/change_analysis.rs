@@ -430,9 +430,70 @@ pub enum ChangeTarget {
 #[derive(Default)]
 pub struct ChangeAnalyzer {
     state: std::sync::Mutex<AnalyzerState>,
+    /// Duplicate scans: one worker per change at a time.
+    dup_queue: DupQueue,
     /// Co-change history for (repo, HEAD): a walk of up to 5000 commits,
     /// so it's reused until HEAD moves.
     history: std::sync::Mutex<Option<CachedHistory>>,
+}
+
+/// One duplicate scan to run for a change.
+pub(crate) struct DupJob {
+    /// The analysis generation it belongs to: its findings are stored only
+    /// if that's still the change's latest computation.
+    generation: u64,
+    root: std::path::PathBuf,
+    version: oxplow_tree_source::TreeVersion,
+    changed: Vec<String>,
+}
+
+/// Coalesces duplicate scans per change (tsk364): a whole-tree parse per
+/// agent edit would pile up, so at most one runs per change, and the
+/// newest request replaces any queued one.
+#[derive(Default)]
+pub(crate) struct DupQueue {
+    inner: std::sync::Mutex<DupQueueState>,
+}
+
+#[derive(Default)]
+struct DupQueueState {
+    active: std::collections::HashSet<i64>,
+    queued: std::collections::HashMap<i64, DupJob>,
+}
+
+impl DupQueue {
+    /// Queue `job` for `change`. True when the caller must start a worker
+    /// (none is running for it).
+    fn submit(&self, change: i64, job: DupJob) -> bool {
+        let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        st.queued.insert(change, job);
+        st.active.insert(change)
+    }
+
+    /// The next job for `change`'s worker; `None` ends the worker.
+    fn next(&self, change: i64) -> Option<DupJob> {
+        let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let job = st.queued.remove(&change);
+        if job.is_none() {
+            st.active.remove(&change);
+        }
+        job
+    }
+}
+
+/// Marks a change in flight; removed however the computation ends
+/// (an error return, a dropped future), so it can't stick (tsk364).
+struct RunningGuard<'a> {
+    state: &'a std::sync::Mutex<AnalyzerState>,
+    id: i64,
+}
+
+impl Drop for RunningGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut st) = self.state.lock() {
+            st.running.remove(&self.id);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -637,7 +698,7 @@ pub async fn ensure_change(
         }
     };
     let stream_val = stream.value();
-    let row = svc
+    let (row, head_moved) = svc
         .change_store
         .get_or_create(stream_val, kind, &key, base.1, head.1)
         .await?;
@@ -651,21 +712,28 @@ pub async fn ensure_change(
             return Ok(row);
         }
         let generation = st.stream_gen.get(&stream_val).copied().unwrap_or(0);
-        let fresh =
-            row.status == "done" && (!mutable || st.computed_gen.get(&row.id) == Some(&generation));
+        // Results of another head (an effort analyzed while open, now
+        // closed) are stale however they were computed.
+        let fresh = row.status == "done"
+            && !head_moved
+            && (!mutable || st.computed_gen.get(&row.id) == Some(&generation));
         if fresh {
             return Ok(row);
         }
         st.running.insert(row.id);
         generation
     };
+    let running = RunningGuard {
+        state: &svc.change_analyzer.state,
+        id: row.id,
+    };
     svc.change_store.set_status(row.id, "running", None).await?;
     let root = svc.git.resolve_repo_dir(Some(&stream.to_string())).await;
     let dup_head = head.0.clone();
     let result = compute(svc, &root, base.0, head.0).await;
-    if let Ok(mut st) = svc.change_analyzer.state.lock() {
-        st.running.remove(&row.id);
-        if result.is_ok() {
+    drop(running);
+    if result.is_ok() {
+        if let Ok(mut st) = svc.change_analyzer.state.lock() {
             st.computed_gen.insert(row.id, generation);
         }
     }
@@ -675,7 +743,7 @@ pub async fn ensure_change(
             svc.change_store.store_results(row.id, results).await?;
             svc.events
                 .emit(crate::OxplowEvent::ChangeAnalyzed { change_id: row.id });
-            spawn_duplicates(svc, row.id, &root, &dup_head, changed);
+            spawn_duplicates(svc, row.id, generation, &root, &dup_head, changed);
         }
         Err(e) => {
             svc.change_store
@@ -699,6 +767,7 @@ pub async fn ensure_change(
 fn spawn_duplicates(
     svc: &crate::Services,
     change_id: i64,
+    generation: u64,
     root: &std::path::Path,
     head: &DiffEndpoint,
     changed: Vec<String>,
@@ -712,44 +781,66 @@ fn spawn_duplicates(
     if changed.is_empty() {
         return;
     }
+    let job = DupJob {
+        generation,
+        root: root.to_path_buf(),
+        version,
+        changed,
+    };
+    if !svc.change_analyzer.dup_queue.submit(change_id, job) {
+        return; // A worker is running; it picks this up next.
+    }
     let recorder = crate::duplication_scan::DuplicationRecorder::new(svc);
     let store = svc.change_store.clone();
     let events = svc.events.clone();
-    let root = root.to_path_buf();
+    let analyzer = svc.change_analyzer.clone();
     tokio::spawn(async move {
-        let scope = format!("change {change_id}");
-        match recorder
-            .record(root, version, Some(changed.clone()), scope)
-            .await
-        {
-            Ok(findings) => {
-                let rows: Vec<oxplow_db::ChangeDuplicateRow> = findings
-                    .into_iter()
-                    .filter(|f| changed.contains(&f.path))
-                    .map(|f| {
-                        let extra: serde_json::Value = f
-                            .extra_json
-                            .as_deref()
-                            .and_then(|j| serde_json::from_str(j).ok())
-                            .unwrap_or_default();
-                        oxplow_db::ChangeDuplicateRow {
-                            path: f.path,
-                            start_line: f.start_line as i64,
-                            end_line: f.end_line as i64,
-                            lines: f.metric_value as i64,
-                            peer_path: extra["peerPath"].as_str().unwrap_or_default().to_string(),
-                            peer_start_line: extra["peerStartLine"].as_i64().unwrap_or_default(),
-                            peer_end_line: extra["peerEndLine"].as_i64().unwrap_or_default(),
-                        }
-                    })
-                    .collect();
-                if let Err(error) = store.store_duplicates(change_id, rows).await {
-                    tracing::warn!(change_id, %error, "storing duplicates failed");
-                    return;
+        while let Some(job) = analyzer.dup_queue.next(change_id) {
+            let scope = format!("change {change_id}");
+            let findings = match recorder
+                .record(job.root, job.version, Some(job.changed.clone()), scope)
+                .await
+            {
+                Ok(f) => f,
+                Err(error) => {
+                    tracing::warn!(change_id, %error, "duplicate scan failed");
+                    continue;
                 }
-                events.emit(crate::OxplowEvent::ChangeAnalyzed { change_id });
+            };
+            // A newer analysis of this change supersedes these findings.
+            let latest = analyzer
+                .state
+                .lock()
+                .map(|st| st.computed_gen.get(&change_id) == Some(&job.generation))
+                .unwrap_or(false);
+            if !latest {
+                continue;
             }
-            Err(error) => tracing::warn!(change_id, %error, "duplicate scan failed"),
+            let rows: Vec<oxplow_db::ChangeDuplicateRow> = findings
+                .into_iter()
+                .filter(|f| job.changed.contains(&f.path))
+                .map(|f| {
+                    let extra: serde_json::Value = f
+                        .extra_json
+                        .as_deref()
+                        .and_then(|j| serde_json::from_str(j).ok())
+                        .unwrap_or_default();
+                    oxplow_db::ChangeDuplicateRow {
+                        path: f.path,
+                        start_line: f.start_line as i64,
+                        end_line: f.end_line as i64,
+                        lines: f.metric_value as i64,
+                        peer_path: extra["peerPath"].as_str().unwrap_or_default().to_string(),
+                        peer_start_line: extra["peerStartLine"].as_i64().unwrap_or_default(),
+                        peer_end_line: extra["peerEndLine"].as_i64().unwrap_or_default(),
+                    }
+                })
+                .collect();
+            if let Err(error) = store.store_duplicates(change_id, rows).await {
+                tracing::warn!(change_id, %error, "storing duplicates failed");
+                continue;
+            }
+            events.emit(crate::OxplowEvent::ChangeAnalyzed { change_id });
         }
     });
 }
@@ -1425,5 +1516,29 @@ mod tests {
             .get(&1)
             .copied();
         assert!(generation.unwrap_or(0) >= 1);
+    }
+
+    #[test]
+    fn duplicate_scans_run_one_at_a_time_per_change_and_only_the_latest_stores() {
+        let q = DupQueue::default();
+        let job = |g: u64| DupJob {
+            generation: g,
+            root: std::path::PathBuf::from("/r"),
+            version: oxplow_tree_source::TreeVersion::Disk,
+            changed: vec!["a.rs".into()],
+        };
+        assert!(q.submit(1, job(1)), "first request starts a worker");
+        assert!(
+            !q.submit(1, job(2)),
+            "one already running: queued, not a second worker"
+        );
+        assert!(
+            !q.submit(1, job(3)),
+            "a newer request replaces the queued one"
+        );
+        assert!(q.submit(2, job(1)), "another change runs independently");
+        assert_eq!(q.next(1).map(|j| j.generation), Some(3));
+        assert!(q.next(1).is_none(), "drained: the worker stops");
+        assert!(q.submit(1, job(4)), "and the next request starts a new one");
     }
 }
