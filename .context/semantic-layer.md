@@ -362,8 +362,12 @@ entities from data already in the semantic layer:
   - **Derived sources** can't declare `network`.
 - **Credentials.** `credentials: [NAME]` declares secrets the entry gets
   as env vars. Values live in the OS keychain (`Services.secrets`, shared
-  with AI provider keys) under account `source:<extension>:<NAME>`, so an
-  extension can't read another's by declaring the same name.
+  with AI provider keys) under account
+  `source:<project key>:<extension>:<NAME>` (tsk348; the project key is a
+  hash of the canonical project path, shared by its worktrees). So neither
+  another extension nor a same-named extension in another repo can read
+  one by declaring the same name. Credentials set before tsk348 (no
+  project in the account) aren't read; set them again.
   - Only a person sets them: IPC `set_source_credential` (UI-only in the
     parity manifest; only names some source of that extension declares).
     Listings carry `credentials: [{name, set}]`, never values.

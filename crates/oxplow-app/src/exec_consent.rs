@@ -311,6 +311,12 @@ const TREE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// skipping dot-directories. What an approval of a script's directory
 /// covers: change any helper and it needs approving again.
 pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
+    tree_hash_except(dir, &|_| false)
+}
+
+/// [`tree_hash`] leaving out files whose path relative to `dir` `skip`
+/// accepts.
+pub fn tree_hash_except(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     let mut files: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
         .follow_links(false)
@@ -319,6 +325,7 @@ pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
+        .filter(|p| !skip(p.strip_prefix(dir).unwrap_or(p)))
         .collect();
     files.sort();
     if files.len() > TREE_MAX_FILES {

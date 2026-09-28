@@ -78,8 +78,10 @@ None of these run until a person approves that program on their machine.
   - its args, plus the content of any arg that names a file, read where
     the program runs (an ACP agent from its stream's worktree), so
     `node tools/agent.js` covers `agent.js`;
-  - for an extension source, every file in the extension, plus its
-    `network` list.
+  - for an extension source, every file in the extension except
+    `extension.yaml` and `lenses/` (not code it runs, so a lens edit
+    doesn't ask again), plus what the manifest grants it: `entry`, `env`
+    passthrough, `credentials` and `network` (tsk348).
 
   Any change needs approving again. A directory of more than 500 files
   or 16 MB can't be approved as a whole: give the program its own

