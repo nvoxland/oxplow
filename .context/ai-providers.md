@@ -55,6 +55,13 @@ What can be called, as of 2026-09:
   (local servers). `SecretStore` is a trait; tests use `MemorySecrets`.
   Gotcha: on macOS an unsigned dev build is a "different app" after each
   rebuild, so the keychain may prompt again for access.
+- **A key is bound to the URL it was saved for** (tsk346). The keychain
+  entry is `{"key", "endpoint"}`, where `endpoint` is the provider's
+  normalized `baseUrl` (empty for the kind's default). `ai.yaml` is a
+  plain file an agent can edit, so a provider pointed at another host gets
+  no key; the call fails with "re-save the provider in Settings → AI".
+  Saving a provider (UI-only) rebinds a kept key to its current URL. A
+  pre-binding bare key counts as bound to the default URL.
 - Provider kinds: `anthropic`, `openai`, `openrouter`, `openai-compatible`
   (needs `baseUrl`), `typesafe`. Every kind accepts a `baseUrl` override.
 - Target: model catalog from models.dev (cached); manual entries allowed.

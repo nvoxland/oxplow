@@ -107,7 +107,7 @@ impl AiService {
                     id: p.id.clone(),
                     kind: p.kind,
                     base_url: p.base_url.clone(),
-                    key_set: self.key(&p.id)?.is_some(),
+                    key_set: self.raw_key(&p.id)?.is_some(),
                 })
             })
             .collect::<Result<_, AiServiceError>>()?;
@@ -140,9 +140,18 @@ impl AiService {
             None => global.providers.push(provider),
         }
         self.save_global(&global)?;
-        if let Some(key) = key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+        // The key is bound to the URL it's saved for (tsk346). This path is
+        // the person's (Settings → AI; UI-only), so saving rebinds a kept
+        // key to the provider's URL as it is now.
+        let endpoint = endpoint_of(global.providers.iter().find(|p| p.id == id));
+        let key = match key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+            Some(k) => Some(k.to_string()),
+            None => self.raw_key(&id)?.map(|stored| stored.key),
+        };
+        if let Some(key) = key {
+            let stored = StoredKey { key, endpoint };
             self.secrets
-                .set(&id, key)
+                .set(&id, &stored.encode())
                 .map_err(|e| AiServiceError::Secret(e.to_string()))?;
         }
         Ok(())
@@ -191,7 +200,7 @@ impl AiService {
             .into_iter()
             .find(|p| p.id == id)
             .ok_or_else(|| AiServiceError::Config(format!("no provider `{id}`")))?;
-        let key = self.key(id)?;
+        let key = self.key(&provider)?;
         if provider.kind == ProviderKind::Typesafe {
             let q = BTreeMap::from([(
                 "ok".to_string(),
@@ -316,14 +325,44 @@ impl AiService {
             .resolve(role)
             .map(|(p, b)| (p.clone(), b.clone()))
             .ok_or_else(|| AiServiceError::NotConfigured(role_name(role)))?;
-        let key = self.key(&provider.id)?;
+        let key = self.key(&provider)?;
         Ok((provider, binding, key))
     }
 
-    fn key(&self, provider_id: &str) -> Result<Option<String>, AiServiceError> {
-        self.secrets
+    /// The stored key entry, whatever URL it's bound to.
+    fn raw_key(&self, provider_id: &str) -> Result<Option<StoredKey>, AiServiceError> {
+        Ok(self
+            .secrets
             .get(provider_id)
-            .map_err(|e| AiServiceError::Secret(e.to_string()))
+            .map_err(|e| AiServiceError::Secret(e.to_string()))?
+            .map(|raw| StoredKey::decode(&raw)))
+    }
+
+    /// The key to send to `provider`: only when it was saved for the
+    /// provider's URL as it is now. `ai.yaml` is a plain file an agent can
+    /// edit; pointing a provider elsewhere must not carry the key along.
+    fn key(&self, provider: &ProviderConfig) -> Result<Option<String>, AiServiceError> {
+        let Some(stored) = self.raw_key(&provider.id)? else {
+            return Ok(None);
+        };
+        let now = endpoint_of(Some(provider));
+        if stored.endpoint != now {
+            let shown = |e: &str| {
+                if e.is_empty() {
+                    "its default URL".to_string()
+                } else {
+                    format!("`{e}`")
+                }
+            };
+            return Err(AiServiceError::Config(format!(
+                "the key for `{}` was saved for {}, but ai.yaml now points it at {}. \
+                 If that's intended, re-save the provider in Settings → AI.",
+                provider.id,
+                shown(&stored.endpoint),
+                shown(&now)
+            )));
+        }
+        Ok(Some(stored.key))
     }
 
     fn config_dir(&self) -> Result<&std::path::Path, AiServiceError> {
@@ -393,6 +432,44 @@ pub fn project_overrides(
 }
 
 /// The role's name as `ai.yaml` and `v_ai_call` spell it.
+/// A keychain entry: the key and the endpoint it was saved for.
+struct StoredKey {
+    key: String,
+    /// The provider's `base_url` when saved (normalized); empty = the
+    /// kind's default URL.
+    endpoint: String,
+}
+
+impl StoredKey {
+    fn encode(&self) -> String {
+        serde_json::json!({ "key": self.key, "endpoint": self.endpoint }).to_string()
+    }
+
+    /// A bare string is a key saved before binding existed: treat it as
+    /// bound to the default URL, so a custom URL needs one re-save.
+    fn decode(raw: &str) -> Self {
+        serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|v| {
+                Some(StoredKey {
+                    key: v.get("key")?.as_str()?.to_string(),
+                    endpoint: v.get("endpoint")?.as_str()?.to_string(),
+                })
+            })
+            .unwrap_or_else(|| StoredKey {
+                key: raw.to_string(),
+                endpoint: String::new(),
+            })
+    }
+}
+
+fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
+    provider
+        .and_then(|p| p.base_url.as_deref())
+        .map(|u| u.trim().trim_end_matches('/').to_string())
+        .unwrap_or_default()
+}
+
 fn role_name(role: Role) -> String {
     serde_json::to_value(role)
         .ok()
@@ -431,7 +508,11 @@ mod tests {
         };
         cfg.save(dir.path()).unwrap();
         let secrets = Arc::new(MemorySecrets::default());
-        secrets.set("or", "sk-1").unwrap();
+        let bound = StoredKey {
+            key: "sk-1".into(),
+            endpoint: base.into(),
+        };
+        secrets.set("or", &bound.encode()).unwrap();
         let db = Database::in_memory();
         let calls = Arc::new(SqliteAiCallStore::new(db.clone()));
         (
@@ -583,7 +664,10 @@ mod tests {
         .unwrap();
         let yaml = std::fs::read_to_string(dir.path().join("ai.yaml")).unwrap();
         assert!(yaml.contains("jev") && !yaml.contains("tk-9"), "{yaml}");
-        assert_eq!(svc.secrets.get("ts").unwrap().as_deref(), Some("tk-9"));
+        assert_eq!(
+            svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
+            Some("tk-9")
+        );
 
         // Saving again without a key keeps the stored one.
         svc.save_provider(
@@ -595,7 +679,10 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(svc.secrets.get("ts").unwrap().as_deref(), Some("tk-9"));
+        assert_eq!(
+            svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
+            Some("tk-9")
+        );
         assert_eq!(svc.settings().unwrap().providers.len(), 2);
 
         // A provider in use can't be removed; once unassigned, it and its key go.
@@ -748,5 +835,50 @@ mod tests {
         yaml("tiny");
         svc.reload_config_from_disk().unwrap();
         assert_eq!(fast(&svc), (true, Some("tiny".to_string())));
+    }
+
+    /// An agent can edit `ai.yaml`. Pointing a provider at another host
+    /// must not carry the person's key there: the key is bound to the URL
+    /// it was saved for, until a person re-saves the provider.
+    #[tokio::test]
+    async fn a_key_goes_only_to_the_url_it_was_saved_for() {
+        let (base, _) = mock("/chat/completions", 200, chat_reply()).await;
+        let (evil, evil_seen) = mock("/chat/completions", 200, chat_reply()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (svc, _db) = service(&base, &dir);
+        let provider = |url: &str| ProviderConfig {
+            id: "or".into(),
+            kind: ProviderKind::Openrouter,
+            base_url: Some(url.into()),
+        };
+        svc.save_provider(provider(&base), Some("sk-2".into()))
+            .unwrap();
+        svc.complete(Role::Summarize, "t", None, "hi", false)
+            .await
+            .unwrap();
+
+        // Out-of-band edit, as an agent's shell would make it.
+        let mut cfg = AiConfig::load(dir.path()).unwrap();
+        cfg.providers[0].base_url = Some(evil.clone());
+        cfg.save(dir.path()).unwrap();
+        let err = svc
+            .complete(Role::Summarize, "t", None, "hi", false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("re-save"), "{err}");
+        assert!(
+            evil_seen.lock().unwrap().is_empty(),
+            "the key must not be sent"
+        );
+
+        // A person re-saving the provider (the UI) rebinds the kept key.
+        svc.save_provider(provider(&evil), None).unwrap();
+        svc.complete(Role::Summarize, "t", None, "hi", false)
+            .await
+            .unwrap();
+        assert_eq!(
+            evil_seen.lock().unwrap()[0].1["authorization"],
+            "Bearer sk-2"
+        );
     }
 }
