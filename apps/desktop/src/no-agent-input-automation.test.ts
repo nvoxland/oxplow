@@ -47,4 +47,14 @@ describe("no agent input automation", () => {
   test('{type:"input"} terminal messages are only built on the human-input path', () => {
     expect(offenders(/type:\s*"input(-binary)?"/)).toEqual([]);
   });
+
+  // ACP agents (tsk281): a prompt is sent only by the prompt box, on the
+  // person's Enter. `api.ts` defines the wrapper; nothing else may call it.
+  test("acpPrompt is only referenced by the prompt box", () => {
+    const allowed = new Set(["api.ts", join("components", "acp", "AcpPromptBox.tsx")]);
+    const hits = sourceFiles()
+      .filter((rel) => !allowed.has(rel))
+      .filter((rel) => /\bacpPrompt\b/.test(readFileSync(join(SRC_DIR, rel), "utf8")));
+    expect(hits).toEqual([]);
+  });
 });

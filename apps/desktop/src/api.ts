@@ -30,6 +30,15 @@ import type {
   SchemaEntity,
   EntityRowCount,
   AcpAgentListing,
+  AcpEvent,
+  AcpSnapshot,
+  AcpStatus,
+  ContextUsage,
+  PermissionOption,
+  PlanEntry,
+  ToolCall as AcpToolCall,
+  ToolDiff,
+  TranscriptItem,
   ProgramKind,
   ProjectProgram,
   LensActionResult,
@@ -39,6 +48,17 @@ import type {
 } from "./tauri-bridge/generated/bindings.js";
 
 export type { AiSettings, ProviderConfig, Role, RoleBinding };
+export type {
+  AcpEvent,
+  AcpSnapshot,
+  AcpStatus,
+  AcpToolCall,
+  ContextUsage,
+  PermissionOption,
+  PlanEntry,
+  ToolDiff,
+  TranscriptItem,
+};
 export type { EntityRowCount, Extension, Lens, LensRun, LensViz, NewLens, SchemaEntity, SearchHit, SourceListing, SourceRunReport, SqlCell, SqlQueryResult };
 
 /// Convert the tauri-specta {status, data|error} envelope into a
@@ -630,6 +650,60 @@ export async function approveProjectProgram(kind: ProgramKind, name: string): Pr
 /// The ACP agents this project can run (the new-thread picker).
 export async function listAcpAgents(): Promise<AcpAgentListing[]> {
   return unwrap(await commands.listAcpAgents());
+}
+
+// ---- ACP sessions (tsk281) --------------------------------------------
+// A structured agent conversation instead of a terminal. `acpPrompt` is
+// the prompt box's Enter and nothing else: oxplow never sends an agent
+// input on its own (guarded by no-agent-input-automation.test.ts).
+
+/** Start the thread's ACP agent (or reattach) and return its session. */
+export async function acpOpenSession(threadId: string): Promise<AcpSnapshot> {
+  return unwrap(await commands.acpOpenSession(threadId));
+}
+
+/** Send what the person typed. Only `AcpPromptBox` calls this. */
+export async function acpPrompt(threadId: string, text: string): Promise<void> {
+  unwrap(await commands.acpPrompt(threadId, text));
+}
+
+export async function acpCancel(threadId: string): Promise<void> {
+  unwrap(await commands.acpCancel(threadId));
+}
+
+/** Answer a permission card; `optionId: null` cancels it. */
+export async function acpRespondPermission(
+  threadId: string,
+  requestId: string,
+  optionId: string | null,
+): Promise<void> {
+  unwrap(await commands.acpRespondPermission(threadId, requestId, optionId));
+}
+
+/** The session plus items changed after `sinceSeq`; null when none is open. */
+export async function acpTranscript(threadId: string, sinceSeq: number): Promise<AcpSnapshot | null> {
+  return unwrap(await commands.acpTranscript(threadId, sinceSeq));
+}
+
+export async function acpDismissDirective(threadId: string): Promise<void> {
+  unwrap(await commands.acpDismissDirective(threadId));
+}
+
+export async function acpCloseSession(threadId: string): Promise<void> {
+  unwrap(await commands.acpCloseSession(threadId));
+}
+
+export function subscribeAcpEvents(listener: (event: AcpEvent) => void): () => void {
+  let stopped = false;
+  // `listen` rejects when no transport is mounted (bun tests).
+  const unlistenPromise = listen(EVENT_CHANNELS.acp, (e) => {
+    if (stopped) return;
+    listener(e.payload as AcpEvent);
+  }).catch(() => null);
+  return () => {
+    stopped = true;
+    void unlistenPromise.then((u) => u?.());
+  };
 }
 
 /// Rows in every entity right now (Settings → Data).

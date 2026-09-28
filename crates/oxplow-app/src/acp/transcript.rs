@@ -19,7 +19,11 @@ use super::model::{
 pub const DEFAULT_CAP: usize = 2000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ItemBody {
     /// What the human sent. `context` is the oxplow block attached to it,
     /// shown behind a disclosure.

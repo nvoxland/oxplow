@@ -3,6 +3,8 @@ import { TerminalPane } from "../components/TerminalPane.js";
 import type { Stream, Thread } from "../api.js";
 import { recordUserInterrupt } from "../api.js";
 import { useWorkspaceLinkIndex } from "../useWorkspaceLinkIndex.js";
+import { AcpAgentView } from "../components/acp/AcpAgentView.js";
+import type { DiffSpec } from "../components/Diff/DiffPane.js";
 
 interface AgentPageProps {
   thread: Thread | null;
@@ -11,6 +13,10 @@ interface AgentPageProps {
   transportMode: "direct" | "tmux";
   /** Click-through handler for file paths detected in terminal output. */
   onOpenFile?(absPath: string, line?: number, column?: number): void;
+  /** ACP threads: open an agent edit's diff. */
+  onOpenDiff?(spec: DiffSpec): void;
+  /** ACP threads: open Settings (an agent that needs approval). */
+  onOpenSettings?(): void;
 }
 
 /**
@@ -25,7 +31,15 @@ interface AgentPageProps {
  * other tab: a tab is a slot that holds a Page; the Page configures
  * what chrome it wants.
  */
-export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }: AgentPageProps) {
+export function AgentPage({
+  thread,
+  stream,
+  visible,
+  transportMode,
+  onOpenFile,
+  onOpenDiff,
+  onOpenSettings,
+}: AgentPageProps) {
   // Only linkify terminal paths that are real workspace files/dirs, so dotted
   // words in agent prose (e.g. a plugin name) aren't turned into broken links.
   const isLinkablePath = useWorkspaceLinkIndex(stream?.id);
@@ -33,6 +47,23 @@ export function AgentPage({ thread, stream, visible, transportMode, onOpenFile }
     return (
       <Page testId="page-agent" showNavBar={false} showHeader={false}>
         <div style={{ padding: 12, color: "var(--muted)" }}>No thread selected.</div>
+      </Page>
+    );
+  }
+  // ACP threads talk to their agent as a structured conversation, not a
+  // terminal (tsk281). Keyed on the thread like the terminal below.
+  if (thread.agent === "acp") {
+    return (
+      <Page testId="page-agent" showNavBar={false} showHeader={false}>
+        <AcpAgentView
+          key={thread.id}
+          thread={thread}
+          worktreePath={stream?.worktree_path}
+          visible={visible}
+          onOpenDiff={onOpenDiff}
+          onOpenFile={onOpenFile ? (p) => onOpenFile(p) : undefined}
+          onOpenSettings={onOpenSettings}
+        />
       </Page>
     );
   }

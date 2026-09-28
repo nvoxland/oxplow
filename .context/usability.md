@@ -77,6 +77,12 @@ Things I keep forgetting. Read this before adding any UI.
   are valid. Use a real `<form onSubmit=...>` wrapper; the browser
   handles single-line Enter for you. For multi-line textareas, Enter
   inserts a newline and Cmd/Ctrl+Enter submits.
+  **Exception: chat prompt boxes.** The ACP thread's prompt box
+  (`components/acp/AcpPromptBox.tsx`) follows the chat convention —
+  Enter sends, Shift+Enter inserts a newline, Escape stops a running
+  turn — because it is a conversation, not a form. While a turn runs,
+  typing still works but Enter/Send do nothing (prompts are never
+  queued).
 - **Escape cancels.** Inline edit fields and inline-confirm pairs
   revert on Escape. The legacy modals that haven't migrated yet still
   close on Escape via their own keydown listener.

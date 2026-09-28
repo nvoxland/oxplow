@@ -1317,6 +1317,13 @@ export type AcpAgentSource =
 // The project's `acpAgents:`; needs a person's approval to run.
 "project";
 
+// A change to one thread's ACP session, pushed to the UI.
+export type AcpEvent = {
+	threadId: string,
+} & (AcpEventBody);
+
+export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "directive"; text: string | null } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
+
 // A session as the UI reads it.
 export type AcpSnapshot = {
 	agent: string,
@@ -2396,11 +2403,11 @@ export type ItemBody =
  */
 { type: "user"; text: string; context: string | null } | { type: "agent"; text: string } | { type: "thought"; text: string } | { type: "tool"; call: ToolCall } | { type: "plan"; entries: PlanEntry[] } | 
 // A permission request waiting on (or answered by) the human.
-{ type: "permission"; request_id: string; tool_call_id: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
+{ type: "permission"; requestId: string; toolCallId: string; title: string; options: PermissionOption[]; answer: PermissionAnswer | null } | 
 // oxplow's policy rejected the call without asking the human.
-{ type: "policy_denied"; tool_call_id: string; label: string; reason: string } | 
+{ type: "policy_denied"; toolCallId: string; label: string; reason: string } | 
 // A write the policy would deny ran without asking first.
-{ type: "bypass"; tool_call_id: string; label: string; reason: string } | 
+{ type: "bypass"; toolCallId: string; label: string; reason: string } | 
 // The turn-end directive, shown to the human. Never sent.
 { type: "directive"; text: string } | 
 // Something failed: the prompt, the agent process, the protocol.
@@ -3279,7 +3286,7 @@ export type PageVisit = {
 };
 
 // How a permission request was answered.
-export type PermissionAnswer = { type: "selected"; option_id: string } | { type: "cancelled" };
+export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
 
 export type PermissionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
 

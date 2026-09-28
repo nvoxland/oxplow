@@ -512,6 +512,27 @@ the same JSON.
 - **Events:** the `acp:event` channel (frame key `acp`) carries `AcpEvent { threadId, type: item|status|directive|usage|closed, … }` over the daemon's `/events`. It is in `event_channels::FRAMES` and in TS `EVENT_CHANNELS` / `CHANNEL_ROUTING` (multiplexed).
 - **Bindings:** raw agent JSON (`rawInput` / `rawOutput`) is TS `unknown`, via `specta_typescript::Unknown`, because specta's own `serde_json::Value` rendering doesn't typecheck.
 
+**UI (tsk339).** `AgentPage` renders `components/acp/AcpAgentView.tsx` for `agent: acp` threads instead of the terminal.
+- **Transcript state:** `acpTranscript.ts` is a pure reducer over the `acpTranscript` snapshot and live `acp:event`s. Items upsert by id and the newer seq wins. A seq gap, or a remote reconnect (`onRemoteReconnect`), refetches `since(headSeq)`. The view subscribes to events before fetching, so nothing between the two is lost.
+- **Opening:** it opens the session on mount when none exists. A failure shows the error with Retry, plus "Open settings" when the agent needs approval.
+- **Items:**
+  - the user message, with an "oxplow context" disclosure;
+  - agent markdown;
+  - collapsible thoughts;
+  - tool cards (status, locations, "View diff", which opens `DiffPane` with the literal old/new text, and collapsible output);
+  - the plan;
+  - permission cards whose buttons call `acpRespondPermission`;
+  - the policy-blocked notice, the bypass banner, and errors.
+- **Header:** the status and the context meter (`used/size`, with cost in the tooltip).
+- **The directive banner** offers "Put in input", which ONLY fills the draft, and "Dismiss".
+- **`AcpPromptBox.tsx`:**
+  - it is the only renderer caller of `acpPrompt`; `no-agent-input-automation.test.ts` pins that;
+  - Enter sends, Shift+Enter adds a newline, Escape or Stop cancels;
+  - nothing sends while a turn runs;
+  - "Add to agent context" (`agent-input-bus`) appends to the draft while the box is visible.
+- **Component test:** `AcpAgentView.test.tsx` asserts that "Put in input" never sends and Enter sends once.
+- **Bindings:** `ItemBody` / `PermissionAnswer` / `AcpEventBody` use `rename_all_fields = "camelCase"` so TS sees `requestId` / `optionId`. `AcpEvent` is exported to the bindings (`.typ::<AcpEvent>()`).
+
 **Fake agent.** `crates/oxplow-acp-fake` is a scripted fake speaking raw JSON-RPC, deliberately not the SDK, so the tests exercise real wire JSON. `fake:<step>` lines in a prompt drive it: say, think, edit, bypass, fswrite, fsread, bash, plan, usage, tokens, wait, crash.
 - `acp/session_tests.rs` runs it in-process over a duplex pipe.
 - `tests/acp_services.rs` runs it against real `Services`, and once as its binary.

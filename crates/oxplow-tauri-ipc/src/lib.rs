@@ -79,10 +79,12 @@ fn shell_commands_module() -> String {
 /// Build the tauri-specta `Builder` registering every oxplow command.
 /// Also exports `OxplowEvent` itself so the renderer derives its
 /// event-kind union from the generated type instead of hand-
-/// maintaining one (the "camelcase trap").
+/// maintaining one (the "camelcase trap"), and `AcpEvent` (the
+/// `acp:event` payload) for the same reason.
 pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .typ::<OxplowEvent>()
+        .typ::<oxplow_app::acp::session::AcpEvent>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,

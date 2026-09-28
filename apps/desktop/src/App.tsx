@@ -2429,6 +2429,8 @@ export function App() {
                 void handleOpenFile(rel);
               }
             }}
+            onOpenDiff={handleOpenDiff}
+            onOpenSettings={() => handleOpenPage(indexRef("settings"))}
           />
         ),
       },

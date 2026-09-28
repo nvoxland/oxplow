@@ -186,7 +186,11 @@ pub struct PermissionAsk {
 
 /// How a permission request was answered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum PermissionAnswer {
     Selected { option_id: String },
     Cancelled,
