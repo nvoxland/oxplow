@@ -3121,7 +3121,11 @@ mod tests {
             }),
             ..Default::default()
         };
-        let yaml = entries_yaml(&[measure.clone()], &[gauge.clone()], &[metric.clone()]);
+        let yaml = entries_yaml(
+            std::slice::from_ref(&measure),
+            std::slice::from_ref(&gauge),
+            std::slice::from_ref(&metric),
+        );
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(config_path(dir.path()), &yaml).unwrap();
