@@ -2221,13 +2221,7 @@ impl MetricEngine {
     ) -> Result<Option<f64>, DomainError> {
         if let Some(entity) = crate::entity_metrics::entity_of(spec) {
             if entity.time.is_some() {
-                // An event metric: the total over the range for counts and
-                // sums, else its latest bucket.
-                return Ok(if crate::entity_metrics::additive(&entity.aggregation) {
-                    (!series.is_empty()).then(|| series.iter().map(|p| p.value).sum())
-                } else {
-                    series.last().map(|p| p.value)
-                });
+                return crate::entity_metrics::headline(&self.layer, &entity, series).await;
             }
         }
         let Some(measure_key) = spec.source_measure.as_deref() else {

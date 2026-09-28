@@ -2131,13 +2131,13 @@ fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
 /// feeds. The entity's own aggregation lives in `entity_json`; the stored
 /// `aggregation` says how the series' points combine, which is what the fact
 /// path and a range total read: `last` for a state metric (one fact per
-/// capture, a level), `sum` for an event metric that adds up (count / sum),
-/// else `avg`.
+/// capture, a level), `sum` for an event metric whose buckets add up
+/// (count / sum; not count_distinct, tsk367), else `avg`.
 fn as_entity_spec(mut spec: NewMetricSpec, entity: &oxplow_config::EntitySpec) -> NewMetricSpec {
     spec.source_measure = entity.time.is_none().then(|| spec.key.clone());
     spec.aggregation = if entity.time.is_none() {
         "last"
-    } else if crate::entity_metrics::additive(&entity.aggregation) {
+    } else if crate::entity_metrics::sums_across_buckets(&entity.aggregation) {
         "sum"
     } else {
         "avg"
@@ -2718,6 +2718,30 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
 mod tests {
     use super::*;
     use oxplow_config::GaugeComputeConfig;
+
+    /// A distinct count's buckets don't add up, so its points aren't
+    /// stored as a `sum` (the detail page would total them) (tsk367).
+    #[test]
+    fn a_distinct_event_metric_is_not_summed_across_buckets() {
+        let entity = |aggregation: &str| oxplow_config::EntitySpec {
+            view: "v_task".into(),
+            where_: None,
+            time: Some("completed_at".into()),
+            value: Some("e.priority".into()),
+            aggregation: aggregation.into(),
+        };
+        let stored = |aggregation: &str| {
+            as_entity_spec(
+                NewMetricSpec::base("k", "K", "k", "sum"),
+                &entity(aggregation),
+            )
+            .aggregation
+        };
+        assert_eq!(stored("count"), "sum");
+        assert_eq!(stored("sum"), "sum");
+        assert_eq!(stored("count_distinct"), "avg");
+        assert_eq!(stored("max"), "avg");
+    }
 
     /// A `MetricsService` over a real in-memory `Services` + git repo.
     async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir) {

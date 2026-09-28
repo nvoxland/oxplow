@@ -41,6 +41,12 @@ pub fn additive(aggregation: &str) -> bool {
     matches!(aggregation, "count" | "count_distinct" | "sum")
 }
 
+/// Whether an aggregation's buckets add up to the whole range's value.
+/// A distinct count doesn't: something seen on two days counts once.
+pub fn sums_across_buckets(aggregation: &str) -> bool {
+    matches!(aggregation, "count" | "sum")
+}
+
 /// One aggregate read over an entity.
 pub struct EntityRead<'a> {
     pub spec: &'a EntitySpec,
@@ -77,9 +83,8 @@ pub fn build_sql(read: &EntityRead) -> (String, Vec<(String, SqlCell)>) {
         .unwrap_or_else(|| "1".into())];
     let mut params = Vec::new();
     if let Some(t) = time {
-        if read.bucket.is_some() {
-            conds.push(format!("({t}) IS NOT NULL"));
-        }
+        // An event read covers the rows that happened, bucketed or not.
+        conds.push(format!("({t}) IS NOT NULL"));
         if let Some(w) = read.window {
             let text = |ts: Timestamp| {
                 SqlCell::Text(
@@ -185,15 +190,21 @@ fn number(c: &SqlCell) -> Option<f64> {
     }
 }
 
-/// Run a read.
+/// Run a read. One row comes back per (bucket, group); past the row cap
+/// the newest ones would be lost, so that's an error rather than a short
+/// answer (tsk367).
 pub async fn run(
     layer: &SemanticLayer,
     read: &EntityRead<'_>,
 ) -> Result<Vec<EntityRow>, DomainError> {
     let (sql, params) = build_sql(read);
-    let out = layer
-        .query_sql_named(&sql, params, Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT))
-        .await?;
+    let cap = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
+    let out = layer.query_sql_named(&sql, params, Some(cap)).await?;
+    if out.truncated {
+        return Err(DomainError::Invalid(format!(
+            "this read has more than {cap} rows (buckets × groups); use a coarser bucket, a narrower window or a dimension with fewer values"
+        )));
+    }
     Ok(out
         .rows
         .iter()
@@ -286,6 +297,34 @@ pub async fn series(
     Ok(points)
 }
 
+/// An event metric's headline for its (ungrouped) `series` over the whole
+/// range: one aggregate over every row for an additive metric (so a
+/// distinct count isn't summed across buckets), else the latest bucket.
+/// `None` when the series is empty.
+pub async fn headline(
+    layer: &SemanticLayer,
+    spec: &EntitySpec,
+    series: &[SeriesPoint],
+) -> Result<Option<f64>, DomainError> {
+    if series.is_empty() {
+        return Ok(None);
+    }
+    if !additive(&spec.aggregation) {
+        return Ok(series.last().map(|p| p.value));
+    }
+    let rows = run(
+        layer,
+        &EntityRead {
+            spec,
+            dim: None,
+            bucket: None,
+            window: None,
+        },
+    )
+    .await?;
+    Ok(Some(rows.first().and_then(|r| r.value).unwrap_or(0.0)))
+}
+
 fn point(at: Timestamp, value: f64, group: Option<String>) -> SeriesPoint {
     SeriesPoint {
         capture_id: 0,
@@ -349,6 +388,10 @@ mod tests {
     use oxplow_db::Database;
 
     async fn layer() -> SemanticLayer {
+        SemanticLayer::new(seeded_db().await)
+    }
+
+    async fn seeded_db() -> Database {
         let db = Database::in_memory();
         db.transaction(|c| {
             c.execute_batch(
@@ -367,7 +410,7 @@ mod tests {
         })
         .await
         .unwrap();
-        SemanticLayer::new(db)
+        db
     }
 
     fn done() -> EntitySpec {
@@ -504,6 +547,71 @@ mod tests {
             .unwrap();
         assert_eq!(by_prio[0].key, "high");
         assert_eq!(by_prio[0].value, 3.0);
+    }
+
+    /// A distinct count doesn't add across buckets: the headline is one
+    /// count over the whole range, not the sum of the daily ones (tsk367).
+    #[tokio::test]
+    async fn a_distinct_headline_counts_across_the_range() {
+        let l = layer().await;
+        let prios = EntitySpec {
+            value: Some("e.priority".into()),
+            aggregation: "count_distinct".into(),
+            ..done()
+        };
+        let s = series(&l, &prios, None, TimeBucket::Day, None)
+            .await
+            .unwrap();
+        // 09-21 {high, low}, 09-22 none, 09-23 {high}.
+        assert_eq!(
+            s.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![2.0, 0.0, 1.0]
+        );
+        assert_eq!(headline(&l, &prios, &s).await.unwrap(), Some(2.0));
+        let count = series(&l, &done(), None, TimeBucket::Day, None)
+            .await
+            .unwrap();
+        assert_eq!(headline(&l, &done(), &count).await.unwrap(), Some(3.0));
+        let latest = EntitySpec {
+            value: Some("e.sort_index".into()),
+            aggregation: "max".into(),
+            ..done()
+        };
+        let s = series(&l, &latest, None, TimeBucket::Day, None)
+            .await
+            .unwrap();
+        assert_eq!(headline(&l, &latest, &s).await.unwrap(), Some(30.0));
+        assert_eq!(headline(&l, &prios, &[]).await.unwrap(), None);
+    }
+
+    /// Past the row cap a read would lose its newest buckets; it errors
+    /// instead (tsk367).
+    #[tokio::test]
+    async fn a_read_past_the_row_cap_errors() {
+        let db = seeded_db().await;
+        let l = SemanticLayer::new(db.clone());
+        let by_id = EntityDimensionSpec {
+            view: "v_task".into(),
+            expr: "e.id".into(),
+            join: None,
+        };
+        db.transaction(|c| {
+            c.execute_batch(
+                "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 10100)
+                 INSERT INTO task (id, thread_id, title, status, priority, sort_index, created_by, created_at, updated_at)
+                 SELECT i, 1, 't', 'ready', 'low', i, 'agent', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
+            )
+            .map_err(|e| DomainError::Invalid(e.to_string()))
+        })
+        .await
+        .unwrap();
+        let all = EntitySpec {
+            where_: None,
+            time: None,
+            ..done()
+        };
+        let err = current(&l, &all, Some(&by_id)).await.unwrap_err();
+        assert!(err.to_string().contains("rows"), "{err}");
     }
 
     #[tokio::test]

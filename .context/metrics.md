@@ -846,8 +846,9 @@ the view aliased `e`.
 combine, which is what the fact path and the detail page's range stat read:
 
 - `last` for a state metric;
-- `sum` for an additive event metric (count / count_distinct / sum);
-- `avg` otherwise.
+- `sum` for an event metric whose buckets add up (count / sum);
+- `avg` otherwise, including `count_distinct`: something seen on two days
+  counts once, so its buckets must never be totalled (tsk367).
 
 The UI shows the entity aggregation (`specAggregation`).
 
@@ -870,7 +871,9 @@ The UI shows the entity aggregation (`specAggregation`).
 **Reads** (`entity_metrics.rs`):
 
 - **One SQL per read.** Everything aggregates in SQLite and one row per
-  (bucket, group) comes back, so the 10k row cap can't truncate.
+  (bucket, group) comes back. A read with more than 10k of those (e.g.
+  daily buckets × a high-cardinality dimension) is an **error**, never a
+  silently short series missing its newest buckets (tsk367).
   - The metric's `where`/`time`/`value` are evaluated in an inner query
     over the view alone. Only a dimension's `expr` sees its `join`, so a
     bare column in `where` can't turn ambiguous.
@@ -880,7 +883,10 @@ The UI shows the entity aggregation (`specAggregation`).
     `rn = (9·n+9)/10`.
 - **Event metrics** are computed live, daily unless `bucket` says
   otherwise. An ungrouped additive one is zero-filled across the window.
-  The headline is the total (additive) or the latest bucket.
+  The headline (`entity_metrics::headline`) of an additive one is one
+  unbucketed aggregate over the whole range, so a `count_distinct`
+  headline isn't the sum of its daily counts; otherwise it's the latest
+  bucket.
 - **State metrics** read their captured facts. Their grouped reads and
   breakdowns are live, current value only.
 - **Dispatch.** `series_for_spec_read`, `headline_from_series` and
