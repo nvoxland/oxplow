@@ -638,3 +638,50 @@ async fn fs_reads_and_writes_stay_inside_the_sessions_worktree() {
     assert!(!target.exists());
     assert!(!dotdot.exists());
 }
+
+#[tokio::test]
+async fn each_open_is_a_new_generation_and_its_events_say_so() {
+    let fake: Shared = Arc::new(std::sync::Mutex::new(FakeState::default()));
+    let (first, r) = open_with(
+        Host::default(),
+        fake.clone(),
+        FakeOptions::default(),
+        |_| {},
+        tempfile::tempdir().unwrap(),
+    )
+    .await;
+    r.unwrap();
+    let g1 = first.mgr.transcript(&thread(), 0).unwrap().generation;
+    first.mgr.close(&thread()).unwrap();
+    // Reopening on the same manager (a Restart) starts a new generation.
+    let mut events = first.mgr.subscribe();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (client, agent) = tokio::io::duplex(1 << 16);
+    let (ar, aw) = tokio::io::split(agent);
+    tokio::spawn(async move {
+        let _ = oxplow_acp_fake::serve(ar, aw, fake, FakeOptions::default()).await;
+    });
+    let (cr, cw) = tokio::io::split(client);
+    first
+        .mgr
+        .open_with_io(first.host.clone(), spec(first.dir.path()), cw, cr)
+        .await
+        .unwrap();
+    let g2 = first.mgr.transcript(&thread(), 0).unwrap().generation;
+    assert_ne!(g1, g2);
+    // Late events from the closed session still carry its generation, so
+    // a client can tell them from the new session's.
+    let seen = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut seen = Vec::new();
+        loop {
+            let e = events.recv().await.unwrap();
+            seen.push(e.generation);
+            if e.generation == g2 {
+                return seen;
+            }
+        }
+    })
+    .await
+    .expect("an event from the new session");
+    assert!(seen.iter().all(|g| *g == g1 || *g == g2), "{seen:?}");
+}

@@ -35,6 +35,9 @@ pub struct Launch {
 #[serde(rename_all = "camelCase")]
 pub struct AcpSnapshot {
     pub agent: String,
+    /// The session's generation: a new one (a Restart) replaces the
+    /// client's transcript instead of merging into it.
+    pub generation: u64,
     pub status: AcpStatus,
     pub directive: Option<String>,
     pub usage: Option<ContextUsage>,
@@ -52,6 +55,8 @@ struct Handle {
 pub struct AcpManager {
     sessions: Mutex<HashMap<ThreadId, Handle>>,
     events: broadcast::Sender<AcpEvent>,
+    /// Hands out session generations; one per open.
+    next_generation: std::sync::atomic::AtomicU64,
 }
 
 impl Default for AcpManager {
@@ -66,6 +71,7 @@ impl AcpManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             events,
+            next_generation: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
@@ -116,7 +122,7 @@ impl AcpManager {
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             return Err(AcpError::Agent("the agent's stdio is unavailable".into()));
         };
-        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent)));
+        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, self.generation())));
         if let Some(stderr) = child.stderr.take() {
             let view = view.clone();
             tokio::spawn(async move {
@@ -146,8 +152,13 @@ impl AcpManager {
         if self.is_open(&spec.thread_id) {
             return Ok(());
         }
-        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent)));
+        let view = Arc::new(Mutex::new(SessionView::new(&spec.agent, self.generation())));
         self.start(host, spec, view, write, read, None).await
+    }
+
+    fn generation(&self) -> u64 {
+        self.next_generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     async fn start<W, R>(
@@ -252,6 +263,7 @@ impl AcpManager {
         let v = sessions.get(thread)?.view.lock();
         Some(AcpSnapshot {
             agent: v.agent.clone(),
+            generation: v.generation,
             status: v.status,
             directive: v.directive.clone(),
             usage: v.transcript.usage().cloned(),
@@ -265,9 +277,14 @@ impl AcpManager {
     pub fn dismiss_directive(&self, thread: &ThreadId) -> Result<(), AcpError> {
         let sessions = self.sessions.lock();
         let h = sessions.get(thread).ok_or(AcpError::NotOpen)?;
-        h.view.lock().directive = None;
+        let generation = {
+            let mut v = h.view.lock();
+            v.directive = None;
+            v.generation
+        };
         let _ = self.events.send(AcpEvent {
             thread_id: thread.to_string(),
+            generation,
             body: AcpEventBody::Directive { text: None },
         });
         Ok(())

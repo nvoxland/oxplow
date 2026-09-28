@@ -13,6 +13,9 @@ import type { AcpEvent, AcpSnapshot, AcpStatus, ContextUsage, TranscriptItem } f
 
 export interface AcpViewState {
   agent: string;
+  /// The session generation this state holds; a new one (a Restart)
+  /// starts over rather than merging, since its ids and seqs restart.
+  generation: number | null;
   status: AcpStatus;
   /** Ordered by id (creation order). */
   items: TranscriptItem[];
@@ -28,6 +31,7 @@ export interface AcpViewState {
 export function initialState(): AcpViewState {
   return {
     agent: "",
+    generation: null,
     status: "starting",
     items: [],
     headSeq: 0,
@@ -55,12 +59,14 @@ export function fromSnapshot(s: AcpSnapshot): AcpViewState {
 
 /** Fold a (possibly partial, `since`) snapshot in. */
 export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState {
+  const base = sameGeneration(state, s.generation) ? state : initialState();
   return {
-    ...state,
+    ...base,
+    generation: s.generation,
     agent: s.agent,
     status: s.status,
-    items: upsertItems(state.items, s.items),
-    headSeq: Math.max(state.headSeq, s.headSeq),
+    items: upsertItems(base.items, s.items),
+    headSeq: Math.max(base.headSeq, s.headSeq),
     directive: s.directive,
     usage: s.usage,
     stderrTail: s.stderrTail,
@@ -68,7 +74,16 @@ export function mergeSnapshot(state: AcpViewState, s: AcpSnapshot): AcpViewState
   };
 }
 
-export function applyEvent(state: AcpViewState, e: AcpEvent): AcpViewState {
+/// Whether `generation` is the one `state` holds (or `state` holds none yet).
+function sameGeneration(state: AcpViewState, generation: number | undefined): boolean {
+  return state.generation === null || generation === undefined || generation === state.generation;
+}
+
+export function applyEvent(prev: AcpViewState, e: AcpEvent): AcpViewState {
+  // A new session's first event: start over (keeping the agent's name).
+  const state: AcpViewState = sameGeneration(prev, e.generation)
+    ? { ...prev, generation: prev.generation ?? e.generation ?? null }
+    : { ...initialState(), agent: prev.agent, generation: e.generation };
   switch (e.type) {
     case "item": {
       // Past a gap the head stays put: it's the last seq known to have

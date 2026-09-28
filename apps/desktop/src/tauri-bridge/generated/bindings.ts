@@ -1192,6 +1192,11 @@ export const commands = {
 	 */
 	acpTranscript: (threadId: ThreadId, sinceSeq: number) => typedError<{
 	agent: string,
+	/**
+	 *  The session's generation: a new one (a Restart) replaces the
+	 *  client's transcript instead of merging into it.
+	 */
+	generation: number,
 	status: AcpStatus,
 	directive: string | null,
 	usage: ContextUsage | null,
@@ -1320,6 +1325,12 @@ export type AcpAgentSource =
 // A change to one thread's ACP session, pushed to the UI.
 export type AcpEvent = {
 	threadId: string,
+	/**
+	 *  Which session of the thread: each open is a new generation whose
+	 *  ids and seqs start over, so a client resets rather than merging it
+	 *  with the last one's transcript.
+	 */
+	generation: number,
 } & (AcpEventBody);
 
 export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "status"; status: AcpStatus } | { type: "directive"; text: string | null } | { type: "usage"; usage: ContextUsage } | { type: "closed"; reason: string | null };
@@ -1327,6 +1338,11 @@ export type AcpEventBody = { type: "item"; item: TranscriptItem } | { type: "sta
 // A session as the UI reads it.
 export type AcpSnapshot = {
 	agent: string,
+	/**
+	 *  The session's generation: a new one (a Restart) replaces the
+	 *  client's transcript instead of merging into it.
+	 */
+	generation: number,
 	status: AcpStatus,
 	directive: string | null,
 	usage: ContextUsage | null,

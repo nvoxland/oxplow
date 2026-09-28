@@ -661,6 +661,7 @@ mod tests {
             loop {
                 svc.acp.emit_event_for_tests(AcpEvent {
                     thread_id: "thr3".into(),
+                    generation: 1,
                     body: AcpEventBody::Status {
                         status: AcpStatus::Running,
                     },

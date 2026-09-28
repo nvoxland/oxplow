@@ -109,3 +109,20 @@ describe("acp transcript reducer", () => {
     expect(contextPercent({ used: 1, size: 0, costAmount: null, costCurrency: null })).toBeNull();
   });
 });
+
+describe("session generations (Restart)", () => {
+  test("a new generation's snapshot replaces the old transcript", () => {
+    let s = fromSnapshot(snap([agent(1, 9, "old one"), agent(2, 10, "old two")], { generation: 1 }));
+    s = mergeSnapshot(s, snap([agent(1, 1, "new")], { generation: 2 }));
+    expect(s.items.map((i) => (i.type === "agent" ? i.text : ""))).toEqual(["new"]);
+    expect(s.headSeq).toBe(1);
+  });
+
+  test("a new generation's event starts fresh instead of losing to old seqs", () => {
+    let s = fromSnapshot(snap([agent(1, 9, "old")], { generation: 1 }));
+    s = applyEvent(s, { threadId: "thr1", generation: 2, type: "item", item: agent(1, 1, "new") });
+    expect(s.items.map((i) => (i.type === "agent" ? i.text : ""))).toEqual(["new"]);
+    expect(s.generation).toBe(2);
+    expect(s.stale).toBe(false);
+  });
+});

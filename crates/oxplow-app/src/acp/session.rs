@@ -62,6 +62,10 @@ pub enum AcpEventBody {
 #[serde(rename_all = "camelCase")]
 pub struct AcpEvent {
     pub thread_id: String,
+    /// Which session of the thread: each open is a new generation whose
+    /// ids and seqs start over, so a client resets rather than merging it
+    /// with the last one's transcript.
+    pub generation: u64,
     #[serde(flatten)]
     pub body: AcpEventBody,
 }
@@ -104,6 +108,8 @@ pub struct SessionSpec {
 #[derive(Debug)]
 pub struct SessionView {
     pub agent: String,
+    /// This session's generation (see [`AcpEvent::generation`]).
+    pub generation: u64,
     pub status: AcpStatus,
     pub transcript: Transcript,
     pub directive: Option<String>,
@@ -115,9 +121,10 @@ pub struct SessionView {
 pub const STDERR_TAIL: usize = 64;
 
 impl SessionView {
-    pub fn new(agent: &str) -> Self {
+    pub fn new(agent: &str, generation: u64) -> Self {
         Self {
             agent: agent.to_string(),
+            generation,
             status: AcpStatus::Starting,
             transcript: Transcript::default(),
             directive: None,
@@ -156,6 +163,7 @@ struct Pending {
 
 pub(super) struct Actor {
     spec: SessionSpec,
+    generation: u64,
     host: Arc<dyn AcpHost>,
     view: Arc<Mutex<SessionView>>,
     events: broadcast::Sender<AcpEvent>,
@@ -184,8 +192,10 @@ impl Actor {
         view: Arc<Mutex<SessionView>>,
         events: broadcast::Sender<AcpEvent>,
     ) -> Self {
+        let generation = view.lock().generation;
         Self {
             spec,
+            generation,
             host,
             view,
             events,
@@ -205,6 +215,7 @@ impl Actor {
     fn emit(&self, body: AcpEventBody) {
         let _ = self.events.send(AcpEvent {
             thread_id: self.spec.thread_id.to_string(),
+            generation: self.generation,
             body,
         });
     }
