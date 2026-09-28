@@ -392,6 +392,20 @@ policy that every agent transport asks, not logic in the hook route.
   - `on_turn_end(svc, thread, signals)` is the Stop pipeline below. It
     owns `StopState`, the reason builders and `describe_run`.
   - `claude_intent(body)` maps a Claude-shaped payload to an intent.
+- **Recording and prompt context** are shared the same way:
+  `Services.agent_activity` (`crates/oxplow-app/src/agent_activity.rs`,
+  tsk334).
+  - `on_post_tool` covers wiki attribution, the effort-file claim, the
+    `v_tool_call` row, and collection plus post-tool advisories (run
+    detached). It returns the ROLE CHANGE banner or a nudge.
+  - `prompt_context` builds the session-context block, advisories and
+    decisions, deduped per session.
+  - `mine_turn_signals`, `track_resume` / `clear_resume_on_session_end`
+    and `reset_session` round it out.
+  - Transports that don't speak Claude's tool vocabulary build a
+    `CanonicalToolEvent` and record its `to_payload()`. That is the one
+    place the canonical shape is built; every recorder and hook-log
+    reader keys on Claude's tool names.
 - **Transports only render the answer.**
   - The hook route renders `hookSpecificOutput` for a deny and
     `{decision:"block", reason}` for Stop.

@@ -8,6 +8,7 @@
 //! on `Services` are the high-level "use cases" the IPC layer calls.
 
 pub mod advisories;
+pub mod agent_activity;
 pub mod agent_command;
 pub mod agent_pane;
 pub mod agent_path;
@@ -477,6 +478,8 @@ pub struct Services {
     /// Write guard, filing and the Stop directive, shared by every agent
     /// transport (the hook route, ACP).
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
+    /// Recording and prompt context shared by every agent transport.
+    pub agent_activity: Arc<agent_activity::AgentActivity>,
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
@@ -784,6 +787,7 @@ impl Services {
             blobs,
             lsp_sessions: lsp,
             agent_policy: Arc::new(agent_policy::AgentPolicy::default()),
+            agent_activity: Arc::new(agent_activity::AgentActivity::default()),
             lsp_installer: lsp_installer_svc,
             terminal_sessions,
             output_activity,
