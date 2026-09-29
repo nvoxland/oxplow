@@ -395,10 +395,18 @@ had it experimental, but the bundled `oxplow-analytics` — shared by
 definition — ships on it, and a first-party extension depending on a
 kind is exactly the evidence promotion requires (target §10.1, §12).
 
-**v1 still loads.** A manifest with no `manifest:` key is read as v1
-(`sources`, `slots`, no intent), converted in memory, and carries a
-warning to run `oxplow plugin migrate` (P1.12). `Extension.manifest_version`
-says which path a loaded extension took.
+**v1 still loads, through the migrator.** A manifest with no `manifest:`
+key is v1 (`sources`, `slots`, no intent). The loader runs
+`extensions::migrate_v1::migrate_v1_to_v2` on its text in memory, reads
+the result as v2, and carries a warning to run `oxplow plugin migrate`
+(P1.14 writes the same text to the file). The migration is **textual**
+so a person's consent survives it: it prepends `manifest: 2`, inserts
+`sharing: private` and an `intent` skeleton (`purpose` from
+`description`, `origin: null`, `examples: []` — the agent fills those
+in) after the header, and renames the top-level `sources:` →
+`collectors:` and `slots:` → `slot_mounts:`; every other byte,
+comments included, is unchanged, and it is idempotent.
+`Extension.manifest_version` says which path a loaded extension took.
 
 **Consent is unaffected by the migration.** `approval_hash` never
 included `extension.yaml`, and the advisory program hash is over the

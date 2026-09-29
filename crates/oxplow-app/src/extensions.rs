@@ -17,7 +17,8 @@ use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
 pub mod manifest_v2;
-use manifest_v2::{at, key_line, line_under, ManifestV2, SlotMount};
+pub mod migrate_v1;
+use manifest_v2::{at, key_line, line_under, ManifestV2};
 pub use manifest_v2::{Intent, IntentExample, Sharing};
 
 /// Where project extensions live, relative to a worktree root.
@@ -430,78 +431,6 @@ fn default_viz() -> LensViz {
     LensViz::Table
 }
 
-/// `extension.yaml` as written on disk at manifest v1 (no `manifest:`
-/// key). Still read — converted to [`ManifestV2`] in memory with a
-/// warning — so an unmigrated extension keeps loading while
-/// `oxplow plugin migrate` rewrites its file.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExtensionFile {
-    name: String,
-    #[serde(default)]
-    description: String,
-    /// Parsed separately by [`crate::extension_sources::parse_sources`] so
-    /// one bad source doesn't fail the whole manifest.
-    #[serde(default)]
-    sources: Option<serde_yaml::Value>,
-    #[serde(default)]
-    slots: Vec<SlotFile>,
-    /// Parsed one by one so a bad advisory doesn't fail the manifest.
-    #[serde(default)]
-    advisories: Vec<serde_yaml::Value>,
-    /// Same schema as `.oxplow/project.yaml`; validated per block so a bad
-    /// one doesn't fail the manifest.
-    #[serde(default)]
-    measures: Option<serde_yaml::Value>,
-    #[serde(default)]
-    metrics: Option<serde_yaml::Value>,
-    #[serde(default)]
-    gauges: Option<serde_yaml::Value>,
-    #[serde(default)]
-    dimensions: Option<serde_yaml::Value>,
-}
-
-/// The v1 manifest as a v2 one: `sources` → `collectors`, `slots` →
-/// `slot_mounts`, no intent, private. What `oxplow plugin migrate`
-/// writes to disk, applied in memory here.
-fn v1_to_v2(m: ExtensionFile) -> ManifestV2 {
-    ManifestV2 {
-        manifest: manifest_v2::CURRENT,
-        name: m.name,
-        description: m.description,
-        sharing: Sharing::Private,
-        engine: None,
-        intent: None,
-        models: None,
-        measures: m.measures,
-        metrics: m.metrics,
-        gauges: m.gauges,
-        dimensions: m.dimensions,
-        collectors: m.sources,
-        commands: None,
-        pages: None,
-        panels: None,
-        launcher: Vec::new(),
-        slot_mounts: m
-            .slots
-            .into_iter()
-            .map(|s| SlotMount {
-                slot: s.slot,
-                lens: s.lens,
-            })
-            .collect(),
-        config: None,
-        providers: None,
-        effects: None,
-        event_types: None,
-        ref_kinds: None,
-        custom_components: None,
-        decorators: None,
-        replacements: None,
-        advisories: m.advisories,
-    }
-}
-
 /// When core runs an advisory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "kebab-case")]
@@ -554,13 +483,6 @@ struct AdvisoryFile {
     once_per: AdvisoryOncePer,
     #[serde(default)]
     heading: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SlotFile {
-    slot: String,
-    lens: String,
 }
 
 /// Places in core pages an extension can mount a lens, and the params each
@@ -932,15 +854,17 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         return ext;
     };
     let file = format!("{rel}/extension.yaml");
-    // `manifest: 2` says which shape to read; a file without it is v1.
+    // `manifest: 2` says which shape to read; a file without it is v1 and
+    // is read through the same textual migration `oxplow plugin migrate`
+    // writes, so the two can't disagree.
     let is_v2 = key_line(&manifest, "manifest").is_some();
-    let parsed: Result<ManifestV2, String> = if is_v2 {
-        serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string())
+    let manifest = if is_v2 {
+        manifest
     } else {
-        serde_yaml::from_str::<ExtensionFile>(&manifest)
-            .map(v1_to_v2)
-            .map_err(|e| e.to_string())
+        migrate_v1::migrate_v1_to_v2(&manifest)
     };
+    let parsed: Result<ManifestV2, String> =
+        serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string());
     let m = match parsed {
         Ok(m) if m.name != name => {
             ext.errors.push(format!(
@@ -974,13 +898,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = &m.collectors {
             let (sources, errors) = crate::extension_sources::parse_sources(name, v);
             ext.sources = sources;
-            ext.errors.extend(errors.into_iter().map(|e| {
-                at(
-                    &file,
-                    key_line(&manifest, "collectors").or_else(|| key_line(&manifest, "sources")),
-                    e,
-                )
-            }));
+            ext.errors.extend(
+                errors
+                    .into_iter()
+                    .map(|e| at(&file, key_line(&manifest, "collectors"), e)),
+            );
         }
         for v in m.advisories.clone() {
             match serde_yaml::from_value::<AdvisoryFile>(v).map(|a| Advisory {
@@ -1207,8 +1129,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             _ => vec![],
         };
-        let mount_line = line_under(&manifest, "slot_mounts", &format!("lens: {}", s.lens))
-            .or_else(|| line_under(&manifest, "slots", &format!("lens: {}", s.lens)));
+        let mount_line = line_under(&manifest, "slot_mounts", &format!("lens: {}", s.lens));
         if slot_params.is_none() {
             ext.errors.push(at(
                 &file,
@@ -2823,7 +2744,11 @@ empty: No tasks.
         let e = only(dir.path(), "review");
         assert!(e.errors.is_empty(), "{:?}", e.errors);
         assert_eq!(e.manifest_version, 1);
-        assert!(e.intent.is_none());
+        // The migrator's skeleton intent: purpose from the description,
+        // examples left for the agent to fill in.
+        let intent = e.intent.as_ref().expect("skeleton intent");
+        assert_eq!(intent.purpose, "Review helpers");
+        assert!(intent.examples.is_empty());
         assert!(
             e.warnings
                 .iter()
