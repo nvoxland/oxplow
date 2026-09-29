@@ -50,7 +50,83 @@ pub struct OxplowMcp {
     tool_router: ToolRouter<Self>,
 }
 
+// ---------- caller identity ----------
+
+/// Who is calling: the agent thread (and stream) behind an MCP request.
+///
+/// Every harness carries it on the HTTP request — `X-Oxplow-Thread` /
+/// `X-Oxplow-Stream` headers (ACP, opencode, Claude's per-thread MCP
+/// config) or `?thread=…&stream=…` on the endpoint URL (Codex, whose
+/// config has no per-session headers). rmcp hands the request's
+/// `http::request::Parts` to tools through the call's `Extensions`;
+/// [`caller_of`] reads them. A transport that carries neither (stdio) is
+/// an anonymous agent: it may read, and `run_command` refuses to write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpCaller {
+    pub thread_id: Option<oxplow_domain::ThreadId>,
+    pub stream_id: Option<oxplow_domain::StreamId>,
+}
+
+impl McpCaller {
+    pub fn from_parts(parts: &http::request::Parts) -> Self {
+        let header = |name: &str| {
+            parts
+                .headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        let query = |key: &str| {
+            parts.uri.query().and_then(|q| {
+                q.split('&').find_map(|pair| {
+                    let (k, v) = pair.split_once('=')?;
+                    (k == key && !v.is_empty()).then(|| v.to_string())
+                })
+            })
+        };
+        let thread = header("x-oxplow-thread").or_else(|| query("thread"));
+        let stream = header("x-oxplow-stream").or_else(|| query("stream"));
+        Self {
+            thread_id: thread.and_then(|t| t.parse().ok()),
+            stream_id: stream.and_then(|s| s.parse().ok()),
+        }
+    }
+
+    pub fn actor(&self) -> oxplow_domain::Actor {
+        oxplow_domain::Actor::Agent {
+            thread_id: self.thread_id,
+            stream_id: self.stream_id,
+        }
+    }
+}
+
+/// The caller behind a tool call, from the request extensions rmcp
+/// attaches; anonymous when the transport carried no HTTP parts.
+pub fn caller_of(extensions: &rmcp::model::Extensions) -> McpCaller {
+    extensions
+        .get::<http::request::Parts>()
+        .map(McpCaller::from_parts)
+        .unwrap_or_default()
+}
+
+/// What `run_command` says to a caller with no thread identity.
+const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (no X-Oxplow-Thread \
+    header or ?thread= on the endpoint URL), so it may not run commands; oxplow's own harness \
+    configs set it — reconnect through one";
+
 // ---------- request shapes ----------
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RunCommandParams {
+    /// The command's name, as `list_commands` reports it (`config.set`,
+    /// `work_item.transition`).
+    pub name: String,
+    /// The command's input, matching its `input_schema`.
+    #[serde(default)]
+    pub input: serde_json::Value,
+}
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct StreamIdParams {
@@ -4555,6 +4631,7 @@ impl OxplowMcp {
     #[tool(description = "Transition a batch of tasks to the same status.")]
     async fn transition_tasks(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<TransitiontasksParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
@@ -4564,12 +4641,9 @@ impl OxplowMcp {
         }
         let target = parse_status(&p.status)?;
         // Each transition is the `work_item.transition` command, run as
-        // the agent: audited, policy-checked, and `command.executed` logged.
-        // The transport carries no thread identity yet (P1.10 adds it).
-        let actor = oxplow_domain::Actor::Agent {
-            thread_id: None,
-            stream_id: None,
-        };
+        // the calling agent: audited, policy-checked, `command.executed`
+        // logged with `source = agent:thr…`.
+        let actor = caller_of(&extensions).actor();
         let mut updated: Vec<oxplow_domain::Task> = Vec::with_capacity(parsed_ids.len());
         for id in parsed_ids {
             let outcome = self
@@ -4899,6 +4973,37 @@ impl OxplowMcp {
             .await
             .map_err(internal)?;
         json_result(&edges)
+    }
+
+    #[tool(
+        description = "The commands this agent may run through `run_command`, each with its \
+                       input schema, one-line summary, whether it needs a person's confirmation \
+                       and whether it is undoable. Commands are the one write path: every run \
+                       is validated, policy-checked, audited and logged as `command.executed`."
+    )]
+    async fn list_commands(
+        &self,
+        extensions: rmcp::model::Extensions,
+    ) -> Result<CallToolResult, McpError> {
+        let actor = caller_of(&extensions).actor();
+        json_result(&self.services.commands.list(&actor))
+    }
+
+    #[tool(
+        description = "Run a command by name with its input (see `list_commands`). Returns \
+                       `{ result, audit_id, event_id, inverse? }`. Invalid input names the \
+                       failing field; a denied command says why; a command that needs a \
+                       person's confirmation is not run — tell the person what to run. \
+                       Requires the connection's thread identity: an anonymous connection may \
+                       not write."
+    )]
+    async fn run_command(
+        &self,
+        extensions: rmcp::model::Extensions,
+        params: Parameters<RunCommandParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let caller = caller_of(&extensions);
+        self.run_command_as(&caller, params.0).await
     }
 
     #[tool(
@@ -5624,6 +5729,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_backlinks",
     "list_outbound",
     "list_dead_letters",
+    "list_commands",
     "find_wiki_pages_for_wiki_page",
     "lsp_definition",
     "lsp_hover",
@@ -5641,6 +5747,8 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    // The one write path: every command, audited to the calling thread.
+    "run_command",
     // The dead-letter queue's two decisions.
     "retry_dead_letter",
     "discard_dead_letter",
@@ -6325,6 +6433,27 @@ impl<T: serde::Serialize> WithLinkWarnings<T> {
             inner,
             link_warnings,
         }
+    }
+}
+
+impl OxplowMcp {
+    /// `run_command` for a known caller. Refuses an anonymous connection:
+    /// a write with no actor behind it is not audited to anyone.
+    pub async fn run_command_as(
+        &self,
+        caller: &McpCaller,
+        params: RunCommandParams,
+    ) -> Result<CallToolResult, McpError> {
+        if caller.thread_id.is_none() {
+            return Err(McpError::invalid_params(ANONYMOUS_WRITE, None));
+        }
+        let outcome = self
+            .services
+            .commands
+            .run(&caller.actor(), &params.name, params.input, false)
+            .await
+            .map_err(command_error)?;
+        json_result(&outcome)
     }
 }
 
@@ -7589,6 +7718,145 @@ mod tests {
             msg.contains("item_id") && msg.contains("thread_id"),
             "error should name both ways to dispatch: {msg}",
         );
+    }
+
+    fn parts_with(headers: &[(&str, &str)], uri: &str) -> http::request::Parts {
+        let mut b = http::Request::builder().uri(uri);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        b.body(()).unwrap().into_parts().0
+    }
+
+    fn extensions_for(parts: http::request::Parts) -> rmcp::model::Extensions {
+        let mut ext = rmcp::model::Extensions::new();
+        ext.insert(parts);
+        ext
+    }
+
+    #[test]
+    fn mcp_caller_reads_the_identity_headers_then_the_url_query() {
+        let c = McpCaller::from_parts(&parts_with(
+            &[("x-oxplow-thread", "thr3"), ("x-oxplow-stream", "str2")],
+            "http://h/mcp",
+        ));
+        assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(3)));
+        assert_eq!(c.stream_id, Some(oxplow_domain::StreamId::new(2)));
+        assert_eq!(c.actor().source(), "agent:thr3");
+        // Codex has no per-session headers: the identity rides the URL.
+        let c = McpCaller::from_parts(&parts_with(&[], "http://h/mcp?thread=thr5&stream=str1"));
+        assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(5)));
+        assert_eq!(c.stream_id, Some(oxplow_domain::StreamId::new(1)));
+        // Headers win over the query; garbage is anonymous.
+        let c = McpCaller::from_parts(&parts_with(
+            &[("x-oxplow-thread", "thr9")],
+            "http://h/mcp?thread=thr5",
+        ));
+        assert_eq!(c.thread_id, Some(oxplow_domain::ThreadId::new(9)));
+        let c = McpCaller::from_parts(&parts_with(&[("x-oxplow-thread", "nope")], "http://h/mcp"));
+        assert_eq!(c, McpCaller::default());
+        assert_eq!(
+            caller_of(&rmcp::model::Extensions::new()),
+            McpCaller::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn run_command_refuses_an_anonymous_connection_and_lists_for_agents() {
+        let (_proj, _services, server) = boot();
+        let err = server
+            .run_command_as(
+                &McpCaller::default(),
+                RunCommandParams {
+                    name: "config.set".into(),
+                    input: serde_json::json!({"key": "zones", "value": []}),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("thread identity"), "{err}");
+        // Listing needs no identity and shows agent-invocable commands.
+        let listed = server
+            .list_commands(rmcp::model::Extensions::new())
+            .await
+            .unwrap();
+        let text = listed.content[0].as_text().unwrap().text.clone();
+        let specs: Vec<serde_json::Value> = serde_json::from_str(&text).unwrap();
+        let names: Vec<&str> = specs.iter().map(|s| s["name"].as_str().unwrap()).collect();
+        for expected in ["config.set", "config.list_keys", "work_item.transition"] {
+            assert!(names.contains(&expected), "{names:?}");
+        }
+        assert!(specs
+            .iter()
+            .all(|s| s["input_schema"].is_object() && s["summary"].is_string()));
+    }
+
+    /// The zones write path after `set_zones` (tsk392): the agent runs
+    /// `config.set` through `run_command`, and the run is audited to the
+    /// calling thread.
+    #[tokio::test]
+    async fn run_command_sets_zones_as_the_calling_thread() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        let parts = parts_with(
+            &[
+                ("x-oxplow-thread", &thread.id.to_string()),
+                ("x-oxplow-stream", &stream.id.to_string()),
+            ],
+            "http://h/mcp",
+        );
+        let out = server
+            .run_command(
+                extensions_for(parts),
+                Parameters(RunCommandParams {
+                    name: "config.set".into(),
+                    input: serde_json::json!({
+                        "key": "zones",
+                        "value": [{"match": "src/**", "zone": "core"}]
+                    }),
+                }),
+            )
+            .await
+            .unwrap();
+        let text = out.content[0].as_text().unwrap().text.clone();
+        let outcome: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(outcome["result"]["changed"], true);
+        assert!(outcome["audit_id"].is_number());
+        let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
+        assert!(yaml.contains("zone: core"), "{yaml}");
+        assert_eq!(services.config.read().unwrap().zones.len(), 1);
+        let events = services.event_log_store.read_after(0, 20).await.unwrap();
+        let executed = events
+            .iter()
+            .find(|e| e.envelope.event_type == "command.executed")
+            .expect("command.executed logged");
+        assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
+        assert_eq!(executed.envelope.anchors.thread_id, Some(thread.id));
+        assert_eq!(executed.envelope.payload["command"], "config.set");
+        // A human-only key is not the agent's to set.
+        let err = server
+            .run_command_as(
+                &McpCaller {
+                    thread_id: Some(thread.id),
+                    stream_id: Some(stream.id),
+                },
+                RunCommandParams {
+                    name: "config.set".into(),
+                    input: serde_json::json!({"key": "ai", "value": {"roles": {}}}),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("confirmation"), "{err}");
     }
 
     #[tokio::test]

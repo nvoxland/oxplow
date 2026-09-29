@@ -168,6 +168,10 @@ pub const MANIFEST: &[Capability] = &[
     both("remove_followup"),
     both("list_backlinks"),
     both("list_outbound"),
+    // ---- the command bus (agent side; the UI reaches commands through
+    // lenses, the launcher and menus) ----
+    agent("list_commands"),
+    agent("run_command"),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
     both("retry_dead_letter"),

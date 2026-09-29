@@ -140,3 +140,125 @@ async fn mcp_rejects_a_missing_bearer_token() {
         .unwrap();
     assert_eq!(resp.status(), 401);
 }
+
+/// The identity headers oxplow's harness configs send (`X-Oxplow-Thread` /
+/// `X-Oxplow-Stream`) reach the tools through rmcp's request parts: a
+/// `run_command` over the wire is audited to that thread, and a session
+/// that sends none may not write.
+#[tokio::test]
+async fn run_command_over_http_is_audited_to_the_thread_in_the_headers() {
+    use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+    let (cp, services, root, _dir) = boot().await;
+    let url = cp.mcp_endpoint_url();
+    let token = cp.hook_token.clone();
+    let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+    let thread = services
+        .thread_store
+        .list_for_stream(&stream.id)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("primary stream has a writer thread");
+    let client = reqwest::Client::builder()
+        .default_headers({
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert("x-oxplow-thread", thread.id.to_string().parse().unwrap());
+            h.insert("x-oxplow-stream", stream.id.to_string().parse().unwrap());
+            h
+        })
+        .build()
+        .unwrap();
+
+    let (session, _) = post(
+        &client,
+        &url,
+        &token,
+        None,
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "mcp-wire-test", "version": "0"}
+            }
+        }),
+    )
+    .await;
+    let session = session.expect("server assigns an Mcp-Session-Id");
+    post(
+        &client,
+        &url,
+        &token,
+        Some(&session),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    )
+    .await;
+    let (_, call) = post(
+        &client,
+        &url,
+        &token,
+        Some(&session),
+        json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "run_command", "arguments": {
+                "name": "config.set",
+                "input": {"key": "zones", "value": [{"match": "src/**", "zone": "core"}]}
+            }}
+        }),
+    )
+    .await;
+    let call = call.unwrap();
+    assert_ne!(call["result"]["isError"], true, "{call}");
+    let yaml = std::fs::read_to_string(root.join(".oxplow/project.yaml")).unwrap();
+    assert!(yaml.contains("zone: core"), "{yaml}");
+    let events = services.event_log_store.read_after(0, 20).await.unwrap();
+    let executed = events
+        .iter()
+        .find(|e| e.envelope.event_type == "command.executed")
+        .expect("command.executed logged");
+    assert_eq!(executed.envelope.source, format!("agent:{}", thread.id));
+
+    // The same call from a session with no identity headers is refused.
+    let anon = reqwest::Client::new();
+    let (session, _) = post(
+        &anon,
+        &url,
+        &token,
+        None,
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "mcp-wire-test", "version": "0"}
+            }
+        }),
+    )
+    .await;
+    let session = session.unwrap();
+    post(
+        &anon,
+        &url,
+        &token,
+        Some(&session),
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    )
+    .await;
+    let (_, call) = post(
+        &anon,
+        &url,
+        &token,
+        Some(&session),
+        json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "run_command", "arguments": {
+                "name": "config.set", "input": {"key": "zones", "value": []}
+            }}
+        }),
+    )
+    .await;
+    let call = call.unwrap();
+    let text = call.to_string();
+    assert!(text.contains("thread identity"), "{call}");
+}

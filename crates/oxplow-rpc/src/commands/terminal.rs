@@ -15,14 +15,40 @@ use oxplow_domain::AgentKind;
 use crate::error::IpcError;
 use crate::RpcContext;
 
+/// The MCP endpoint with the calling thread's identity in the query
+/// string, for a harness whose MCP config has no per-session headers
+/// (Codex). The control plane reads `?thread=…&stream=…` like the
+/// `X-Oxplow-*` headers.
+fn mcp_url_with_identity(
+    mcp_endpoint_url: &str,
+    thread_id: Option<&str>,
+    stream_id: &str,
+) -> String {
+    let sep = if mcp_endpoint_url.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
+    match thread_id {
+        Some(t) => format!("{mcp_endpoint_url}{sep}thread={t}&stream={stream_id}"),
+        None => format!("{mcp_endpoint_url}{sep}stream={stream_id}"),
+    }
+}
+
 fn codex_config_overrides(
     paths: &oxplow_plugin::CodexRuntimePaths,
     mcp_endpoint_url: &str,
+    thread_id: Option<&str>,
+    stream_id: &str,
 ) -> Vec<String> {
     let mut out = vec![
         format!(
             "mcp_servers.oxplow.url={}",
-            toml_cli_string(mcp_endpoint_url)
+            toml_cli_string(&mcp_url_with_identity(
+                mcp_endpoint_url,
+                thread_id,
+                stream_id
+            ))
         ),
         "mcp_servers.oxplow.bearer_token_env_var=\"OXPLOW_HOOK_TOKEN\"".into(),
     ];
@@ -158,8 +184,12 @@ fn opencode_config_content(
                 "type": "remote",
                 "url": mcp_endpoint_url,
                 "enabled": true,
+                // opencode substitutes `{env:…}` in headers, so the
+                // per-spawn identity env vars ride along with the token.
                 "headers": {
                     "Authorization": "Bearer {env:OXPLOW_HOOK_TOKEN}",
+                    "X-Oxplow-Thread": "{env:OXPLOW_THREAD_ID}",
+                    "X-Oxplow-Stream": "{env:OXPLOW_STREAM_ID}",
                 },
             },
         },
@@ -385,11 +415,30 @@ pub async fn open_terminal_session(
     match &agent_runtime {
         oxplow_plugin::AgentRuntimePaths::Claude(paths) => {
             opts.plugin_dir = Some(paths.plugin_dir.to_string_lossy().into_owned());
-            opts.mcp_config = Some(paths.mcp_config.to_string_lossy().into_owned());
+            // Claude's MCP config can't read env vars, so the thread's
+            // identity is baked into a per-thread file (like the token).
+            let mcp_config = match thread_id_str.as_deref() {
+                Some(thread) => oxplow_plugin::write_claude_mcp_config(
+                    &paths.plugin_dir,
+                    &plugin_runtime.mcp_endpoint_url,
+                    &plugin_runtime.hook_token,
+                    oxplow_plugin::McpIdentity {
+                        thread_id: thread,
+                        stream_id: &stream.id.to_string(),
+                    },
+                )
+                .map_err(|e| IpcError::internal(format!("mcp config write failed: {e}")))?,
+                None => paths.mcp_config.clone(),
+            };
+            opts.mcp_config = Some(mcp_config.to_string_lossy().into_owned());
         }
         oxplow_plugin::AgentRuntimePaths::Codex(paths) => {
-            opts.codex_config_overrides =
-                codex_config_overrides(paths, &plugin_runtime.mcp_endpoint_url);
+            opts.codex_config_overrides = codex_config_overrides(
+                paths,
+                &plugin_runtime.mcp_endpoint_url,
+                thread_id_str.as_deref(),
+                &stream.id.to_string(),
+            );
             // Codex exports token-usage metrics via OTEL to the same OTLP
             // receiver as Claude (tsk24); Codex has NO OTEL env vars, so this
             // rides `--config otel.*`. Attribution + auth via the same headers.

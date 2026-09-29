@@ -372,7 +372,7 @@ pub fn write_plugin(
     write_json(&hooks, &hooks_body)?;
 
     let mcp_config = plugin_dir.join("mcp-config.json");
-    let mcp_body = build_mcp_config(mcp_endpoint_url, hook_token);
+    let mcp_body = build_mcp_config(mcp_endpoint_url, hook_token, None);
     write_json(&mcp_config, &mcp_body)?;
 
     let agent_guide = plugin_dir.join("AGENT_GUIDE.md");
@@ -457,25 +457,63 @@ fn build_hooks_json(hook_base_url: &str) -> serde_json::Value {
     json!({ "hooks": serde_json::Value::Object(hooks) })
 }
 
-fn build_mcp_config(mcp_endpoint_url: &str, hook_token: &str) -> serde_json::Value {
-    // Bake the literal token into the file. Claude Code's MCP config
-    // schema does not env-var-interpolate `headers` (unlike hooks,
-    // which opt in via `allowedEnvVars`), so `"Bearer $VAR"` would be
-    // sent verbatim and the control plane would 401. The file lives
-    // under `.oxplow/runtime/claude-plugin/` (gitignored) and is
-    // rewritten per `open_terminal_session`, so it tracks the current
-    // boot's token.
+/// The thread and stream an MCP connection acts for, as the control
+/// plane reads them (`X-Oxplow-Thread` / `X-Oxplow-Stream`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct McpIdentity<'a> {
+    pub thread_id: &'a str,
+    pub stream_id: &'a str,
+}
+
+fn build_mcp_config(
+    mcp_endpoint_url: &str,
+    hook_token: &str,
+    identity: Option<McpIdentity<'_>>,
+) -> serde_json::Value {
+    // Bake the literal token — and the thread identity — into the file.
+    // Claude Code's MCP config schema does not env-var-interpolate
+    // `headers` (unlike hooks, which opt in via `allowedEnvVars`), so
+    // `"Bearer $VAR"` would be sent verbatim and the control plane would
+    // 401. The file lives under `.oxplow/runtime/claude-plugin/`
+    // (gitignored) and is rewritten per `open_terminal_session`, so it
+    // tracks the current boot's token.
+    let mut headers = serde_json::Map::new();
+    headers.insert(
+        "Authorization".into(),
+        format!("Bearer {hook_token}").into(),
+    );
+    if let Some(id) = identity {
+        headers.insert("X-Oxplow-Thread".into(), id.thread_id.into());
+        headers.insert("X-Oxplow-Stream".into(), id.stream_id.into());
+    }
     json!({
         "mcpServers": {
             "oxplow": {
                 "type": "http",
                 "url": mcp_endpoint_url,
-                "headers": {
-                    "Authorization": format!("Bearer {hook_token}"),
-                },
+                "headers": headers,
             },
         },
     })
+}
+
+/// A per-thread MCP config for Claude (`mcp-config.<thread>.json` next to
+/// the shared `mcp-config.json`) carrying the thread's identity headers,
+/// so `run_command` and every audited write know which thread is acting.
+/// The shared file stays for spawns with no thread. Returns the path to
+/// pass as `--mcp-config`.
+pub fn write_claude_mcp_config(
+    plugin_dir: &Path,
+    mcp_endpoint_url: &str,
+    hook_token: &str,
+    identity: McpIdentity<'_>,
+) -> Result<PathBuf, PluginError> {
+    let path = plugin_dir.join(format!("mcp-config.{}.json", identity.thread_id));
+    write_json(
+        &path,
+        &build_mcp_config(mcp_endpoint_url, hook_token, Some(identity)),
+    )?;
+    Ok(path)
 }
 
 pub fn write_codex_runtime(
@@ -691,7 +729,7 @@ mod tests {
 
     #[test]
     fn mcp_config_uses_http_transport() {
-        let v = build_mcp_config("http://127.0.0.1:8/mcp", "tok");
+        let v = build_mcp_config("http://127.0.0.1:8/mcp", "tok", None);
         assert_eq!(v["mcpServers"]["oxplow"]["type"], "http");
         assert_eq!(v["mcpServers"]["oxplow"]["url"], "http://127.0.0.1:8/mcp");
     }
@@ -701,7 +739,7 @@ mod tests {
         // Regression: Claude Code does not env-var-interpolate MCP
         // header values, so the token must land in the file as a
         // literal string — not "Bearer $OXPLOW_HOOK_TOKEN".
-        let v = build_mcp_config("http://x/mcp", "abc123");
+        let v = build_mcp_config("http://x/mcp", "abc123", None);
         assert_eq!(
             v["mcpServers"]["oxplow"]["headers"]["Authorization"],
             "Bearer abc123"

@@ -109,6 +109,28 @@ id as `Actor::Agent` (thread identity arrives in P1.10); RPC
 invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells
 the agent to ask the person, `Failed` is internal.
 
+## Exposure to agents (MCP)
+
+Agents reach every command through two generic tools — `list_commands`
+(the specs the calling agent may run, with `input_schema`, `summary`,
+`confirm`, `undoable`) and `run_command { name, input }` (the outcome:
+`result`, `audit_id`, `event_id`, `inverse?`). Extensions never add MCP
+tools. `transition_tasks` is `run_command("work_item.transition")` per
+id.
+
+**Caller identity.** Every harness carries the acting thread on the
+HTTP request, and `oxplow_mcp::McpCaller::from_parts` reads it from the
+`http::request::Parts` rmcp attaches to each tool call — the
+`X-Oxplow-Thread` / `X-Oxplow-Stream` headers (ACP: `McpHttp.headers`;
+opencode: `{env:OXPLOW_THREAD_ID}` in its config headers; Claude: a
+per-thread `mcp-config.<thread>.json` with the literal headers, since
+Claude's MCP config reads no env vars), or `?thread=…&stream=…` on the
+endpoint URL (Codex, whose config has no per-session headers). A
+connection with neither is an anonymous agent: it may list and read,
+and `run_command` refuses it — no write without an actor to audit it to.
+The wire test `crates/oxplow-control-plane/tests/mcp_wire.rs` proves the
+headers reach `command.executed`'s `source = agent:thr…`.
+
 ## Adding a command
 
 1. Define the input as a Rust struct with `JsonSchema`

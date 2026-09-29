@@ -16,6 +16,7 @@ oxplow-git = { workspace = true }
 # list_code_units — generic per-language unit listing (tsk325).
 oxplow-code-metrics = { workspace = true }
 rmcp = { workspace = true }
+http = "1"
 schemars = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

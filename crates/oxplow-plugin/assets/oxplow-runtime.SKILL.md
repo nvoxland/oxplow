@@ -238,3 +238,24 @@ scoped to "user rejected my last attempt at this same item."
 
 Subagents return a one-line `oxplow-result: { ok, itemId, … }`.
 Record that as a work note via `add_thread_note`.
+
+# Commands (the one write path)
+
+Project configuration and other state changes are **commands**. Call
+`list_commands` to see what you may run — each with its input schema
+and summary — and `run_command { name, input }` to run one. Every run
+is validated, policy-checked, audited to your thread and logged as
+`command.executed`; undoable runs return an `inverse`.
+
+- `.oxplow/project.yaml` keys: `config.list_keys`, `config.get { key }`,
+  `config.set { key, value }`, `config.unset { key }`. Zones live here
+  (`config.set { key: "zones", value: [{ match, zone, color? }] }`;
+  `list_zones` shows what the table matches). Keys that run a program or
+  pick the model (`agents`, `lsp`, `collection`, `ai`, `acpAgents`,
+  `agentModels`, `extensions`) need the person's confirmation — the
+  refusal tells you what to ask them to run.
+- Task status: `transition_tasks` (= `work_item.transition` per id).
+
+Invalid input names the failing field; a denial says why. If a run
+returns "needs a person's confirmation", tell the user the exact command
+and input rather than looking for another way to make the change.

@@ -907,6 +907,14 @@ primary tool for queue-driven dispatch.
 
 ## MCP tools
 
+**Caller identity and commands.** Every MCP request carries the acting
+thread (`X-Oxplow-Thread` / `X-Oxplow-Stream` headers, or `?thread=` on
+the endpoint URL for Codex); `oxplow_mcp::caller_of` turns it into the
+`Actor::Agent` the command bus audits to. Writes that are commands go
+through `run_command` (`list_commands` shows what the agent may run);
+an anonymous connection may read but not run commands. Per-harness
+plumbing and the rule live in [commands.md](./commands.md).
+
 `buildTaskMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`
 prefix (historical), but `crates/oxplow-mcp/src/lib.rs` strips that prefix at the
