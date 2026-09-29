@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detail } from "./BottomPanel.js";
+import { detail, eventDetail } from "./BottomPanel.js";
 
 describe("agent activity rows", () => {
   test("a tool request names the tool, its target and a refusal", () => {
@@ -22,7 +22,12 @@ describe("agent activity rows", () => {
     expect(detail("session.started", { harness: "claude", resumed: true })).toBe("claude (resumed)");
   });
   test("a payload retention replaced says so", () => {
-    expect(detail("tool.finished", {})).toBe("(details expired)");
+    expect(
+      eventDetail({ type: "agent.tool.finished", payload: {}, payload_expired_at: "2026-09-01T00:00:00.000000Z" }),
+    ).toBe("(details expired)");
+    expect(eventDetail({ type: "agent.tool.finished", payload: { tool: "Bash", ok: true }, payload_expired_at: null })).toBe(
+      "Bash · ok",
+    );
   });
   test("an unknown kind or payload shows nothing rather than throwing", () => {
     expect(detail("tool.finished", null)).toBe("");

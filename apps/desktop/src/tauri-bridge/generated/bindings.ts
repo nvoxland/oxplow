@@ -4087,6 +4087,12 @@ export type SqlQueryResult = {
 export type StoredEvent = {
 	// Global insert order; the delivery order and what checkpoints hold.
 	seq: number,
+	/**
+	 *  When retention replaced the payload with `{}` (the envelope stays).
+	 *  An expired event is history only: the pump skips it and nothing
+	 *  derives state from it.
+	 */
+	payload_expired_at: Timestamp | null,
 } & (Envelope);
 
 export type Stream = {

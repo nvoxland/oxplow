@@ -53,6 +53,9 @@ pub enum ActivityKind {
 
 /// The reducer's view of a logged event; `None` for events it ignores.
 pub fn activity_of(event: &StoredEvent) -> Option<Activity> {
+    if event.payload_expired() {
+        return None; // what it said is gone; an old event doesn't move status
+    }
     let env = &event.envelope;
     let p = &env.payload;
     let tool = p.get("tool").and_then(|t| t.as_str()).map(str::to_string);
@@ -765,6 +768,7 @@ mod tests {
                 serde_json::json!({"tool": "AskUserQuestion", "decision": "denied"}),
             )
             .unwrap(),
+            payload_expired_at: None,
         };
         assert_eq!(activity_of(&denied), None);
         let allowed = StoredEvent {
@@ -776,10 +780,23 @@ mod tests {
                 serde_json::json!({"tool": "AskUserQuestion", "decision": "allowed"}),
             )
             .unwrap(),
+            payload_expired_at: None,
         };
         assert_eq!(
             activity_of(&allowed).unwrap().kind,
             ActivityKind::ToolStarted
         );
+    }
+
+    /// Retention replaced the payload: the event says nothing any more.
+    #[test]
+    fn an_expired_event_is_no_activity() {
+        use oxplow_domain::{Envelope, StoredEvent};
+        let expired = StoredEvent {
+            seq: 2,
+            envelope: Envelope::new("agent.turn.ended", 2, "test", serde_json::json!({})).unwrap(),
+            payload_expired_at: Some(Timestamp::from_unix_ms(1)),
+        };
+        assert_eq!(activity_of(&expired), None);
     }
 }

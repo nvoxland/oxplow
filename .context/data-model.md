@@ -1148,10 +1148,13 @@ retention differs (and the blob store's GC only knows snapshot rows).
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
 and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
 boot + daily; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
-`test` and `code` 90 / 30, everything else kept). An expired payload no
-longer validates against its schema, so a dead letter older than its
-payload window can't be retried (discard it). The activity log shows an
-expired row as "(details expired)".
+`test` and `code` 90 / 30, everything else kept). **An expired event is
+history only** (tsk501): `StoredEvent.payload_expired_at` carries the
+stamp; the pump checkpoints past it without calling any consumer (a new or
+renamed consumer replaying the log never sees `{}`); `retry_dead_letter`
+refuses one; the sweep marks the pending dead letters of expired events
+`discarded`; the status derivation ignores it. The activity log shows it
+as "(details expired)" from the field, not from an empty payload.
 
 **Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
 and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one

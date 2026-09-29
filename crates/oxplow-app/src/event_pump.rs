@@ -287,7 +287,7 @@ impl EventPump {
     ) -> Result<Delivery, DomainError> {
         let name = consumer.name();
         let seq = event.seq;
-        let outcome = if consumer.handles(&event.envelope.event_type) {
+        let outcome = if delivers(consumer.handles(&event.envelope.event_type), &event) {
             match run_async_handler(self.log.schemas().clone(), consumer, event).await {
                 Ok(()) => Delivery::Handled,
                 Err(err) if err.is_retryable() => return Ok(Delivery::Deferred),
@@ -322,7 +322,7 @@ impl EventPump {
         let schemas = self.log.schemas().clone();
         self.db
             .transaction(move |tx| {
-                let outcome = if consumer.handles(&event.envelope.event_type) {
+                let outcome = if delivers(consumer.handles(&event.envelope.event_type), &event) {
                     match run_handler(&schemas, consumer.as_ref(), tx, &event) {
                         Ok(()) => Delivery::Handled,
                         // A lock blip isn't a poison event: fail the whole
@@ -385,6 +385,7 @@ impl EventPump {
                 let Some(event) = event_by_seq_tx(tx, seq)? else {
                     return Err(DomainError::NotFound);
                 };
+                retryable(&event, id)?;
                 match run_handler(&schemas, consumer.as_ref(), tx, &event) {
                     Ok(()) => set_dead_letter_state_tx(tx, id, "retried"),
                     Err(err) => dead_letter_tx(tx, consumer.name(), seq, &err.to_string()),
@@ -405,6 +406,7 @@ impl EventPump {
             .transaction(move |tx| event_by_seq_tx(tx, seq))
             .await?
             .ok_or(DomainError::NotFound)?;
+        retryable(&event, id)?;
         let name = consumer.name();
         let result = run_async_handler(self.log.schemas().clone(), consumer, Arc::new(event)).await;
         self.db
@@ -501,6 +503,22 @@ impl EventPump {
             }
         })
     }
+}
+
+/// Whether an event reaches a consumer: one it handles, whose payload
+/// retention hasn't replaced (an expired event is checkpointed past).
+fn delivers(handles: bool, event: &StoredEvent) -> bool {
+    handles && !event.payload_expired()
+}
+
+/// Refuse to re-run a handler on an event whose payload has expired.
+fn retryable(event: &StoredEvent, id: i64) -> Result<(), DomainError> {
+    if event.payload_expired() {
+        return Err(DomainError::Invalid(format!(
+            "dead letter {id}'s event payload expired under retention; discard the letter"
+        )));
+    }
+    Ok(())
 }
 
 enum Delivery {
@@ -760,6 +778,54 @@ mod tests {
         let pump = EventPump::new(db.clone(), store.clone(), vec![]);
         pump.register_async(consumer);
         pump
+    }
+
+    /// What the retention sweep does to an event's payload.
+    async fn expire(db: &Database, seq: i64) {
+        db.transaction(move |tx| {
+            tx.execute(
+                "UPDATE event_log SET payload = '{}', payload_expired_at = at WHERE seq = ?1",
+                [seq],
+            )
+            .map_err(|e| DomainError::Storage(e.to_string()))
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_expired_event_is_skipped_by_every_consumer() {
+        let (db, store) = setup().await;
+        for key in ["a", "b"] {
+            store.append(config_changed(key)).await.unwrap();
+        }
+        expire(&db, 1).await;
+        let recorder = Recorder::new("rec", None);
+        let rec = AsyncRecorder::new(vec![]);
+        let pump = pump(&db, &store, vec![recorder.clone()]);
+        pump.register_async(rec.clone());
+        let report = pump.run_once().await.unwrap();
+        assert_eq!((report.handled, report.skipped), (2, 2));
+        assert_eq!(seen(&db, "rec").await, vec!["b"]);
+        assert_eq!(rec.seen(), vec!["b"]);
+        assert_eq!(store.checkpoint("rec".into()).await.unwrap(), 2);
+        assert_eq!(store.checkpoint("async_rec".into()).await.unwrap(), 2);
+        assert!(pump.list_dead_letters(false).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dead_letter_whose_event_expired_cannot_be_retried() {
+        let (db, store) = setup().await;
+        store.append(config_changed("bad")).await.unwrap();
+        let recorder = Recorder::new("rec", Some("bad"));
+        let pump = pump(&db, &store, vec![recorder.clone()]);
+        pump.run_once().await.unwrap();
+        let letter = pump.list_dead_letters(false).await.unwrap()[0].clone();
+        expire(&db, 1).await;
+        *recorder.poison.lock() = None;
+        let err = pump.retry_dead_letter(letter.id).await.unwrap_err();
+        assert!(err.to_string().contains("expired"), "{err}");
+        assert_eq!(seen(&db, "rec").await, Vec::<String>::new());
     }
 
     #[tokio::test]

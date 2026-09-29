@@ -55,6 +55,15 @@ pub async fn sweep(db: &Database, now: Timestamp) -> Result<SweepReport, DomainE
                 )
                 .map_err(map_sql_err)?;
         }
+        // A parked event whose payload expired can never be retried.
+        tx.execute(
+            "UPDATE event_dead_letter SET state = 'discarded'
+              WHERE state = 'pending'
+                AND EXISTS (SELECT 1 FROM event_log e
+                             WHERE e.seq = event_seq AND e.payload_expired_at IS NOT NULL)",
+            [],
+        )
+        .map_err(map_sql_err)?;
         Ok(report)
     })
     .await
@@ -64,6 +73,52 @@ pub async fn sweep(db: &Database, now: Timestamp) -> Result<SweepReport, DomainE
 mod tests {
     use super::*;
     use crate::Database;
+
+    /// A parked event whose payload expires can never be retried, so its
+    /// pending dead letter is discarded with it.
+    #[tokio::test]
+    async fn a_pending_dead_letter_of_an_expired_event_is_discarded() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(100 * DAY_MS);
+        let old = crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+            now.unix_ms() - 31 * DAY_MS,
+        ));
+        db.transaction(move |tx| {
+            for (id, ty) in [("e1", "agent.tool.finished"), ("e2", "effort.closed")] {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                       VALUES (?1, ?2, 1, ?3, 'test', '[]', '{\"tool\":\"Bash\"}')",
+                    rusqlite::params![id, ty, old],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            for seq in [1, 2] {
+                crate::event_log_store::dead_letter_tx(tx, "rec", seq, "boom")?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        sweep(&db, now).await.unwrap();
+        let states: Vec<(i64, String)> = db
+            .transaction(|tx| {
+                let mut s = tx
+                    .prepare("SELECT event_seq, state FROM event_dead_letter ORDER BY event_seq")
+                    .map_err(crate::map_sql_err)?;
+                let r = s
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(crate::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(crate::map_sql_err)?;
+                Ok(r)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            states,
+            vec![(1, "discarded".to_string()), (2, "pending".to_string())]
+        );
+    }
 
     /// P3.11 (tsk481): an agent tool body older than 14 days is gone and its
     /// event older than 30 days keeps its envelope with the payload

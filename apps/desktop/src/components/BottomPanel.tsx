@@ -66,7 +66,7 @@ function EventRow({ evt }: { evt: AgentEvent }) {
     <div style={{ display: "flex", gap: 8, whiteSpace: "nowrap" }}>
       <span style={{ color: "var(--muted)" }}>{formatTime(evt.at)}</span>
       <span style={{ color: kindColor(kind), width: 130, flexShrink: 0 }}>{kind}</span>
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{detail(kind, evt.payload)}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{eventDetail(evt)}</span>
     </div>
   );
 }
@@ -78,11 +78,15 @@ function str(p: Payload, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+/** What a row says about its event; retention may have taken the payload. */
+export function eventDetail(evt: Pick<AgentEvent, "type" | "payload" | "payload_expired_at">): string {
+  if (evt.payload_expired_at) return "(details expired)";
+  return detail(evt.type.replace(/^agent\./, ""), evt.payload);
+}
+
 /** What a row says about its event, from the payload. */
 export function detail(kind: string, raw: unknown): string {
   const p = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  // Retention replaced the payload (every live agent payload has fields).
-  if (raw && typeof raw === "object" && Object.keys(p).length === 0) return "(details expired)";
   switch (kind) {
     case "tool.requested": {
       const target = str(p, "path") || str(p, "detail");

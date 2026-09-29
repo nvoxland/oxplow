@@ -150,6 +150,16 @@ pub struct StoredEvent {
     pub seq: i64,
     #[serde(flatten)]
     pub envelope: Envelope,
+    /// When retention replaced the payload with `{}` (the envelope stays).
+    /// An expired event is history only: the pump skips it and nothing
+    /// derives state from it.
+    pub payload_expired_at: Option<Timestamp>,
+}
+
+impl StoredEvent {
+    pub fn payload_expired(&self) -> bool {
+        self.payload_expired_at.is_some()
+    }
 }
 
 /// A type name is `segment(.segment)+` with snake_case segments: at
@@ -221,6 +231,7 @@ mod tests {
         let json = serde_json::to_value(StoredEvent {
             seq: 7,
             envelope: env.clone(),
+            payload_expired_at: None,
         })
         .unwrap();
         assert_eq!(json["seq"], 7);

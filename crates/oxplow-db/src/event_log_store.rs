@@ -163,7 +163,12 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
     let payload: String = row.get("payload")?;
     let at: String = row.get("at")?;
     let cause: Option<String> = row.get("cause")?;
+    let expired: Option<String> = row.get("payload_expired_at")?;
     Ok(StoredEvent {
+        payload_expired_at: expired
+            .map(|s| string_to_ts(&s))
+            .transpose()
+            .map_err(conv)?,
         seq: row.get("seq")?,
         envelope: Envelope {
             id: EventId(row.get("id")?),
