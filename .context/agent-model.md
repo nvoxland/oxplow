@@ -334,9 +334,10 @@ to `runtime.handleHookEnvelope`, which:
    valid pointer, and the shell `||` net in `agent_command.rs` still
    covers the file-vanishes-between-check-and-exec race. Claude-only;
    codex/opencode keep just the shell net.
-3. Drives effort-anchored snapshot flushes (see "Snapshot tracking"
-   below). The runtime no longer tracks per-turn rows; snapshots and
-   per-effort attribution are anchored to `task_effort`.
+3. Opens and closes `agent_turn` rows (UserPromptSubmit / Stop /
+   interrupt, logging `agent.turn.*`), and a closed turn ends at a
+   `turn_end` snapshot (see "Snapshot tracking" below). Per-effort
+   attribution stays anchored to `task_effort`.
 4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
    policy" below). The write guard runs first (read-only thread; see
    Write guard below), then filing enforcement (Edit / Write /

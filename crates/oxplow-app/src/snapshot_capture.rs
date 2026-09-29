@@ -232,6 +232,9 @@ struct Inner {
     /// Tells the quiet trigger to exit (see [`SnapshotCaptureService::shutdown`]).
     quiet_shutdown: tokio::sync::Notify,
     open_turn_probe: Option<OpenTurnProbe>,
+    /// Set once the quiet trigger runs: a second `spawn_watcher` (the
+    /// registry hands back an existing service) mustn't start another.
+    quiet_spawned: std::sync::atomic::AtomicBool,
     /// Serializes takes. Each caller gets its own op (its own trigger
     /// and anchors — two threads' turn ends are two ops); a caller that
     /// waited behind another drains whatever landed meanwhile, usually
@@ -290,6 +293,7 @@ impl SnapshotCaptureService {
                 activity: tokio::sync::Notify::new(),
                 quiet_shutdown: tokio::sync::Notify::new(),
                 open_turn_probe: None,
+                quiet_spawned: std::sync::atomic::AtomicBool::new(false),
                 shutdown: tokio::sync::Notify::new(),
                 refilter: tokio::sync::Notify::new(),
                 initial_ready: tokio::sync::watch::channel(true).0,
@@ -397,8 +401,8 @@ impl SnapshotCaptureService {
         self
     }
 
-    /// Attach an `EventBus` so capture emits `FileSnapshotCreated`
-    /// after each successful insert.
+    /// Attach an `EventBus` so a take that recorded something new emits
+    /// `SnapshotTaken` after its transaction commits.
     pub fn with_events(self, events: EventBus) -> Self {
         *self.inner.events.write().unwrap_or_else(|e| e.into_inner()) = Some(events);
         self
@@ -449,6 +453,10 @@ impl SnapshotCaptureService {
     /// capture the same edits) or a take already drained everything.
     /// Human edits between turns get a snapshot of their own this way.
     pub fn spawn_quiet_trigger(&self) -> tokio::task::JoinHandle<()> {
+        if self.inner.quiet_spawned.swap(true, Ordering::SeqCst) {
+            debug!("snapshot: quiet trigger already running for this stream");
+            return tokio::spawn(async {});
+        }
         let this = self.clone();
         tokio::spawn(async move {
             loop {
@@ -1127,12 +1135,13 @@ impl SnapshotCaptureService {
                         }
                     }
                 }
-                // Oversize files are tracked by metadata-only rows,
-                // so we can't hash-compare. Capture only when there's
-                // no prior row at all — otherwise the row would be
-                // identical to the existing one.
+                // Oversize files are tracked by metadata-only rows, so we
+                // can't hash-compare. A prior with the same size+mtime was
+                // short-circuited above, so any file reaching here changed:
+                // new, grown past the cap from a normal row, recreated over
+                // a tombstone, or an oversize file touched.
                 if size as u64 > max_bytes {
-                    if prior.is_none() {
+                    {
                         oversize_new += 1;
                         staged.push((
                             entry.path().to_path_buf(),
@@ -1603,10 +1612,9 @@ impl SnapshotCaptureService {
         // `request_snapshot` here: doing so would create a recursive
         // Send-bound cycle on the anonymous Future types
         // (request_snapshot → capture_inner → tokio::spawn(...) →
-        // request_snapshot). In practice, the next external
-        // `request_snapshot` (an effort start/end lifecycle transition,
-        // a git-refs change, or the startup sweep — there is no periodic
-        // timer) will pick the deferred entries up. Fresh-file
+        // request_snapshot). The quiet trigger re-arms for entries left
+        // dirty (see `quiet_take`), and any other take — a turn end, an
+        // effort bracket, a git-refs change — picks them up too. Fresh-file
         // captures may land in a later snapshot than the one that
         // first observed them — a small latency cost for completely
         // suppressing transient-file rows.
@@ -1691,8 +1699,18 @@ impl SnapshotCaptureService {
             budget_ms: req.budget.map(|b| b.as_millis() as u64),
             source: "system:snapshot_capture".into(),
         };
-        let Some(outcome) = self.inner.store.record_take(take).await? else {
-            return Ok(None);
+        let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
+        let outcome = match self.inner.store.record_take(take).await {
+            Ok(Some(outcome)) => outcome,
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                // The drained paths go back in the dirty set, so the next
+                // take records them rather than losing the edits.
+                for path in paths {
+                    self.mark_dirty(self.inner.project_dir.join(path), WatchEventKind::Other);
+                }
+                return Err(e.into());
+            }
         };
         if outcome.over_budget {
             warn!(
@@ -1937,6 +1955,69 @@ mod tests {
             .unwrap();
         assert_ne!(edited, base);
         assert_eq!(store.list_for_path("lib.rs").await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_sweep_records_a_file_that_grew_past_the_cap() {
+        let project = tempdir().unwrap();
+        let path = project.path().join("data.bin");
+        std::fs::write(&path, "small").unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        std::fs::write(&path, vec![b'x'; 1_100_000]).unwrap();
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let rows = store.list_for_path("data.bin").await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].storage, SnapshotStorage::Oversize, "{rows:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_take_puts_its_paths_back_in_the_dirty_set() {
+        let project = tempdir().unwrap();
+        let a = project.path().join("a.txt");
+        std::fs::write(&a, "one").unwrap();
+        let db = Database::in_memory();
+        seed_stream(&db).await;
+        let store = Arc::new(SqliteSnapshotStore::new(db));
+        // A stream with no row: the take's snapshot insert fails its FK.
+        let svc = SnapshotCaptureService::new(
+            store,
+            BlobStore::new(project.path().join(".oxplow/snapshots")),
+            project.path().to_path_buf(),
+            StreamId::new(999),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(Duration::ZERO)
+        .with_predrain_delay(Duration::ZERO);
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        assert!(svc.request_snapshot(SnapshotTrigger::Manual).await.is_err());
+        assert!(
+            svc.inner.dirty.lock().unwrap().contains_key(&a),
+            "the edit must be retried by the next take, not lost"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_quiet_trigger_runs_once_per_service() {
+        let project = tempdir().unwrap();
+        let (svc, _store) = svc_for(project.path()).await;
+        let first = svc.spawn_quiet_trigger();
+        let second = svc.spawn_quiet_trigger();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(second.is_finished(), "a second trigger must not start");
+        assert!(!first.is_finished());
+        svc.shutdown();
+        tokio::time::timeout(Duration::from_secs(2), first)
+            .await
+            .expect("the trigger stops on shutdown")
+            .unwrap();
     }
 
     #[tokio::test]

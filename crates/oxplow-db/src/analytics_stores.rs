@@ -1595,12 +1595,10 @@ impl SqliteSnapshotStore {
         Ok(self.capture_batch(vec![snap]).await?[0])
     }
 
-    /// Insert N `file_snapshot` rows in a single transaction. Returns
-    /// the new row ids in input order. Used by
-    /// `SnapshotCaptureService::request_snapshot` to flush the entire
-    /// drained dirty set with one DB round-trip — at 34k rows the
-    /// per-INSERT autocommit overhead of `capture()` dominates wall
-    /// time, and the transaction shape collapses it to a single fsync.
+    /// **Fixture seeding** (tests): insert N `file_snapshot` rows in one
+    /// transaction, returning their ids. Production takes go through
+    /// [`Self::record_take`], which also writes the snapshot row, its op
+    /// and `snapshot.taken` — rows written here have no op.
     pub async fn capture_batch(&self, snaps: Vec<FileSnapshot>) -> Result<Vec<i64>, DomainError> {
         if snaps.is_empty() {
             return Ok(Vec::new());
@@ -1610,10 +1608,8 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Insert a new `snapshot` row and return its id. Callers (e.g.
-    /// `SnapshotCaptureService::request_snapshot`) only do this when
-    /// they have dirty files to capture — empty requests reuse
-    /// `latest_snapshot_id_for_stream`.
+    /// **Fixture seeding** (tests): insert a bare `snapshot` row. A
+    /// production take uses [`Self::record_take`].
     pub async fn create_snapshot(&self, stream_id: StreamId) -> Result<i64, DomainError> {
         let now = ts_to_string(Timestamp::now());
         self.db
@@ -1645,9 +1641,9 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Pin a snapshot to a git commit sha. Called by the capture
-    /// layer immediately after `create_snapshot` when the worktree
-    /// was clean.
+    /// **Fixture seeding** (tests): pin a snapshot to a git commit sha
+    /// (with the exact-pin cascade). Production stamps a new snapshot in
+    /// [`Self::record_take`] and a HEAD move in [`Self::record_head_moved`].
     pub async fn set_snapshot_git_commit(
         &self,
         snapshot_id: i64,
@@ -1660,11 +1656,8 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Record the git branch HEAD was on when this snapshot was
-    /// captured. Called by the capture layer right after
-    /// `create_snapshot` (independent of the clean-tree `git_commit`
-    /// stamp — the branch is meaningful whether the tree was clean or
-    /// dirty). A no-op when `branch` is empty.
+    /// **Fixture seeding** (tests): set a snapshot's branch. Production
+    /// records it in [`Self::record_take`].
     pub async fn set_snapshot_git_branch(
         &self,
         snapshot_id: i64,
