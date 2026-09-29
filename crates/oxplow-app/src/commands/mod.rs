@@ -71,6 +71,28 @@ pub struct TxCtx<'a> {
     pub conn: &'a rusqlite::Connection,
     pub actor: &'a Actor,
     pub events: oxplow_db::EventCtx<'a>,
+    /// May this run open an effort (claim the worktree)? False only for
+    /// an agent thread that isn't its stream's writer; a `Record`
+    /// handler checks it with [`TxCtx::claim`].
+    pub may_claim: bool,
+}
+
+impl TxCtx<'_> {
+    /// Refuse the run when it opened an effort (`opened`) and the actor
+    /// may not claim. The bus rolls the transaction back and audits the
+    /// refusal as denied.
+    pub fn claim(&self, opened: bool, what: &str) -> Result<(), CommandError> {
+        if opened && !self.may_claim {
+            return Err(CommandError::Denied {
+                reason: format!(
+                    "{what} opens an effort — a claim on the worktree — and only the \
+                     stream's writer thread may claim; file or edit it without \
+                     `in_progress`, or run this from the writer thread"
+                ),
+            });
+        }
+        Ok(())
+    }
 }
 
 type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
@@ -276,14 +298,23 @@ impl CommandBus {
         }
         // 3. …and an agent (or a lens acting for one) must also pass the
         // agent policy.
+        // A `Record` command isn't refused here; its handler refuses a
+        // claim (see `TxCtx::may_claim`).
+        let mut may_claim = true;
         if let Some(thread_id) = actor.agent_thread() {
+            use oxplow_domain::CommandEffect;
             let may_write = match (spec.effect, &thread_id, &self.write_gate) {
-                (oxplow_domain::CommandEffect::Write, Some(t), Some(gate)) => Some(gate(*t).await),
+                (CommandEffect::Write | CommandEffect::Record, Some(t), Some(gate)) => {
+                    Some(gate(*t).await)
+                }
                 _ => None,
             };
+            if spec.effect == CommandEffect::Record {
+                may_claim = may_write != Some(false);
+            }
+            let gated = may_write.filter(|_| spec.effect == CommandEffect::Write);
             if let PolicyDecision::Deny { reason, .. } =
-                self.policy
-                    .check_command(thread_id.as_ref(), spec, may_write)
+                self.policy.check_command(thread_id.as_ref(), spec, gated)
             {
                 let err = CommandError::Denied { reason };
                 self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
@@ -333,6 +364,7 @@ impl CommandBus {
                                 source: actor_c.source(),
                                 cause: Some(executed_id.clone()),
                             },
+                            may_claim,
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) => out,
@@ -395,7 +427,13 @@ impl CommandBus {
                 Ok(done)
             }
             Err(err) => {
-                self.audit_only(actor, spec, &input, Outcome::Error, Some(err.to_string()))
+                // A handler's refusal (a claim the actor may not take) is a
+                // denial, not an error.
+                let recorded = match err {
+                    CommandError::Denied { .. } => Outcome::Denied,
+                    _ => Outcome::Error,
+                };
+                self.audit_only(actor, spec, &input, recorded, Some(err.to_string()))
                     .await;
                 Err(err)
             }
@@ -464,6 +502,7 @@ impl CommandBus {
                                 source: actor.source(),
                                 cause: None,
                             },
+                            may_claim: false,
                         };
                         handler(&ctx, input.clone()).map_err(|err| {
                             *failed_c.lock() = Some(err);

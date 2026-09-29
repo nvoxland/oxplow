@@ -21,7 +21,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction) or `BestEffort` (see below) |
-| `effect` | `Write` (the default) or `Read`: a read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`) |
+| `effect` | `Write` (the default), `Read` or `Record`. A read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`). A `Write` is refused to an agent thread that may not write. A `Record` changes oxplow's own records (`work_item.*`): audited like a write, open to any thread, and its handler refuses only a **claim** — opening an effort — when `TxCtx::may_claim` is false (tsk466) |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -40,7 +40,11 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    command needs a thread that may write: the bus asks its `WriteGate`
    (`Services` wires "the thread exists and is its stream's writer"), so
    a queued or closed thread can read but not change state (tsk437
-   review).
+   review). A `Record` command skips that refusal; the gate's answer
+   rides into the handler as `TxCtx::may_claim`, and `TxCtx::claim`
+   returns `Denied` (rolled back, audited `denied`, not `error`) when the
+   run opened an effort the actor may not claim. Filing and editing
+   tasks isn't a claim on the worktree; moving one to `in_progress` is.
 4. **Confirmation** — when `confirm` requires it and the call isn't
    `confirmed`, `NeedsConfirmation { preview }` and **nothing is written,
    not even an audit row**. An agent's `confirmed` is ignored: it gets
@@ -157,7 +161,8 @@ description, priority, parent, status — not its thread or position). MCP
 `create_task`, `file_epic_with_children`, `update_task`, `complete_task`,
 `dispatch_task`, `upsert_task` and `transition_tasks` run them as `Actor::Agent` with the caller's verified
 thread and stream (`McpCaller` — see "MCP identity"), so an anonymous
-connection (or a queued thread) can't file or change a task; RPC
+connection can't file or change a task, and a queued thread can file,
+edit and finish tasks but not move one to `in_progress` (tsk466); RPC
 `create_task` / `update_task` / `upsert_task` run them as
 `Actor::Human`. `TaskService::update`
 (no actor) still logs every status change, with source

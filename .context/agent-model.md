@@ -921,8 +921,11 @@ thread (`X-Oxplow-Thread` / `X-Oxplow-Stream` headers, or `?thread=` on
 the endpoint URL for Codex); `oxplow_mcp::caller_of` turns it into the
 `Actor::Agent` the command bus audits to. Writes that are commands go
 through `run_command` (`list_commands` shows what the agent may run);
-an anonymous connection may read but not run commands. Per-harness
-plumbing and the rule live in [commands.md](./commands.md).
+an anonymous connection may read but not run commands. Any thread in
+the stream may file, edit and finish tasks (`work_item.*` are `Record`
+commands); claiming — moving a task to `in_progress`, or `effort.open` —
+takes the stream's writer thread (tsk466). Per-harness plumbing and the
+rule live in [commands.md](./commands.md).
 
 `buildTaskMcpTools` (`crates/oxplow-mcp/src/lib.rs`) registers the agent's
 tool surface. Internally each `ToolDef.name` carries an `oxplow__`

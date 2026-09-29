@@ -87,15 +87,21 @@ pub enum Atomicity {
     BestEffort,
 }
 
-/// Whether a command changes anything. A `Read` runs without an audit
-/// row or a `command.executed` event (a polling agent must not fill the
-/// log), and an agent thread that may not write can still run it.
+/// Whether a command changes anything, and who may. A `Read` runs
+/// without an audit row or a `command.executed` event (a polling agent
+/// must not fill the log), and an agent thread that may not write can
+/// still run it. A `Write` is refused outright to an agent thread that
+/// isn't its stream's writer. A `Record` changes oxplow's own records
+/// (filing and editing tasks) and is audited like a `Write`, but any
+/// thread may run it: the handler refuses only the part that would claim
+/// the worktree — opening an effort — when `TxCtx::may_claim` is false.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandEffect {
     Read,
     #[default]
     Write,
+    Record,
 }
 
 /// What a command declares about itself.

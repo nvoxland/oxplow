@@ -188,6 +188,7 @@ impl SqliteTaskStore {
             .transaction(move |tx| {
                 let ev = EventCtx::system(&schemas, "task_service");
                 update_with_status_tx(tx, &ev, &owned, status, Timestamp::now())
+                    .map(|(after, _)| after)
             })
             .await?;
         self.project_body_refs(&after, after.id).await?;
@@ -347,7 +348,7 @@ pub fn update_with_status_tx(
     item: &Task,
     status: Option<TaskStatus>,
     now: Timestamp,
-) -> Result<Task, DomainError> {
+) -> Result<(Task, EffortTransition), DomainError> {
     let before = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
     if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
         return Err(DomainError::NotFound);
@@ -368,10 +369,12 @@ pub fn update_with_status_tx(
             .with_subject([work_item]);
         ev.append(conn, &env)?;
     }
-    if let Some(to) = status {
-        set_status_tx(conn, ev, item.id, to, now)?;
-    }
-    get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)
+    let effort = match status {
+        Some(to) => set_status_tx(conn, ev, item.id, to, now)?.effort,
+        None => EffortTransition::Untouched,
+    };
+    let after = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
+    Ok((after, effort))
 }
 
 /// Insert `item` and log `work_item.created@1` with its initial status;

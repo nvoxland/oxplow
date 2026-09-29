@@ -389,6 +389,7 @@ mod tests {
             conn: &conn,
             actor: &actor,
             events: oxplow_db::EventCtx::system(&schemas, "test"),
+            may_claim: true,
         };
         let input = json!({ "key": "metricRetentionDays", "value": 30 });
         let first = handler(&ctx, input.clone()).unwrap();
