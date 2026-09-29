@@ -1642,7 +1642,11 @@ mod tests {
         let tasks = SqliteTaskStore::new(db.clone());
 
         let entering = tasks
-            .update_with_effort_transition(&task_row(tid, t, TaskStatus::InProgress), t, true)
+            .update_with_effort_transition(
+                &task_row(tid, t, TaskStatus::InProgress),
+                t,
+                TaskStatus::Ready,
+            )
             .await
             .unwrap();
         let EffortTransition::Opened(eff) = entering else {
@@ -1655,17 +1659,55 @@ mod tests {
         // Entering again (e.g. Busy retry / re-issued transition)
         // adopts the open row instead of tripping the V31 index.
         let again = tasks
-            .update_with_effort_transition(&task_row(tid, t, TaskStatus::InProgress), t, true)
+            .update_with_effort_transition(
+                &task_row(tid, t, TaskStatus::InProgress),
+                t,
+                TaskStatus::InProgress,
+            )
             .await
             .unwrap();
         assert_eq!(again, EffortTransition::Opened(eff));
 
         let leaving = tasks
-            .update_with_effort_transition(&task_row(tid, t, TaskStatus::Done), t, false)
+            .update_with_effort_transition(
+                &task_row(tid, t, TaskStatus::Done),
+                t,
+                TaskStatus::InProgress,
+            )
             .await
             .unwrap();
         assert_eq!(leaving, EffortTransition::Finished(eff));
         assert!(store.find_open_for_task(tid).await.unwrap().is_none());
+
+        // The outbox: one `work_item.transitioned@1` per status change,
+        // committed with it — the re-issued (same-status) call logged
+        // nothing. Subject and anchors name the task and its effort.
+        let events = db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 2, "{events:#?}");
+        let opened = &events[0].envelope;
+        assert_eq!(opened.event_type, "work_item.transitioned");
+        assert_eq!(opened.v, 1);
+        assert_eq!(
+            opened.subject,
+            vec![format!("work_item:oxplow:{tid}"), format!("effort:{eff}")]
+        );
+        assert_eq!(opened.anchors.thread_id, Some(t));
+        assert_eq!(opened.anchors.effort_id, Some(eff));
+        assert_eq!(opened.payload["from"], "ready");
+        assert_eq!(opened.payload["to"], "in_progress");
+        assert_eq!(
+            opened.payload["work_item"],
+            format!("work_item:oxplow:{tid}")
+        );
+        assert_eq!(opened.payload["effort"], format!("effort:{eff}"));
+        let finished = &events[1].envelope;
+        assert_eq!(finished.payload["from"], "in_progress");
+        assert_eq!(finished.payload["to"], "done");
+        assert_eq!(finished.anchors.effort_id, Some(eff));
+        assert!(events[1].seq > events[0].seq);
     }
 
     #[tokio::test]
@@ -1674,12 +1716,22 @@ mod tests {
         let tasks = SqliteTaskStore::new(db.clone());
         let ghost = TaskId::new(9999);
         let err = tasks
-            .update_with_effort_transition(&task_row(ghost, t, TaskStatus::InProgress), t, true)
+            .update_with_effort_transition(
+                &task_row(ghost, t, TaskStatus::InProgress),
+                t,
+                TaskStatus::Ready,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::NotFound), "got {err:?}");
-        // The whole action rolled back — no effort row for the ghost.
+        // The whole action rolled back — no effort row for the ghost,
+        // and nothing in the event log either.
         assert!(store.find_open_for_task(ghost).await.unwrap().is_none());
+        let events = db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap();
+        assert!(events.is_empty(), "{events:#?}");
     }
 
     #[tokio::test]

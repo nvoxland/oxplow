@@ -573,10 +573,13 @@ impl Services {
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let page_ref_store = Arc::new(SqlitePageRefStore::new(db.clone()));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone()));
-        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let event_schemas = Arc::new(EventSchemaRegistry::core());
+        let task_store = Arc::new(SqliteTaskStore::with_event_schemas(
+            db.clone(),
+            event_schemas.clone(),
+        ));
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let event_schemas = Arc::new(EventSchemaRegistry::core());
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));

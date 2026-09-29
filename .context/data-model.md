@@ -1012,9 +1012,19 @@ still advances, so one poison event never stalls the pump. Letters are
 `command_audit` (who ran which command, outcome, the undo as
 `inverse_json`) is created here and written by the command bus in P1.8.
 
+**Producers so far.** `SqliteTaskStore::update_with_effort_transition`
+(P1.6, tsk408) appends `work_item.transitioned@1` in the same transaction
+as the status flip and the effort open/finish — subject
+`work_item:oxplow:tskN` (+ `effort:effN`), anchors `thread`/`effort`,
+payload `{ work_item, from, to, effort? }`, source `task_service` (the
+command bus supplies the real actor in P1.8). A same-status re-issue logs
+nothing; a failed transition rolls the row back with the rest. It sets
+no dedupe key: a transactional producer's retry has already rolled back,
+so keys are for at-least-once producers. `TaskService` keeps its
+post-commit `TasksChanged` broadcast as the UI wake-up.
+
 V93 also dropped `task_event` (a per-task audit table nothing had written
-since V1; task transitions log here from P1.6) and wiped `page_visit`
-(its rows carried pre-canonical tab ids).
+since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
 
 ### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 

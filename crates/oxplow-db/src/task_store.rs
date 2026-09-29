@@ -1,13 +1,17 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use rusqlite::params;
 
+use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    DomainError, EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus,
-    ThreadId, Timestamp,
+    Anchors, DomainError, EffortId, Envelope, EventSchemaRegistry, Task, TaskActorKind, TaskAuthor,
+    TaskId, TaskPriority, TaskStatus, ThreadId, Timestamp,
 };
 
 use crate::database::Database;
+use crate::event_log_store::append_tx;
 use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -15,6 +19,8 @@ use crate::page_ref_store::SqlitePageRefStore;
 pub struct SqliteTaskStore {
     db: Database,
     page_refs: SqlitePageRefStore,
+    /// Validates the `work_item.transitioned` envelopes this store logs.
+    event_schemas: Arc<EventSchemaRegistry>,
 }
 
 /// Outcome of [`SqliteTaskStore::update_with_effort_transition`]: which
@@ -32,10 +38,17 @@ pub enum EffortTransition {
 }
 
 impl SqliteTaskStore {
+    /// A store with its own core schema registry. `Services` shares one
+    /// registry across stores via [`Self::with_event_schemas`].
     pub fn new(db: Database) -> Self {
+        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+    }
+
+    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
             db,
+            event_schemas,
         }
     }
 
@@ -69,15 +82,23 @@ impl SqliteTaskStore {
     /// On entry an already-open effort is adopted instead of erroring —
     /// the V31 unique index makes a true double-open impossible, and
     /// adoption keeps the op idempotent under Busy retry.
+    ///
+    /// The same transaction appends `work_item.transitioned@1` to the
+    /// event log (the outbox; `.context/data-model.md` "event_log") when
+    /// `from` differs from the row's new status — so the log can never
+    /// claim a transition the state doesn't show, or miss one it does.
+    /// `item.status == InProgress` means entering; anything else leaves.
     pub async fn update_with_effort_transition(
         &self,
         item: &Task,
         thread: ThreadId,
-        entering: bool,
+        from: TaskStatus,
     ) -> Result<EffortTransition, DomainError> {
         use crate::database::map_sql_err;
         let edges_item = item.clone();
-        let item = std::sync::Arc::new(item.clone());
+        let item = Arc::new(item.clone());
+        let schemas = self.event_schemas.clone();
+        let entering = item.status == TaskStatus::InProgress;
         let outcome = self
             .db
             .transaction(move |tx| {
@@ -85,7 +106,7 @@ impl SqliteTaskStore {
                 if rows == 0 {
                     return Err(DomainError::NotFound);
                 }
-                if entering {
+                let transition = if entering {
                     match crate::effort_store::find_open_for_task_tx(tx, item.id)
                         .map_err(map_sql_err)?
                     {
@@ -116,7 +137,36 @@ impl SqliteTaskStore {
                         }
                         None => Ok(EffortTransition::NoOpenEffort),
                     }
+                }?;
+                if from != item.status {
+                    let effort = match transition {
+                        EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
+                        EffortTransition::NoOpenEffort => None,
+                    };
+                    let work_item = format!("work_item:{}", work_item_id(item.id));
+                    let mut subject = vec![work_item.clone()];
+                    subject.extend(effort.map(|e| format!("effort:{e}")));
+                    // No dedupe key: this producer is transactional, so a
+                    // retried attempt has already rolled back and can't
+                    // double-log. Keys are for at-least-once producers.
+                    let env = Envelope::typed::<WorkItemTransitioned>(
+                        "task_service",
+                        &WorkItemTransitionedV1 {
+                            work_item,
+                            from,
+                            to: item.status,
+                            effort: effort.map(|e| format!("effort:{e}")),
+                        },
+                    )
+                    .with_anchors(Anchors {
+                        thread_id: Some(thread),
+                        effort_id: effort,
+                        ..Anchors::default()
+                    })
+                    .with_subject(subject);
+                    append_tx(tx, &schemas, &env)?;
                 }
+                Ok(transition)
             })
             .await?;
         // Post-commit: same body-ref projection `update()` runs.

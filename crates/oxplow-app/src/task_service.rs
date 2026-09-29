@@ -361,7 +361,7 @@ impl TaskService {
             (true, true, Some(thread_id)) => {
                 let transition = self
                     .store
-                    .update_with_effort_transition(&item, thread_id, crossed_in)
+                    .update_with_effort_transition(&item, thread_id, prior_status)
                     .await?;
                 self.backfill_effort_snapshot(&item, crossed_in, transition)
                     .await;
