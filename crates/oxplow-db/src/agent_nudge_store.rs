@@ -207,7 +207,7 @@ pub fn record_tx(
         "INSERT INTO agent_nudge
            (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT (cause, kind) WHERE cause IS NOT NULL DO NOTHING
+         ON CONFLICT (cause, kind, coalesce(effort_id, 0)) WHERE cause IS NOT NULL DO NOTHING
          RETURNING id",
         params![
             thread_val,
@@ -323,10 +323,20 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+        // The same event and kind for another effort (here: none) is its
+        // own nudge (tsk510).
+        assert!(store
+            .record(NewAgentNudge {
+                cause: Some("evt-1".into()),
+                ..sample("report-less-run", None)
+            })
+            .await
+            .unwrap()
+            .is_some());
         let taken = store.take_undelivered(&thread).await.unwrap();
         assert_eq!(
             taken.iter().map(|n| n.kind.as_str()).collect::<Vec<_>>(),
-            vec!["report-less-run", "coverage-target"],
+            vec!["report-less-run", "coverage-target", "report-less-run"],
             "oldest first"
         );
         assert!(taken.iter().all(|n| n.delivered_at.is_some()));

@@ -187,7 +187,7 @@ fn row_to_status(
             .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
         Ok(AgentStatus {
             thread_id: ThreadId::new(thread),
-            state: p.state,
+            state: p.state.into(),
             detail: p.detail,
             updated_at: string_to_ts(&at)?,
         })
@@ -486,7 +486,7 @@ mod tests {
         let env = ev
             .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
                 thread: thread_ref(thread),
-                state,
+                state: oxplow_domain::events::schema::LoggedAgentStatus::of(state).unwrap(),
                 detail: detail.map(str::to_string),
             })
             .with_anchors(anchors_for_thread_tx(&conn, thread).unwrap())

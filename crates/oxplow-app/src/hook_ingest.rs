@@ -48,7 +48,7 @@ use oxplow_domain::events::schema::{
     AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
     AgentSessionStarted, AgentSessionStartedV1, AgentStatusChanged, AgentStatusChangedV1,
     AgentToolFinished, AgentToolFinishedV1, AgentToolRequested, AgentToolRequestedV1, ContentRef,
-    ToolDecision as Decision,
+    LoggedAgentStatus, ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::{
@@ -317,7 +317,9 @@ fn log_status_tx(
     let env = ev
         .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
             thread: thread_ref(thread),
-            state,
+            state: LoggedAgentStatus::of(state).ok_or_else(|| {
+                DomainError::Invalid(format!("{state:?} is derived, never logged"))
+            })?,
             detail,
         })
         .with_anchors(anchors)
@@ -539,7 +541,7 @@ fn track_session_tx(
         .typed::<AgentSessionStarted>(&AgentSessionStartedV1 {
             session: session.to_string(),
             thread: thread_ref(thread),
-            harness: row.agent,
+            harness: row.agent.into(),
             resumed: row.resume_session_id == session,
         })
         .with_anchors(activity_anchors_tx(conn, thread)?)

@@ -565,6 +565,71 @@ pub struct ContentRef {
     pub truncated: bool,
 }
 
+/// The agent harness a session ran in — the event's own vocabulary, so
+/// the published contract doesn't change with the internal `AgentKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Harness {
+    Claude,
+    Codex,
+    Opencode,
+    /// Any agent spoken to over the Agent Client Protocol.
+    Acp,
+}
+
+impl From<crate::agent::AgentKind> for Harness {
+    fn from(kind: crate::agent::AgentKind) -> Self {
+        use crate::agent::AgentKind as K;
+        match kind {
+            K::Claude => Harness::Claude,
+            K::Codex => Harness::Codex,
+            K::Opencode => Harness::Opencode,
+            K::Acp => Harness::Acp,
+        }
+    }
+}
+
+/// A status a thread's agent can be logged in. There is no `stalled`: that
+/// is derived from silence and never logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LoggedAgentStatus {
+    Idle,
+    Running,
+    /// Parked on the person (`await_user`, a question).
+    AwaitingUser,
+    Stopped,
+    Error,
+}
+
+impl LoggedAgentStatus {
+    /// The loggable form of `state`; `None` for a derived-only state.
+    pub fn of(state: crate::hook::AgentStatusState) -> Option<Self> {
+        use crate::hook::AgentStatusState as S;
+        match state {
+            S::Idle => Some(Self::Idle),
+            S::Running => Some(Self::Running),
+            S::AwaitingUser => Some(Self::AwaitingUser),
+            S::Stopped => Some(Self::Stopped),
+            S::Error => Some(Self::Error),
+            S::Stalled => None,
+        }
+    }
+}
+
+impl From<LoggedAgentStatus> for crate::hook::AgentStatusState {
+    fn from(s: LoggedAgentStatus) -> Self {
+        use crate::hook::AgentStatusState as S;
+        match s {
+            LoggedAgentStatus::Idle => S::Idle,
+            LoggedAgentStatus::Running => S::Running,
+            LoggedAgentStatus::AwaitingUser => S::AwaitingUser,
+            LoggedAgentStatus::Stopped => S::Stopped,
+            LoggedAgentStatus::Error => S::Error,
+        }
+    }
+}
+
 /// `agent.session.started@1`: a harness session began on a thread — first
 /// seen by id (hooks) or announced (ACP).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -572,7 +637,7 @@ pub struct ContentRef {
 pub struct AgentSessionStartedV1 {
     pub session: String,
     pub thread: String,
-    pub harness: crate::agent::AgentKind,
+    pub harness: Harness,
     /// The session is the thread's resume session (a reattach), not new.
     pub resumed: bool,
 }
@@ -692,7 +757,7 @@ impl EventType for AgentToolFinished {
 #[serde(deny_unknown_fields)]
 pub struct AgentStatusChangedV1 {
     pub thread: String,
-    pub state: crate::hook::AgentStatusState,
+    pub state: LoggedAgentStatus,
     /// The `await_user` question, or why it stopped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,

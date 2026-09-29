@@ -1,6 +1,7 @@
 {
   "$defs": {
-    "AgentKind": {
+    "Harness": {
+      "description": "The agent harness a session ran in — the event's own vocabulary, so\nthe published contract doesn't change with the internal `AgentKind`.",
       "oneOf": [
         {
           "enum": [
@@ -12,7 +13,7 @@
         },
         {
           "const": "acp",
-          "description": "An agent spoken to over the Agent Client Protocol (tsk335); which one\nis the thread's `acp_agent`.",
+          "description": "Any agent spoken to over the Agent Client Protocol.",
           "type": "string"
         }
       ]
@@ -23,7 +24,7 @@
   "description": "`agent.session.started@1`: a harness session began on a thread — first\nseen by id (hooks) or announced (ACP).",
   "properties": {
     "harness": {
-      "$ref": "#/$defs/AgentKind"
+      "$ref": "#/$defs/Harness"
     },
     "resumed": {
       "description": "The session is the thread's resume session (a reattach), not new.",

@@ -1124,7 +1124,13 @@ namespace — never a core namespace (`CORE_NAMESPACES`, §5.3). `append_tx`
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`
-so the shape is checked by the compiler too.
+so the shape is checked by the compiler too. **A payload owns its enums**
+(tsk510): the golden schema is a published contract, so an event uses its
+own vocabulary type (`ToolDecision`, `LoggedAgentStatus`, `Harness`) with
+public doc comments, converted from the internal type at the producer —
+never an internal enum whose doc comments and variants (a derived-only
+`stalled`) would leak into the contract. Every fixture under
+`tests/fixtures/events/` sets every optional field its type has.
 
 **Golden schemas.** Each core `type@v`'s JSON Schema is checked in at
 `crates/oxplow-domain/schemas/events/<type>@<v>.json`;
@@ -1584,9 +1590,11 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
 - **V102 (P3.2, tsk472)** adds `turn_id` (FK agent_turn SET NULL), `cause`
-  (the event that fired it) and `delivered_at`. `UNIQUE(cause, kind) WHERE
-  cause IS NOT NULL` makes a redelivered event unable to fire the same
-  nudge twice (`record_tx` → `None`). **Delivery is by thread, not by
+  (the event that fired it) and `delivered_at`. `UNIQUE(cause, kind,
+  coalesce(effort_id, 0)) WHERE cause IS NOT NULL` (V104, tsk510; V102 keyed
+  it without the effort and dropped a second effort's nudge) makes a
+  redelivered event unable to fire the same nudge twice for one effort
+  (`record_tx` → `None`). **Delivery is by thread, not by
   cause:** `take_undelivered(thread)` returns the thread's nudges with no
   `delivered_at`, oldest first, and stamps them in the same transaction —
   so a nudge whose reactor finishes after its hook's response went out

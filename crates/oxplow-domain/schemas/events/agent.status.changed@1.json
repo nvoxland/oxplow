@@ -1,20 +1,20 @@
 {
   "$defs": {
-    "AgentStatusState": {
+    "LoggedAgentStatus": {
+      "description": "A status a thread's agent can be logged in. There is no `stalled`: that\nis derived from silence and never logged.",
       "oneOf": [
         {
           "enum": [
             "idle",
             "running",
-            "awaiting_user",
             "stopped",
             "error"
           ],
           "type": "string"
         },
         {
-          "const": "stalled",
-          "description": "Derived-only: the hook log says Running but no event has\narrived for longer than the stall threshold. Claude Code emits\nno hook when a turn dies on an API error and the process drops\nback to its prompt, so a wall-clock check is the only way to\nnotice. Never persisted to the agent_status table.",
+          "const": "awaiting_user",
+          "description": "Parked on the person (`await_user`, a question).",
           "type": "string"
         }
       ]
@@ -32,7 +32,7 @@
       ]
     },
     "state": {
-      "$ref": "#/$defs/AgentStatusState"
+      "$ref": "#/$defs/LoggedAgentStatus"
     },
     "thread": {
       "type": "string"
