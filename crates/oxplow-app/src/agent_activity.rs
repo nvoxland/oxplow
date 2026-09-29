@@ -15,12 +15,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_domain::stores::{AgentTurnStore, StreamStore, ThreadStore};
-use oxplow_domain::{HookKind, ThreadId};
+use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::ThreadId;
 use parking_lot::Mutex;
 use tracing::warn;
 
-use crate::agent_policy::TurnSignals;
 use crate::{build_session_context_block_with_role, role_change_banner, RoleMode, Services};
 
 /// A tool call in the canonical (Claude-shaped) vocabulary, for transports
@@ -88,41 +87,6 @@ impl AgentActivity {
         state
             .last_context_by_session_id
             .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
-    }
-
-    /// What this turn did so far (read from the hook log since the open
-    /// turn started): the Stop pipeline's Q&A carve-out and write signal.
-    /// Call before the Stop event is ingested (ingest closes the turn).
-    pub async fn mine_turn_signals(
-        &self,
-        svc: &Services,
-        thread_id: &ThreadId,
-    ) -> Option<TurnSignals> {
-        let open = svc.agent_turn_store.list_open(thread_id).await.ok()?;
-        let started_at = open.first()?.started_at;
-        let events = svc
-            .hook_event_store
-            .list_recent(Some(thread_id), 200)
-            .await
-            .ok()?;
-        let mut signals = TurnSignals::default();
-        for evt in events {
-            if evt.received_at < started_at {
-                continue;
-            }
-            if !matches!(evt.kind, HookKind::PreToolUse | HookKind::PostToolUse) {
-                continue;
-            }
-            signals.had_activity = true;
-            if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&evt.payload_json) {
-                if let Some(tool_name) = payload.get("tool_name").and_then(|v| v.as_str()) {
-                    if matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
-                        signals.had_writes = true;
-                    }
-                }
-            }
-        }
-        Some(signals)
     }
 
     /// Record a finished tool call: wiki attribution, the effort-file

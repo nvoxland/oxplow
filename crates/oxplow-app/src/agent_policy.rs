@@ -328,16 +328,46 @@ impl AgentPolicy {
     }
 }
 
-/// Per-turn signals reconstructed from the hook_event_store between
-/// the open agent_turn's started_at and now. Powers the Stop
-/// pipeline's Q&A-turn carve-out and the writes-vs-no-writes branch
-/// of the filed-but-didn't-ship advisory.
+/// What a turn did, from the tool events anchored to it (P3.4). Powers
+/// the Stop pipeline's Q&A-turn carve-out and the writes-vs-no-writes
+/// branch of the filed-but-didn't-ship advisory.
 #[derive(Debug, Clone, Default)]
 pub struct TurnSignals {
-    /// At least one PreToolUse / PostToolUse fired since the turn opened.
+    /// The turn requested or finished at least one tool.
     pub had_activity: bool,
-    /// At least one Edit/Write/MultiEdit/NotebookEdit fired since the turn opened.
+    /// One of them was Edit/Write/MultiEdit/NotebookEdit (a refused write
+    /// still counts: the agent tried to change files).
     pub had_writes: bool,
+}
+
+impl TurnSignals {
+    /// The signals of `turn`, read from its `agent.tool.requested` /
+    /// `agent.tool.finished` events — exact by turn, so neither a turn
+    /// before nor one alongside can leak in.
+    pub async fn of_turn(
+        db: &oxplow_db::Database,
+        turn: oxplow_domain::AgentTurnId,
+    ) -> Result<Self, oxplow_domain::DomainError> {
+        db.transaction(move |conn| {
+            conn.query_row(
+                "SELECT count(*) > 0,
+                        coalesce(max(json_extract(payload, '$.tool')
+                                     IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')), 0)
+                   FROM event_log
+                  WHERE turn_id = ?1
+                    AND type IN ('agent.tool.requested', 'agent.tool.finished')",
+                [turn.value()],
+                |r| {
+                    Ok(TurnSignals {
+                        had_activity: r.get(0)?,
+                        had_writes: r.get(1)?,
+                    })
+                },
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+    }
 }
 
 /// Whether the writer's stream has an open effort — the filing guard's
@@ -625,6 +655,64 @@ fn build_filed_but_didnt_ship_reason() -> String {
 mod tests {
     use super::*;
     use oxplow_db::EffortStore as _;
+
+    /// P3.4 (tsk474): a turn's signals are the tool events anchored to that
+    /// turn — a read-only turn, a writing turn and a Q&A turn each read
+    /// alone, whatever ran in the turns around them.
+    #[tokio::test]
+    async fn turn_signals_come_from_the_turns_own_tool_events() {
+        use crate::{HookEnvelope, ToolDecision};
+        use oxplow_domain::HookKind;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let hook = |kind: HookKind, body: serde_json::Value| HookEnvelope {
+            kind,
+            thread_id: Some(f.thread),
+            stream_id: None,
+            session_id: Some("s".into()),
+            payload_json: body.to_string(),
+            prompt: Some("go".into()),
+            decision: (kind == HookKind::PreToolUse).then_some(ToolDecision {
+                allowed: true,
+                reason: None,
+            }),
+        };
+        let mut seen = Vec::new();
+        for tools in [
+            vec![(HookKind::PostToolUse, "Read")],
+            vec![
+                (HookKind::PreToolUse, "Edit"),
+                (HookKind::PostToolUse, "Edit"),
+            ],
+            vec![],
+        ] {
+            f.svc
+                .hook_ingest
+                .ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({})))
+                .await
+                .unwrap();
+            for (kind, tool) in tools {
+                f.svc
+                    .hook_ingest
+                    .ingest(hook(
+                        kind,
+                        serde_json::json!({"tool_name": tool, "tool_input": {"file_path": "a.rs"}}),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let stop = f
+                .svc
+                .hook_ingest
+                .ingest(hook(HookKind::Stop, serde_json::json!({})))
+                .await
+                .unwrap();
+            let s = TurnSignals::of_turn(&f.svc.db, stop.closed_turn.unwrap())
+                .await
+                .unwrap();
+            seen.push((s.had_activity, s.had_writes));
+        }
+        assert_eq!(seen, vec![(true, false), (true, true), (false, false)]);
+    }
     use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::StreamStore;
     use oxplow_domain::{

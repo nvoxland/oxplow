@@ -628,8 +628,9 @@ policy that every agent transport asks, not logic in the hook route.
     detached). It returns the ROLE CHANGE banner or a nudge.
   - `prompt_context` builds the session-context block, advisories and
     decisions, deduped per session.
-  - `mine_turn_signals` and `reset_session` round it out; session and
-    resume tracking moved into the hook ingest (P3.3).
+  - `reset_session` rounds it out. Session and resume tracking moved into
+    the hook ingest (P3.3); turn signals are read from the log
+    (`TurnSignals::of_turn`, P3.4).
   - Transports that don't speak Claude's tool vocabulary build a
     `CanonicalToolEvent` and record its `to_payload()`. That is the one
     place the canonical shape is built; every recorder and hook-log
@@ -653,18 +654,20 @@ effects (the audit signature, the filed-but-didn't-ship flag). Keeping the decis
 separate from the side effects lets every branch be unit-tested with a
 fixture.
 
-**Q&A short-circuit.** Before any branch runs, the pipeline checks
-`snapshot.turnHadActivity`. The runtime tracks a per-thread flag
-(`turnActivityByThread`) seeded `false` on UserPromptSubmit and
-flipped `true` on the first qualifying PostToolUse — write-intent
-tools (Edit/Write/Bash with non-readonly command), oxplow filing
-tools, and dispatch tools (see `isActivityTool`). When the flag is
-still `false` at Stop, the turn was pure Q&A — the agent answered or
-asked the user something with no real work — and **every directive is
-suppressed** so the agent stays stopped waiting for the user. Audit
-and filing-enforcement are both skipped. `undefined` (no
-UserPromptSubmit fired) is treated as "unknown → don't suppress" so
-older tests / edge cases stay stable.
+**Q&A short-circuit.** Before any branch runs, the pipeline checks the
+turn's `TurnSignals` (`crates/oxplow-app/src/agent_policy.rs`). They are
+read from the log after the Stop is ingested, for **the turn that Stop
+closed** (`IngestOutcome.closed_turn`): `had_activity` when any
+`agent.tool.requested` / `agent.tool.finished` is anchored to it,
+`had_writes` when one of them is Edit / Write / MultiEdit / NotebookEdit (a
+refused write still counts). Anchoring by turn id means neither an earlier
+turn nor a concurrent thread's can leak in (P3.4; it replaced a
+time-window scan of the in-memory hook ring). When the turn had no tool
+activity it was pure Q&A — the agent answered or asked the user something
+with no real work — and **every directive is suppressed** so the agent
+stays stopped waiting for the user. Audit and filing-enforcement are both
+skipped. A Stop that closed no turn has no signals, read as "unknown →
+don't suppress".
 
 **Awaiting-user gate.** A turn that *did* have qualifying tool
 activity (e.g. filed a task) but ended with the agent asking the

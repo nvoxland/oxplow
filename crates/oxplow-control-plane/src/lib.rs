@@ -460,30 +460,25 @@ async fn handle_hook_inner(
         }),
     };
 
-    // Mine per-turn signals BEFORE ingest closes the open agent_turn
-    // for Stop hooks. Cheap query (capped at 200 recent events) — only
-    // runs for Stop, not on every hook.
-    let turn_signals: Option<oxplow_app::agent_policy::TurnSignals> = if kind == HookKind::Stop {
-        if let Some(tid) = thread_id.as_ref() {
-            ctx.services
-                .agent_activity
-                .mine_turn_signals(&ctx.services, tid)
-                .await
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     let envelope_for_resume = envelope.clone();
-    if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
-        // The agent can't act on an error status — Claude Code just
-        // prints a "non-blocking status code" warning into the user's
-        // terminal. Log the cause server-side and ack anyway.
-        warn!(?event, ?err, "hook ingest failed");
-        return hook_ack();
-    }
+    let ingested = match ctx.services.hook_ingest.ingest(envelope).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            // The agent can't act on an error status — Claude Code just
+            // prints a "non-blocking status code" warning into the user's
+            // terminal. Log the cause server-side and ack anyway.
+            warn!(?event, ?err, "hook ingest failed");
+            return hook_ack();
+        }
+    };
+    // What the turn this Stop closed did (its own tool events); none when
+    // no turn was open.
+    let turn_signals = match ingested.closed_turn {
+        Some(turn) => oxplow_app::agent_policy::TurnSignals::of_turn(&ctx.services.db, turn)
+            .await
+            .ok(),
+        None => None,
+    };
 
     // Token usage (tsk104): on Stop, parse the transcript tail referenced
     // by the hook payload and record this turn's token delta against the

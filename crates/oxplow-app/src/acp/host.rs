@@ -202,8 +202,6 @@ impl AcpHost for ServicesAcpHost {
         tokens: Option<&TurnTokens>,
     ) -> Option<String> {
         let svc = self.svc.upgrade()?;
-        // Mine before ingest: the Stop closes the open turn.
-        let signals = svc.agent_activity.mine_turn_signals(&svc, thread).await;
         let env = self.envelope(
             HookKind::Stop,
             thread,
@@ -211,7 +209,19 @@ impl AcpHost for ServicesAcpHost {
             serde_json::json!({ "session_id": session_id }),
             None,
         );
-        self.ingest(&svc, env).await;
+        // What the turn this Stop closed did; none when no turn was open.
+        let signals = match svc.hook_ingest.ingest(env).await {
+            Ok(outcome) => match outcome.closed_turn {
+                Some(turn) => crate::agent_policy::TurnSignals::of_turn(&svc.db, turn)
+                    .await
+                    .ok(),
+                None => None,
+            },
+            Err(err) => {
+                warn!(?err, "acp: hook ingest failed");
+                None
+            }
+        };
         if let Some(t) = tokens {
             let turn = crate::token_usage::Turn {
                 prompt: Some(prompt.to_string()),
