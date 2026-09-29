@@ -6502,7 +6502,7 @@ fn command_error(err: oxplow_domain::CommandError) -> McpError {
             ),
             None,
         ),
-        E::Failed { .. } => internal(err.to_string()),
+        E::Failed { .. } | E::Busy { .. } => internal(err.to_string()),
     }
 }
 

@@ -336,6 +336,10 @@ impl CommandBus {
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) => out,
+                            // A lock blip retries the whole run.
+                            Err(CommandError::Busy { message }) => {
+                                return Err(oxplow_domain::DomainError::Busy(message));
+                            }
                             Err(err) => {
                                 *failed_c.lock() = Some(err);
                                 return Err(oxplow_domain::DomainError::Invariant(
@@ -746,6 +750,57 @@ mod tests {
             let rt = tokio::runtime::Handle::current();
             tokio::task::block_in_place(|| rt.block_on(self)).unwrap();
         }
+    }
+
+    /// A lock blip inside a `Tx` handler (SQLITE_BUSY, a snapshot that
+    /// moved under a read-then-write) retries the run like any transaction,
+    /// instead of failing the caller; a persistent one surfaces as `Busy`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn a_busy_tx_handler_is_retried_then_reported_as_busy() {
+        let (_db, bus) = bus();
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = attempts.clone();
+        let flaky = Handler::Tx(Arc::new(move |_ctx: &TxCtx<'_>, input| {
+            let n = seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if input["v"] == "always" || n == 0 {
+                return Err(CommandError::from(oxplow_domain::DomainError::Busy(
+                    "database is locked".into(),
+                )));
+            }
+            Ok(HandlerOutput {
+                result: json!({ "attempt": n }),
+                inverse: None,
+                events: Vec::new(),
+                after_commit: None,
+            })
+        }));
+        bus.register(
+            Command::new(kv_spec("kv.flaky", Invokers::ALL, Confirm::Never), flaky).unwrap(),
+        )
+        .unwrap();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "kv.flaky",
+                json!({"k": "a", "v": "once"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out.result["attempt"], 1,
+            "the second attempt ran and committed"
+        );
+        let err = bus
+            .run(
+                &Actor::Human,
+                "kv.flaky",
+                json!({"k": "a", "v": "always"}),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Busy { .. }), "{err:?}");
     }
 
     fn kv_spec(name: &str, invokers: Invokers, confirm: Confirm) -> CommandSpec {

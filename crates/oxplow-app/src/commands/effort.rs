@@ -73,10 +73,10 @@ fn invalid(field: &str, message: impl Into<String>) -> CommandError {
     }
 }
 
-fn storage(e: impl std::fmt::Display) -> CommandError {
-    CommandError::Failed {
-        message: e.to_string(),
-    }
+/// A SQLite error as the bus sees it — a lock blip stays `Busy`, so the
+/// run retries.
+fn storage(e: rusqlite::Error) -> CommandError {
+    CommandError::from(oxplow_db::map_sql_err(e))
 }
 
 /// The stream `thread` belongs to; `Invalid` for an unknown thread.

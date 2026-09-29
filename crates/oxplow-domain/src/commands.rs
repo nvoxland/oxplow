@@ -286,6 +286,9 @@ pub enum CommandError {
     NeedsConfirmation { preview: Box<Preview> },
     /// The handler failed.
     Failed { message: String },
+    /// The database stayed busy through the run's retries; nothing was
+    /// written. Worth retrying.
+    Busy { message: String },
 }
 
 impl std::fmt::Display for CommandError {
@@ -305,6 +308,9 @@ impl std::fmt::Display for CommandError {
                 write!(f, "`{}` needs confirmation", preview.command)
             }
             CommandError::Failed { message } => write!(f, "command failed: {message}"),
+            CommandError::Busy { message } => {
+                write!(f, "database busy, nothing written: {message}")
+            }
         }
     }
 }
@@ -318,6 +324,7 @@ impl From<DomainError> for CommandError {
                 field: None,
                 message: m,
             },
+            DomainError::Busy(m) => CommandError::Busy { message: m },
             other => CommandError::Failed {
                 message: other.to_string(),
             },

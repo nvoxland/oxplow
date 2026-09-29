@@ -124,7 +124,11 @@ runs — so store cores the handler calls (`set_status_tx`,
 `effort_store::start_tx`) log their own events as this run's. Those
 events precede `command.executed` in `seq` (it's appended after the
 handler, with the audit); `HandlerOutput.events` follow it. A handler
-must stay pure: `Database::transaction` retries it on SQLITE_BUSY. A
+must stay pure: `Database::transaction` retries it on SQLITE_BUSY — and
+a handler that hits one itself returns `CommandError::Busy` (the
+`From<DomainError::Busy>`; map SQLite errors with `oxplow_db::map_sql_err`),
+which the bus turns back into a retry; only a busy that outlasts the
+retries reaches the caller, as `Busy` (RPC `BUSY`). A
 `BestEffort` handler is an async call into a pre-existing service that
 owns its own transactions, audited after it returns; it
 exists only for handlers that predate the bus, and

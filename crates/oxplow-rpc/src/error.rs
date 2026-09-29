@@ -68,6 +68,7 @@ impl From<oxplow_domain::CommandError> for IpcError {
             E::Denied { .. } => "DENIED",
             E::NeedsConfirmation { .. } => "NEEDS_CONFIRMATION",
             E::Failed { .. } => "INTERNAL",
+            E::Busy { .. } => "BUSY",
         };
         Self {
             code: code.into(),

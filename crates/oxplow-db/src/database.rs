@@ -400,7 +400,7 @@ pub(crate) fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
     Timestamp::parse(s).map_err(|e| DomainError::Invalid(format!("bad timestamp `{s}`: {e}")))
 }
 
-pub(crate) fn map_sql_err(e: rusqlite::Error) -> oxplow_domain::DomainError {
+pub fn map_sql_err(e: rusqlite::Error) -> oxplow_domain::DomainError {
     use rusqlite::ffi::ErrorCode;
     match &e {
         rusqlite::Error::SqliteFailure(f, _) => match f.code {
