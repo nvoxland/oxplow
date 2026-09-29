@@ -403,8 +403,13 @@ entities from data already in the semantic layer:
 ## Change analysis
 
 A **change** is one diff: a `commit` (vs its first parent), an `effort`
-(start snapshot → end snapshot, or → the working tree while open) or a
-stream's `working` tree (vs HEAD). `crates/oxplow-app/src/change_analysis.rs`
+(start snapshot → end snapshot, or → the working tree while open), an
+agent `turn` (its `start_snapshot_id` → its end `snapshot_id` — what the
+turn changed, even across a snapshot taken mid-turn; a turn still
+running is `NotFound`; target `{"kind":"turn","turnId":"trn12"}`, P2.10,
+V101) or a stream's `working` tree (vs HEAD). V101 rebuilt `change` to
+widen its kind CHECK, emptying the cache first (rows are recomputed on
+demand). `crates/oxplow-app/src/change_analysis.rs`
 analyzes it and stores the rows behind `v_change*`; lenses (the
 oxplow-analytics change cards) only read them.
 

@@ -1002,12 +1002,12 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_change",
-        description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis.",
+        description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis.",
         columns: &[
             ("id", "Change id (the change_id in v_change_*)."),
             ("stream_id", "Stream whose repo it's in."),
-            ("kind", "`commit`, `effort` or `working`."),
-            ("target", "The commit sha, the effort row id, or '' for the working tree."),
+            ("kind", "`commit`, `effort`, `turn` or `working`."),
+            ("target", "The commit sha, the effort row id, the turn row id, or '' for the working tree."),
             ("base_label", "What it's compared against (a sha, `HEAD`, `snapshot N`)."),
             ("head_label", "The newer side."),
             ("status", "`pending`, `running`, `done` or `failed`."),

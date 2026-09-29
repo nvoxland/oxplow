@@ -423,6 +423,12 @@ pub enum ChangeTarget {
         #[serde(rename = "effortId")]
         effort_id: String,
     },
+    /// An agent turn: its start snapshot → its end snapshot, "what changed
+    /// this turn" (P2.10). A turn still running has no end: `NotFound`.
+    Turn {
+        #[serde(rename = "turnId")]
+        turn_id: String,
+    },
 }
 
 /// Tracks which mutable changes (working tree, open efforts) are stale,
@@ -650,6 +656,41 @@ pub async fn ensure_change(
                 full.clone(),
                 (base.clone().map(|sha| DiffEndpoint::Commit { sha }), base),
                 (DiffEndpoint::Commit { sha: full.clone() }, Some(full)),
+                false,
+            )
+        }
+        ChangeTarget::Turn { turn_id } => {
+            use oxplow_domain::stores::AgentTurnStore as _;
+            let tid = oxplow_domain::AgentTurnId::try_from_str(&turn_id)
+                .ok_or_else(|| invalid(format!("not a turn id: {turn_id}")))?;
+            let turn = svc
+                .agent_turn_store
+                .get(&tid)
+                .await?
+                .ok_or(DomainError::NotFound)?;
+            let end = turn.snapshot_id.ok_or(DomainError::NotFound)?;
+            let start = turn.start_snapshot_id.ok_or_else(|| {
+                invalid(format!(
+                    "turn {turn_id} began before the stream had a snapshot, so there's nothing to diff from"
+                ))
+            })?;
+            let thread = svc
+                .thread_store
+                .get(&turn.thread_id)
+                .await?
+                .ok_or(DomainError::NotFound)?;
+            (
+                thread.stream_id,
+                "turn",
+                tid.value().to_string(),
+                (
+                    Some(DiffEndpoint::Snapshot { snapshot_id: start }),
+                    Some(format!("snapshot {start}")),
+                ),
+                (
+                    DiffEndpoint::Snapshot { snapshot_id: end },
+                    Some(format!("snapshot {end}")),
+                ),
                 false,
             )
         }
@@ -1259,6 +1300,95 @@ mod tests {
             )
             .await,
             serde_json::json!([["tests/it.rs", 2, 1, 3, 1, 0, 1]])
+        );
+    }
+
+    /// P2.10 (tsk434): a turn diffs its start snapshot → its end snapshot
+    /// — everything the turn changed, even across a snapshot taken in the
+    /// middle (an effort closing mid-turn).
+    #[tokio::test]
+    async fn a_turn_diffs_from_where_it_started_to_where_it_ended() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            oxplow_domain::StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str, body: &str| {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, body).unwrap();
+            capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: None,
+            })
+        };
+        let start = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        let _mid = take("src/a.rs", AFTER).await.unwrap().unwrap();
+        let end = take("src/b.rs", "pub fn b() {}\n").await.unwrap().unwrap();
+        let (ended, running): (i64, i64) = f
+            .svc
+            .db
+            .transaction(move |c| {
+                let ins = |snap: Option<i64>| {
+                    c.execute(
+                        "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
+                         VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                        rusqlite::params![start, snap],
+                    )
+                    .map(|_| c.last_insert_rowid())
+                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+                };
+                Ok((ins(Some(end))?, ins(None)?))
+            })
+            .await
+            .unwrap();
+
+        let turn_id = oxplow_domain::AgentTurnId::new(ended).to_string();
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Turn {
+                turn_id: turn_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (c.kind.as_str(), c.target.as_str(), c.status.as_str()),
+            ("turn", ended.to_string().as_str(), "done")
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status FROM v_change_file WHERE change_id = ?1 ORDER BY path",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/a.rs", "modified"], ["src/b.rs", "added"]])
+        );
+
+        // A turn still running has no end, so no change to analyze.
+        let err = ensure_change(
+            &f.svc,
+            ChangeTarget::Turn {
+                turn_id: oxplow_domain::AgentTurnId::new(running).to_string(),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, oxplow_domain::DomainError::NotFound),
+            "{err:?}"
         );
     }
 

@@ -1652,7 +1652,12 @@ export type ChangeTarget =
  *  An effort: its start snapshot → its end snapshot (or the working
  *  tree while it's open).
  */
-{ kind: "effort"; effortId: string };
+{ kind: "effort"; effortId: string } | 
+/**
+ *  An agent turn: its start snapshot → its end snapshot, "what changed
+ *  this turn" (P2.10). A turn still running has no end: `NotFound`.
+ */
+{ kind: "turn"; turnId: string };
 
 // What `check` found.
 export type CheckReport = {
