@@ -1392,7 +1392,7 @@ impl TaskService {
         Ok(())
     }
 
-    async fn load(&self, id: TaskId) -> Result<Task, TaskServiceError> {
+    pub(crate) async fn load(&self, id: TaskId) -> Result<Task, TaskServiceError> {
         self.store
             .get(id)
             .await?

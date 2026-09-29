@@ -28,6 +28,7 @@ pub mod churn;
 pub mod code_analysis;
 pub mod code_quality_runner;
 pub mod collection;
+pub mod commands;
 pub mod commit_indexer;
 pub mod config_service;
 pub mod config_watch;
@@ -404,6 +405,8 @@ pub struct Services {
     /// Delivers the log to its consumers (checkpoints, dead letters).
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
     pub event_pump: Arc<event_pump::EventPump>,
+    /// The command bus: the one write path (`.context/commands.md`).
+    pub commands: Arc<commands::CommandBus>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -773,6 +776,16 @@ impl Services {
             .with_metrics(fact_store.clone(), event_bus.clone())
             .with_attribution(attribution_store.clone())
             .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
+        let agent_policy = Arc::new(agent_policy::AgentPolicy::default());
+        let commands = Arc::new(commands::CommandBus::new(
+            db.clone(),
+            (*event_log_store).clone(),
+            agent_policy.clone(),
+            event_pump.clone(),
+        ));
+        commands
+            .register(commands::work_item::command(tasks.clone()))
+            .expect("core commands register");
         let collection = collection::CollectionService::new(
             fact_store.clone(),
             nudge_store.clone(),
@@ -812,6 +825,7 @@ impl Services {
             event_log_store,
             event_schemas,
             event_pump,
+            commands,
             wiki_page_store,
             page_visit_store,
             usage_store,
@@ -855,7 +869,7 @@ impl Services {
             agent_panes,
             blobs,
             lsp_sessions: lsp,
-            agent_policy: Arc::new(agent_policy::AgentPolicy::default()),
+            agent_policy,
             agent_activity: Arc::new(agent_activity::AgentActivity::default()),
             acp: Arc::new(acp::manager::AcpManager::new()),
             approvals,

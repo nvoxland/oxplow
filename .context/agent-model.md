@@ -592,6 +592,9 @@ policy that every agent transport asks, not logic in the hook route.
   exposed as `Services.agent_policy`:
   - `check_tool(svc, thread, intent)` gathers the thread, the stream's
     `in_progress` claim and git state.
+  - `check_command(thread, spec)` is the command bus's agent gate
+    ([commands.md](./commands.md)): an agent may run a command only when
+    its spec admits agents. `DenyLayer::Command` names the refusal.
   - `on_turn_end(svc, thread, signals)` is the Stop pipeline below. It
     owns `StopState`, the reason builders and `describe_run`.
   - `claude_intent(body)` maps a Claude-shaped payload to an intent.

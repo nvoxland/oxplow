@@ -6,6 +6,7 @@
 //! no IO, no async runtime usage, and no platform-specific code.
 
 pub mod agent;
+pub mod commands;
 pub mod comment;
 pub mod error;
 pub mod events;
@@ -20,6 +21,10 @@ pub mod time;
 pub mod tree_diff;
 
 pub use agent::AgentKind;
+pub use commands::{
+    Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Confirm,
+    InputValidator, Invoker, Invokers, Lifecycle, Preview,
+};
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
 };

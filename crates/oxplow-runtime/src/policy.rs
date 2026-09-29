@@ -42,6 +42,8 @@ pub struct ToolIntent<'a> {
 pub enum DenyLayer {
     WriteGuard,
     Filing,
+    /// The command bus: the command does not admit agents.
+    Command,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

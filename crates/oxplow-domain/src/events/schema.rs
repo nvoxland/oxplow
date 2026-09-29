@@ -289,7 +289,7 @@ impl EventType for WorkItemTransitioned {
 }
 
 /// Who ran a command (`.context/target-architecture.md` §7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ActorKind {
     Human,
@@ -299,7 +299,7 @@ pub enum ActorKind {
 }
 
 /// How a command run ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandOutcome {
     Ok,

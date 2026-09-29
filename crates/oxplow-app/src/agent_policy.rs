@@ -73,6 +73,26 @@ pub fn claude_intent(body: &serde_json::Value) -> Option<ClaudeIntent> {
 }
 
 impl AgentPolicy {
+    /// May an agent run `spec`? The command's own `invokers` is the first
+    /// gate; this is the agent-specific policy on top of it — today, that
+    /// a command open to agents may be run by any agent thread. The write
+    /// guard and filing concern worktree edits, which no command performs
+    /// yet; when one does, its handler consults `check_tool`'s facts here.
+    pub fn check_command(
+        &self,
+        _thread_id: Option<&ThreadId>,
+        spec: &oxplow_domain::CommandSpec,
+    ) -> PolicyDecision {
+        if spec.invokers.agent {
+            PolicyDecision::Allow
+        } else {
+            PolicyDecision::Deny {
+                layer: oxplow_runtime::policy::DenyLayer::Command,
+                reason: format!("`{}` is not open to agents", spec.name),
+            }
+        }
+    }
+
     /// May `thread_id` run `intent` now? Allows when the thread is
     /// unknown (nothing to enforce against).
     pub async fn check_tool(

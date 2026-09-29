@@ -79,6 +79,7 @@ or exact mechanics.
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
 | Effort-scoped collection (test-run + diff-coverage observations, the coverage parser, the `collection:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Refs — the canonical `<kind>:<id>[@rev][#frag]` grammar, the kind registry, what replaces tab ids / `page_ref` kinds / `[[…]]` shapes | `.context/refs.md` |
+| Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | **Target architecture** — anchors/refs, event log, capabilities + providers, commands, reactors, models, plugin kinds, UI contribution points (P0 spec, epic tsk393; read before designing anything new) | `.context/target-architecture.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — `extension.yaml`, lenses (user/agent-built UI), slots, actions/alerts, the `oxplow-analytics` example extension, what moves out of core (target design) | `.context/extensions.md` |

@@ -10,6 +10,7 @@ pub mod ai_call_store;
 pub mod analytics_stores;
 pub mod attribution_store;
 pub mod change_store;
+pub mod command_audit_store;
 pub mod comment_store;
 pub mod dashboard_store;
 mod database;
@@ -51,6 +52,7 @@ pub use change_store::{
     ChangeCoChangeRow, ChangeDuplicateRow, ChangeFileRow, ChangeFunctionRow, ChangeImportRow,
     ChangeResults, ChangeRow, ChangeTestFileRow, SqliteChangeStore,
 };
+pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
 pub use comment_store::SqliteCommentStore;
 pub use dashboard_store::{
     Dashboard, DashboardItem, DashboardWithItems, NewDashboardItem, SqliteDashboardStore,

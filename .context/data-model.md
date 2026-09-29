@@ -1030,8 +1030,11 @@ used to run post-commit, now checkpointed and dead-lettered like any
 other consumer. Task insert/update still project inline until they log
 events of their own.
 
-`command_audit` (who ran which command, outcome, the undo as
-`inverse_json`) is created here and written by the command bus in P1.8.
+`command_audit` (who ran which command, the input, outcome, the undo as
+`inverse_json`, and `undone_by`) is written by the command bus through
+`command_audit_store::insert_tx` / `set_event_id_tx` / `mark_undone_tx`
+inside the run's transaction; `SqliteCommandAuditStore` reads it. See
+[commands.md](./commands.md).
 
 **Producers so far.** `SqliteTaskStore::update_with_effort_transition`
 (P1.6, tsk408) appends `work_item.transitioned@1` in the same transaction

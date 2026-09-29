@@ -68,6 +68,37 @@ pub struct UpdateTaskRequest {
 }
 
 pub async fn update_task(svc: &Services, req: UpdateTaskRequest) -> Result<Task, IpcError> {
+    // A status change on its own is the `work_item.transition` command:
+    // it runs through the bus so the human's transition is audited and
+    // `command.executed` is logged like an agent's would be.
+    let status_only = matches!(
+        &req.changes,
+        UpdateTaskChanges {
+            title: None,
+            description: None,
+            parent_id: None,
+            status: Some(_),
+            priority: None,
+        }
+    );
+    if let (true, Some(to)) = (status_only, req.changes.status) {
+        let outcome = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                oxplow_app::commands::work_item::NAME,
+                serde_json::json!({ "id": req.id.to_string(), "to": to }),
+                true,
+            )
+            .await
+            .map_err(|e| IpcError::invalid(e.to_string()))?;
+        let item: Task = serde_json::from_value(outcome.result)
+            .map_err(|e| IpcError::internal(format!("command result: {e}")))?;
+        svc.events.emit(OxplowEvent::TasksChanged {
+            thread_id: item.thread_id,
+        });
+        return Ok(item);
+    }
     let item = svc.tasks.update(req.id, req.changes).await?;
     svc.events.emit(OxplowEvent::TasksChanged {
         thread_id: item.thread_id,

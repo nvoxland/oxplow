@@ -4633,20 +4633,28 @@ impl OxplowMcp {
             parsed_ids.push(parse_task_id("transition_tasks", "ids[]", raw)?);
         }
         let target = parse_status(&p.status)?;
-        let mut updated = Vec::with_capacity(parsed_ids.len());
+        // Each transition is the `work_item.transition` command, run as
+        // the agent: audited, policy-checked, and `command.executed` logged.
+        // The transport carries no thread identity yet (P1.10 adds it).
+        let actor = oxplow_domain::Actor::Agent {
+            thread_id: None,
+            stream_id: None,
+        };
+        let mut updated: Vec<oxplow_domain::Task> = Vec::with_capacity(parsed_ids.len());
         for id in parsed_ids {
-            let row = self
+            let outcome = self
                 .services
-                .tasks
-                .update(
-                    id,
-                    UpdateTaskChanges {
-                        status: Some(target),
-                        ..Default::default()
-                    },
+                .commands
+                .run(
+                    &actor,
+                    oxplow_app::commands::work_item::NAME,
+                    serde_json::json!({ "id": id.to_string(), "to": target }),
+                    false,
                 )
                 .await
-                .map_err(|e| internal(e.to_string()))?;
+                .map_err(command_error)?;
+            let row: oxplow_domain::Task =
+                serde_json::from_value(outcome.result).map_err(|e| internal(e.to_string()))?;
             updated.push(row);
         }
         let mut threads: std::collections::HashSet<Option<oxplow_domain::ThreadId>> =
@@ -6388,6 +6396,26 @@ impl<T: serde::Serialize> WithLinkWarnings<T> {
             inner,
             link_warnings,
         }
+    }
+}
+
+/// A command-bus refusal as the MCP error the agent can act on: invalid
+/// input and denials are the caller's to fix; a needed confirmation says
+/// so; a handler failure is internal.
+fn command_error(err: oxplow_domain::CommandError) -> McpError {
+    use oxplow_domain::CommandError as E;
+    match &err {
+        E::Unknown { .. } | E::Invalid { .. } | E::Denied { .. } => {
+            McpError::invalid_params(err.to_string(), None)
+        }
+        E::NeedsConfirmation { preview } => McpError::invalid_params(
+            format!(
+                "`{}` needs a person's confirmation; ask them to run it (input: {})",
+                preview.command, preview.input
+            ),
+            None,
+        ),
+        E::Failed { .. } => internal(err.to_string()),
     }
 }
 
