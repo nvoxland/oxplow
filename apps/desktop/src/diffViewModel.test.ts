@@ -80,14 +80,17 @@ describe("snapshotsOnBranch", () => {
 });
 
 describe("previousSnapshotId", () => {
-  test("returns the largest id strictly less than the target", () => {
-    expect(previousSnapshotId(9, [3, 5, 9, 12])).toBe(5);
+  const rows = (pairs: Array<[number, number | null]>) =>
+    pairs.map(([id, parentSnapshotId]) => ({ id, parentSnapshotId }));
+  test("the recorded parent wins over id order (P2.11)", () => {
+    // 9 grew from 3 (5 was another take that 9's op didn't follow).
+    expect(previousSnapshotId(9, rows([[3, null], [5, 3], [9, 3], [12, 9]]))).toBe(3);
   });
-  test("ignores ids >= target and unordered input", () => {
-    expect(previousSnapshotId(9, [12, 9, 5, 3])).toBe(5);
+  test("a snapshot no op created falls back to the largest id before it", () => {
+    expect(previousSnapshotId(9, rows([[12, null], [9, null], [5, null], [3, null]]))).toBe(5);
   });
   test("null when the target is the first capture", () => {
-    expect(previousSnapshotId(3, [3, 5, 9])).toBeNull();
+    expect(previousSnapshotId(3, rows([[3, null], [5, 3], [9, 5]]))).toBeNull();
   });
 });
 

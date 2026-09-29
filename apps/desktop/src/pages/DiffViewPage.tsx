@@ -179,10 +179,7 @@ function DiffBody({
     void listSnapshots(stream.id, 500)
       .then((rows) => {
         if (cancelled) return;
-        const prev = previousSnapshotId(
-          snapshotId,
-          rows.map((r) => r.id),
-        );
+        const prev = previousSnapshotId(snapshotId, rows);
         setResolved({
           ...resolveSnapshotEndpoints(snapshotId, prev),
           taskId: null,

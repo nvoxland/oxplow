@@ -300,6 +300,7 @@ pub const MANIFEST: &[Capability] = &[
     todo("git_add_path"),
     // ---- snapshots / local history: reads + restore mirrored to MCP (Child 3) ----
     both("list_snapshots_for_stream"),
+    both("list_snapshot_ops"),
     both("list_files_for_snapshot"),
     both("get_file_snapshot"),
     both("get_snapshot_stats"),

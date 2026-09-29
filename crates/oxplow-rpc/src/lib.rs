@@ -401,6 +401,7 @@ macro_rules! oxplow_command_table {
                 // snapshot
                 list_file_snapshots => $crate::commands::snapshot::list_file_snapshots { path: String } -> Vec<::oxplow_db::FileSnapshot>,
                 list_snapshots_for_stream => $crate::commands::snapshot::list_snapshots_for_stream { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::Snapshot>,
+                list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<usize> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: i64 } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> i64,
                 list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<i64> } -> Vec<(i64, String)>,

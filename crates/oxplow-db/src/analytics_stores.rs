@@ -959,6 +959,13 @@ pub struct Snapshot {
     /// Two snapshots with equal `tree_hash` hold the same files. `None`
     /// on snapshots taken before V96.
     pub tree_hash: Option<String>,
+    /// What the take that CREATED this snapshot recorded (its first
+    /// `snapshot_op`, P2.11): the snapshot it grew from — the "previous"
+    /// a single-snapshot diff starts at — why it was taken, and whether
+    /// it ran over its budget. `None` / `false` for a snapshot with no op.
+    pub parent_snapshot_id: Option<i64>,
+    pub trigger: Option<SnapshotTrigger>,
+    pub over_budget: bool,
 }
 
 /// Most-recent stat (hash + size + mtime) for a single path. The
@@ -1728,8 +1735,11 @@ impl SqliteSnapshotStore {
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
                              WHERE f.snapshot_id = s.id) AS file_count,
-                            s.git_commit, s.git_branch, s.tree_hash
+                            s.git_commit, s.git_branch, s.tree_hash,
+                            op.parent_snapshot_id, op.trigger, COALESCE(op.over_budget, 0)
                      FROM snapshot s
+                     LEFT JOIN snapshot_op op ON op.seq = (
+                         SELECT MIN(o.seq) FROM snapshot_op o WHERE o.snapshot_id = s.id)
                      WHERE s.stream_id = ?1
                      ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
                 )?;
@@ -1741,6 +1751,9 @@ impl SqliteSnapshotStore {
                     let git_commit: Option<String> = row.get(4)?;
                     let git_branch: Option<String> = row.get(5)?;
                     let tree_hash: Option<String> = row.get(6)?;
+                    let parent_snapshot_id: Option<i64> = row.get(7)?;
+                    let trigger: Option<String> = row.get(8)?;
+                    let over_budget: i64 = row.get(9)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1756,6 +1769,9 @@ impl SqliteSnapshotStore {
                         git_commit,
                         git_branch,
                         tree_hash,
+                        parent_snapshot_id,
+                        trigger: trigger.as_deref().and_then(SnapshotTrigger::from_db_str),
+                        over_budget: over_budget != 0,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -2968,6 +2984,58 @@ mod tests {
                 .unwrap()
                 .seq,
             ops[0].seq
+        );
+    }
+
+    /// P2.11 (tsk435): a listed snapshot carries what its creating op
+    /// recorded — its parent (the "previous" a diff starts from), trigger
+    /// and whether it ran over budget; the op log lists newest first.
+    #[tokio::test]
+    async fn a_listed_snapshot_carries_its_creating_ops_parent_and_trigger() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db);
+        let first = store
+            .record_take(take(1, vec![("a.txt", "h1")], SnapshotTrigger::Startup))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut slow = take(1, vec![("a.txt", "h2")], SnapshotTrigger::TurnEnd);
+        slow.budget_ms = Some(1);
+        slow.elapsed_ms = 50;
+        let second = store.record_take(slow).await.unwrap().unwrap();
+        // A later empty take lands on the second snapshot; its creating op
+        // is still the turn-end one.
+        store
+            .record_take(take(1, vec![], SnapshotTrigger::Quiet))
+            .await
+            .unwrap();
+
+        let rows = store
+            .list_snapshots_for_stream(StreamId::new(1), 10)
+            .await
+            .unwrap();
+        let row = |id: i64| rows.iter().find(|r| r.id == id).unwrap().clone();
+        let a = row(first.snapshot_id);
+        assert_eq!(
+            (a.parent_snapshot_id, a.trigger, a.over_budget),
+            (None, Some(SnapshotTrigger::Startup), false)
+        );
+        let b = row(second.snapshot_id);
+        assert_eq!(
+            (b.parent_snapshot_id, b.trigger, b.over_budget),
+            (
+                Some(first.snapshot_id),
+                Some(SnapshotTrigger::TurnEnd),
+                true
+            )
+        );
+
+        let ops = store.list_ops(StreamId::new(1), 2).await.unwrap();
+        let triggers: Vec<SnapshotTrigger> = ops.iter().map(|o| o.trigger).collect();
+        assert_eq!(
+            triggers,
+            vec![SnapshotTrigger::Quiet, SnapshotTrigger::TurnEnd]
         );
     }
 

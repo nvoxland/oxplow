@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CommitRefLabel, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
+import type { SnapshotTrigger } from "../tauri-bridge/generated/bindings.js";
 import {
   getSnapshotStats,
   getTaskSummaries,
@@ -605,6 +606,20 @@ function SnapshotRowItem({
           title={`${summary.total} file${summary.total === 1 ? "" : "s"} captured: ${summary.created} created · ${summary.modified} modified · ${summary.deleted} deleted`}
         />
       ) : null}
+      {snapshot.overBudget ? (
+        <span
+          data-testid="local-history-over-budget"
+          style={{ ...subtle, color: "var(--status-waiting)", flexShrink: 0 }}
+          title="This take ran past its time budget; it still captured everything"
+        >
+          slow
+        </span>
+      ) : null}
+      {snapshot.trigger ? (
+        <span style={{ ...subtle, flexShrink: 0 }} title="Why this snapshot was taken">
+          {TRIGGER_LABEL[snapshot.trigger]}
+        </span>
+      ) : null}
       <span style={{ ...subtle, width: 130, flexShrink: 0, textAlign: "right" }} title={snapshot.createdAt}>
         {formatShortDateTime(snapshot.createdAt)}
       </span>
@@ -776,6 +791,19 @@ function groupByBranch(
 
 const muted: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-sm)" };
 const subtle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)" };
+
+/** How a snapshot's trigger reads in a row (P2.11). */
+const TRIGGER_LABEL: Record<SnapshotTrigger, string> = {
+  turn_end: "turn end",
+  quiet: "idle",
+  effort_start: "effort start",
+  effort_end: "effort end",
+  startup: "startup",
+  manual: "manual",
+  git_refs: "git",
+  head_moved: "HEAD moved",
+  legacy: "",
+};
 const errorBanner: React.CSSProperties = {
   padding: 8,
   background: "var(--surface-warning, #fef3c7)",

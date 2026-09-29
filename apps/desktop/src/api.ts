@@ -1990,6 +1990,11 @@ export interface Snapshot {
   /** Short name of the branch HEAD was on at capture; null for pre-V42
    *  rows, a detached HEAD, or a non-git directory. */
   gitBranch: string | null;
+  /** What the take that created it recorded (P2.11): the snapshot it grew
+   *  from, why it was taken, and whether it ran over its time budget. */
+  parentSnapshotId: number | null;
+  trigger: SnapshotTrigger | null;
+  overBudget: boolean;
 }
 
 /** Per-file snapshot history — every `file_snapshot` row for this
@@ -2045,6 +2050,9 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     file_count: number;
     git_commit: string | null;
     git_branch: string | null;
+    parent_snapshot_id: number | null;
+    trigger: SnapshotTrigger | null;
+    over_budget: boolean;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -2053,6 +2061,9 @@ export async function listSnapshots(streamId: string, limit?: number): Promise<S
     fileCount: r.file_count,
     gitCommit: r.git_commit,
     gitBranch: r.git_branch,
+    parentSnapshotId: r.parent_snapshot_id,
+    trigger: r.trigger,
+    overBudget: r.over_budget,
   }));
 }
 

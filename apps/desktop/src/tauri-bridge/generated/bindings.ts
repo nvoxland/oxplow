@@ -617,6 +617,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listSnapshotOps: (streamId: StreamId, limit: number | null) => typedError<SnapshotOp[], IpcError>(__TAURI_INVOKE("list_snapshot_ops", { streamId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listFilesForSnapshot: (snapshotId: number) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_files_for_snapshot", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3766,6 +3771,32 @@ export type Snapshot = {
 	 *  on snapshots taken before V96.
 	 */
 	tree_hash: string | null,
+	/**
+	 *  What the take that CREATED this snapshot recorded (its first
+	 *  `snapshot_op`, P2.11): the snapshot it grew from — the "previous"
+	 *  a single-snapshot diff starts at — why it was taken, and whether
+	 *  it ran over its budget. `None` / `false` for a snapshot with no op.
+	 */
+	parent_snapshot_id: number | null,
+	trigger: SnapshotTrigger | null,
+	over_budget: boolean,
+};
+
+// One row of the operation log (`snapshot_op`).
+export type SnapshotOp = {
+	seq: number,
+	stream_id: StreamId,
+	snapshot_id: number,
+	parent_snapshot_id: number | null,
+	trigger: SnapshotTrigger,
+	thread_id: ThreadId | null,
+	turn_id: number | null,
+	effort_id: EffortId | null,
+	at: Timestamp,
+	elapsed_ms: number,
+	budget_ms: number | null,
+	over_budget: boolean,
+	file_count: number,
 };
 
 /**

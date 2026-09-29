@@ -699,7 +699,15 @@ production write path; `create_snapshot` / `capture` / `capture_batch` /
   file_count)` (STRICT). `snapshot_id` is where the worktree is after
   the take; `parent_snapshot_id` where it was before (the stream's
   current snapshot = its latest op's `snapshot_id`). Readable as
-  `v_snapshot_op`.
+  `v_snapshot_op`; listed newest first by `list_ops` (RPC + MCP
+  `list_snapshot_ops { stream_id, limit? }`, P2.11).
+- **A snapshot row carries its creating op** (P2.11): the stream listing
+  (`list_snapshots_for_stream`) joins each snapshot's FIRST op for its
+  `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
+  "previous" for a single snapshot is that recorded parent
+  (`previousSnapshotId` in `apps/desktop/src/diffViewModel.ts`), falling
+  back to the next-smaller id only for a snapshot no op created; Local
+  History shows the trigger and marks an over-budget take "slow".
 - **Every take records an op**, including one that found nothing new:
   its op points at the unchanged snapshot (`parent = snapshot`,
   `file_count = 0`, `snapshot.taken.unchanged = true`) and no new

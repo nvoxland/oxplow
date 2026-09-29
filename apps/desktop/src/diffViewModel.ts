@@ -52,15 +52,18 @@ export function resolveEffortEndpoints(effort: EffortLike): ResolvedEndpoints {
   return { start, end: { kind: "working" }, inProgress: true };
 }
 
-/** The snapshot immediately before `snapshotId` in a stream — the
- *  largest captured id strictly less than it, or null when it's the
- *  first. A single-snapshot diff uses this as its `start`. */
+/** The snapshot `snapshotId` grew from — a single-snapshot diff's
+ *  `start`. It's the parent its creating take recorded (P2.11); a
+ *  snapshot no op created (older data) falls back to the largest id
+ *  strictly before it. Null for the stream's first capture. */
 export function previousSnapshotId(
   snapshotId: number,
-  snapshotIds: number[],
+  rows: ReadonlyArray<{ id: number; parentSnapshotId: number | null }>,
 ): number | null {
+  const own = rows.find((r) => r.id === snapshotId);
+  if (own?.parentSnapshotId != null) return own.parentSnapshotId;
   let prev: number | null = null;
-  for (const id of snapshotIds) {
+  for (const { id } of rows) {
     if (id < snapshotId && (prev === null || id > prev)) prev = id;
   }
   return prev;

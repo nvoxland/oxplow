@@ -2312,6 +2312,33 @@ impl OxplowMcp {
         json_result(&rows)
     }
 
+    #[tool(
+        description = "The stream's snapshot operation log, newest first: every take (a new \
+                       snapshot, or one that found the tree unchanged) with its trigger \
+                       (turn_end, quiet, effort_start, …), parent snapshot, turn/effort anchors, \
+                       elapsed time and budget (over_budget when it ran over)."
+    )]
+    async fn list_snapshot_ops(
+        &self,
+        params: Parameters<SnapshotStreamParams>,
+    ) -> Result<CallToolResult, McpError> {
+        expect_id_kind(
+            "list_snapshot_ops",
+            "stream_id",
+            &params.0.stream_id,
+            ID_STREAM,
+        )?;
+        let stream_id = oxplow_domain::StreamId::try_from_str(&params.0.stream_id)
+            .ok_or_else(|| McpError::invalid_params("invalid stream id", None))?;
+        let ops = self
+            .services
+            .snapshot_store
+            .list_ops(stream_id, params.0.limit.unwrap_or(200) as usize)
+            .await
+            .map_err(internal)?;
+        json_result(&ops)
+    }
+
     #[tool(description = "List every file_snapshot row captured under one snapshot id.")]
     async fn list_files_for_snapshot(
         &self,
@@ -5653,6 +5680,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "read_file_at_ref",
     "list_branches",
     "list_snapshots_for_stream",
+    "list_snapshot_ops",
     "list_files_for_snapshot",
     "get_file_snapshot",
     "get_snapshot_stats",

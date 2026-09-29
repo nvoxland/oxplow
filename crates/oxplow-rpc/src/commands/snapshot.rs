@@ -60,6 +60,20 @@ pub async fn list_snapshots_for_stream(
         .await?)
 }
 
+/// The stream's snapshot operation log, newest first: every take — a new
+/// snapshot or one that found the tree unchanged — with its trigger,
+/// anchors, timing and budget (P2.11).
+pub async fn list_snapshot_ops(
+    svc: &Services,
+    stream_id: StreamId,
+    limit: Option<usize>,
+) -> Result<Vec<oxplow_db::SnapshotOp>, IpcError> {
+    Ok(svc
+        .snapshot_store
+        .list_ops(stream_id, limit.unwrap_or(200))
+        .await?)
+}
+
 /// Created/modified/deleted counts for a snapshot. Powers the Local
 /// History dashboard's per-snapshot stats column.
 pub async fn get_snapshot_stats(
