@@ -312,7 +312,9 @@ pub fn update_with_status_tx(
     now: Timestamp,
 ) -> Result<Task, DomainError> {
     let before = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
-    update_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
+    if update_task_tx(conn, item).map_err(crate::database::map_sql_err)? == 0 {
+        return Err(DomainError::NotFound);
+    }
     let fields = edited_fields(&before, item);
     if !fields.is_empty() {
         let work_item = work_item_ref(item.id);
@@ -433,11 +435,12 @@ pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
     Ok(TaskId::new(conn.last_insert_rowid()))
 }
 
-/// One live task by id, for composition inside a transaction (the event
-/// pump's consumers read through it).
+/// One live task by id — `None` for a missing or soft-deleted row — for
+/// composition inside a transaction (the status cores, the task commands
+/// and the event pump's consumers read through it).
 pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Task>, DomainError> {
     use rusqlite::OptionalExtension;
-    let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
+    let sql = format!("{} WHERE t.id = ?1 AND t.deleted_at IS NULL", SELECT_BASE);
     conn.query_row(&sql, params![id.value()], row_to_task)
         .optional()
         .map_err(crate::database::map_sql_err)
@@ -742,14 +745,26 @@ impl TaskStore for SqliteTaskStore {
         Ok(())
     }
 
+    /// Soft-delete the task and close its open effort in the same
+    /// transaction: no claim outlives its task.
     async fn soft_delete(&self, id: TaskId) -> Result<(), DomainError> {
-        let now = ts_to_string(Timestamp::now());
+        let schemas = self.event_schemas.clone();
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "UPDATE task SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
-                    params![id.value(), now],
-                )?;
+            .transaction(move |tx| {
+                let now = Timestamp::now();
+                tx.execute(
+                    "UPDATE task SET deleted_at = ?2, updated_at = ?2
+                     WHERE id = ?1 AND deleted_at IS NULL",
+                    params![id.value(), ts_to_string(now)],
+                )
+                .map_err(crate::database::map_sql_err)?;
+                if let Some(open) =
+                    crate::effort_store::find_open_for_work_item_tx(tx, &work_item_ref(id))
+                        .map_err(crate::database::map_sql_err)?
+                {
+                    let ev = EventCtx::system(&schemas, "task_service");
+                    crate::effort_store::finish_tx(tx, &ev, open.id, None, None, now, false)?;
+                }
                 Ok(())
             })
             .await?;
@@ -842,6 +857,61 @@ mod tests {
             note_count: 0,
             author: Some(TaskAuthor::User),
         }
+    }
+
+    /// A deleted task can't be edited (nothing is logged or re-projected),
+    /// and deleting an in_progress task closes its effort — no claim
+    /// outlives its task (review of P2.6b–P2.11, tsk464).
+    #[tokio::test]
+    async fn a_deleted_task_takes_no_edits_and_leaves_no_open_effort() {
+        let (store, tid) = fixture().await;
+        let mut filed = item(Some(tid));
+        filed.status = TaskStatus::InProgress;
+        let (id, effort) = store.insert_logged(&filed).await.unwrap();
+        let effort = effort.unwrap();
+        store.soft_delete(id).await.unwrap();
+
+        let (ended, events): (Option<String>, Vec<String>) = store
+            .db
+            .call(move |c| {
+                let ended = c.query_row(
+                    "SELECT ended_at FROM effort WHERE id = ?1",
+                    params![effort.value()],
+                    |r| r.get(0),
+                )?;
+                let mut stmt = c.prepare("SELECT type FROM event_log ORDER BY seq")?;
+                let types = stmt
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((ended, types))
+            })
+            .await
+            .unwrap();
+        assert!(ended.is_some(), "the effort closed with its task");
+        assert_eq!(
+            events,
+            vec!["effort.opened", "work_item.created", "effort.closed"]
+        );
+
+        let mut edit = filed.clone();
+        edit.id = id;
+        edit.title = "ghost".into();
+        assert!(matches!(
+            store.update_with_status(&edit, None).await,
+            Err(DomainError::NotFound)
+        ));
+        let logged: i64 = store
+            .db
+            .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(logged, 3, "a refused edit logs nothing");
+        let live = store
+            .db
+            .transaction(move |c| get_task_tx(c, id))
+            .await
+            .unwrap();
+        assert!(live.is_none(), "get_task_tx sees live rows only");
     }
 
     /// A field write never touches status (review of P2.6): a copy read

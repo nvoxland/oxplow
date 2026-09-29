@@ -67,7 +67,10 @@ has exactly one open `effort` row. Enforced three ways: the
 status flip and effort open/finish commit in one transaction
 (`task_store::apply_status_tx`, via `set_status_tx` /
 `update_with_status_tx` / `insert_logged_tx` — the cores of
-`work_item.transition` / `work_item.update` / `work_item.create`); a V31 partial
+`work_item.transition` / `work_item.update` / `work_item.create`, and
+`soft_delete`, which closes a deleted task's open effort in its own
+transaction — `get_task_tx` sees live rows only, so a deleted task takes
+no edits); a V31 partial
 unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
 double-open a `Constraint` error; and boot recovery
 (`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
