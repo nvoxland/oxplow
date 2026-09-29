@@ -13,6 +13,7 @@
 mod common;
 
 use common::boot;
+use oxplow_domain::refs::build::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
@@ -197,11 +198,15 @@ async fn stop_in_progress_audit() {
 
 #[tokio::test]
 async fn stop_effort_review_with_an_unattributed_run() {
-    use oxplow_app::TaskEffortStore as _;
+    use oxplow_app::EffortStore as _;
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let task = seed_task(&svc, tid, "reviewed work").await;
-    let effort = svc.effort_store.start(task, &tid, None).await.unwrap();
+    let effort = svc
+        .effort_store
+        .start(&work_item_ref(task), &tid, None)
+        .await
+        .unwrap();
     svc.attribution_store
         .set_state(
             &effort.id,

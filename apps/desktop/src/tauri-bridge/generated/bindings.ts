@@ -927,7 +927,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listTaskEfforts: (itemId: TaskId) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_task_efforts", { itemId })),
+	listWorkItemEfforts: (workItem: string) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_work_item_efforts", { workItem })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -939,7 +939,8 @@ export const commands = {
 	 */
 	getEffort: (effortId: EffortId) => typedError<{
 	id: EffortId,
-	task_id: TaskId,
+	// The work item worked on, as a canonical `work_item` ref.
+	work_item: string,
 	thread_id: ThreadId,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
@@ -957,7 +958,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsOverlappingRange: (rangeStart: number, rangeEnd: number) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
+	listEffortsOverlappingRange: (rangeStart: number, rangeEnd: number) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_overlapping_range", { rangeStart, rangeEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -967,7 +968,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<TaskEffort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
+	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<Effort[], IpcError>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2056,6 +2057,19 @@ export type DimensionEntry = {
 	join?: string | null,
 };
 
+export type Effort = {
+	id: EffortId,
+	// The work item worked on, as a canonical `work_item` ref.
+	work_item: string,
+	thread_id: ThreadId,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	start_snapshot_id: number | null,
+	end_snapshot_id: number | null,
+	// The effort's summary prose — the canonical text.
+	summary: string | null,
+};
+
 /**
  *  One (snapshot, effort) pair returned from
  *  `list_efforts_at_snapshots`. The renderer derives
@@ -2064,7 +2078,7 @@ export type DimensionEntry = {
  */
 export type EffortAtSnapshot = {
 	snapshot_id: number,
-	effort: TaskEffort,
+	effort: Effort,
 };
 
 /**
@@ -4110,18 +4124,6 @@ export type TaskActorKind = "user" | "agent" | "system";
 
 // Semantic origin — distinct from `created_by` (the writer).
 export type TaskAuthor = "user" | "agent";
-
-export type TaskEffort = {
-	id: EffortId,
-	task_id: TaskId,
-	thread_id: ThreadId,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	start_snapshot_id: number | null,
-	end_snapshot_id: number | null,
-	// The effort's summary prose — the canonical text.
-	summary: string | null,
-};
 
 export type TaskId = string;
 

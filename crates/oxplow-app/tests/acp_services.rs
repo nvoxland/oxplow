@@ -4,6 +4,7 @@
 
 #![allow(clippy::unwrap_used)]
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::process::Command as Proc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -105,8 +106,11 @@ async fn claim_task(svc: &Services, thread: ThreadId) {
         })
         .await
         .unwrap();
-    use oxplow_app::TaskEffortStore as _;
-    svc.effort_store.start(task, &thread, None).await.unwrap();
+    use oxplow_app::EffortStore as _;
+    svc.effort_store
+        .start(&work_item_ref(task), &thread, None)
+        .await
+        .unwrap();
 }
 
 fn spec(thread: ThreadId, root: &std::path::Path) -> SessionSpec {

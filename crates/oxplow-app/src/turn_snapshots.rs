@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
-use oxplow_db::effort_store::TaskEffortStore;
-use oxplow_db::{SqliteTaskEffortStore, SqliteThreadStore};
+use oxplow_db::effort_store::EffortStore;
+use oxplow_db::{SqliteEffortStore, SqliteThreadStore};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentTurnId, ThreadId};
@@ -43,7 +43,7 @@ pub trait TurnSnapshots: Send + Sync {
 pub struct CaptureTurnSnapshots {
     pub captures: SnapshotCaptureRegistry,
     pub threads: Arc<SqliteThreadStore>,
-    pub efforts: Arc<SqliteTaskEffortStore>,
+    pub efforts: Arc<SqliteEffortStore>,
     pub config: Arc<RwLock<OxplowConfig>>,
 }
 

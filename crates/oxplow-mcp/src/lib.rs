@@ -8,6 +8,7 @@
 //! convention); request shapes are defined as `serde + JsonSchema`
 //! structs alongside the tool methods.
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::sync::Arc;
 
 use rmcp::handler::server::tool::ToolRouter;
@@ -3002,7 +3003,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<GetOpenEffortParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         expect_id_kind(
             "get_open_effort",
             "thread_id",
@@ -3020,7 +3021,8 @@ impl OxplowMcp {
             Some(e) => serde_json::json!({
                 "open": true,
                 "effortId": e.id.to_string(),
-                "taskId": e.task_id.to_string(),
+                "workItem": e.work_item,
+                "taskId": e.task_id().map(|t| t.to_string()),
                 "startedAt": e.started_at,
                 "hasStartSnapshot": e.start_snapshot_id.is_some(),
             }),
@@ -3042,7 +3044,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<ListEffortObservationsParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         let effort_id = match (params.0.effort_id, params.0.thread_id) {
             (Some(e), _) => e,
             (None, Some(t)) => {
@@ -4282,11 +4284,11 @@ impl OxplowMcp {
         // Run claims/disclaims at the close boundary (tsk268) — the run-kind
         // counterpart of `touched_files`, keyed to the just-closed effort.
         if closing && (!claim_runs.is_empty() || !disclaim_runs.is_empty()) {
-            use oxplow_db::TaskEffortStore as _;
+            use oxplow_db::EffortStore as _;
             if let Some(effort) = self
                 .services
                 .effort_store
-                .most_recent_for_task(updated.id)
+                .most_recent_for_work_item(&work_item_ref(updated.id))
                 .await
                 .ok()
                 .flatten()
@@ -4320,7 +4322,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<CompleteTaskParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         let p = params.0;
         let id = parse_task_id("complete_task", "id", &p.id)?;
         let _ = p.author; // legacy field — kept on the wire, no longer attributed
@@ -4420,7 +4422,7 @@ impl OxplowMcp {
                         None => self
                             .services
                             .effort_store
-                            .most_recent_for_task(item.id)
+                            .most_recent_for_work_item(&work_item_ref(item.id))
                             .await
                             .ok()
                             .flatten()
@@ -4452,7 +4454,7 @@ impl OxplowMcp {
         let decision_hint = match self
             .services
             .effort_store
-            .most_recent_for_task(item.id)
+            .most_recent_for_work_item(&work_item_ref(item.id))
             .await
         {
             Ok(Some(effort)) => {
@@ -4518,7 +4520,7 @@ impl OxplowMcp {
         &self,
         params: Parameters<AmendEffortParams>,
     ) -> Result<CallToolResult, McpError> {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         let p = params.0;
         let effort_id = parse_effort_id(&p.effort_id)?;
         let add = p.add_files.unwrap_or_default();
@@ -5971,7 +5973,7 @@ async fn resolve_effort(
     thread_id: &str,
     task_id: Option<&str>,
 ) -> Result<(i64, Option<i64>, Option<i64>), McpError> {
-    use oxplow_db::TaskEffortStore as _;
+    use oxplow_db::EffortStore as _;
     expect_id_kind(tool, "thread_id", thread_id, ID_THREAD)?;
     let tid = parse_thread_id(thread_id)?;
     let effort = match task_id {
@@ -5999,7 +6001,7 @@ async fn resolve_effort(
             }
             let e = services
                 .effort_store
-                .find_open_for_task(task)
+                .find_open_for_work_item(&work_item_ref(task))
                 .await
                 .map_err(internal)?;
             return Ok((tid.value(), Some(task.value()), e.map(|e| e.id.value())));
@@ -6012,7 +6014,7 @@ async fn resolve_effort(
     };
     Ok((
         tid.value(),
-        effort.as_ref().map(|e| e.task_id.value()),
+        effort.as_ref().and_then(|e| e.task_id()).map(|t| t.value()),
         effort.map(|e| e.id.value()),
     ))
 }
@@ -7938,7 +7940,7 @@ mod tests {
 
     #[tokio::test]
     async fn amend_effort_adds_and_removes_files() {
-        use oxplow_db::{EffortFileChange, TaskEffortStore as _};
+        use oxplow_db::{EffortFileChange, EffortStore as _};
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
         // Reuse the writer thread that boot's primary stream created.
@@ -7957,7 +7959,7 @@ mod tests {
         // Open an effort for this task with a pre-recorded file.
         let effort = services
             .effort_store
-            .start(task_id, &thread.id, None)
+            .start(&work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
         let v = oxplow_db::FileRefVersion {
@@ -8080,7 +8082,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_task_ignores_claims_on_never_snapshotted_paths() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         // Boot with a real `generated.exclude` in the project config —
         // the same route the user's `.oxplow/project.yaml` takes.
@@ -8118,7 +8120,7 @@ mod tests {
 
         let effort = services
             .effort_store
-            .most_recent_for_task(task_id)
+            .most_recent_for_work_item(&work_item_ref(task_id))
             .await
             .unwrap()
             .expect("close should have recorded an effort");
@@ -8133,7 +8135,7 @@ mod tests {
 
     #[tokio::test]
     async fn amend_effort_claims_and_disclaims_runs() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_db::{STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED};
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
@@ -8151,7 +8153,7 @@ mod tests {
         item.id = task_id;
         let effort = services
             .effort_store
-            .start(task_id, &thread.id, None)
+            .start(&work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
         // Seed two unattributed runs in the ledger, as the reconcile would.
@@ -8208,7 +8210,7 @@ mod tests {
         // tsk268: the agent claims its runs at the natural close point (no
         // reactive second amend_effort). update_task(status=done, claim_runs=…)
         // writes the ledger claim for the task's effort.
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_db::{STATE_CLAIMED, STATE_UNATTRIBUTED};
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
@@ -8227,7 +8229,7 @@ mod tests {
         item.id = task_id;
         let effort = services
             .effort_store
-            .start(task_id, &thread.id, None)
+            .start(&work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
         services
@@ -8348,7 +8350,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_decision_and_claim_attach_to_the_open_effort() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
@@ -8367,7 +8369,7 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(task_id, &thread.id, None)
+            .start(&work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
 
@@ -8426,7 +8428,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_open_effort_reports_open_effort() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (_proj, services, server) = boot();
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
@@ -8445,7 +8447,7 @@ mod tests {
             .unwrap();
         let effort = services
             .effort_store
-            .start(task_id, &thread.id, None)
+            .start(&work_item_ref(task_id), &thread.id, None)
             .await
             .unwrap();
 

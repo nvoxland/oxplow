@@ -117,7 +117,7 @@ pub use followup::{Followup, FollowupStore};
 // hold a `Services` (e.g. oxplow-control-plane, which doesn't depend on
 // oxplow-db directly) can call the trait methods its public
 // `effort_store` field exposes.
-pub use oxplow_db::{EffortFile, TaskEffortStore};
+pub use oxplow_db::{EffortFile, EffortStore};
 
 use thiserror::Error;
 use tracing::info;
@@ -127,9 +127,9 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteCommentStore, SqliteEventLogStore, SqliteFactStore, SqlitePageRefStore,
-    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
-    SqliteTaskEffortStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore, SqliteFactStore,
+    SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
+    SqliteStreamStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
     SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
     SqliteWikiPageThreadUpdateStore,
 };
@@ -434,7 +434,7 @@ pub struct Services {
     /// views of this same registry — keep the concrete handle around
     /// for code that wants to bypass the trait surfaces.
     pub thread_runtime: Arc<thread_runtime::ThreadRuntimeRegistry>,
-    pub effort_store: Arc<SqliteTaskEffortStore>,
+    pub effort_store: Arc<SqliteEffortStore>,
     /// Durable atomic fact layer (epic tsk12) — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
@@ -624,7 +624,7 @@ impl Services {
             db.clone(),
             event_schemas.clone(),
         ));
-        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
             SqliteSnapshotStore::new(db.clone()),

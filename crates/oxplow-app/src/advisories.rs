@@ -134,7 +134,7 @@ pub async fn for_thread(
     thread: &oxplow_domain::ThreadId,
     on: AdvisoryOn,
 ) -> Vec<AdvisoryHit> {
-    use oxplow_db::TaskEffortStore as _;
+    use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::ThreadStore as _;
     let Ok(Some(effort)) = svc.effort_store.find_single_open_for_thread(thread).await else {
         return Vec::new();

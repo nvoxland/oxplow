@@ -41,6 +41,7 @@ import { useChange } from "../lens/useChange.js";
 import { effortRowId } from "../lens/lensModel.js";
 import { EndpointPicker, type EndpointSnapshotOption } from "../components/Diff/EndpointPicker.js";
 import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
+import { workItemLabel } from "../workItemRef.js";
 
 /**
  * What a diff view renders. Reached three ways, all via `DiffViewPage`:
@@ -313,9 +314,10 @@ function ResolvedEndpointDiff({
           if (!cancelled) setEffortRows([]);
           return;
         }
-        const titles = await getTaskSummaries(
-          Array.from(new Set(overlapping.map((o) => o.taskId))),
-        ).catch(() => [] as Array<{ id: string; title: string }>);
+        const taskIds = overlapping.flatMap((o) => (o.taskId ? [o.taskId] : []));
+        const titles = await getTaskSummaries(Array.from(new Set(taskIds))).catch(
+          () => [] as Array<{ id: string; title: string }>,
+        );
         const titleByTask = new Map(titles.map((t) => [t.id, t.title] as const));
         if (cancelled) return;
         setEffortRows(
@@ -323,13 +325,16 @@ function ResolvedEndpointDiff({
             effort: {
               snapshotId: range.rangeEnd,
               effortId: o.effortId,
+              workItem: o.workItem,
               tasksId: o.taskId,
               threadId: o.threadId,
               startSnapshotId: o.startSnapshotId,
               endSnapshotId: o.endSnapshotId,
               completedHere: o.endSnapshotId === range.rangeEnd,
             },
-            taskTitle: titleByTask.get(o.taskId) ?? `task ${o.taskId}`,
+            taskTitle: o.taskId
+              ? titleByTask.get(o.taskId) ?? `task ${o.taskId}`
+              : workItemLabel(o.workItem),
             endedAt: o.endedAt,
           })),
         );
@@ -631,13 +636,18 @@ function ResolvedEndpointDiff({
           <ul style={effortListStyle}>
             {concurrentEfforts.map((r) => (
               <li key={r.effort.effortId}>
-                <button
-                  type="button"
-                  onClick={() => onOpenPage(taskRef(r.effort.tasksId))}
-                  style={{ ...linkButton, fontFamily: "inherit", fontSize: "var(--text-sm)" }}
-                >
-                  {r.taskTitle}
-                </button>
+                {r.effort.tasksId ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPage(taskRef(r.effort.tasksId as string))}
+                    style={{ ...linkButton, fontFamily: "inherit", fontSize: "var(--text-sm)" }}
+                  >
+                    {r.taskTitle}
+                  </button>
+                ) : (
+                  // Another provider's work item has no page here.
+                  <span style={{ fontSize: "var(--text-sm)" }}>{r.taskTitle}</span>
+                )}
               </li>
             ))}
           </ul>

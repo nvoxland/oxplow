@@ -419,7 +419,7 @@ mod tests {
     /// What Deviated: the effort's files outside the area its task names.
     #[tokio::test]
     async fn what_deviated_lists_files_outside_the_tasks_stated_area() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
         let describe = |text: &'static str| {
@@ -527,7 +527,7 @@ mod tests {
     /// harness, built from the task, the files and the agent's claims.
     #[tokio::test]
     async fn review_prompt_names_the_task_and_what_changed() {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         use oxplow_domain::stores::TaskStore as _;
         let f = crate::test_fixtures::services_with_effort().await;
         let mut t = f.svc.task_store.get(f.task).await.unwrap().unwrap();

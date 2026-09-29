@@ -595,7 +595,7 @@ pub async fn ensure_change(
     svc: &crate::Services,
     target: ChangeTarget,
 ) -> Result<oxplow_db::ChangeRow, oxplow_domain::DomainError> {
-    use oxplow_db::TaskEffortStore as _;
+    use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     use oxplow_domain::DomainError;
 

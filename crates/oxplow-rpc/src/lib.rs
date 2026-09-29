@@ -247,12 +247,12 @@ macro_rules! oxplow_command_table {
                 remove_dashboard_item => $crate::commands::dashboards::remove_dashboard_item { id: ::oxplow_domain::DashboardItemId } -> (),
                 reorder_dashboard_items => $crate::commands::dashboards::reorder_dashboard_items { req: $crate::commands::dashboards::ReorderDashboardItemsRequest } -> (),
                 // effort
-                list_task_efforts => $crate::commands::effort::list_task_efforts { item_id: ::oxplow_domain::TaskId } -> Vec<::oxplow_db::TaskEffort>,
-                list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::TaskEffort>,
+                list_work_item_efforts => $crate::commands::effort::list_work_item_efforts { work_item: String } -> Vec<::oxplow_db::Effort>,
+                list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
                 get_effort_files => $crate::commands::effort::get_effort_files { effort_id: ::oxplow_domain::EffortId } -> Vec<::oxplow_db::EffortFile>,
-                get_effort => $crate::commands::effort::get_effort { effort_id: ::oxplow_domain::EffortId } -> Option<::oxplow_db::TaskEffort>,
+                get_effort => $crate::commands::effort::get_effort { effort_id: ::oxplow_domain::EffortId } -> Option<::oxplow_db::Effort>,
                 list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<i64> } -> Vec<::oxplow_db::EffortAtSnapshot>,
-                list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::TaskEffort>,
+                list_efforts_overlapping_range => $crate::commands::effort::list_efforts_overlapping_range { range_start: i64, range_end: i64 } -> Vec<::oxplow_db::Effort>,
                 list_changed_paths_for_effort => $crate::commands::effort::list_changed_paths_for_effort { effort_id: ::oxplow_domain::EffortId } -> ::oxplow_db::EffortChangedPaths,
                 // metrics (unified substrate, tsk213)
                 list_metric_definitions => $crate::commands::metrics::list_metric_definitions { language: Option<String>, scope: Option<String> } -> Vec<::oxplow_db::MetricSpec>,

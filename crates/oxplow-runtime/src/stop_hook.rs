@@ -49,7 +49,9 @@ pub struct ThreadSnapshot<'a> {
 pub struct PendingEffortReview {
     /// The canonical `eff<N>` form — what `amend_effort` parses.
     pub effort_id: String,
-    pub task_id: i64,
+    /// The effort's work item, as a canonical `work_item` ref.
+    pub work_item: String,
+    /// The task's title for an oxplow work item; the ref's label otherwise.
     pub task_title: String,
     pub claimed_but_not_changed: Vec<String>,
     pub changed_but_not_claimed: Vec<String>,
@@ -366,7 +368,7 @@ mod tests {
         let items = vec![item(1, TaskStatus::InProgress, None)];
         let reviews = vec![PendingEffortReview {
             effort_id: "e-1".into(),
-            task_id: 7,
+            work_item: "work_item:oxplow:tsk7".into(),
             task_title: "ship the thing".into(),
             claimed_but_not_changed: vec!["src/typo.rs".into()],
             changed_but_not_claimed: vec!["src/extra.rs".into()],

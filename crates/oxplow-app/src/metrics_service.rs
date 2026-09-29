@@ -27,8 +27,8 @@ use oxplow_config::{
     MeasureEntry, MetricEntry, OxplowConfig, ResolvedGauge, ResolvedSpec,
 };
 use oxplow_db::{
-    NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteFactStore, SqliteSnapshotStore,
-    SqliteTaskEffortStore, SqliteThreadStore, TaskEffortStore,
+    EffortStore, NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteEffortStore,
+    SqliteFactStore, SqliteSnapshotStore, SqliteThreadStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{EffortId, StreamId, ThreadId};
@@ -90,7 +90,7 @@ struct GlobalCatalog {
 pub struct MetricsService {
     snapshot_store: Arc<SqliteSnapshotStore>,
     thread_store: Arc<SqliteThreadStore>,
-    effort_store: Arc<SqliteTaskEffortStore>,
+    effort_store: Arc<SqliteEffortStore>,
     blobs: BlobStore,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
@@ -198,7 +198,7 @@ impl MetricsService {
     pub fn new(
         snapshot_store: Arc<SqliteSnapshotStore>,
         thread_store: Arc<SqliteThreadStore>,
-        effort_store: Arc<SqliteTaskEffortStore>,
+        effort_store: Arc<SqliteEffortStore>,
         blobs: BlobStore,
         config: Arc<RwLock<OxplowConfig>>,
         project_dir: PathBuf,
@@ -2658,6 +2658,7 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
 mod tests {
     use super::*;
     use oxplow_config::GaugeComputeConfig;
+    use oxplow_domain::refs::build::work_item_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
     /// stored as a `sum` (the detail page would total them) (tsk367).
@@ -3467,7 +3468,11 @@ def transform(input):
             })
             .await
             .unwrap();
-        let effort = svc.effort_store.start(task, &thread, None).await.unwrap();
+        let effort = svc
+            .effort_store
+            .start(&work_item_ref(task), &thread, None)
+            .await
+            .unwrap();
 
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
@@ -3534,7 +3539,11 @@ def transform(input):
             })
             .await
             .unwrap();
-        let effort = svc.effort_store.start(task, &thread, None).await.unwrap();
+        let effort = svc
+            .effort_store
+            .start(&work_item_ref(task), &thread, None)
+            .await
+            .unwrap();
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/metrics/eff.star"),

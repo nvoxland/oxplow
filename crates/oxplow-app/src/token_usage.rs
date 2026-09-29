@@ -33,9 +33,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::TaskEffortStore;
+use oxplow_db::EffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteFactStore, SqliteTaskEffortStore,
+    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteEffortStore, SqliteFactStore,
     SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::stores::ThreadStore;
@@ -328,7 +328,7 @@ struct RecordedTurns {
 #[derive(Clone)]
 pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
-    efforts: Arc<SqliteTaskEffortStore>,
+    efforts: Arc<SqliteEffortStore>,
     threads: Arc<SqliteThreadStore>,
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
     /// on the `oxplow.tokens` measure (the legacy sample write is gone, T-E2).
@@ -339,7 +339,7 @@ pub struct TokenUsageService {
 impl TokenUsageService {
     pub fn new(
         usage: Arc<SqliteTokenUsageStore>,
-        efforts: Arc<SqliteTaskEffortStore>,
+        efforts: Arc<SqliteEffortStore>,
         threads: Arc<SqliteThreadStore>,
         facts: Arc<SqliteFactStore>,
         events: EventBus,
@@ -787,6 +787,7 @@ fn otlp_idempotency_key(thread: &ThreadId, body: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::refs::build::work_item_ref;
     use std::io::Write;
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
@@ -1503,7 +1504,7 @@ mod tests {
             .unwrap();
         let effort = svc
             .effort_store
-            .start(task_id, &thread, None)
+            .start(&work_item_ref(task_id), &thread, None)
             .await
             .unwrap();
 

@@ -74,6 +74,33 @@ pub fn task_of_work_item_ref(r: &str) -> Option<TaskId> {
     TaskId::try_from_str(native)
 }
 
+/// The provider-scoped id inside a `work_item` ref (`oxplow:tsk42`,
+/// `linear:ENG-12`) — the `page_ref` id of the work item.
+pub fn work_item_id_of_ref(r: &str) -> Option<&str> {
+    r.strip_prefix("work_item:").filter(|id| !id.is_empty())
+}
+
+/// How a person names a work item: `tsk42` for an oxplow task, the
+/// provider-scoped id (`linear:ENG-12`) otherwise, the text itself when it
+/// isn't a `work_item` ref.
+pub fn work_item_label(r: &str) -> String {
+    match task_of_work_item_ref(r) {
+        Some(t) => t.to_string(),
+        None => work_item_id_of_ref(r).unwrap_or(r).to_string(),
+    }
+}
+
+/// A `work_item` ref, or `Invalid` naming what's wrong with it.
+pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
+    let parsed = crate::refs::validate_ref(r)?;
+    if parsed.kind != "work_item" {
+        return Err(crate::DomainError::Invalid(format!(
+            "`{r}` is not a work_item ref"
+        )));
+    }
+    Ok(())
+}
+
 /// The `source` of an event a system component emits on its own behalf
 /// (`system:snapshot_capture`); an actor's runs use `Actor::source()`.
 pub fn system_source(component: &str) -> String {
@@ -124,5 +151,18 @@ mod tests {
         assert_eq!(task_from_work_item_id("tsk42"), Some(TaskId::new(42)));
         assert_eq!(task_from_work_item_id("42"), Some(TaskId::new(42)));
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
+        assert_eq!(
+            work_item_id_of_ref("work_item:linear:ENG-1"),
+            Some("linear:ENG-1")
+        );
+        assert_eq!(work_item_id_of_ref("work_item:"), None);
+        assert_eq!(work_item_id_of_ref("effort:eff1"), None);
+        assert!(validate_work_item_ref("work_item:linear:ENG-1").is_ok());
+        assert_eq!(work_item_label("work_item:oxplow:tsk42"), "tsk42");
+        assert_eq!(work_item_label("work_item:linear:ENG-1"), "linear:ENG-1");
+        assert_eq!(work_item_label("odd"), "odd");
+        for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
+            assert!(validate_work_item_ref(bad).is_err(), "{bad}");
+        }
     }
 }

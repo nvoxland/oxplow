@@ -4,10 +4,8 @@
 use std::path::Path;
 
 use oxplow_app::Services;
-use oxplow_db::{
-    EffortAtSnapshot, EffortChangedPaths, EffortFile, TaskEffort, TaskEffortStore as _,
-};
-use oxplow_domain::{EffortId, TaskId, Timestamp};
+use oxplow_db::{Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortStore as _};
+use oxplow_domain::{EffortId, Timestamp};
 use oxplow_fs_watch::WorkspaceFilter;
 
 use crate::error::IpcError;
@@ -25,11 +23,14 @@ fn current_filter(svc: &Services) -> WorkspaceFilter {
         .unwrap_or_default()
 }
 
-pub async fn list_task_efforts(
+/// Every effort on a work item (`work_item:oxplow:tsk42`,
+/// `work_item:linear:ENG-12`), newest first.
+pub async fn list_work_item_efforts(
     svc: &Services,
-    item_id: TaskId,
-) -> Result<Vec<TaskEffort>, IpcError> {
-    Ok(svc.effort_store.list_for_item(item_id).await?)
+    work_item: String,
+) -> Result<Vec<Effort>, IpcError> {
+    oxplow_domain::refs::build::validate_work_item_ref(&work_item)?;
+    Ok(svc.effort_store.list_for_work_item(&work_item).await?)
 }
 
 /// Efforts whose span overlaps `[window_start, window_end]` — the time-range
@@ -38,7 +39,7 @@ pub async fn list_efforts_in_window(
     svc: &Services,
     window_start: Timestamp,
     window_end: Timestamp,
-) -> Result<Vec<TaskEffort>, IpcError> {
+) -> Result<Vec<Effort>, IpcError> {
     Ok(svc
         .effort_store
         .list_in_window(window_start, window_end)
@@ -62,10 +63,7 @@ pub async fn get_effort_files(
 /// view resolve an `effortDiffRef(effortId)` into the (start, end)
 /// snapshot endpoints it diffs, including after a cold history reopen
 /// where only the effort id survives. `null` when the id is unknown.
-pub async fn get_effort(
-    svc: &Services,
-    effort_id: EffortId,
-) -> Result<Option<TaskEffort>, IpcError> {
+pub async fn get_effort(svc: &Services, effort_id: EffortId) -> Result<Option<Effort>, IpcError> {
     Ok(svc.effort_store.get_effort(&effort_id).await?)
 }
 
@@ -87,7 +85,7 @@ pub async fn list_efforts_overlapping_range(
     svc: &Services,
     range_start: i64,
     range_end: i64,
-) -> Result<Vec<TaskEffort>, IpcError> {
+) -> Result<Vec<Effort>, IpcError> {
     Ok(svc
         .effort_store
         .list_efforts_overlapping_range(range_start, range_end)
@@ -124,16 +122,23 @@ pub async fn list_changed_paths_for_effort(
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn list_task_efforts_dispatches() {
+    async fn list_work_item_efforts_dispatches() {
         let (svc, _dir) = crate::test_support::services();
         let out = crate::dispatch(
-            "list_task_efforts",
-            serde_json::json!({"itemId": "tsk999999"}),
+            "list_work_item_efforts",
+            serde_json::json!({"workItem": "work_item:oxplow:tsk999999"}),
             &svc,
         )
         .await
         .unwrap();
         assert!(out.is_array());
+        assert!(crate::dispatch(
+            "list_work_item_efforts",
+            serde_json::json!({"workItem": "tsk1"}),
+            &svc,
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]

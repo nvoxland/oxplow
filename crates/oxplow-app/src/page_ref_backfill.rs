@@ -17,6 +17,7 @@
 //! kinds whose data lives entirely in SQLite (tasks, links,
 //! efforts, findings).
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
@@ -24,9 +25,9 @@ use oxplow_db::page_ref_projections::{
     note_edges, task_body_ref_types, task_edges, task_link_ref_types, work_item_id, KIND_FINDING,
     KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
-use oxplow_db::TaskEffortStore as _;
+use oxplow_db::EffortStore as _;
 use oxplow_db::{
-    SqliteCodeQualityStore, SqlitePageRefStore, SqliteTaskEffortStore, SqliteTaskLinkStore,
+    SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore, SqliteTaskLinkStore,
     SqliteTaskNoteStore, SqliteTaskStore,
 };
 use oxplow_domain::stores::TaskLinkStore as _;
@@ -47,7 +48,7 @@ pub async fn run(
     page_refs: Arc<SqlitePageRefStore>,
     tasks: Arc<SqliteTaskStore>,
     links: Arc<SqliteTaskLinkStore>,
-    efforts: Arc<SqliteTaskEffortStore>,
+    efforts: Arc<SqliteEffortStore>,
     findings_store: Arc<SqliteCodeQualityStore>,
     task_note: Arc<SqliteTaskNoteStore>,
 ) -> BackfillCounts {
@@ -74,7 +75,7 @@ pub async fn run(
             use std::collections::BTreeMap;
             let mut paths: BTreeMap<String, String> = BTreeMap::new();
             let mut summaries: Vec<String> = Vec::new();
-            if let Ok(item_efforts) = efforts.list_for_item(item.id).await {
+            if let Ok(item_efforts) = efforts.list_for_work_item(&work_item_ref(item.id)).await {
                 // list_for_item is sorted started_at DESC; walking
                 // in reverse gives oldest-first so the latest write
                 // wins via plain `insert`.
@@ -98,8 +99,8 @@ pub async fn run(
                 }
             }
             let path_vec: Vec<(String, String)> = paths.into_iter().collect();
-            let mut edges = effort_touched_file_edges(&item.id, &path_vec);
-            edges.extend(effort_summary_edges(&item.id, &summaries));
+            let mut edges = effort_touched_file_edges(&id_str, &path_vec);
+            edges.extend(effort_summary_edges(&id_str, &summaries));
             let had_payload = !path_vec.is_empty() || !summaries.is_empty();
             let _ = page_refs
                 .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, effort_ref_types(), edges)
@@ -273,7 +274,7 @@ mod tests {
         // Build the attached stores the backfill consumes.
         let items_attached = Arc::new(SqliteTaskStore::new(db.clone()));
         let links = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
         let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
         let notes = Arc::new(SqliteTaskNoteStore::new(db.clone()));
 

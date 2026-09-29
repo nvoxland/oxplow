@@ -73,6 +73,51 @@ impl SqliteTaskStore {
             .await
     }
 
+    /// Insert a task filed straight into `in_progress` on `thread` and
+    /// open its effort — one transaction, so "in_progress ⟺ one open
+    /// effort" holds from the first commit. Snapshot pins are backfilled
+    /// after commit, as for [`Self::update_with_effort_transition`].
+    pub async fn insert_with_effort(
+        &self,
+        item: &Task,
+        thread: ThreadId,
+    ) -> Result<(TaskId, EffortId), DomainError> {
+        use crate::database::map_sql_err;
+        let owned = Arc::new(item.clone());
+        let (id, effort) = self
+            .db
+            .transaction(move |tx| {
+                let id = insert_task_tx(tx, &owned).map_err(map_sql_err)?;
+                let effort = crate::effort_store::start_tx(
+                    tx,
+                    &work_item_ref(id),
+                    thread,
+                    None,
+                    Timestamp::now(),
+                )
+                .map_err(map_sql_err)?;
+                Ok((id, effort))
+            })
+            .await?;
+        self.project_body_refs(item, id).await?;
+        Ok((id, effort))
+    }
+
+    /// Re-project a task's body mentions into `page_ref` (the task-body
+    /// slice; the effort slice is the effort store's).
+    async fn project_body_refs(&self, item: &Task, id: TaskId) -> Result<(), DomainError> {
+        let mut placed = item.clone();
+        placed.id = id;
+        self.page_refs
+            .replace_source_for_ref_types(
+                KIND_WORK_ITEM,
+                &work_item_id(id),
+                task_body_ref_types(),
+                task_edges(&placed),
+            )
+            .await
+    }
+
     /// Persist a task row that just crossed the in_progress boundary
     /// AND open/finish its lifecycle effort — one transaction, so the
     /// invariant "in_progress ⟺ one open effort" can't be torn by a
@@ -107,15 +152,16 @@ impl SqliteTaskStore {
                 if rows == 0 {
                     return Err(DomainError::NotFound);
                 }
+                let work_item = work_item_ref(item.id);
                 let transition = if entering {
-                    match crate::effort_store::find_open_for_task_tx(tx, item.id)
+                    match crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
                         .map_err(map_sql_err)?
                     {
                         Some(open) => Ok(EffortTransition::Opened(open.id)),
                         None => Ok(EffortTransition::Opened(
                             crate::effort_store::start_tx(
                                 tx,
-                                item.id,
+                                &work_item,
                                 thread,
                                 None,
                                 Timestamp::now(),
@@ -124,7 +170,7 @@ impl SqliteTaskStore {
                         )),
                     }
                 } else {
-                    match crate::effort_store::find_open_for_task_tx(tx, item.id)
+                    match crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
                         .map_err(map_sql_err)?
                     {
                         Some(open) => {
@@ -141,7 +187,6 @@ impl SqliteTaskStore {
                         EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
                         EffortTransition::NoOpenEffort => None,
                     };
-                    let work_item = work_item_ref(item.id);
                     let mut subject = vec![work_item.clone()];
                     subject.extend(effort.map(effort_ref));
                     let stream: Option<i64> = tx
@@ -180,6 +225,33 @@ impl SqliteTaskStore {
         // transaction logged (oxplow-app `page_ref_consumers.rs`).
         Ok(outcome)
     }
+}
+
+/// Sync core for the task-row INSERT; returns the new id.
+pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<TaskId> {
+    conn.execute(
+        "INSERT INTO task (
+            thread_id, parent_id, title, description,
+            status, priority, sort_index, created_by, created_at, updated_at,
+            completed_at, deleted_at, author
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            item.thread_id.as_ref().map(|t| t.value()),
+            item.parent_id.map(|p| p.value()),
+            item.title,
+            item.description,
+            status_to_str(item.status),
+            priority_to_str(item.priority),
+            item.sort_index,
+            actor_to_str(item.created_by),
+            ts_to_string(item.created_at),
+            ts_to_string(item.updated_at),
+            item.completed_at.map(ts_to_string),
+            item.deleted_at.map(ts_to_string),
+            item.author.map(author_to_str),
+        ],
+    )?;
+    Ok(TaskId::new(conn.last_insert_rowid()))
 }
 
 /// One live task by id, for composition inside a transaction (the event
@@ -461,51 +533,12 @@ impl TaskStore for SqliteTaskStore {
     }
 
     async fn insert(&self, item: &Task) -> Result<TaskId, DomainError> {
-        let item = item.clone();
         let owned = item.clone();
-        let new_id: TaskId = self
+        let new_id = self
             .db
-            .call(move |conn| {
-                let item = owned;
-                conn.execute(
-                    "INSERT INTO task (
-                        thread_id, parent_id, title, description,
-                        status, priority, sort_index, created_by, created_at, updated_at,
-                        completed_at, deleted_at, author
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                    params![
-                        item.thread_id.as_ref().map(|t| t.value()),
-                        item.parent_id.map(|p| p.value()),
-                        item.title,
-                        item.description,
-                        status_to_str(item.status),
-                        priority_to_str(item.priority),
-                        item.sort_index,
-                        actor_to_str(item.created_by),
-                        ts_to_string(item.created_at),
-                        ts_to_string(item.updated_at),
-                        item.completed_at.map(ts_to_string),
-                        item.deleted_at.map(ts_to_string),
-                        item.author.map(author_to_str),
-                    ],
-                )?;
-                let id = conn.last_insert_rowid();
-                Ok(TaskId::new(id))
-            })
+            .call(move |conn| insert_task_tx(conn, &owned))
             .await?;
-        {
-            let refs = &self.page_refs;
-            let mut placed = item.clone();
-            placed.id = new_id;
-            let edges = task_edges(&placed);
-            refs.replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(new_id),
-                task_body_ref_types(),
-                edges,
-            )
-            .await?;
-        }
+        self.project_body_refs(item, new_id).await?;
         Ok(new_id)
     }
 
@@ -633,6 +666,51 @@ mod tests {
             note_count: 0,
             author: Some(TaskAuthor::User),
         }
+    }
+
+    /// P2.5b (tsk428): filing a task straight into `in_progress` opens its
+    /// effort in the insert's own transaction — both or neither.
+    #[tokio::test]
+    async fn insert_in_progress_opens_its_effort_in_the_same_transaction() {
+        let (store, tid) = fixture().await;
+        let mut it = item(Some(tid));
+        it.status = TaskStatus::InProgress;
+        let (id, effort) = store.insert_with_effort(&it, tid).await.unwrap();
+        let (work_item, ended): (String, Option<String>) = store
+            .db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT work_item, ended_at FROM effort WHERE id = ?1",
+                    params![effort.value()],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(work_item, work_item_ref(id));
+        assert_eq!(ended, None);
+
+        // The effort can't open (the next task's ref already has an open
+        // effort), so the task row isn't written either.
+        let next = work_item_ref(TaskId::new(id.value() + 1));
+        store
+            .db
+            .call(move |c| {
+                c.execute(
+                    "INSERT INTO effort (work_item, thread_id, started_at)
+                       VALUES (?1, 1, '2026-01-01T00:00:00.000000Z')",
+                    params![next],
+                )
+            })
+            .await
+            .unwrap();
+        assert!(store.insert_with_effort(&it, tid).await.is_err());
+        let rows: i64 = store
+            .db
+            .call(|c| c.query_row("SELECT count(*) FROM task", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(rows, 1, "the failed insert rolled back with its effort");
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@
 //! (`oxplow-coverage`), never from the agent — so `diff-coverage` is
 //! always `observed`.
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -25,11 +26,11 @@ use oxplow_collect_plugin::{
 };
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_db::{
-    SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore, SqliteThreadStore,
-    TaskEffort, TaskEffortStore, STATE_CLAIMED,
+    Effort, EffortStore, SqliteAttributionStore, SqliteEffortStore, SqliteSnapshotStore,
+    SqliteThreadStore, STATE_CLAIMED,
 };
+use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{DomainError, EffortId, TaskId, ThreadId};
 
@@ -391,7 +392,7 @@ pub struct CollectionService {
     /// aggregation engine reads these; the samples are the rebuildable cache.
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
-    efforts: Arc<SqliteTaskEffortStore>,
+    efforts: Arc<SqliteEffortStore>,
     /// Read-only, and only for run attribution: an effort's task text names the
     /// files being worked on before snapshot capture has claimed any (tsk185).
     tasks: Arc<oxplow_db::SqliteTaskStore>,
@@ -424,7 +425,7 @@ impl CollectionService {
     pub fn new(
         facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
-        efforts: Arc<SqliteTaskEffortStore>,
+        efforts: Arc<SqliteEffortStore>,
         tasks: Arc<oxplow_db::SqliteTaskStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
@@ -778,7 +779,7 @@ impl CollectionService {
         run_id: i64,
         task: Option<TaskId>,
         command: Option<&str>,
-    ) -> Option<TaskEffort> {
+    ) -> Option<Effort> {
         let attribute_to = self
             .resolve_owning_effort_for_command(thread, task, command)
             .await;
@@ -799,7 +800,7 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         task: Option<TaskId>,
-    ) -> Option<TaskEffort> {
+    ) -> Option<Effort> {
         self.resolve_owning_effort_for_command(thread, task, None)
             .await
     }
@@ -824,9 +825,14 @@ impl CollectionService {
         thread: &ThreadId,
         task: Option<TaskId>,
         command: Option<&str>,
-    ) -> Option<TaskEffort> {
+    ) -> Option<Effort> {
         if let Some(tid) = task {
-            return self.efforts.find_open_for_task(tid).await.ok().flatten();
+            return self
+                .efforts
+                .find_open_for_work_item(&work_item_ref(tid))
+                .await
+                .ok()
+                .flatten();
         }
         if let Some(single) = self
             .efforts
@@ -850,7 +856,7 @@ impl CollectionService {
 
     /// Claim `run:<id>` for an effort in the unified run ledger (best-effort — a
     /// ledger write error never fails the host path).
-    async fn claim_run(&self, effort: &TaskEffort, run_id: i64) {
+    async fn claim_run(&self, effort: &Effort, run_id: i64) {
         let _ = self
             .attribution
             .set_state(
@@ -1354,7 +1360,7 @@ impl CollectionService {
     /// lines overlap. `diff_payload` is the same shape the panel already renders.
     async fn diff_coverage_for_effort(
         &self,
-        effort: &TaskEffort,
+        effort: &Effort,
         abs_payload: &serde_json::Value,
     ) -> Result<Option<(f64, serde_json::Value)>, DomainError> {
         let Some(start) = effort.start_snapshot_id else {
@@ -1793,7 +1799,7 @@ impl CollectionService {
     pub(crate) async fn persist_nudge(
         &self,
         thread: &ThreadId,
-        effort: Option<&TaskEffort>,
+        effort: Option<&Effort>,
         kind: &str,
         message: &str,
         trigger: &str,
@@ -2460,7 +2466,7 @@ impl CollectionService {
     async fn file_delta_from_facts(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &TaskEffort,
+        effort: &Effort,
         claimed: &[String],
         stream: Option<i64>,
         fact_cache: &mut std::collections::HashMap<i64, std::sync::Arc<Vec<oxplow_db::FactRow>>>,
@@ -2872,7 +2878,7 @@ impl CollectionService {
     async fn coverage_delta_for_spec(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &TaskEffort,
+        effort: &Effort,
     ) -> Option<oxplow_db::EffortMetricDelta> {
         let mut caps: Vec<oxplow_db::MetricCapture> = Vec::new();
         for id in self
@@ -2947,7 +2953,7 @@ impl CollectionService {
         diff_new_side_lines(&old, &new)
     }
 
-    fn emit(&self, thread: &ThreadId, effort: &TaskEffort) {
+    fn emit(&self, thread: &ThreadId, effort: &Effort) {
         self.events.emit(OxplowEvent::EffortObservationsChanged {
             thread_id: *thread,
             effort_id: effort.id.to_string(),
@@ -2972,8 +2978,11 @@ impl CollectionService {
 /// fixing them means hand-mapping run ids to efforts. Here it costs one token on
 /// the next command. It names the candidate tasks so the right id doesn't have
 /// to be looked up.
-fn unattributed_run_message(command: &str, open: &[TaskEffort]) -> String {
-    let ids: Vec<String> = open.iter().map(|e| e.task_id.to_string()).collect();
+fn unattributed_run_message(command: &str, open: &[Effort]) -> String {
+    let ids: Vec<String> = open
+        .iter()
+        .map(|e| oxplow_domain::refs::build::work_item_label(&e.work_item))
+        .collect();
     format!(
         "`{cmd}` was recorded but NOT attributed to an effort — {n} efforts are open \
          ({list}) and the command doesn't name which one it's for. Prefix the run with \
@@ -3687,7 +3696,7 @@ mod tests {
             service: CollectionService,
             thread: ThreadId,
             effort_id: String,
-            efforts: Arc<SqliteTaskEffortStore>,
+            efforts: Arc<SqliteEffortStore>,
             nudges: Arc<SqliteAgentNudgeStore>,
             tmp: tempfile::TempDir,
             /// Shared in-memory db handle — lets a test seed a second task/effort
@@ -3799,9 +3808,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+            let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
             let effort = efforts
-                .start(task_id, &thread.id, Some(snap_id))
+                .start(&work_item_ref(task_id), &thread.id, Some(snap_id))
                 .await
                 .unwrap();
 
@@ -3938,7 +3947,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let _eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let _eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
 
             // Observe coverage — two efforts open ⇒ unclaimed.
             assert!(matches!(
@@ -5153,7 +5166,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             let eff2_id = eff2.id.to_string();
 
             let (m, facts) =
@@ -5294,7 +5311,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             let eff2_id = eff2.id.to_string();
             let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             // A capture time inside BOTH (open) windows — after the later start
@@ -5592,7 +5613,10 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            h.efforts.start(task2, &h.thread, None).await.unwrap();
+            h.efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
 
             // Names no crate and no path, so target overlap can't resolve it.
             let msg = h
@@ -5637,7 +5661,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             let eff1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             for (eid, path) in [
                 (eff1, "crates/oxplow-git/src/smart_merge.rs"),
@@ -5711,8 +5739,16 @@ mod tests {
                 "Fix `[[crates/oxplow-git/src/smart_merge.rs]]`.",
             )
             .await;
-            let eff_cfg = h.efforts.start(task_cfg, &h.thread, None).await.unwrap();
-            let eff_git = h.efforts.start(task_git, &h.thread, None).await.unwrap();
+            let eff_cfg = h
+                .efforts
+                .start(&work_item_ref(task_cfg), &h.thread, None)
+                .await
+                .unwrap();
+            let eff_git = h
+                .efforts
+                .start(&work_item_ref(task_git), &h.thread, None)
+                .await
+                .unwrap();
 
             // Precondition: neither effort has claimed anything.
             for id in [eff_cfg.id, eff_git.id] {
@@ -5773,7 +5809,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             let eff1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
 
             // Each effort declares the file it is working on — the signal the
@@ -5865,7 +5905,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
 
             // Three observed run CAPTURES on the thread (the capture is the run,
@@ -6003,7 +6047,11 @@ mod tests {
             // r_outer ∈ eff1 only. Small sleeps keep the timeline strictly ordered
             // past the microsecond truncation of canonical timestamps.
             let gap = || tokio::time::sleep(std::time::Duration::from_millis(3));
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
             gap().await;
             let r_inner = mk_run().await;
             gap().await;
@@ -6100,7 +6148,11 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let eff2 = h.efforts.start(task2, &h.thread, None).await.unwrap();
+            let eff2 = h
+                .efforts
+                .start(&work_item_ref(task2), &h.thread, None)
+                .await
+                .unwrap();
 
             // Two efforts open ⇒ ambiguous for find_single. Name task2.
             h.service
@@ -6488,9 +6540,9 @@ mod tests {
             };
             // Synthetic effort started at the epoch so the just-written file
             // is always fresh (same approach as merge_fresh_test_reports test).
-            let effort = TaskEffort {
+            let effort = Effort {
                 id: EffortId::new(901),
-                task_id: TaskId::placeholder(),
+                work_item: "work_item:oxplow:tsk999".into(),
                 thread_id: h.thread,
                 started_at: Timestamp::from_unix_ms(0),
                 ended_at: None,
@@ -6650,9 +6702,9 @@ mod tests {
             .unwrap();
             // Synthetic effort started at the epoch → both files are fresh
             // (deterministic, no wall-clock/fs-granularity dependence).
-            let effort = TaskEffort {
+            let effort = Effort {
                 id: EffortId::new(902),
-                task_id: TaskId::placeholder(),
+                work_item: "work_item:oxplow:tsk999".into(),
                 thread_id: ThreadId::new(1),
                 started_at: Timestamp::from_unix_ms(0),
                 ended_at: None,
@@ -6846,9 +6898,9 @@ mod tests {
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
             // Synthetic effort started at the epoch → the report is fresh.
-            let effort = TaskEffort {
+            let effort = Effort {
                 id: EffortId::new(903),
-                task_id: TaskId::placeholder(),
+                work_item: "work_item:oxplow:tsk999".into(),
                 thread_id: h.thread,
                 started_at: Timestamp::from_unix_ms(0),
                 ended_at: None,
@@ -6962,7 +7014,7 @@ mod tests {
             h.efforts.finish(&open.id, None, None).await.unwrap();
             let no_base = h
                 .efforts
-                .start(open.task_id, &h.thread, None)
+                .start(&open.work_item, &h.thread, None)
                 .await
                 .unwrap();
             assert!(no_base.start_snapshot_id.is_none());

@@ -368,7 +368,7 @@ impl AgentActivity {
         thread_id: &ThreadId,
         session_id: Option<&str>,
     ) -> Option<String> {
-        use crate::TaskEffortStore as _;
+        use crate::EffortStore as _;
         let effort = svc
             .effort_store
             .find_open_for_thread(thread_id)
@@ -485,7 +485,7 @@ async fn record_tool_call(
     payload_json: &str,
     worktree: &Path,
 ) {
-    use crate::TaskEffortStore as _;
+    use crate::EffortStore as _;
     let Some(parts) = crate::tool_calls::parse_tool_call(payload_json, worktree) else {
         return;
     };

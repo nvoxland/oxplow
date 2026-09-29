@@ -11,6 +11,7 @@
 //! independent of the tauri-specta layering and lets the MCP surface
 //! reuse the same service without paying for renderer notifications.
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -21,8 +22,8 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, NewFact, NewMetricCapture, SqliteAttributionStore, SqliteFactStore,
-    SqliteSnapshotStore, SqliteTaskEffortStore, TaskEffortStore,
+    EffortFileChange, EffortStore, NewFact, NewMetricCapture, SqliteAttributionStore,
+    SqliteEffortStore, SqliteFactStore, SqliteSnapshotStore,
 };
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::stores::{TaskLinkStore, TaskStore};
@@ -105,7 +106,7 @@ pub struct TaskService {
     /// `in_progress` entry/exit. Held as an `Option` so test paths
     /// that construct a TaskService without the full Services boot
     /// still work — they just skip the lifecycle effort.
-    effort_store: Option<Arc<SqliteTaskEffortStore>>,
+    effort_store: Option<Arc<SqliteEffortStore>>,
     /// Per-stream snapshot capture registry. When set alongside
     /// `thread_store`, lifecycle snapshots resolve the right service
     /// via the task's thread → stream — so a task running in a
@@ -189,7 +190,7 @@ impl TaskService {
     /// Attach the effort store. Required (together with
     /// `with_snapshot_capture`) for automatic effort lifecycle on
     /// in_progress transitions.
-    pub fn with_effort_store(mut self, store: Arc<SqliteTaskEffortStore>) -> Self {
+    pub fn with_effort_store(mut self, store: Arc<SqliteEffortStore>) -> Self {
         self.effort_store = Some(store);
         self
     }
@@ -289,34 +290,24 @@ impl TaskService {
             note_count: 0,
             author: input.author.or(Some(TaskAuthor::User)),
         };
-        let id = self.store.insert(&item).await?;
-        item.id = id;
-        // Filing directly in `in_progress` (the path CLAUDE.md
-        // recommends to "start the work in the same call") needs the
-        // same lifecycle hook that update() runs on a Ready →
-        // InProgress transition — otherwise complete_task's EffortEnd
-        // snapshot has no open effort to land on and gets orphaned.
-        // The insert above already committed, so this is open + backfill
-        // (best-effort; boot recovery heals an in_progress task with no
-        // open effort).
-        if matches!(item.status, TaskStatus::InProgress) {
-            if let (Some(effort_store), Some(thread_id)) =
-                (self.effort_store.as_ref(), item.thread_id)
-            {
-                match effort_store.start(item.id, &thread_id, None).await {
-                    Ok(eff) => {
-                        self.backfill_effort_snapshot(
-                            &item,
-                            true,
-                            oxplow_db::EffortTransition::Opened(eff.id),
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, task = %item.id, "effort lifecycle: start on create failed");
-                    }
-                }
+        // Filing directly in `in_progress` (the path CLAUDE.md recommends to
+        // "start the work in the same call") opens its effort in the insert's
+        // transaction, so the invariant "in_progress ⟺ one open effort" holds
+        // from the first commit. The start snapshot is backfilled after.
+        let opens_effort =
+            matches!(item.status, TaskStatus::InProgress) && self.effort_store.is_some();
+        match (opens_effort, item.thread_id) {
+            (true, Some(thread_id)) => {
+                let (id, effort) = self.store.insert_with_effort(&item, thread_id).await?;
+                item.id = id;
+                self.backfill_effort_snapshot(
+                    &item,
+                    true,
+                    oxplow_db::EffortTransition::Opened(effort),
+                )
+                .await;
             }
+            _ => item.id = self.store.insert(&item).await?,
         }
         Ok(item)
     }
@@ -561,7 +552,10 @@ impl TaskService {
             return; // not actually closed — nothing to measure
         };
         let cycle_ms = (ended_at.unix_ms() - effort.started_at.unix_ms()).max(0);
-        let efforts_so_far = match effort_store.list_for_item(task_id).await {
+        let efforts_so_far = match effort_store
+            .list_for_work_item(&work_item_ref(task_id))
+            .await
+        {
             Ok(rows) => rows.len() as i64,
             Err(e) => {
                 tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
@@ -963,7 +957,7 @@ impl TaskService {
     #[allow(clippy::too_many_arguments)]
     pub async fn record_effort(
         &self,
-        effort_store: &SqliteTaskEffortStore,
+        effort_store: &SqliteEffortStore,
         item: TaskId,
         thread: &ThreadId,
         touched_files: &[String],
@@ -982,7 +976,9 @@ impl TaskService {
         // `project_effort_lifecycle_metrics` never ran for it (tsk172). We
         // project it ourselves at the tail — otherwise the work is invisible to
         // exactly the metrics that measure how the pairing is going.
-        let prior = effort_store.most_recent_for_task(item).await?;
+        let prior = effort_store
+            .most_recent_for_work_item(&work_item_ref(item))
+            .await?;
         let synthesized = prior.is_none();
         let version = match prior {
             Some(e) => self.resolve_effort_file_version(&e).await,
@@ -1006,7 +1002,7 @@ impl TaskService {
             .collect();
         let effort_id = effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
-                task: item,
+                work_item: work_item_ref(item),
                 thread: *thread,
                 files,
                 version: oxplow_db::OwnedFileRefVersion {
@@ -1038,7 +1034,7 @@ impl TaskService {
     /// the PostToolUse caller swallows errors so the hook never fails.
     pub async fn claim_open_effort_file(
         &self,
-        effort_store: &SqliteTaskEffortStore,
+        effort_store: &SqliteEffortStore,
         thread: &ThreadId,
         path: &str,
         worktree_root: Option<&Path>,
@@ -1151,7 +1147,7 @@ impl TaskService {
     /// snapshot later.
     pub async fn resolve_effort_file_version(
         &self,
-        effort: &oxplow_db::TaskEffort,
+        effort: &oxplow_db::Effort,
     ) -> crate::file_ref_version::ResolvedFileVersion {
         let snapshot_id = effort
             .end_snapshot_id
@@ -1187,7 +1183,8 @@ impl TaskService {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct EffortFileReview {
     pub effort_id: String,
-    pub task_id: i64,
+    /// The effort's work item (`work_item:oxplow:tsk42`).
+    pub work_item: String,
     /// Paths the agent claimed but the auto-diff doesn't see as
     /// changed. Disclaim via `amend_effort(remove_files=…)` if not
     /// actually touched.
@@ -1214,13 +1211,13 @@ pub const MAX_UNCLAIMED_FOR_REVIEW: usize = crate::attribution::MAX_UNCLAIMED_FO
 /// nothing's worth showing the agent — claim and diff agree, or no
 /// snapshot bracket exists yet.
 pub async fn compute_effort_file_review(
-    effort_store: &SqliteTaskEffortStore,
+    effort_store: &SqliteEffortStore,
     snapshot_store: &SqliteSnapshotStore,
     task_id: TaskId,
     claimed: &[String],
 ) -> Option<EffortFileReview> {
     let effort = effort_store
-        .most_recent_for_task(task_id)
+        .most_recent_for_work_item(&work_item_ref(task_id))
         .await
         .ok()
         .flatten()?;
@@ -1235,7 +1232,7 @@ pub async fn compute_effort_file_review(
         .ok()?;
     review_from_lists(
         &effort.id,
-        task_id,
+        &effort.work_item,
         claimed,
         &changed,
         &acknowledged,
@@ -1249,7 +1246,7 @@ pub async fn compute_effort_file_review(
 /// bracket yet.
 async fn effort_changed_paths(
     snapshot_store: &SqliteSnapshotStore,
-    effort: &oxplow_db::TaskEffort,
+    effort: &oxplow_db::Effort,
 ) -> Option<Vec<String>> {
     let (start, end) = (effort.start_snapshot_id?, effort.end_snapshot_id?);
     let changes = snapshot_store.diff_snapshots(Some(start), end).await.ok()?;
@@ -1261,7 +1258,7 @@ async fn effort_changed_paths(
 /// called `amend_effort`. Returns `None` when the effort no longer
 /// has a discrepancy (or doesn't exist / has no snapshot bracket).
 pub async fn recompute_effort_file_review(
-    effort_store: &SqliteTaskEffortStore,
+    effort_store: &SqliteEffortStore,
     snapshot_store: &SqliteSnapshotStore,
     effort_id: &EffortId,
 ) -> Option<EffortFileReview> {
@@ -1276,7 +1273,7 @@ pub async fn recompute_effort_file_review(
         .ok()?;
     review_from_lists(
         effort_id,
-        effort.task_id,
+        &effort.work_item,
         &claimed,
         &changed,
         &acknowledged,
@@ -1297,7 +1294,7 @@ pub async fn recompute_effort_file_review(
 /// table so a path stays in exactly one of {claimed, unattributed}
 /// (`record_file` clears the residue when a path is later claimed).
 pub async fn reconcile_unattributed_on_close(
-    effort_store: &SqliteTaskEffortStore,
+    effort_store: &SqliteEffortStore,
     snapshot_store: &SqliteSnapshotStore,
     effort_id: &EffortId,
 ) -> Vec<String> {
@@ -1312,7 +1309,7 @@ pub async fn reconcile_unattributed_on_close(
 /// onto the shared reconciliation core.
 fn review_from_lists(
     effort_id: &EffortId,
-    task_id: TaskId,
+    work_item: &str,
     claimed: &[String],
     changed: &[String],
     acknowledged: &[String],
@@ -1328,7 +1325,7 @@ fn review_from_lists(
         crate::attribution::diff(&sets, MAX_UNCLAIMED_FOR_REVIEW)?;
     Some(EffortFileReview {
         effort_id: effort_id.to_string(),
-        task_id: task_id.value(),
+        work_item: work_item.to_string(),
         claimed_but_not_changed,
         changed_but_not_claimed,
         unclaimed_overflow,
@@ -1535,7 +1532,7 @@ mod tests {
         // `changed_but_not_claimed`. With ack: it's filtered out
         // and the review collapses to `None`.
         let effort = EffortId::new(1);
-        let task = TaskId::new(1);
+        let task = "work_item:oxplow:tsk1";
         let claimed = vec!["claimed.rs".to_string()];
         let changed = vec!["claimed.rs".to_string(), "extra.rs".to_string()];
         let no_ack = review_from_lists(&effort, task, &claimed, &changed, &[], &[]);
@@ -1636,7 +1633,7 @@ mod tests {
     async fn fixture_with_lifecycle() -> (
         TaskService,
         ThreadId,
-        Arc<SqliteTaskEffortStore>,
+        Arc<SqliteEffortStore>,
         tempfile::TempDir,
         crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     ) {
@@ -1645,7 +1642,7 @@ mod tests {
         let streams = SqliteStreamStore::new(db.clone());
         let threads = SqliteThreadStore::new(db.clone());
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
-        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(project.path().join(".oxplow/snapshots"));
         let s = Stream {
@@ -1767,7 +1764,7 @@ mod tests {
             .await
             .unwrap();
         let open = effort_store
-            .find_open_for_task(item.id)
+            .find_open_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .expect("effort should be open");
@@ -1801,14 +1798,17 @@ mod tests {
             )
             .await
             .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         assert_eq!(efforts.len(), 1);
         let closed = &efforts[0];
         assert!(closed.ended_at.is_some());
         assert!(closed.end_snapshot_id.is_some());
         // And no new effort was opened.
         assert!(effort_store
-            .find_open_for_task(item.id)
+            .find_open_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .is_none());
@@ -2268,7 +2268,7 @@ mod tests {
             .await
             .unwrap();
         let open = effort_store
-            .find_open_for_task(item.id)
+            .find_open_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .expect("lifecycle effort should be open after in_progress create");
@@ -2294,7 +2294,7 @@ mod tests {
             .await
             .unwrap();
         assert!(effort_store
-            .find_open_for_task(item.id)
+            .find_open_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .is_none());
@@ -2349,7 +2349,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         assert_eq!(efforts.len(), 1, "should still be a single effort row");
         let row = &efforts[0];
         assert_eq!(row.summary.as_deref(), Some("did the thing"));
@@ -2394,7 +2397,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         let files = effort_store.list_files(&efforts[0].id).await.unwrap();
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
@@ -2434,7 +2440,10 @@ mod tests {
             .await
             .unwrap();
         assert!(!claimed, "a never-snapshotted path is not claimable");
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         let files = effort_store.list_files(&efforts[0].id).await.unwrap();
         assert!(files.is_empty(), "nothing should have been recorded");
 
@@ -2471,7 +2480,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         assert_eq!(efforts.len(), 1);
         assert!(efforts[0].ended_at.is_some());
         assert_eq!(efforts[0].summary.as_deref(), Some("retro"));
@@ -2526,12 +2538,12 @@ mod tests {
         assert!(claimed, "the edited path names one effort's area");
 
         let api_effort = effort_store
-            .find_open_for_task(api.id)
+            .find_open_for_work_item(&work_item_ref(api.id))
             .await
             .unwrap()
             .unwrap();
         let ui_effort = effort_store
-            .find_open_for_task(ui.id)
+            .find_open_for_work_item(&work_item_ref(ui.id))
             .await
             .unwrap()
             .unwrap();
@@ -2602,7 +2614,7 @@ mod tests {
             .await
             .unwrap();
         let open = effort_store
-            .find_open_for_task(item.id)
+            .find_open_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .expect("effort open");
@@ -2672,7 +2684,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         let eff = &efforts[0];
         let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
         assert!(
@@ -2729,7 +2744,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let efforts = effort_store.list_for_item(item.id).await.unwrap();
+        let efforts = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap();
         let eff = &efforts[0];
         let unattributed = effort_store.list_unattributed_files(&eff.id).await.unwrap();
         assert!(
@@ -2775,7 +2793,7 @@ mod tests {
             .await
             .unwrap();
         assert!(effort_store
-            .list_for_item(item.id)
+            .list_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .is_empty());
@@ -3166,7 +3184,7 @@ mod tests {
         let stream_store = SqliteStreamStore::new(db.clone());
         let thread_store_handle = SqliteThreadStore::new(db.clone());
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
-        let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
         let snapshot_store = Arc::new(oxplow_db::SqliteSnapshotStore::new(db.clone()));
         let blobs = crate::blob_store::BlobStore::new(primary_dir.path().join(".oxplow/snapshots"));
 
@@ -3326,7 +3344,7 @@ mod tests {
             .unwrap();
 
         let closed = effort_store
-            .list_for_item(item.id)
+            .list_for_work_item(&work_item_ref(item.id))
             .await
             .unwrap()
             .into_iter()
@@ -3339,7 +3357,7 @@ mod tests {
         // Nothing claimed → the worktree edit lands in the `unclaimed`
         // half of the split; the primary-stream edit appears in neither.
         let changed =
-            oxplow_db::TaskEffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
+            oxplow_db::EffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
                 .await
                 .unwrap();
         assert!(
@@ -3362,7 +3380,7 @@ mod tests {
             closest_git_version: None,
             git_version_exact: false,
         };
-        oxplow_db::TaskEffortStore::record_file(
+        oxplow_db::EffortStore::record_file(
             &*effort_store,
             &closed.id,
             "changed.txt",
@@ -3372,7 +3390,7 @@ mod tests {
         .await
         .unwrap();
         let split =
-            oxplow_db::TaskEffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
+            oxplow_db::EffortStore::list_changed_paths_for_effort(&*effort_store, &closed.id)
                 .await
                 .unwrap();
         assert!(

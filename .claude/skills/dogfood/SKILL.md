@@ -77,8 +77,8 @@ selectors; screenshot when looks matter, and read the image.
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
    inspection: `get_thread_work_state` (`{"threadId":"thr1"}`),
-   `list_threads` (`{"streamId":"str1"}`), `list_task_efforts`
-   (`{"itemId":"tskNN"}`), `list_effort_observations`
+   `list_threads` (`{"streamId":"str1"}`), `list_work_item_efforts`
+   (`{"workItem":"work_item:oxplow:tskNN"}`), `list_effort_observations`
    (`{"effortId":"effNN"}`), `create_task`
    (`{"req":{"threadId":...,"input":{"title","description","parent_id":null,"status","priority","author":null}}}`).
 4. **Review what landed** through oxplow itself: Git Dashboard →

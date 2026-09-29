@@ -19,6 +19,7 @@ import { Page } from "../tabs/Page.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { NavSiblingEntry, NavSiblings } from "../tabs/PageNavigationContext.js";
 import { gitCommitRef, indexRef, snapshotRef } from "../tabs/pageRefs.js";
+import { workItemLabel } from "../workItemRef.js";
 
 const RECENT_LIMIT = 20;
 /** Cap on the number of commit groups rendered in the dashboard's
@@ -51,7 +52,8 @@ export interface LocalHistoryDashboardPageProps {
 
 interface SnapshotRowEffort {
   effortId: string;
-  tasksId: string;
+  /** The oxplow task; `null` for another provider's work item. */
+  tasksId: string | null;
   title: string;
 }
 
@@ -175,7 +177,9 @@ export function LocalHistoryDashboardPage({
       }
       // Resolve task titles for every effort the dashboard will show
       // — the efforts IPC only carries effort columns, no task title.
-      const uniqueTaskIds = Array.from(new Set(effortsAt.map((e) => e.tasksId)));
+      const uniqueTaskIds = Array.from(
+        new Set(effortsAt.flatMap((e) => (e.tasksId ? [e.tasksId] : []))),
+      );
       const taskSummaries = await getTaskSummaries(uniqueTaskIds).catch((err) => {
         logUi("warn", "task summaries fetch failed", { error: String(err) });
         return [] as Array<{ id: string; title: string }>;
@@ -191,7 +195,9 @@ export function LocalHistoryDashboardPage({
         list.push({
           effortId: e.effortId,
           tasksId: e.tasksId,
-          title: titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`,
+          title: e.tasksId
+            ? titleByTaskId.get(e.tasksId) ?? `task ${e.tasksId}`
+            : workItemLabel(e.workItem),
         });
         target.set(e.snapshotId, list);
       }

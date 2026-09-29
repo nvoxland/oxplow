@@ -62,8 +62,8 @@ pub use database::{Database, DbInitError};
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
 pub use effort_evidence_store::SqliteEffortEvidenceStore;
 pub use effort_store::{
-    EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
-    OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
+    Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, EffortStore,
+    FileRefVersion, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
 };
 pub use event_log_store::{DeadLetter, SqliteEventLogStore};
 pub use ext_source_store::{

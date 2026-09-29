@@ -321,11 +321,12 @@ async fn clear_recently_finished_no_throw_on_empty() {
 // ---- Effort commands ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_task_efforts_empty_for_unknown_item() {
+async fn list_work_item_efforts_empty_for_unknown_item() {
     let app = TestApp::build();
-    let v = commands::generated::list_task_efforts(app.state(), TaskId::new(999))
-        .await
-        .unwrap();
+    let v =
+        commands::generated::list_work_item_efforts(app.state(), "work_item:oxplow:tsk999".into())
+            .await
+            .unwrap();
     assert!(v.is_empty());
 }
 

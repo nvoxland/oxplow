@@ -143,11 +143,11 @@ pub fn normalize_impact_kind(kind: &str) -> Option<&'static str> {
 }
 
 /// Edges contributed by the union of every effort's declared
-/// impacts. Self-task references are filtered out (an effort on
-/// tsk7 declaring it "completed" tsk7 is implicit).
-pub fn effort_impact_edges(task: &TaskId, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
+/// impacts, from the work item `source` (its provider-scoped id,
+/// `oxplow:tsk7` or `linear:ENG-12`). Self references are filtered out
+/// (an effort on tsk7 declaring it "completed" tsk7 is implicit).
+pub fn effort_impact_edges(source: &str, impacts: &[TaskImpact]) -> Vec<PageRefEdge> {
     let mut out = Vec::new();
-    let source = work_item_id(*task);
     for imp in impacts {
         let Some(target_kind) = normalize_impact_kind(&imp.kind) else {
             continue;
@@ -160,14 +160,15 @@ pub fn effort_impact_edges(task: &TaskId, impacts: &[TaskImpact]) -> Vec<PageRef
             let Some(t) = task_from_work_item_id(imp.id.trim()) else {
                 continue;
             };
-            if t == *task {
+            let target = work_item_id(t);
+            if target == source {
                 continue;
             }
-            work_item_id(t)
+            target
         } else {
             imp.id.clone()
         };
-        let mut edge = PageRefEdge::new(KIND_WORK_ITEM, &source, target_kind, target_id, RT_IMPACT);
+        let mut edge = PageRefEdge::new(KIND_WORK_ITEM, source, target_kind, target_id, RT_IMPACT);
         if let Some(action) = &imp.action {
             if !action.trim().is_empty() {
                 edge = edge.with_extra(serde_json::json!({ "action": action.trim() }).to_string());
@@ -376,15 +377,14 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
 /// `{"change_kind":"..."}` so the renderer can display "created"
 /// / "modified" / "deleted" instead of a single "touched" label.
 /// The renderer normalizes `updated` → "modified" for display.
-pub fn effort_touched_file_edges(task: &TaskId, entries: &[(String, String)]) -> Vec<PageRefEdge> {
-    let source = work_item_id(*task);
+pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> Vec<PageRefEdge> {
     entries
         .iter()
         .map(|(path, change_kind)| {
             let extra = serde_json::json!({ "change_kind": change_kind }).to_string();
             PageRefEdge::new(
                 KIND_WORK_ITEM,
-                &source,
+                source,
                 KIND_FILE,
                 path.clone(),
                 RT_TOUCHED_FILE,
@@ -395,18 +395,19 @@ pub fn effort_touched_file_edges(task: &TaskId, entries: &[(String, String)]) ->
 }
 
 /// Edges contributed by the union of every `effort.summary`
-/// body for one task. Parsed via the shared ref extractor, so
-/// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
-/// mentions all flow through as outbound edges from `(task, id)`.
+/// body for one work item (`source`, its provider-scoped id). Parsed via
+/// the shared ref extractor, so wikilinks (`[[some-slug]]`), file/dir
+/// refs, task/finding/commit mentions all flow through as outbound edges
+/// from `(work_item, source)`.
 /// Owned slice = the `summary_*` ref_types above (paired with
 /// `RT_TOUCHED_FILE` under `effort_ref_types()`).
-pub fn effort_summary_edges(task: &TaskId, summaries: &[String]) -> Vec<PageRefEdge> {
+pub fn effort_summary_edges(source: &str, summaries: &[String]) -> Vec<PageRefEdge> {
     if summaries.is_empty() {
         return Vec::new();
     }
     let combined = summaries.join("\n\n");
     let refs = extract(&combined);
-    let task_id = &work_item_id(*task);
+    let task_id = source;
     let mut out = Vec::new();
     for fd in refs.files_detail {
         out.push(PageRefEdge::new(
@@ -436,14 +437,15 @@ pub fn effort_summary_edges(task: &TaskId, summaries: &[String]) -> Vec<PageRefE
         ));
     }
     for t in refs.tasks {
-        if t == task.value() {
+        let target = work_item_id(TaskId::new(t));
+        if target == source {
             continue;
         }
         out.push(PageRefEdge::new(
             KIND_WORK_ITEM,
             task_id,
             KIND_WORK_ITEM,
-            work_item_id(TaskId::new(t)),
+            target,
             RT_SUMMARY_TASK,
         ));
     }
@@ -590,7 +592,7 @@ mod tests {
             ("b.rs".to_string(), "updated".to_string()),
             ("c.rs".to_string(), "deleted".to_string()),
         ];
-        let edges = effort_touched_file_edges(&TaskId::new(7), &entries);
+        let edges = effort_touched_file_edges("oxplow:tsk7", &entries);
         assert_eq!(edges.len(), 3);
         assert_eq!(edges[0].source_kind, "work_item");
         assert_eq!(edges[0].source_id, "oxplow:tsk7");
@@ -615,7 +617,7 @@ mod tests {
             "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
             "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
         ];
-        let edges = effort_summary_edges(&TaskId::new(7), &summaries);
+        let edges = effort_summary_edges("oxplow:tsk7", &summaries);
         let by_kind: std::collections::BTreeMap<_, Vec<_>> =
             edges
                 .iter()
@@ -646,7 +648,7 @@ mod tests {
     #[test]
     fn effort_summary_edges_filter_self_task() {
         let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
-        let edges = effort_summary_edges(&TaskId::new(7), &summaries);
+        let edges = effort_summary_edges("oxplow:tsk7", &summaries);
         let task_ids: Vec<_> = edges
             .iter()
             .filter(|e| e.target_kind == "work_item")
@@ -657,7 +659,7 @@ mod tests {
 
     #[test]
     fn effort_summary_edges_empty_input_yields_no_edges() {
-        assert!(effort_summary_edges(&TaskId::new(7), &[]).is_empty());
+        assert!(effort_summary_edges("oxplow:tsk7", &[]).is_empty());
     }
 
     #[test]
@@ -695,7 +697,7 @@ mod tests {
                 action: None,
             }, // empty id — filtered
         ];
-        let edges = effort_impact_edges(&TaskId::new(7), &impacts);
+        let edges = effort_impact_edges("oxplow:tsk7", &impacts);
         assert_eq!(edges.len(), 3, "got {edges:?}");
         let wiki = edges
             .iter()
@@ -734,7 +736,7 @@ mod tests {
                 action: None,
             },
         ];
-        let ids: Vec<String> = effort_impact_edges(&TaskId::new(7), &impacts)
+        let ids: Vec<String> = effort_impact_edges("oxplow:tsk7", &impacts)
             .into_iter()
             .map(|e| e.target_id)
             .collect();

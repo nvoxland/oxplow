@@ -1,9 +1,10 @@
 //! Shared test setup for tests that need a real `Services`.
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_db::TaskEffortStore as _;
+use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::TaskStore as _;
 use oxplow_domain::{
     EffortId, Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus, ThreadId,
@@ -78,7 +79,7 @@ pub async fn services_with_effort() -> EffortFixture {
         .unwrap();
     let effort = svc
         .effort_store
-        .start(task, &thread, None)
+        .start(&work_item_ref(task), &thread, None)
         .await
         .unwrap()
         .id;

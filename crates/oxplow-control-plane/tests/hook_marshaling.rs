@@ -12,6 +12,7 @@
 mod common;
 
 use common::boot;
+use oxplow_domain::refs::build::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
@@ -388,7 +389,7 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
     // PostToolUse auto-claims the file onto the thread's OPEN effort in
     // real time, so the agent's touched_files at completion merely
     // confirms/amends rather than enumerating from scratch.
-    use oxplow_app::TaskEffortStore as _;
+    use oxplow_app::EffortStore as _;
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     // Insert a task and open an effort on the thread.
@@ -414,7 +415,11 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
         })
         .await
         .unwrap();
-    let effort = svc.effort_store.start(task_id, &tid, None).await.unwrap();
+    let effort = svc
+        .effort_store
+        .start(&work_item_ref(task_id), &tid, None)
+        .await
+        .unwrap();
 
     let target = root.join("src/x.rs");
     let resp = post_hook(
@@ -464,7 +469,7 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
 
 #[tokio::test]
 async fn prompts_carry_the_efforts_decisions_once_per_session() {
-    use oxplow_app::TaskEffortStore as _;
+    use oxplow_app::EffortStore as _;
     let (cp, svc, _root, _dir) = boot().await;
     let tid = seed_thread(&svc, ThreadStatus::Active).await;
     let now = Timestamp::from_unix_ms(1);
@@ -489,7 +494,11 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
         })
         .await
         .unwrap();
-    let effort = svc.effort_store.start(task_id, &tid, None).await.unwrap();
+    let effort = svc
+        .effort_store
+        .start(&work_item_ref(task_id), &tid, None)
+        .await
+        .unwrap();
     svc.reasoning_store
         .record_decision(oxplow_db::NewDecision {
             thread_id: tid.value(),

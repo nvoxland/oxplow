@@ -19,8 +19,8 @@
 use async_trait::async_trait;
 
 use oxplow_db::{
-    MetricSpec, SqliteAttributionStore, SqliteSnapshotStore, SqliteTaskEffortStore,
-    TaskEffortStore as _, STATE_ACKNOWLEDGED, STATE_CLAIMED,
+    EffortStore as _, MetricSpec, SqliteAttributionStore, SqliteEffortStore, SqliteSnapshotStore,
+    STATE_ACKNOWLEDGED, STATE_CLAIMED,
 };
 use oxplow_domain::EffortId;
 
@@ -229,12 +229,12 @@ pub async fn reconcile_close(kind: &dyn AttributionKind, effort_id: &EffortId) -
 /// and the snapshot-bracket diff). No data migration — behavior-identical to
 /// the pre-generalization path.
 pub struct FileKind<'a> {
-    pub efforts: &'a SqliteTaskEffortStore,
+    pub efforts: &'a SqliteEffortStore,
     pub snapshots: &'a SqliteSnapshotStore,
 }
 
 impl<'a> FileKind<'a> {
-    pub fn new(efforts: &'a SqliteTaskEffortStore, snapshots: &'a SqliteSnapshotStore) -> Self {
+    pub fn new(efforts: &'a SqliteEffortStore, snapshots: &'a SqliteSnapshotStore) -> Self {
         Self { efforts, snapshots }
     }
 }
@@ -300,7 +300,7 @@ impl AttributionKind for FileKind<'_> {
 /// so the boundary claim resolves it. The capture IS the run (T-E1, tsk48):
 /// `ref` = the `metric_capture` id as `run:<id>`.
 pub struct RunKind<'a> {
-    pub efforts: &'a SqliteTaskEffortStore,
+    pub efforts: &'a SqliteEffortStore,
     pub facts: &'a oxplow_db::SqliteFactStore,
     pub ledger: &'a SqliteAttributionStore,
     /// Attribution kind name — `"run"` (the unified run kind, tsk269).
@@ -316,7 +316,7 @@ impl<'a> RunKind<'a> {
     /// observed by `trigger = "on-report"`. Attribution is per-capture,
     /// producer-agnostic; the producer only drives rendering.
     pub fn runs(
-        efforts: &'a SqliteTaskEffortStore,
+        efforts: &'a SqliteEffortStore,
         facts: &'a oxplow_db::SqliteFactStore,
         ledger: &'a SqliteAttributionStore,
     ) -> Self {
@@ -949,9 +949,9 @@ mod target_scoring_tests {
 /// (codegen, a formatter, an agent using a heredoc) is deliberately never
 /// auto-claimed at all.
 pub(crate) async fn effort_known_paths(
-    efforts: &oxplow_db::SqliteTaskEffortStore,
+    efforts: &oxplow_db::SqliteEffortStore,
     tasks: &oxplow_db::SqliteTaskStore,
-    effort: &oxplow_db::TaskEffort,
+    effort: &oxplow_db::Effort,
 ) -> Vec<String> {
     use oxplow_domain::stores::TaskStore;
     let mut paths: Vec<String> = efforts
@@ -961,7 +961,11 @@ pub(crate) async fn effort_known_paths(
         .into_iter()
         .map(|f| f.path)
         .collect();
-    if let Ok(Some(task)) = TaskStore::get(tasks, effort.task_id).await {
+    let task = match effort.task_id() {
+        Some(t) => TaskStore::get(tasks, t).await.ok().flatten(),
+        None => None,
+    };
+    if let Some(task) = task {
         for text in [task.title.as_str(), task.description.as_str()] {
             for p in task_target_paths(text) {
                 if !paths.contains(&p) {
@@ -981,15 +985,15 @@ pub(crate) async fn effort_known_paths(
 /// a missing one — the agent can still claim a missing one at close, but a
 /// wrong one silently misreports what an effort did.
 pub(crate) async fn resolve_by_targets(
-    efforts: &oxplow_db::SqliteTaskEffortStore,
+    efforts: &oxplow_db::SqliteEffortStore,
     tasks: &oxplow_db::SqliteTaskStore,
-    open: Vec<oxplow_db::TaskEffort>,
+    open: Vec<oxplow_db::Effort>,
     targets: &[String],
-) -> Option<oxplow_db::TaskEffort> {
+) -> Option<oxplow_db::Effort> {
     if targets.is_empty() || open.len() < 2 {
         return None;
     }
-    let mut candidates: Vec<(oxplow_db::TaskEffort, Vec<String>)> = Vec::new();
+    let mut candidates: Vec<(oxplow_db::Effort, Vec<String>)> = Vec::new();
     for e in open {
         let paths = effort_known_paths(efforts, tasks, &e).await;
         candidates.push((e, paths));

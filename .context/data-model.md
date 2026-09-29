@@ -62,7 +62,8 @@ the first time an op needs to join a transaction. Current users:
 **Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
 has exactly one open `effort` row. Enforced three ways: the
 status flip and effort open/finish commit in one transaction
-(`SqliteTaskStore::update_with_effort_transition`); a V31 partial
+(`SqliteTaskStore::update_with_effort_transition`, and
+`insert_with_effort` for a task filed straight into `in_progress`); a V31 partial
 unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
 double-open a `Constraint` error; and boot recovery
 (`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
@@ -395,8 +396,19 @@ ref (`work_item:oxplow:tsk42`, or another provider's
 `work_item:linear:ENG-12`; built with `refs::build::work_item_ref`).
 `v_effort` / `v_effort_file` derive `task_id` from it (NULL for other
 providers). Tasks are only soft-deleted, so the old FK's CASCADE never
-fired; an effort still goes with its thread. The Rust `TaskEffort` keeps
-`task_id` until P2.5b moves it to `work_item`. Columns: `work_item`,
+fired; an effort still goes with its thread.
+
+In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
+`task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
+is keyed by the ref — `start(work_item, …)` refuses anything that isn't
+a `work_item` ref (`refs::build::validate_work_item_ref`),
+`find_open_for_work_item`, `most_recent_for_work_item`,
+`list_for_work_item`, `work_item_for_effort`. The effort's `page_ref`
+slice is projected from the work item's provider-scoped id, so another
+provider's item gets edges too. The UI mirrors the helpers in
+`apps/desktop/src/workItemRef.ts` (`workItemRef`, `taskIdOfWorkItemRef`,
+`workItemLabel`); an effort on another provider's item shows its label
+and has no task page. Columns: `work_item`,
 `thread_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
 written by `complete_task` describing what shipped in this effort; one
@@ -452,7 +464,8 @@ Read API: `listEffortsForTask(itemId)`, `listOpenEfforts()`,
 efforts that touched `path` via `effort_file`, joined to the
 owning task's title/status, newest-first by `ended_at` — drives
 the local-blame overlay described in `.context/editor-and-monaco.md`).
-`createTaskApi` exposes `listTaskEfforts(itemId)` which returns
+`createTaskApi` exposes `listTaskEfforts(itemId)` (over the
+`list_work_item_efforts { workItem }` RPC) which returns
 per-effort rows with pre-joined start/end snapshot metadata and the
 list of changed paths (computed from the pair diff).
 

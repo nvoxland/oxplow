@@ -10,11 +10,12 @@
 //!
 //! Called once from `Services::boot` after the DB is open. Idempotent.
 
+use oxplow_domain::refs::build::work_item_ref;
 use std::sync::Arc;
 
 use tracing::info;
 
-use oxplow_db::{SqliteTaskEffortStore, SqliteTaskStore, SqliteThreadStore, TaskEffortStore};
+use oxplow_db::{EffortStore, SqliteEffortStore, SqliteTaskStore, SqliteThreadStore};
 use oxplow_domain::stores::{AgentTurnStore, ThreadStore};
 use oxplow_domain::DomainError;
 
@@ -27,7 +28,7 @@ use oxplow_domain::snapshot::SnapshotTrigger;
 pub struct RecoveryService {
     turns: Arc<dyn AgentTurnStore>,
     tasks: Arc<SqliteTaskStore>,
-    efforts: Arc<SqliteTaskEffortStore>,
+    efforts: Arc<SqliteEffortStore>,
     events: EventBus,
     /// Optional wiring for reconciling unattributed changes when a
     /// restart-recovery close brackets an orphaned effort. When absent
@@ -42,7 +43,7 @@ impl RecoveryService {
     pub fn new(
         turns: Arc<dyn AgentTurnStore>,
         tasks: Arc<SqliteTaskStore>,
-        efforts: Arc<SqliteTaskEffortStore>,
+        efforts: Arc<SqliteEffortStore>,
         events: EventBus,
     ) -> Self {
         Self {
@@ -104,7 +105,13 @@ impl RecoveryService {
             in_progress.iter().map(|t| t.id).collect();
         let mut closed_efforts = 0usize;
         for effort in self.efforts.list_all_open().await? {
-            if !in_progress_ids.contains(&effort.task_id) {
+            // Only oxplow tasks carry the status half of the invariant; an
+            // effort on another provider's work item is opened and closed
+            // by `effort.open` / `effort.close` and left alone here.
+            let Some(task_id) = effort.task_id() else {
+                continue;
+            };
+            if !in_progress_ids.contains(&task_id) {
                 // Death/restart case: the worktree still reflects the dead
                 // effort's final state, so bracket the effort with an
                 // EffortEnd snapshot and reconcile its unclaimed residue
@@ -122,8 +129,15 @@ impl RecoveryService {
             let Some(thread_id) = task.thread_id else {
                 continue;
             };
-            if self.efforts.find_open_for_task(task.id).await?.is_none() {
-                self.efforts.start(task.id, &thread_id, None).await?;
+            if self
+                .efforts
+                .find_open_for_work_item(&work_item_ref(task.id))
+                .await?
+                .is_none()
+            {
+                self.efforts
+                    .start(&work_item_ref(task.id), &thread_id, None)
+                    .await?;
                 opened_efforts += 1;
             }
         }
@@ -152,7 +166,7 @@ impl RecoveryService {
     /// dirty set is empty and `request_snapshot` would just return the
     /// existing latest snapshot, missing edits that landed after the
     /// last capture but before the crash.
-    async fn capture_orphan_end_snapshot(&self, effort: &oxplow_db::TaskEffort) -> Option<i64> {
+    async fn capture_orphan_end_snapshot(&self, effort: &oxplow_db::Effort) -> Option<i64> {
         // No start snapshot → no bracket → nothing to reconcile.
         effort.start_snapshot_id?;
         let threads = self.threads.as_ref()?;
@@ -292,7 +306,7 @@ mod tests {
         let svc = RecoveryService::new(
             turns.clone(),
             Arc::new(SqliteTaskStore::new(db.clone())),
-            Arc::new(SqliteTaskEffortStore::new(db.clone())),
+            Arc::new(SqliteEffortStore::new(db.clone())),
             EventBus::new(),
         );
         let report = svc.run().await.unwrap();
@@ -348,7 +362,7 @@ mod tests {
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
 
         let tasks = Arc::new(SqliteTaskStore::new(db.clone()));
-        let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
         let row = |title: &str, status: TaskStatus| Task {
             id: TaskId::placeholder(),
             thread_id: Some(t.id),
@@ -373,7 +387,10 @@ mod tests {
             .unwrap();
         // Orphan B: done task with an open effort left behind.
         let stale = tasks.insert(&row("stale", TaskStatus::Done)).await.unwrap();
-        efforts.start(stale, &t.id, None).await.unwrap();
+        efforts
+            .start(&work_item_ref(stale), &t.id, None)
+            .await
+            .unwrap();
 
         let svc = RecoveryService::new(
             Arc::new(SqliteAgentTurnStore::new(db.clone())),
@@ -384,9 +401,13 @@ mod tests {
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_efforts, 1);
         assert_eq!(report.opened_efforts, 1);
-        assert!(efforts.find_open_for_task(stale).await.unwrap().is_none());
         assert!(efforts
-            .find_open_for_task(no_effort)
+            .find_open_for_work_item(&work_item_ref(stale))
+            .await
+            .unwrap()
+            .is_none());
+        assert!(efforts
+            .find_open_for_work_item(&work_item_ref(no_effort))
             .await
             .unwrap()
             .is_some());
@@ -453,7 +474,7 @@ mod tests {
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
 
         let tasks = Arc::new(SqliteTaskStore::new(db.clone()));
-        let efforts = Arc::new(SqliteTaskEffortStore::new(db.clone()));
+        let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
         let thread_store = Arc::new(SqliteThreadStore::new(db.clone()));
         let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
 
@@ -509,7 +530,10 @@ mod tests {
             author: Some(TaskAuthor::User),
         };
         let task_id = tasks.insert(&task_row).await.unwrap();
-        let effort = efforts.start(task_id, &t.id, Some(start_id)).await.unwrap();
+        let effort = efforts
+            .start(&work_item_ref(task_id), &t.id, Some(start_id))
+            .await
+            .unwrap();
 
         // An unclaimed worktree change the dead effort left behind.
         std::fs::write(project.path().join("foo.rs"), "version-two-longer").unwrap();
@@ -550,7 +574,7 @@ mod tests {
         let svc = RecoveryService::new(
             turns,
             Arc::new(SqliteTaskStore::new(db.clone())),
-            Arc::new(SqliteTaskEffortStore::new(db.clone())),
+            Arc::new(SqliteEffortStore::new(db.clone())),
             EventBus::new(),
         );
         let report = svc.run().await.unwrap();

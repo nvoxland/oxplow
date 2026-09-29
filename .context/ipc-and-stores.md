@@ -276,7 +276,8 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   the worktree file with the snapshot's content via the existing
   `writeWorkspaceFile` path (so the UI-echo filter and workspace
   event bus behave the same as a UI edit).
-- `listTaskEfforts(itemId)` — returns per-effort rows (one per
+- `listTaskEfforts(itemId)` (RPC `list_work_item_efforts { workItem }`,
+  called with `work_item:oxplow:<itemId>`) — returns per-effort rows (one per
   `in_progress → human_check` cycle) with pre-joined start/end
   snapshot metadata, linked turn ids, and the changed-paths list
   computed from the pair summary. Used by the Plan modal's Efforts

@@ -425,7 +425,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("set_agent_model"),
     ui("get_workspace_context"),
     // ---- ui-only: efforts ----
-    ui("list_task_efforts"),
+    ui("list_work_item_efforts"),
     ui("get_effort_files"),
     ui("get_effort"),
     ui("list_efforts_at_snapshots"),

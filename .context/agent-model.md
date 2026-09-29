@@ -1909,7 +1909,8 @@ when takes happen.
 - **HEAD moves.** The git-refs listener runs a `git_refs` take, then —
   on a clean tree — a `head_moved` re-stamp (`vcs.head.moved@1`).
 - **Effort-level diffs** are `diff_snapshots(start, end)` (content
-  identity), exposed to the UI via `listTaskEfforts`.
+  identity), exposed to the UI via `listTaskEfforts` (the
+  `list_work_item_efforts` RPC).
 
 ## Per-effort write log
 

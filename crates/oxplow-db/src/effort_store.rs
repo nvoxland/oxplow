@@ -1,6 +1,8 @@
 //! Task effort tracking.
 //!
-//! An "effort" is one continuous push of agent work on a single task,
+//! An "effort" is one continuous push of agent work on a single work
+//! item (an oxplow task, `work_item:oxplow:tsk42`, or another provider's
+//! item, `work_item:linear:ENG-12`),
 //! bounded by snapshots at start and end. This module owns:
 //!
 //! - `effort` (the effort row)
@@ -17,10 +19,12 @@ use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
-    work_item_id, KIND_WORK_ITEM,
+    KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
-use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
+use oxplow_domain::refs::build::{
+    task_of_work_item_ref, validate_work_item_ref, work_item_id_of_ref,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -31,9 +35,10 @@ pub enum EffortFileChange {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct TaskEffort {
+pub struct Effort {
     pub id: EffortId,
-    pub task_id: TaskId,
+    /// The work item worked on, as a canonical `work_item` ref.
+    pub work_item: String,
     pub thread_id: ThreadId,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
@@ -41,6 +46,14 @@ pub struct TaskEffort {
     pub end_snapshot_id: Option<i64>,
     /// The effort's summary prose — the canonical text.
     pub summary: Option<String>,
+}
+
+impl Effort {
+    /// The oxplow task this effort is on; `None` for another provider's
+    /// work item.
+    pub fn task_id(&self) -> Option<TaskId> {
+        task_of_work_item_ref(&self.work_item)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -105,12 +118,13 @@ impl OwnedFileRefVersion {
 }
 
 /// One user-visible attribution action for
-/// [`SqliteTaskEffortStore::record_effort_atomic`]: merge files,
-/// impacts, and a summary into the task's current effort (opening one
-/// if none exists) — committed as a single transaction.
+/// [`SqliteEffortStore::record_effort_atomic`]: merge files,
+/// impacts, and a summary into the work item's current effort (opening
+/// one if none exists) — committed as a single transaction.
 #[derive(Debug, Clone)]
 pub struct RecordEffortAtomic {
-    pub task: TaskId,
+    /// A `work_item` ref (validated before the transaction).
+    pub work_item: String,
     pub thread: ThreadId,
     /// `(path, change)` pairs; callers pre-filter empty paths.
     pub files: Vec<(String, EffortFileChange)>,
@@ -130,7 +144,7 @@ pub struct RecordEffortAtomic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct EffortAtSnapshot {
     pub snapshot_id: i64,
-    pub effort: TaskEffort,
+    pub effort: Effort,
 }
 
 // ---------------------------------------------------------------------------
@@ -142,9 +156,11 @@ pub struct EffortAtSnapshot {
 // "Transactions".
 // ---------------------------------------------------------------------------
 
+/// Opens an effort on `work_item`, which the caller has validated
+/// (`validate_work_item_ref`) or built with `work_item_ref`.
 pub(crate) fn start_tx(
     conn: &rusqlite::Connection,
-    task: TaskId,
+    work_item: &str,
     thread: ThreadId,
     start_snapshot_id: Option<i64>,
     now: Timestamp,
@@ -156,7 +172,7 @@ pub(crate) fn start_tx(
          VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
         params![
             None::<i64>,
-            work_item_ref(task),
+            work_item,
             thread.value(),
             ts_to_string(now),
             start_snapshot_id,
@@ -235,28 +251,28 @@ fn record_file_tx(
     Ok(())
 }
 
-pub(crate) fn find_open_for_task_tx(
+pub(crate) fn find_open_for_work_item_tx(
     conn: &rusqlite::Connection,
-    task: TaskId,
-) -> rusqlite::Result<Option<TaskEffort>> {
+    work_item: &str,
+) -> rusqlite::Result<Option<Effort>> {
     let mut stmt = conn.prepare(
         "SELECT * FROM effort
          WHERE work_item = ?1 AND ended_at IS NULL
          ORDER BY started_at DESC LIMIT 1",
     )?;
-    let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
+    let mut rows = stmt.query_map(params![work_item], row_to_effort)?;
     rows.next().transpose()
 }
 
-fn most_recent_for_task_tx(
+fn most_recent_for_work_item_tx(
     conn: &rusqlite::Connection,
-    task: TaskId,
-) -> rusqlite::Result<Option<TaskEffort>> {
+    work_item: &str,
+) -> rusqlite::Result<Option<Effort>> {
     let mut stmt = conn.prepare(
         "SELECT * FROM effort WHERE work_item = ?1
          ORDER BY started_at DESC LIMIT 1",
     )?;
-    let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
+    let mut rows = stmt.query_map(params![work_item], row_to_effort)?;
     rows.next().transpose()
 }
 
@@ -281,7 +297,7 @@ fn str_to_change(s: &str) -> Result<EffortFileChange, DomainError> {
     })
 }
 
-fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
+fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<Effort> {
     let id: i64 = row.get("id")?;
     let work_item: String = row.get("work_item")?;
     let thread_id: i64 = row.get("thread_id")?;
@@ -293,15 +309,9 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
-    Ok(TaskEffort {
+    Ok(Effort {
         id: EffortId::new(id),
-        // Until the Rust shape moves to `work_item` (P2.5b), every effort
-        // is an oxplow task's.
-        task_id: task_of_work_item_ref(&work_item).ok_or_else(|| {
-            map_err(DomainError::Invalid(format!(
-                "effort {id} is on `{work_item}`, not an oxplow task"
-            )))
-        })?,
+        work_item,
         thread_id: ThreadId::new(thread_id),
         started_at: string_to_ts(&started_at).map_err(map_err)?,
         ended_at: ended_at
@@ -315,13 +325,15 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
 }
 
 #[async_trait]
-pub trait TaskEffortStore: Send + Sync {
+pub trait EffortStore: Send + Sync {
+    /// Open an effort on `work_item`; `Invalid` unless it's a `work_item`
+    /// ref, `Constraint` when that work item already has an open one.
     async fn start(
         &self,
-        task: TaskId,
+        work_item: &str,
         thread: &ThreadId,
         start_snapshot_id: Option<i64>,
-    ) -> Result<TaskEffort, DomainError>;
+    ) -> Result<Effort, DomainError>;
     async fn finish(
         &self,
         id: &EffortId,
@@ -330,27 +342,27 @@ pub trait TaskEffortStore: Send + Sync {
     ) -> Result<(), DomainError>;
     /// Record the LLM-declared cross-page impacts for an effort.
     /// Replaces any prior list. The store then re-projects the
-    /// owning task's effort slice so impact edges show up in
+    /// owning work item's effort slice so impact edges show up in
     /// `page_ref` immediately.
     async fn set_impacts(&self, id: &EffortId, impacts: &[TaskImpact]) -> Result<(), DomainError>;
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError>;
+    async fn list_for_work_item(&self, work_item: &str) -> Result<Vec<Effort>, DomainError>;
+    /// The work item an effort is on; `None` when the row is gone.
+    async fn work_item_for_effort(&self, id: &EffortId) -> Result<Option<String>, DomainError>;
     /// Fetch a single effort row by id. Returns `None` when the row
     /// doesn't exist (e.g. cleared during snapshot prune).
-    async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError>;
-    /// Open effort (`ended_at IS NULL`) for `task`, if any. Used by
+    async fn get_effort(&self, id: &EffortId) -> Result<Option<Effort>, DomainError>;
+    /// Open effort (`ended_at IS NULL`) for `work_item`, if any. Used by
     /// the lifecycle path that opens an effort on in_progress entry
     /// and finishes it on exit, and by `record_effort` to merge
     /// touched-files into the lifecycle row instead of creating a
     /// duplicate.
-    async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError>;
+    async fn find_open_for_work_item(&self, work_item: &str)
+        -> Result<Option<Effort>, DomainError>;
     /// Open effort (`ended_at IS NULL`) for `thread`, if any. The
     /// orchestrator keeps at most one item `in_progress` per thread, so
     /// this is the effort that hook-driven collection (test runs,
     /// coverage) attributes against. Newest open effort wins.
-    async fn find_open_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Option<TaskEffort>, DomainError>;
+    async fn find_open_for_thread(&self, thread: &ThreadId) -> Result<Option<Effort>, DomainError>;
     /// Open effort for `thread` ONLY when it's unambiguous — exactly one open
     /// effort. Returns `None` when zero OR two-plus are open (parallel
     /// sub-agents on one thread), so attribution never silently guesses the
@@ -360,17 +372,19 @@ pub trait TaskEffortStore: Send + Sync {
     async fn find_single_open_for_thread(
         &self,
         thread: &ThreadId,
-    ) -> Result<Option<TaskEffort>, DomainError>;
+    ) -> Result<Option<Effort>, DomainError>;
     /// EVERY open effort for `thread`, newest first. The disambiguation input
     /// for target-overlap attribution (tsk169): when more than one is open
     /// `find_single_open_for_thread` declines by design, and the caller scores
     /// these candidates by what the run's command actually names.
-    async fn list_open_for_thread(&self, thread: &ThreadId)
-        -> Result<Vec<TaskEffort>, DomainError>;
-    /// Most-recent effort for `task` regardless of state, or `None`
-    /// when the task has never had one. Used by `record_effort` to
+    async fn list_open_for_thread(&self, thread: &ThreadId) -> Result<Vec<Effort>, DomainError>;
+    /// Most-recent effort for `work_item` regardless of state, or `None`
+    /// when it has never had one. Used by `record_effort` to
     /// reattach files to a just-closed lifecycle effort.
-    async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError>;
+    async fn most_recent_for_work_item(
+        &self,
+        work_item: &str,
+    ) -> Result<Option<Effort>, DomainError>;
     /// Overwrite the summary on an already-finished effort. Used
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
@@ -412,7 +426,7 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         range_start: i64,
         range_end: i64,
-    ) -> Result<Vec<TaskEffort>, DomainError>;
+    ) -> Result<Vec<Effort>, DomainError>;
     /// All distinct file paths whose `file_snapshot` rows fall inside
     /// this effort's snapshot bracket — i.e. the auto-diff for the
     /// effort. Returns empty when either `start_snapshot_id` or
@@ -469,12 +483,12 @@ pub trait TaskEffortStore: Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct SqliteTaskEffortStore {
+pub struct SqliteEffortStore {
     db: Database,
     page_refs: SqlitePageRefStore,
 }
 
-impl SqliteTaskEffortStore {
+impl SqliteEffortStore {
     pub fn new(db: Database) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
@@ -488,10 +502,15 @@ impl SqliteTaskEffortStore {
     /// `summary` body, and the declared `TaskImpact` rows.
     /// Replaces under `effort_ref_types()` so the task-body slice
     /// (owned by `task_store`) is unaffected.
-    async fn project_effort_slice(&self, task_id: TaskId) -> Result<(), DomainError> {
+    async fn project_effort_slice(&self, work_item: &str) -> Result<(), DomainError> {
+        let Some(source) = work_item_id_of_ref(work_item).map(str::to_string) else {
+            return Err(DomainError::Invalid(format!(
+                "`{work_item}` is not a work_item ref"
+            )));
+        };
         let refs = &self.page_refs;
         type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
-        let work_item = work_item_ref(task_id);
+        let work_item = work_item.to_string();
         let (paths, summaries, impact_jsons): SliceRows = self
             .db
             .call(move |conn| {
@@ -550,16 +569,11 @@ impl SqliteTaskEffortStore {
                 }
             }
         }
-        let mut edges = effort_touched_file_edges(&task_id, &paths);
-        edges.extend(effort_summary_edges(&task_id, &summaries));
-        edges.extend(effort_impact_edges(&task_id, &impacts));
-        refs.replace_source_for_ref_types(
-            KIND_WORK_ITEM,
-            &work_item_id(task_id),
-            effort_ref_types(),
-            edges,
-        )
-        .await
+        let mut edges = effort_touched_file_edges(&source, &paths);
+        edges.extend(effort_summary_edges(&source, &summaries));
+        edges.extend(effort_impact_edges(&source, &impacts));
+        refs.replace_source_for_ref_types(KIND_WORK_ITEM, &source, effort_ref_types(), edges)
+            .await
     }
 
     /// Other efforts on the same thread whose time-window is **strictly nested**
@@ -570,7 +584,7 @@ impl SqliteTaskEffortStore {
     /// (an open effort's end is unbounded ⇒ never `<= self.ended_at`). Empty when
     /// self has no bounded window. Timestamps are fixed-width RFC3339, so the
     /// `<=`/`>=` string comparisons order them correctly.
-    pub async fn nested_efforts(&self, id: &EffortId) -> Result<Vec<TaskEffort>, DomainError> {
+    pub async fn nested_efforts(&self, id: &EffortId) -> Result<Vec<Effort>, DomainError> {
         let id = *id;
         self.db
             .call(move |conn| {
@@ -603,16 +617,18 @@ impl SqliteTaskEffortStore {
         args: RecordEffortAtomic,
     ) -> Result<EffortId, DomainError> {
         use crate::database::map_sql_err;
-        let task = args.task;
+        validate_work_item_ref(&args.work_item)?;
+        let work_item = args.work_item.clone();
         let a = std::sync::Arc::new(args);
         let effort_id = self
             .db
             .transaction(move |tx| {
-                let existing = most_recent_for_task_tx(tx, a.task).map_err(map_sql_err)?;
+                let existing =
+                    most_recent_for_work_item_tx(tx, &a.work_item).map_err(map_sql_err)?;
                 let (effort_id, open) = match &existing {
                     Some(e) => (e.id, e.ended_at.is_none()),
                     None => (
-                        start_tx(tx, a.task, a.thread, None, Timestamp::now())
+                        start_tx(tx, &a.work_item, a.thread, None, Timestamp::now())
                             .map_err(map_sql_err)?,
                         true,
                     ),
@@ -648,13 +664,13 @@ impl SqliteTaskEffortStore {
                 Ok(effort_id)
             })
             .await?;
-        self.project_effort_slice(task).await?;
+        self.project_effort_slice(&work_item).await?;
         Ok(effort_id)
     }
 
     /// Every open effort row (`ended_at IS NULL`) across all tasks.
     /// Used by boot recovery to heal lifecycle orphans.
-    pub async fn list_all_open(&self) -> Result<Vec<TaskEffort>, DomainError> {
+    pub async fn list_all_open(&self) -> Result<Vec<Effort>, DomainError> {
         self.db
             .call(|conn| {
                 let mut stmt = conn
@@ -675,7 +691,7 @@ impl SqliteTaskEffortStore {
         &self,
         window_start: Timestamp,
         window_end: Timestamp,
-    ) -> Result<Vec<TaskEffort>, DomainError> {
+    ) -> Result<Vec<Effort>, DomainError> {
         let start = ts_to_string(window_start);
         let end = ts_to_string(window_end);
         self.db
@@ -730,39 +746,28 @@ impl SqliteTaskEffortStore {
             })
             .await
     }
-
-    async fn task_for_effort(&self, effort_id: &EffortId) -> Result<Option<TaskId>, DomainError> {
-        let id = *effort_id;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT work_item FROM effort WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, String>(0))?;
-                Ok(rows
-                    .next()
-                    .transpose()?
-                    .and_then(|w| task_of_work_item_ref(&w)))
-            })
-            .await
-    }
 }
 
 #[async_trait]
-impl TaskEffortStore for SqliteTaskEffortStore {
+impl EffortStore for SqliteEffortStore {
     async fn start(
         &self,
-        task: TaskId,
+        work_item: &str,
         thread: &ThreadId,
         start_snapshot_id: Option<i64>,
-    ) -> Result<TaskEffort, DomainError> {
+    ) -> Result<Effort, DomainError> {
+        validate_work_item_ref(work_item)?;
         let thread = *thread;
         let now = Timestamp::now();
+        let work_item = work_item.to_string();
+        let w = work_item.clone();
         let id = self
             .db
-            .call(move |conn| start_tx(conn, task, thread, start_snapshot_id, now))
+            .call(move |conn| start_tx(conn, &w, thread, start_snapshot_id, now))
             .await?;
-        Ok(TaskEffort {
+        Ok(Effort {
             id,
-            task_id: task,
+            work_item,
             thread_id: thread,
             started_at: now,
             ended_at: None,
@@ -790,14 +795,32 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             })
             .await?;
         if summary_has_body {
-            if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_effort_slice(tid).await?;
+            if let Some(w) = self.work_item_for_effort(id).await? {
+                self.project_effort_slice(&w).await?;
             }
         }
         Ok(())
     }
 
-    async fn find_open_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
+    async fn work_item_for_effort(
+        &self,
+        effort_id: &EffortId,
+    ) -> Result<Option<String>, DomainError> {
+        let id = *effort_id;
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare("SELECT work_item FROM effort WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, String>(0))?;
+                rows.next().transpose()
+            })
+            .await
+    }
+
+    async fn find_open_for_work_item(
+        &self,
+        work_item: &str,
+    ) -> Result<Option<Effort>, DomainError> {
+        let work_item = work_item.to_string();
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
@@ -805,16 +828,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                      WHERE work_item = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC LIMIT 1",
                 )?;
-                let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
+                let mut rows = stmt.query_map(params![work_item], row_to_effort)?;
                 rows.next().transpose()
             })
             .await
     }
 
-    async fn find_open_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Option<TaskEffort>, DomainError> {
+    async fn find_open_for_thread(&self, thread: &ThreadId) -> Result<Option<Effort>, DomainError> {
         let thread = *thread;
         self.db
             .call(move |conn| {
@@ -832,7 +852,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
     async fn find_single_open_for_thread(
         &self,
         thread: &ThreadId,
-    ) -> Result<Option<TaskEffort>, DomainError> {
+    ) -> Result<Option<Effort>, DomainError> {
         let thread = *thread;
         self.db
             .call(move |conn| {
@@ -854,10 +874,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .await
     }
 
-    async fn list_open_for_thread(
-        &self,
-        thread: &ThreadId,
-    ) -> Result<Vec<TaskEffort>, DomainError> {
+    async fn list_open_for_thread(&self, thread: &ThreadId) -> Result<Vec<Effort>, DomainError> {
         let thread = *thread;
         self.db
             .call(move |conn| {
@@ -872,9 +889,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .await
     }
 
-    async fn most_recent_for_task(&self, task: TaskId) -> Result<Option<TaskEffort>, DomainError> {
+    async fn most_recent_for_work_item(
+        &self,
+        work_item: &str,
+    ) -> Result<Option<Effort>, DomainError> {
+        let work_item = work_item.to_string();
         self.db
-            .call(move |conn| most_recent_for_task_tx(conn, task))
+            .call(move |conn| most_recent_for_work_item_tx(conn, &work_item))
             .await
     }
 
@@ -884,27 +905,28 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| set_summary_tx(conn, id_for_sql, summary.as_deref()))
             .await?;
         {
-            if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_effort_slice(tid).await?;
+            if let Some(w) = self.work_item_for_effort(id).await? {
+                self.project_effort_slice(&w).await?;
             }
         }
         Ok(())
     }
 
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEffort>, DomainError> {
+    async fn list_for_work_item(&self, work_item: &str) -> Result<Vec<Effort>, DomainError> {
+        let work_item = work_item.to_string();
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT * FROM effort WHERE work_item = ?1
                      ORDER BY started_at DESC",
                 )?;
-                let rows = stmt.query_map(params![work_item_ref(item)], row_to_effort)?;
+                let rows = stmt.query_map(params![work_item], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
-    async fn get_effort(&self, id: &EffortId) -> Result<Option<TaskEffort>, DomainError> {
+    async fn get_effort(&self, id: &EffortId) -> Result<Option<Effort>, DomainError> {
         let id = *id;
         self.db
             .call(move |conn| {
@@ -967,8 +989,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| set_impacts_json_tx(conn, id_clone, json.as_deref()))
             .await?;
         {
-            if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_effort_slice(tid).await?;
+            if let Some(w) = self.work_item_for_effort(id).await? {
+                self.project_effort_slice(&w).await?;
             }
         }
         Ok(())
@@ -1010,8 +1032,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| record_file_tx(conn, id_clone, &path_clone, change, owned.as_ref()))
             .await?;
         {
-            if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_effort_slice(tid).await?;
+            if let Some(w) = self.work_item_for_effort(id).await? {
+                self.project_effort_slice(&w).await?;
             }
         }
         Ok(())
@@ -1068,8 +1090,8 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             })
             .await?;
         {
-            if let Some(tid) = self.task_for_effort(id).await? {
-                self.project_effort_slice(tid).await?;
+            if let Some(w) = self.work_item_for_effort(id).await? {
+                self.project_effort_slice(&w).await?;
             }
         }
         Ok(())
@@ -1261,7 +1283,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         &self,
         range_start: i64,
         range_end: i64,
-    ) -> Result<Vec<TaskEffort>, DomainError> {
+    ) -> Result<Vec<Effort>, DomainError> {
         self.db
             .call(move |conn| {
                 // Half-open overlap (range_start, range_end]:
@@ -1301,13 +1323,14 @@ mod tests {
     use crate::stream_store::SqliteStreamStore;
     use crate::task_store::SqliteTaskStore;
     use crate::thread_store::SqliteThreadStore;
+    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
         Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
         Thread, ThreadStatus,
     };
 
-    async fn fixture() -> (SqliteTaskEffortStore, TaskId, ThreadId) {
+    async fn fixture() -> (SqliteEffortStore, TaskId, ThreadId) {
         let (store, _db, tid, thread) = fixture_with_db().await;
         (store, tid, thread)
     }
@@ -1323,7 +1346,7 @@ mod tests {
         //   ef-before  ( 1,  5]  entirely before     → not reported
         //   ef-later   (35, 50]  entirely after      → not reported
         let db = Database::in_memory();
-        let store = SqliteTaskEffortStore::new(db.clone());
+        let store = SqliteEffortStore::new(db.clone());
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
             db2.with_conn(|conn| {
@@ -1378,7 +1401,7 @@ mod tests {
         // tsk267 window-dominance: self = effort 1 [10:00, 11:00]. A sibling is
         // "nested" only when its window is strictly inside self's.
         let db = Database::in_memory();
-        let store = SqliteTaskEffortStore::new(db.clone());
+        let store = SqliteEffortStore::new(db.clone());
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
             db2.with_conn(|conn| {
@@ -1415,7 +1438,7 @@ mod tests {
     #[tokio::test]
     async fn list_in_window_returns_only_overlapping_efforts() {
         let db = Database::in_memory();
-        let store = SqliteTaskEffortStore::new(db.clone());
+        let store = SqliteEffortStore::new(db.clone());
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
             db2.with_conn(|conn| {
@@ -1453,7 +1476,7 @@ mod tests {
         );
     }
 
-    async fn fixture_with_db() -> (SqliteTaskEffortStore, Database, TaskId, ThreadId) {
+    async fn fixture_with_db() -> (SqliteEffortStore, Database, TaskId, ThreadId) {
         let db = Database::in_memory();
         let now = Timestamp::from_unix_ms(1);
         let s = Stream {
@@ -1513,19 +1536,75 @@ mod tests {
             })
             .await
             .unwrap();
-        (SqliteTaskEffortStore::new(db.clone()), db, tid, t.id)
+        (SqliteEffortStore::new(db.clone()), db, tid, t.id)
+    }
+
+    /// P2.5b (tsk428): an effort is on a work item — an oxplow task's or
+    /// another provider's — and the store never accepts a non-ref.
+    #[tokio::test]
+    async fn efforts_are_keyed_by_work_item_ref() {
+        let (store, tid, t) = fixture().await;
+        let ours = work_item_ref(tid);
+        let eff = store.start(&ours, &t, None).await.unwrap();
+        assert_eq!(eff.work_item, ours);
+        assert_eq!(eff.task_id(), Some(tid));
+
+        let foreign = "work_item:linear:ENG-12";
+        store.finish(&eff.id, None, None).await.unwrap();
+        let other = store.start(foreign, &t, None).await.unwrap();
+        assert_eq!(other.task_id(), None);
+        assert_eq!(
+            store
+                .find_open_for_work_item(foreign)
+                .await
+                .unwrap()
+                .map(|e| e.id),
+            Some(other.id)
+        );
+        assert!(store
+            .find_open_for_work_item(&ours)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store
+                .most_recent_for_work_item(&ours)
+                .await
+                .unwrap()
+                .map(|e| e.id),
+            Some(eff.id)
+        );
+        assert_eq!(store.list_for_work_item(foreign).await.unwrap().len(), 1);
+        assert_eq!(
+            store
+                .work_item_for_effort(&other.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(foreign)
+        );
+
+        for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
+            assert!(
+                matches!(
+                    store.start(bad, &t, None).await,
+                    Err(DomainError::Invalid(_))
+                ),
+                "`{bad}` must be refused"
+            );
+        }
     }
 
     #[tokio::test]
     async fn start_then_finish_round_trips() {
         let (store, tid, t) = fixture().await;
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         assert!(eff.ended_at.is_none());
         store
             .finish(&eff.id, None, Some("done".into()))
             .await
             .unwrap();
-        let list = store.list_for_item(tid).await.unwrap();
+        let list = store.list_for_work_item(&work_item_ref(tid)).await.unwrap();
         assert_eq!(list.len(), 1);
         assert!(list[0].ended_at.is_some());
         assert_eq!(list[0].summary.as_deref(), Some("done"));
@@ -1538,7 +1617,7 @@ mod tests {
         summary: Option<&str>,
     ) -> RecordEffortAtomic {
         RecordEffortAtomic {
-            task: tid,
+            work_item: work_item_ref(tid),
             thread,
             files,
             version: OwnedFileRefVersion {
@@ -1570,13 +1649,17 @@ mod tests {
         assert!(row.ended_at.is_some(), "fresh effort is closed");
         assert_eq!(row.summary.as_deref(), Some("shipped"));
         assert_eq!(store.list_files(&eff).await.unwrap().len(), 2);
-        assert!(store.find_open_for_task(tid).await.unwrap().is_none());
+        assert!(store
+            .find_open_for_work_item(&work_item_ref(tid))
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
     async fn record_effort_atomic_merges_into_open_lifecycle_effort() {
         let (store, tid, t) = fixture().await;
-        let lifecycle = store.start(tid, &t, None).await.unwrap();
+        let lifecycle = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let eff = store
             .record_effort_atomic(atomic_args(
                 tid,
@@ -1596,7 +1679,7 @@ mod tests {
     #[tokio::test]
     async fn record_effort_atomic_backfills_summary_on_closed_effort() {
         let (store, tid, t) = fixture().await;
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store.finish(&eff.id, None, None).await.unwrap();
         let landed = store
             .record_effort_atomic(atomic_args(tid, t, Vec::new(), Some("late summary")))
@@ -1645,7 +1728,11 @@ mod tests {
         let EffortTransition::Opened(eff) = entering else {
             panic!("expected Opened, got {entering:?}");
         };
-        let open = store.find_open_for_task(tid).await.unwrap().unwrap();
+        let open = store
+            .find_open_for_work_item(&work_item_ref(tid))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(open.id, eff);
         assert!(open.start_snapshot_id.is_none(), "pin backfills later");
 
@@ -1670,7 +1757,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(leaving, EffortTransition::Finished(eff));
-        assert!(store.find_open_for_task(tid).await.unwrap().is_none());
+        assert!(store
+            .find_open_for_work_item(&work_item_ref(tid))
+            .await
+            .unwrap()
+            .is_none());
 
         // The outbox: one `work_item.transitioned@1` per status change,
         // committed with it — the re-issued (same-status) call logged
@@ -1724,7 +1815,11 @@ mod tests {
         assert!(matches!(err, DomainError::NotFound), "got {err:?}");
         // The whole action rolled back — no effort row for the ghost,
         // and nothing in the event log either.
-        assert!(store.find_open_for_task(ghost).await.unwrap().is_none());
+        assert!(store
+            .find_open_for_work_item(&work_item_ref(ghost))
+            .await
+            .unwrap()
+            .is_none());
         let events = db
             .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
             .await
@@ -1738,13 +1833,20 @@ mod tests {
         // invariant: at most one open effort per task. A double-open
         // must surface as a typed Constraint, never silently diverge.
         let (store, tid, t) = fixture().await;
-        store.start(tid, &t, None).await.unwrap();
-        let err = store.start(tid, &t, None).await.unwrap_err();
+        store.start(&work_item_ref(tid), &t, None).await.unwrap();
+        let err = store
+            .start(&work_item_ref(tid), &t, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::Constraint(_)), "got {err:?}");
         // Finishing the open row frees the slot.
-        let open = store.find_open_for_task(tid).await.unwrap().unwrap();
+        let open = store
+            .find_open_for_work_item(&work_item_ref(tid))
+            .await
+            .unwrap()
+            .unwrap();
         store.finish(&open.id, None, None).await.unwrap();
-        store.start(tid, &t, None).await.unwrap();
+        store.start(&work_item_ref(tid), &t, None).await.unwrap();
     }
 
     #[tokio::test]
@@ -1757,7 +1859,10 @@ mod tests {
             .unwrap()
             .is_none());
         // Exactly one open → Some.
-        store.start(tid, &thread, None).await.unwrap();
+        store
+            .start(&work_item_ref(tid), &thread, None)
+            .await
+            .unwrap();
         assert!(store
             .find_single_open_for_thread(&thread)
             .await
@@ -1786,7 +1891,10 @@ mod tests {
             })
             .await
             .unwrap();
-        store.start(tid2, &thread, None).await.unwrap();
+        store
+            .start(&work_item_ref(tid2), &thread, None)
+            .await
+            .unwrap();
         assert!(
             store
                 .find_single_open_for_thread(&thread)
@@ -1802,7 +1910,7 @@ mod tests {
     #[tokio::test]
     async fn record_then_list_files() {
         let (store, tid, t) = fixture().await;
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
             closest_git_version: None,
@@ -1825,8 +1933,8 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db);
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .finish(
                 &eff.id,
@@ -1877,8 +1985,8 @@ mod tests {
         use oxplow_domain::TaskImpact;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db);
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let impacts = vec![
             TaskImpact {
                 kind: "wiki".into(),
@@ -1959,14 +2067,14 @@ mod tests {
         use crate::page_ref_store::SqlitePageRefStore;
         let (_, db, tid, t) = fixture_with_db().await;
         let page_refs = SqlitePageRefStore::new(db.clone());
-        let store = SqliteTaskEffortStore::new(db);
-        let first = store.start(tid, &t, None).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let first = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .finish(&first.id, None, Some("Filed [[url-schemes]]".into()))
             .await
             .unwrap();
 
-        let second = store.start(tid, &t, None).await.unwrap();
+        let second = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         let v = FileRefVersion {
             local_snapshot_id: 0,
             closest_git_version: None,
@@ -1994,8 +2102,8 @@ mod tests {
         // replace_unattributed_files records the audit residue; list reads
         // it back; deleting the effort cascades it away.
         let (_, db, tid, t) = fixture_with_db().await;
-        let store = SqliteTaskEffortStore::new(db);
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .replace_unattributed_files(&eff.id, &["a.rs".into(), "b.rs".into()])
             .await
@@ -2019,8 +2127,8 @@ mod tests {
         // Invariant: a path is CLAIMED or UNATTRIBUTED, never both.
         // Claiming a previously-unattributed path drops its residue row.
         let (_, db, tid, t) = fixture_with_db().await;
-        let store = SqliteTaskEffortStore::new(db);
-        let eff = store.start(tid, &t, None).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let eff = store.start(&work_item_ref(tid), &t, None).await.unwrap();
         store
             .replace_unattributed_files(&eff.id, &["shared.rs".into(), "other.rs".into()])
             .await
@@ -2110,14 +2218,20 @@ mod tests {
         let snap2 = snap_store.create_snapshot(s.id).await.unwrap();
         let snap3 = snap_store.create_snapshot(s.id).await.unwrap();
 
-        let store = SqliteTaskEffortStore::new(db);
+        let store = SqliteEffortStore::new(db);
         // Effort A: start@snap1, end@snap2 — active at snap1 AND snap2
         // (ends exactly there); not active at snap3.
-        let a = store.start(tid, &t.id, Some(snap1)).await.unwrap();
+        let a = store
+            .start(&work_item_ref(tid), &t.id, Some(snap1))
+            .await
+            .unwrap();
         store.finish(&a.id, Some(snap2), None).await.unwrap();
         // Effort B: start@snap2, still open — active at snap2 and
         // snap3.
-        let b = store.start(tid, &t.id, Some(snap2)).await.unwrap();
+        let b = store
+            .start(&work_item_ref(tid), &t.id, Some(snap2))
+            .await
+            .unwrap();
 
         let rows = store
             .list_efforts_at_snapshots(vec![snap1, snap2, snap3])
@@ -2203,23 +2317,38 @@ mod tests {
         let _s3 = snap_store.create_snapshot(s.id).await.unwrap();
         let s4 = snap_store.create_snapshot(s.id).await.unwrap();
         let s5 = snap_store.create_snapshot(s.id).await.unwrap();
-        let store = SqliteTaskEffortStore::new(db);
+        let store = SqliteEffortStore::new(db);
 
         // Range under test: (s2, s4].
         // A [s1,s2] — ends exactly at range start → excluded.
-        let a = store.start(tid, &t.id, Some(s1)).await.unwrap();
+        let a = store
+            .start(&work_item_ref(tid), &t.id, Some(s1))
+            .await
+            .unwrap();
         store.finish(&a.id, Some(s2), None).await.unwrap();
         // B [s2,s4] — straddles the range end → included.
-        let b = store.start(tid, &t.id, Some(s2)).await.unwrap();
+        let b = store
+            .start(&work_item_ref(tid), &t.id, Some(s2))
+            .await
+            .unwrap();
         store.finish(&b.id, Some(s4), None).await.unwrap();
         // C [s4,s5] — starts exactly at range end → excluded.
-        let c = store.start(tid, &t.id, Some(s4)).await.unwrap();
+        let c = store
+            .start(&work_item_ref(tid), &t.id, Some(s4))
+            .await
+            .unwrap();
         store.finish(&c.id, Some(s5), None).await.unwrap();
         // D [s1,s5] — fully contains the range → included.
-        let d = store.start(tid, &t.id, Some(s1)).await.unwrap();
+        let d = store
+            .start(&work_item_ref(tid), &t.id, Some(s1))
+            .await
+            .unwrap();
         store.finish(&d.id, Some(s5), None).await.unwrap();
         // E [s2,open] — still in progress → included.
-        let e = store.start(tid, &t.id, Some(s2)).await.unwrap();
+        let e = store
+            .start(&work_item_ref(tid), &t.id, Some(s2))
+            .await
+            .unwrap();
 
         let rows = store.list_efforts_overlapping_range(s2, s4).await.unwrap();
         let ids: std::collections::HashSet<i64> = rows.iter().map(|r| r.id.value()).collect();
@@ -2325,10 +2454,16 @@ mod tests {
         let a2 = snap.create_snapshot(sa).await.unwrap();
         let b2 = snap.create_snapshot(sb).await.unwrap();
 
-        let store = SqliteTaskEffortStore::new(db);
-        let ea = store.start(tida, &ta, Some(a1)).await.unwrap();
+        let store = SqliteEffortStore::new(db);
+        let ea = store
+            .start(&work_item_ref(tida), &ta, Some(a1))
+            .await
+            .unwrap();
         store.finish(&ea.id, Some(a2), None).await.unwrap();
-        let eb = store.start(tidb, &tb, Some(b1)).await.unwrap();
+        let eb = store
+            .start(&work_item_ref(tidb), &tb, Some(b1))
+            .await
+            .unwrap();
         store.finish(&eb.id, Some(b2), None).await.unwrap();
 
         // Diff range is stream A's (a1, a2]; range_end (a2) is a stream-A

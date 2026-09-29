@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use oxplow_domain::stores::{TaskStore, ThreadStore};
-use oxplow_domain::{TaskId, TaskStatus, Thread, ThreadId};
+use oxplow_domain::{TaskStatus, Thread, ThreadId};
 use oxplow_runtime::policy::{decide_tool, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};
 use oxplow_runtime::stop_hook::{
     decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopDirective,
@@ -163,7 +163,7 @@ impl AgentPolicy {
         thread_id: &ThreadId,
         turn_signals: Option<&TurnSignals>,
     ) -> Option<StopDirective> {
-        use oxplow_db::TaskEffortStore as _;
+        use oxplow_db::EffortStore as _;
         let thread = svc.thread_store.get(thread_id).await.ok().flatten()?;
 
         let tasks = svc
@@ -227,29 +227,28 @@ impl AgentPolicy {
                 for r in &unattributed_refs {
                     unattributed_runs.push(describe_run(&svc.fact_store, r).await);
                 }
-                // task_id/title come from the file review when present; otherwise
-                // resolve from the effort (run-only residue, no file discrepancy).
-                let task_id = match file_review.as_ref() {
-                    Some(r) => r.task_id,
+                // The work item comes from the file review when present;
+                // otherwise from the effort (run-only residue, no file
+                // discrepancy). An oxplow task shows its title.
+                let work_item = match file_review.as_ref() {
+                    Some(r) => r.work_item.clone(),
                     None => svc
                         .effort_store
-                        .get_effort(&eid)
+                        .work_item_for_effort(&eid)
                         .await
                         .ok()
                         .flatten()
-                        .map(|e| e.task_id.value())
-                        .unwrap_or(0),
+                        .unwrap_or_default(),
                 };
-                let title = titles_by_id
-                    .get(&task_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("task {task_id}"));
+                let title = oxplow_domain::refs::build::task_of_work_item_ref(&work_item)
+                    .and_then(|t| titles_by_id.get(&t.value()).cloned())
+                    .unwrap_or_else(|| oxplow_domain::refs::build::work_item_label(&work_item));
                 pending_reviews.push(PendingEffortReview {
                     effort_id: file_review
                         .as_ref()
                         .map(|r| r.effort_id.clone())
                         .unwrap_or_else(|| eid.to_string()),
-                    task_id,
+                    work_item,
                     task_title: title,
                     claimed_but_not_changed: file_review
                         .as_ref()
@@ -525,7 +524,7 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
         // `amend_effort` parse, so the agent can paste them back (tsk341).
         out.push_str(&format!(
             "  • [{}] {} (effort {})\n",
-            TaskId::new(r.task_id),
+            oxplow_domain::refs::build::work_item_label(&r.work_item),
             r.task_title,
             r.effort_id
         ));

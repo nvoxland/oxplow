@@ -268,7 +268,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::set_agent_model,
             commands::generated::get_workspace_context,
             // efforts
-            commands::generated::list_task_efforts,
+            commands::generated::list_work_item_efforts,
             commands::generated::get_effort_files,
             commands::generated::get_effort,
             commands::generated::list_efforts_at_snapshots,

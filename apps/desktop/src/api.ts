@@ -6,6 +6,7 @@ export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import type { OxplowEvent } from "./api-types.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
+import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
 import { ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
@@ -391,7 +392,9 @@ export interface SnapshotDiffResult {
 
 export interface TaskEffort {
   id: string;
-  task_id: string;
+  /** The work item worked on (`work_item:oxplow:tsk42`, or another
+   *  provider's `work_item:linear:ENG-12`). */
+  work_item: string;
   started_at: string;
   ended_at: string | null;
   start_snapshot_id: string | null;
@@ -1825,7 +1828,9 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   // via `complete_task` / `amend_effort`). start_snapshot and
   // end_snapshot are still null until a "snapshot by id" IPC
   // exists; consumers tolerate that.
-  const rows = unwrap(await commands.listTaskEfforts(itemId)) as unknown as TaskEffort[];
+  const rows = unwrap(
+    await commands.listWorkItemEfforts(workItemRef(itemId)),
+  ) as unknown as TaskEffort[];
   const filesByEffort = await Promise.all(
     rows.map(async (effort) => {
       try {
@@ -2162,27 +2167,8 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
  *  can resolve `effortDiffRef(effortId)` into (start, end) endpoints.
  *  `null` when the id is unknown. */
 export async function getEffort(effortId: string): Promise<OverlappingEffort | null> {
-  const row = unwrap(await commands.getEffort(effortId)) as unknown as {
-    id: string;
-    task_id: string;
-    thread_id: string;
-    started_at: string;
-    ended_at: string | null;
-    start_snapshot_id: number | null;
-    end_snapshot_id: number | null;
-    summary: string | null;
-  } | null;
-  if (!row) return null;
-  return {
-    effortId: row.id,
-    taskId: row.task_id,
-    threadId: row.thread_id,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    startSnapshotId: row.start_snapshot_id,
-    endSnapshotId: row.end_snapshot_id,
-    summary: row.summary,
-  };
+  const row = unwrap(await commands.getEffort(effortId)) as unknown as RawEffort | null;
+  return row ? toOverlappingEffort(row) : null;
 }
 
 /** Per-effort touched_files list — the canonical authorship list
@@ -2207,7 +2193,10 @@ export async function listEffortFiles(
 export interface EffortAtSnapshot {
   snapshotId: number;
   effortId: string;
-  tasksId: string;
+  /** The effort's work item ref. */
+  workItem: string;
+  /** The oxplow task behind `workItem`; `null` for another provider's item. */
+  tasksId: string | null;
   threadId: string;
   startSnapshotId: number | null;
   endSnapshotId: number | null;
@@ -2250,7 +2239,7 @@ export async function listEffortsAtSnapshots(
     snapshot_id: number;
     effort: {
       id: string;
-      task_id: string;
+      work_item: string;
       thread_id: string;
       start_snapshot_id: number | null;
       end_snapshot_id: number | null;
@@ -2259,7 +2248,8 @@ export async function listEffortsAtSnapshots(
   return rows.map((r) => ({
     snapshotId: r.snapshot_id,
     effortId: r.effort.id,
-    tasksId: r.effort.task_id,
+    workItem: r.effort.work_item,
+    tasksId: taskIdOfWorkItemRef(r.effort.work_item),
     threadId: r.effort.thread_id,
     startSnapshotId: r.effort.start_snapshot_id,
     endSnapshotId: r.effort.end_snapshot_id,
@@ -2267,9 +2257,39 @@ export async function listEffortsAtSnapshots(
   }));
 }
 
+/** An effort row as the IPC sends it (snake_case; see the generated
+ *  `Effort` binding). */
+interface RawEffort {
+  id: string;
+  work_item: string;
+  thread_id: string;
+  started_at: string;
+  ended_at: string | null;
+  start_snapshot_id: number | null;
+  end_snapshot_id: number | null;
+  summary: string | null;
+}
+
+function toOverlappingEffort(r: RawEffort): OverlappingEffort {
+  return {
+    effortId: r.id,
+    workItem: r.work_item,
+    taskId: taskIdOfWorkItemRef(r.work_item),
+    threadId: r.thread_id,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    startSnapshotId: r.start_snapshot_id,
+    endSnapshotId: r.end_snapshot_id,
+    summary: r.summary,
+  };
+}
+
 export interface OverlappingEffort {
   effortId: string;
-  taskId: string;
+  /** The effort's work item ref. */
+  workItem: string;
+  /** The oxplow task behind `workItem`; `null` for another provider's item. */
+  taskId: string | null;
   threadId: string;
   startedAt: string;
   endedAt: string | null;
@@ -2288,26 +2308,8 @@ export async function listEffortsOverlappingRange(
 ): Promise<OverlappingEffort[]> {
   const rows = unwrap(
     await commands.listEffortsOverlappingRange(rangeStart, rangeEnd),
-  ) as unknown as Array<{
-    id: string;
-    task_id: string;
-    thread_id: string;
-    started_at: string;
-    ended_at: string | null;
-    start_snapshot_id: number | null;
-    end_snapshot_id: number | null;
-    summary: string | null;
-  }>;
-  return rows.map((r) => ({
-    effortId: r.id,
-    taskId: r.task_id,
-    threadId: r.thread_id,
-    startedAt: r.started_at,
-    endedAt: r.ended_at,
-    startSnapshotId: r.start_snapshot_id,
-    endSnapshotId: r.end_snapshot_id,
-    summary: r.summary,
-  }));
+  ) as unknown as RawEffort[];
+  return rows.map(toOverlappingEffort);
 }
 
 export async function restoreFileFromSnapshot(
