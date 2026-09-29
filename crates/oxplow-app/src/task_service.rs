@@ -1678,6 +1678,7 @@ mod tests {
                 max_file_bytes: 1_000_000,
                 workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
                 events: event_bus.clone(),
+                open_turn_probe: None,
             },
         );
         // Drop the default-built service; tests need overridden
@@ -3212,6 +3213,7 @@ mod tests {
                 max_file_bytes: 1_000_000,
                 workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
                 events: crate::events::EventBus::new(),
+                open_turn_probe: None,
             },
         );
         // Register both streams the same way Services::boot does, then

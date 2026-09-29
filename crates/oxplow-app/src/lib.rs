@@ -753,6 +753,17 @@ impl Services {
                 max_file_bytes: max_bytes,
                 workspace_filter,
                 events: event_bus.clone(),
+                open_turn_probe: Some({
+                    let turns = agent_turn_store.clone();
+                    Arc::new(move |stream| {
+                        let turns = turns.clone();
+                        Box::pin(async move {
+                            // On a lookup error, assume a turn is open: the
+                            // turn's own end take is the safe default.
+                            turns.stream_has_open_turn(stream).await.unwrap_or(true)
+                        })
+                    })
+                }),
             },
         );
         // Register every active stream. Streams whose worktree no

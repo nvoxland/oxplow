@@ -33,6 +33,8 @@ pub struct SnapshotCaptureRegistryConfig {
     pub max_file_bytes: u64,
     pub workspace_filter: WorkspaceFilter,
     pub events: EventBus,
+    /// Lets each service's quiet trigger yield to an open agent turn.
+    pub open_turn_probe: Option<crate::snapshot_capture::OpenTurnProbe>,
 }
 
 /// Per-stream registry of [`SnapshotCaptureService`]s. Look up by
@@ -86,20 +88,22 @@ impl SnapshotCaptureRegistry {
                 return Some(existing.clone());
             }
         }
-        let svc = Arc::new(
-            SnapshotCaptureService::new(
-                self.config.snapshot_store.clone(),
-                self.config.blobs.clone(),
-                worktree,
-                stream.id,
-                self.config.max_file_bytes,
-                self.workspace_filter
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone(),
-            )
-            .with_events(self.config.events.clone()),
-        );
+        let mut svc = SnapshotCaptureService::new(
+            self.config.snapshot_store.clone(),
+            self.config.blobs.clone(),
+            worktree,
+            stream.id,
+            self.config.max_file_bytes,
+            self.workspace_filter
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+        )
+        .with_events(self.config.events.clone());
+        if let Some(probe) = &self.config.open_turn_probe {
+            svc = svc.with_open_turn_probe(probe.clone());
+        }
+        let svc = Arc::new(svc);
         let mut services = self.services.write().unwrap_or_else(|e| e.into_inner());
         // Double-check after acquiring the write lock — a concurrent
         // register for the same id may have raced us.
@@ -209,6 +213,7 @@ mod tests {
             max_file_bytes: 1_000_000,
             workspace_filter: WorkspaceFilter::default(),
             events: EventBus::new(),
+            open_turn_probe: None,
         }
     }
 

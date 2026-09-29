@@ -1871,6 +1871,17 @@ when takes happen.
 - **Turn events.** `agent_turn` open/close log `agent.turn.started@1` /
   `agent.turn.ended@1 { outcome: completed | interrupted | restart }` in
   the same transaction, anchored to turn, thread and stream.
+- **Quiet period (P2.4).** Human edits between turns get a snapshot of
+  their own: each fs-watch change arms a deadline (`DEFAULT_QUIET_PERIOD`,
+  3 s, debounced); when it fires with paths still dirty and no turn open
+  on any thread of the stream (`SqliteAgentTurnStore::
+  stream_has_open_turn`, injected as the registry's `OpenTurnProbe`), a
+  `quiet` take records them. While a turn is open it yields — that
+  turn's `turn_end` take captures the same edits. Entries the settle gate
+  deferred re-arm it. Only the watcher arms it: the boot sweep and
+  explicit `mark_dirty` callers are followed by their own take. The
+  trigger runs beside the watcher (`spawn_watcher` starts both) and ends
+  on `shutdown()`.
 - **Effort brackets.** Entering `in_progress` takes an `effort_start`
   snapshot recorded on `task_effort.start_snapshot_id`; leaving it takes
   an `effort_end` one on `end_snapshot_id` (both anchored to the effort).

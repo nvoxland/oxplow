@@ -80,6 +80,15 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// [`SnapshotCaptureService::with_predrain_delay`].
 pub const DEFAULT_PREDRAIN_DELAY: Duration = Duration::from_millis(300);
 
+/// How long the worktree must stay still (no fs-watch change) before a
+/// `quiet` take records human edits made between agent turns (P2.4).
+pub const DEFAULT_QUIET_PERIOD: Duration = Duration::from_secs(3);
+
+/// "Is an agent mid-turn anywhere on this stream?" — the quiet trigger
+/// yields to an open turn, whose `turn_end` take captures the same edits.
+pub type OpenTurnProbe =
+    Arc<dyn Fn(StreamId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+
 /// A capped rayon pool for the startup sweep's read+hash+blob fan-out,
 /// so hashing a large worktree doesn't peg every core — the sweep is
 /// one-time background work and the UI/agents need headroom. Leaves a
@@ -196,6 +205,15 @@ struct Inner {
     /// [`DEFAULT_PREDRAIN_DELAY`]. Tests set this to `Duration::ZERO`
     /// to capture immediately.
     predrain_delay: Duration,
+    /// How long the worktree must be still before a `quiet` take.
+    quiet_period: Duration,
+    /// When the fs-watcher last reported a change (the quiet deadline is
+    /// this + `quiet_period`), and the wake-up for the quiet trigger.
+    last_activity: Mutex<Option<Instant>>,
+    activity: tokio::sync::Notify,
+    /// Tells the quiet trigger to exit (see [`SnapshotCaptureService::shutdown`]).
+    quiet_shutdown: tokio::sync::Notify,
+    open_turn_probe: Option<OpenTurnProbe>,
     /// Serializes takes. Each caller gets its own op (its own trigger
     /// and anchors — two threads' turn ends are two ops); a caller that
     /// waited behind another drains whatever landed meanwhile, usually
@@ -249,6 +267,11 @@ impl SnapshotCaptureService {
                 settle_duration: DEFAULT_SETTLE_DURATION,
                 predrain_delay: DEFAULT_PREDRAIN_DELAY,
                 take_lock: tokio::sync::Mutex::new(()),
+                quiet_period: DEFAULT_QUIET_PERIOD,
+                last_activity: Mutex::new(None),
+                activity: tokio::sync::Notify::new(),
+                quiet_shutdown: tokio::sync::Notify::new(),
+                open_turn_probe: None,
                 shutdown: tokio::sync::Notify::new(),
                 refilter: tokio::sync::Notify::new(),
                 initial_ready: tokio::sync::watch::channel(true).0,
@@ -327,6 +350,26 @@ impl SnapshotCaptureService {
     /// Setting this to `Duration::ZERO` makes `request_snapshot` drain
     /// the dirty set immediately — used by tests that drive
     /// `mark_dirty` directly and don't need to wait for fs-watch.
+    /// Override the quiet period (tests use a few ms).
+    pub fn with_quiet_period(mut self, period: Duration) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.quiet_period = period;
+        } else {
+            warn!("with_quiet_period called after the service was shared; ignoring");
+        }
+        self
+    }
+
+    /// Supply the open-turn probe the quiet trigger consults.
+    pub fn with_open_turn_probe(mut self, probe: OpenTurnProbe) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.open_turn_probe = Some(probe);
+        } else {
+            warn!("with_open_turn_probe called after the service was shared; ignoring");
+        }
+        self
+    }
+
     pub fn with_predrain_delay(mut self, delay: Duration) -> Self {
         if let Some(inner) = Arc::get_mut(&mut self.inner) {
             inner.predrain_delay = delay;
@@ -362,9 +405,99 @@ impl SnapshotCaptureService {
     /// Spawn the fs-watch listener. The listener only updates the
     /// in-memory dirty set; it never writes to the database. Returns
     /// the `JoinHandle` so callers can await teardown if needed.
+    /// Start the fs-watcher and, beside it, the quiet trigger (P2.4). The
+    /// returned handle is the watcher's; both end on [`Self::shutdown`].
     pub fn spawn_watcher(&self) -> tokio::task::JoinHandle<()> {
+        self.spawn_quiet_trigger();
         let this = self.clone();
         tokio::spawn(async move { this.run_watcher().await })
+    }
+
+    /// Record that the worktree changed (fs-watch), arming the quiet
+    /// trigger. The boot sweep and explicit `mark_dirty` callers don't
+    /// arm it: they are followed by an explicit take.
+    fn note_activity(&self) {
+        *self
+            .inner
+            .last_activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        self.inner.activity.notify_one();
+    }
+
+    /// The quiet trigger: after the worktree has been still for
+    /// `quiet_period`, take a `quiet` snapshot of what changed — unless
+    /// an agent turn is open on this stream (its `turn_end` take will
+    /// capture the same edits) or a take already drained everything.
+    /// Human edits between turns get a snapshot of their own this way.
+    pub fn spawn_quiet_trigger(&self) -> tokio::task::JoinHandle<()> {
+        let this = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = this.inner.quiet_shutdown.notified() => return,
+                    _ = this.inner.activity.notified() => {}
+                }
+                // Debounce: wait until nothing changed for a whole period.
+                loop {
+                    let Some(last) = *this
+                        .inner
+                        .last_activity
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                    else {
+                        break;
+                    };
+                    let deadline = last + this.inner.quiet_period;
+                    tokio::select! {
+                        _ = this.inner.quiet_shutdown.notified() => return,
+                        _ = tokio::time::sleep_until(deadline.into()) => {}
+                    }
+                    let latest = *this
+                        .inner
+                        .last_activity
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if latest == Some(last) {
+                        break;
+                    }
+                }
+                this.quiet_take().await;
+            }
+        })
+    }
+
+    /// One quiet-period firing (see [`Self::spawn_quiet_trigger`]).
+    async fn quiet_take(&self) {
+        if self
+            .inner
+            .dirty
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+        {
+            return; // a take already drained it
+        }
+        if let Some(probe) = &self.inner.open_turn_probe {
+            if probe(self.inner.stream_id).await {
+                return; // the open turn's end take captures these edits
+            }
+        }
+        if let Err(e) = self.request_snapshot(SnapshotTrigger::Quiet).await {
+            debug!(error = %e, "snapshot: quiet take failed");
+        }
+        // Entries the settle gate deferred are still dirty: go again once
+        // they've had time to settle, rather than waiting for the next
+        // external trigger.
+        if !self
+            .inner
+            .dirty
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+        {
+            self.note_activity();
+        }
     }
 
     /// Signal the `spawn_watcher` task (if any) to exit. Idempotent and
@@ -374,6 +507,7 @@ impl SnapshotCaptureService {
     /// until process exit.
     pub fn shutdown(&self) {
         self.inner.shutdown.notify_one();
+        self.inner.quiet_shutdown.notify_one();
     }
 
     /// Spawn a listener that turns `OxplowEvent::GitRefsChanged` into
@@ -659,9 +793,11 @@ impl SnapshotCaptureService {
                                 "snapshot capture: new top-level dir, backfilling and re-registering"
                             );
                             self.mark_tree_dirty(&path);
+                            self.note_activity();
                             return false;
                         }
                         self.mark_dirty(path, event.kind);
+                        self.note_activity();
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "snapshot capture: fs-watch lagged");
@@ -2212,6 +2348,78 @@ mod tests {
                 SnapshotTrigger::Startup,
             ]
         );
+    }
+
+    /// Poll the op log until `pred` holds or `within` elapses.
+    async fn wait_for_ops(
+        store: &SqliteSnapshotStore,
+        within: Duration,
+        pred: impl Fn(&[oxplow_db::SnapshotOp]) -> bool,
+    ) -> Vec<oxplow_db::SnapshotOp> {
+        let deadline = Instant::now() + within;
+        loop {
+            let ops = store.list_ops(TEST_STREAM, 20).await.unwrap();
+            if pred(&ops) || Instant::now() >= deadline {
+                return ops;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn probe(open: bool) -> OpenTurnProbe {
+        Arc::new(move |_| Box::pin(async move { open }))
+    }
+
+    #[tokio::test]
+    async fn a_quiet_worktree_with_no_open_turn_gets_a_quiet_snapshot() {
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        let svc = svc
+            .with_quiet_period(Duration::from_millis(40))
+            .with_open_turn_probe(probe(false));
+        let _quiet = svc.spawn_quiet_trigger();
+        // A human edits twice in quick succession: one take, after the
+        // second edit has been still for a whole period.
+        let a = project.path().join("notes.md");
+        std::fs::write(&a, "draft").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.note_activity();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        std::fs::write(&a, "draft 2").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.note_activity();
+        let ops = wait_for_ops(&store, Duration::from_secs(3), |ops| !ops.is_empty()).await;
+        assert_eq!(ops.len(), 1, "{ops:?}");
+        assert_eq!(ops[0].trigger, SnapshotTrigger::Quiet);
+        assert_eq!(ops[0].file_count, 1);
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(store.list_ops(TEST_STREAM, 20).await.unwrap().len(), 1);
+        svc.shutdown();
+    }
+
+    #[tokio::test]
+    async fn an_open_turn_holds_the_quiet_trigger_and_its_end_take_captures_the_edit() {
+        let project = tempdir().unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        let svc = svc
+            .with_quiet_period(Duration::from_millis(30))
+            .with_open_turn_probe(probe(true));
+        let _quiet = svc.spawn_quiet_trigger();
+        let a = project.path().join("edit.rs");
+        std::fs::write(&a, "fn main() {}").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.note_activity();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(store.list_ops(TEST_STREAM, 20).await.unwrap().is_empty());
+        // The turn ends: its take gets the edit.
+        svc.request_snapshot(SnapshotTrigger::TurnEnd)
+            .await
+            .unwrap();
+        let ops = store.list_ops(TEST_STREAM, 20).await.unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
+        assert_eq!(ops[0].file_count, 1);
+        svc.shutdown();
     }
 
     #[tokio::test]
