@@ -326,9 +326,21 @@ pub struct TurnRecord {
     pub turn_id: Option<i64>,
     /// The effort open when the turn ran (the event's anchor).
     pub effort: Option<oxplow_domain::EffortId>,
-    /// The `agent.turn.ended` event id — keys counts the turn reported
-    /// itself, so a redelivery records them once.
+    /// The `agent.turn.ended` event id. It keys the `oxplow.turn` facts
+    /// capture, and — only for counts the turn reported itself (one row per
+    /// event) — the row, so a redelivery records them once. Transcript rows
+    /// are not keyed by it: a chunk can hold several turns (tsk498), and
+    /// their idempotency is the cursor committing with them.
     pub cause: Option<String>,
+}
+
+/// Where a turn's counts came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Counted {
+    /// Parsed from the session transcript's new tail (Claude).
+    Transcript,
+    /// Reported by the harness with the turn (ACP).
+    Reported,
 }
 
 struct RecordedTurns {
@@ -443,6 +455,7 @@ impl TokenUsageService {
                 &session_key,
                 turns,
                 rec,
+                Counted::Transcript,
                 Some((session_key.clone(), new_offset)),
             )
             .await?;
@@ -487,6 +500,7 @@ impl TokenUsageService {
                 session_id,
                 vec![turn],
                 rec,
+                Counted::Reported,
                 None,
             )
             .await?;
@@ -505,6 +519,7 @@ impl TokenUsageService {
         session_key: &str,
         turns: Vec<Turn>,
         rec: &TurnRecord,
+        counted: Counted,
         cursor: Option<(String, u64)>,
     ) -> Result<RecordedTurns, DomainError> {
         // The effort the turn ran in (its event's anchor); without one,
@@ -548,7 +563,10 @@ impl TokenUsageService {
                 cache_read_input_tokens: cr,
                 message_count: turn.usage.message_count,
                 turn_id: rec.turn_id,
-                cause: rec.cause.clone(),
+                cause: match counted {
+                    Counted::Reported => rec.cause.clone(),
+                    Counted::Transcript => None,
+                },
             });
             by_model.entry(model_key).or_default().turns += 1;
         }
@@ -907,6 +925,15 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
             cause: Some(env.id.as_str().to_string()),
         };
         if let Some(u) = payload.usage {
+            // Rows key on the session; a turn the harness reported counts for
+            // always has one (ACP opens turns with a session id).
+            let Some(session) = session.as_deref().filter(|s| !s.is_empty()) else {
+                tracing::warn!(
+                    turn = turn_id,
+                    "turn reported usage but has no session; not counted"
+                );
+                return Ok(());
+            };
             let reported = Turn {
                 prompt: turn.map(|t| t.prompt).filter(|p| !p.is_empty()),
                 usage: UsageDelta {
@@ -919,12 +946,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
                 },
             };
             self.tokens
-                .record_turn_for(
-                    &thread,
-                    session.as_deref().unwrap_or_default(),
-                    reported,
-                    &rec,
-                )
+                .record_turn_for(&thread, session, reported, &rec)
                 .await?;
         } else if let Some(path) = payload.transcript_path {
             let body = serde_json::json!({ "transcript_path": path }).to_string();
@@ -1423,7 +1445,9 @@ mod tests {
             .unwrap()
             .is_none());
 
-        // Append two full turns, then Stop once: [A → turn][B → turn].
+        // Append two full turns, then Stop once: [A → turn][B → turn]. As
+        // the reactor records it (tsk498): one `agent.turn.ended` is the
+        // cause of both rows, and both must land.
         {
             let mut f = std::fs::OpenOptions::new()
                 .append(true)
@@ -1434,9 +1458,14 @@ mod tests {
             )
             .unwrap();
         }
+        let rec = TurnRecord {
+            turn_id: None,
+            effort: None,
+            cause: Some("evt-stop-1".into()),
+        };
         assert!(svc
             .token_usage
-            .on_stop(&thread, Some("sess-2p"), &payload)
+            .on_stop_for(&thread, Some("sess-2p"), &payload, &rec)
             .await
             .unwrap()
             .is_some());

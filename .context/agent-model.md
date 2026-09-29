@@ -1497,7 +1497,9 @@ reacts to it with `TokenUsageService::on_stop_for`, carrying a `TurnRecord`
 counts with the turn instead: the host puts them on the Stop body
 (`TURN_USAGE_KEY`), they ride the event's `usage`, and the reactor records
 one row keyed by the event (`agent_token_usage.cause`), so a redelivery
-counts it once. The transcript path:
+counts it once. Transcript rows carry no `cause` — one chunk can hold
+several turns, so the cursor (step 5) is their redelivery guard (tsk498).
+The transcript path:
 1. Pull `transcript_path` from the payload; resolve the thread's
    `AgentKind` + stream.
 2. Read the persisted per-session cursor (`agent_token_cursor`), seek to

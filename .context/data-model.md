@@ -1590,6 +1590,9 @@ Indexes on `(effort_id, recorded_at DESC)` and `(thread_id, recorded_at
 DESC)`. V102 (P3.2) added `turn_id` (the turn the tokens were spent in) and
 `cause` (`UNIQUE WHERE NOT NULL`: the `agent.turn.ended` event whose own
 report — ACP — carried the counts, so a redelivered event counts once).
+Transcript rows leave `cause` NULL: one transcript chunk can hold several
+turns, and the cursor committing with the rows is what makes their
+redelivery a no-op (tsk498).
 `record_batch(rows, cursor)` writes the rows and advances the session's
 cursor in **one transaction**, so the cursor never passes bytes whose rows
 are missing (or vice versa); `insert_tx` / `set_cursor_tx` are the cores.

@@ -346,7 +346,8 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
         let db = state.db.clone();
         tokio::spawn(async move {
             loop {
-                match oxplow_db::event_retention::sweep(&db, oxplow_domain::Timestamp::now()).await {
+                match oxplow_db::event_retention::sweep(&db, oxplow_domain::Timestamp::now()).await
+                {
                     Ok(report) => tracing::info!(?report, "event retention sweep done"),
                     Err(error) => tracing::warn!(%error, "event retention sweep failed"),
                 }
