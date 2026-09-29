@@ -527,6 +527,21 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	listDeadLetters: (all: boolean | null) => typedError<DeadLetter[], IpcError>(__TAURI_INVOKE("list_dead_letters", { all })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	retryDeadLetter: (id: number) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("retry_dead_letter", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	discardDeadLetter: (id: number) => typedError<DeadLetter, IpcError>(__TAURI_INVOKE("discard_dead_letter", { id })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	listBacklinks: (targetKind: string, targetId: string, limit: number | null) => typedError<BacklinkEdge[], IpcError>(__TAURI_INVOKE("list_backlinks", { targetKind, targetId, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1929,6 +1944,19 @@ export type DashboardItemId = string;
 export type DashboardWithItems = {
 	dashboard: Dashboard,
 	items: DashboardItem[],
+};
+
+// A parked event: the consumer that failed on it, why, and how often.
+export type DeadLetter = {
+	id: number,
+	consumer: string,
+	event_seq: number,
+	error: string,
+	attempts: number,
+	first_failed_at: Timestamp,
+	last_failed_at: Timestamp,
+	// `pending` | `retried` | `discarded`.
+	state: string,
 };
 
 /**

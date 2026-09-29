@@ -143,6 +143,9 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     }
 
     // Extension-source scheduler (tsk292): runs approved `every <n>` sources.
+    // The event pump: delivers the log to its consumers (page_ref
+    // projections first); catches up on anything logged while down.
+    state.event_pump.clone().spawn();
     crate::source_runner::spawn_scheduler(state.clone());
     crate::inferred_decisions::spawn_on_effort_finished(state.clone());
     crate::effort_evidence::spawn(state.clone());

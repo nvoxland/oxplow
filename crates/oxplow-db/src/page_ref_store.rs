@@ -465,53 +465,14 @@ impl SqlitePageRefStore {
         let source_kind = source_kind.to_string();
         let source_id = source_id.to_string();
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                let placeholders: Vec<String> =
-                    (3..3 + ref_types.len()).map(|i| format!("?{i}")).collect();
-                let sql = format!(
-                    "DELETE FROM page_ref
-                 WHERE source_kind = ?1 AND source_id = ?2
-                   AND ref_type IN ({})",
-                    placeholders.join(",")
-                );
-                let mut params_vec: Vec<&dyn rusqlite::ToSql> =
-                    Vec::with_capacity(2 + ref_types.len());
-                params_vec.push(&source_kind);
-                params_vec.push(&source_id);
-                for rt in &ref_types {
-                    params_vec.push(rt);
-                }
-                tx.execute(&sql, &params_vec[..])
-                    .map_err(crate::database::map_sql_err)?;
-                for edge in edges {
-                    if edge.source_kind != source_kind || edge.source_id != source_id {
-                        continue;
-                    }
-                    if !ref_types.contains(&edge.ref_type) {
-                        continue;
-                    }
-                    tx.execute(
-                        "INSERT OR IGNORE INTO page_ref
-                       (source_kind, source_id, target_kind, target_id, ref_type,
-                        source_extra, local_snapshot_id, closest_git_version,
-                        git_version_exact)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        params![
-                            edge.source_kind,
-                            edge.source_id,
-                            edge.target_kind,
-                            edge.target_id,
-                            edge.ref_type,
-                            edge.source_extra,
-                            edge.local_snapshot_id,
-                            edge.closest_git_version,
-                            if edge.git_version_exact { 1 } else { 0 },
-                        ],
-                    )
-                    .map_err(crate::database::map_sql_err)?;
-                }
-                tx.commit().map_err(crate::database::map_sql_err)
+            .transaction(move |tx| {
+                replace_source_for_ref_types_tx(
+                    tx,
+                    &source_kind,
+                    &source_id,
+                    &ref_types,
+                    edges.clone(),
+                )
             })
             .await
     }
@@ -637,6 +598,66 @@ impl PageRefStore for SqlitePageRefStore {
     ) -> Result<Vec<PageRefEdge>, DomainError> {
         SqlitePageRefStore::list_outbound(self, source_kind, source_id, limit).await
     }
+}
+
+/// Sync core of [`SqlitePageRefStore::replace_source_for_ref_types`]:
+/// delete the source's rows whose `ref_type` is in `ref_types`, then
+/// insert `edges` (only those matching the source and one of the
+/// ref_types). Composes inside a `Database::transaction` closure — the
+/// event pump's consumers project through it.
+pub fn replace_source_for_ref_types_tx(
+    conn: &rusqlite::Connection,
+    source_kind: &str,
+    source_id: &str,
+    ref_types: &[String],
+    edges: Vec<PageRefEdge>,
+) -> Result<(), DomainError> {
+    if ref_types.is_empty() {
+        return Ok(());
+    }
+    let placeholders: Vec<String> = (3..3 + ref_types.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "DELETE FROM page_ref
+         WHERE source_kind = ?1 AND source_id = ?2
+           AND ref_type IN ({})",
+        placeholders.join(",")
+    );
+    let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(2 + ref_types.len());
+    params_vec.push(&source_kind);
+    params_vec.push(&source_id);
+    for rt in ref_types {
+        params_vec.push(rt);
+    }
+    conn.execute(&sql, &params_vec[..])
+        .map_err(crate::database::map_sql_err)?;
+    for edge in edges {
+        if edge.source_kind != source_kind || edge.source_id != source_id {
+            continue;
+        }
+        if !ref_types.contains(&edge.ref_type) {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO page_ref
+               (source_kind, source_id, target_kind, target_id, ref_type,
+                source_extra, local_snapshot_id, closest_git_version,
+                git_version_exact)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                edge.source_kind,
+                edge.source_id,
+                edge.target_kind,
+                edge.target_id,
+                edge.ref_type,
+                edge.source_extra,
+                edge.local_snapshot_id,
+                edge.closest_git_version,
+                if edge.git_version_exact { 1 } else { 0 },
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

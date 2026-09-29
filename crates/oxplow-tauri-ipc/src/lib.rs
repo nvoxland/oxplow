@@ -185,6 +185,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::search_wiki_titles,
             commands::generated::read_wiki_page_body,
             commands::generated::write_wiki_page_body,
+            // events (dead-letter queue)
+            commands::generated::list_dead_letters,
+            commands::generated::retry_dead_letter,
+            commands::generated::discard_dead_letter,
             // page refs (unified backlinks/outbound)
             commands::generated::list_backlinks,
             commands::generated::list_outbound,

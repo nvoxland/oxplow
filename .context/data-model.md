@@ -999,15 +999,36 @@ activity with no state write (a tool call, a lens view). Reads:
 `read_after_tx(after_seq, limit)` (oldest first — the pump's cursor),
 `get_tx(id)`.
 
-**Delivery is at least once** (the pump lands in P1.7): a consumer reads
-`seq > checkpoint_tx(consumer)`, handles the batch, and commits its own
-writes plus `set_checkpoint_tx` in one transaction. A handler that fails
-parks the event with `dead_letter_tx(consumer, seq, error)` — a repeat
+**Delivery is at least once** — the `EventPump`
+(`crates/oxplow-app/src/event_pump.rs`, P1.7, tsk409). A consumer is
+`trait EventConsumer { name, handles(type), handle(&Connection,
+&StoredEvent) }`; the pump reads each consumer's `seq > checkpoint` in
+batches and, per event, runs the handler under a SAVEPOINT and advances
+the checkpoint in **one transaction**, so a consumer's writes and its
+position never disagree. A handler that fails (or panics) has its writes
+rolled back to the savepoint and the event is parked with
+`dead_letter_tx(consumer, seq, error)` in that same transaction — a repeat
 failure of the same `(consumer, seq)` bumps `attempts` rather than adding
 a row, and reopens a `retried`/`discarded` letter — and the checkpoint
-still advances, so one poison event never stalls the pump. Letters are
-`pending | retried | discarded` (`set_dead_letter_state_tx`), listed by
-`list_dead_letters_tx(all)`. Nothing is skipped silently.
+still advances, so one poison event never stalls the pump. Events a
+consumer doesn't `handle` are skipped but checkpointed. Renaming a
+consumer restarts it from the beginning of the log. `Services.event_pump`
+is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
+producers call after their commit — or every 5s); `TaskService` wakes it
+after a transition. Letters are `pending | retried | discarded`; the
+person's moves are `list_dead_letters(all?)`, `retry_dead_letter(id)`
+(re-runs the consumer now; `retried` on success, else `pending` with the
+new error) and `discard_dead_letter(id)` — RPC + MCP (parity `both`), and
+`v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
+layer (V94). Nothing is skipped silently.
+
+**Consumers so far.** `PageRefWorkItemConsumer` (`page_ref.work_item`,
+`crates/oxplow-app/src/page_ref_consumers.rs`) re-projects a task's
+body-mention `page_ref` edges on `work_item.transitioned` through the
+`replace_source_for_ref_types_tx` core — the projection the transition
+used to run post-commit, now checkpointed and dead-lettered like any
+other consumer. Task insert/update still project inline until they log
+events of their own.
 
 `command_audit` (who ran which command, outcome, the undo as
 `inverse_json`) is created here and written by the command bus in P1.8.

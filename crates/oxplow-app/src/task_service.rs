@@ -131,6 +131,9 @@ pub struct TaskService {
     /// Optional so bare TaskService tests skip that fact.
     agent_turn_store: Option<Arc<oxplow_db::SqliteAgentTurnStore>>,
     comment_store: Option<Arc<oxplow_db::SqliteCommentStore>>,
+    /// Woken after a transition commits so the `work_item.transitioned`
+    /// event it logged is delivered now rather than on the idle timer.
+    event_pump: Option<Arc<crate::event_pump::EventPump>>,
 }
 
 /// Returns true iff any item in `items` has this id as its parent_id.
@@ -156,7 +159,15 @@ impl TaskService {
             attribution: None,
             agent_turn_store: None,
             comment_store: None,
+            event_pump: None,
         }
+    }
+
+    /// Attach the event pump so a committed transition is delivered to
+    /// its consumers right away.
+    pub fn with_event_pump(mut self, pump: Arc<crate::event_pump::EventPump>) -> Self {
+        self.event_pump = Some(pump);
+        self
     }
 
     /// Attach the attribution ledger so closing an effort reconciles the run
@@ -363,6 +374,9 @@ impl TaskService {
                     .store
                     .update_with_effort_transition(&item, thread_id, prior_status)
                     .await?;
+                if let Some(pump) = self.event_pump.as_ref() {
+                    pump.wake();
+                }
                 self.backfill_effort_snapshot(&item, crossed_in, transition)
                     .await;
                 // Effort just closed: project derived process metrics

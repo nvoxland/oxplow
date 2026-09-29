@@ -659,6 +659,19 @@ fn default_page_ref_limit() -> u32 {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ListDeadLettersParams {
+    /// Include `retried` and `discarded` letters too (default: `pending` only).
+    #[serde(default)]
+    pub all: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct DeadLetterIdParams {
+    /// `v_event_dead_letter.id`.
+    pub id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ResyncNoteParams {
     pub slug: String,
 }
@@ -4951,6 +4964,61 @@ impl OxplowMcp {
     }
 
     #[tool(
+        description = "The event log's dead-letter queue: events a consumer failed on, \
+                       parked with the error (`pending` by default; `all` includes retried \
+                       and discarded). Each row names the consumer, the event and the \
+                       failure; the same data is `v_event_dead_letter` in query_sql."
+    )]
+    async fn list_dead_letters(
+        &self,
+        params: Parameters<ListDeadLettersParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let letters = self
+            .services
+            .event_pump
+            .list_dead_letters(params.0.all)
+            .await
+            .map_err(internal)?;
+        json_result(&letters)
+    }
+
+    #[tool(
+        description = "Run a dead-lettered event through its consumer again, now — after \
+                       fixing the cause. The letter becomes `retried` on success; on failure \
+                       it stays `pending` with the new error and one more attempt. Returns \
+                       the letter's new state."
+    )]
+    async fn retry_dead_letter(
+        &self,
+        params: Parameters<DeadLetterIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let letter = self
+            .services
+            .event_pump
+            .retry_dead_letter(params.0.id)
+            .await
+            .map_err(internal)?;
+        json_result(&letter)
+    }
+
+    #[tool(
+        description = "Give up on a dead-lettered event. It stays visible as `discarded`; \
+                       nothing is skipped silently."
+    )]
+    async fn discard_dead_letter(
+        &self,
+        params: Parameters<DeadLetterIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let letter = self
+            .services
+            .event_pump
+            .discard_dead_letter(params.0.id)
+            .await
+            .map_err(internal)?;
+        json_result(&letter)
+    }
+
+    #[tool(
         description = "Unified outbound: every page the given source page points AT. \
                        Inverse of `list_backlinks` — ask \"what does THIS page reference?\". \
                        Same `kind`/`id` shape as list_backlinks."
@@ -5617,6 +5685,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_thread_context",
     "list_backlinks",
     "list_outbound",
+    "list_dead_letters",
     "find_wiki_pages_for_wiki_page",
     "lsp_definition",
     "lsp_hover",
@@ -5634,6 +5703,9 @@ const READ_ONLY_TOOLS: &[&str] = &[
 /// prove every registered tool is accounted for (read XOR write).
 #[cfg(test)]
 const WRITE_TOOLS: &[&str] = &[
+    // The dead-letter queue's two decisions.
+    "retry_dead_letter",
+    "discard_dead_letter",
     "run_lens_action",
     // Stores the change's analysis and starts its duplicate scan.
     "ensure_change",

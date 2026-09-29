@@ -95,7 +95,6 @@ impl SqliteTaskStore {
         from: TaskStatus,
     ) -> Result<EffortTransition, DomainError> {
         use crate::database::map_sql_err;
-        let edges_item = item.clone();
         let item = Arc::new(item.clone());
         let schemas = self.event_schemas.clone();
         let entering = item.status == TaskStatus::InProgress;
@@ -169,18 +168,21 @@ impl SqliteTaskStore {
                 Ok(transition)
             })
             .await?;
-        // Post-commit: same body-ref projection `update()` runs.
-        let edges = task_edges(&edges_item);
-        self.page_refs
-            .replace_source_for_ref_types(
-                KIND_WORK_ITEM,
-                &work_item_id(edges_item.id),
-                task_body_ref_types(),
-                edges,
-            )
-            .await?;
+        // The body-ref projection is the `page_ref.work_item` consumer's
+        // job now: it reacts to the `work_item.transitioned` event this
+        // transaction logged (oxplow-app `page_ref_consumers.rs`).
         Ok(outcome)
     }
+}
+
+/// One live task by id, for composition inside a transaction (the event
+/// pump's consumers read through it).
+pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Task>, DomainError> {
+    use rusqlite::OptionalExtension;
+    let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
+    conn.query_row(&sql, params![id.value()], row_to_task)
+        .optional()
+        .map_err(crate::database::map_sql_err)
 }
 
 /// Sync core for the task-row UPDATE — connection-parameterized so it

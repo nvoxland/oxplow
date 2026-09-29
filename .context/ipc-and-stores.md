@@ -585,6 +585,15 @@ each other:
    the projection for free, and the backfill
    (`page_ref_backfill.rs`) exists only for rows written before
    mirroring did.
+4. **Event-driven projection** where the write logs an event. A task
+   transition logs `work_item.transitioned` in its transaction, and
+   `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
+   re-projects the body slice through the
+   `replace_source_for_ref_types_tx` core when the pump delivers it —
+   checkpointed and dead-lettered, so a crash between commit and
+   projection can't leave the graph stale. As writes gain events this
+   replaces (3) for them; see [data-model.md](./data-model.md)
+   "event_log".
 
 When a single writer owns the WHOLE source (wiki sync, findings
 write, commit indexer), use the simpler `replace_source` instead.

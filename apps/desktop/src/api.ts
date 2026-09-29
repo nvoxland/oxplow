@@ -3088,6 +3088,27 @@ export async function listBacklinks(
   return unwrap(await commands.listBacklinks(targetKind, targetId, limit));
 }
 
+// ----------------------------------------------------------------------
+// The event log's dead-letter queue (.context/data-model.md "event_log").
+// ----------------------------------------------------------------------
+
+export type DeadLetter = import("./tauri-bridge/generated/bindings.js").DeadLetter;
+
+/** Parked events; `pending` only unless `all`. */
+export async function listDeadLetters(all = false): Promise<DeadLetter[]> {
+  return unwrap(await commands.listDeadLetters(all));
+}
+
+/** Run the parked event through its consumer again; returns the letter's new state. */
+export async function retryDeadLetter(id: number): Promise<DeadLetter> {
+  return unwrap(await commands.retryDeadLetter(id));
+}
+
+/** Give up on the parked event (stays visible as `discarded`). */
+export async function discardDeadLetter(id: number): Promise<DeadLetter> {
+  return unwrap(await commands.discardDeadLetter(id));
+}
+
 /** Pages this source points AT. Inverse of `listBacklinks`. */
 export async function listPageOutbound(
   sourceKind: string,

@@ -37,6 +37,7 @@ pub mod duplication_scan;
 pub mod effort_evidence;
 pub mod endpoint_diff;
 pub mod entity_metrics;
+pub mod event_pump;
 pub mod events;
 pub mod exec_consent;
 pub mod extension_sources;
@@ -61,6 +62,7 @@ pub mod net_sandbox;
 pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
+pub mod page_ref_consumers;
 pub mod producer_metrics;
 pub mod reasoning;
 pub mod recovery;
@@ -399,6 +401,9 @@ pub struct Services {
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; plugin types join when their manifests load.
     pub event_schemas: Arc<EventSchemaRegistry>,
+    /// Delivers the log to its consumers (checkpoints, dead letters).
+    /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
+    pub event_pump: Arc<event_pump::EventPump>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -581,6 +586,11 @@ impl Services {
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
+        let event_pump = Arc::new(event_pump::EventPump::new(
+            db.clone(),
+            (*event_log_store).clone(),
+            vec![Arc::new(page_ref_consumers::PageRefWorkItemConsumer)],
+        ));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
@@ -616,7 +626,7 @@ impl Services {
         let streams =
             StreamService::new(workspace_layout, stream_store.clone(), thread_store.clone());
         let threads = ThreadService::new(thread_store.clone());
-        let tasks = TaskService::new(task_store.clone());
+        let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
         let event_bus = EventBus::new();
         let hook_ingest = HookIngestService::new(
             hook_event_store.clone(),
@@ -801,6 +811,7 @@ impl Services {
             task_link_store,
             event_log_store,
             event_schemas,
+            event_pump,
             wiki_page_store,
             page_visit_store,
             usage_store,

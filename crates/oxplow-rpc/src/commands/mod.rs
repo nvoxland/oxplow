@@ -27,6 +27,7 @@ pub mod comments;
 pub mod config;
 pub mod dashboards;
 pub mod effort;
+pub mod events;
 pub mod extensions;
 pub mod followup;
 pub mod git;

@@ -275,6 +275,10 @@ macro_rules! oxplow_command_table {
                 search_wiki_titles => $crate::commands::wiki::search_wiki_titles { query: String, limit: u32 } -> Vec<::oxplow_db::WikiPage>,
                 read_wiki_page_body => $crate::commands::wiki::read_wiki_page_body { slug: String } -> String,
                 write_wiki_page_body => $crate::commands::wiki::write_wiki_page_body { slug: String, body: String } -> (),
+                // events (the log's dead-letter queue)
+                list_dead_letters => $crate::commands::events::list_dead_letters { all: Option<bool> } -> Vec<::oxplow_db::DeadLetter>,
+                retry_dead_letter => $crate::commands::events::retry_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
+                discard_dead_letter => $crate::commands::events::discard_dead_letter { id: i64 } -> ::oxplow_db::DeadLetter,
                 // page_refs
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target_kind: String, target_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source_kind: String, source_id: String, limit: Option<i64> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,

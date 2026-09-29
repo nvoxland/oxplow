@@ -12,6 +12,7 @@ url = { workspace = true }
 oxplow-domain = { workspace = true }
 oxplow-plugin = { workspace = true }
 oxplow-db = { workspace = true }
+rusqlite = { workspace = true }
 oxplow-ai = { workspace = true }
 oxplow-config = { workspace = true }
 oxplow-fs-watch = { workspace = true }
