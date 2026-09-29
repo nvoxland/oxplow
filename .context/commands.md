@@ -56,6 +56,28 @@ run that didn't complete, was already undone or has no inverse, runs the
 inverse through the same pipeline, and marks the row `undone_by` the new
 run.
 
+A command whose confirmation depends on the input sets
+`Command::with_confirm_for(fn(&input) -> Confirm)`; the bus consults it
+in step 4. A handler that needs the UI to refetch returns
+`HandlerOutput::after_commit`, which the bus runs once the transaction
+has committed — the in-memory `OxplowEvent` broadcast belongs there,
+never inside the handler.
+
+## `config.*` and the key registry
+
+`.oxplow/project.yaml`'s vocabulary is one registry,
+`oxplow_config::keys` (`config_keys()`): the JSON Schema generated from
+the file's own shape (`RawConfig`, `deny_unknown_fields`), whose
+top-level properties are the keys, each with its field doc and value
+schema. `write_project_config` renders only those keys and copies any
+other top-level key through — deriving the managed set from the schema
+is what fixed `metricRetentionDays`, `metricDetailMaxPerProducer`,
+`metricDetailRetentionDays` and `iconTint` silently reverting (they were
+missing from the old hand-kept `MANAGED_KEYS` list, so their on-disk
+value came back as an "extra" over the one just written). Adding a field
+to `RawConfig` makes it managed, documented and settable at once.
+`set_zones` is gone (tsk392): `zones` is just a key.
+
 `CommandBus::list(actor)` is the specs that actor may run —
 `list_commands` for the agent (P1.10), the launcher for the human.
 
@@ -76,6 +98,8 @@ spec's `atomicity` is refused, as is a second command of the same name.
 | Command | Handler | Notes |
 |---|---|---|
 | `work_item.transition { id, to }` | `BestEffort` over `TaskService::update` (`commands/work_item.rs`) | all invokers; undoable (inverse restores the prior status). The service logs `work_item.transitioned` itself. |
+| `config.list_keys {}` / `config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value, `human_only` |
+| `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`), write the file, swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `lsp`, `collection`, `extensions` — each runs a program, picks the model, or enables code) needs a person's confirmation per input |
 
 **Callers.** MCP `transition_tasks` runs one `work_item.transition` per
 id as `Actor::Agent` (thread identity arrives in P1.10); RPC

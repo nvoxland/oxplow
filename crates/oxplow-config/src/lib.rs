@@ -11,6 +11,8 @@ use specta::Type;
 use thiserror::Error;
 use tracing::info;
 
+pub mod keys;
+
 pub use oxplow_domain::AgentKind;
 
 pub mod recent;
@@ -95,7 +97,7 @@ const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 /// ([`acp_presets`]); `acpAgents:` in `.oxplow/project.yaml` adds or
 /// overrides by name. A project entry names a program from the repo, so it
 /// runs only once a person approved it (see `exec_consent`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AcpAgentConfig {
     /// Short name a thread picks it by (`claude`, `gemini`, `my-agent`).
@@ -150,7 +152,7 @@ pub fn resolve_acp_agents(project: &[AcpAgentConfig]) -> Vec<(AcpAgentConfig, Ac
     out
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct LspServerConfig {
     #[serde(rename = "languageId")]
     pub language_id: String,
@@ -167,7 +169,7 @@ pub struct LspServerConfig {
 /// longer gate-kept here — it's resolved against the collector registry at
 /// collection time, so an unknown format surfaces as a warning rather than a
 /// config load failure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct ReportConfig {
     pub path: String,
     pub format: String,
@@ -179,7 +181,7 @@ pub struct ReportConfig {
 /// (the collection layer maps it to a registered collector). `entry` is the
 /// jaq/Starlark script (or the program for `exec`); `args` are extra exec
 /// arguments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct PluginConfig {
     pub name: String,
     /// What the plugin observes: `coverage` | `test`.
@@ -210,7 +212,9 @@ pub struct PluginConfig {
 /// gauge; tree-derived gauges read the snapshot via `files()` instead and leave
 /// it unset. (Renamed from `MetricComputeConfig` in epic tsk12, E: compute is a
 /// property of the *gauge* that emits facts, not the *metric* that reads them.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, Default, schemars::JsonSchema,
+)]
 pub struct GaugeComputeConfig {
     /// Transform tier: `jaq` | `starlark` | `exec`.
     pub runtime: String,
@@ -235,7 +239,7 @@ pub struct GaugeComputeConfig {
 /// keeping only the facts that match before aggregation: `minValue` for a
 /// count-over-threshold (complexity ≥ N), `severity` for a lint slice, `dimEq`
 /// for a conformed-dimension slice (`[oxplow.rule, unsafe_block]`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FilterConfig {
     /// Keep facts with `value >= minValue`.
@@ -253,7 +257,7 @@ pub struct FilterConfig {
 /// constrained binary op over two OTHER metric keys (no source measure). The
 /// engine aligns the two metrics on their shared rollup key and applies `op`
 /// (`div` is the ratio primitive: bugs-per-KLOC, cost-per-token).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FormulaConfig {
     /// `add` | `sub` | `mul` | `div` (`ratio` aliases `div`).
@@ -276,7 +280,7 @@ pub struct FormulaConfig {
 /// Resolved across the three scopes into [`ResolvedSpec`]s. All non-discriminant
 /// fields are optional so both forms share one struct; validation enforces the
 /// per-form rules.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MetricEntry {
     /// `use:` form — the catalog key to enable.
@@ -419,7 +423,7 @@ pub struct EntityDimensionSpec {
 /// `use:`/`key:` split — a gauge is always a definition (you declare the
 /// producer; a project doesn't "enable" one). Resolved across global+project by
 /// [`resolve_gauges`]; built-in gauges live in code, not config.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GaugeEntry {
     /// The gauge's namespaced key (`<vendor>.<id>`). Required.
@@ -461,7 +465,7 @@ pub struct ResolvedGauge {
 /// split — a measure entry is always a definition (you declare the fact type,
 /// you don't "enable" one). Resolved across the global+project scopes by
 /// [`resolve_measures`] and seeded into the `measure` table at boot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MeasureEntry {
     /// The new measure's namespaced key (`<vendor>.<id>`). Required.
@@ -526,7 +530,7 @@ pub struct ResolvedMeasure {
 /// migration seed. Resolved by [`resolve_dimensions`] and seeded into the
 /// `dimension` table at boot; `promote` requests a generated column + index
 /// (catalog teeth).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, Default, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DimensionEntry {
     /// The new dimension's namespaced key (`<vendor>.<id>`). Required.
@@ -679,7 +683,7 @@ pub struct GeneratedConfig {
 /// load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
 /// takes the FIRST matching rule, so specific patterns must precede
 /// catch-alls.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct ZoneRuleConfig {
     /// Globs selecting the files in this zone (any-of). In YAML `match`
     /// accepts a single string or a list; both land here as a list.
@@ -824,7 +828,7 @@ pub struct OxplowConfig {
     pub extensions_disabled: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawExtensionsBlock {
     #[serde(default)]
@@ -853,14 +857,14 @@ pub fn disabled_extensions(project_dir: impl AsRef<Path>) -> Vec<String> {
 pub const AI_ROLE_NAMES: [&str; 6] = ["main", "fast", "summarize", "embed", "decide", "review"];
 
 /// One `ai.roles` entry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AiRoleOverride {
     pub provider: String,
     pub model: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawAiBlock {
     #[serde(default)]
@@ -880,7 +884,7 @@ pub enum ConfigError {
 /// Raw `zones:` row. `match` accepts a scalar or a sequence, so a
 /// single-pattern zone reads as `match: crates/db/**` rather than a
 /// one-element list.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawZoneRule {
     #[serde(rename = "match")]
@@ -891,7 +895,7 @@ struct RawZoneRule {
 }
 
 /// A YAML field that may be written as one string or a list of them.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum StringOrList {
     One(String),
@@ -908,7 +912,7 @@ impl StringOrList {
 }
 
 /// Raw `generated:` block — `{ exclude: [...], include: [...] }`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawGenerated {
     #[serde(default)]
@@ -937,65 +941,88 @@ pub fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
 
 /// Internal raw shape, used to validate before promoting to
 /// `OxplowConfig`. Mirrors the TS `ParsedOxplowConfig` interface.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
+    /// Enabled agent implementations, in priority order; the first is the default for new threads.
     #[serde(default)]
     agents: Option<Vec<AgentKind>>,
+    /// Legacy single-agent form of `agents`.
     #[serde(default)]
     agent: Option<AgentKind>,
+    /// Display name; defaults to the project directory's basename.
     #[serde(rename = "projectName", default)]
     project_name: Option<String>,
+    /// Extra language servers: `{ servers: [{ languageId, extensions, command, args }] }`. Runs programs.
     #[serde(default)]
     lsp: Option<RawLspBlock>,
+    /// Text appended verbatim to every agent's system prompt.
     #[serde(rename = "agentPromptAppend", default)]
     agent_prompt_append: Option<String>,
+    /// File-snapshot retention in days; 0 disables pruning.
     #[serde(rename = "snapshotRetentionDays", default)]
     snapshot_retention_days: Option<f64>,
+    /// Metric-capture retention in days; 0 (default) keeps everything.
     #[serde(rename = "metricRetentionDays", default)]
     metric_retention_days: Option<f64>,
+    /// Keep per-run detail for only the newest N captures per producer; 0 disables the cap.
     #[serde(rename = "metricDetailMaxPerProducer", default)]
     metric_detail_max_per_producer: Option<f64>,
+    /// Compact per-run detail older than this many days; 0 disables.
     #[serde(rename = "metricDetailRetentionDays", default)]
     metric_detail_retention_days: Option<f64>,
+    /// Extra `exclude` / `include` paths layered over .gitignore for watching, snapshots and scans.
     #[serde(rename = "generated", default)]
     generated: Option<RawGenerated>,
+    /// Largest file snapshotted by content; bigger files get a stat-only entry.
     #[serde(rename = "snapshotMaxFileBytes", default)]
     snapshot_max_file_bytes: Option<f64>,
+    /// Inject the session-context block into every agent prompt.
     #[serde(rename = "injectSessionContext", default)]
     inject_session_context: Option<bool>,
+    /// Hex colour composited behind the app icon so windows are tellable apart (macOS).
     #[serde(rename = "iconTint", default)]
     icon_tint: Option<String>,
+    /// Test and coverage collection: commands, report paths, run patterns, plugins. Runs programs.
     #[serde(default)]
     collection: Option<RawCollectionBlock>,
+    /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
+    /// Fact producers: each runs its `compute` collector on its trigger and emits facts.
     #[serde(default)]
     gauges: Option<Vec<GaugeEntry>>,
+    /// Custom fact types collectors may emit.
     #[serde(default)]
     measures: Option<Vec<MeasureEntry>>,
+    /// Custom slice axes for facts.
     #[serde(default)]
     dimensions: Option<Vec<DimensionEntry>>,
+    /// Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.
     #[serde(default)]
     zones: Option<Vec<RawZoneRule>>,
+    /// Per-agent launch model overrides, e.g. `{ opencode: "github-copilot/gpt-5-mini" }`.
     #[serde(rename = "agentModels", default)]
     agent_models: Option<std::collections::BTreeMap<AgentKind, String>>,
+    /// The project's ACP agents, layered over the presets. Runs programs.
     #[serde(rename = "acpAgents", default)]
     acp_agents: Option<Vec<AcpAgentConfig>>,
+    /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
     #[serde(default)]
     ai: Option<RawAiBlock>,
+    /// Extensions turned off for this project: `{ disabled: [names] }`.
     #[serde(default)]
     extensions: Option<RawExtensionsBlock>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawReport {
     path: String,
     format: String,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawPlugin {
     name: String,
@@ -1011,7 +1038,7 @@ struct RawPlugin {
     args: Vec<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawCollectionBlock {
     #[serde(rename = "testCommand", default)]
@@ -1040,14 +1067,14 @@ struct RawCollectionBlock {
     plugins: Option<Vec<RawPlugin>>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawLspBlock {
     #[serde(default)]
     servers: Option<Vec<RawLspServer>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RawLspServer {
     #[serde(rename = "languageId")]
@@ -1088,6 +1115,17 @@ pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig
     Ok(config)
 }
 
+/// Validate a parsed `.oxplow/project.yaml` document exactly as
+/// `load_project_config` does — the one path every config write takes,
+/// whether a person edits the file or a command sets a key.
+pub fn parse_project_config(
+    doc: serde_yaml::Value,
+    fallback_name: &str,
+) -> Result<OxplowConfig, ConfigError> {
+    let parsed: RawConfig = serde_yaml::from_value(doc)?;
+    validate(parsed, fallback_name)
+}
+
 /// Re-serialize an `OxplowConfig` back to `.oxplow/project.yaml`.
 ///
 /// **Comment preservation:** none of the maintained Rust YAML
@@ -1116,31 +1154,12 @@ pub fn write_project_config(
     }
     let fallback_name = basename(project_dir);
 
-    // Schema-managed keys we own. Anything outside this set found
-    // in an existing file is copied through verbatim (best-effort,
-    // since YAML→serde_yaml::Value→YAML is still lossy on style).
-    const MANAGED_KEYS: &[&str] = &[
-        "agent",
-        "agents",
-        "projectName",
-        "agentPromptAppend",
-        "snapshotRetentionDays",
-        "generated",
-        "snapshotMaxFileBytes",
-        "injectSessionContext",
-        "lsp",
-        "collection",
-        "metrics",
-        "gauges",
-        "measures",
-        "dimensions",
-        "zones",
-        "agentModels",
-        "acpAgents",
-        "ai",
-        "extensions",
-    ];
-
+    // Every key the file schema knows (`keys::config_keys`) is ours to
+    // render; anything else found in an existing file is copied through
+    // verbatim (best-effort, since YAML→serde_yaml::Value→YAML is still
+    // lossy on style). Deriving the set from the schema is what keeps a
+    // new field from being "an extra" that re-inserts its stale on-disk
+    // value over the one just written (tsk164, tsk411).
     let existing_extras: serde_yaml::Mapping = if path.exists() {
         match std::fs::read_to_string(&path)
             .ok()
@@ -1149,7 +1168,7 @@ pub fn write_project_config(
             Some(serde_yaml::Value::Mapping(m)) => m
                 .into_iter()
                 .filter(|(k, _)| match k {
-                    serde_yaml::Value::String(s) => !MANAGED_KEYS.contains(&s.as_str()),
+                    serde_yaml::Value::String(s) => !keys::is_config_key(s),
                     _ => true,
                 })
                 .collect(),
@@ -1159,6 +1178,23 @@ pub fn write_project_config(
         serde_yaml::Mapping::new()
     };
 
+    let mut doc = render_project_config(config, &fallback_name);
+    // Carry forward any unknown top-level keys the user (or a
+    // sibling tool) added to .oxplow/project.yaml.
+    for (k, v) in existing_extras {
+        doc.insert(k, v);
+    }
+
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
+    std::fs::write(path, yaml)?;
+    Ok(())
+}
+
+/// The `.oxplow/project.yaml` document for `config`: only keys whose
+/// value differs from the default, so a hand-edited file stays minimal.
+/// `fallback_name` is the project name that needs no `projectName` key.
+/// Pure — `write_project_config` adds the file's unknown keys and writes.
+pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serde_yaml::Mapping {
     let mut doc = serde_yaml::Mapping::new();
     if config.agents != vec![AgentKind::default()] {
         doc.insert(
@@ -1386,15 +1422,7 @@ pub fn write_project_config(
         doc.insert("ai".into(), serde_yaml::Value::Mapping(ai));
     }
 
-    // Carry forward any unknown top-level keys the user (or a
-    // sibling tool) added to .oxplow/project.yaml.
-    for (k, v) in existing_extras {
-        doc.insert(k, v);
-    }
-
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc))?;
-    std::fs::write(path, yaml)?;
-    Ok(())
+    doc
 }
 
 /// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
@@ -3049,7 +3077,7 @@ fn validate_collection(raw: Option<RawCollectionBlock>) -> Result<CollectionConf
     })
 }
 
-fn basename(path: &Path) -> String {
+pub(crate) fn basename(path: &Path) -> String {
     let resolved: PathBuf = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     resolved
         .file_name()

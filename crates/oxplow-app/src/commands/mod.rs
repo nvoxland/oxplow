@@ -15,6 +15,7 @@
 //! bus; [`CommandBus::best_effort_count`] is asserted by a test so the
 //! number trends to zero.
 
+pub mod config_commands;
 pub mod work_item;
 
 use std::collections::BTreeMap;
@@ -40,7 +41,7 @@ use crate::agent_policy::AgentPolicy;
 use crate::event_pump::EventPump;
 
 /// What a handler produced.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct HandlerOutput {
     /// Returned to the caller (`run_command`'s result).
     pub result: Value,
@@ -51,6 +52,9 @@ pub struct HandlerOutput {
     /// in the same transaction. A `BestEffort` handler's own transactions
     /// log their events themselves; this is for `Tx` handlers.
     pub events: Vec<Envelope>,
+    /// Runs once the run has committed — the place for the in-memory
+    /// broadcast that wakes the UI (`OxplowEvent`), never for a write.
+    pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 
 type TxHandler = dyn Fn(&rusqlite::Connection, &Actor, Value) -> Result<HandlerOutput, CommandError>
@@ -66,11 +70,16 @@ pub enum Handler {
     BestEffort(Arc<BestEffortHandler>),
 }
 
+type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
+
 /// A registered command: its spec, compiled input schema and handler.
 pub struct Command {
     pub spec: CommandSpec,
     pub handler: Handler,
     validator: InputValidator,
+    /// Per-input confirmation, when the spec's `confirm` depends on the
+    /// input (`config.set` on a human-only key). Overrides `spec.confirm`.
+    confirm_for: Option<Arc<ConfirmFor>>,
 }
 
 impl Command {
@@ -94,7 +103,20 @@ impl Command {
             spec,
             handler,
             validator,
+            confirm_for: None,
         })
+    }
+
+    pub fn with_confirm_for(mut self, f: Arc<ConfirmFor>) -> Self {
+        self.confirm_for = Some(f);
+        self
+    }
+
+    fn confirm(&self, input: &Value) -> oxplow_domain::Confirm {
+        match &self.confirm_for {
+            Some(f) => f(input),
+            None => self.spec.confirm,
+        }
     }
 }
 
@@ -154,6 +176,11 @@ impl CommandBus {
 
     pub fn spec(&self, name: &str) -> Option<CommandSpec> {
         self.commands.read().get(name).map(|c| c.spec.clone())
+    }
+
+    /// The log the bus records into (tests read it back).
+    pub fn log_for_tests(&self) -> &SqliteEventLogStore {
+        &self.log
     }
 
     /// How many registered handlers are `BestEffort`. Trends to zero.
@@ -217,13 +244,14 @@ impl CommandBus {
         }
         // 4. A person confirms; an agent never can. Nothing is written.
         let confirmed = confirmed && !matches!(actor, Actor::Agent { .. });
-        if spec.confirm.required() && !confirmed {
+        let confirm = command.confirm(&input);
+        if confirm.required() && !confirmed {
             return Err(CommandError::NeedsConfirmation {
                 preview: Box::new(Preview {
                     command: spec.name.clone(),
                     summary: spec.summary.clone(),
                     input,
-                    destructive: matches!(spec.confirm, oxplow_domain::Confirm::Destructive),
+                    destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
                 }),
             });
         }
@@ -359,6 +387,7 @@ impl CommandBus {
             result: Value::Null,
             inverse,
             events,
+            after_commit: None,
         };
         self.db
             .transaction(move |tx| record_tx(tx, &schemas, &actor, &spec, &input, &shadow))
@@ -373,7 +402,10 @@ struct Recorded {
     event_id: oxplow_domain::EventId,
 }
 
-fn finish(out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
+fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
+    if let Some(after) = out.after_commit.take() {
+        after();
+    }
     CommandOutcome {
         result: out.result,
         audit_id: recorded.audit_id,
@@ -549,6 +581,7 @@ mod tests {
                         after: Value::String(v),
                     },
                 )],
+                after_commit: None,
             })
         }))
     }

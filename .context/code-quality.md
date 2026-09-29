@@ -256,19 +256,20 @@ rule is visible rather than silently never matching.
 This repo's own table lives in its `.oxplow/project.yaml` and is the
 worked example.
 
-### MCP: `list_zones` / `set_zones`
+### MCP: `list_zones`; writing the table is `config.set`
 
 The agent owns this table. `list_zones` returns the rules plus what they
 actually match — a file count per zone over the worktree and a sample of
 paths that fell through to `other`, which is the signal that the table
-has gone stale as the repo grew. `set_zones { rules }` REPLACES the
-whole ordered table, validates it, writes it to `.oxplow/project.yaml`
-(committed, so a team shares one vocabulary), emits `ConfigChanged`, and
-returns the same shape so the caller can confirm the rules matched what
-it meant. Implementation: `crates/oxplow-app/src/zones_service.rs`.
+has gone stale as the repo grew. Writing it is the `config.set { key:
+"zones", value: [rules] }` command ([commands.md](./commands.md)) — the
+WHOLE ordered table, validated by the loader's rules (reserved labels,
+glob shapes), written to `.oxplow/project.yaml` (committed, so a team
+shares one vocabulary), logged as `config.changed`, undoable. Read side:
+`crates/oxplow-app/src/zones_service.rs`.
 
 No IPC of its own — `zones` rides on `get_config`, and the config
-watcher hot-reloads file edits, so a `set_zones` call repaints an open
+watcher hot-reloads file edits, so a write repaints an open
 changed-files tree without a restart.
 
 ### `oxplow-git/co_change`

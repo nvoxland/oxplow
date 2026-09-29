@@ -148,6 +148,13 @@ oxplow agent:
 
 `build_agent_command_for_session` in `crates/oxplow-app/src/agent_command.rs`
 constructs a shell command for the thread's assigned `AgentKind`.
+Project configuration is changed through the `config.*` commands on the
+command bus ([commands.md](./commands.md)) — an agent sets `zones`,
+`metricRetentionDays`, `generated`, … with `config.set`, while the keys
+that run a program or pick the model (`agents`, `lsp`, `collection`,
+`ai`, `acpAgents`, `agentModels`, `extensions`) need a person's
+confirmation. `set_zones` is gone; `zones` is just a key.
+
 `.oxplow/project.yaml` lists enabled agents as `agents: [...]`; the first entry
 is the default for newly-created threads, and each thread persists its
 own `agent` at creation time so Claude and Codex threads can run

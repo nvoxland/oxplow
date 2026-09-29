@@ -4,7 +4,18 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Type,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]

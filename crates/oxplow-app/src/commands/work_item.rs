@@ -83,6 +83,7 @@ pub fn command(tasks: TaskService) -> Command {
                     .expect("input serializes"),
                 }),
                 events: Vec::new(),
+                after_commit: None,
             })
         })
     }));

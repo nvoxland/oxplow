@@ -786,6 +786,15 @@ impl Services {
         commands
             .register(commands::work_item::command(tasks.clone()))
             .expect("core commands register");
+        for command in
+            commands::config_commands::commands(commands::config_commands::ConfigTarget {
+                config: config_arc.clone(),
+                project_dir: layout.project_dir.clone(),
+                events: event_bus.clone(),
+            })
+        {
+            commands.register(command).expect("core commands register");
+        }
         let collection = collection::CollectionService::new(
             fact_store.clone(),
             nudge_store.clone(),

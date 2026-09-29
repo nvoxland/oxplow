@@ -2,14 +2,16 @@
 //!
 //! Zones are project configuration, not oxplow's opinion (tsk251): the
 //! `zones:` block in `.oxplow/project.yaml` is the whole vocabulary, and
-//! an unconfigured project has none. This module is the seam the agent
-//! drives through MCP (`list_zones` / `set_zones`) — read the table with
-//! the distribution it actually produces, or replace it.
+//! an unconfigured project has none. This module is the read side the
+//! agent reaches through MCP `list_zones`: the table with the
+//! distribution it actually produces. Writing the table is
+//! `config.set { key: "zones" }` on the command bus
+//! (`.context/commands.md`), like every other project.yaml key.
 //!
-//! Returning the distribution from BOTH calls is the point: a rule table
-//! you can't see the effect of is guesswork. `unmatched_sample` is the
-//! stale-table signal — paths the table doesn't cover yet, which is what
-//! the repo growing a new top-level area looks like from here.
+//! Returning the distribution is the point: a rule table you can't see
+//! the effect of is guesswork. `unmatched_sample` is the stale-table
+//! signal — paths the table doesn't cover yet, which is what the repo
+//! growing a new top-level area looks like from here.
 
 use std::collections::BTreeMap;
 
@@ -45,21 +47,6 @@ pub async fn zone_report(svc: &Services) -> Result<ZoneReport, String> {
         cfg.zones.clone()
     };
     report_for(svc, rules).await
-}
-
-/// Replace the table, persist it to `.oxplow/project.yaml`, and report
-/// what the new rules match. Validation is the same pass config load
-/// runs, so a rule the agent writes here fails exactly as it would if a
-/// human had typed it into the file.
-pub async fn set_zones(svc: &Services, rules: Vec<ZoneRuleConfig>) -> Result<ZoneReport, String> {
-    let validated = oxplow_config::validate_zone_rules(&rules).map_err(|e| e.to_string())?;
-    let for_report = validated.clone();
-    crate::config_service::mutate_config(&svc.config, &svc.layout.project_dir, move |c| {
-        c.zones = validated;
-    })
-    .map_err(|e| e.to_string())?;
-    svc.events.emit(crate::OxplowEvent::ConfigChanged);
-    report_for(svc, for_report).await
 }
 
 async fn report_for(svc: &Services, rules: Vec<ZoneRuleConfig>) -> Result<ZoneReport, String> {
