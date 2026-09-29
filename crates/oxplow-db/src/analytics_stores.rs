@@ -8,8 +8,6 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use std::collections::BTreeMap;
-
 use oxplow_domain::{
     diff_trees, DomainError, FileChange, PageVisitId, StreamId, ThreadId, Timestamp, UsageEventId,
 };
@@ -18,6 +16,7 @@ use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
+use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
 
 // ---------------- Page visits ----------------
 
@@ -874,6 +873,8 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
     // and we treat that as None.
     let snapshot_id: Option<i64> = row.get(7).ok().flatten();
     let mtime_ms: Option<i64> = row.get(8).ok().flatten();
+    // Present only when the SELECT names it (V96+).
+    let content_hash: Option<String> = row.get("content_hash").ok().flatten();
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -887,6 +888,7 @@ fn row_to_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileSnapshot> {
         storage: SnapshotStorage::from_db_str(&storage),
         snapshot_id,
         mtime_ms,
+        content_hash,
     })
 }
 
@@ -943,6 +945,11 @@ pub struct Snapshot {
     /// HEAD, or a non-git directory. Lets callers distinguish snapshots
     /// taken on different branches within the same stream's worktree.
     pub git_branch: Option<String>,
+    /// Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
+    /// the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
+    /// Two snapshots with equal `tree_hash` hold the same files. `None`
+    /// on snapshots taken before V96.
+    pub tree_hash: Option<String>,
 }
 
 /// Most-recent stat (hash + size + mtime) for a single path. The
@@ -953,6 +960,10 @@ pub struct LatestStat {
     pub blob_hash: Option<String>,
     pub size_bytes: i64,
     pub mtime_ms: Option<i64>,
+    pub storage: SnapshotStorage,
+    /// The row's content identity when known (V96): always for `oxplow`,
+    /// lazily for `git`, never for `oversize`/`deleted`.
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -960,8 +971,9 @@ pub struct FileSnapshot {
     pub id: i64,
     pub stream_id: StreamId,
     pub path: String,
-    /// xxh3-128 (storage = oxplow) or git blob OID (storage = git);
-    /// NULL for oversize / deleted rows.
+    /// The storage ADDRESS: xxh3-128 (storage = oxplow) or git blob OID
+    /// (storage = git); NULL for oversize / deleted rows. Compare
+    /// [`Self::content_hash`], not this.
     pub blob_hash: Option<String>,
     pub size_bytes: i64,
     pub captured_at: Timestamp,
@@ -978,6 +990,13 @@ pub struct FileSnapshot {
     /// both match the current stat, the file is presumed unchanged
     /// and the bytes aren't re-read or re-hashed.
     pub mtime_ms: Option<i64>,
+    /// The content identity (V96): xxh3-128 of the bytes, whatever the
+    /// storage class. `blob_hash` is only the address. [`capture_batch`]
+    /// fills it from `blob_hash` for `oxplow` rows; `git` rows get it
+    /// lazily ([`SqliteSnapshotStore::with_content_hasher`]).
+    ///
+    /// [`capture_batch`]: SqliteSnapshotStore::capture_batch
+    pub content_hash: Option<String>,
 }
 
 /// One commit-stamped snapshot row — a point where a stream's worktree WAS
@@ -995,14 +1014,104 @@ pub struct StampedSnapshot {
     pub created_at: Timestamp,
 }
 
+/// Every row captured under snapshot `?1`, classified against the most
+/// recent prior row for the same `(stream_id, path)` by content identity:
+/// `kind` is `added` / `modified` / `deleted`, or NULL when the row is not
+/// a change (same bytes as before, or a tombstone for a path already
+/// absent). Columns: `id, path, storage, prior_id, kind`.
+const CLASSIFIED_CHANGES: &str = "
+    SELECT c.id, c.path, c.storage, c.prior_id,
+           CASE
+             WHEN c.storage = 'deleted' THEN
+               CASE WHEN p.storage IS NULL OR p.storage = 'deleted' THEN NULL ELSE 'deleted' END
+             WHEN p.storage IS NULL OR p.storage = 'deleted' THEN 'added'
+             WHEN c.ident = COALESCE(p.content_hash,
+                            CASE p.storage
+                              WHEN 'oxplow' THEN p.blob_hash
+                              WHEN 'git' THEN 'git:' || p.blob_hash
+                              WHEN 'oversize' THEN 'oversize:' || p.size_bytes || ':' || COALESCE(p.mtime_ms, 0)
+                            END) THEN NULL
+             ELSE 'modified'
+           END AS kind
+      FROM (
+        SELECT f.id, f.path, f.storage, COALESCE(f.content_hash,
+                            CASE f.storage
+                              WHEN 'oxplow' THEN f.blob_hash
+                              WHEN 'git' THEN 'git:' || f.blob_hash
+                              WHEN 'oversize' THEN 'oversize:' || f.size_bytes || ':' || COALESCE(f.mtime_ms, 0)
+                            END) AS ident,
+               (SELECT q.id FROM file_snapshot q
+                 WHERE q.stream_id = f.stream_id AND q.path = f.path AND q.id < f.id
+                 ORDER BY q.id DESC LIMIT 1) AS prior_id
+          FROM file_snapshot f
+         WHERE f.snapshot_id = ?1
+      ) c
+      LEFT JOIN file_snapshot p ON p.id = c.prior_id";
+
+/// [`SqliteSnapshotStore::tree_at`] on a connection (also used inside
+/// transactions that need the tree).
+pub(crate) fn tree_at_conn(
+    conn: &rusqlite::Connection,
+    snapshot_id: i64,
+) -> rusqlite::Result<SnapshotTree> {
+    let stream_id: Option<i64> = conn
+        .query_row(
+            "SELECT stream_id FROM snapshot WHERE id = ?1",
+            params![snapshot_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(stream_id) = stream_id else {
+        return Ok(SnapshotTree::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT path, blob_hash, storage, size_bytes, mtime_ms, content_hash FROM (
+            SELECT path, blob_hash, storage, size_bytes, mtime_ms, content_hash,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY path ORDER BY snapshot_id DESC, id DESC
+                   ) AS rn
+            FROM file_snapshot
+            WHERE stream_id = ?1
+              AND snapshot_id IS NOT NULL
+              AND snapshot_id <= ?2
+         ) WHERE rn = 1 AND storage <> 'deleted'",
+    )?;
+    let rows = stmt.query_map(params![stream_id, snapshot_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            TreeEntry {
+                address: row.get(1)?,
+                storage: SnapshotStorage::from_db_str(&row.get::<_, String>(2)?),
+                size_bytes: row.get(3)?,
+                mtime_ms: row.get(4)?,
+                content_hash: row.get(5)?,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
 #[derive(Clone)]
 pub struct SqliteSnapshotStore {
     db: Database,
+    content_hasher: Option<ContentHasher>,
 }
 
 impl SqliteSnapshotStore {
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            content_hasher: None,
+        }
+    }
+
+    /// Supply the lazy git-content hasher (the app wires one over the git
+    /// odb). Without one, an un-hashed git entry compares by `git:<oid>`
+    /// only — conservative: the same bytes on the other side read as
+    /// changed, never the reverse.
+    pub fn with_content_hasher(mut self, hasher: ContentHasher) -> Self {
+        self.content_hasher = Some(hasher);
+        self
     }
 
     pub async fn capture(&self, snap: FileSnapshot) -> Result<i64, DomainError> {
@@ -1028,11 +1137,17 @@ impl SqliteSnapshotStore {
                         .prepare(
                             "INSERT INTO file_snapshot
                            (stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                            snapshot_id, mtime_ms)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                            snapshot_id, mtime_ms, content_hash)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                         )
                         .map_err(crate::database::map_sql_err)?;
                     for snap in &snaps {
+                        // An oxplow row's address IS its content hash.
+                        let content_hash = snap.content_hash.clone().or_else(|| {
+                            (snap.storage == SnapshotStorage::Oxplow)
+                                .then(|| snap.blob_hash.clone())
+                                .flatten()
+                        });
                         stmt.execute(params![
                             snap.stream_id.value(),
                             snap.path,
@@ -1042,6 +1157,7 @@ impl SqliteSnapshotStore {
                             snap.storage.as_db_str(),
                             snap.snapshot_id,
                             snap.mtime_ms,
+                            content_hash,
                         ])
                         .map_err(crate::database::map_sql_err)?;
                         ids.push(tx.last_insert_rowid());
@@ -1183,7 +1299,7 @@ impl SqliteSnapshotStore {
                     "SELECT s.id, s.stream_id, s.created_at,
                             (SELECT COUNT(*) FROM file_snapshot f
                              WHERE f.snapshot_id = s.id) AS file_count,
-                            s.git_commit, s.git_branch
+                            s.git_commit, s.git_branch, s.tree_hash
                      FROM snapshot s
                      WHERE s.stream_id = ?1
                      ORDER BY s.created_at DESC, s.id DESC LIMIT ?2",
@@ -1195,6 +1311,7 @@ impl SqliteSnapshotStore {
                     let file_count: i64 = row.get(3)?;
                     let git_commit: Option<String> = row.get(4)?;
                     let git_branch: Option<String> = row.get(5)?;
+                    let tree_hash: Option<String> = row.get(6)?;
                     let map_err = |e: DomainError| {
                         rusqlite::Error::FromSqlConversionFailure(
                             0,
@@ -1209,6 +1326,7 @@ impl SqliteSnapshotStore {
                         file_count,
                         git_commit,
                         git_branch,
+                        tree_hash,
                     })
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -1263,31 +1381,25 @@ impl SqliteSnapshotStore {
             })
     }
 
-    /// Aggregate counts of created/modified/deleted files in a
-    /// snapshot — derived by comparing each child row's `blob_hash`
-    /// to the most-recent prior row for the same `(stream_id, path)`.
-    /// The `idx_file_snapshot_stream_path` index covers the prior-row
-    /// lookup so this stays cheap even with multi-million-row history.
+    /// Created / modified / deleted counts for the rows captured under one
+    /// snapshot, each compared with the most recent prior row for the same
+    /// `(stream_id, path)` by **content identity** (V96): a row whose bytes
+    /// equal its predecessor's is not a change and isn't counted (nor in
+    /// `total`). A git row not yet hashed compares as `git:<oid>`, so it can
+    /// read as modified against a hashed predecessor — conservative. The
+    /// `idx_file_snapshot_stream_path` index covers the prior-row lookup.
     pub async fn stats_for_snapshot(&self, snapshot_id: i64) -> Result<SnapshotStats, DomainError> {
         self.db
             .call(move |conn| {
                 conn.query_row(
-                    "SELECT
-                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NULL THEN 1 ELSE 0 END), 0) AS deleted,
-                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NOT NULL AND prev_hash IS NULL THEN 1 ELSE 0 END), 0) AS created,
-                       COALESCE(SUM(CASE WHEN fs.blob_hash IS NOT NULL AND prev_hash IS NOT NULL THEN 1 ELSE 0 END), 0) AS modified,
-                       COUNT(*) AS total
-                     FROM (
-                       SELECT
-                         f.blob_hash,
-                         (SELECT p.blob_hash FROM file_snapshot p
-                          WHERE p.stream_id = f.stream_id
-                            AND p.path = f.path
-                            AND p.id < f.id
-                          ORDER BY p.id DESC LIMIT 1) AS prev_hash
-                       FROM file_snapshot f
-                       WHERE f.snapshot_id = ?1
-                     ) fs",
+                    &format!(
+                        "SELECT
+                           COALESCE(SUM(kind = 'deleted'), 0),
+                           COALESCE(SUM(kind = 'added'), 0),
+                           COALESCE(SUM(kind = 'modified'), 0),
+                           COUNT(*)
+                         FROM ({CLASSIFIED_CHANGES}) WHERE kind IS NOT NULL"
+                    ),
                     params![snapshot_id],
                     |row| {
                         Ok(SnapshotStats {
@@ -1302,52 +1414,29 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// `SnapshotChangeEntry` rows for one snapshot. Pairs every
-    /// child row with its most-recent prior `(stream_id, path)` row
-    /// and labels the status (`added`/`modified`/`deleted`) so the
-    /// renderer can feed the same shape into the shared change-
-    /// analysis pipeline used by Git commits.
+    /// `SnapshotChangeEntry` rows for one snapshot: every captured row that
+    /// is a change against the path's prior row (same classification as
+    /// [`Self::stats_for_snapshot`]), labelled `added`/`modified`/`deleted`
+    /// so the renderer can feed the same shape into the shared
+    /// change-analysis pipeline used by Git commits.
     pub async fn list_changes_for_snapshot(
         &self,
         snapshot_id: i64,
     ) -> Result<Vec<SnapshotChangeEntry>, DomainError> {
         self.db
             .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT
-                       f.id, f.path, f.blob_hash, f.storage,
-                       (SELECT p.id FROM file_snapshot p
-                        WHERE p.stream_id = f.stream_id
-                          AND p.path = f.path
-                          AND p.id < f.id
-                        ORDER BY p.id DESC LIMIT 1) AS prior_id,
-                       (SELECT p.blob_hash FROM file_snapshot p
-                        WHERE p.stream_id = f.stream_id
-                          AND p.path = f.path
-                          AND p.id < f.id
-                        ORDER BY p.id DESC LIMIT 1) AS prior_hash
-                     FROM file_snapshot f
-                     WHERE f.snapshot_id = ?1
-                     ORDER BY f.path ASC",
-                )?;
+                let mut stmt = conn.prepare(&format!(
+                    "SELECT id, path, storage, prior_id, kind
+                       FROM ({CLASSIFIED_CHANGES}) WHERE kind IS NOT NULL
+                      ORDER BY path ASC"
+                ))?;
                 let rows = stmt.query_map(params![snapshot_id], |row| {
-                    let current_file_id: i64 = row.get(0)?;
-                    let path: String = row.get(1)?;
-                    let blob_hash: Option<String> = row.get(2)?;
-                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(3)?);
-                    let prior_file_id: Option<i64> = row.get(4)?;
-                    let prior_hash: Option<String> = row.get(5)?;
-                    let status = match (&blob_hash, &prior_hash) {
-                        (None, _) => "deleted",
-                        (Some(_), None) => "added",
-                        (Some(_), Some(_)) => "modified",
-                    }
-                    .to_string();
+                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(2)?);
                     Ok(SnapshotChangeEntry {
-                        path,
-                        status,
-                        current_file_id,
-                        prior_file_id,
+                        current_file_id: row.get(0)?,
+                        path: row.get(1)?,
+                        prior_file_id: row.get(3)?,
+                        status: row.get(4)?,
                         oversize: storage.is_oversize(),
                     })
                 })?;
@@ -1356,84 +1445,125 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Reconstruct the content tree as-of `snapshot_id`: `path ->
-    /// content identity`, using the most-recent `file_snapshot` row per
-    /// path with `snapshot_id <= snapshot_id` (snapshots are
-    /// incremental, so this is the file's content at that boundary).
-    /// Deletion rows (`blob_hash` NULL, not oversize) drop the path;
-    /// oversize rows (no blob hash) get a `size:mtime` identity so a
-    /// change to a too-big file is still detected.
-    pub async fn tree_at(&self, snapshot_id: i64) -> Result<BTreeMap<String, String>, DomainError> {
+    /// Reconstruct the tree as of `snapshot_id`: the most-recent
+    /// `file_snapshot` row per path with `snapshot_id <= snapshot_id`
+    /// (snapshots are incremental deltas). Deletion tombstones drop the
+    /// path. Entries keep storage/address apart from content identity
+    /// ([`TreeEntry`]); to compare two trees, run
+    /// [`Self::resolve_for_compare`] first (or use [`Self::diff_snapshots`]).
+    pub async fn tree_at(&self, snapshot_id: i64) -> Result<SnapshotTree, DomainError> {
         self.db
-            .call(move |conn| {
-                let stream_id: Option<i64> = conn
-                    .query_row(
-                        "SELECT stream_id FROM snapshot WHERE id = ?1",
-                        params![snapshot_id],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                let Some(stream_id) = stream_id else {
-                    return Ok(BTreeMap::new());
-                };
-                let mut stmt = conn.prepare(
-                    "SELECT path, blob_hash, storage, size_bytes, mtime_ms FROM (
-                        SELECT path, blob_hash, storage, size_bytes, mtime_ms,
-                               ROW_NUMBER() OVER (
-                                 PARTITION BY path ORDER BY snapshot_id DESC, id DESC
-                               ) AS rn
-                        FROM file_snapshot
-                        WHERE stream_id = ?1
-                          AND snapshot_id IS NOT NULL
-                          AND snapshot_id <= ?2
-                     ) WHERE rn = 1",
-                )?;
-                let rows = stmt.query_map(params![stream_id, snapshot_id], |row| {
-                    let path: String = row.get(0)?;
-                    let blob_hash: Option<String> = row.get(1)?;
-                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(2)?);
-                    let size_bytes: i64 = row.get(3)?;
-                    let mtime_ms: Option<i64> = row.get(4)?;
-                    Ok((path, blob_hash, storage, size_bytes, mtime_ms))
-                })?;
-                let mut tree = BTreeMap::new();
-                for r in rows {
-                    let (path, blob_hash, storage, size_bytes, mtime_ms) = r?;
-                    let id = match blob_hash {
-                        // oxplow → xxh3, git → blob OID. Both uniquely
-                        // identify content, so either works as the diff
-                        // identity (a file can't be git-backed and
-                        // oxplow-backed with the same bytes).
-                        Some(h) => h,
-                        // Oversize: content exists but isn't hashed —
-                        // use size+mtime as a best-effort identity.
-                        None if storage.is_oversize() => {
-                            format!("oversize:{}:{}", size_bytes, mtime_ms.unwrap_or(0))
-                        }
-                        // Deletion tombstone: the path is absent here.
-                        None => continue,
-                    };
-                    tree.insert(path, id);
+            .call(move |conn| tree_at_conn(conn, snapshot_id))
+            .await
+    }
+
+    /// Make two trees comparable: hash (lazily, once, persisted) every
+    /// un-hashed git entry that sits opposite an entry with a different
+    /// identity — the only case where the OID-vs-xxh3 split could call
+    /// equal bytes different. Paths equal by identity, or present on one
+    /// side only, never need it, so a clean git baseline is not re-read.
+    /// Without a hasher this is a no-op (conservative).
+    pub async fn resolve_for_compare(
+        &self,
+        before: &mut SnapshotTree,
+        after: &mut SnapshotTree,
+    ) -> Result<(), DomainError> {
+        let Some(hasher) = self.content_hasher.clone() else {
+            return Ok(());
+        };
+        let mut oids: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (path, a) in after.iter() {
+            let Some(b) = before.get(path) else { continue };
+            if a.identity() == b.identity() {
+                continue;
+            }
+            for e in [a, b] {
+                if e.needs_content_hash() {
+                    if let Some(oid) = &e.address {
+                        oids.insert(oid.clone());
+                    }
                 }
-                Ok(tree)
+            }
+        }
+        if oids.is_empty() {
+            return Ok(());
+        }
+        let hashed: Vec<(String, String)> = tokio::task::spawn_blocking(move || {
+            oids.into_iter()
+                .filter_map(|oid| hasher(&oid).map(|h| (oid, h)))
+                .collect()
+        })
+        .await
+        .map_err(|e| DomainError::Storage(format!("content hash task: {e}")))?;
+        if hashed.is_empty() {
+            return Ok(());
+        }
+        let by_oid: std::collections::HashMap<String, String> = hashed.iter().cloned().collect();
+        for tree in [&mut *before, &mut *after] {
+            for e in tree.values_mut() {
+                if e.needs_content_hash() {
+                    if let Some(h) = e.address.as_ref().and_then(|oid| by_oid.get(oid)) {
+                        e.content_hash = Some(h.clone());
+                    }
+                }
+            }
+        }
+        self.set_git_content_hashes(hashed).await
+    }
+
+    /// Persist content hashes for git-backed rows, by OID. An OID names
+    /// its bytes forever, so every row with that address gets the hash.
+    async fn set_git_content_hashes(
+        &self,
+        hashed: Vec<(String, String)>,
+    ) -> Result<(), DomainError> {
+        self.db
+            .transaction(move |tx| {
+                let mut stmt = tx
+                    .prepare(
+                        "UPDATE file_snapshot SET content_hash = ?2
+                          WHERE storage = 'git' AND blob_hash = ?1 AND content_hash IS NULL",
+                    )
+                    .map_err(crate::database::map_sql_err)?;
+                for (oid, hash) in &hashed {
+                    stmt.execute(params![oid, hash])
+                        .map_err(crate::database::map_sql_err)?;
+                }
+                Ok(())
             })
             .await
     }
 
-    /// Content diff between two snapshots, via the shared
-    /// [`oxplow_domain::diff_trees`]. `from = None` ⇒ everything in `to`
-    /// is added. Reconstructs each side with [`Self::tree_at`].
+    /// Content diff between two snapshots via the shared
+    /// [`oxplow_domain::diff_trees`], comparing content identity (never a
+    /// storage address). `from = None` ⇒ everything in `to` is added.
     pub async fn diff_snapshots(
         &self,
         from: Option<i64>,
         to: i64,
     ) -> Result<Vec<FileChange>, DomainError> {
-        let before = match from {
+        let mut before = match from {
             Some(f) => self.tree_at(f).await?,
-            None => BTreeMap::new(),
+            None => SnapshotTree::new(),
         };
-        let after = self.tree_at(to).await?;
-        Ok(diff_trees(&before, &after))
+        let mut after = self.tree_at(to).await?;
+        self.resolve_for_compare(&mut before, &mut after).await?;
+        Ok(diff_trees(&identities(&before), &identities(&after)))
+    }
+
+    /// Compute and store `snapshot.tree_hash` for `snapshot_id` from its
+    /// reconstructed tree. Returns the hash.
+    pub async fn set_tree_hash(&self, snapshot_id: i64) -> Result<String, DomainError> {
+        self.db
+            .call(move |conn| {
+                let hash = manifest_hash(&tree_at_conn(conn, snapshot_id)?);
+                conn.execute(
+                    "UPDATE snapshot SET tree_hash = ?2 WHERE id = ?1",
+                    params![snapshot_id, hash],
+                )?;
+                Ok(hash)
+            })
+            .await
     }
 
     /// For each input snapshot id, return the set of wiki slugs whose
@@ -1570,44 +1700,48 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// Most recent `(blob_hash, size_bytes, mtime_ms)` per path
-    /// across the whole table. Used by the startup sweep: when the
-    /// current file's `(size, mtime)` matches the stored values, the
-    /// bytes are presumed identical and we skip the read + hash.
-    /// `mtime_ms` is `None` for pre-V15 rows that predate the column.
+    /// Most recent row's stat and identity per path **in one stream**. Used
+    /// by the startup sweep (when `(size, mtime)` matches, the bytes are
+    /// presumed identical and not re-read) and by capture (a re-captured
+    /// path whose content equals its latest row writes no new row).
+    /// `mtime_ms` is `None` for pre-V15 rows. Another stream's rows are a
+    /// different worktree's history and never count here.
     pub async fn latest_stat_per_path(
         &self,
+        stream_id: StreamId,
     ) -> Result<std::collections::HashMap<String, LatestStat>, DomainError> {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms
+                    "SELECT s.path, s.blob_hash, s.size_bytes, s.mtime_ms, s.storage, s.content_hash
                      FROM file_snapshot s
                      JOIN (
                        SELECT path, MAX(id) AS max_id
-                       FROM file_snapshot GROUP BY path
+                       FROM file_snapshot WHERE stream_id = ?1 GROUP BY path
                      ) m ON m.path = s.path AND m.max_id = s.id",
                 )?;
-                let rows = stmt.query_map([], |row| {
+                let rows = stmt.query_map(params![stream_id.value()], |row| {
                     let path: String = row.get(0)?;
-                    let hash: Option<String> = row.get(1)?;
-                    let size: i64 = row.get(2)?;
-                    let mtime: Option<i64> = row.get(3)?;
+                    let storage = SnapshotStorage::from_db_str(&row.get::<_, String>(4)?);
+                    let blob_hash: Option<String> = row.get(1)?;
+                    let content_hash: Option<String> =
+                        row.get::<_, Option<String>>(5)?.or_else(|| {
+                            (storage == SnapshotStorage::Oxplow)
+                                .then(|| blob_hash.clone())
+                                .flatten()
+                        });
                     Ok((
                         path,
                         LatestStat {
-                            blob_hash: hash,
-                            size_bytes: size,
-                            mtime_ms: mtime,
+                            blob_hash,
+                            size_bytes: row.get(2)?,
+                            mtime_ms: row.get(3)?,
+                            storage,
+                            content_hash,
                         },
                     ))
                 })?;
-                let mut out = std::collections::HashMap::new();
-                for row in rows {
-                    let (p, stat) = row?;
-                    out.insert(p, stat);
-                }
-                Ok(out)
+                rows.collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()
             })
             .await
     }
@@ -1941,15 +2075,30 @@ mod tests {
         .await;
 
         let t1 = store.tree_at(1).await.unwrap();
-        assert_eq!(t1.get("a.txt").map(String::as_str), Some("hA"));
-        assert_eq!(t1.get("b.txt").map(String::as_str), Some("hB"));
+        assert_eq!(
+            t1.get("a.txt").map(TreeEntry::identity).as_deref(),
+            Some("hA")
+        );
+        assert_eq!(
+            t1.get("b.txt").map(TreeEntry::identity).as_deref(),
+            Some("hB")
+        );
         assert!(!t1.contains_key("c.txt"));
 
         let t2 = store.tree_at(2).await.unwrap();
         // b carries forward (no row at snap 2); a is the newer hash.
-        assert_eq!(t2.get("a.txt").map(String::as_str), Some("hA2"));
-        assert_eq!(t2.get("b.txt").map(String::as_str), Some("hB"));
-        assert_eq!(t2.get("c.txt").map(String::as_str), Some("hC"));
+        assert_eq!(
+            t2.get("a.txt").map(TreeEntry::identity).as_deref(),
+            Some("hA2")
+        );
+        assert_eq!(
+            t2.get("b.txt").map(TreeEntry::identity).as_deref(),
+            Some("hB")
+        );
+        assert_eq!(
+            t2.get("c.txt").map(TreeEntry::identity).as_deref(),
+            Some("hC")
+        );
     }
 
     #[tokio::test]
@@ -1998,6 +2147,260 @@ mod tests {
         let d_none = store.diff_snapshots(None, 1).await.unwrap();
         assert_eq!(d_none.len(), 2);
         assert!(d_none.iter().all(|c| c.status == ChangeStatus::Added));
+    }
+
+    /// One typed row for [`seed_typed`].
+    struct Seed<'a> {
+        snapshot: i64,
+        stream: i64,
+        path: &'a str,
+        storage: &'a str,
+        blob: Option<&'a str>,
+        content: Option<&'a str>,
+    }
+
+    /// `(snapshot, stream, path, storage, blob_hash, content_hash)`.
+    fn seed<'a>(
+        snapshot: i64,
+        stream: i64,
+        path: &'a str,
+        storage: &'a str,
+        blob: Option<&'a str>,
+        content: Option<&'a str>,
+    ) -> Seed<'a> {
+        Seed {
+            snapshot,
+            stream,
+            path,
+            storage,
+            blob,
+            content,
+        }
+    }
+
+    /// Insert typed snapshot rows (streams and snapshot rows as needed).
+    async fn seed_typed(db: &Database, rows: &[Seed<'_>]) {
+        let sql: Vec<(i64, i64, [Option<String>; 4])> = rows
+            .iter()
+            .map(|r| {
+                (
+                    r.snapshot,
+                    r.stream,
+                    [
+                        Some(r.path.to_string()),
+                        Some(r.storage.to_string()),
+                        r.blob.map(str::to_string),
+                        r.content.map(str::to_string),
+                    ],
+                )
+            })
+            .collect();
+        db.call(move |conn| {
+            for (sn, st, [path, storage, blob, content]) in &sql {
+                conn.execute(
+                    "INSERT OR IGNORE INTO streams
+                       (id, kind, title, branch, branch_ref, branch_source,
+                        worktree_path, created_at, updated_at)
+                     VALUES (?1,'worktree','s','b','refs/heads/b','origin',
+                             '/tmp','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+                    params![st],
+                )?;
+                conn.execute(
+                    "INSERT OR IGNORE INTO snapshot (id, stream_id, created_at)
+                     VALUES (?1, ?2, '2026-01-01T00:00:00Z')",
+                    params![sn, st],
+                )?;
+                conn.execute(
+                    "INSERT INTO file_snapshot
+                       (stream_id, path, blob_hash, size_bytes, captured_at,
+                        storage, snapshot_id, mtime_ms, content_hash)
+                     VALUES (?1, ?2, ?3, 10, '2026-01-01T00:00:00Z', ?4, ?5, 1, ?6)",
+                    params![st, path, blob, storage, sn, content],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    fn oid(c: char) -> String {
+        std::iter::repeat_n(c, 40).collect()
+    }
+
+    #[tokio::test]
+    async fn the_same_bytes_as_git_and_oxplow_rows_diff_as_unchanged() {
+        // tsk423. Snapshot 1 recorded a.txt from the git odb (address = OID,
+        // content not hashed yet); snapshot 2 re-captured the same bytes
+        // into the blob store (address = content = xxh3 "x1").
+        let db = Database::in_memory();
+        let o = oid('a');
+        seed_typed(
+            &db,
+            &[
+                seed(1, 1, "a.txt", "git", Some(&o), None),
+                seed(1, 1, "b.txt", "git", Some(&oid('b')), None),
+                seed(2, 1, "a.txt", "oxplow", Some("x1"), Some("x1")),
+            ],
+        )
+        .await;
+        // Without a hasher the comparison is conservative: modified.
+        let bare = SqliteSnapshotStore::new(db.clone());
+        assert_eq!(
+            bare.diff_snapshots(Some(1), 2).await.unwrap(),
+            vec![FileChange {
+                path: "a.txt".into(),
+                status: ChangeStatus::Modified
+            }]
+        );
+        // With the hasher (OID → xxh3 of the blob) they are the same bytes.
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen = calls.clone();
+        let o2 = o.clone();
+        let store = SqliteSnapshotStore::new(db.clone()).with_content_hasher(std::sync::Arc::new(
+            move |q: &str| {
+                seen.lock().unwrap().push(q.to_string());
+                (q == o2).then(|| "x1".to_string())
+            },
+        ));
+        assert!(store.diff_snapshots(Some(1), 2).await.unwrap().is_empty());
+        // Only the path that looked different was hashed (b.txt was not read).
+        assert_eq!(*calls.lock().unwrap(), vec![o.clone()]);
+        // …and the hash is persisted: the next compare needs no hasher.
+        assert!(bare.diff_snapshots(Some(1), 2).await.unwrap().is_empty());
+        let t1 = bare.tree_at(1).await.unwrap();
+        assert_eq!(t1["a.txt"].content_hash.as_deref(), Some("x1"));
+        assert_eq!(t1["a.txt"].address.as_deref(), Some(o.as_str()));
+        assert_eq!(t1["a.txt"].storage, SnapshotStorage::Git);
+        assert_eq!(t1["b.txt"].identity(), format!("git:{}", oid('b')));
+    }
+
+    #[tokio::test]
+    async fn stats_and_changes_ignore_rows_whose_content_did_not_change() {
+        let db = Database::in_memory();
+        seed_typed(
+            &db,
+            &[
+                seed(1, 1, "same.txt", "oxplow", Some("s1"), Some("s1")),
+                seed(1, 1, "edit.txt", "oxplow", Some("e1"), Some("e1")),
+                seed(1, 1, "gone.txt", "oxplow", Some("g1"), Some("g1")),
+                seed(2, 1, "same.txt", "oxplow", Some("s1"), Some("s1")), // touched, same bytes
+                seed(2, 1, "edit.txt", "oxplow", Some("e2"), Some("e2")),
+                seed(2, 1, "gone.txt", "deleted", None, None),
+                seed(2, 1, "new.txt", "oxplow", Some("n1"), Some("n1")),
+            ],
+        )
+        .await;
+        let store = SqliteSnapshotStore::new(db);
+        assert_eq!(
+            store.stats_for_snapshot(2).await.unwrap(),
+            SnapshotStats {
+                created: 1,
+                modified: 1,
+                deleted: 1,
+                total: 3
+            }
+        );
+        let changes: Vec<(String, String)> = store
+            .list_changes_for_snapshot(2)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.path, c.status))
+            .collect();
+        assert_eq!(
+            changes,
+            vec![
+                ("edit.txt".into(), "modified".into()),
+                ("gone.txt".into(), "deleted".into()),
+                ("new.txt".into(), "added".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn latest_stat_per_path_is_scoped_to_one_stream() {
+        let db = Database::in_memory();
+        seed_typed(
+            &db,
+            &[
+                seed(1, 1, "a.txt", "oxplow", Some("a1"), Some("a1")),
+                seed(2, 2, "a.txt", "oxplow", Some("a2"), Some("a2")),
+                seed(3, 2, "only2.txt", "git", Some(&oid('c')), None),
+            ],
+        )
+        .await;
+        let store = SqliteSnapshotStore::new(db);
+        let s1 = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
+        assert_eq!(s1.len(), 1);
+        assert_eq!(s1["a.txt"].content_hash.as_deref(), Some("a1"));
+        let s2 = store.latest_stat_per_path(StreamId::new(2)).await.unwrap();
+        assert_eq!(s2["a.txt"].content_hash.as_deref(), Some("a2"));
+        assert_eq!(s2["only2.txt"].storage, SnapshotStorage::Git);
+        assert_eq!(s2["only2.txt"].content_hash, None);
+    }
+
+    #[tokio::test]
+    async fn tree_hash_is_the_manifest_hash_and_equal_trees_share_it() {
+        let db = Database::in_memory();
+        seed_typed(
+            &db,
+            &[
+                seed(1, 1, "a.txt", "oxplow", Some("a1"), Some("a1")),
+                seed(1, 1, "b.txt", "oxplow", Some("b1"), Some("b1")),
+                seed(2, 1, "a.txt", "oxplow", Some("a2"), Some("a2")),
+                seed(3, 1, "a.txt", "oxplow", Some("a1"), Some("a1")), // reverted
+            ],
+        )
+        .await;
+        let store = SqliteSnapshotStore::new(db);
+        let h1 = store.set_tree_hash(1).await.unwrap();
+        let h2 = store.set_tree_hash(2).await.unwrap();
+        let h3 = store.set_tree_hash(3).await.unwrap();
+        assert_eq!(
+            h1,
+            crate::snapshot_tree::manifest_hash(&store.tree_at(1).await.unwrap())
+        );
+        assert_ne!(h1, h2);
+        assert_eq!(h1, h3, "a revert restores the tree identity");
+        let listed = store
+            .list_snapshots_for_stream(StreamId::new(1), 10)
+            .await
+            .unwrap();
+        assert!(listed.iter().all(|s| s.tree_hash.is_some()));
+    }
+
+    #[tokio::test]
+    async fn capture_batch_records_content_hash_for_oxplow_rows() {
+        let db = Database::in_memory();
+        seed_typed(
+            &db,
+            &[seed(1, 1, "seed.txt", "oxplow", Some("s"), Some("s"))],
+        )
+        .await;
+        let store = SqliteSnapshotStore::new(db);
+        let row = |path: &str, storage, blob: Option<&str>| FileSnapshot {
+            id: 0,
+            stream_id: StreamId::new(1),
+            path: path.into(),
+            blob_hash: blob.map(str::to_string),
+            size_bytes: 1,
+            captured_at: Timestamp::now(),
+            storage,
+            snapshot_id: Some(1),
+            mtime_ms: Some(1),
+            content_hash: None,
+        };
+        store
+            .capture_batch(vec![
+                row("o.txt", SnapshotStorage::Oxplow, Some("xo")),
+                row("g.txt", SnapshotStorage::Git, Some(&oid('d'))),
+            ])
+            .await
+            .unwrap();
+        let t = store.tree_at(1).await.unwrap();
+        assert_eq!(t["o.txt"].content_hash.as_deref(), Some("xo"));
+        assert_eq!(t["g.txt"].content_hash, None, "git rows are hashed lazily");
     }
 
     #[tokio::test]
@@ -2355,6 +2758,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: None,
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2381,6 +2785,7 @@ mod tests {
                 storage: SnapshotStorage::Git,
                 snapshot_id: None,
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2401,6 +2806,7 @@ mod tests {
                 storage: SnapshotStorage::Deleted,
                 snapshot_id: None,
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2430,13 +2836,13 @@ mod tests {
                     storage: SnapshotStorage::Oxplow,
                     snapshot_id: Some(p1),
                     mtime_ms: None,
+                    content_hash: None,
                 })
                 .await
                 .unwrap();
         }
 
-        // Parent 2: a modified, b unchanged-but-recaptured (modified by
-        // the rule, since the row exists at all), c deleted, d created.
+        // Parent 2: a modified, c deleted (a tombstone row), d created.
         let p2 = store.create_snapshot(stream).await.unwrap();
         store
             .capture(FileSnapshot {
@@ -2449,6 +2855,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2460,9 +2867,10 @@ mod tests {
                 blob_hash: None,
                 size_bytes: 0,
                 captured_at: Timestamp::now(),
-                storage: SnapshotStorage::Oxplow,
+                storage: SnapshotStorage::Deleted,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2477,6 +2885,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2515,6 +2924,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2529,6 +2939,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -2546,6 +2957,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             },
             FileSnapshot {
                 id: 0,
@@ -2557,6 +2969,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             },
             FileSnapshot {
                 id: 0,
@@ -2565,9 +2978,10 @@ mod tests {
                 blob_hash: None,
                 size_bytes: 0,
                 captured_at: Timestamp::now(),
-                storage: SnapshotStorage::Oxplow,
+                storage: SnapshotStorage::Deleted,
                 snapshot_id: Some(p2),
                 mtime_ms: None,
+                content_hash: None,
             },
         ] {
             store.capture(snap).await.unwrap();

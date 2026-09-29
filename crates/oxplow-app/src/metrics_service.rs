@@ -2730,6 +2730,7 @@ mod tests {
                 storage: *storage,
                 snapshot_id: Some(snap),
                 mtime_ms: None,
+                content_hash: None,
             })
             .collect();
         if !rows.is_empty() {

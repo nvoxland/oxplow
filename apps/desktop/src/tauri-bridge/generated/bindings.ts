@@ -632,8 +632,9 @@ export const commands = {
 	stream_id: StreamId,
 	path: string,
 	/**
-	 *  xxh3-128 (storage = oxplow) or git blob OID (storage = git);
-	 *  NULL for oversize / deleted rows.
+	 *  The storage ADDRESS: xxh3-128 (storage = oxplow) or git blob OID
+	 *  (storage = git); NULL for oversize / deleted rows. Compare
+	 *  [`Self::content_hash`], not this.
 	 */
 	blob_hash: string | null,
 	size_bytes: number,
@@ -657,6 +658,15 @@ export const commands = {
 	 *  and the bytes aren't re-read or re-hashed.
 	 */
 	mtime_ms: number | null,
+	/**
+	 *  The content identity (V96): xxh3-128 of the bytes, whatever the
+	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
+	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
+	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
+	 * 
+	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
+	 */
+	content_hash: string | null,
 } | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -2191,8 +2201,9 @@ export type FileSnapshot = {
 	stream_id: StreamId,
 	path: string,
 	/**
-	 *  xxh3-128 (storage = oxplow) or git blob OID (storage = git);
-	 *  NULL for oversize / deleted rows.
+	 *  The storage ADDRESS: xxh3-128 (storage = oxplow) or git blob OID
+	 *  (storage = git); NULL for oversize / deleted rows. Compare
+	 *  [`Self::content_hash`], not this.
 	 */
 	blob_hash: string | null,
 	size_bytes: number,
@@ -2216,6 +2227,15 @@ export type FileSnapshot = {
 	 *  and the bytes aren't re-read or re-hashed.
 	 */
 	mtime_ms: number | null,
+	/**
+	 *  The content identity (V96): xxh3-128 of the bytes, whatever the
+	 *  storage class. `blob_hash` is only the address. [`capture_batch`]
+	 *  fills it from `blob_hash` for `oxplow` rows; `git` rows get it
+	 *  lazily ([`SqliteSnapshotStore::with_content_hasher`]).
+	 * 
+	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
+	 */
+	content_hash: string | null,
 };
 
 /**
@@ -3728,6 +3748,13 @@ export type Snapshot = {
 	 *  taken on different branches within the same stream's worktree.
 	 */
 	git_branch: string | null,
+	/**
+	 *  Whole-tree identity (V96): the xxh3-128 of the sorted manifest of
+	 *  the reconstructed tree ([`crate::snapshot_tree::manifest_hash`]).
+	 *  Two snapshots with equal `tree_hash` hold the same files. `None`
+	 *  on snapshots taken before V96.
+	 */
+	tree_hash: string | null,
 };
 
 export type SnapshotEntry = {

@@ -168,18 +168,21 @@ pub async fn diff_endpoints(
 ) -> Result<Vec<DiffEntry>, IpcError> {
     // Snapshot trees come off the DB (async); prefetch them, then do the
     // git / fs / hashing / diff work on the blocking pool.
-    let start_snap = match &start {
+    let mut start_snap = match &start {
         Some(DiffEndpoint::Snapshot { snapshot_id }) => {
             Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
         }
         _ => None,
     };
-    let end_snap = match &end {
+    let mut end_snap = match &end {
         DiffEndpoint::Snapshot { snapshot_id } => {
             Some(svc.snapshot_store.tree_at(*snapshot_id).await?)
         }
         _ => None,
     };
+    if let (Some(a), Some(b)) = (start_snap.as_mut(), end_snap.as_mut()) {
+        svc.snapshot_store.resolve_for_compare(a, b).await?;
+    }
     let project_dir = svc.layout.project_dir.clone();
     let blobs = svc.blobs.clone();
     let filter = current_filter(svc);
@@ -378,9 +381,15 @@ mod tests {
             blob_hash: hash.map(|h| h.into()),
             size_bytes: 1,
             captured_at: oxplow_domain::Timestamp::now(),
-            storage: oxplow_db::SnapshotStorage::Oxplow,
+            // A row with no bytes is a deletion tombstone.
+            storage: if hash.is_some() {
+                oxplow_db::SnapshotStorage::Oxplow
+            } else {
+                oxplow_db::SnapshotStorage::Deleted
+            },
             snapshot_id: Some(snap),
             mtime_ms: None,
+            content_hash: None,
         };
         // p1: a + b baselined.
         let p1 = store.create_snapshot(stream).await.unwrap();
@@ -427,6 +436,7 @@ mod tests {
                 storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();
@@ -529,6 +539,7 @@ mod tests {
                 storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(p1),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();

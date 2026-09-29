@@ -602,7 +602,17 @@ impl Services {
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
-        let snapshot_store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        // Git-backed snapshot rows are hashed lazily into the one content
+        // identity space (xxh3) the first time a comparison needs them
+        // (`.context/data-model.md` "snapshot + file_snapshot"). Every
+        // worktree shares the repo's object db, so the primary dir serves
+        // any stream's OIDs.
+        let snapshot_store = Arc::new({
+            let dir = layout.project_dir.clone();
+            SqliteSnapshotStore::new(db.clone()).with_content_hasher(Arc::new(move |oid: &str| {
+                oxplow_git::read_blob(&dir, oid).map(|bytes| blob_store::BlobStore::hash(&bytes))
+            }))
+        });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime =
             Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());

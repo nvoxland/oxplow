@@ -557,10 +557,34 @@ draft of this doc described a single `snapshot_entry` table with a
   branches of the *same* stream's worktree apart (the diff page's
   snapshot picker filters by it).
 - **`file_snapshot`** — the per-path rows: `id, stream_id, path,
-  blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms`.
-  Each points back at its `snapshot_id`. `storage` (V37) is the
-  explicit class telling you where the bytes live and how to read
+  blob_hash, size_bytes, captured_at, storage, snapshot_id, mtime_ms,
+  content_hash`. Each points back at its `snapshot_id`. `storage` (V37)
+  is the explicit class telling you where the bytes live and how to read
   `blob_hash` back — see "Storage classes" below.
+- **`snapshot.tree_hash`** (V96) — whole-tree identity: the xxh3-128 of
+  the sorted manifest `path \0 identity \n` of the reconstructed tree
+  (`oxplow_db::snapshot_tree::manifest_hash`), set by every capture. Equal
+  trees hash equal; an un-hashed git entry makes it conservative (an
+  extra snapshot, never a missed change). NULL before V96.
+
+**Content identity vs storage address (V96, tsk423).** `blob_hash` is
+the **address** (where the bytes live); `content_hash` is the
+**identity** (what the bytes are): the xxh3-128 of the bytes, for every
+class that has bytes. They coincide for `oxplow` rows (capture fills
+`content_hash` from `blob_hash`). A `git` row's address is a git blob
+OID — a different hash space — so its `content_hash` is filled
+**lazily**: `SqliteSnapshotStore::resolve_for_compare` hashes exactly the
+git entries that sit opposite a different identity in a comparison (via
+the `ContentHasher` the app wires over the git odb in `Services::new`)
+and persists the result by OID. A clean baseline is never re-read.
+Everything that compares content goes through typed trees
+(`tree_at` → `SnapshotTree` of `TreeEntry { storage, address,
+content_hash, … }`, `TreeEntry::identity()`), never through an address:
+`diff_snapshots`, `endpoint_diff` (which knows each cell's class instead
+of guessing from the string's length), change analysis, diff coverage
+and wiki drift. `stats_for_snapshot` / `list_changes_for_snapshot`
+classify by the same identity, so a row whose bytes equal its
+predecessor's is not a change.
 
 **`stream_id` is NOT NULL** (V16). Every captured row belongs to a
 specific stream's worktree — different streams have independent
@@ -604,12 +628,18 @@ close `backfill_effort_snapshot` falls back to the effort's
 open (`end_snapshot_id` null ⇔ effort in progress); there is no
 time-based gap.
 
-**Change detection.** The startup sweep short-circuits on
-`(size_bytes, mtime_ms)`: a file whose stat matches its latest row is
-presumed unchanged and isn't re-read. A change otherwise produces a new
-`file_snapshot` row; the per-path content identity used for diffing is
-the `blob_hash` (xxh3-128 or git OID), so touching a file without
-changing its bytes doesn't shift its identity.
+**Change detection.** `latest_stat_per_path(stream)` is per stream
+(another worktree's rows are a different history). The startup sweep
+short-circuits on `(size_bytes, mtime_ms)`: a file whose stat matches its
+latest row is presumed unchanged and isn't re-read. When the stat moved
+and the file is clean vs HEAD, an OID equal to the prior address is
+unchanged; a prior row in the other space (an xxh3) is compared by
+hashing the file, so committing a file already captured dirty records
+nothing. Incremental capture skips a path whose bytes hash to its latest
+row's `content_hash` (a touch is not a change), an oversize file whose
+size and mtime are unchanged, and a tombstone for a path already
+deleted. The sweep's reverse-deletion pass tombstones oversize files too
+(it used to key on `blob_hash`, which oversize rows lack).
 
 **No ancestry link.** Snapshots have no parent/child column — each
 is independent. The "previous" snapshot for diff purposes is just

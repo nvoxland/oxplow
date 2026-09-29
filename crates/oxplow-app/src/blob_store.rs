@@ -63,7 +63,15 @@ impl BlobStore {
     /// Idempotent — re-writing the same bytes is a no-op (the file's
     /// mtime is bumped but contents are unchanged).
     pub fn write(&self, bytes: &[u8]) -> Result<String, BlobStoreError> {
-        let hash = Self::hash(bytes);
+        self.write_hashed(&Self::hash(bytes), bytes)
+    }
+
+    /// [`Self::write`] for a caller that already hashed `bytes` (to
+    /// compare with a prior content hash first). `hash` must be
+    /// `Self::hash(bytes)`.
+    pub fn write_hashed(&self, hash: &str, bytes: &[u8]) -> Result<String, BlobStoreError> {
+        debug_assert_eq!(hash, Self::hash(bytes));
+        let hash = hash.to_string();
         let path = self.path_for(&hash);
         if path.exists() {
             return Ok(hash);

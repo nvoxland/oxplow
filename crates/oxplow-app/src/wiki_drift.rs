@@ -81,16 +81,33 @@ pub async fn compute_wiki_ref_drift(
     // from the tree ⇒ the file didn't exist then (added since) ⇒ empty.
     let tree = snapshots.tree_at(pin).await?;
     let pinned = match tree.get(path) {
-        Some(hash) if hash.starts_with("oversize:") => {
-            return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary"));
-        }
-        Some(hash) => match String::from_utf8(read_blob(blobs, hash)?) {
-            Ok(s) => s,
-            Err(_) => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+        Some(entry) => match entry.content_ref() {
+            // Oversize: tracked by size only, no bytes to diff.
+            None => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+            Some(content) => content,
         },
-        None => String::new(),
+        None => {
+            // Absent at the pin ⇒ added since ⇒ pinned side is empty.
+            return drifted_or_unchanged(slug, path, pin, String::new(), project_dir);
+        }
     };
+    let pinned = crate::snapshot_content::read_content_ref(&pinned, project_dir, blobs)
+        .map_err(|e| DomainError::Storage(format!("snapshot read {path}@{pin}: {e}")))?;
+    let pinned = match String::from_utf8(pinned) {
+        Ok(s) => s,
+        Err(_) => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+    };
+    drifted_or_unchanged(slug, path, pin, pinned, project_dir)
+}
 
+/// Compare the pinned text with the working-tree file.
+fn drifted_or_unchanged(
+    slug: &str,
+    path: &str,
+    pin: i64,
+    pinned: String,
+    project_dir: &Path,
+) -> Result<WikiRefDrift, DomainError> {
     // Current content: the working-tree file. Missing ⇒ deleted ⇒ empty.
     let current = match std::fs::read(project_dir.join(path)) {
         Ok(bytes) => match String::from_utf8(bytes) {
@@ -112,12 +129,6 @@ pub async fn compute_wiki_ref_drift(
         unified_diff: Some(diff),
         truncated,
     })
-}
-
-fn read_blob(blobs: &BlobStore, hash: &str) -> Result<Vec<u8>, DomainError> {
-    blobs
-        .read(hash)
-        .map_err(|e| DomainError::Storage(format!("blob read {hash}: {e}")))
 }
 
 /// Pure line-level unified diff of `old`→`new`, headed with `path`,
@@ -212,6 +223,7 @@ mod tests {
                 storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(snap),
                 mtime_ms: None,
+                content_hash: None,
             })
             .await
             .unwrap();

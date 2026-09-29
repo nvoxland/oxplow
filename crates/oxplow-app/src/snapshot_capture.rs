@@ -102,6 +102,9 @@ pub struct CaptureStaging {
     pub mtime_ms: Option<i64>,
     pub blob_hash: Option<String>,
     pub storage: SnapshotStorage,
+    /// The content identity when the sweep already knows it (it read the
+    /// bytes): always for `oxplow`, sometimes for `git`.
+    pub content_hash: Option<String>,
 }
 
 /// State per path tracked in the dirty set between snapshot drains.
@@ -835,7 +838,11 @@ impl SnapshotCaptureService {
     async fn enqueue_tree_diff(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let sweep_started = Instant::now();
         let db_started = Instant::now();
-        let mut latest = self.inner.store.latest_stat_per_path().await?;
+        let mut latest = self
+            .inner
+            .store
+            .latest_stat_per_path(self.inner.stream_id)
+            .await?;
         let prior_rows = latest.len();
         let db_load_ms = db_started.elapsed().as_millis() as u64;
         info!(
@@ -900,6 +907,8 @@ impl SnapshotCaptureService {
                 mtime_ms: Option<i64>,
                 mtime: Option<(i64, u32)>,
                 prior_hash: Option<String>,
+                /// The prior row's content identity, when known.
+                prior_content: Option<String>,
             }
             let mut staged: Vec<(PathBuf, CaptureStaging)> = Vec::new();
             let mut needs_hash: Vec<Pending> = Vec::new();
@@ -968,6 +977,7 @@ impl SnapshotCaptureService {
                                 mtime_ms,
                                 blob_hash: None,
                                 storage: SnapshotStorage::Oversize,
+                                content_hash: None,
                             },
                         ));
                     }
@@ -981,6 +991,7 @@ impl SnapshotCaptureService {
                     size,
                     mtime_ms,
                     mtime: mtime_secnsec,
+                    prior_content: prior.as_ref().and_then(|s| s.content_hash.clone()),
                     prior_hash: prior.and_then(|s| s.blob_hash),
                 });
             }
@@ -1016,6 +1027,7 @@ impl SnapshotCaptureService {
                             mtime_ms,
                             mtime,
                             prior_hash,
+                            prior_content,
                         } = p;
                         // Git-sourced baseline: a committed file still
                         // byte-clean vs HEAD (judged from the walk's stat —
@@ -1037,6 +1049,24 @@ impl SnapshotCaptureService {
                             if prior_hash.as_deref() == Some(oid.as_str()) {
                                 return None;
                             }
+                            // The prior row is in the other identity space
+                            // (an xxh3): compare content, not addresses
+                            // (tsk423). Clean means the disk bytes ARE the
+                            // HEAD blob, so hash the file; equal bytes are
+                            // not a change. A fresh path (no prior) is
+                            // still recorded without a read.
+                            let content_hash = match &prior_content {
+                                Some(prior) => {
+                                    let bytes = std::fs::read(&path).ok()?;
+                                    bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                                    let h = BlobStore::hash(&bytes);
+                                    if &h == prior {
+                                        return None;
+                                    }
+                                    Some(h)
+                                }
+                                None => None,
+                            };
                             git_backed.fetch_add(1, Ordering::Relaxed);
                             return Some((
                                 path,
@@ -1045,6 +1075,7 @@ impl SnapshotCaptureService {
                                     mtime_ms,
                                     blob_hash: Some(oid),
                                     storage: SnapshotStorage::Git,
+                                    content_hash,
                                 },
                             ));
                         }
@@ -1052,10 +1083,8 @@ impl SnapshotCaptureService {
                         let bytes = std::fs::read(&path).ok()?;
                         bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         let hash = BlobStore::hash(&bytes);
-                        if let Some(prior) = prior_hash.as_ref() {
-                            if *prior == hash {
-                                return None;
-                            }
+                        if prior_content.as_deref() == Some(hash.as_str()) {
+                            return None;
                         }
                         // Persist the blob now — we already have the
                         // bytes in memory. The serial capture path
@@ -1077,6 +1106,7 @@ impl SnapshotCaptureService {
                                 mtime_ms,
                                 blob_hash: Some(hash),
                                 storage: SnapshotStorage::Oxplow,
+                                content_hash: None,
                             },
                         ))
                     })
@@ -1111,7 +1141,7 @@ impl SnapshotCaptureService {
             // file on disk now. Re-record deletions only for
             // those whose latest row wasn't already a deletion.
             for (path, stat) in latest {
-                if stat.blob_hash.is_some() {
+                if !stat.storage.is_deleted() {
                     staged.push((
                         project_dir.join(path),
                         CaptureStaging {
@@ -1119,6 +1149,7 @@ impl SnapshotCaptureService {
                             mtime_ms: None,
                             blob_hash: None,
                             storage: SnapshotStorage::Deleted,
+                            content_hash: None,
                         },
                     ));
                 }
@@ -1246,13 +1277,11 @@ impl SnapshotCaptureService {
         // depend on the current contents of `file_snapshot`. One
         // query yields both lookups; staged sweep already uses the
         // same call so the query plan is hot.
-        let known_paths: std::collections::HashSet<String> = self
-            .inner
-            .store
-            .latest_stat_per_path()
-            .await?
-            .into_keys()
-            .collect();
+        let latest: std::collections::HashMap<String, oxplow_db::analytics_stores::LatestStat> =
+            self.inner
+                .store
+                .latest_stat_per_path(self.inner.stream_id)
+                .await?;
 
         // Split into:
         //   - staged   — short-circuit straight to a row.
@@ -1314,6 +1343,7 @@ impl SnapshotCaptureService {
                         storage: s.storage,
                         snapshot_id: None,
                         mtime_ms: s.mtime_ms,
+                        content_hash: None,
                     });
                 }
 
@@ -1327,7 +1357,9 @@ impl SnapshotCaptureService {
                     .into_par_iter()
                     .filter_map(|(path, entry)| {
                         let rel = rel_of(&project_dir, &path);
-                        let has_prior = known_paths.contains(&rel);
+                        let prior = latest.get(&rel);
+                        let has_prior = prior.is_some();
+                        let prior_gone = prior.is_none_or(|p| p.storage.is_deleted());
                         let metadata = match std::fs::metadata(&path) {
                             Ok(m) => Some(m),
                             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -1338,6 +1370,8 @@ impl SnapshotCaptureService {
                         };
                         match (metadata, has_prior) {
                             (None, false) => None,
+                            // Already a tombstone: nothing new to record.
+                            (None, true) if prior_gone => None,
                             (None, true) => Some(Outcome::Row(FileSnapshot {
                                 id: 0,
                                 stream_id,
@@ -1348,6 +1382,7 @@ impl SnapshotCaptureService {
                                 storage: SnapshotStorage::Deleted,
                                 snapshot_id: None,
                                 mtime_ms: None,
+                                content_hash: None,
                             })),
                             (Some(metadata), has_prior) => {
                                 if !metadata.is_file() {
@@ -1364,16 +1399,35 @@ impl SnapshotCaptureService {
                                 let size = metadata.len();
                                 let mtime_ms = mtime_to_unix_ms(&metadata);
                                 let oversize = size > max_bytes;
+                                // Touched but not changed (tsk423): same
+                                // bytes as the path's latest row → no row.
+                                // A too-big file compares by size + mtime.
+                                if oversize
+                                    && prior.is_some_and(|p| {
+                                        p.storage.is_oversize()
+                                            && p.size_bytes == size as i64
+                                            && p.mtime_ms == mtime_ms
+                                    })
+                                {
+                                    return None;
+                                }
                                 let blob_hash = if oversize {
                                     None
                                 } else {
                                     match std::fs::read(&path) {
-                                        Ok(bytes) => match blobs.write(&bytes) {
-                                            Ok(h) => Some(h),
-                                            Err(e) => {
-                                                debug!(?path, error = %e, "snapshot capture: blob write failed");
+                                        Ok(bytes) => match BlobStore::hash(&bytes) {
+                                            h if prior.and_then(|p| p.content_hash.as_deref())
+                                                == Some(h.as_str()) =>
+                                            {
                                                 return None;
                                             }
+                                            h => match blobs.write_hashed(&h, &bytes) {
+                                                Ok(h) => Some(h),
+                                                Err(e) => {
+                                                    debug!(?path, error = %e, "snapshot capture: blob write failed");
+                                                    return None;
+                                                }
+                                            },
                                         },
                                         Err(e) => {
                                             debug!(?path, error = %e, "snapshot capture: read failed");
@@ -1395,6 +1449,7 @@ impl SnapshotCaptureService {
                                     },
                                     snapshot_id: None,
                                     mtime_ms,
+                                    content_hash: None,
                                 }))
                             }
                         }
@@ -1488,6 +1543,7 @@ impl SnapshotCaptureService {
         let assembled = rows.len() as u64;
         let insert_started = Instant::now();
         let ids = self.inner.store.capture_batch(rows).await?;
+        self.inner.store.set_tree_hash(snapshot_id).await?;
         let insert_ms = insert_started.elapsed().as_millis() as u64;
         self.emit_batch_event(snapshot_id, ids.len() as u32, source);
         let capture_ms = capture_started.elapsed().as_millis() as u64;
@@ -1701,6 +1757,87 @@ mod tests {
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].storage, SnapshotStorage::Oxplow);
         assert!(svc.inner.blobs.has(dirty[0].blob_hash.as_ref().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn a_committed_file_already_captured_as_oxplow_is_not_recorded_again() {
+        // tsk423. The file was captured dirty (an oxplow row, xxh3), then
+        // committed and touched: its stat changed, it is clean vs HEAD, and
+        // its HEAD OID differs from the prior row's address — but the bytes
+        // are the same, so the sweep must record nothing.
+        let project = tempdir().unwrap();
+        let path = project.path().join("note.txt");
+        std::fs::write(&path, "same bytes\n").unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        svc.mark_dirty(path.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap();
+        let first = store.list_for_path("note.txt").await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].storage, SnapshotStorage::Oxplow);
+
+        init_git_repo_with(project.path(), &[("note.txt", "same bytes\n")]);
+        let queued = svc.enqueue_startup_diff().await.unwrap();
+        assert_eq!(
+            queued, 0,
+            "same content in the other address space is not a change"
+        );
+
+        // A real edit still shows up.
+        std::fs::write(&path, "new bytes\n").unwrap();
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn touching_a_file_without_changing_it_writes_no_row() {
+        let project = tempdir().unwrap();
+        let a = project.path().join("a.txt");
+        let b = project.path().join("b.txt");
+        std::fs::write(&a, "one").unwrap();
+        std::fs::write(&b, "two").unwrap();
+        let (svc, store) = svc_for(project.path()).await;
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
+        let first = svc
+            .request_snapshot(SnapshotSourceKind::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Rewrite a with the same bytes, change b: only b gets a row.
+        std::fs::write(&a, "one").unwrap();
+        std::fs::write(&b, "TWO").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
+        let second = svc
+            .request_snapshot(SnapshotSourceKind::Manual)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
+        assert_eq!(store.list_for_path("b.txt").await.unwrap().len(), 2);
+
+        // Only a touch: nothing to record, the latest snapshot stands.
+        std::fs::write(&a, "one").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        let third = svc
+            .request_snapshot(SnapshotSourceKind::Manual)
+            .await
+            .unwrap();
+        assert_eq!(third, Some(second));
+
+        // Every capture records its tree identity.
+        let listed = store
+            .list_snapshots_for_stream(TEST_STREAM, 10)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed
+            .iter()
+            .all(|s| s.tree_hash.as_ref().is_some_and(|h| h.len() == 32)));
+        assert_ne!(listed[0].tree_hash, listed[1].tree_hash);
     }
 
     #[tokio::test]
@@ -2539,6 +2676,7 @@ mod tests {
                 mtime_ms: Some(1_700_000_000_000),
                 blob_hash: Some("deadbeef".repeat(4)),
                 storage: SnapshotStorage::Oxplow,
+                content_hash: None,
             },
         );
         let _parent = svc
@@ -2579,6 +2717,7 @@ mod tests {
                 mtime_ms: Some(42),
                 blob_hash: Some(staged_hash.clone()),
                 storage: SnapshotStorage::Oxplow,
+                content_hash: None,
             },
         );
 
@@ -2624,6 +2763,7 @@ mod tests {
                 storage: SnapshotStorage::Oxplow,
                 snapshot_id: Some(parent),
                 mtime_ms: Some(1000 + i as i64),
+                content_hash: None,
             })
             .collect();
         let ids = store.capture_batch(snaps).await.unwrap();
@@ -2632,7 +2772,7 @@ mod tests {
             ids.iter().collect::<std::collections::HashSet<_>>().len(),
             100
         );
-        let latest = store.latest_stat_per_path().await.unwrap();
+        let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
         assert_eq!(latest.len(), 100);
     }
 

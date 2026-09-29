@@ -489,6 +489,10 @@ const CATALOG: &[CatalogView] = &[
             ("created_at", "RFC 3339 timestamp."),
             ("git_commit", "HEAD commit when captured, if known."),
             ("git_branch", "Branch when captured, if known."),
+            (
+                "tree_hash",
+                "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96.",
+            ),
         ],
     },
     CatalogView {

@@ -1683,6 +1683,7 @@ mod tests {
             storage: oxplow_db::SnapshotStorage::Oxplow,
             snapshot_id: Some(snap),
             mtime_ms: None,
+            content_hash: None,
         };
         let snap1 = snapshots
             .create_snapshot(oxplow_domain::StreamId::new(1))

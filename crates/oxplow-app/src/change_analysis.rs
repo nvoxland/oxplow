@@ -870,8 +870,14 @@ async fn compute(
             }
         }
     };
-    let base_tree = tree(&base).await?;
-    let head_tree = tree(&Some(head.clone())).await?;
+    let mut base_tree = tree(&base).await?;
+    let mut head_tree = tree(&Some(head.clone())).await?;
+    if let (Some(b), Some(h)) = (base_tree.as_mut(), head_tree.as_mut()) {
+        svc.snapshot_store
+            .resolve_for_compare(b, h)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let (filter, zones) = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
         (

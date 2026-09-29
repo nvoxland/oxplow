@@ -512,6 +512,7 @@ mod tests {
                 storage: oxplow_db::SnapshotStorage::Oxplow,
                 snapshot_id: Some(snap_id),
                 mtime_ms: Some(0),
+                content_hash: None,
             })
             .await
             .unwrap();

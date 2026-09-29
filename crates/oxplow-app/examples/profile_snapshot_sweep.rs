@@ -84,7 +84,10 @@ async fn main() {
 async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs: BlobStore) {
     // Load the latest stat map (drives the short-circuit).
     let t_db = Instant::now();
-    let latest = store.latest_stat_per_path().await.expect("latest_stat");
+    let latest = store
+        .latest_stat_per_path(oxplow_domain::StreamId::new(1))
+        .await
+        .expect("latest_stat");
     let db_ms = t_db.elapsed().as_millis();
     eprintln!(
         "  load latest_stat_per_path: {db_ms} ms ({} rows)",
@@ -238,7 +241,10 @@ async fn profile_pass(project_dir: &Path, store: Arc<SqliteSnapshotStore>, blobs
     // sweep finished — re-walk + insert rows via the real store API.
     if report.hashed_count > 0 {
         // Detect: if pass 1 already ran (latest_stat had rows), skip.
-        let probe = store.latest_stat_per_path().await.unwrap_or_default();
+        let probe = store
+            .latest_stat_per_path(oxplow_domain::StreamId::new(1))
+            .await
+            .unwrap_or_default();
         if probe.is_empty() {
             seed_latest_stat(&project_dir_owned, store.as_ref()).await;
         }
@@ -327,6 +333,7 @@ async fn seed_latest_stat(project_dir: &Path, store: &SqliteSnapshotStore) {
                 storage,
                 snapshot_id: None,
                 mtime_ms,
+                content_hash: None,
             })
             .await;
     }

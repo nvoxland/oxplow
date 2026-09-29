@@ -10,6 +10,7 @@ use similar::{ChangeTag, TextDiff};
 use specta::Type;
 
 use crate::blob_store::BlobStore;
+use oxplow_db::{SnapshotStorage, SnapshotTree};
 use oxplow_fs_watch::WorkspaceFilter;
 
 /// One endpoint of a diff: a captured local-history snapshot, a git
@@ -48,20 +49,22 @@ fn change_status_str(s: oxplow_domain::ChangeStatus) -> &'static str {
 /// The identity space a tree's `Cell`s compare in.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Space {
-    /// xxh3 / git-oid / oversize-sentinel as stored by the snapshot store.
+    /// Snapshot content identity (`TreeEntry::identity`: the xxh3 of the
+    /// bytes whatever the storage class; see `oxplow_db::snapshot_tree`).
     Snapshot,
     /// git blob oids (commit trees, and the working tree we build in this
     /// space).
     Git,
 }
 
-/// How to fetch a path's raw bytes for line counting.
+/// Where a path's raw bytes are, for reading and for normalizing into
+/// git-oid space. Known from the row's storage class, never guessed.
 #[derive(Clone)]
 enum ContentSource {
-    /// `id` is an xxh3 hash → oxplow blob store.
-    Oxplow,
-    /// `id` is a git blob oid → git odb.
-    Git,
+    /// An xxh3 address in the oxplow blob store.
+    Oxplow(String),
+    /// A git blob oid in the git odb.
+    Git(String),
     /// live file on disk.
     Working(PathBuf),
     /// oversize / pruned — no readable bytes; identity is opaque.
@@ -76,11 +79,15 @@ struct Cell {
     source: ContentSource,
 }
 
+/// `start_snap`/`end_snap` are the snapshot trees for snapshot endpoints;
+/// when both sides are snapshots, run
+/// `SqliteSnapshotStore::resolve_for_compare` on them first so a git-backed
+/// and a blob-store copy of the same bytes compare equal.
 pub fn compute_diff(
     start: Option<DiffEndpoint>,
     end: DiffEndpoint,
-    start_snap: Option<BTreeMap<String, String>>,
-    end_snap: Option<BTreeMap<String, String>>,
+    start_snap: Option<SnapshotTree>,
+    end_snap: Option<SnapshotTree>,
     project_dir: &Path,
     blobs: &BlobStore,
     filter: &WorkspaceFilter,
@@ -130,7 +137,7 @@ pub fn compute_diff(
 /// Build one endpoint's `path -> Cell` tree + its identity space.
 fn cells_for_endpoint(
     ep: &DiffEndpoint,
-    snap_tree: Option<BTreeMap<String, String>>,
+    snap_tree: Option<SnapshotTree>,
     project_dir: &Path,
     filter: &WorkspaceFilter,
 ) -> Result<(BTreeMap<String, Cell>, Space), String> {
@@ -145,7 +152,20 @@ fn cells_for_endpoint(
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|(path, _)| !filter.ignore(Path::new(path), false))
-                .map(|(path, id)| (path, classify_snapshot_cell(id)))
+                .map(|(path, entry)| {
+                    let source = match (entry.storage, &entry.address) {
+                        (SnapshotStorage::Oxplow, Some(a)) => ContentSource::Oxplow(a.clone()),
+                        (SnapshotStorage::Git, Some(oid)) => ContentSource::Git(oid.clone()),
+                        _ => ContentSource::Unreadable,
+                    };
+                    (
+                        path,
+                        Cell {
+                            id: entry.identity(),
+                            source,
+                        },
+                    )
+                })
                 .collect();
             Ok((cells, Space::Snapshot))
         }
@@ -158,8 +178,8 @@ fn cells_for_endpoint(
                     (
                         path,
                         Cell {
-                            id: oid,
-                            source: ContentSource::Git,
+                            id: oid.clone(),
+                            source: ContentSource::Git(oid),
                         },
                     )
                 })
@@ -168,19 +188,6 @@ fn cells_for_endpoint(
         }
         DiffEndpoint::Working => Ok((working_cells(project_dir, filter), Space::Git)),
     }
-}
-
-/// Infer a snapshot row's content source from its `tree_at` identity:
-/// 40-hex git oid, `oversize:…` sentinel, else a 32-hex xxh3 hash.
-fn classify_snapshot_cell(id: String) -> Cell {
-    let source = if id.starts_with("oversize:") {
-        ContentSource::Unreadable
-    } else if id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        ContentSource::Git
-    } else {
-        ContentSource::Oxplow
-    };
-    Cell { id, source }
 }
 
 /// Build the live working tree in git-oid space, honouring the
@@ -232,21 +239,22 @@ fn working_cells(project_dir: &Path, filter: &WorkspaceFilter) -> BTreeMap<Strin
 }
 
 /// The comparison identity for a cell. Raw when same-space; normalized
-/// into git-oid space when crossing spaces (only an oxplow xxh3 cell
-/// needs a byte read + rehash — git/working ids are already oids, an
-/// oversize sentinel stays opaque). A failed read falls back to the raw
-/// id (best-effort: it simply won't match, so the file reads as changed).
+/// into git-oid space when crossing spaces: a git-backed snapshot cell is
+/// already its oid, a blob-store cell needs a byte read + git rehash, an
+/// oversize sentinel stays opaque. A failed read falls back to the raw id
+/// (best-effort: it simply won't match, so the file reads as changed).
 fn compare_id(cell: &Cell, normalize_to_git: bool, blobs: &BlobStore) -> String {
     if !normalize_to_git {
         return cell.id.clone();
     }
     match &cell.source {
-        ContentSource::Oxplow => blobs
-            .read(&cell.id)
+        ContentSource::Oxplow(addr) => blobs
+            .read(addr)
             .ok()
             .as_deref()
             .and_then(oxplow_git::git_blob_oid)
             .unwrap_or_else(|| cell.id.clone()),
+        ContentSource::Git(oid) => oid.clone(),
         _ => cell.id.clone(),
     }
 }
@@ -255,8 +263,8 @@ fn compare_id(cell: &Cell, normalize_to_git: bool, blobs: &BlobStore) -> String 
 /// content or a failed read.
 fn read_cell(cell: &Cell, blobs: &BlobStore, project_dir: &Path) -> Option<Vec<u8>> {
     match &cell.source {
-        ContentSource::Oxplow => blobs.read(&cell.id).ok(),
-        ContentSource::Git => oxplow_git::read_blob(project_dir, &cell.id),
+        ContentSource::Oxplow(addr) => blobs.read(addr).ok(),
+        ContentSource::Git(oid) => oxplow_git::read_blob(project_dir, oid),
         ContentSource::Working(path) => std::fs::read(path).ok(),
         ContentSource::Unreadable => None,
     }
@@ -294,7 +302,7 @@ fn count_lines(base: Option<&[u8]>, head: Option<&[u8]>) -> (u32, u32) {
 /// tree when `endpoint` is a snapshot.
 pub fn endpoint_contents(
     endpoint: &DiffEndpoint,
-    snap_tree: Option<BTreeMap<String, String>>,
+    snap_tree: Option<SnapshotTree>,
     project_dir: &Path,
     blobs: &BlobStore,
     filter: &WorkspaceFilter,

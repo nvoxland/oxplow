@@ -62,27 +62,6 @@ pub fn read_content_ref(
     read_snapshot_content(content_ref.storage, &content_ref.hash, project_dir, blobs)
 }
 
-/// Read content addressed by a `tree_at` **identity** string. That map
-/// collapses storage class away — an entry is either an oxplow xxh3
-/// (oxplow rows), a git blob OID (git rows), or an `"oversize:…"`
-/// sentinel. We can't recover the class, but the two real address spaces
-/// don't collide (xxh3 is 32 hex chars, a git OID 40), so try the blob
-/// store first, then the git odb. `None` for oversize sentinels or a
-/// genuine miss.
-pub fn read_tree_identity(
-    identity: &str,
-    project_dir: &Path,
-    blobs: &BlobStore,
-) -> Option<Vec<u8>> {
-    if identity.starts_with("oversize:") {
-        return None;
-    }
-    if let Ok(bytes) = blobs.read(identity) {
-        return Some(bytes);
-    }
-    oxplow_git::read_blob(project_dir, identity)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

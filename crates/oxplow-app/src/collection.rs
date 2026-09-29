@@ -13,7 +13,7 @@
 //! (`oxplow-coverage`), never from the agent — so `diff-coverage` is
 //! always `observed`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -2928,15 +2928,12 @@ impl CollectionService {
     /// End-side changed line numbers (1-based) for `path` between its
     /// start-snapshot content and the current working-tree content.
     /// Files absent from disk (deleted) or unchanged yield an empty set.
-    fn changed_lines_for(
-        &self,
-        path: &str,
-        start_tree: &BTreeMap<String, String>,
-    ) -> BTreeSet<u32> {
+    fn changed_lines_for(&self, path: &str, start_tree: &oxplow_db::SnapshotTree) -> BTreeSet<u32> {
         let old = start_tree
             .get(path)
-            .and_then(|id| {
-                crate::snapshot_content::read_tree_identity(id, &self.project_dir, &self.blobs)
+            .and_then(|entry| entry.content_ref())
+            .and_then(|r| {
+                crate::snapshot_content::read_content_ref(&r, &self.project_dir, &self.blobs).ok()
             })
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
@@ -3797,6 +3794,7 @@ mod tests {
                     storage: oxplow_db::SnapshotStorage::Oxplow,
                     snapshot_id: Some(snap_id),
                     mtime_ms: None,
+                    content_hash: None,
                 })
                 .await
                 .unwrap();

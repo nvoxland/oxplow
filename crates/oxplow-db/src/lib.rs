@@ -27,6 +27,7 @@ pub mod page_ref_store;
 pub mod reasoning_store;
 pub mod search_store;
 pub mod semantic_layer;
+pub mod snapshot_tree;
 mod stream_store;
 pub mod task_satellite;
 pub mod task_store;
@@ -81,6 +82,7 @@ pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlQueryResult,
 };
+pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;
 pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};

@@ -21,6 +21,7 @@ refinery = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 specta = { workspace = true }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
