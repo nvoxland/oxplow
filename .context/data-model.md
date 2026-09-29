@@ -646,8 +646,10 @@ latest row is presumed unchanged and isn't re-read. When the stat moved
 and the file is clean vs HEAD, an OID equal to the prior address is
 unchanged; a prior row in the other space (an xxh3) is compared by
 hashing the file, so committing a file already captured dirty records
-nothing. Incremental capture skips a path whose bytes hash to its latest
-row's `content_hash` (a touch is not a change), an oversize file whose
+nothing. Incremental capture skips a path whose bytes equal its latest row's
+content — by `content_hash`, or for a git-backed row not hashed yet by
+the bytes' git blob OID against its address (tsk439) — so a touch or a
+formatter no-op is not a change, an oversize file whose
 size and mtime are unchanged, and a tombstone for a path already
 deleted. The sweep's reverse-deletion pass tombstones oversize files too
 (it used to key on `blob_hash`, which oversize rows lack).

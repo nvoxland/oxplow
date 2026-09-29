@@ -105,6 +105,24 @@ fn sweep_thread_pool() -> Option<rayon::ThreadPool> {
         .ok()
 }
 
+/// Whether `bytes` (whose xxh3 is `xxh3`) are the content `prior`'s row
+/// already records. By content hash when the prior has one; a git-backed
+/// prior not hashed yet is compared by git blob OID — the same bytes hash
+/// to its address — so touching a clean file isn't a change (tsk439).
+fn same_content(
+    prior: Option<(&SnapshotStorage, Option<&str>, Option<&str>)>,
+    xxh3: &str,
+    bytes: &[u8],
+) -> bool {
+    match prior {
+        Some((_, Some(content), _)) => content == xxh3,
+        Some((SnapshotStorage::Git, None, Some(oid))) => {
+            oxplow_git::git_blob_oid(bytes).as_deref() == Some(oid)
+        }
+        _ => false,
+    }
+}
+
 /// Extract `mtime` from a `Metadata` and convert to unix
 /// milliseconds. Returns `None` when the platform / filesystem
 /// doesn't expose mtime (rare) — callers fall back to hashing.
@@ -1044,6 +1062,7 @@ impl SnapshotCaptureService {
                 prior_hash: Option<String>,
                 /// The prior row's content identity, when known.
                 prior_content: Option<String>,
+                prior_storage: Option<SnapshotStorage>,
             }
             let mut staged: Vec<(PathBuf, CaptureStaging)> = Vec::new();
             let mut needs_hash: Vec<Pending> = Vec::new();
@@ -1127,6 +1146,7 @@ impl SnapshotCaptureService {
                     mtime_ms,
                     mtime: mtime_secnsec,
                     prior_content: prior.as_ref().and_then(|s| s.content_hash.clone()),
+                    prior_storage: prior.as_ref().map(|s| s.storage),
                     prior_hash: prior.and_then(|s| s.blob_hash),
                 });
             }
@@ -1163,6 +1183,7 @@ impl SnapshotCaptureService {
                             mtime,
                             prior_hash,
                             prior_content,
+                            prior_storage,
                         } = p;
                         // Git-sourced baseline: a committed file still
                         // byte-clean vs HEAD (judged from the walk's stat —
@@ -1218,7 +1239,10 @@ impl SnapshotCaptureService {
                         let bytes = std::fs::read(&path).ok()?;
                         bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
                         let hash = BlobStore::hash(&bytes);
-                        if prior_content.as_deref() == Some(hash.as_str()) {
+                        let prior = prior_storage
+                            .as_ref()
+                            .map(|st| (st, prior_content.as_deref(), prior_hash.as_deref()));
+                        if same_content(prior, &hash, &bytes) {
                             return None;
                         }
                         // Persist the blob now — we already have the
@@ -1427,7 +1451,7 @@ impl SnapshotCaptureService {
                         storage: s.storage,
                         snapshot_id: None,
                         mtime_ms: s.mtime_ms,
-                        content_hash: None,
+                        content_hash: s.content_hash,
                     });
                 }
 
@@ -1500,8 +1524,17 @@ impl SnapshotCaptureService {
                                 } else {
                                     match std::fs::read(&path) {
                                         Ok(bytes) => match BlobStore::hash(&bytes) {
-                                            h if prior.and_then(|p| p.content_hash.as_deref())
-                                                == Some(h.as_str()) =>
+                                            h if same_content(
+                                                prior.map(|p| {
+                                                    (
+                                                        &p.storage,
+                                                        p.content_hash.as_deref(),
+                                                        p.blob_hash.as_deref(),
+                                                    )
+                                                }),
+                                                &h,
+                                                &bytes,
+                                            ) =>
                                             {
                                                 return None;
                                             }
@@ -1846,6 +1879,42 @@ mod tests {
         // A real edit still shows up.
         std::fs::write(&path, "new bytes\n").unwrap();
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn rewriting_a_git_backed_file_with_the_same_bytes_writes_no_row() {
+        // tsk439: after the boot sweep most files are git-backed with no
+        // content hash yet; a formatter or `touch` must not read as a change.
+        let project = tempdir().unwrap();
+        init_git_repo_with(project.path(), &[("lib.rs", "fn a() {}\n")]);
+        let (svc, store) = svc_for(project.path()).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        let base = svc
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        let rows = store.list_for_path("lib.rs").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].storage, SnapshotStorage::Git);
+
+        let path = project.path().join("lib.rs");
+        std::fs::write(&path, "fn a() {}\n").unwrap();
+        svc.mark_dirty(path.clone(), WatchEventKind::Other);
+        let again = svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        assert_eq!(again, Some(base));
+        assert_eq!(store.list_for_path("lib.rs").await.unwrap().len(), 1);
+
+        // A real edit is still a change.
+        std::fs::write(&path, "fn b() {}\n").unwrap();
+        svc.mark_dirty(path.clone(), WatchEventKind::Other);
+        let edited = svc
+            .request_snapshot(SnapshotTrigger::Quiet)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(edited, base);
+        assert_eq!(store.list_for_path("lib.rs").await.unwrap().len(), 2);
     }
 
     #[tokio::test]
