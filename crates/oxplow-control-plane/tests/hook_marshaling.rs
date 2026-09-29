@@ -86,7 +86,8 @@ async fn seed_in_progress_task(services: &Services, thread_id: ThreadId) {
         note_count: 0,
         author: None,
     };
-    services.task_store.insert(&task).await.unwrap();
+    // Filed the way the app files it: the effort opens with it.
+    services.task_store.insert_logged(&task).await.unwrap();
 }
 
 fn hook_url(cp: &ControlPlane, event: &str) -> String {
@@ -190,7 +191,7 @@ async fn pre_tool_use_without_in_progress_task_denies_with_filing_shape() {
     assert_eq!(out["permissionDecision"], "deny");
     let reason = out["permissionDecisionReason"].as_str().unwrap();
     assert!(
-        reason.contains("requires a tracked task"),
+        reason.contains("requires open, tracked work") && reason.contains("effort.open"),
         "unexpected reason: {reason}"
     );
 }

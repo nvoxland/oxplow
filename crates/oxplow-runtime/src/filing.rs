@@ -32,7 +32,7 @@ pub struct FilingEnforcementDeny {
 pub struct FilingEnforcementContext<'a> {
     pub thread: Option<&'a Thread>,
     pub tool_name: &'a str,
-    pub has_in_progress_task: bool,
+    pub has_open_effort: bool,
     /// Absolute path being written, when the tool input carries one.
     pub file_path: Option<&'a str>,
     pub git_operation_in_progress: bool,
@@ -61,7 +61,7 @@ pub fn build_filing_enforcement_pre_tool_deny(
     filing_reason(
         thread,
         ctx.tool_name,
-        ctx.has_in_progress_task,
+        ctx.has_open_effort,
         ctx.file_path,
         ctx.git_operation_in_progress,
     )
@@ -82,12 +82,12 @@ pub fn build_filing_enforcement_pre_tool_deny(
 pub fn filing_reason(
     thread: &Thread,
     label: &str,
-    has_in_progress_task: bool,
+    has_open_effort: bool,
     file_path: Option<&str>,
     git_operation_in_progress: bool,
 ) -> Option<String> {
     if !thread.status.is_writer()
-        || has_in_progress_task
+        || has_open_effort
         || is_plan_mode_plan_file(file_path)
         || git_operation_in_progress
     {
@@ -98,14 +98,15 @@ pub fn filing_reason(
 
 pub fn build_filing_enforcement_pre_tool_reason(tool_name: &str) -> String {
     [
-        format!("BLOCKED: {tool_name} requires a tracked task on this thread before edits can land."),
+        format!("BLOCKED: {tool_name} requires open, tracked work in this stream before edits can land."),
         String::new(),
-        "No `in_progress` task exists on this thread. `ready`-status rows don't count — `ready` is backlog, `in_progress` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.".into(),
+        "No effort is open in this stream. An effort opens when a task goes `in_progress` — `ready`-status rows don't count: `ready` is backlog, `in_progress` is the actual claim. The Work panel needs to honestly reflect what's shipping while it ships, not after.".into(),
         String::new(),
         "Pick one before re-issuing the edit:".into(),
         format!("  • New concern → `mcp__oxplow__create_task` with status=in_progress, then re-run {tool_name}. Close to done via `complete_task` when settled."),
         format!("  • Fix/redo of a recently-closed done item → `mcp__oxplow__update_task` → status=in_progress on that item, then re-run {tool_name}. Close back to done when settled."),
         "  • Already dispatched against a ready row → `mcp__oxplow__update_task` → status=in_progress on that row first.".into(),
+        format!("  • Work tracked outside oxplow (a Linear/GitHub issue) → `mcp__oxplow__run_command` `effort.open` with `{{\"work_item\": \"work_item:<provider>:<id>\"}}`, then re-run {tool_name}; `effort.close` when done."),
         String::new(),
         "Do not file a placeholder \"untracked work\" item — describe the real change you're about to make.".into(),
     ]
@@ -164,7 +165,7 @@ mod tests {
         let result = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
             thread: Some(&t),
             tool_name: "Write",
-            has_in_progress_task: true,
+            has_open_effort: true,
             ..Default::default()
         });
         assert!(result.is_none());
@@ -176,14 +177,14 @@ mod tests {
         let result = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
             thread: Some(&t),
             tool_name: "Write",
-            has_in_progress_task: false,
+            has_open_effort: false,
             ..Default::default()
         });
         let body = result.expect("deny");
         assert!(body
             .hook_specific_output
             .permission_decision_reason
-            .contains("requires a tracked task"));
+            .contains("requires open, tracked work"));
     }
 
     #[test]
@@ -192,7 +193,7 @@ mod tests {
         let result = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
             thread: Some(&t),
             tool_name: "Write",
-            has_in_progress_task: false,
+            has_open_effort: false,
             git_operation_in_progress: true,
             ..Default::default()
         });
@@ -208,7 +209,7 @@ mod tests {
         let result = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
             thread: Some(&t),
             tool_name: "Write",
-            has_in_progress_task: false,
+            has_open_effort: false,
             file_path: Some(&path),
             ..Default::default()
         });
@@ -223,7 +224,7 @@ mod tests {
         let result = build_filing_enforcement_pre_tool_deny(FilingEnforcementContext {
             thread: Some(&t),
             tool_name: "Write",
-            has_in_progress_task: false,
+            has_open_effort: false,
             file_path: Some(&path),
             ..Default::default()
         });

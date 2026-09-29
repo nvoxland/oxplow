@@ -23,8 +23,12 @@ use oxplow_domain::{Task, TaskStatus, Thread, ThreadStatus};
 pub struct ThreadSnapshot<'a> {
     pub thread: Option<&'a Thread>,
     pub tasks: &'a [Task],
-    /// Signature of the in_progress set the runtime last emitted an
-    /// audit directive for on this thread.
+    /// The stream's open efforts — the claims the audit walks (P2.7): an
+    /// `in_progress` row with no effort isn't one, and another provider's
+    /// work item (`effort.open`) is.
+    pub open_efforts: &'a [OpenEffort],
+    /// Signature of the open-effort set the runtime last emitted an audit
+    /// directive for on this thread.
     pub last_in_progress_audit_signature: Option<&'a str>,
     pub subagent_in_flight: bool,
     /// `None` is treated as "unknown — don't suppress".
@@ -39,6 +43,21 @@ pub struct ThreadSnapshot<'a> {
     /// fires a one-shot directive surfacing the discrepancies; once
     /// fired, the runtime drops these so the prompt doesn't repeat.
     pub pending_effort_reviews: &'a [PendingEffortReview],
+}
+
+/// An open effort as the Stop audit names it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenEffort {
+    /// `eff12`.
+    pub effort_id: String,
+    /// `tsk42`, or `linear:ENG-12` for another provider's work item.
+    pub label: String,
+    /// The task's title; the label for another provider's work item.
+    pub title: String,
+    /// Moves when the agent touches the effort's task (its `updated_at`
+    /// and note count), so the audit re-fires after a change; empty for
+    /// another provider's work item.
+    pub stamp: String,
 }
 
 /// Minimal review summary the Stop hook needs to render its
@@ -92,7 +111,7 @@ pub struct StopHookOutcome {
 #[derive(Default)]
 #[allow(clippy::type_complexity)]
 pub struct DirectiveBuilders<'a> {
-    pub build_in_progress_audit_reason: Option<&'a dyn Fn(&[Task]) -> String>,
+    pub build_open_effort_audit_reason: Option<&'a dyn Fn(&[OpenEffort]) -> String>,
     pub build_filed_but_didnt_ship_reason: Option<&'a dyn Fn() -> String>,
     pub build_stale_epic_children_reason: Option<&'a dyn Fn(&[StaleEpicPair]) -> String>,
     pub build_effort_file_review_reason: Option<&'a dyn Fn(&[PendingEffortReview]) -> String>,
@@ -129,15 +148,9 @@ pub fn decide_stop_directive(
         return outcome;
     }
 
-    let in_progress: Vec<&Task> = snapshot
-        .tasks
-        .iter()
-        .filter(|item| item.status == TaskStatus::InProgress)
-        .collect();
-
     if snapshot.turn_filed_ready_item
         && !snapshot.turn_had_writes
-        && in_progress.is_empty()
+        && snapshot.open_efforts.is_empty()
         && !snapshot.filed_but_didnt_ship_fired
     {
         if let Some(build) = builders.build_filed_but_didnt_ship_reason {
@@ -168,14 +181,13 @@ pub fn decide_stop_directive(
         }
     }
 
-    if !in_progress.is_empty() {
-        if let Some(build) = builders.build_in_progress_audit_reason {
-            let in_progress_owned: Vec<Task> = in_progress.iter().map(|i| (*i).clone()).collect();
-            let signature = compute_audit_signature(&in_progress_owned);
+    if !snapshot.open_efforts.is_empty() {
+        if let Some(build) = builders.build_open_effort_audit_reason {
+            let signature = compute_audit_signature(snapshot.open_efforts);
             if snapshot.last_in_progress_audit_signature == Some(signature.as_str()) {
                 return outcome;
             }
-            outcome.directive = Some(StopDirective::block(build(&in_progress_owned)));
+            outcome.directive = Some(StopDirective::block(build(snapshot.open_efforts)));
             outcome
                 .side_effects
                 .push(StopHookSideEffect::RecordAuditSignature(signature));
@@ -214,16 +226,10 @@ pub fn find_stale_epic_children_pairs(items: &[Task]) -> Vec<StaleEpicPair> {
 
 /// Per-thread fingerprint of the in_progress set used to detect
 /// "nothing changed since last audit fire" and skip a duplicate.
-pub fn compute_audit_signature(items: &[Task]) -> String {
-    let mut entries: Vec<String> = items
+pub fn compute_audit_signature(efforts: &[OpenEffort]) -> String {
+    let mut entries: Vec<String> = efforts
         .iter()
-        .map(|item| {
-            let updated_at = serde_json::to_string(&item.updated_at)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_string();
-            format!("{}|{}|{}", item.id, updated_at, item.note_count)
-        })
+        .map(|e| format!("{}|{}", e.effort_id, e.stamp))
         .collect();
     entries.sort();
     entries.join("\n")
@@ -320,39 +326,48 @@ mod tests {
     #[test]
     fn subagent_in_flight_suppresses_audit() {
         let t = active_thread();
-        let items = vec![item(1, TaskStatus::InProgress, None)];
+        let efforts = vec![open("eff1", "a")];
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            tasks: &items,
+            open_efforts: &efforts,
             subagent_in_flight: true,
             ..Default::default()
         };
-        let build_audit = |_: &[Task]| "audit".to_string();
+        let build_audit = |_: &[OpenEffort]| "audit".to_string();
         let builders = DirectiveBuilders {
-            build_in_progress_audit_reason: Some(&build_audit),
+            build_open_effort_audit_reason: Some(&build_audit),
             ..Default::default()
         };
         let outcome = decide_stop_directive(snap, builders);
         assert!(outcome.directive.is_none());
     }
 
+    fn open(effort: &str, stamp: &str) -> OpenEffort {
+        OpenEffort {
+            effort_id: effort.into(),
+            label: "tsk1".into(),
+            title: "ship".into(),
+            stamp: stamp.into(),
+        }
+    }
+
     #[test]
-    fn in_progress_items_trigger_audit() {
+    fn open_efforts_trigger_audit() {
         let t = active_thread();
-        let items = vec![item(1, TaskStatus::InProgress, None)];
+        let efforts = vec![open("eff1", "a")];
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            tasks: &items,
+            open_efforts: &efforts,
             ..Default::default()
         };
-        let build_audit = |items: &[Task]| format!("audit {} items", items.len());
+        let build_audit = |efforts: &[OpenEffort]| format!("audit {} efforts", efforts.len());
         let builders = DirectiveBuilders {
-            build_in_progress_audit_reason: Some(&build_audit),
+            build_open_effort_audit_reason: Some(&build_audit),
             ..Default::default()
         };
         let outcome = decide_stop_directive(snap, builders);
         let dir = outcome.directive.expect("audit directive");
-        assert!(dir.reason.contains("audit 1 items"));
+        assert!(dir.reason.contains("audit 1 efforts"));
         assert!(matches!(
             outcome.side_effects.first(),
             Some(StopHookSideEffect::RecordAuditSignature(_))
@@ -375,16 +390,18 @@ mod tests {
             unclaimed_overflow: None,
             unattributed_runs: vec![],
         }];
+        let efforts = vec![open("eff1", "a")];
         let snap = ThreadSnapshot {
             thread: Some(&t),
             tasks: &items,
+            open_efforts: &efforts,
             pending_effort_reviews: &reviews,
             ..Default::default()
         };
-        let build_audit = |_: &[Task]| "AUDIT".to_string();
+        let build_audit = |_: &[OpenEffort]| "AUDIT".to_string();
         let build_review = |rs: &[PendingEffortReview]| format!("REVIEW {} efforts", rs.len());
         let builders = DirectiveBuilders {
-            build_in_progress_audit_reason: Some(&build_audit),
+            build_open_effort_audit_reason: Some(&build_audit),
             build_effort_file_review_reason: Some(&build_review),
             ..Default::default()
         };
@@ -397,17 +414,17 @@ mod tests {
     #[test]
     fn audit_signature_dedup() {
         let t = active_thread();
-        let items = vec![item(1, TaskStatus::InProgress, None)];
-        let signature = compute_audit_signature(&items);
+        let efforts = vec![open("eff1", "a")];
+        let signature = compute_audit_signature(&efforts);
         let snap = ThreadSnapshot {
             thread: Some(&t),
-            tasks: &items,
+            open_efforts: &efforts,
             last_in_progress_audit_signature: Some(&signature),
             ..Default::default()
         };
-        let build_audit = |_: &[Task]| "audit".to_string();
+        let build_audit = |_: &[OpenEffort]| "audit".to_string();
         let builders = DirectiveBuilders {
-            build_in_progress_audit_reason: Some(&build_audit),
+            build_open_effort_audit_reason: Some(&build_audit),
             ..Default::default()
         };
         let outcome = decide_stop_directive(snap, builders);
@@ -537,10 +554,34 @@ mod tests {
 
     #[test]
     fn compute_audit_signature_stable_under_reordering() {
-        let a = item(10, TaskStatus::InProgress, None);
-        let b = item(20, TaskStatus::InProgress, None);
+        let a = open("eff10", "x");
+        let b = open("eff20", "y");
         let s1 = compute_audit_signature(&[a.clone(), b.clone()]);
         let s2 = compute_audit_signature(&[b, a]);
         assert_eq!(s1, s2);
+        // Touching an effort's task re-arms the audit.
+        assert_ne!(
+            compute_audit_signature(&[open("eff10", "x")]),
+            compute_audit_signature(&[open("eff10", "x2")])
+        );
+    }
+
+    /// P2.7 (tsk431): an `in_progress` row with no open effort isn't a
+    /// claim, so it doesn't hold the turn open either.
+    #[test]
+    fn an_in_progress_row_without_an_effort_does_not_trigger_the_audit() {
+        let t = active_thread();
+        let items = vec![item(1, TaskStatus::InProgress, None)];
+        let snap = ThreadSnapshot {
+            thread: Some(&t),
+            tasks: &items,
+            ..Default::default()
+        };
+        let build_audit = |_: &[OpenEffort]| "audit".to_string();
+        let builders = DirectiveBuilders {
+            build_open_effort_audit_reason: Some(&build_audit),
+            ..Default::default()
+        };
+        assert!(decide_stop_directive(snap, builders).directive.is_none());
     }
 }

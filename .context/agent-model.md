@@ -686,35 +686,43 @@ is visible from the rail without switching to it. Live-session only:
 **Filing enforcement (writer thread, PreToolUse).** Enforcement runs
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
 `crates/oxplow-runtime/src/filing.rs`), not the Stop hook. When the agent invokes
-Edit / Write / MultiEdit / NotebookEdit on a writer thread and the
-thread has no `in_progress` task, the hook returns
-`permissionDecision: "deny"` and the edit is rejected before it
-lands. The agent files an item at `in_progress` (or flips an existing
-ready row to `in_progress`) and re-issues the edit. **A `ready`-status
-filing call alone does NOT satisfy the guard** — `ready` is backlog
-("noticed for later"), only `in_progress` is a commitment to ship
-now. Earlier versions accepted "any filing call this turn" via a
-per-thread `filedThisTurn` flag; that let the agent create a ready
-row and quietly edit against it without ever transitioning. The
-`hasInProgressItem` predicate is now computed live from the
-task store on each PreToolUse, so a `create_task` /
-`update_task` / `transition_tasks` that lands at
-`in_progress` is reflected immediately. **The claim is scoped to the
-whole STREAM, not just the literal thread the task was filed on**
-(`stream_has_in_progress_claim` in `crates/oxplow-control-plane/src/lib.rs`,
-tsk133): a stream has exactly one active writer, so an `in_progress`
-task on *any* thread in the writer's stream satisfies the guard. This
-makes cross-thread dispatch work — a task filed on a sibling thread and
-routed to the stream's writer no longer needs a manual `move_task`
-first. This does **not** weaken the one-writer invariant: queued/closed
-threads still can't write at all (the write guard runs first); only
-which thread's `in_progress` row counts as the writer's claim widened.
+Edit / Write / MultiEdit / NotebookEdit on a writer thread and **no effort
+is open in its stream**, the hook returns `permissionDecision: "deny"`
+and the edit is rejected before it lands (P2.7, tsk431). The claim is an
+open **effort**, not a task status: an effort opens in the same
+transaction as a task filed or moved `in_progress`
+(`work_item.create` / `work_item.update` / `work_item.transition`), or
+through `run_command effort.open {work_item}` for another provider's work
+item (a Linear/GitHub issue); an `in_progress` row alone isn't a claim
+(recovery gives it an effort at boot). The deny text names both doors.
+**A `ready`-status filing call does NOT satisfy the guard** — `ready` is
+backlog ("noticed for later"), only an open effort is a commitment to
+ship now. The check (`stream_has_open_effort` in
+`crates/oxplow-app/src/agent_policy.rs` → `SqliteEffortStore::stream_has_open_effort`,
+one `EXISTS` over `effort JOIN threads`) runs live on each PreToolUse, so
+a filing that just landed is reflected immediately; a lookup failure
+denies. **The claim is scoped to the whole STREAM** (tsk133): a stream
+has exactly one active writer, so an effort on *any* thread in the
+writer's stream satisfies the guard — cross-thread dispatch needs no
+`move_task` first. This does **not** weaken the one-writer invariant:
+queued/closed threads still can't write at all (the write guard runs
+first). `PolicyFacts.has_open_effort` / `FilingContext.has_open_effort`
+carry it into the runtime.
 Bash is **excluded** — shell
 commands routinely mutate the worktree as a side effect (`git
 merge`, `git pull`, codegen, formatters) without representing
-authored change worth filing. The Stop-hook in-progress audit still
-fires for any lingering items, so real edits made via Bash under an
-open item are unaffected.
+authored change worth filing. The Stop-hook audit still fires for any
+open effort, so real edits made via Bash under an open item are
+unaffected.
+
+**The Stop audit walks the stream's open efforts** (P2.7):
+`open_efforts_in_stream` lists them (`list_open_for_stream`) as
+`[eff12] tsk42 — <title>`, or `[eff12] linear:ENG-12` for another
+provider's item, and the directive says to `complete_task` an oxplow
+task or `effort.close` a foreign item. Its dedupe signature is over the
+effort ids plus each task's `updated_at` + note count, so touching a
+task re-arms it. An `in_progress` row with no effort doesn't hold the
+turn open.
 
 **Plan-mode plan file is exempt** (`isPlanModePlanFile` in
 `crates/oxplow-runtime/src/filing.rs`). Writes whose `tool_input.file_path` lands

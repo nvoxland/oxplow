@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use oxplow_domain::stores::{TaskStore, ThreadStore};
-use oxplow_domain::{TaskStatus, Thread, ThreadId};
+use oxplow_domain::{Thread, ThreadId};
 use oxplow_runtime::policy::{decide_tool, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};
 use oxplow_runtime::stop_hook::{
-    decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopDirective,
+    decide_stop_directive, DirectiveBuilders, OpenEffort, PendingEffortReview, StopDirective,
     StopHookSideEffect, ThreadSnapshot,
 };
 use parking_lot::Mutex;
@@ -132,9 +132,9 @@ impl AgentPolicy {
             .filter(|p| p != &worktree_root)
             .collect();
         // Only the writer is subject to filing; skip its lookups otherwise.
-        let (has_in_progress_claim, git_operation_in_progress) = if thread.status.is_writer() {
+        let (has_open_effort, git_operation_in_progress) = if thread.status.is_writer() {
             (
-                stream_has_in_progress_claim(svc, &thread).await,
+                stream_has_open_effort(svc, &thread).await,
                 git_operation_in_progress(&worktree_root),
             )
         } else {
@@ -147,7 +147,7 @@ impl AgentPolicy {
                 worktree_root: &worktree_root,
                 other_roots: &other_roots,
                 project_dir,
-                has_in_progress_claim,
+                has_open_effort,
                 git_operation_in_progress,
             },
         )
@@ -270,9 +270,11 @@ impl AgentPolicy {
             }
         }
 
+        let open_efforts = open_efforts_in_stream(svc, &thread).await;
         let snapshot = ThreadSnapshot {
             thread: Some(&thread),
             tasks: &tasks,
+            open_efforts: &open_efforts,
             last_in_progress_audit_signature: last_signature.as_deref(),
             // Mined from hook_event_store between this turn's started_at
             // and now. Letting the Q&A-turn carve-out fire silences the
@@ -300,7 +302,7 @@ impl AgentPolicy {
         let outcome = decide_stop_directive(
             snapshot,
             DirectiveBuilders {
-                build_in_progress_audit_reason: Some(&build_in_progress_audit_reason),
+                build_open_effort_audit_reason: Some(&build_open_effort_audit_reason),
                 build_filed_but_didnt_ship_reason: Some(&build_filed_but_didnt_ship_reason),
                 build_stale_epic_children_reason: None,
                 build_effort_file_review_reason: Some(&build_effort_file_review_reason),
@@ -338,38 +340,25 @@ pub struct TurnSignals {
     pub had_writes: bool,
 }
 
-/// Whether the stream's active writer has a claimed (`in_progress`) task
-/// that satisfies filing enforcement.
+/// Whether the writer's stream has an open effort — the filing guard's
+/// claim (P2.7, tsk431). An effort opens when a task is filed or moved
+/// `in_progress` (in the same transaction) or through `effort.open` for
+/// another provider's work item; an `in_progress` row alone isn't one.
 ///
-/// Scoped to the whole STREAM, not just the literal thread the task was
-/// filed on (tsk133). A stream has exactly one active writer (enforced by
-/// the `idx_threads_one_active_per_stream` unique index + the write
-/// guard), so any `in_progress` task on *any* thread in that stream is a
-/// legitimate claim for the writer. This is what makes cross-thread
-/// dispatch work: a task filed on a sibling thread and routed to the
-/// stream's writer no longer needs a manual `move_task` first. The core
-/// invariant is untouched — queued/closed threads still can't write
-/// (the write guard runs first); only which thread's `in_progress` row
-/// counts as the writer's claim changes.
-pub(crate) async fn stream_has_in_progress_claim(svc: &Services, thread: &Thread) -> bool {
-    let threads = match svc.thread_store.list_for_stream(&thread.stream_id).await {
-        Ok(threads) => threads,
-        // On a lookup failure, fall back to the literal thread so the
-        // guard still works for the common (same-thread) case.
-        Err(_) => vec![thread.clone()],
-    };
-    for t in &threads {
-        let claimed = svc
-            .task_store
-            .list_for_thread(&t.id)
-            .await
-            .map(|items| items.iter().any(|i| i.status == TaskStatus::InProgress))
-            .unwrap_or(false);
-        if claimed {
-            return true;
-        }
-    }
-    false
+/// Scoped to the whole STREAM, not just the literal thread (tsk133): a
+/// stream has exactly one active writer (the `idx_threads_one_active_per_stream`
+/// unique index + the write guard), so an effort on *any* of its threads
+/// is a legitimate claim for the writer — cross-thread dispatch needs no
+/// `move_task` first. Queued/closed threads still can't write (the write
+/// guard runs first). A lookup failure denies (fails closed).
+pub(crate) async fn stream_has_open_effort(svc: &Services, thread: &Thread) -> bool {
+    svc.effort_store
+        .stream_has_open_effort(thread.stream_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "filing: open-effort lookup failed");
+            false
+        })
 }
 
 /// Returns true when the worktree is mid git merge / rebase /
@@ -407,20 +396,64 @@ pub fn git_operation_in_progress(project_dir: &Path) -> bool {
     false
 }
 
-fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
-    let titles: Vec<String> = items
+/// The stream's open efforts, named for the Stop audit: an oxplow task's
+/// by its id and title (its `updated_at` + note count as the stamp that
+/// re-arms the audit), another provider's item by its label.
+async fn open_efforts_in_stream(svc: &Services, thread: &Thread) -> Vec<OpenEffort> {
+    let efforts = svc
+        .effort_store
+        .list_open_for_stream(thread.stream_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "stop audit: open-effort lookup failed");
+            Vec::new()
+        });
+    let mut out = Vec::with_capacity(efforts.len());
+    for e in efforts {
+        let label = oxplow_domain::refs::build::work_item_label(&e.work_item);
+        let task = match e.task_id() {
+            Some(id) => svc.task_store.get(id).await.ok().flatten(),
+            None => None,
+        };
+        let (title, stamp) = match task {
+            Some(t) => (
+                t.title.clone(),
+                format!("{}|{}", t.updated_at.unix_ms(), t.note_count),
+            ),
+            None => (label.clone(), String::new()),
+        };
+        out.push(OpenEffort {
+            effort_id: e.id.to_string(),
+            label,
+            title,
+            stamp,
+        });
+    }
+    out
+}
+
+fn build_open_effort_audit_reason(efforts: &[OpenEffort]) -> String {
+    let lines: Vec<String> = efforts
         .iter()
-        .map(|i| format!("  • [{}] {}", i.id, i.title))
+        .map(|e| {
+            if e.title == e.label {
+                format!("  • [{}] {}", e.effort_id, e.label)
+            } else {
+                format!("  • [{}] {} — {}", e.effort_id, e.label, e.title)
+            }
+        })
         .collect();
     format!(
-        "AUDIT: this turn is closing with {} task(s) still `in_progress`:\n{}\n\n\
+        "AUDIT: this turn is closing with {} effort(s) still open in this stream:\n{}\n\n\
          Before stopping, walk each one:\n\
-         - Done? → `mcp__oxplow__complete_task` with `touchedFiles`.\n\
-         - Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n\
+         - An oxplow task (tsk…) done? → `mcp__oxplow__complete_task` with `touchedFiles`. \
+           Stale or no longer the right shape? → `mcp__oxplow__update_task` to ready/blocked/done.\n\
+         - Another provider's work item? → `mcp__oxplow__run_command` `effort.close` with \
+           `{{\"effort\": \"eff…\"}}` when it's done.\n\
          - Waiting on the user? → `mcp__oxplow__await_user`.\n\n\
-         An `in_progress` row with finished work parked in it looks stuck to the user.",
-        items.len(),
-        titles.join("\n")
+         An open effort with finished work parked in it looks stuck to the user.",
+        efforts.len(),
+        lines.join("\n")
     )
 }
 
@@ -591,10 +624,12 @@ fn build_filed_but_didnt_ship_reason() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_db::EffortStore as _;
+    use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::StreamStore;
     use oxplow_domain::{
         AgentKind, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority,
-        ThreadStatus, Timestamp,
+        TaskStatus, ThreadStatus, Timestamp,
     };
 
     /// In-memory services over a real git repo (the session layer refuses
@@ -833,38 +868,55 @@ mod tests {
         assert!(!git_operation_in_progress(tmp.path()));
     }
 
+    /// P2.7 (tsk431): the claim is an OPEN EFFORT in the stream, on any of
+    /// its threads (tsk133 — cross-thread dispatch keeps working).
     #[tokio::test]
-    async fn claim_filed_on_sibling_thread_satisfies_writer() {
-        // tsk133: a task filed on a sibling thread A (queued) but
-        // dispatched to the stream's active writer thread B must satisfy
-        // filing enforcement for B — no manual move_task required.
-        // Cross-thread dispatch within a stream just works because a
-        // stream has exactly one active writer.
+    async fn an_effort_on_a_sibling_thread_satisfies_the_writer() {
         let (svc, _dir) = services();
         let (stream, writer_b) = primary_writer(&svc).await;
-        // Sibling queued thread A in the same stream.
         let sibling_a_id = svc
             .thread_store
             .upsert(&test_thread(stream.id, ThreadStatus::Queued))
             .await
             .unwrap();
-        // The in_progress claim lives on the SIBLING thread A, not B.
-        svc.task_store
+        let task = svc
+            .task_store
             .insert(&in_progress_task(sibling_a_id))
             .await
             .unwrap();
+        svc.effort_store
+            .start(&work_item_ref(task), &sibling_a_id, None)
+            .await
+            .unwrap();
+        assert!(stream_has_open_effort(&svc, &writer_b).await);
+    }
 
-        assert!(
-            stream_has_in_progress_claim(&svc, &writer_b).await,
-            "an in_progress task on a sibling thread in the same stream must \
-             satisfy the writer's filing guard"
-        );
+    /// Another provider's work item is a claim too (`effort.open`).
+    #[tokio::test]
+    async fn an_effort_on_a_foreign_work_item_satisfies_the_writer() {
+        let (svc, _dir) = services();
+        let (_stream, writer) = primary_writer(&svc).await;
+        svc.effort_store
+            .start("work_item:linear:ENG-12", &writer.id, None)
+            .await
+            .unwrap();
+        assert!(stream_has_open_effort(&svc, &writer).await);
+    }
+
+    /// An `in_progress` row alone is not a claim — only its effort is.
+    #[tokio::test]
+    async fn an_in_progress_task_without_an_effort_does_not_satisfy() {
+        let (svc, _dir) = services();
+        let (_stream, writer) = primary_writer(&svc).await;
+        svc.task_store
+            .insert(&in_progress_task(writer.id))
+            .await
+            .unwrap();
+        assert!(!stream_has_open_effort(&svc, &writer).await);
     }
 
     #[tokio::test]
-    async fn claim_in_another_stream_does_not_satisfy() {
-        // Scoping is per-stream, not global: an in_progress task in a
-        // DIFFERENT stream must NOT unblock this stream's writer.
+    async fn an_effort_in_another_stream_does_not_satisfy() {
         let (svc, _dir) = services();
         let (_stream, writer) = primary_writer(&svc).await;
         let other_stream_id = svc.stream_store.upsert(&test_stream()).await.unwrap();
@@ -873,15 +925,11 @@ mod tests {
             .upsert(&test_thread(other_stream_id, ThreadStatus::Active))
             .await
             .unwrap();
-        svc.task_store
-            .insert(&in_progress_task(other_thread_id))
+        svc.effort_store
+            .start("work_item:linear:ENG-9", &other_thread_id, None)
             .await
             .unwrap();
-
-        assert!(
-            !stream_has_in_progress_claim(&svc, &writer).await,
-            "an in_progress task in another stream must not satisfy this writer"
-        );
+        assert!(!stream_has_open_effort(&svc, &writer).await);
     }
 
     #[tokio::test]
@@ -889,8 +937,8 @@ mod tests {
         let (svc, _dir) = services();
         let (_stream, writer) = primary_writer(&svc).await;
         assert!(
-            !stream_has_in_progress_claim(&svc, &writer).await,
-            "no in_progress task anywhere → guard not satisfied"
+            !stream_has_open_effort(&svc, &writer).await,
+            "no open effort anywhere → guard not satisfied"
         );
     }
 }

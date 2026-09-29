@@ -64,7 +64,7 @@ pub struct PolicyFacts<'a> {
     /// The primary project, whose `.oxplow/wiki` every stream shares.
     pub project_dir: &'a Path,
     /// Some thread in the stream has an `in_progress` task.
-    pub has_in_progress_claim: bool,
+    pub has_open_effort: bool,
     /// A merge / rebase / cherry-pick / revert is underway.
     pub git_operation_in_progress: bool,
 }
@@ -165,7 +165,7 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
         worktree_root: &own,
         other_roots: &others,
         project_dir: &project,
-        has_in_progress_claim: facts.has_in_progress_claim,
+        has_open_effort: facts.has_open_effort,
         git_operation_in_progress: facts.git_operation_in_progress,
     };
     let intent = &ToolIntent {
@@ -210,7 +210,7 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
         if let Some(reason) = filing_reason(
             facts.thread,
             intent.label,
-            facts.has_in_progress_claim,
+            facts.has_open_effort,
             *t,
             facts.git_operation_in_progress,
         ) {
@@ -269,7 +269,7 @@ mod tests {
                 worktree_root: Path::new("/proj"),
                 other_roots: &[std::path::PathBuf::from("/proj-wt")],
                 project_dir: Path::new("/proj"),
-                has_in_progress_claim: claim,
+                has_open_effort: claim,
                 git_operation_in_progress: false,
             },
         )
@@ -324,7 +324,7 @@ mod tests {
         };
         assert_eq!(layer, DenyLayer::Filing);
         assert!(
-            reason.starts_with("BLOCKED: Delete requires a tracked task"),
+            reason.starts_with("BLOCKED: Delete requires open, tracked work"),
             "{reason}"
         );
         assert_eq!(
@@ -390,7 +390,7 @@ mod tests {
             worktree_root: Path::new("/proj"),
             other_roots: &[],
             project_dir: Path::new("/proj"),
-            has_in_progress_claim: false,
+            has_open_effort: false,
             git_operation_in_progress: true,
         };
         assert_eq!(decide_tool(&intent, &facts), PolicyDecision::Allow);
@@ -412,7 +412,7 @@ mod tests {
                 worktree_root: Path::new("/proj-wt"),
                 other_roots: &[std::path::PathBuf::from("/proj")],
                 project_dir: Path::new("/proj"),
-                has_in_progress_claim: claim,
+                has_open_effort: claim,
                 git_operation_in_progress: false,
             },
         )
@@ -495,7 +495,7 @@ mod tests {
                     worktree_root: &root,
                     other_roots: &[],
                     project_dir: &root,
-                    has_in_progress_claim: true,
+                    has_open_effort: true,
                     git_operation_in_progress: false,
                 },
             );

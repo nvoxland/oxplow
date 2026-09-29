@@ -17,7 +17,7 @@ use oxplow_domain::refs::build::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
-use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
+use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::{
     Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus, Thread,
     ThreadId, ThreadStatus, Timestamp,
@@ -83,11 +83,13 @@ async fn seed_thread(services: &Services, status: ThreadStatus) -> ThreadId {
     thread.id
 }
 
+/// An `in_progress` task filed the way the app files one: its effort opens
+/// in the same transaction (the filing guard's claim).
 async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
     let now = Timestamp::from_unix_ms(1);
     services
         .task_store
-        .insert(&Task {
+        .insert_logged(&Task {
             id: TaskId::placeholder(),
             thread_id: Some(thread_id),
             parent_id: None,
@@ -106,6 +108,7 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
         })
         .await
         .unwrap()
+        .0
 }
 
 async fn post(
@@ -204,9 +207,10 @@ async fn stop_effort_review_with_an_unattributed_run() {
     let task = seed_task(&svc, tid, "reviewed work").await;
     let effort = svc
         .effort_store
-        .start(&work_item_ref(task), &tid, None)
+        .find_open_for_work_item(&work_item_ref(task))
         .await
-        .unwrap();
+        .unwrap()
+        .expect("filing in_progress opened its effort");
     svc.attribution_store
         .set_state(
             &effort.id,

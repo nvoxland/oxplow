@@ -24,8 +24,8 @@ pub use policy::{
 };
 pub use stop_hook::{
     compute_audit_signature, decide_stop_directive, find_stale_epic_children_pairs,
-    DirectiveBuilders, StaleEpicPair, StopDirective, StopHookOutcome, StopHookSideEffect,
-    ThreadSnapshot,
+    DirectiveBuilders, OpenEffort, StaleEpicPair, StopDirective, StopHookOutcome,
+    StopHookSideEffect, ThreadSnapshot,
 };
 pub use write_guard::{
     build_write_guard_response, WriteGuardContext, WriteGuardDeny, WORKTREE_MUTATING_TOOLS,

@@ -29,7 +29,7 @@ use oxplow_domain::refs::build::{
     effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
     work_item_id_of_ref,
 };
-use oxplow_domain::{Anchors, EventSchemaRegistry};
+use oxplow_domain::{Anchors, EventSchemaRegistry, StreamId};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -742,6 +742,38 @@ impl SqliteEffortStore {
             .await?;
         self.project_effort_slice(&work_item).await?;
         Ok(effort_id)
+    }
+
+    /// Whether any thread in `stream` has an open effort — the filing
+    /// guard's claim (`.context/agent-model.md`, "Filing enforcement").
+    pub async fn stream_has_open_effort(&self, stream: StreamId) -> Result<bool, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS (
+                       SELECT 1 FROM effort e JOIN threads th ON th.id = e.thread_id
+                        WHERE th.stream_id = ?1 AND e.ended_at IS NULL)",
+                    params![stream.value()],
+                    |r| r.get(0),
+                )
+            })
+            .await
+    }
+
+    /// The open efforts on `stream`'s threads, oldest first — what the
+    /// Stop audit walks.
+    pub async fn list_open_for_stream(&self, stream: StreamId) -> Result<Vec<Effort>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT e.* FROM effort e JOIN threads th ON th.id = e.thread_id
+                      WHERE th.stream_id = ?1 AND e.ended_at IS NULL
+                      ORDER BY e.started_at, e.id",
+                )?;
+                let rows = stmt.query_map(params![stream.value()], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
     }
 
     /// Every open effort row (`ended_at IS NULL`) across all tasks.
