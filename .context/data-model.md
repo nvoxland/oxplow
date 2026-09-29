@@ -1236,10 +1236,16 @@ Registered with `register_async` after the services they drive exist. Each
 async consumer has its own lock, wake-up and loop (P2.6b), so a slow one —
 a model call — delays only itself: `spawn` starts one loop for the sync
 consumers and one per async consumer, `wake()` wakes them all, and a loop
-that handled something wakes the others (its handler may have logged what
-they consume). `EventPump::settle(&[names], timeout)` spawns a catch-up of
-just the named consumers and waits for it, for callers whose answer needs
-their effect (`TaskService` settles `effort.lifecycle`).
+that moved its checkpoint wakes the others (its handler may have logged
+what they consume). **Ordering (tsk506):** an async consumer may declare
+`after()` — consumers whose effect it reads; an event reaches it only once
+each of theirs has checkpointed past it (until then the delivery is
+deferred, checkpoint unmoved, later events behind it), so no reactor reads
+another's half-written result for the same event.
+`EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
+consumers — side by side within a level, a consumer in a level after those
+it runs `after` — and waits for it, for callers whose answer needs their
+effect (`TaskService` settles `effort.lifecycle`).
 
 The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /

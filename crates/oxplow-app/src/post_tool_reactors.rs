@@ -95,6 +95,12 @@ impl AsyncEventConsumer for PostToolAdvisories {
         POST_TOOL_ADVISORIES
     }
 
+    /// An advisory reads what collection recorded for the same run
+    /// (`v_effort_observation`), so it sees the run only after collection.
+    fn after(&self) -> &'static [&'static str] {
+        &[COLLECTION]
+    }
+
     fn handles(&self, event_type: &str) -> bool {
         event_type == AgentToolFinished::TYPE
     }

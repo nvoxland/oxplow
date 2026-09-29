@@ -49,6 +49,12 @@ use tokio::sync::Notify;
 pub trait AsyncEventConsumer: Send + Sync {
     /// Stable name, keying the checkpoint and dead letters.
     fn name(&self) -> &'static str;
+    /// Consumers whose effect this one reads: an event reaches this one
+    /// only once each of theirs has checkpointed past it (until then it is
+    /// deferred, and later events wait behind it).
+    fn after(&self) -> &'static [&'static str] {
+        &[]
+    }
     fn handles(&self, event_type: &str) -> bool;
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError>;
 }
@@ -165,12 +171,16 @@ impl EventPump {
             .into_iter()
             .filter(|s| consumers.contains(&s.consumer.name()))
             .collect();
-        // Side by side: the wait is the slowest consumer's, not the sum.
+        // Side by side within a level, so the wait is the slowest
+        // consumer's rather than the sum; a consumer runs in a level after
+        // the ones it declares `after`.
         let run = tokio::spawn(async move {
-            let runs = slots.iter().map(|slot| pump.run_slot(slot));
             let mut report = PumpReport::default();
-            for ran in futures::future::join_all(runs).await {
-                report.add(ran?);
+            for level in settle_levels(slots) {
+                let runs = level.iter().map(|slot| pump.run_slot(slot));
+                for ran in futures::future::join_all(runs).await {
+                    report.add(ran?);
+                }
             }
             Ok::<_, DomainError>(report)
         });
@@ -287,7 +297,11 @@ impl EventPump {
     ) -> Result<Delivery, DomainError> {
         let name = consumer.name();
         let seq = event.seq;
-        let outcome = if delivers(consumer.handles(&event.envelope.event_type), &event) {
+        let wanted = delivers(consumer.handles(&event.envelope.event_type), &event);
+        if wanted && !self.predecessors_past(consumer.after(), seq).await? {
+            return Ok(Delivery::Deferred);
+        }
+        let outcome = if wanted {
             match run_async_handler(self.log.schemas().clone(), consumer, event).await {
                 Ok(()) => Delivery::Handled,
                 Err(err) if err.is_retryable() => return Ok(Delivery::Deferred),
@@ -309,6 +323,27 @@ impl EventPump {
             .transaction(move |tx| set_checkpoint_tx(tx, name, seq))
             .await?;
         Ok(outcome)
+    }
+
+    /// Whether every consumer in `after` has checkpointed at or past `seq`.
+    async fn predecessors_past(
+        &self,
+        after: &'static [&'static str],
+        seq: i64,
+    ) -> Result<bool, DomainError> {
+        if after.is_empty() {
+            return Ok(true);
+        }
+        self.db
+            .read(move |c| {
+                for name in after {
+                    if oxplow_db::event_log_store::checkpoint_tx(c, name)? < seq {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            })
+            .await
     }
 
     /// One event to one consumer: handler (under a savepoint) and
@@ -447,8 +482,9 @@ impl EventPump {
                 let Some(p) = pump.upgrade() else { return };
                 let ran = p.run_slot(&slot).await;
                 // A handler may have logged events (`effort.finished`) that
-                // other consumers wait on.
-                if matches!(&ran, Ok(report) if report.handled > 0) {
+                // other consumers wait on, and a consumer running `after`
+                // this one waits on its checkpoint.
+                if matches!(&ran, Ok(r) if r.handled + r.skipped + r.dead_lettered > 0) {
                     p.wake_others(&slot);
                 }
                 match ran {
@@ -519,6 +555,31 @@ fn retryable(event: &StoredEvent, id: i64) -> Result<(), DomainError> {
         )));
     }
     Ok(())
+}
+
+/// `slots` grouped so each consumer comes in a level after every consumer
+/// it runs `after` (among these slots; one outside the set is the loop's
+/// business). A cycle falls back to one last level.
+fn settle_levels(mut slots: Vec<Arc<AsyncSlot>>) -> Vec<Vec<Arc<AsyncSlot>>> {
+    let mut levels: Vec<Vec<Arc<AsyncSlot>>> = Vec::new();
+    let mut placed: Vec<&'static str> = Vec::new();
+    while !slots.is_empty() {
+        let names: Vec<&'static str> = slots.iter().map(|s| s.consumer.name()).collect();
+        let (ready, waiting): (Vec<_>, Vec<_>) = slots.into_iter().partition(|s| {
+            s.consumer
+                .after()
+                .iter()
+                .all(|dep| placed.contains(dep) || !names.contains(dep))
+        });
+        if ready.is_empty() {
+            levels.push(waiting);
+            break;
+        }
+        placed.extend(ready.iter().map(|s| s.consumer.name()));
+        levels.push(ready);
+        slots = waiting;
+    }
+    levels
 }
 
 enum Delivery {
@@ -826,6 +887,66 @@ mod tests {
         let err = pump.retry_dead_letter(letter.id).await.unwrap_err();
         assert!(err.to_string().contains("expired"), "{err}");
         assert_eq!(seen(&db, "rec").await, Vec::<String>::new());
+    }
+
+    /// Records the order consumers handled events in, shared across them.
+    struct Ordered {
+        name: &'static str,
+        after: &'static [&'static str],
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncEventConsumer for Ordered {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn after(&self) -> &'static [&'static str] {
+            self.after
+        }
+        fn handles(&self, event_type: &str) -> bool {
+            event_type == "config.changed"
+        }
+        async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
+            let key = event.envelope.payload["key"].as_str().unwrap_or("");
+            self.log.lock().push(format!("{}:{key}", self.name));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_consumer_that_runs_after_another_waits_for_its_checkpoint() {
+        let (db, store) = setup().await;
+        store.append(config_changed("e1")).await.unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let pump = Arc::new(EventPump::new(db.clone(), store.clone(), vec![]));
+        // Registered first, so a plain run reaches it first.
+        pump.register_async(Arc::new(Ordered {
+            name: "second",
+            after: &["first"],
+            log: log.clone(),
+        }));
+        pump.register_async(Arc::new(Ordered {
+            name: "first",
+            after: &[],
+            log: log.clone(),
+        }));
+        let report = pump.run_once().await.unwrap();
+        assert_eq!((report.handled, report.deferred), (1, 1));
+        assert_eq!(store.checkpoint("second".into()).await.unwrap(), 0);
+        pump.run_once().await.unwrap();
+        assert_eq!(*log.lock(), vec!["first:e1", "second:e1"]);
+
+        // A settle of both runs them in order and completes.
+        store.append(config_changed("e2")).await.unwrap();
+        assert!(
+            pump.settle(&["second", "first"], Duration::from_secs(5))
+                .await
+        );
+        assert_eq!(
+            *log.lock(),
+            vec!["first:e1", "second:e1", "first:e2", "second:e2"]
+        );
     }
 
     #[tokio::test]

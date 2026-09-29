@@ -196,8 +196,11 @@ hook + MCP wiring):
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
   MCP `record_test_run` / `ingest_coverage` paths log them too, anchored to
   the thread. The hook waits ≤2.5 s for the `collection` and
-  `advisories.post_tool` consumers (`EventPump::settle`, which runs them side
-  by side) and then returns the thread's **undelivered** nudges; one that
+  `advisories.post_tool` consumers (`EventPump::settle`; the advisories
+  consumer declares `after: [collection]`, so it sees a run only once
+  collection has recorded it — an advisory reading `v_effort_observation`
+  judges the run's own coverage, tsk506) and then returns the thread's
+  **undelivered** nudges; one that
   lands later goes out on the thread's next tool call.
   **Landed commits also feed the wasted-token leg (tsk77):** any detected
   commit — including `git revert`, which needs its own `detect_git_revert`
