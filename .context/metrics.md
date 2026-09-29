@@ -1343,6 +1343,13 @@ the deferred backfill (tsk38). The now-orphaned legacy reads
 
 ### Run attribution grain — the ledger, not the clock (tsk260/tsk269)
 
+> **P3 (tsk476):** a run the `collection` reactor records carries the tool
+> event that ran it: the capture is keyed `test-run:<event id>` (a
+> redelivery records nothing new), the effort the command ran in owns it
+> (the event's effort anchor, after an `OXPLOW_TASK=` token), and its
+> `test.run.recorded` is anchored to the turn. `metric_capture` itself has
+> no turn column yet (tsk483), so turn-grain reads go through the event.
+
 **The capture IS the run (T-E1, tsk48).** Agent-work runs — tests, coverage,
 analysis — are **observe-always**: every run writes its `metric_capture` + facts
 regardless of how many efforts are open, attributed through the `capture.effort_id` stamp

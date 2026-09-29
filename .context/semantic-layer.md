@@ -107,7 +107,7 @@ metrics.md.
 | lsp | diagnostic, symbol, reference | diagnostic counts by severity |
 | tests & coverage | test_run, test_case | coverage, pass/fail |
 | code metrics | function, file | complexity, length, params |
-| agent | session, turn, tool_call, hook_event, context_read | tokens, struggle |
+| agent | session, turn, tool_call, agent event (`v_event` `agent.*`), context_read | tokens, struggle |
 | ai | ai_call | tokens, latency |
 | usage | page_visit | — |
 

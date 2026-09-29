@@ -606,7 +606,8 @@ each other:
    checkpointed and dead-lettered, so a crash between commit and
    projection can't leave the graph stale. As writes gain events this
    replaces (3) for them; see [data-model.md](./data-model.md)
-   "event_log".
+   "event_log" — its consumer table lists every reaction to the log
+   (agent activity, collection, tokens and search run there since P3).
 
 When a single writer owns the WHOLE source (wiki sync, findings
 write, commit indexer), use the simpler `replace_source` instead.

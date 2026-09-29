@@ -1189,6 +1189,25 @@ Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
 (tsk437 review).
 
+**The consumers (after P3).** Every reaction to the log, by checkpoint
+name. "Boot" consumers are registered by `Services::boot` and run wherever
+`Services` does (tests included); "boot.rs" ones need an `Arc<Services>`
+and are registered by `crate::boot` — a test that wants them calls their
+`register` itself.
+
+| Consumer | Kind | On | Does | Registered |
+|---|---|---|---|---|
+| `page_ref.work_item` | sync | `work_item.created` / `edited` | re-projects a task's body-mention edges | boot |
+| `tool_call.project` | sync | `agent.tool.finished` | the `agent_tool_call` row (one per event) | boot |
+| `wiki.attribution` | sync | `agent.tool.finished` | marks an edited, indexed wiki page touched by the thread | boot |
+| `effort.lifecycle` | async | `effort.opened` / `closed` | snapshot pins, reconcile (after settling `effort.claim`), metrics; logs `effort.finished` | boot |
+| `effort.claim` | async | `agent.tool.finished` | claims an edited file for the effort it was edited in | boot |
+| `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
+| `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
+| `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
+| `effort.evidence` / `effort.decisions` / `effort.gauges` | async | `effort.finished` | evidence rows, inferred decisions, on-effort gauges | boot.rs |
+| `search.index` | async | `work_item.*`, `snapshot.taken` | the search index for tasks and snapshot files | boot.rs |
+
 **Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
 handles(type), async handle(&StoredEvent) }` is for work that can't run
 in a SQLite transaction (take a snapshot, call a service). The pump runs
