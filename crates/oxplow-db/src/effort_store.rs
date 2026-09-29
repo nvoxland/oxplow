@@ -787,7 +787,8 @@ impl SqliteEffortStore {
     /// Backfill the start-snapshot pin on an effort opened by the
     /// transactional lifecycle transition. The snapshot is requested
     /// AFTER that transaction commits, so a snapshot failure degrades
-    /// to "effort without a pin" rather than "no effort row".
+    /// to "effort without a pin" rather than "no effort row". Only an
+    /// unpinned effort is stamped: a redelivered event can't move a pin.
     pub async fn set_start_snapshot(
         &self,
         id: &EffortId,
@@ -797,7 +798,8 @@ impl SqliteEffortStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE effort SET start_snapshot_id = ?2 WHERE id = ?1",
+                    "UPDATE effort SET start_snapshot_id = ?2
+                     WHERE id = ?1 AND start_snapshot_id IS NULL",
                     params![id.value(), snapshot_id],
                 )?;
                 Ok(())
@@ -805,7 +807,8 @@ impl SqliteEffortStore {
             .await
     }
 
-    /// Backfill the end-snapshot pin. See [`Self::set_start_snapshot`].
+    /// Backfill the end-snapshot pin, when it's still unset. See
+    /// [`Self::set_start_snapshot`].
     pub async fn set_end_snapshot(
         &self,
         id: &EffortId,
@@ -815,7 +818,8 @@ impl SqliteEffortStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE effort SET end_snapshot_id = ?2 WHERE id = ?1",
+                    "UPDATE effort SET end_snapshot_id = ?2
+                     WHERE id = ?1 AND end_snapshot_id IS NULL",
                     params![id.value(), snapshot_id],
                 )?;
                 Ok(())

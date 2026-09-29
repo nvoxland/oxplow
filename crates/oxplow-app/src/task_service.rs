@@ -144,6 +144,9 @@ pub struct TaskService {
 /// for the startup sweep. It only bounds a stuck pump.
 const LIFECYCLE_SETTLE: std::time::Duration = std::time::Duration::from_secs(600);
 
+/// The producer of an effort's lifecycle facts (one capture per effort).
+const LIFECYCLE_PRODUCER: &str = "effort-lifecycle";
+
 /// Returns true iff any item in `items` has this id as its parent_id.
 fn is_epic(item: &Task, items: &[Task]) -> bool {
     items.iter().any(|c| c.parent_id == Some(item.id))
@@ -517,6 +520,18 @@ impl TaskService {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
         };
+        // Once per effort: a redelivered close (a crash before the pump's
+        // checkpoint, a dead-letter retry) finds its capture and stops.
+        if let Some(facts) = self.fact_store.as_ref() {
+            match facts.captures_for_effort(effort_id.value()).await {
+                Ok(caps) if caps.iter().any(|c| c.producer == LIFECYCLE_PRODUCER) => return,
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "effort lifecycle metrics: capture lookup failed");
+                    return;
+                }
+            }
+        }
         let Some(ended_at) = effort.ended_at else {
             return; // not actually closed — nothing to measure
         };
@@ -839,7 +854,7 @@ impl TaskService {
                     return Ok::<(), DomainError>(());
                 }
                 let mut capture =
-                    NewMetricCapture::done(stream_val, "effort-lifecycle", "effort-lifecycle");
+                    NewMetricCapture::done(stream_val, LIFECYCLE_PRODUCER, LIFECYCLE_PRODUCER);
                 capture.thread_id = Some(thread_id.value());
                 capture.effort_id = Some(effort_id.value());
                 capture.trigger = Some("on-effort-complete".into());
@@ -1972,6 +1987,66 @@ mod tests {
                 .is_empty(),
             "a synthesized effort has no real duration — better absent than 0"
         );
+    }
+
+    /// Review of P2.6 (tsk462): re-delivering a close (a crash before the
+    /// checkpoint, a dead-letter retry) projects the lifecycle facts once
+    /// and keeps the first end pin.
+    #[tokio::test]
+    async fn a_redelivered_close_records_its_lifecycle_once() {
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "twice".into(),
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let primary = captures.primary().unwrap();
+        std::fs::write(project.path().join("work.txt"), "w").unwrap();
+        primary.mark_dirty(
+            project.path().join("work.txt"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        svc.update(
+            item.id,
+            UpdateTaskChanges {
+                status: Some(TaskStatus::Done),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let effort = effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap()
+            .remove(0);
+        let facts = svc.fact_store.as_ref().unwrap();
+        let lifecycle = |caps: Vec<oxplow_db::MetricCapture>| {
+            caps.iter()
+                .filter(|c| c.producer == "effort-lifecycle")
+                .count()
+        };
+        let before = lifecycle(facts.captures_for_effort(effort.id.value()).await.unwrap());
+        assert_eq!(before, 1);
+
+        assert!(effort.end_snapshot_id.is_some());
+        // The tree moves on, then the close is handled again.
+        std::fs::write(project.path().join("later.txt"), "x").unwrap();
+        primary.mark_dirty(
+            project.path().join("later.txt"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        svc.on_effort_closed(effort.id, false).await.unwrap();
+        let after = lifecycle(facts.captures_for_effort(effort.id.value()).await.unwrap());
+        assert_eq!(after, 1, "no second lifecycle capture");
+        let again = effort_store.get_effort(&effort.id).await.unwrap().unwrap();
+        assert_eq!(again.end_snapshot_id, effort.end_snapshot_id);
     }
 
     #[tokio::test]

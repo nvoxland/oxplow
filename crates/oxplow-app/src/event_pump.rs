@@ -353,14 +353,15 @@ impl EventPump {
                 letter.state
             )));
         }
-        if let Some(consumer) = self
+        if let Some(slot) = self
             .async_slots()
             .into_iter()
-            .map(|s| s.consumer.clone())
-            .find(|c| c.name() == letter.consumer)
+            .find(|s| s.consumer.name() == letter.consumer)
         {
+            // Under the consumer's lock: a retry never races its loop.
+            let _one_run = slot.lock.lock().await;
             return self
-                .retry_async_letter(consumer, id, letter.event_seq)
+                .retry_async_letter(slot.consumer.clone(), id, letter.event_seq)
                 .await;
         }
         let consumer = self
