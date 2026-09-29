@@ -582,6 +582,7 @@ impl SnapshotCaptureService {
         // One lock from the drain to the stamp: a take slipping in between
         // would capture a fresh edit that the stamp would then call HEAD.
         let started = Instant::now();
+        self.predrain().await;
         let _serialized = self.inner.take_lock.lock().await;
         let after_drain = self
             .capture_inner(SnapshotTrigger::GitRefs.into(), started)
@@ -1361,8 +1362,22 @@ impl SnapshotCaptureService {
         // The clock starts before the lock: waiting behind another take
         // counts against this one's budget.
         let started = Instant::now();
+        self.predrain().await;
         let _serialized = self.inner.take_lock.lock().await;
         self.capture_inner(req, started).await
+    }
+
+    /// Yield long enough for the fs-watch debouncer + broadcast hop +
+    /// `run_watcher` to drain in-flight events into the dirty set.
+    /// Without this, an edit that landed on disk less than 250 ms before
+    /// a take hasn't propagated yet and the take misses it — see
+    /// `DEFAULT_PREDRAIN_DELAY`. Done BEFORE taking the lock, so queued
+    /// takes wait for it in parallel rather than one after another.
+    async fn predrain(&self) {
+        let predrain = self.inner.predrain_delay;
+        if !predrain.is_zero() {
+            tokio::time::sleep(predrain).await;
+        }
     }
 
     /// Body of `request_snapshot`: drain → classify / read / hash /
@@ -1372,15 +1387,6 @@ impl SnapshotCaptureService {
         req: TakeRequest,
         started: Instant,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        // Yield long enough for the fs-watch debouncer + broadcast hop
-        // + `run_watcher` to drain any in-flight events into the dirty
-        // set. Without this, an edit that landed on disk less than
-        // 250 ms before this call hasn't propagated yet and we'd
-        // capture an empty bracket — see `DEFAULT_PREDRAIN_DELAY`.
-        let predrain = self.inner.predrain_delay;
-        if !predrain.is_zero() {
-            tokio::time::sleep(predrain).await;
-        }
         let drained: Vec<(PathBuf, DirtyEntry)> = {
             let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
             set.drain().collect()
@@ -1654,17 +1660,24 @@ impl SnapshotCaptureService {
         rows: Vec<FileSnapshot>,
         started: Instant,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        let project_dir = self.inner.project_dir.clone();
-        let (git_branch, git_commit) = tokio::task::spawn_blocking(move || {
-            let branch = oxplow_git::detect_current_branch(&project_dir);
-            let clean = oxplow_git::list_git_statuses(&project_dir).is_empty();
-            let commit = clean
-                .then(|| oxplow_git::head_commit_sha(&project_dir))
-                .flatten();
-            (branch, commit)
-        })
-        .await
-        .unwrap_or((None, None));
+        // A take with no rows records no new snapshot, so it needs no
+        // branch or commit — skip the git probes (a `git status` on a big
+        // repo is most of an empty take's cost).
+        let (git_branch, git_commit) = if rows.is_empty() {
+            (None, None)
+        } else {
+            let project_dir = self.inner.project_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                let branch = oxplow_git::detect_current_branch(&project_dir);
+                let clean = oxplow_git::list_git_statuses(&project_dir).is_empty();
+                let commit = clean
+                    .then(|| oxplow_git::head_commit_sha(&project_dir))
+                    .flatten();
+                (branch, commit)
+            })
+            .await
+            .unwrap_or((None, None))
+        };
         let take = TakeRecord {
             stream_id: self.inner.stream_id,
             rows,

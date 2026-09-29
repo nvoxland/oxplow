@@ -175,7 +175,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         id: &AgentTurnId,
         answer: Option<String>,
         outcome: TurnOutcome,
-    ) -> Result<(), DomainError> {
+    ) -> Result<bool, DomainError> {
         let id = *id;
         let now = ts_to_string(Timestamp::now());
         let schemas = self.event_schemas.clone();
@@ -192,7 +192,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     .optional()
                     .map_err(map_sql_err)?;
                 let Some(thread) = thread.map(ThreadId::new) else {
-                    return Ok(()); // already closed
+                    return Ok(false); // already closed
                 };
                 let env = Envelope::typed::<AgentTurnEnded>(
                     "hook_ingest",
@@ -205,7 +205,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 .with_anchors(turn_anchors(tx, thread, id)?)
                 .with_subject([format!("turn:{id}"), format!("thread:{thread}")]);
                 append_tx(tx, &schemas, &env)?;
-                Ok(())
+                Ok(true)
             })
             .await
     }

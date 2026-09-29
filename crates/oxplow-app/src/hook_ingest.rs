@@ -146,7 +146,8 @@ impl HookIngestService {
                     .await?;
             }
             HookKind::Stop => {
-                self.close_open_turns(&thread, None, TurnOutcome::Completed)
+                let ended = self
+                    .close_open_turns(&thread, None, TurnOutcome::Completed)
                     .await?;
                 // Did the agent park on the user this turn? Two signals:
                 //  - a sentinel in THIS Stop payload (kept for the
@@ -176,6 +177,9 @@ impl HookIngestService {
                         (AgentStatusState::Idle, None)
                     };
                 self.set_status(&thread, state, detail).await?;
+                // The status is out first: the snapshot is bookkeeping and
+                // must not hold the UI on "running".
+                self.take_turn_end(&thread, ended).await;
             }
             HookKind::SubagentStop => {
                 // A Task-tool subagent finished. The parent agent is
@@ -184,14 +188,16 @@ impl HookIngestService {
                 // at the top of ingest; that's all we need here.
             }
             HookKind::Interrupt => {
-                self.close_open_turns(
-                    &thread,
-                    Some("interrupted".into()),
-                    TurnOutcome::Interrupted,
-                )
-                .await?;
+                let ended = self
+                    .close_open_turns(
+                        &thread,
+                        Some("interrupted".into()),
+                        TurnOutcome::Interrupted,
+                    )
+                    .await?;
                 self.set_status(&thread, AgentStatusState::Stopped, Some("interrupt".into()))
                     .await?;
+                self.take_turn_end(&thread, ended).await;
             }
             HookKind::AgentBoot => {
                 self.set_status(&thread, AgentStatusState::Idle, Some("boot".into()))
@@ -241,26 +247,37 @@ impl HookIngestService {
         Ok(stored.id)
     }
 
+    /// Close the thread's open turns. Returns the most recent turn THIS
+    /// call closed (a concurrent Stop that got there first closes nothing
+    /// here), which is the one the turn-end snapshot belongs to.
     async fn close_open_turns(
         &self,
         thread: &ThreadId,
         answer: Option<String>,
         outcome: TurnOutcome,
-    ) -> Result<(), HookIngestError> {
+    ) -> Result<Option<AgentTurnId>, HookIngestError> {
+        // `list_open` is newest first.
         let open = self.turns.list_open(thread).await?;
-        let closed_any = !open.is_empty();
+        let mut latest_closed = None;
         for t in open {
-            self.turns.close(&t.id, answer.clone(), outcome).await?;
-            // The turn ends at a snapshot; bounded by the turn budget.
-            if let Some(snapshots) = &self.turn_snapshots {
-                snapshots.take_turn_end(*thread, t.id).await;
+            if self.turns.close(&t.id, answer.clone(), outcome).await? && latest_closed.is_none() {
+                latest_closed = Some(t.id);
             }
         }
-        if closed_any {
+        if latest_closed.is_some() {
             self.events
                 .emit(OxplowEvent::AgentTurnsChanged { thread_id: *thread });
         }
-        Ok(())
+        Ok(latest_closed)
+    }
+
+    /// The turn ends at a snapshot, bounded by the turn budget. One take
+    /// per Stop: an older turn left open alongside (a missed Stop) closes
+    /// without one of its own.
+    async fn take_turn_end(&self, thread: &ThreadId, turn: Option<AgentTurnId>) {
+        if let (Some(snapshots), Some(turn)) = (&self.turn_snapshots, turn) {
+            snapshots.take_turn_end(*thread, turn).await;
+        }
     }
 
     /// Set and announce a thread's status directly (the ACP session's

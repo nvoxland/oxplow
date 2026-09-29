@@ -1867,6 +1867,13 @@ when takes happen.
   `effort_end`, a commit's `git_refs`, another thread's turn end) move
   that, and the usual flow — edit, `complete_task`, Stop — would read as
   a turn that changed nothing (V99, tsk438).
+- **Order and cost (tsk441).** The Stop/interrupt handler closes the
+  turn, sets the agent status (so the UI isn't held on "running"), then
+  takes the snapshot. One take per Stop, for the newest turn this call
+  closed — `AgentTurnStore::close` reports whether it closed anything,
+  so a repeated Stop takes nothing. The 300 ms pre-drain runs before the
+  take lock (queued takes wait in parallel), and a take with no rows
+  skips the git branch/status/HEAD probes.
 - **The budget.** The Stop hook waits at most `snapshotTurnBudgetMs`
   (default 2000, min 100; a `config.set` key, not human-only). A slower
   take is never aborted: it finishes in the background and its op and

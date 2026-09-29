@@ -179,6 +179,21 @@ mod tests {
             .unwrap();
         assert!(changed.iter().any(|c| c.path == "made.txt"), "{changed:?}");
 
+        // A second Stop (a harness repeating itself) closes nothing and
+        // takes nothing.
+        svc.hook_ingest
+            .ingest(envelope(HookKind::Stop, f.thread))
+            .await
+            .unwrap();
+        let after = svc.snapshot_store.list_ops(stream, 10).await.unwrap();
+        assert_eq!(
+            after
+                .iter()
+                .filter(|o| o.turn_id == Some(turn.value()))
+                .count(),
+            1
+        );
+
         // The turn's own events carry the anchor too.
         let mut anchored: Vec<String> = svc
             .event_log_store

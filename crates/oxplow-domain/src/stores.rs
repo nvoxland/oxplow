@@ -155,14 +155,15 @@ pub trait AgentTurnStore: Send + Sync {
     /// Open a turn. When `turn.id` is the placeholder a fresh
     /// autoincrement id is allocated; returns the effective id.
     async fn open(&self, turn: &AgentTurn) -> Result<AgentTurnId, DomainError>;
-    /// Close an open turn (no-op when already closed), logging
-    /// `agent.turn.ended` with `outcome` in the same transaction.
+    /// Close an open turn, logging `agent.turn.ended` with `outcome` in
+    /// the same transaction. Returns whether this call closed it (`false`
+    /// when it was already closed — nothing is logged then).
     async fn close(
         &self,
         id: &AgentTurnId,
         answer: Option<String>,
         outcome: crate::hook::TurnOutcome,
-    ) -> Result<(), DomainError>;
+    ) -> Result<bool, DomainError>;
     async fn get(&self, id: &AgentTurnId) -> Result<Option<AgentTurn>, DomainError>;
     async fn list_open(&self, thread: &ThreadId) -> Result<Vec<AgentTurn>, DomainError>;
     /// Every open agent_turn across every thread. Used by daemon
