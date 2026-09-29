@@ -226,6 +226,55 @@ mod tests {
         assert_eq!(runs.as_array().unwrap().len(), 2);
     }
 
+    /// P4.1 (tsk486): every query a bundled extension ships — lens,
+    /// advisory, source input — reads only published views, never a
+    /// physical table (what the authorizer will refuse, P4.3).
+    #[tokio::test]
+    async fn bundled_queries_read_only_published_views() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let bundled: Vec<&str> = super::BUNDLED.iter().map(|b| b.name).collect();
+        let mut checked = 0;
+        for ext in f.svc.extension_catalog.get(f._dir.path()).iter() {
+            if !bundled.contains(&ext.name.as_str()) {
+                continue;
+            }
+            let queries = ext
+                .lenses
+                .iter()
+                .map(|l| (format!("lens {}", l.id), l.query.clone()))
+                .chain(
+                    ext.advisories
+                        .iter()
+                        .map(|a| (format!("advisory {}", a.id), a.query.clone())),
+                )
+                .chain(ext.sources.iter().filter_map(|s| {
+                    s.input
+                        .clone()
+                        .map(|q| (format!("source {} input", s.id), q))
+                }));
+            for (what, sql) in queries {
+                let reads = f
+                    .svc
+                    .sql
+                    .check(&sql)
+                    .await
+                    .unwrap_or_else(|e| panic!("{}/{what}: {e}", ext.name));
+                let physical: Vec<&String> = reads
+                    .tables
+                    .iter()
+                    .filter(|t| !t.starts_with("temp."))
+                    .collect();
+                assert!(
+                    physical.is_empty(),
+                    "{}/{what} reads {physical:?}",
+                    ext.name
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 30, "only {checked} bundled queries found");
+    }
+
     /// Run an oxplow-analytics lens with one integer param; its rows as JSON.
     async fn run_analytics_lens(
         f: &crate::test_fixtures::EffortFixture,
@@ -243,7 +292,7 @@ mod tests {
         id: &str,
         params: &[(&str, i64)],
     ) -> serde_json::Value {
-        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let params = params
             .iter()
             .map(|(k, v)| (k.to_string(), oxplow_db::SqlCell::Int(*v)))
@@ -631,7 +680,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let ctx = crate::extensions::lens_context(&f.svc, None, None).await;
         let first = |id: &'static str, ctx: crate::extensions::LensContext| {
             let layer = layer.clone();
@@ -679,7 +728,7 @@ mod tests {
             .slots
             .iter()
             .any(|s| s.slot == "rail" && s.lens_id == "oxplow-review/waiting-on-me"));
-        let layer = oxplow_db::SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
         let run = crate::extensions::run_lens(
             &layer,

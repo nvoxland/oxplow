@@ -267,7 +267,7 @@ mod tests {
     }
 
     async fn rows(svc: &crate::Services, sql: &'static str) -> serde_json::Value {
-        let sl = oxplow_db::SemanticLayer::new(svc.db.clone());
+        let sl = crate::sql_gateway::SqlGateway::new(svc.db.clone());
         serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
     }
 

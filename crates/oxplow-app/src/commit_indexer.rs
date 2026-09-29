@@ -384,7 +384,7 @@ mod tests {
         assert_eq!(n, 1, "should index the one commit");
 
         // The commit, its file and its task mention read through v_*.
-        let sl = oxplow_db::SemanticLayer::new(db.clone());
+        let sl = crate::sql_gateway::SqlGateway::new(db.clone());
         let q = |sql: &'static str| {
             let sl = sl.clone();
             async move {

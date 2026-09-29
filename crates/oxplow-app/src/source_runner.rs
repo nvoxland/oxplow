@@ -23,9 +23,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use oxplow_ai::secrets::SecretStore;
-use oxplow_db::{
-    EntityTable, EntityWrite, SemanticLayer, SourceState, SqlCell, SqliteExtSourceStore, StoredType,
-};
+use oxplow_db::{EntityTable, EntityWrite, SourceState, SqlCell, SqliteExtSourceStore, StoredType};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
@@ -86,7 +84,7 @@ pub struct Sources<'a> {
     /// Where credential values are kept (the OS keychain in the app).
     pub secrets: &'a dyn SecretStore,
     /// What a derived source's `input` is read through.
-    pub layer: SemanticLayer,
+    pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
     pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
 }
@@ -99,7 +97,7 @@ impl<'a> Sources<'a> {
             approvals: &svc.approvals,
             store: &svc.ext_source_store,
             secrets: svc.secrets.as_ref(),
-            layer: SemanticLayer::new(svc.db.clone()),
+            layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
         }
     }
@@ -476,7 +474,7 @@ pub fn exec_source(
 /// Run a derived (starlark / jaq) source: read its `input` rows, then run
 /// its script over `{"rows": [...]}` in the collector sandbox.
 pub async fn derive_source(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     script: String,
     spec: &SourceSpec,
 ) -> Result<SourceOutput, String> {
@@ -1157,7 +1155,7 @@ mod tests {
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
 
@@ -1181,7 +1179,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report.row_counts["pr"], 2);
-        let out = oxplow_db::SemanticLayer::new(db)
+        let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql("SELECT title FROM v_my_gh_pr ORDER BY number", vec![], None)
             .await
             .unwrap();
@@ -1322,7 +1320,7 @@ mod tests {
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
 
@@ -1349,7 +1347,7 @@ mod tests {
             approvals: ctx.approvals,
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let other = list_sources(&elsewhere).await.unwrap();
@@ -1369,7 +1367,7 @@ mod tests {
         run_source(&ctx, "two", "s", Some(&version_of(&ctx, "two", "s").await))
             .await
             .unwrap();
-        let out = oxplow_db::SemanticLayer::new(db)
+        let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT token FROM v_one_row), (SELECT token FROM v_two_row)",
                 vec![],
@@ -1451,7 +1449,7 @@ mod tests {
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         // No approval asked for, and the listing says it can run.
@@ -1459,7 +1457,7 @@ mod tests {
         let report = run_source(&ctx, "work", "star", None).await.unwrap();
         assert_eq!(report.row_counts["hot"], 1);
         run_source(&ctx, "work", "jq", None).await.unwrap();
-        let out = oxplow_db::SemanticLayer::new(db)
+        let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT title FROM v_work_hot), (SELECT group_concat(title, ',') FROM v_work_upper)",
                 vec![],
@@ -1504,7 +1502,7 @@ mod tests {
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let preview = preview_source(&ctx, "work", "star").await.unwrap();
@@ -1525,7 +1523,7 @@ mod tests {
             "no run recorded"
         );
         assert!(
-            oxplow_db::SemanticLayer::new(db)
+            crate::sql_gateway::SqlGateway::new(db)
                 .query_sql("SELECT * FROM v_work_hot", vec![], None)
                 .await
                 .is_err(),
@@ -1556,7 +1554,7 @@ mod tests {
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         script(
@@ -1579,7 +1577,7 @@ mod tests {
             report.row_counts["item"], 2,
             "counts are the entity's total"
         );
-        let out = oxplow_db::SemanticLayer::new(db)
+        let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT (SELECT group_concat(id || title, ',') FROM (SELECT * FROM v_inc_item ORDER BY id)), (SELECT count(*) FROM v_inc_other)",
                 vec![],
@@ -1652,14 +1650,14 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
         run_source(&ctx, "net", "s", Some(&version_of(&ctx, "net", "s").await))
             .await
             .unwrap();
-        let out = oxplow_db::SemanticLayer::new(db)
+        let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql(
                 "SELECT declared, undeclared, direct FROM v_net_r",
                 vec![],
@@ -1747,7 +1745,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             approvals: &crate::exec_consent::ApprovalStore::for_tests(&state),
             store: &store,
             secrets: &secrets,
-            layer: oxplow_db::SemanticLayer::new(db.clone()),
+            layer: crate::sql_gateway::SqlGateway::new(db.clone()),
             catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let seen = list_sources(&ctx).await.unwrap()[0]

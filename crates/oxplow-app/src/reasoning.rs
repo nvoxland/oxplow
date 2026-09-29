@@ -3,7 +3,7 @@
 //! nudge when a big effort closes with none recorded. See
 //! `.context/semantic-layer.md` (`v_decision`).
 
-use oxplow_db::{SemanticLayer, SqlCell};
+use oxplow_db::SqlCell;
 
 /// Decisions shown in the context block (most recent last).
 pub const MAX_DECISIONS_IN_CONTEXT: usize = 15;
@@ -54,7 +54,10 @@ pub fn format_missing_decisions_hint(files: i64, decisions: i64) -> Option<Strin
 
 /// `effort_id`'s decisions as a context block (see
 /// [`format_decisions_block`]).
-pub async fn effort_decisions_block(layer: &SemanticLayer, effort_id: i64) -> Option<String> {
+pub async fn effort_decisions_block(
+    layer: &crate::sql_gateway::SqlGateway,
+    effort_id: i64,
+) -> Option<String> {
     let out = layer
         .query_sql(
             // Only what the agent recorded: inferred decisions are
@@ -89,7 +92,10 @@ pub async fn effort_decisions_block(layer: &SemanticLayer, effort_id: i64) -> Op
 
 /// The `complete_task` nudge for `effort_id` (see
 /// [`format_missing_decisions_hint`]).
-pub async fn missing_decisions_hint(layer: &SemanticLayer, effort_id: i64) -> Option<String> {
+pub async fn missing_decisions_hint(
+    layer: &crate::sql_gateway::SqlGateway,
+    effort_id: i64,
+) -> Option<String> {
     let out = layer
         .query_sql(
             "SELECT (SELECT count(*) FROM v_effort_file WHERE effort_id = ?1),
@@ -169,7 +175,7 @@ mod tests {
             .replace_inferred(effort, vec![d("guessed")])
             .await
             .unwrap();
-        let layer = SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         assert_eq!(effort_decisions_block(&layer, effort).await, None);
         f.svc
             .reasoning_store

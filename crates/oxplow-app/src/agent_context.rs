@@ -207,11 +207,7 @@ impl AgentContext {
             .await
             .ok()
             .flatten()?;
-        let block = crate::reasoning::effort_decisions_block(
-            &oxplow_db::SemanticLayer::new(svc.db.clone()),
-            effort.id.value(),
-        )
-        .await?;
+        let block = crate::reasoning::effort_decisions_block(&svc.sql, effort.id.value()).await?;
         let key = session_id.map(|s| format!("{s}{DECISIONS_KEY_SUFFIX}"));
         self.should_emit(key.as_deref(), &block).then_some(block)
     }

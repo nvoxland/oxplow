@@ -5325,7 +5325,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let out = oxplow_db::SemanticLayer::new(h.db.clone())
+            let out = crate::sql_gateway::SqlGateway::new(h.db.clone())
                 .query_sql(
                     "SELECT key, baseline, current, delta FROM v_effort_metric_delta",
                     vec![],

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use oxplow_app::extension_catalog::ExtensionCatalog;
 use oxplow_app::extensions::{self, Extension, EXTENSIONS_DIR};
-use oxplow_db::SemanticLayer;
+use oxplow_app::sql_gateway::SqlGateway;
 use oxplow_domain::DomainError;
 use serde::Serialize;
 
@@ -195,7 +195,7 @@ pub async fn check(
     root: &Path,
     name: &str,
     catalog: &ExtensionCatalog,
-    layer: Option<&SemanticLayer>,
+    layer: Option<&SqlGateway>,
 ) -> Result<CheckReport, SdkError> {
     let extension = match layer {
         Some(layer) => extensions::validate_extension(layer, catalog, root, name).await,

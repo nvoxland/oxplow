@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use oxplow_db::{SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell};
+use oxplow_db::{SchemaColumn, SchemaEntity, SchemaRelation, SqlCell};
 
 use crate::extension_sources::ColumnType;
 use oxplow_domain::DomainError;
@@ -12,12 +12,12 @@ use oxplow_domain::DomainError;
 /// Core entities first, then extension entities (owner = extension
 /// name), read from `root/oxplow/extensions/`.
 pub async fn describe_schema(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<SchemaEntity>, DomainError> {
     let mut all = layer.describe_schema().await?;
-    let existing = existing_views(layer).await?;
+    let existing = layer.view_names().await?;
     for ext in catalog.get(root).iter() {
         for source in &ext.sources {
             for e in &source.entities {
@@ -65,28 +65,6 @@ fn sql_type(t: ColumnType) -> &'static str {
     }
 }
 
-/// Names of every view in the database (read through the same read-only
-/// path as `query_sql`).
-async fn existing_views(
-    layer: &SemanticLayer,
-) -> Result<std::collections::HashSet<String>, DomainError> {
-    let out = layer
-        .query_sql(
-            "SELECT name FROM sqlite_master WHERE type = 'view'",
-            vec![],
-            Some(10_000),
-        )
-        .await?;
-    Ok(out
-        .rows
-        .into_iter()
-        .filter_map(|r| match r.into_iter().next() {
-            Some(SqlCell::Text(t)) => Some(t),
-            _ => None,
-        })
-        .collect())
-}
-
 /// Rows in one entity right now.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -98,7 +76,7 @@ pub struct EntityRowCount {
 
 /// Row counts for every entity in [`describe_schema`] (Settings → Data).
 pub async fn row_counts(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<EntityRowCount>, DomainError> {
@@ -138,7 +116,7 @@ mod tests {
         )
         .unwrap();
         let db = Database::in_memory();
-        let layer = SemanticLayer::new(db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(db.clone());
         let counts = row_counts(
             &layer,
             &crate::extension_catalog::ExtensionCatalog::new(),
@@ -186,7 +164,7 @@ mod tests {
         )
         .unwrap();
         let db = Database::in_memory();
-        let layer = SemanticLayer::new(db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(db.clone());
 
         let all = describe_schema(
             &layer,

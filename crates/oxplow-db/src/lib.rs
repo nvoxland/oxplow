@@ -30,6 +30,7 @@ pub mod reasoning_store;
 pub mod search_store;
 pub mod semantic_layer;
 pub mod snapshot_tree;
+pub mod sql_tokens;
 mod stream_store;
 pub mod task_satellite;
 pub mod task_store;
@@ -82,7 +83,8 @@ pub use page_ref_store::{PageRefEdge, PageRefStore, SqlitePageRefStore};
 pub use reasoning_store::{NewClaim, NewDecision, SqliteReasoningStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
-    SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlQueryResult,
+    Reads, SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlParams, SqlQuery,
+    SqlQueryResult,
 };
 pub use snapshot_tree::{ContentHasher, SnapshotTree, TreeEntry};
 pub use stream_store::SqliteStreamStore;

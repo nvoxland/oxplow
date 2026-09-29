@@ -523,7 +523,7 @@ mod tests {
 
     /// `v_ai_call` rows as `[role, caller, ok, error is set, input_tokens]`.
     async fn recorded(db: &Database) -> serde_json::Value {
-        let out = oxplow_db::SemanticLayer::new(db.clone())
+        let out = crate::sql_gateway::SqlGateway::new(db.clone())
             .query_sql(
                 "SELECT role, caller, ok, error IS NOT NULL, input_tokens FROM v_ai_call ORDER BY id",
                 vec![],

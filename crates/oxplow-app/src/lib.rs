@@ -81,6 +81,7 @@ pub mod snapshot_conformance;
 pub mod snapshot_content;
 pub mod snapshot_files;
 pub mod source_runner;
+pub mod sql_gateway;
 pub mod task_service;
 pub mod task_writes;
 pub mod terminal_sessions;
@@ -410,6 +411,8 @@ pub struct Services {
     /// append inside their own transaction via `event_log_store::append_tx`;
     /// this handle is for reads and the pump.
     pub event_log_store: Arc<SqliteEventLogStore>,
+    /// The one way a query reaches the semantic layer (P4.1).
+    pub sql: sql_gateway::SqlGateway,
     /// Every event `type@v` the log accepts, with its schema. Core types
     /// at boot; plugin types join when their manifests load.
     pub event_schemas: Arc<EventSchemaRegistry>,
@@ -552,6 +555,7 @@ impl Services {
             approvals: self.approvals.clone(),
             extension_catalog: self.extension_catalog.clone(),
             db: self.db.clone(),
+            sql: self.sql.clone(),
             collection: self.collection.clone(),
         }
     }
@@ -616,6 +620,7 @@ impl Services {
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
+        let sql = sql_gateway::SqlGateway::new(db.clone());
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
@@ -952,6 +957,7 @@ impl Services {
                 approvals: approvals.clone(),
                 extension_catalog: extension_catalog.clone(),
                 db: db.clone(),
+                sql: sql.clone(),
                 collection: collection.clone(),
             },
         }));
@@ -969,6 +975,7 @@ impl Services {
             work_note_store,
             task_link_store,
             event_log_store,
+            sql,
             event_schemas,
             event_pump,
             extension_catalog,

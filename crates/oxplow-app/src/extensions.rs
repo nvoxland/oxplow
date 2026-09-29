@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use oxplow_db::{SemanticLayer, SqlCell, SqlQueryResult};
+use oxplow_db::{SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
@@ -1319,7 +1319,7 @@ pub async fn lens_context(
 /// defaults, and query the semantic layer. Unknown params are rejected,
 /// so a typo doesn't silently fall back to a default.
 pub async fn run_lens(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     id: &str,
@@ -1365,7 +1365,7 @@ fn explain_unsynced(
 }
 
 async fn execute(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     lens: Lens,
     supplied: BTreeMap<String, SqlCell>,
     ctx: &LensContext,
@@ -1398,7 +1398,11 @@ async fn execute(
     let named: Vec<(String, SqlCell)> =
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let result = layer
-        .query_sql_named(&lens.query, named, None)
+        .run(
+            oxplow_db::SqlQuery::new(&lens.query)
+                .named(named)
+                .limit(None),
+        )
         .await
         .map_err(|e| match e {
             DomainError::Invalid(m) => DomainError::Invalid(format!("lens {}: {m}", lens.id)),
@@ -1417,7 +1421,7 @@ async fn execute(
 /// reporting query failures and `columns` keys the query doesn't
 /// return as errors.
 pub async fn validate_extension(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
@@ -1430,17 +1434,17 @@ pub async fn validate_extension(
 /// Dry-run a loaded extension's advisories and lenses, appending what's
 /// wrong to its `errors`. `root` names sources for an unsynced view.
 async fn check_extension(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     ext: &mut Extension,
 ) {
     for a in ext.advisories.clone() {
         let run = layer
-            .query_sql_named(
-                &a.query,
-                vec![("effort_id".into(), SqlCell::Null(()))],
-                None,
+            .run(
+                oxplow_db::SqlQuery::new(&a.query)
+                    .named(vec![("effort_id".into(), SqlCell::Null(()))])
+                    .limit(None),
             )
             .await;
         match run {
@@ -1533,7 +1537,7 @@ pub struct ExtensionReview {
 /// Clone an extension and report what it declares, installing nothing.
 /// `replacing` names the installed extension an update must match.
 pub async fn review_extension(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     git_url: &str,
@@ -1567,7 +1571,7 @@ pub async fn review_extension(
 /// [`review_extension`] for an update: the installed extension's recorded
 /// source.
 pub async fn review_update(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
@@ -1989,8 +1993,8 @@ columns:
 empty: No tasks.
 "#;
 
-    async fn layer() -> SemanticLayer {
-        SemanticLayer::new(Database::in_memory())
+    async fn layer() -> crate::sql_gateway::SqlGateway {
+        crate::sql_gateway::SqlGateway::new(Database::in_memory())
     }
 
     /// Project extensions only (bundled ones are always present).

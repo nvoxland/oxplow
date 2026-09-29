@@ -1487,7 +1487,7 @@ impl OxplowMcp {
                 let ctx =
                     oxplow_app::extensions::lens_context(&self.services, None, Some(thread)).await;
                 lens_run = match oxplow_app::extensions::run_lens(
-                    &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+                    &self.services.sql,
                     &self.services.extension_catalog,
                     &root,
                     lens_id,
@@ -1831,7 +1831,7 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(p.stream_id.as_deref())
             .await;
-        let layer = oxplow_db::SemanticLayer::new(self.services.db.clone());
+        let layer = self.services.sql.clone();
         let review = match (p.git_url.as_deref(), p.name.as_deref()) {
             (Some(url), None) => {
                 oxplow_app::extensions::review_extension(
@@ -2025,7 +2025,7 @@ impl OxplowMcp {
             .lens_context(p.stream_id.as_deref(), p.thread_id.as_deref())
             .await?;
         let run = oxplow_app::extensions::run_lens(
-            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &self.services.sql,
             &self.services.extension_catalog,
             &root,
             &p.id,
@@ -2098,7 +2098,7 @@ impl OxplowMcp {
             &root,
             &p.name,
             &self.services.extension_catalog,
-            Some(&oxplow_db::SemanticLayer::new(self.services.db.clone())),
+            Some(&self.services.sql),
         )
         .await
         .map_err(|e| match e {
@@ -2124,7 +2124,7 @@ impl OxplowMcp {
     async fn describe_schema(&self) -> Result<CallToolResult, McpError> {
         let root = self.services.git.resolve_repo_dir(None).await;
         let schema = oxplow_app::semantic_catalog::describe_schema(
-            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &self.services.sql,
             &self.services.extension_catalog,
             &root,
         )
@@ -2147,7 +2147,10 @@ impl OxplowMcp {
         params: Parameters<QuerySqlParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
-        let out = oxplow_db::SemanticLayer::new(self.services.db.clone())
+        let out = self
+            .services
+            .sql
+            .clone()
             .query_sql(
                 &p.sql,
                 p.params
@@ -4517,11 +4520,8 @@ impl OxplowMcp {
             .await
         {
             Ok(Some(effort)) => {
-                oxplow_app::reasoning::missing_decisions_hint(
-                    &oxplow_db::SemanticLayer::new(self.services.db.clone()),
-                    effort.id.value(),
-                )
-                .await
+                oxplow_app::reasoning::missing_decisions_hint(&self.services.sql, effort.id.value())
+                    .await
             }
             _ => None,
         };

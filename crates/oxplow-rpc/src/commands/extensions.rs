@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use oxplow_app::extensions::{self, Extension, Lens, LensRun, NewLens};
 use oxplow_app::Services;
-use oxplow_db::{SemanticLayer, SqlCell};
+use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 
 use crate::error::IpcError;
@@ -15,10 +15,6 @@ use crate::error::IpcError;
 /// or the primary's when `stream_id` is omitted.
 async fn root(svc: &Services, stream_id: Option<&str>) -> std::path::PathBuf {
     svc.git.resolve_repo_dir(stream_id).await
-}
-
-fn layer(svc: &Services) -> SemanticLayer {
-    SemanticLayer::new(svc.db.clone())
 }
 
 /// Every project extension in the stream's worktree (primary when
@@ -52,7 +48,7 @@ pub async fn run_lens(
     let root = root(svc, stream_id.as_deref()).await;
     let ctx = context(svc, stream_id.as_deref()).await;
     Ok(extensions::run_lens(
-        &layer(svc),
+        &svc.sql,
         &svc.extension_catalog,
         &root,
         &id,
@@ -101,7 +97,7 @@ pub async fn validate_extension(
     stream_id: Option<String>,
 ) -> Result<oxplow_sdk::CheckReport, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    oxplow_sdk::check(&root, &name, &svc.extension_catalog, Some(&layer(svc)))
+    oxplow_sdk::check(&root, &name, &svc.extension_catalog, Some(&svc.sql))
         .await
         .map_err(sdk_error)
 }
@@ -148,7 +144,7 @@ pub async fn review_extension(
     Ok(match (git_url, name) {
         (Some(url), None) => {
             extensions::review_extension(
-                &layer(svc),
+                &svc.sql,
                 &svc.extension_catalog,
                 &root,
                 &url,
@@ -158,7 +154,7 @@ pub async fn review_extension(
             .await?
         }
         (None, Some(name)) => {
-            extensions::review_update(&layer(svc), &svc.extension_catalog, &root, &name).await?
+            extensions::review_update(&svc.sql, &svc.extension_catalog, &root, &name).await?
         }
         _ => {
             return Err(IpcError::invalid(

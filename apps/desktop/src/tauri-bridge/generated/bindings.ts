@@ -3635,6 +3635,21 @@ export type ProviderStatus = {
 	keySet: boolean,
 };
 
+/**
+ *  What a query read, as SQLite's authorizer reported it while preparing
+ *  it (P4.1).
+ */
+export type Reads = {
+	// Views read, directly or through another view; sorted, distinct.
+	models: string[],
+	/**
+	 *  Tables the query's own SQL read — not through a view (a temp table
+	 *  as `temp.<name>`); sorted, distinct. A physical table here is what
+	 *  the read contract refuses once enforced (P4.3).
+	 */
+	tables: string[],
+};
+
 // A recent-projects row plus a freshness flag for the UI.
 export type RecentProjectView = {
 	path: string,
@@ -4101,6 +4116,8 @@ export type SqlQueryResult = {
 	columns: string[],
 	rows: SqlCell[][],
 	truncated: boolean,
+	// What the query read — what a caller subscribes to (P4.6).
+	reads: Reads,
 };
 
 // An envelope as read back from the log, with its position.

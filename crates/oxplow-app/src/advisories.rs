@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use oxplow_db::{SemanticLayer, SqlCell, SqliteAgentNudgeStore};
+use oxplow_db::{SqlCell, SqliteAgentNudgeStore};
 
 use crate::extensions::{AdvisoryOn, AdvisoryOncePer, Extension};
 
@@ -34,7 +34,7 @@ impl AdvisoryRunner {
     /// and return the ones that fire. A failing query is logged and skipped.
     pub async fn run(
         &self,
-        layer: &SemanticLayer,
+        layer: &crate::sql_gateway::SqlGateway,
         extensions: &[Extension],
         on: AdvisoryOn,
         effort_id: i64,
@@ -50,10 +50,10 @@ impl AdvisoryRunner {
                     continue;
                 }
                 let result = match layer
-                    .query_sql_named(
-                        &a.query,
-                        vec![("effort_id".into(), SqlCell::Int(effort_id))],
-                        None,
+                    .run(
+                        oxplow_db::SqlQuery::new(&a.query)
+                            .named(vec![("effort_id".into(), SqlCell::Int(effort_id))])
+                            .limit(None),
                     )
                     .await
                 {
@@ -124,6 +124,7 @@ pub struct AdvisoryDeps {
     pub approvals: std::sync::Arc<crate::exec_consent::ApprovalStore>,
     pub extension_catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
     pub db: oxplow_db::Database,
+    pub sql: crate::sql_gateway::SqlGateway,
     pub collection: crate::collection::CollectionService,
 }
 
@@ -153,7 +154,7 @@ pub async fn for_thread(
     };
     let root = svc.git.resolve_repo_dir(stream_id.as_deref()).await;
     let extensions = consented(&svc.approvals, &svc.extension_catalog.get(&root));
-    let layer = SemanticLayer::new(svc.db.clone());
+    let layer = svc.sql.clone();
     let hits = svc
         .advisories
         .run(&layer, &extensions, on, effort.id.value())
@@ -226,7 +227,7 @@ mod tests {
 
     /// A layer and a runner over one database holding efforts 1–5 (a
     /// once-mark references its effort).
-    async fn setup() -> (SemanticLayer, AdvisoryRunner) {
+    async fn setup() -> (crate::sql_gateway::SqlGateway, AdvisoryRunner) {
         let db = oxplow_db::Database::in_memory();
         db.transaction(|tx| {
             tx.execute_batch(
@@ -246,7 +247,7 @@ mod tests {
         .await
         .unwrap();
         (
-            SemanticLayer::new(db.clone()),
+            crate::sql_gateway::SqlGateway::new(db.clone()),
             AdvisoryRunner::new(SqliteAgentNudgeStore::new(db)),
         )
     }
@@ -387,7 +388,7 @@ mod tests {
                 text: format!("effort {}", f.effort.value())
             }]
         );
-        let out = SemanticLayer::new(f.svc.db.clone())
+        let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql("SELECT kind, message FROM v_agent_nudge", vec![], None)
             .await
             .unwrap();

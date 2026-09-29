@@ -19,7 +19,7 @@
 //! its view alone (aliased `e`); only a dimension's `expr` sees its `join`. See `.context/metrics.md`.
 
 use oxplow_config::{EntityDimensionSpec, EntitySpec};
-use oxplow_db::{Dimension, MetricSpec, SemanticLayer, SqlCell};
+use oxplow_db::{Dimension, MetricSpec, SqlCell};
 use oxplow_domain::{DomainError, Timestamp};
 
 use crate::metric_bucket::TimeBucket;
@@ -147,19 +147,19 @@ pub fn build_sql(read: &EntityRead) -> (String, Vec<(String, SqlCell)>) {
 }
 
 /// Check that a metric (and optionally a dimension over it) compiles against
-/// the current schema, without running it.
+/// the current schema, without running it; what it would read.
 pub async fn check(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &EntitySpec,
     dim: Option<&EntityDimensionSpec>,
-) -> Result<(), DomainError> {
+) -> Result<oxplow_db::Reads, DomainError> {
     let (sql, _) = build_sql(&EntityRead {
         spec,
         dim,
         bucket: spec.time.as_ref().map(|_| TimeBucket::Day),
         window: None,
     });
-    layer.check_sql(&sql).await
+    layer.check(&sql).await
 }
 
 /// One aggregated row of a read.
@@ -194,12 +194,18 @@ fn number(c: &SqlCell) -> Option<f64> {
 /// the newest ones would be lost, so that's an error rather than a short
 /// answer (tsk367).
 pub async fn run(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     read: &EntityRead<'_>,
 ) -> Result<Vec<EntityRow>, DomainError> {
     let (sql, params) = build_sql(read);
     let cap = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
-    let out = layer.query_sql_named(&sql, params, Some(cap)).await?;
+    let out = layer
+        .run(
+            oxplow_db::SqlQuery::new(&sql)
+                .named(params)
+                .limit(Some(cap)),
+        )
+        .await?;
     if out.truncated {
         return Err(DomainError::Invalid(format!(
             "this read has more than {cap} rows (buckets × groups); use a coarser bucket, a narrower window or a dimension with fewer values"
@@ -245,7 +251,7 @@ fn next_bucket(at: Timestamp, bucket: TimeBucket) -> Timestamp {
 /// the span it covers when unwindowed, so a quiet day reads 0 rather than
 /// vanishing.
 pub async fn series(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &EntitySpec,
     dim: Option<&EntityDimensionSpec>,
     bucket: TimeBucket,
@@ -302,7 +308,7 @@ pub async fn series(
 /// distinct count isn't summed across buckets), else the latest bucket.
 /// `None` when the series is empty.
 pub async fn headline(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &EntitySpec,
     series: &[SeriesPoint],
 ) -> Result<Option<f64>, DomainError> {
@@ -342,7 +348,7 @@ fn point(at: Timestamp, value: f64, group: Option<String>) -> SeriesPoint {
 
 /// The value right now (a state metric's capture), or per group.
 pub async fn current(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &EntitySpec,
     dim: Option<&EntityDimensionSpec>,
 ) -> Result<Vec<EntityRow>, DomainError> {
@@ -365,7 +371,7 @@ pub async fn current(
 
 /// A by-dimension breakdown: the metric over every row, per group, largest first.
 pub async fn rollup(
-    layer: &SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &EntitySpec,
     dim: &EntityDimensionSpec,
 ) -> Result<Vec<RollupRow>, DomainError> {
@@ -387,8 +393,8 @@ mod tests {
     use super::*;
     use oxplow_db::Database;
 
-    async fn layer() -> SemanticLayer {
-        SemanticLayer::new(seeded_db().await)
+    async fn layer() -> crate::sql_gateway::SqlGateway {
+        crate::sql_gateway::SqlGateway::new(seeded_db().await)
     }
 
     async fn seeded_db() -> Database {
@@ -589,7 +595,7 @@ mod tests {
     #[tokio::test]
     async fn a_read_past_the_row_cap_errors() {
         let db = seeded_db().await;
-        let l = SemanticLayer::new(db.clone());
+        let l = crate::sql_gateway::SqlGateway::new(db.clone());
         let by_id = EntityDimensionSpec {
             view: "v_task".into(),
             expr: "e.id".into(),

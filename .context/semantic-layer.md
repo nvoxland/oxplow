@@ -192,23 +192,44 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 ### Querying (current)
 
 - `query_sql(sql, params?, limit?)` over IPC (`querySql` in `api.ts`) and
-  MCP. Mechanics (`SemanticLayer` in `crates/oxplow-db/src/semantic_layer.rs`):
-  - First gate: the statement must start with `SELECT` or `WITH`, after
-    comments.
-  - Real gate: rusqlite `prepare` rejects multiple statements, and
-    `Statement::readonly()` rejects anything that writes (including
-    `WITH … DELETE`).
-  - Runs on a pooled connection under `PRAGMA query_only = ON`, which is
-    always reset afterwards. A test proves the pooled connection stays
-    writable.
+  MCP. **Every query goes through the SQL gateway** (P4.1, tsk486):
+  `Services.sql`, `crates/oxplow-app/src/sql_gateway.rs` — MCP and IPC
+  `query_sql`, lenses, advisories, entity metrics, extension checks
+  (`validate_extension`, `oxplow plugin check`) and source inputs alike.
+  It takes one `SqlQuery { sql, params (positional | named), limit,
+  timeout }`; `check(sql)` prepares without running. Mechanics
+  (`SemanticLayer` in `crates/oxplow-db/src/semantic_layer.rs`):
+  - First gate: the tokenizer (`crates/oxplow-db/src/sql_tokens.rs`, the
+    one tokenizer: strings, quoted identifiers, comments, parameters,
+    calls) — exactly one `SELECT` or `WITH`, a trailing `;` aside.
+  - Real gate: `Statement::readonly()` rejects anything that writes
+    (including `WITH … DELETE`).
+  - **The authorizer records what it reads** (record-only in P4.1;
+    enforcement is P4.3). Installed before `prepare` in a `ReadSession`
+    that, when dropped — on every path, a panic included — clears it and
+    `PRAGMA query_only`, so the pooled connection comes back writable. The
+    result's `reads` is `{ models, tables }`: every view read, directly or
+    through another view (a `count(*)` over a view reports only its base
+    table, with the view as accessor, so view accessors count too), and
+    every stored table the query's own SQL read — not one a view read, and
+    not a table-valued function such as `json_each`. A CTE's name can be an
+    accessor, so a CTE body counts as the query's own SQL.
+  - **Parameters bind by the statement's own list:** a positional count
+    must match; every `:name` the statement uses must be given (a name it
+    doesn't use is ignored, so a host passes one fixed set).
+  - Executes under `PRAGMA query_only = ON`. A test proves the pooled
+    connection stays writable after a failure at each stage.
   - A 5 s interrupt timer (`InterruptHandle`) stops runaway queries.
   - The row cap defaults to 500 and can be raised to at most 10 000.
     `truncated: true` means more rows existed.
   - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
     IPC `INVALID` code, and MCP `invalid_params`.
-  - Physical tables are technically readable too, but they aren't part of
-    the contract. Lenses and extensions must use `v_*`; a missing column is
-    a reason to extend a view, not to reach around it.
+  - Physical tables are still readable until P4.3 enforces the contract;
+    `reads.tables` names them. Every bundled lens, advisory, source input
+    and built-in entity metric reads only views — audit tests
+    (`bundled_queries_read_only_published_views`,
+    `builtin_entity_metrics_read_only_views`) keep it so. A missing column
+    is a reason to extend a view, not to reach around it.
 - Values are `SqlCell`: an untagged `null | boolean | number | string`,
   so the TS binding is a plain scalar union. Blobs come back as
   `"<blob N bytes>"`.
@@ -263,7 +284,7 @@ entities from data already in the semantic layer:
     entities: [...]
 ```
 
-- **Input.** `input` is read-only SQL through `SemanticLayer::query_sql`.
+- **Input.** `input` is read-only SQL through the SQL gateway.
   More than 10k rows fails the run rather than deriving from a partial
   set. The script gets `{"rows": [{col: value, …}]}` and returns the exec
   shape.

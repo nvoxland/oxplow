@@ -1482,13 +1482,13 @@ pub struct MetricEngine {
     /// — pre-tsk102 behavior, never an error.
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
     /// Entity metrics read through the semantic layer (tsk322).
-    layer: oxplow_db::SemanticLayer,
+    layer: crate::sql_gateway::SqlGateway,
 }
 
 impl MetricEngine {
     pub fn new(facts: SqliteFactStore) -> Self {
         Self {
-            layer: oxplow_db::SemanticLayer::new(facts.database()),
+            layer: crate::sql_gateway::SqlGateway::new(facts.database()),
             facts,
             fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,

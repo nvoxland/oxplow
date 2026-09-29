@@ -150,7 +150,7 @@ mod tests {
     }
 
     async fn count(svc: &crate::Services, sql: &'static str) -> i64 {
-        let sl = oxplow_db::SemanticLayer::new(svc.db.clone());
+        let sl = crate::sql_gateway::SqlGateway::new(svc.db.clone());
         let rows = sl.query_sql(sql, vec![], None).await.unwrap().rows;
         serde_json::to_value(&rows).unwrap()[0][0].as_i64().unwrap()
     }

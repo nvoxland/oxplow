@@ -289,7 +289,7 @@ mod tests {
         let findings = scan(&f).await;
         assert!(!findings.is_empty());
 
-        let scans = oxplow_db::SemanticLayer::new(f.svc.db.clone())
+        let scans = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql(
                 "SELECT status, tree_version_kind FROM v_code_quality_scan",
                 vec![],

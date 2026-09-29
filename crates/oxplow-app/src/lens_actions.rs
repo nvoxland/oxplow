@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use oxplow_db::{SemanticLayer, SqlCell};
+use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +49,7 @@ pub async fn run_lens_action(
         })?;
     match action.kind {
         LensActionKind::Copy => {
-            let layer = SemanticLayer::new(svc.db.clone());
+            let layer = svc.sql.clone();
             let run = extensions::run_lens(
                 &layer,
                 &svc.extension_catalog,

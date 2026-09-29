@@ -413,7 +413,7 @@ impl MetricsService {
             self.with_global_catalog(|g| (g.measures.clone(), g.dimensions.clone()));
 
         let ext = self.extension_catalog();
-        let layer = oxplow_db::SemanticLayer::new(facts.database());
+        let layer = crate::sql_gateway::SqlGateway::new(facts.database());
         let mut m = 0;
         for rm in resolve_measures(&global_measures, &ext.measures, &project_measures) {
             // `rm.component_role` is intentionally not forwarded — the measure
@@ -1277,7 +1277,7 @@ impl MetricsService {
         let Ok(specs) = facts.list_specs().await else {
             return 0;
         };
-        let layer = oxplow_db::SemanticLayer::new(facts.database());
+        let layer = crate::sql_gateway::SqlGateway::new(facts.database());
         let mut stream: Option<i64> = None;
         let mut captured = 0;
         for spec in specs {
@@ -2076,7 +2076,7 @@ fn as_entity_spec(mut spec: NewMetricSpec, entity: &oxplow_config::EntitySpec) -
 /// skipped with a warning instead of reaching the catalog.
 async fn seed_dimension(
     facts: &SqliteFactStore,
-    layer: &oxplow_db::SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     nd: NewDimension,
 ) -> bool {
     let entity = nd
@@ -2111,7 +2111,7 @@ async fn seed_dimension(
 /// spec passes through untouched.
 async fn prepare_entity_spec(
     facts: &SqliteFactStore,
-    layer: &oxplow_db::SemanticLayer,
+    layer: &crate::sql_gateway::SqlGateway,
     spec: &mut NewMetricSpec,
     entity_dims: &[(String, String)],
 ) -> bool {
@@ -2158,7 +2158,7 @@ async fn prepare_entity_spec(
 }
 
 /// The primary stream's id, which project-wide captures are recorded against.
-async fn primary_stream(layer: &oxplow_db::SemanticLayer) -> Option<i64> {
+async fn primary_stream(layer: &crate::sql_gateway::SqlGateway) -> Option<i64> {
     let out = layer
         .query_sql(
             "SELECT id FROM v_stream WHERE kind = 'primary'",
@@ -2650,6 +2650,37 @@ fn gauge_source(gauge: &ResolvedGauge, collector: &Collector) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// P4.1 (tsk486): every built-in entity metric and dimension reads only
+    /// published views — nothing its SQL names is a physical table.
+    #[tokio::test]
+    async fn builtin_entity_metrics_read_only_views() {
+        let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
+        for spec in builtin_entity_specs() {
+            let entity: oxplow_config::EntitySpec =
+                serde_json::from_str(spec.entity_json.as_deref().unwrap()).unwrap();
+            let reads = crate::entity_metrics::check(&layer, &entity, None)
+                .await
+                .unwrap();
+            assert!(reads.tables.is_empty(), "{}: {:?}", spec.key, reads.tables);
+            assert!(!reads.models.is_empty(), "{}", spec.key);
+        }
+        for dim in builtin_entity_dimensions() {
+            let d: oxplow_config::EntityDimensionSpec =
+                serde_json::from_str(dim.entity_json.as_deref().unwrap()).unwrap();
+            let probe = oxplow_config::EntitySpec {
+                view: d.view.clone(),
+                where_: None,
+                time: None,
+                value: None,
+                aggregation: "count".into(),
+            };
+            let reads = crate::entity_metrics::check(&layer, &probe, Some(&d))
+                .await
+                .unwrap();
+            assert!(reads.tables.is_empty(), "{}: {:?}", dim.key, reads.tables);
+        }
+    }
     use super::*;
     use oxplow_config::GaugeComputeConfig;
     use oxplow_domain::refs::build::work_item_ref;

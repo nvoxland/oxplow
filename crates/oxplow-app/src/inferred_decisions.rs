@@ -5,7 +5,7 @@
 //! agent. Off until a `summarize` model is assigned. See
 //! `.context/ai-providers.md` → "Inferred decisions".
 
-use oxplow_db::{NewDecision, SemanticLayer, SqlCell};
+use oxplow_db::{NewDecision, SqlCell};
 use serde::Deserialize;
 
 use crate::ai_service::{AiServiceError, Role};
@@ -201,7 +201,7 @@ pub async fn infer_for_effort(
     if !configured {
         return Ok(InferOutcome::Off);
     }
-    let layer = SemanticLayer::new(svc.db.clone());
+    let layer = svc.sql.clone();
     let activity = gather(&layer, effort_id).await?;
     let Some(prompt) = build_prompt(&activity) else {
         return Ok(InferOutcome::NoActivity);
@@ -229,7 +229,10 @@ pub async fn infer_for_effort(
 }
 
 /// Read what the agent did during `effort_id`.
-pub async fn gather(layer: &SemanticLayer, effort_id: i64) -> Result<EffortActivity, String> {
+pub async fn gather(
+    layer: &crate::sql_gateway::SqlGateway,
+    effort_id: i64,
+) -> Result<EffortActivity, String> {
     let q = |sql: &'static str| async move {
         layer
             .query_sql(sql, vec![SqlCell::Int(effort_id)], Some(2_000))
@@ -402,7 +405,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let layer = SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         let got = gather(&layer, effort).await.unwrap();
         let detail = |i: usize| got.tool_calls[i].detail.clone().unwrap();
         assert_eq!(detail(got.tool_calls.len() - 1), "call 2499");
@@ -509,7 +512,7 @@ mod tests {
             "{prompt}"
         );
 
-        let out = SemanticLayer::new(f.svc.db.clone())
+        let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql(
                 "SELECT question, provenance FROM v_decision WHERE effort_id = ?1",
                 vec![SqlCell::Int(effort)],
@@ -522,7 +525,7 @@ mod tests {
             serde_json::json!([["Which CSV library?", "inferred"]]),
             "a second pass replaced the first"
         );
-        let calls = SemanticLayer::new(f.svc.db.clone())
+        let calls = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .query_sql("SELECT caller, role FROM v_ai_call", vec![], None)
             .await
             .unwrap();
@@ -593,7 +596,7 @@ mod tests {
         // The close logged `effort.finished`; the pump hands it to the
         // `effort.decisions` reactor.
         f.svc.event_pump.run_once().await.unwrap();
-        let layer = SemanticLayer::new(f.svc.db.clone());
+        let layer = crate::sql_gateway::SqlGateway::new(f.svc.db.clone());
         for _ in 0..100 {
             let out = layer
                 .query_sql(

@@ -1258,7 +1258,7 @@ mod tests {
     const AFTER: &str = "fn keep() -> u32 {\n    1\n}\n\nfn grow(a: u32, b: u32) -> u32 {\n    if a > b {\n        a\n    } else {\n        b\n    }\n}\n\nfn fresh() {}\n";
 
     async fn rows(svc: &crate::Services, sql: &str, id: i64) -> serde_json::Value {
-        let out = oxplow_db::SemanticLayer::new(svc.db.clone())
+        let out = crate::sql_gateway::SqlGateway::new(svc.db.clone())
             .query_sql(sql, vec![oxplow_db::SqlCell::Int(id)], None)
             .await
             .unwrap();

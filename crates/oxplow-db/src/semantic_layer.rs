@@ -27,6 +27,72 @@ pub struct SqlQueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<SqlCell>>,
     pub truncated: bool,
+    /// What the query read — what a caller subscribes to (P4.6).
+    pub reads: Reads,
+}
+
+/// What a query read, as SQLite's authorizer reported it while preparing
+/// it (P4.1).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Reads {
+    /// Views read, directly or through another view; sorted, distinct.
+    pub models: Vec<String>,
+    /// Tables the query's own SQL read — not through a view (a temp table
+    /// as `temp.<name>`); sorted, distinct. A physical table here is what
+    /// the read contract refuses once enforced (P4.3).
+    pub tables: Vec<String>,
+}
+
+/// One read-only query: its SQL, parameters, row cap and time budget.
+#[derive(Debug, Clone)]
+pub struct SqlQuery {
+    pub sql: String,
+    pub params: SqlParams,
+    /// Row cap: default [`DEFAULT_ROW_LIMIT`], at most [`MAX_ROW_LIMIT`].
+    pub limit: Option<usize>,
+    pub timeout: Duration,
+}
+
+/// A query's parameters.
+#[derive(Debug, Clone)]
+pub enum SqlParams {
+    /// `?1`, `?2`, … in order; exactly as many as the statement has.
+    Positional(Vec<SqlCell>),
+    /// `:name` → value. Every name the statement uses must be given; names
+    /// it doesn't use are ignored, so a host can pass one fixed set.
+    Named(Vec<(String, SqlCell)>),
+}
+
+impl SqlQuery {
+    pub fn new(sql: impl Into<String>) -> Self {
+        Self {
+            sql: sql.into(),
+            params: SqlParams::Positional(Vec::new()),
+            limit: None,
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+
+    pub fn positional(mut self, params: Vec<SqlCell>) -> Self {
+        self.params = SqlParams::Positional(params);
+        self
+    }
+
+    pub fn named(mut self, params: Vec<(String, SqlCell)>) -> Self {
+        self.params = SqlParams::Named(params);
+        self
+    }
+
+    pub fn limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
 }
 
 /// One SQL value, serialized as a plain JSON scalar (`null`, boolean,
@@ -118,80 +184,52 @@ impl SemanticLayer {
         Self { db }
     }
 
-    /// Run one read-only `SELECT`/`WITH` statement with positional
-    /// `params` (`?1`, `?2`, …), capped at `limit` rows (default
-    /// [`DEFAULT_ROW_LIMIT`], max [`MAX_ROW_LIMIT`]).
+    /// Run one read-only `SELECT`/`WITH` statement.
+    pub async fn run(&self, query: SqlQuery) -> Result<SqlQueryResult, DomainError> {
+        crate::sql_tokens::check_single_read(&query.sql)?;
+        self.db
+            .call(move |conn| Ok(run_read_only(conn, &query)))
+            .await?
+    }
+
+    /// [`Self::run`] with positional parameters — the short form.
     pub async fn query_sql(
         &self,
         sql: &str,
         params: Vec<SqlCell>,
         limit: Option<usize>,
     ) -> Result<SqlQueryResult, DomainError> {
-        self.query_sql_with_timeout(sql, params, limit, DEFAULT_TIMEOUT)
+        self.run(SqlQuery::new(sql).positional(params).limit(limit))
             .await
     }
 
-    pub async fn query_sql_with_timeout(
-        &self,
-        sql: &str,
-        params: Vec<SqlCell>,
-        limit: Option<usize>,
-        timeout: Duration,
-    ) -> Result<SqlQueryResult, DomainError> {
-        let binding = Binding::Positional(params.iter().map(SqlCell::to_sql).collect());
-        self.run(sql, binding, limit, timeout).await
-    }
-
-    /// Like [`Self::query_sql`] but binds `:name` parameters. Names the
-    /// statement doesn't reference are ignored, so a caller can pass a
-    /// fixed parameter set to queries that use only some of it.
-    pub async fn query_sql_named(
-        &self,
-        sql: &str,
-        params: Vec<(String, SqlCell)>,
-        limit: Option<usize>,
-    ) -> Result<SqlQueryResult, DomainError> {
-        let binding = Binding::Named(
-            params
-                .into_iter()
-                .map(|(name, v)| (name, v.to_sql()))
-                .collect(),
-        );
-        self.run(sql, binding, limit, DEFAULT_TIMEOUT).await
-    }
-
     /// Check that `sql` would be accepted — a read-only `SELECT`/`WITH` that
-    /// compiles against the current schema — without running it. Metric and
-    /// dimension config uses this to reject a bad SQL fragment up front.
-    pub async fn check_sql(&self, sql: &str) -> Result<(), DomainError> {
-        check_leading_keyword(sql)?;
+    /// compiles against the current schema — without running it, and say
+    /// what it would read. Metric, dimension and extension config use this
+    /// to reject a bad SQL fragment up front.
+    pub async fn check(&self, sql: &str) -> Result<Reads, DomainError> {
+        crate::sql_tokens::check_single_read(sql)?;
         let sql = sql.to_string();
         self.db
             .call(move |conn| {
-                Ok(match conn.prepare(&sql) {
-                    Err(e) => Err(DomainError::Invalid(format!("query_sql: {e}"))),
-                    Ok(stmt) if !stmt.readonly() => Err(DomainError::Invalid(
-                        "query_sql accepts read-only statements only".into(),
-                    )),
-                    Ok(_) => Ok(()),
-                })
+                Ok((|| {
+                    let session = ReadSession::open(conn)?;
+                    {
+                        let stmt = conn.prepare(&sql).map_err(invalid)?;
+                        if !stmt.readonly() {
+                            return Err(read_only_only());
+                        }
+                    }
+                    Ok(session.reads())
+                })())
             })
             .await?
     }
 
-    async fn run(
-        &self,
-        sql: &str,
-        binding: Binding,
-        limit: Option<usize>,
-        timeout: Duration,
-    ) -> Result<SqlQueryResult, DomainError> {
-        check_leading_keyword(sql)?;
-        let sql = sql.to_string();
-        let cap = limit.unwrap_or(DEFAULT_ROW_LIMIT).clamp(1, MAX_ROW_LIMIT);
-        self.db
-            .call(move |conn| Ok(run_read_only(conn, &sql, &binding, cap, timeout)))
-            .await?
+    /// The name of every view in the database — the schema, read directly
+    /// rather than through the query contract.
+    pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
+        self.db.call_mut(|conn| view_names(conn)).await
     }
 
     /// The catalog of queryable entities with column docs. Column
@@ -233,60 +271,201 @@ impl SemanticLayer {
     }
 }
 
-/// Reject anything that doesn't start with `SELECT` or `WITH`, after
-/// leading whitespace and comments. Cheap first gate; the prepared
-/// statement's `readonly()` check is the real one.
-fn check_leading_keyword(sql: &str) -> Result<(), DomainError> {
-    let mut rest = sql;
-    loop {
-        rest = rest.trim_start();
-        if let Some(r) = rest.strip_prefix("--") {
-            rest = r.split_once('\n').map(|(_, t)| t).unwrap_or("");
-        } else if let Some(r) = rest.strip_prefix("/*") {
-            rest = r.split_once("*/").map(|(_, t)| t).unwrap_or("");
-        } else {
-            break;
+fn invalid(e: rusqlite::Error) -> DomainError {
+    DomainError::Invalid(format!("query_sql: {e}"))
+}
+
+fn read_only_only() -> DomainError {
+    DomainError::Invalid("query_sql accepts read-only statements only".into())
+}
+
+/// Bind `params` to the prepared statement, by the statement's own
+/// parameter list: a positional count must match, and a `:name` the
+/// statement uses must be given.
+fn bind(stmt: &mut rusqlite::Statement<'_>, params: &SqlParams) -> Result<(), DomainError> {
+    let count = stmt.parameter_count();
+    match params {
+        SqlParams::Positional(vals) => {
+            if vals.len() != count {
+                return Err(DomainError::Invalid(format!(
+                    "query_sql: the statement takes {count} parameter(s), {} given",
+                    vals.len()
+                )));
+            }
+            for (i, v) in vals.iter().enumerate() {
+                stmt.raw_bind_parameter(i + 1, v.to_sql())
+                    .map_err(invalid)?;
+            }
+        }
+        SqlParams::Named(vals) => {
+            for i in 1..=count {
+                let Some(name) = stmt.parameter_name(i).map(str::to_string) else {
+                    return Err(DomainError::Invalid(format!(
+                        "query_sql: parameter {i} is positional; this query binds by name"
+                    )));
+                };
+                let bare = name.trim_start_matches([':', '@', '$']);
+                let Some((_, v)) = vals.iter().find(|(n, _)| n == bare) else {
+                    return Err(DomainError::Invalid(format!(
+                        "query_sql: no value for {name}"
+                    )));
+                };
+                stmt.raw_bind_parameter(i, v.to_sql()).map_err(invalid)?;
+            }
         }
     }
-    let word: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .collect::<String>()
-        .to_ascii_uppercase();
-    if word == "SELECT" || word == "WITH" {
-        Ok(())
-    } else {
-        Err(DomainError::Invalid(
-            "query_sql accepts a single SELECT or WITH statement".into(),
+    Ok(())
+}
+
+/// Every view in the database, main and temp, named bare — as SQLite
+/// reports it wherever it appears (as an accessor too).
+fn view_names(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashSet<String>, DomainError> {
+    Ok(schema_names(conn, "view")?
+        .into_iter()
+        .map(|n| n.strip_prefix("temp.").map_or(n.clone(), str::to_string))
+        .collect())
+}
+
+/// Every name of `kind` (`table` or `view`) in main and temp; a temp
+/// one as `temp.<name>`.
+fn schema_names(
+    conn: &rusqlite::Connection,
+    kind: &str,
+) -> Result<std::collections::HashSet<String>, DomainError> {
+    let mut st = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = ?1
+             UNION ALL SELECT 'temp.' || name FROM sqlite_temp_master WHERE type = ?1",
+        )
+        .map_err(crate::database::map_sql_err)?;
+    let names = st
+        .query_map([kind], |r| r.get::<_, String>(0))
+        .map_err(crate::database::map_sql_err)?
+        .collect::<rusqlite::Result<std::collections::HashSet<_>>>()
+        .map_err(crate::database::map_sql_err)?;
+    Ok(names)
+}
+
+/// What the authorizer saw while a statement was prepared.
+#[derive(Default)]
+struct Seen {
+    /// `(table, column, reached through a view?)`, as reported.
+    reads: Vec<(String, String, Option<String>)>,
+}
+
+/// One read on a pooled connection: the authorizer installed (recording
+/// every read) and, once asked, `PRAGMA query_only`. Dropping it — on
+/// every path, an error or a panic included — clears both, so the next
+/// user of the connection gets it back as it was.
+struct ReadSession<'c> {
+    conn: &'c rusqlite::Connection,
+    seen: std::sync::Arc<std::sync::Mutex<Seen>>,
+    /// Every view in the database, to tell a model read from a table read.
+    views: std::collections::HashSet<String>,
+    /// Every stored table (and the schema tables), to tell a table read
+    /// from a table-valued function's (`json_each`).
+    tables: std::collections::HashSet<String>,
+}
+
+impl<'c> ReadSession<'c> {
+    fn open(conn: &'c rusqlite::Connection) -> Result<Self, DomainError> {
+        let views = view_names(conn)?;
+        let mut tables = schema_names(conn, "table")?;
+        tables.extend(
+            [
+                "sqlite_master",
+                "sqlite_schema",
+                "temp.sqlite_master",
+                "temp.sqlite_schema",
+            ]
+            .map(String::from),
+        );
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Seen::default()));
+        let sink = seen.clone();
+        conn.authorizer(Some(
+            move |ctx: rusqlite::hooks::AuthContext<'_>| -> rusqlite::hooks::Authorization {
+                if let rusqlite::hooks::AuthAction::Read {
+                    table_name,
+                    column_name,
+                } = ctx.action
+                {
+                    let table = match ctx.database_name {
+                        Some("temp") => format!("temp.{table_name}"),
+                        _ => table_name.to_string(),
+                    };
+                    sink.lock().unwrap_or_else(|e| e.into_inner()).reads.push((
+                        table,
+                        column_name.to_string(),
+                        ctx.accessor.map(str::to_string),
+                    ));
+                }
+                rusqlite::hooks::Authorization::Allow
+            },
         ))
+        .map_err(crate::database::map_sql_err)?;
+        Ok(Self {
+            conn,
+            seen,
+            views,
+            tables,
+        })
+    }
+
+    /// Refuse writes on this connection until the session ends.
+    fn query_only(&self) -> Result<(), DomainError> {
+        self.conn
+            .execute_batch("PRAGMA query_only = ON")
+            .map_err(crate::database::map_sql_err)
+    }
+
+    /// The reads so far, classified. A read of a view, or by one, is a
+    /// model read; a read whose accessor is a view happened inside it; anything
+    /// else is the query's own SQL (a CTE's name can be the accessor too).
+    /// SQLite reports `count(*)` over a view as an empty-column read of
+    /// the view's base table at top level — that one belongs to the view.
+    fn reads(&self) -> Reads {
+        let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let mut models = std::collections::BTreeSet::new();
+        let mut under = std::collections::HashSet::new();
+        for (table, _, accessor) in &seen.reads {
+            if self.views.contains(table) {
+                models.insert(table.clone());
+            }
+            // A view that read something was read (`count(*)` over a view
+            // reports only its base table's reads, with the view as
+            // accessor).
+            if let Some(view) = accessor.as_ref().filter(|a| self.views.contains(*a)) {
+                models.insert(view.clone());
+                under.insert(table.clone());
+            }
+        }
+        let tables = seen
+            .reads
+            .iter()
+            .filter(|(table, column, accessor)| {
+                self.tables.contains(table)
+                    && !accessor.as_ref().is_some_and(|a| self.views.contains(a))
+                    && !(column.is_empty() && under.contains(table))
+            })
+            .map(|(table, _, _)| table.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        Reads {
+            models: models.into_iter().collect(),
+            tables: tables.into_iter().collect(),
+        }
     }
 }
 
-/// How a query's parameters are supplied.
-enum Binding {
-    /// `?1`, `?2`, … in order.
-    Positional(Vec<rusqlite::types::Value>),
-    /// `:name` → value; names the statement doesn't use are skipped.
-    Named(Vec<(String, rusqlite::types::Value)>),
-}
-
-impl Binding {
-    fn apply(&self, stmt: &mut rusqlite::Statement<'_>) -> rusqlite::Result<()> {
-        match self {
-            Binding::Positional(vals) => {
-                for (i, v) in vals.iter().enumerate() {
-                    stmt.raw_bind_parameter(i + 1, v)?;
-                }
-            }
-            Binding::Named(vals) => {
-                for (name, v) in vals {
-                    if let Some(idx) = stmt.parameter_index(&format!(":{name}"))? {
-                        stmt.raw_bind_parameter(idx, v)?;
-                    }
-                }
-            }
+impl Drop for ReadSession<'_> {
+    fn drop(&mut self) {
+        let _ = self.conn.authorizer(
+            None::<fn(rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization>,
+        );
+        if let Err(e) = self.conn.execute_batch("PRAGMA query_only = OFF") {
+            tracing::error!(error = %e, "query_sql: could not restore a pooled connection to writable");
         }
-        Ok(())
     }
 }
 
@@ -301,24 +480,26 @@ fn cell(v: rusqlite::types::ValueRef<'_>) -> SqlCell {
     }
 }
 
-/// Execute under `PRAGMA query_only` with an interrupt timer, always
-/// restoring the pooled connection to writable afterwards.
+/// Prepare under the recording authorizer, then execute under `PRAGMA
+/// query_only` with an interrupt timer. The [`ReadSession`] restores the
+/// pooled connection on every path.
 fn run_read_only(
     conn: &rusqlite::Connection,
-    sql: &str,
-    binding: &Binding,
-    cap: usize,
-    timeout: Duration,
+    query: &SqlQuery,
 ) -> Result<SqlQueryResult, DomainError> {
-    let invalid = |e: rusqlite::Error| DomainError::Invalid(format!("query_sql: {e}"));
-    let mut stmt = conn.prepare(sql).map_err(invalid)?;
+    let cap = query
+        .limit
+        .unwrap_or(DEFAULT_ROW_LIMIT)
+        .clamp(1, MAX_ROW_LIMIT);
+    let timeout = query.timeout;
+    let session = ReadSession::open(conn)?;
+    let mut stmt = conn.prepare(&query.sql).map_err(invalid)?;
     if !stmt.readonly() {
-        return Err(DomainError::Invalid(
-            "query_sql accepts read-only statements only".into(),
-        ));
+        return Err(read_only_only());
     }
-    conn.execute_batch("PRAGMA query_only = ON")
-        .map_err(crate::database::map_sql_err)?;
+    let reads = session.reads();
+    bind(&mut stmt, &query.params)?;
+    session.query_only()?;
 
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let interrupt = conn.get_interrupt_handle();
@@ -336,7 +517,6 @@ fn run_read_only(
             .collect();
         let mut rows_out = Vec::new();
         let mut truncated = false;
-        binding.apply(&mut stmt)?;
         let mut rows = stmt.raw_query();
         while let Some(row) = rows.next()? {
             if rows_out.len() == cap {
@@ -353,23 +533,23 @@ fn run_read_only(
             columns,
             rows: rows_out,
             truncated,
+            reads,
         })
     })();
 
     drop(done_tx);
     let _ = timer.join();
-    let reset = conn.execute_batch("PRAGMA query_only = OFF");
+    drop(stmt);
+    drop(session);
 
-    let out = result.map_err(|e| match e {
+    result.map_err(|e| match e {
         rusqlite::Error::SqliteFailure(f, _)
             if f.code == rusqlite::ErrorCode::OperationInterrupted =>
         {
             DomainError::Invalid(format!("query_sql: timed out after {timeout:?}"))
         }
         other => invalid(other),
-    });
-    reset.map_err(crate::database::map_sql_err)?;
-    out
+    })
 }
 
 struct CatalogView {
@@ -1235,12 +1415,12 @@ mod tests {
     #[tokio::test]
     async fn check_sql_compiles_without_running_and_refuses_writes() {
         let (_db, sl) = seeded().await;
-        sl.check_sql("SELECT count(*) FROM v_task e WHERE e.status = 'done'")
+        sl.check("SELECT count(*) FROM v_task e WHERE e.status = 'done'")
             .await
             .unwrap();
         let err = |sql: &'static str| {
             let sl = sl.clone();
-            async move { sl.check_sql(sql).await.unwrap_err().to_string() }
+            async move { sl.check(sql).await.unwrap_err().to_string() }
         };
         assert!(err("SELECT nope FROM v_task")
             .await
@@ -1275,14 +1455,13 @@ mod tests {
     async fn binds_named_params_ignoring_ones_the_query_does_not_use() {
         let (_db, sl) = seeded().await;
         let out = sl
-            .query_sql_named(
-                "SELECT title FROM v_task WHERE status = :status AND id >= :min_id",
-                vec![
-                    ("status".into(), SqlCell::Text("in_progress".into())),
-                    ("min_id".into(), SqlCell::Int(1)),
-                    ("unused".into(), SqlCell::Int(9)),
-                ],
-                None,
+            .run(
+                SqlQuery::new("SELECT title FROM v_task WHERE status = :status AND id >= :min_id")
+                    .named(vec![
+                        ("status".into(), SqlCell::Text("in_progress".into())),
+                        ("min_id".into(), SqlCell::Int(1)),
+                        ("unused".into(), SqlCell::Int(9)),
+                    ]),
             )
             .await
             .unwrap();
@@ -1290,6 +1469,58 @@ mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             json!([["Live task"]])
         );
+        // A name the query uses must be given; a positional count must match.
+        let err = sl
+            .run(SqlQuery::new("SELECT title FROM v_task WHERE id = :id").named(vec![]))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no value for :id"), "{err}");
+        let err = sl
+            .query_sql("SELECT ?1, ?2", vec![SqlCell::Int(1)], None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("takes 2 parameter(s), 1 given"),
+            "{err}"
+        );
+    }
+
+    /// P4.1 (tsk486): a query says what it read — the views, through other
+    /// views too, and any table its own SQL read (not one a view read).
+    #[tokio::test]
+    async fn a_query_reports_what_it_read() {
+        let (_db, sl) = seeded().await;
+        let reads = |sql: &'static str| {
+            let sl = sl.clone();
+            async move { sl.query_sql(sql, vec![], None).await.unwrap().reads }
+        };
+        let r = reads("SELECT count(*) FROM v_task").await;
+        assert_eq!((r.models, r.tables), (vec!["v_task".to_string()], vec![]));
+        let r =
+            reads("WITH t AS (SELECT id FROM v_task) SELECT * FROM t JOIN v_thread th ON 1").await;
+        assert_eq!(r.models, vec!["v_task".to_string(), "v_thread".to_string()]);
+        assert!(r.tables.is_empty(), "{:?}", r.tables);
+        let r = reads("SELECT t.title FROM task t JOIN v_thread th ON th.id = t.thread_id").await;
+        assert_eq!(r.tables, vec!["task".to_string()]);
+        let r = reads("WITH c AS (SELECT title FROM task) SELECT * FROM c").await;
+        assert_eq!(
+            r.tables,
+            vec!["task".to_string()],
+            "a CTE body is the query's own SQL"
+        );
+        let r = reads("SELECT j.value FROM v_task t, json_each('[1,2]') j").await;
+        assert!(
+            r.tables.is_empty(),
+            "a table-valued function isn't a table: {:?}",
+            r.tables
+        );
+        let r = reads("SELECT name FROM sqlite_master").await;
+        assert_eq!(r.tables, vec!["sqlite_master".to_string()]);
+        let checked = sl
+            .check("SELECT id FROM v_task WHERE id = :id")
+            .await
+            .unwrap();
+        assert_eq!(checked.models, vec!["v_task".to_string()]);
     }
 
     #[tokio::test]
@@ -1370,7 +1601,7 @@ mod tests {
         let (_db, sl) = seeded().await;
         let sql = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c";
         let err = sl
-            .query_sql_with_timeout(sql, vec![], None, Duration::from_millis(100))
+            .run(SqlQuery::new(sql).timeout(Duration::from_millis(100)))
             .await
             .unwrap_err();
         assert!(
@@ -1384,6 +1615,16 @@ mod tests {
         let (db, sl) = seeded().await;
         sl.query_sql("SELECT 1", vec![], None).await.unwrap();
         let _ = sl.query_sql("DELETE FROM task", vec![], None).await;
+        // A failure after the authorizer is installed, and one after
+        // `query_only` is on, leave nothing behind either.
+        let _ = sl.query_sql("SELECT nope FROM v_task", vec![], None).await;
+        let _ = sl.query_sql("SELECT ?1", vec![], None).await;
+        let _ = sl
+            .run(
+                SqlQuery::new("WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c")
+                    .timeout(Duration::from_millis(50)),
+            )
+            .await;
         // in_memory() has a single pooled connection, so this proves
         // query_only was reset.
         db.call(|c| c.execute("UPDATE task SET title = 'renamed' WHERE id = 1", []))

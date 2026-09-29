@@ -249,7 +249,7 @@ mod tests {
                 .unwrap()
                 .to_string();
         let count = || async {
-            let r = oxplow_db::SemanticLayer::new(svc.db.clone())
+            let r = crate::sql_gateway::SqlGateway::new(svc.db.clone())
                 .query_sql(
                     "SELECT path, severity, line FROM v_diagnostic",
                     vec![],

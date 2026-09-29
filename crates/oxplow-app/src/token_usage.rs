@@ -1215,7 +1215,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].input_tokens, 100);
         let turn_ids: Vec<Option<i64>> = {
-            let sl = oxplow_db::SemanticLayer::new(svc.db.clone());
+            let sl = crate::sql_gateway::SqlGateway::new(svc.db.clone());
             let r = sl
                 .query_sql("SELECT turn_id FROM v_token_usage", vec![], None)
                 .await
