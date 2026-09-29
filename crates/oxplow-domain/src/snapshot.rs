@@ -78,10 +78,7 @@ impl SnapshotTrigger {
     ];
 }
 
-/// The canonical ref of a snapshot (`snapshot:123`).
-pub fn snapshot_ref(id: i64) -> String {
-    format!("snapshot:{id}")
-}
+pub use crate::refs::build::snapshot_ref;
 
 #[cfg(test)]
 mod tests {

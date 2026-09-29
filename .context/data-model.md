@@ -1035,10 +1035,14 @@ transaction* as the change — the outbox pattern — so the two never
 disagree. The envelope is `oxplow_domain::events::Envelope`
 (`crates/oxplow-domain/src/events/mod.rs`): `id` (UUIDv7 text, sorts by
 time), `type` (`namespace.name`, snake_case, validated on append), `v`
-(schema version), `at`, `source` (`agent:thr3`, `human`,
-`system:snapshot_capture`), `anchors` (nullable stream / thread / effort
-/ turn / snapshot columns, so per-anchor timelines are indexed range
-scans), `subject` (JSON array of canonical refs), `payload` (JSON;
+(schema version), `at`, `source` (`agent:thr3`, `human`, `lens:<id>`,
+`system`, or `system:<component>` from `refs::build::system_source` —
+`system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
+`anchors` (nullable stream / thread / effort / turn / snapshot columns,
+so per-anchor timelines are indexed range scans; an event that names a
+thread also carries its stream), `subject` (JSON array of canonical
+refs built with `oxplow_domain::refs::build` and validated against the
+kind registry on append, see [refs.md](./refs.md)), `payload` (JSON;
 validated against `type@v`'s schema on append), `payload_hash` (reserved for
 forgettable bodies stored by content hash), `cause`, `dedupe_key`
 (UNIQUE — the emitter derives it from the occurrence, so an at-least-once
@@ -1125,8 +1129,9 @@ inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 **Producers so far.** `SqliteTaskStore::update_with_effort_transition`
 (P1.6, tsk408) appends `work_item.transitioned@1` in the same transaction
 as the status flip and the effort open/finish — subject
-`work_item:oxplow:tskN` (+ `effort:effN`), anchors `thread`/`effort`,
-payload `{ work_item, from, to, effort? }`, source `task_service` (the
+`work_item:oxplow:tskN` (+ `effort:effN`), anchors `stream` (looked up
+from the thread inside the transaction) / `thread` / `effort`, payload
+`{ work_item, from, to, effort? }`, source `system:task_service` (the
 actor is on the `command.executed` event and the `command_audit` row the
 bus writes alongside; the domain event's `source` names the actor once
 `work_item.transition` becomes a `Tx` handler). A same-status re-issue logs

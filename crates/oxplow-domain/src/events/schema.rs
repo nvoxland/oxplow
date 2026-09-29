@@ -224,8 +224,16 @@ impl EventSchemaRegistry {
     }
 
     /// Validate an envelope's `type@v` and payload.
+    /// The payload against its schema, and every subject as a canonical
+    /// ref of a registered kind (a consumer resolves subjects; a malformed
+    /// one would dead-letter far from the producer that wrote it).
     pub fn validate_envelope(&self, env: &Envelope) -> Result<(), DomainError> {
-        self.validate(&env.event_type, env.v, &env.payload)
+        self.validate(&env.event_type, env.v, &env.payload)?;
+        for subject in &env.subject {
+            crate::refs::validate_ref(subject)
+                .map_err(|e| DomainError::Invalid(format!("{} subject: {e}", env.event_type)))?;
+        }
+        Ok(())
     }
 
     /// Carry a payload written at `from_v` to the newest version of its

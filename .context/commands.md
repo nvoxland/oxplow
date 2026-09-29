@@ -49,7 +49,9 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    row (`crates/oxplow-db/src/command_audit_store.rs`: actor, input,
    outcome, inverse), `command.executed@1` in the event log pointing at
    the audit row, the handler's domain events (with `cause` = the
-   executed event), and the audit row's `event_id`. A handler failure
+   executed event, and the actor's thread/stream — `Actor::anchors()` —
+   filled into any anchor the handler left empty), and the audit row's
+   `event_id`. A handler failure
    rolls all of it back and is audited as `error` in a transaction of its
    own.
 6. Post-commit: wake the event pump.

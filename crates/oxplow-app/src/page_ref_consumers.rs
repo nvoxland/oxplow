@@ -15,7 +15,6 @@ use oxplow_db::page_ref_store::replace_source_for_ref_types_tx;
 use oxplow_db::task_store::get_task_tx;
 use oxplow_domain::events::schema::EventType;
 use oxplow_domain::events::schema::WorkItemTransitioned;
-use oxplow_domain::refs::grammar::CanonicalRef;
 use oxplow_domain::{DomainError, StoredEvent, TaskId};
 
 use crate::event_pump::EventConsumer;
@@ -31,19 +30,18 @@ impl PageRefWorkItemConsumer {
 /// The task behind a `work_item:oxplow:tskN` ref; `None` for another
 /// provider's item, which has no page here.
 fn task_of(subject: &str) -> Result<Option<TaskId>, DomainError> {
-    let r = CanonicalRef::parse(subject)
-        .map_err(|e| DomainError::Invalid(format!("subject `{subject}`: {}", e.reason())))?;
+    let r = oxplow_domain::refs::validate_ref(subject)?;
     if r.kind != "work_item" {
         return Err(DomainError::Invalid(format!(
             "subject `{subject}` is not a work_item"
         )));
     }
-    let Some(bare) = r.id.strip_prefix("oxplow:") else {
+    if !r.id.starts_with("oxplow:") {
         return Ok(None);
-    };
-    bare.parse::<TaskId>()
+    }
+    oxplow_domain::refs::build::task_of_work_item_ref(subject)
         .map(Some)
-        .map_err(|e| DomainError::Invalid(format!("subject `{subject}`: {e}")))
+        .ok_or_else(|| DomainError::Invalid(format!("`{subject}` names no oxplow task")))
 }
 
 impl EventConsumer for PageRefWorkItemConsumer {

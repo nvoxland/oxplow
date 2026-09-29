@@ -1681,6 +1681,11 @@ mod tests {
         );
         assert_eq!(opened.anchors.thread_id, Some(t));
         assert_eq!(opened.anchors.effort_id, Some(eff));
+        assert!(
+            opened.anchors.stream_id.is_some(),
+            "the thread's stream anchors it too"
+        );
+        assert_eq!(opened.source, "system:task_service");
         assert_eq!(opened.payload["from"], "ready");
         assert_eq!(opened.payload["to"], "in_progress");
         assert_eq!(

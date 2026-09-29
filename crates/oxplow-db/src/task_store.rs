@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+use oxplow_domain::refs::build::{effort_ref, system_source, work_item_ref};
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
     Anchors, DomainError, EffortId, Envelope, EventSchemaRegistry, Task, TaskActorKind, TaskAuthor,
@@ -140,22 +141,30 @@ impl SqliteTaskStore {
                         EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
                         EffortTransition::NoOpenEffort => None,
                     };
-                    let work_item = format!("work_item:{}", work_item_id(item.id));
+                    let work_item = work_item_ref(item.id);
                     let mut subject = vec![work_item.clone()];
-                    subject.extend(effort.map(|e| format!("effort:{e}")));
+                    subject.extend(effort.map(effort_ref));
+                    let stream: Option<i64> = tx
+                        .query_row(
+                            "SELECT stream_id FROM threads WHERE id = ?1",
+                            params![thread.value()],
+                            |r| r.get(0),
+                        )
+                        .map_err(map_sql_err)?;
                     // No dedupe key: this producer is transactional, so a
                     // retried attempt has already rolled back and can't
                     // double-log. Keys are for at-least-once producers.
                     let env = Envelope::typed::<WorkItemTransitioned>(
-                        "task_service",
+                        system_source("task_service"),
                         &WorkItemTransitionedV1 {
                             work_item,
                             from,
                             to: item.status,
-                            effort: effort.map(|e| format!("effort:{e}")),
+                            effort: effort.map(effort_ref),
                         },
                     )
                     .with_anchors(Anchors {
+                        stream_id: stream.map(oxplow_domain::StreamId::new),
                         thread_id: Some(thread),
                         effort_id: effort,
                         ..Anchors::default()

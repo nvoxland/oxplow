@@ -64,6 +64,27 @@ the §4.2 vocabulary plus `finding`, `task_note` and `run`. Only
 `linear:ENG-12`); `wiki`, `commit` and `symbol` keep bare ids and use the
 capability's active provider.
 
+`config` (a config key, `config:zones`) is registered too (P2.4b, tsk450).
+
+## Building refs in Rust (built, P2.4b)
+
+Producers never hand-format a ref. `oxplow_domain::refs::build` has one
+builder per kind oxplow emits: `stream_ref`, `thread_ref`, `effort_ref`,
+`turn_ref`, `snapshot_ref`, `commit_ref`, `command_ref`, `config_ref`,
+`work_item_ref(TaskId)` (`work_item:oxplow:tsk42`) and `work_item_id`
+(the provider-scoped id alone, `oxplow:tsk42`, for `page_ref` rows).
+The inverses are `task_of_work_item_ref` (strict: a full ref naming an
+oxplow task) and `task_from_work_item_id` (lenient: also a bare `tsk42`
+or `42`, as agents write in impacts). `system_source(component)` gives
+the `system:<component>` event source a system producer uses; an
+actor's runs use `Actor::source()`.
+
+`refs::validate_ref` parses a ref and checks it against the kind
+registry. The event log's `append_tx` runs it on every `subject`
+entry, so an event naming `zones`, `config:`, `nope:thing`,
+`commit:xyz` or `effort:12` (ids are `effN`) is refused with the event
+type in the message.
+
 ## `[[…]]` sugar → canonical refs (built)
 
 `refs::canonical_wikilink(interior)` turns a wikilink interior into a

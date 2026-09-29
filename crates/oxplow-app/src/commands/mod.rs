@@ -30,7 +30,7 @@ use oxplow_domain::events::schema::{
     CommandExecuted, CommandExecutedV1, CommandOutcome as Outcome,
 };
 use oxplow_domain::{
-    Actor, Anchors, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Envelope,
+    Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Envelope,
     InputValidator, Preview,
 };
 use oxplow_runtime::policy::PolicyDecision;
@@ -631,18 +631,16 @@ fn record_tx(
             undoable: inverse.is_some(),
         },
     )
-    .with_anchors(Anchors {
-        thread_id: actor.thread_id(),
-        stream_id: match actor {
-            Actor::Agent { stream_id, .. } => *stream_id,
-            _ => None,
-        },
-        ..Anchors::default()
-    })
-    .with_subject([format!("command:{}", spec.name)]);
+    .with_anchors(actor.anchors())
+    .with_subject([oxplow_domain::refs::build::command_ref(&spec.name)]);
     append_tx(tx, schemas, &executed)?;
+    // A handler's own events carry the actor's thread and stream unless
+    // it anchored them itself.
+    let fallback = actor.anchors();
     for event in &out.events {
-        let event = event.clone().with_cause(executed.id.clone());
+        let mut event = event.clone().with_cause(executed.id.clone());
+        event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
+        event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
         append_tx(tx, schemas, &event)?;
     }
     set_event_id_tx(tx, audit_id, &executed.id)?;
@@ -871,8 +869,10 @@ mod tests {
             audit.inverse.as_ref().unwrap().input,
             json!({"k": "a", "v": ""})
         );
-        // command.executed then the handler's domain event, caused by it.
+        // command.executed then the handler's domain event, caused by it,
+        // anchored to the actor's thread like the run itself.
         let events = bus.log.read_after(0, 10).await.unwrap();
+        assert_eq!(events[1].envelope.anchors.thread_id, Some(ThreadId::new(7)));
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].envelope.event_type, "command.executed");
         assert_eq!(

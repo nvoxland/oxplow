@@ -29,6 +29,7 @@
 //! URLs are stripped before the inline scan so
 //! `https://example.com/path.json` doesn't masquerade as a file ref.
 
+pub mod build;
 pub mod grammar;
 pub mod kind;
 
@@ -102,10 +103,22 @@ pub struct ClassifiedWikilink {
     pub reference: Option<Reference>,
 }
 
-/// The registry every `[[…]]` translation validates against.
-fn registry() -> &'static KindRegistry {
+/// The registry every `[[…]]` translation and event subject validates
+/// against: the core kinds (plugin `ref_kinds` join it once they run).
+pub fn registry() -> &'static KindRegistry {
     static REG: OnceLock<KindRegistry> = OnceLock::new();
     REG.get_or_init(kind::core_kinds)
+}
+
+/// `r` is a canonical ref of a registered kind whose id fits that kind.
+pub fn validate_ref(r: &str) -> Result<CanonicalRef, crate::DomainError> {
+    let parsed = CanonicalRef::parse(r).map_err(|e| {
+        crate::DomainError::Invalid(format!("`{r}` is not a canonical ref: {}", e.reason()))
+    })?;
+    registry()
+        .validate(&parsed)
+        .map_err(|e| crate::DomainError::Invalid(format!("`{r}`: {e}")))?;
+    Ok(parsed)
 }
 
 /// Translate one `[[…]]` interior (already `|`-split and trimmed) into

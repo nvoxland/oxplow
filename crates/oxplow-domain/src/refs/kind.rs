@@ -179,6 +179,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),
         KindSpec::new("plugin", r"^[a-z0-9-]+$"),
         KindSpec::new("command", r"^[a-z0-9_]+\.[a-z0-9_]+$"),
+        // A `.oxplow/project.yaml` key (`config.changed`'s subject).
+        KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),
         KindSpec::new("finding", r"^\S+$"),
         KindSpec::new("task_note", &prefixed("not")),
         KindSpec::new("run", r"^\d+$"),

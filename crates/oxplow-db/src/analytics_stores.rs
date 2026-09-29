@@ -22,7 +22,8 @@ use oxplow_domain::events::schema::{
     EventSchemaRegistry, SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1,
 };
 use oxplow_domain::events::{Anchors, Envelope};
-use oxplow_domain::snapshot::{snapshot_ref, SnapshotTrigger};
+use oxplow_domain::refs::build::{commit_ref, snapshot_ref, stream_ref};
+use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::EffortId;
 use std::sync::Arc;
 
@@ -1306,7 +1307,7 @@ fn record_take_tx(
         .map_err(map_sql_err)?;
     }
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
-    let stream = format!("stream:{}", take.stream_id);
+    let stream = stream_ref(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
         &SnapshotTakenV1 {
@@ -1376,14 +1377,14 @@ fn record_head_moved_tx(
         0,
     )
     .map_err(map_sql_err)?;
-    let stream = format!("stream:{stream_id}");
+    let stream = stream_ref(stream_id);
     let env = Envelope::typed::<VcsHeadMoved>(
         source.to_string(),
         &VcsHeadMovedV1 {
             stream: stream.clone(),
             snapshot: snapshot_ref(sid),
-            from: from.map(|f| format!("commit:{f}")),
-            to: format!("commit:{sha}"),
+            from: from.map(|f| commit_ref(&f)),
+            to: commit_ref(sha),
         },
     )
     .with_anchors(Anchors {
@@ -1391,7 +1392,7 @@ fn record_head_moved_tx(
         snapshot_id: Some(sid),
         ..Anchors::default()
     })
-    .with_subject([stream, snapshot_ref(sid), format!("commit:{sha}")]);
+    .with_subject([stream, snapshot_ref(sid), commit_ref(sha)]);
     append_tx(tx, schemas, &env)?;
     Ok(Some(TakeOutcome {
         op_seq,
@@ -3016,14 +3017,14 @@ mod tests {
         let store = SqliteSnapshotStore::new(db.clone());
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), 1, "aaa".into(), "test".into())
+                .record_head_moved(StreamId::new(1), 1, "aaaaaaa".into(), "test".into())
                 .await
                 .unwrap(),
             None,
             "no snapshot yet"
         );
         let mut first = take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup);
-        first.git_commit = Some("aaa".into());
+        first.git_commit = Some("aaaaaaa".into());
         let base = store.record_take(first).await.unwrap().unwrap();
         db.conn()
             .unwrap()
@@ -3040,7 +3041,7 @@ mod tests {
                 .record_head_moved(
                     StreamId::new(1),
                     base.snapshot_id,
-                    "aaa".into(),
+                    "aaaaaaa".into(),
                     "test".into()
                 )
                 .await
@@ -3051,7 +3052,7 @@ mod tests {
             .record_head_moved(
                 StreamId::new(1),
                 base.snapshot_id,
-                "bbb".into(),
+                "bbbbbbb".into(),
                 "test".into(),
             )
             .await
@@ -3064,7 +3065,7 @@ mod tests {
                 .await
                 .unwrap()
                 .as_deref(),
-            Some("bbb")
+            Some("bbbbbbb")
         );
         let exact: (String, i64) = db
             .conn()
@@ -3075,7 +3076,7 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(exact, ("bbb".into(), 1));
+        assert_eq!(exact, ("bbbbbbb".into(), 1));
         let ops = store.list_ops(StreamId::new(1), 5).await.unwrap();
         assert_eq!(ops[0].trigger, SnapshotTrigger::HeadMoved);
         // A take landed after the caller saw the clean tree: the stamp is
@@ -3090,7 +3091,7 @@ mod tests {
                 .record_head_moved(
                     StreamId::new(1),
                     base.snapshot_id,
-                    "ccc".into(),
+                    "ccccccc".into(),
                     "test".into()
                 )
                 .await
@@ -3106,8 +3107,8 @@ mod tests {
         );
         let moved_events = events(&db, "vcs.head.moved");
         assert_eq!(moved_events.len(), 1);
-        assert_eq!(moved_events[0]["from"], "commit:aaa");
-        assert_eq!(moved_events[0]["to"], "commit:bbb");
+        assert_eq!(moved_events[0]["from"], "commit:aaaaaaa");
+        assert_eq!(moved_events[0]["to"], "commit:bbbbbbb");
     }
 
     #[tokio::test]

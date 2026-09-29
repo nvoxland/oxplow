@@ -217,6 +217,25 @@ impl Actor {
             _ => None,
         }
     }
+
+    /// The agent's stream, when the transport carried it (through a lens
+    /// chain too, like [`Self::thread_id`]).
+    pub fn stream_id(&self) -> Option<StreamId> {
+        match self {
+            Actor::Agent { stream_id, .. } => *stream_id,
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.stream_id(),
+            _ => None,
+        }
+    }
+
+    /// The anchors every event this actor causes carries.
+    pub fn anchors(&self) -> crate::events::Anchors {
+        crate::events::Anchors {
+            thread_id: self.thread_id(),
+            stream_id: self.stream_id(),
+            ..crate::events::Anchors::default()
+        }
+    }
 }
 
 /// A command by name with its input — what an inverse is, and what

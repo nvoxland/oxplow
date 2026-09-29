@@ -471,6 +471,31 @@ mod tests {
         assert!(store.read_after(0, 10).await.unwrap().is_empty());
     }
 
+    /// Subjects are canonical refs of registered kinds; anything else is
+    /// refused before the write (tsk450).
+    #[tokio::test]
+    async fn subjects_must_be_canonical_refs_of_registered_kinds() {
+        let db = Database::in_memory();
+        let store = store(&db);
+        for bad in ["zones", "config:", "nope:thing", "commit:xyz", "effort:12"] {
+            let err = store
+                .append(env(None).with_subject([bad]))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, DomainError::Invalid(_)), "{bad}: {err:?}");
+            assert!(err.to_string().contains(bad), "{err}");
+        }
+        store
+            .append(env(None).with_subject([
+                "config:zones",
+                "stream:str1",
+                "work_item:oxplow:tsk4",
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(store.read_after(0, 10).await.unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn checkpoints_start_at_zero_and_upsert() {
         let db = Database::in_memory();

@@ -14,6 +14,7 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::hook::TurnOutcome;
+use oxplow_domain::refs::build::{system_source, thread_ref, turn_ref};
 use oxplow_domain::stores::AgentTurnStore;
 use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp};
 
@@ -154,15 +155,15 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 // A re-open of an existing id is an update, not a new turn.
                 if fresh {
                     let env = Envelope::typed::<AgentTurnStarted>(
-                        "hook_ingest",
+                        system_source("hook_ingest"),
                         &AgentTurnStartedV1 {
-                            turn: format!("turn:{id}"),
-                            thread: format!("thread:{}", turn.thread_id),
+                            turn: turn_ref(id),
+                            thread: thread_ref(turn.thread_id),
                             session: turn.session_id.clone(),
                         },
                     )
                     .with_anchors(anchors)
-                    .with_subject([format!("turn:{id}"), format!("thread:{}", turn.thread_id)]);
+                    .with_subject([turn_ref(id), thread_ref(turn.thread_id)]);
                     append_tx(tx, &schemas, &env)?;
                 }
                 Ok(id)
@@ -195,15 +196,15 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     return Ok(false); // already closed
                 };
                 let env = Envelope::typed::<AgentTurnEnded>(
-                    "hook_ingest",
+                    system_source("hook_ingest"),
                     &AgentTurnEndedV1 {
-                        turn: format!("turn:{id}"),
-                        thread: format!("thread:{thread}"),
+                        turn: turn_ref(id),
+                        thread: thread_ref(thread),
                         outcome,
                     },
                 )
                 .with_anchors(turn_anchors(tx, thread, id)?)
-                .with_subject([format!("turn:{id}"), format!("thread:{thread}")]);
+                .with_subject([turn_ref(id), thread_ref(thread)]);
                 append_tx(tx, &schemas, &env)?;
                 Ok(true)
             })

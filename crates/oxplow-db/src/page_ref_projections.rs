@@ -33,20 +33,8 @@ pub const KIND_DIR: &str = "dir";
 pub const KIND_FINDING: &str = "finding";
 pub const KIND_COMMIT: &str = "commit";
 
-/// The provider oxplow's own tasks are filed under in a `work_item` ref.
-pub const OXPLOW_PROVIDER: &str = "oxplow";
-
-/// The `work_item` id of an oxplow task: `oxplow:tsk<n>`.
-pub fn work_item_id(task: TaskId) -> String {
-    format!("{OXPLOW_PROVIDER}:{task}")
-}
-
-/// The task behind a `work_item` id, when it's one of ours (`oxplow:tsk<n>`
-/// or, from an agent's impact declaration, a bare `tsk<n>` / `<n>`).
-pub fn task_from_work_item_id(id: &str) -> Option<TaskId> {
-    let native = id.strip_prefix("oxplow:").unwrap_or(id);
-    TaskId::try_from_str(native).or_else(|| native.parse::<i64>().ok().map(TaskId::new))
-}
+// The work-item helpers live with the other ref builders (tsk450).
+pub use oxplow_domain::refs::build::{task_from_work_item_id, work_item_id, OXPLOW_PROVIDER};
 
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
