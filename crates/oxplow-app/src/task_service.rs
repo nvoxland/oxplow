@@ -1016,6 +1016,24 @@ impl TaskService {
         path: &str,
         worktree_root: Option<&Path>,
     ) -> Result<bool, TaskServiceError> {
+        self.claim_effort_file(effort_store, thread, None, path, worktree_root)
+            .await
+    }
+
+    /// [`Self::claim_open_effort_file`] for an edit recorded with the effort
+    /// it happened in (`anchored`, the event's effort anchor — P3.5): that
+    /// effort takes the claim even when it has closed since (the reactor
+    /// can run after the close; `record_file` also clears the path from
+    /// the close's unattributed list). With no anchor, the thread's open
+    /// efforts decide as below.
+    pub async fn claim_effort_file(
+        &self,
+        effort_store: &SqliteEffortStore,
+        thread: &ThreadId,
+        anchored: Option<oxplow_domain::EffortId>,
+        path: &str,
+        worktree_root: Option<&Path>,
+    ) -> Result<bool, TaskServiceError> {
         if path.is_empty() {
             return Ok(false);
         }
@@ -1043,7 +1061,15 @@ impl TaskService {
         // strict unique winner only. A tie still declines — a WRONG claim
         // misreports what an effort did, which is worse than a missing one the
         // agent can add at close.
-        let effort = match effort_store.find_single_open_for_thread(thread).await? {
+        let anchored = match anchored {
+            Some(id) => effort_store.get_effort(&id).await?,
+            None => None,
+        };
+        let single = match anchored {
+            Some(e) => Some(e),
+            None => effort_store.find_single_open_for_thread(thread).await?,
+        };
+        let effort = match single {
             Some(e) => e,
             None => {
                 let open = effort_store.list_open_for_thread(thread).await?;

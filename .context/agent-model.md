@@ -488,7 +488,7 @@ the same JSON.
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
 - `PostToolUse` plus `AgentActivity::on_post_tool` on each finished tool call (per canonical event);
-- `Stop` (turn signals mined first), then per-turn tokens via `TokenUsageService::record_turn` and `AgentPolicy::on_turn_end` for the directive;
+- `Stop` (its closed turn's signals read from the log), then per-turn tokens via `TokenUsageService::record_turn` and `AgentPolicy::on_turn_end` for the directive;
 - `Interrupt` when the agent goes away.
 
 **Starting.**
@@ -623,9 +623,10 @@ policy that every agent transport asks, not logic in the hook route.
 - **Recording and prompt context** are shared the same way:
   `Services.agent_activity` (`crates/oxplow-app/src/agent_activity.rs`,
   tsk334).
-  - `on_post_tool` covers wiki attribution, the effort-file claim, the
-    `v_tool_call` row, and collection plus post-tool advisories (run
-    detached). It returns the ROLE CHANGE banner or a nudge.
+  - `on_post_tool` runs collection plus post-tool advisories (detached)
+    and returns the ROLE CHANGE banner or a nudge. The tool-call row, the
+    effort-file claim and wiki attribution are pump reactors on
+    `agent.tool.finished` (P3.5).
   - `prompt_context` builds the session-context block, advisories and
     decisions, deduped per session.
   - `reset_session` rounds it out. Session and resume tracking moved into
@@ -1955,28 +1956,32 @@ union. To attribute writes correctly the agent declares its touched
 files on the status transition that closes the effort; the runtime
 stores them in `effort_file` (see data-model.md).
 
-**Claim-first auto-attribution (PostToolUse).** Every structured write
-tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — auto-claims the
-file it just wrote onto the thread's OPEN effort in real time, from the
-same PostToolUse path that attributes wiki edits
-(`attribute_effort_file_edit` → `effort_claim_path_from_edit` in
-`crates/oxplow-app/src/agent_activity.rs`, delegating to
-`TaskService::claim_open_effort_file` in `crates/oxplow-app/src/task_service.rs`).
-Paths are made repo-relative against the thread's own tree,
-`Services::thread_worktree` (its stream's worktree, a sibling directory
-for a worktree stream), as are `agent_tool_call.path` and the write
-guard's (tsk386/tsk350). Wiki attribution stays on the project dir, where
-`.oxplow/wiki` lives.
-The claim is best-effort (never fails the hook), idempotent (`record_file`
-is `INSERT OR REPLACE` keyed on `(effort_id, path)`), and resolves the
-open effort **per thread** via `find_single_open_for_thread` — which
-returns an effort ONLY when exactly one is open. `find_open_for_thread`
-("newest open effort wins") was removed as an attribution authority: it
-mis-assigns when parallel sub-agents run separate efforts in one thread.
-When two-plus efforts are open the auto-claim is skipped and the file
-falls to close-time reconciliation, surfacing in the EFFORT REVIEW for
-the agent to claim. `Bash` / codegen / formatter writes are intentionally
-NOT auto-claimed — they stay for snapshot reconciliation.
+**Claim-first auto-attribution (a pump reactor, P3.5).** Every structured
+write tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — claims the
+file it wrote for the effort it was written in. The `effort.claim` async
+consumer (`crates/oxplow-app/src/tool_call_reactors.rs`) reacts to
+`agent.tool.finished`; the ingest already made `path` relative to the
+thread's own tree (its stream's worktree, a sibling directory for a
+worktree stream — tsk386/tsk350), and an absolute path (outside it) is
+never claimed. It calls `TaskService::claim_effort_file` with the event's
+**effort anchor** — the thread's single open effort when the edit
+happened — so a claim that lands after that effort closed (the reactor ran
+late) still goes to it, and `record_file` clears the path from the close's
+unattributed list. With no anchor (zero or two-plus efforts open) the
+thread's open efforts are scored by target overlap, strict unique winner
+only (tsk186); a tie declines and the file falls to close-time
+reconciliation, surfacing in the EFFORT REVIEW. The close waits for the
+claim reactor first: `EffortLifecycleConsumer` settles `effort.claim`
+(bounded, 10 s) before `on_effort_closed` reconciles, so the effort's
+last edits are counted. The claim is idempotent (`record_file` is
+`INSERT OR REPLACE` keyed on `(effort_id, path)`). `Bash` / codegen /
+formatter writes are intentionally NOT auto-claimed — they stay for
+snapshot reconciliation. The same event feeds two sync consumers:
+`tool_call.project` (the `agent_tool_call` row, one per event by
+`event_id`) and `wiki.attribution` (an edit of an indexed
+`.oxplow/wiki/<slug>.md` marks the page touched by the thread; a page the
+watcher hasn't indexed yet is skipped rather than dead-lettered, as the
+inline write used to warn and skip).
 
 **Agent-declared payload (now confirm/amend).** When calling
 `update_task` or `complete_task` to close an effort, the agent passes

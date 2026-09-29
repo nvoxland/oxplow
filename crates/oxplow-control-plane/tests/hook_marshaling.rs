@@ -435,6 +435,8 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
     )
     .await;
     assert_eq!(resp.status(), 200);
+    // The row and the claim are pump reactors on `agent.tool.finished`.
+    svc.event_pump.run_once().await.unwrap();
 
     let files = svc.effort_store.list_files(&effort.id).await.unwrap();
     assert_eq!(files.len(), 1, "the edit should auto-claim one file");
@@ -458,6 +460,8 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
     )
     .await;
     assert_eq!(resp.status(), 200);
+    // The row and the claim are pump reactors on `agent.tool.finished`.
+    svc.event_pump.run_once().await.unwrap();
     let out = oxplow_db::SemanticLayer::new(svc.db.clone())
         .query_sql("SELECT thread_id, path FROM v_context_read", vec![], None)
         .await

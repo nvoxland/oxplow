@@ -203,7 +203,8 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
     })
     .await;
 
-    // The tool-call row, as v_tool_call reads it.
+    // The tool-call row, as v_tool_call reads it (written by a pump reactor).
+    svc.event_pump.run_once().await.unwrap();
     let layer = oxplow_db::SemanticLayer::new(svc.db.clone());
     let rows = layer
         .query_sql(

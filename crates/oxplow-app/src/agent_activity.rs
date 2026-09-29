@@ -12,7 +12,6 @@
 //! See `.context/agent-model.md`.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_domain::stores::{StreamStore, ThreadStore};
@@ -108,12 +107,8 @@ impl AgentActivity {
         body: &serde_json::Value,
         payload_json: &str,
     ) -> Option<String> {
-        attribute_wiki_page_edit(svc, thread_id, body).await;
-        // Tool paths are the thread's tree's, not the project's (tsk386).
-        let worktree = svc.thread_worktree(thread_id).await;
-        attribute_effort_file_edit(svc, thread_id, body, &worktree).await;
-        record_tool_call(svc, thread_id, payload_json, &worktree).await;
-
+        // The tool-call row, the effort claim and wiki attribution are pump
+        // reactors on `agent.tool.finished` (`tool_call_reactors`, P3.5).
         let services = svc.clone();
         let collection_thread = *thread_id;
         let payload = payload_json.to_string();
@@ -303,275 +298,10 @@ impl AgentActivity {
     }
 }
 
-/// Attribute an edit of `.oxplow/wiki/<slug>.md` to the thread (the rail's
-/// "Finished" list). Best-effort.
-async fn attribute_wiki_page_edit(svc: &Services, thread_id: &ThreadId, body: &serde_json::Value) {
-    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
-        return;
-    }
-    let Some(tool_input) = body.get("tool_input") else {
-        return;
-    };
-    let Some(path) = tool_input
-        .get("file_path")
-        .or_else(|| tool_input.get("notebook_path"))
-        .or_else(|| tool_input.get("path"))
-        .and_then(|v| v.as_str())
-    else {
-        return;
-    };
-    let Some(slug) = wiki_page_slug_from_path(path, &svc.layout.project_dir) else {
-        return;
-    };
-    if let Err(err) = svc
-        .wiki_page_thread_updates
-        .touch(thread_id, &slug, oxplow_domain::Timestamp::now())
-        .await
-    {
-        warn!(?err, slug, "wiki-page attribution failed");
-    }
-}
-
-/// Claim the file a structured edit just wrote onto the thread's open
-/// effort (claim-first attribution). Only Edit / Write / MultiEdit /
-/// NotebookEdit: Bash and formatter writes are left to snapshot
-/// reconciliation. Best-effort.
-async fn attribute_effort_file_edit(
-    svc: &Services,
-    thread_id: &ThreadId,
-    body: &serde_json::Value,
-    worktree: &Path,
-) {
-    let tool_name = body.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-    let Some(rel) = effort_claim_path_from_edit(tool_name, body.get("tool_input"), worktree) else {
-        return;
-    };
-    if let Err(err) = svc
-        .tasks
-        .claim_open_effort_file(&svc.effort_store, thread_id, &rel, Some(worktree))
-        .await
-    {
-        warn!(?err, path = rel, "effort file auto-claim failed");
-    }
-}
-
-/// Persist a finished tool call as an `agent_tool_call` row on the
-/// thread's open effort (`v_tool_call`). Best-effort.
-async fn record_tool_call(
-    svc: &Services,
-    thread_id: &ThreadId,
-    payload_json: &str,
-    worktree: &Path,
-) {
-    use crate::EffortStore as _;
-    let Some(parts) = crate::tool_calls::parse_tool_call(payload_json, worktree) else {
-        return;
-    };
-    let effort_id = match svc.effort_store.find_open_for_thread(thread_id).await {
-        Ok(e) => e.map(|e| e.id.value()),
-        Err(err) => {
-            warn!(?err, "tool-call effort lookup failed");
-            None
-        }
-    };
-    let call = oxplow_db::NewToolCall {
-        thread_id: thread_id.value(),
-        effort_id,
-        tool: parts.tool,
-        path: parts.path,
-        detail: parts.detail,
-        ok: parts.ok,
-        ..Default::default()
-    };
-    if let Err(err) = svc.tool_call_store.record(call).await {
-        warn!(?err, "tool-call record failed");
-    }
-}
-
-/// Repo-relative path to claim from a structured edit, or `None` when it
-/// isn't one, names no path, or the path is absolute outside the project.
-fn effort_claim_path_from_edit(
-    tool_name: &str,
-    tool_input: Option<&serde_json::Value>,
-    project_dir: &Path,
-) -> Option<String> {
-    if !matches!(tool_name, "Edit" | "Write" | "MultiEdit" | "NotebookEdit") {
-        return None;
-    }
-    let raw = tool_input?
-        .get("file_path")
-        .or_else(|| tool_input?.get("notebook_path"))
-        .or_else(|| tool_input?.get("path"))
-        .and_then(|v| v.as_str())?;
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        path.strip_prefix(project_dir)
-            .ok()
-            .map(|r| r.to_string_lossy().into_owned())
-    } else {
-        Some(raw.to_string())
-    }
-}
-
-/// The wiki-page slug for a path directly inside `.oxplow/wiki/` with a
-/// `.md` extension (absolute or project-relative).
-fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
-    let path = Path::new(raw);
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        project_dir.join(path)
-    };
-    let notes_dir = project_dir.join(".oxplow").join("wiki");
-    let rel = abs.strip_prefix(&notes_dir).ok()?;
-    if rel
-        .parent()
-        .map(|p| !p.as_os_str().is_empty())
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    let stem = rel.file_stem()?.to_string_lossy().into_owned();
-    let ext = rel.extension()?.to_string_lossy();
-    (ext == "md").then_some(stem)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// In a worktree stream (a sibling directory of the project) an edit's
-    /// absolute path is inside the thread's worktree, not the project: it
-    /// is claimed and recorded repo-relative all the same (tsk386).
-    #[tokio::test]
-    async fn worktree_stream_edits_are_claimed_and_recorded_relative() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let worktree = tempfile::tempdir().unwrap();
-        let wt = worktree.path().to_string_lossy().to_string();
-        let thread = {
-            use oxplow_domain::stores::ThreadStore as _;
-            f.svc.thread_store.get(&f.thread).await.unwrap().unwrap()
-        };
-        let stream = thread.stream_id.value();
-        f.svc
-            .db
-            .transaction(move |c| {
-                c.execute(
-                    "UPDATE streams SET worktree_path = ?1 WHERE id = ?2",
-                    (wt.as_str(), stream),
-                )
-                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert_eq!(f.svc.thread_worktree(&f.thread).await, worktree.path());
-
-        let file = worktree.path().join("src/a.rs");
-        let body = serde_json::json!({
-            "tool_name": "Edit",
-            "tool_input": { "file_path": file.to_string_lossy() },
-            "tool_response": {},
-        });
-        f.svc
-            .agent_activity
-            .on_post_tool(&f.svc, &f.thread, None, &body, &body.to_string())
-            .await;
-        let sl = oxplow_db::SemanticLayer::new(f.svc.db.clone());
-        let q = |sql: &'static str| {
-            let sl = sl.clone();
-            async move {
-                serde_json::to_value(sl.query_sql(sql, vec![], None).await.unwrap().rows).unwrap()
-            }
-        };
-        assert_eq!(
-            q("SELECT path FROM v_tool_call").await,
-            serde_json::json!([["src/a.rs"]])
-        );
-        assert_eq!(
-            q("SELECT path FROM v_effort_file").await,
-            serde_json::json!([["src/a.rs"]])
-        );
-    }
-
-    #[test]
-    fn wiki_slug_from_relative_path_in_notes_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        // A relative path that resolves into .oxplow/wiki returns the slug.
-        let slug = wiki_page_slug_from_path(".oxplow/wiki/architecture.md", tmp.path());
-        assert_eq!(slug.as_deref(), Some("architecture"));
-    }
-
-    #[test]
-    fn wiki_slug_from_absolute_path_in_notes_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let abs = tmp.path().join(".oxplow/wiki/data-model.md");
-        let slug = wiki_page_slug_from_path(&abs.to_string_lossy(), tmp.path());
-        assert_eq!(slug.as_deref(), Some("data-model"));
-    }
-
-    #[test]
-    fn wiki_slug_rejects_non_md_extension() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        assert!(wiki_page_slug_from_path(".oxplow/wiki/foo.txt", tmp.path()).is_none());
-        // No extension at all.
-        assert!(wiki_page_slug_from_path(".oxplow/wiki/foo", tmp.path()).is_none());
-    }
-
-    #[test]
-    fn wiki_slug_rejects_subdirectory_paths() {
-        // Wiki notes must be flat under .oxplow/wiki — a path with a
-        // subdirectory shouldn't accidentally adopt the basename.
-        let tmp = tempfile::TempDir::new().unwrap();
-        assert!(wiki_page_slug_from_path(".oxplow/wiki/sub/inner.md", tmp.path()).is_none());
-    }
-
-    #[test]
-    fn wiki_slug_rejects_paths_outside_notes_dir() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        assert!(wiki_page_slug_from_path("README.md", tmp.path()).is_none());
-        assert!(wiki_page_slug_from_path(".oxplow/other/foo.md", tmp.path()).is_none());
-        assert!(wiki_page_slug_from_path("/etc/hosts", tmp.path()).is_none());
-    }
-
-    #[test]
-    fn effort_claim_path_extracts_repo_relative_for_structured_tools() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        // Relative file_path → returned as-is (already repo-relative).
-        let ti = serde_json::json!({ "file_path": "src/edited.rs" });
-        assert_eq!(
-            effort_claim_path_from_edit("Edit", Some(&ti), tmp.path()).as_deref(),
-            Some("src/edited.rs")
-        );
-        // Absolute path inside the project → normalized to repo-relative.
-        let abs = tmp.path().join("crates/x/lib.rs");
-        let ti_abs = serde_json::json!({ "file_path": abs.to_string_lossy() });
-        assert_eq!(
-            effort_claim_path_from_edit("Write", Some(&ti_abs), tmp.path()).as_deref(),
-            Some("crates/x/lib.rs")
-        );
-        // NotebookEdit uses notebook_path.
-        let ti_nb = serde_json::json!({ "notebook_path": "nb/run.ipynb" });
-        assert_eq!(
-            effort_claim_path_from_edit("NotebookEdit", Some(&ti_nb), tmp.path()).as_deref(),
-            Some("nb/run.ipynb")
-        );
-    }
-
-    #[test]
-    fn effort_claim_path_excludes_bash_and_outside_project() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        // Bash (and any non-structured tool) is intentionally NOT auto-claimed.
-        let ti = serde_json::json!({ "command": "echo hi > out.txt" });
-        assert!(effort_claim_path_from_edit("Bash", Some(&ti), tmp.path()).is_none());
-        // An absolute path outside the project is not an effort file.
-        let ti_out = serde_json::json!({ "file_path": "/etc/hosts" });
-        assert!(effort_claim_path_from_edit("Edit", Some(&ti_out), tmp.path()).is_none());
-        // Missing path → None.
-        let ti_empty = serde_json::json!({});
-        assert!(effort_claim_path_from_edit("Edit", Some(&ti_empty), tmp.path()).is_none());
-    }
+    use std::path::Path;
 
     #[test]
     fn session_context_emits_initial_and_changed_blocks_only() {
@@ -619,12 +349,12 @@ mod tests {
             ev.to_payload(),
             serde_json::json!({"tool_name": "Edit", "tool_input": {"file_path": "src/a.rs"}, "tool_response": {"is_error": false}, "session_id": "s1"})
         );
-        // What the recorders read: a claim path and a tool-call row.
+        // What the ingest reads: the tool, its path and outcome.
         let body = ev.to_payload();
+        let parts = crate::tool_calls::parse_tool_call(&body.to_string(), Path::new("/p")).unwrap();
         assert_eq!(
-            effort_claim_path_from_edit("Edit", body.get("tool_input"), Path::new("/p")).as_deref(),
-            Some("src/a.rs")
+            (parts.tool.as_str(), parts.path.as_deref()),
+            ("Edit", Some("src/a.rs"))
         );
-        assert!(crate::tool_calls::parse_tool_call(&body.to_string(), Path::new("/p")).is_some());
     }
 }

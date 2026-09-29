@@ -89,6 +89,7 @@ pub mod test_signals;
 pub mod thread_lifecycle;
 pub mod thread_runtime;
 pub mod token_usage;
+pub mod tool_call_reactors;
 pub mod tool_calls;
 pub mod turn_snapshots;
 pub mod wiki_drift;
@@ -603,7 +604,13 @@ impl Services {
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
-            vec![Arc::new(page_ref_consumers::PageRefWorkItemConsumer)],
+            vec![
+                Arc::new(page_ref_consumers::PageRefWorkItemConsumer),
+                Arc::new(tool_call_reactors::ToolCallProjection),
+                Arc::new(tool_call_reactors::WikiAttribution {
+                    project_dir: layout.project_dir.clone(),
+                }),
+            ],
         ));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
@@ -829,9 +836,19 @@ impl Services {
             .with_attribution(attribution_store.clone())
             .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // The post-commit half of effort open/close runs on the pump.
-        event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
+        event_pump.register_async(Arc::new(
+            effort_lifecycle::EffortLifecycleConsumer::new(
+                tasks.without_event_pump(),
+                (*event_log_store).clone(),
+            )
+            .with_pump(Arc::downgrade(&event_pump)),
+        ));
+        // A structured edit claims its file for the effort it happened in.
+        event_pump.register_async(Arc::new(tool_call_reactors::EffortClaimConsumer::new(
             tasks.without_event_pump(),
-            (*event_log_store).clone(),
+            effort_store.clone(),
+            db.clone(),
+            layout.project_dir.clone(),
         )));
         let agent_policy = Arc::new(agent_policy::AgentPolicy::default());
         let commands = Arc::new(

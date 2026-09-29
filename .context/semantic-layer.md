@@ -158,7 +158,7 @@ never the physical tables, which stay internal and free to change.
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via MCP `record_decision` (V76), or `inferred` by the summarize model when the effort closed (V79) |
 | `v_claim` | agent claims ("tests pass") with `verified` (cited evidence, or a `tests_pass` claim whose effort's **latest** `v_test_run` — its own or one claimed through attribution — has `failed = 0 AND total > 0`) (V76; latest-run rule V91, tsk366) |
-| `v_tool_call` | every agent tool call, persisted from PostToolUse (`record_tool_call` in the control plane; `oxplow-app/src/tool_calls.rs` parses the payload; paths repo-relative; Bash `ok` is NULL when Claude reports no exit code) (V77; `turn_id`, `event_id` since V102) |
+| `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the ingest parses the payload with `oxplow-app/src/tool_calls.rs`; paths worktree-relative; Bash `ok` is NULL when Claude reports no exit code) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | `Read`s of `.context/*.md` (V77) |
 | `v_struggle` | per effort: a file edited 5+ times, or 3+ failed commands (V77) |
 | `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error (V78; see [ai-providers.md](./ai-providers.md)) |
