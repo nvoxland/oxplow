@@ -4,8 +4,10 @@ import {
   previousSnapshotId,
   rangeDateLabel,
   rangeEndpointOptions,
+  inProgressNotice,
   resolveEffortEndpoints,
   resolveSnapshotEndpoints,
+  resolveTurnEndpoints,
   snapshotsOnBranch,
 } from "./diffViewModel.js";
 
@@ -134,5 +136,33 @@ describe("resolveEffortEndpoints", () => {
       end: { kind: "snapshot", snapshot_id: 9 },
       inProgress: false,
     });
+  });
+});
+
+describe("resolveTurnEndpoints", () => {
+  test("a finished turn diffs its start snapshot to its end snapshot", () => {
+    expect(resolveTurnEndpoints({ startSnapshotId: 3, snapshotId: 5 })).toEqual({
+      start: { kind: "snapshot", snapshot_id: 3 },
+      end: { kind: "snapshot", snapshot_id: 5 },
+      inProgress: false,
+    });
+  });
+  test("a running turn diffs its start against the working tree", () => {
+    expect(resolveTurnEndpoints({ startSnapshotId: 3, snapshotId: null })).toMatchObject({
+      end: { kind: "working" },
+      inProgress: true,
+    });
+  });
+  test("a turn with no start snapshot has nothing to diff against", () => {
+    const r = resolveTurnEndpoints({ startSnapshotId: null, snapshotId: 5 });
+    expect("unavailable" in r && r.unavailable).toContain("no snapshot");
+  });
+});
+
+describe("inProgressNotice", () => {
+  test("names what is still running", () => {
+    expect(inProgressNotice("turn")).toContain("Turn is still running");
+    expect(inProgressNotice("effort")).toContain("Effort is in progress");
+    expect(inProgressNotice("endpoints")).not.toMatch(/effort|turn/i);
   });
 });

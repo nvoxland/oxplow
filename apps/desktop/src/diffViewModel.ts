@@ -34,7 +34,7 @@ export interface ResolvedEndpoints {
   /** `end` snapshot is null → the effort is still open; it diffs its
    *  start against the live working tree. The working-tree endpoint
    *  isn't computed by the substrate yet (tsk339), so the page shows an
-   *  "Effort is in progress" notice rather than a file diff. */
+   *  in-progress notice ([`inProgressNotice`]) rather than a file diff. */
   inProgress: boolean;
 }
 
@@ -50,6 +50,48 @@ export function resolveEffortEndpoints(effort: EffortLike): ResolvedEndpoints {
     return { start, end: { kind: "snapshot", snapshot_id: effort.endSnapshotId }, inProgress: false };
   }
   return { start, end: { kind: "working" }, inProgress: true };
+}
+
+export interface TurnLike {
+  startSnapshotId: number | null;
+  /** The end snapshot, taken when the turn ended; null while it runs. */
+  snapshotId: number | null;
+}
+
+/** Map an agent turn to diff endpoints: start snapshot → end snapshot,
+ *  or start → working tree while it runs. A turn that began before its
+ *  stream had any snapshot has no start to diff against — diffing the
+ *  empty tree would show the whole repo as added — so it resolves to an
+ *  explanation instead (the Rust `ChangeTarget::Turn` refuses it too). */
+export function resolveTurnEndpoints(
+  turn: TurnLike,
+): ResolvedEndpoints | { unavailable: string } {
+  if (turn.startSnapshotId == null) {
+    return {
+      unavailable:
+        "This turn began before its stream had any snapshot, so there is no snapshot of " +
+        "where it started and nothing to diff its changes against.",
+    };
+  }
+  return resolveEffortEndpoints({
+    startSnapshotId: turn.startSnapshotId,
+    endSnapshotId: turn.snapshotId,
+  });
+}
+
+/** What a diff that ends at the working tree is showing. */
+export type DiffSubject = "effort" | "turn" | "endpoints";
+
+/** The notice over a diff whose end is the live working tree. */
+export function inProgressNotice(subject: DiffSubject): string {
+  switch (subject) {
+    case "effort":
+      return "Effort is in progress — diffing the start snapshot against the live working tree, which keeps changing until it closes.";
+    case "turn":
+      return "Turn is still running — diffing its start snapshot against the live working tree, which keeps changing until the turn ends.";
+    case "endpoints":
+      return "Diffing against the live working tree, which keeps changing.";
+  }
 }
 
 /** The snapshot `snapshotId` grew from — a single-snapshot diff's

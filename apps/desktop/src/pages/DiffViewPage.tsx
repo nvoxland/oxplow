@@ -15,9 +15,12 @@ import {
   previousSnapshotId,
   rangeDateLabel,
   rangeEndpointOptions,
+  inProgressNotice,
   resolveEffortEndpoints,
   resolveSnapshotEndpoints,
+  resolveTurnEndpoints,
   snapshotRange,
+  type DiffSubject,
   snapshotsOnBranch,
 } from "../diffViewModel.js";
 import type { DiffEndpoint } from "../tauri-bridge/generated/bindings.js";
@@ -84,6 +87,8 @@ interface ResolvedDiff {
   start: DiffEndpoint | null;
   end: DiffEndpoint;
   inProgress: boolean;
+  /** What the diff is of — picks the in-progress notice's wording. */
+  subject: DiffSubject;
   /** Task id of the effort this diff was opened *for* (effort mode);
    *  null for snapshot/endpoint diffs. */
   taskId: string | null;
@@ -110,7 +115,8 @@ function DiffBody({
   onOpenDiffInTab,
 }: DiffViewPageProps) {
   const [resolved, setResolved] = useState<ResolvedDiff | null>(null);
-  const [resolveError, setResolveError] = useState<string | null>(null);
+  // Why nothing resolved: an error, or a turn with nothing to diff.
+  const [unresolved, setUnresolved] = useState<string | null>(null);
   const key = specKey(spec);
 
   // Backlinks/outbound keyed on the ref that opened this page. A
@@ -139,12 +145,13 @@ function DiffBody({
 
   useEffect(() => {
     let cancelled = false;
-    setResolveError(null);
+    setUnresolved(null);
     if (spec.mode === "endpoints") {
       setResolved({
         start: spec.start,
         end: spec.end,
         inProgress: spec.end.kind === "working",
+        subject: "endpoints",
         taskId: null,
         effortId: null,
       });
@@ -156,11 +163,12 @@ function DiffBody({
         .then((effort) => {
           if (cancelled) return;
           if (!effort) {
-            setResolveError("Effort not found.");
+            setUnresolved("Effort not found.");
             return;
           }
           setResolved({
             ...resolveEffortEndpoints(effort),
+            subject: "effort",
             taskId: effort.taskId,
             effortId: effort.effortId,
           });
@@ -168,7 +176,7 @@ function DiffBody({
         .catch((err) => {
           if (cancelled) return;
           logUi("warn", "effort resolve failed", { error: String(err) });
-          setResolveError(err instanceof Error ? err.message : String(err));
+          setUnresolved(err instanceof Error ? err.message : String(err));
         });
       return () => {
         cancelled = true;
@@ -181,14 +189,17 @@ function DiffBody({
         .then((turn) => {
           if (cancelled) return;
           if (!turn) {
-            setResolveError("Turn not found.");
+            setUnresolved("Turn not found.");
+            return;
+          }
+          const endpoints = resolveTurnEndpoints(turn);
+          if ("unavailable" in endpoints) {
+            setUnresolved(endpoints.unavailable);
             return;
           }
           setResolved({
-            ...resolveEffortEndpoints({
-              startSnapshotId: turn.startSnapshotId,
-              endSnapshotId: turn.snapshotId,
-            }),
+            ...endpoints,
+            subject: "turn",
             taskId: null,
             effortId: null,
           });
@@ -196,7 +207,7 @@ function DiffBody({
         .catch((err) => {
           if (cancelled) return;
           logUi("warn", "turn resolve failed", { error: String(err) });
-          setResolveError(err instanceof Error ? err.message : String(err));
+          setUnresolved(err instanceof Error ? err.message : String(err));
         });
       return () => {
         cancelled = true;
@@ -214,6 +225,7 @@ function DiffBody({
         const prev = previousSnapshotId(snapshotId, rows);
         setResolved({
           ...resolveSnapshotEndpoints(snapshotId, prev),
+          subject: "endpoints",
           taskId: null,
           effortId: null,
         });
@@ -230,10 +242,10 @@ function DiffBody({
 
   // Loading / error keep the simple full-layout chrome; the resolved view
   // owns its own Page (it needs the range data for the details rail).
-  if (resolveError || !resolved) {
+  if (unresolved || !resolved) {
     return (
       <Page testId="page-diff-view" title="Changes" kind="diff-view" backlinks={backlinks} outbound={outbound}>
-        <div style={{ ...muted, padding: "12px 16px" }}>{resolveError ?? "Loading…"}</div>
+        <div style={{ ...muted, padding: "12px 16px" }}>{unresolved ?? "Loading…"}</div>
       </Page>
     );
   }
@@ -650,8 +662,7 @@ function ResolvedEndpointDiff({
           style={{ ...card, color: "var(--text-secondary)", fontSize: "var(--text-xs)" }}
           data-testid="diff-view-in-progress"
         >
-          Effort is in progress — diffing the start snapshot against the live
-          working tree, which keeps changing until it closes.
+          {inProgressNotice(resolved.subject)}
         </div>
       ) : null}
 
