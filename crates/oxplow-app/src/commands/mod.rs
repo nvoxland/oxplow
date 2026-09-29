@@ -220,6 +220,21 @@ impl CommandBus {
         input: Value,
         confirmed: bool,
     ) -> Result<CommandOutcome, CommandError> {
+        self.run_inner(actor, name, input, confirmed, None).await
+    }
+
+    /// [`Self::run`], optionally as the undo of audit row `undo_of`: the
+    /// row is claimed as undone in the same transaction as the run (a
+    /// `Tx` handler) or before it (a `BestEffort` one, released if the run
+    /// fails), so two undos of one row can't both apply the inverse.
+    async fn run_inner(
+        &self,
+        actor: &Actor,
+        name: &str,
+        input: Value,
+        confirmed: bool,
+        undo_of: Option<i64>,
+    ) -> Result<CommandOutcome, CommandError> {
         let command =
             self.commands
                 .read()
@@ -249,9 +264,10 @@ impl CommandBus {
                 .await;
             return Err(err);
         }
-        // 3. …and an agent must also pass the agent policy.
-        if let Actor::Agent { thread_id, .. } = actor {
-            let may_write = match (spec.effect, thread_id, &self.write_gate) {
+        // 3. …and an agent (or a lens acting for one) must also pass the
+        // agent policy.
+        if let Some(thread_id) = actor.agent_thread() {
+            let may_write = match (spec.effect, &thread_id, &self.write_gate) {
                 (oxplow_domain::CommandEffect::Write, Some(t), Some(gate)) => Some(gate(*t).await),
                 _ => None,
             };
@@ -266,7 +282,7 @@ impl CommandBus {
             }
         }
         // 4. A person confirms; an agent never can. Nothing is written.
-        let confirmed = confirmed && !matches!(actor, Actor::Agent { .. });
+        let confirmed = confirmed && !actor.is_agent_driven();
         let confirm = command.confirm(&input);
         if confirm.required() && !confirmed {
             return Err(CommandError::NeedsConfirmation {
@@ -308,6 +324,11 @@ impl CommandBus {
                             }
                         };
                         let recorded = record_tx(tx, &schemas, &actor_c, &spec_c, &input_c, &out)?;
+                        if let Some(original) = undo_of {
+                            // Fails (and rolls the whole run back) when the
+                            // row was undone meanwhile.
+                            mark_undone_tx(tx, original, recorded.audit_id)?;
+                        }
                         Ok((out, recorded))
                     })
                     .await;
@@ -319,13 +340,22 @@ impl CommandBus {
                         .unwrap_or_else(|| CommandError::from(db_err))),
                 }
             }
-            Handler::BestEffort(handler) => match handler(actor.clone(), input.clone()).await {
-                Ok(out) => {
-                    let recorded = self.record(actor, spec, &input, &out).await?;
-                    Ok(finish(out, recorded))
+            Handler::BestEffort(handler) => {
+                if let Some(original) = undo_of {
+                    self.claim_undo(original).await?;
                 }
-                Err(err) => Err(err),
-            },
+                match handler(actor.clone(), input.clone()).await {
+                    Ok(out) => Ok(self
+                        .record_best_effort(actor, spec, &input, out, undo_of)
+                        .await),
+                    Err(err) => {
+                        if let Some(original) = undo_of {
+                            self.release_undo(original).await;
+                        }
+                        Err(err)
+                    }
+                }
+            }
         };
         match outcome {
             Ok(done) => {
@@ -357,19 +387,24 @@ impl CommandBus {
                 message: format!("audit row {audit_id} not found"),
             })?;
         let inverse = undoable(&row)?;
-        let outcome = self
-            .run(actor, &inverse.name, inverse.input.clone(), confirmed)
-            .await?;
-        let Some(done_by) = outcome.audit_id else {
-            return Err(CommandError::Failed {
-                message: format!("`{}` is a read and can't undo anything", inverse.name),
-            });
-        };
-        self.db
-            .transaction(move |tx| mark_undone_tx(tx, audit_id, done_by))
-            .await
-            .map_err(CommandError::from)?;
-        Ok(outcome)
+        self.run_inner(
+            actor,
+            &inverse.name,
+            inverse.input.clone(),
+            confirmed,
+            Some(audit_id),
+        )
+        .await
+        .map_err(|e| match e {
+            // The row was undone by a concurrent undo between our read and
+            // our claim: say so, as the up-front check would have.
+            CommandError::Failed { message } if message.contains("already undone") => {
+                CommandError::Failed {
+                    message: format!("audit row {audit_id} was already undone"),
+                }
+            }
+            other => other,
+        })
     }
 
     /// Step 5 for a `Read` command: the handler on a plain connection,
@@ -441,29 +476,102 @@ impl CommandBus {
         }
     }
 
-    /// The audit row and `command.executed` for a `BestEffort` run.
-    async fn record(
+    /// Record a `BestEffort` run whose writes already committed: the audit
+    /// row and `command.executed` (and, for an undo, the claimed row's
+    /// real `undone_by`). If recording fails, the run still happened — it
+    /// is reported as done and unrecorded (logged at error level), never
+    /// as an error, which would tell the caller the change didn't happen.
+    async fn record_best_effort(
         &self,
         actor: &Actor,
         spec: &CommandSpec,
         input: &Value,
-        out: &HandlerOutput,
-    ) -> Result<Recorded, CommandError> {
-        let (actor, spec, input) = (actor.clone(), spec.clone(), input.clone());
-        let inverse = out.inverse.clone();
-        let events = out.events.clone();
+        mut out: HandlerOutput,
+        undo_of: Option<i64>,
+    ) -> CommandOutcome {
+        let (actor_c, spec_c, input_c) = (actor.clone(), spec.clone(), input.clone());
         let schemas = self.log.schemas().clone();
         let shadow = HandlerOutput {
             result: Value::Null,
-            inverse,
-            events,
+            inverse: out.inverse.clone(),
+            events: out.events.clone(),
             after_commit: None,
         };
+        let recorded = self
+            .db
+            .transaction(move |tx| {
+                let recorded = record_tx(tx, &schemas, &actor_c, &spec_c, &input_c, &shadow)?;
+                if let Some(original) = undo_of {
+                    finish_undo_claim_tx(tx, original, recorded.audit_id)?;
+                }
+                Ok(recorded)
+            })
+            .await;
+        match recorded {
+            Ok(recorded) => finish(out, recorded),
+            Err(e) => {
+                tracing::error!(
+                    command = %spec.name,
+                    error = %e,
+                    "command ran but recording it failed; the change stands unrecorded"
+                );
+                if let Some(after) = out.after_commit.take() {
+                    after();
+                }
+                CommandOutcome {
+                    result: out.result,
+                    audit_id: None,
+                    event_id: None,
+                    inverse: None,
+                }
+            }
+        }
+    }
+
+    /// Mark `audit_id` as being undone (`undone_by = UNDO_PENDING`) before
+    /// running a `BestEffort` inverse. Fails when it's already undone or
+    /// being undone.
+    async fn claim_undo(&self, audit_id: i64) -> Result<(), CommandError> {
         self.db
-            .transaction(move |tx| record_tx(tx, &schemas, &actor, &spec, &input, &shadow))
+            .transaction(move |tx| mark_undone_tx(tx, audit_id, UNDO_PENDING))
             .await
             .map_err(CommandError::from)
     }
+
+    /// The inverse failed: the row is undoable again.
+    async fn release_undo(&self, audit_id: i64) {
+        if let Err(e) = self
+            .db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE command_audit SET undone_by = NULL WHERE id = ?1 AND undone_by = ?2",
+                    rusqlite::params![audit_id, UNDO_PENDING],
+                )
+                .map(|_| ())
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+        {
+            tracing::error!(audit_id, error = %e, "releasing an undo claim failed");
+        }
+    }
+}
+
+/// `undone_by` while a `BestEffort` undo is running (audit ids start at 1).
+const UNDO_PENDING: i64 = 0;
+
+/// Replace a pending undo claim with the undo run's audit row.
+fn finish_undo_claim_tx(
+    tx: &rusqlite::Connection,
+    original: i64,
+    done_by: i64,
+) -> Result<(), oxplow_domain::DomainError> {
+    tx.execute(
+        "UPDATE command_audit SET undone_by = ?2 WHERE id = ?1 AND undone_by = ?3",
+        rusqlite::params![original, done_by, UNDO_PENDING],
+    )
+    .map(|_| ())
+    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
 }
 
 /// What recording a successful run produced.
@@ -939,6 +1047,131 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("already undone"), "{err}");
         assert!(bus.undo(&Actor::Human, 9999, false).await.is_err());
+    }
+
+    /// Two undos of one row race: exactly one applies the inverse; the
+    /// other is refused without running it (an inverse applied twice is a
+    /// second, unasked-for change).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn concurrent_undos_apply_the_inverse_once() {
+        let (db, bus) = bus();
+        let bus = Arc::new(bus);
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+        )
+        .unwrap();
+        bus.run(&Actor::Human, "kv.set", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        let second = bus
+            .run(&Actor::Human, "kv.set", json!({"k": "a", "v": "2"}), false)
+            .await
+            .unwrap()
+            .audit_id
+            .unwrap();
+        let (b1, b2) = (bus.clone(), bus.clone());
+        let (r1, r2) = tokio::join!(
+            tokio::spawn(async move { b1.undo(&Actor::Human, second, false).await }),
+            tokio::spawn(async move { b2.undo(&Actor::Human, second, false).await }),
+        );
+        let results = [r1.unwrap(), r2.unwrap()];
+        assert_eq!(
+            results.iter().filter(|r| r.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
+        let ok_runs = bus
+            .audit_store()
+            .list_recent(20)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.outcome == Outcome::Ok)
+            .count();
+        assert_eq!(ok_runs, 3, "two sets and one undo");
+    }
+
+    /// A lens acting for an agent is held to the agent rules: it can't
+    /// confirm, and the agent policy applies.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_lens_acting_for_an_agent_is_treated_as_the_agent() {
+        let (_db, bus) = bus();
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Always), kv_set()).unwrap(),
+        )
+        .unwrap();
+        let lens = Actor::Lens {
+            lens_id: "acme/x".into(),
+            on_behalf_of: Box::new(agent()),
+        };
+        let err = bus
+            .run(&lens, "kv.set", json!({"k": "a", "v": "1"}), true)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CommandError::NeedsConfirmation { .. }),
+            "{err:?}"
+        );
+        let for_person = Actor::Lens {
+            lens_id: "acme/x".into(),
+            on_behalf_of: Box::new(Actor::Human),
+        };
+        bus.run(&for_person, "kv.set", json!({"k": "a", "v": "1"}), true)
+            .await
+            .unwrap();
+    }
+
+    /// A `BestEffort` handler's writes are committed by the time the bus
+    /// records them; if recording then fails, the run still happened —
+    /// it's reported as done (unrecorded), not as an error.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_best_effort_run_whose_record_fails_still_reports_success() {
+        let (db, bus) = bus();
+        let mut spec = kv_spec("kv.effort", Invokers::ALL, Confirm::Never);
+        spec.atomicity = Atomicity::BestEffort;
+        let writes = db.clone();
+        bus.register(
+            Command::new(
+                spec,
+                Handler::BestEffort(Arc::new(move |_actor, input| {
+                    let db = writes.clone();
+                    Box::pin(async move {
+                        db.transaction(|tx| {
+                            tx.execute("INSERT INTO kv (k, v) VALUES ('e', '1')", [])
+                                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?;
+                            Ok(())
+                        })
+                        .await
+                        .map_err(CommandError::from)?;
+                        Ok(HandlerOutput {
+                            result: input,
+                            // An event the log refuses (unregistered type):
+                            // recording fails after the write committed.
+                            events: vec![
+                                Envelope::new("nope.unknown", 1, "test", json!({})).unwrap()
+                            ],
+                            ..HandlerOutput::default()
+                        })
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let out = bus
+            .run(
+                &Actor::Human,
+                "kv.effort",
+                json!({"k": "e", "v": "1"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.audit_id, None);
+        assert_eq!(kv(&db, "e").await.as_deref(), Some("1"));
+        let rows = bus.audit_store().list_recent(10).await.unwrap();
+        assert!(rows.iter().all(|r| r.outcome != Outcome::Error), "{rows:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

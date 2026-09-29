@@ -61,7 +61,20 @@ not write — nothing records it.
 `CommandBus::undo(actor, audit_id, confirmed)` loads the row, refuses a
 run that didn't complete, was already undone or has no inverse, runs the
 inverse through the same pipeline, and marks the row `undone_by` the new
-run.
+run. The original row is claimed **with** the inverse run
+— marked `undone_by` inside the run's transaction for a `Tx` inverse,
+or claimed (`undone_by = 0`, pending) before a `BestEffort` inverse and
+released if it fails — so two concurrent undos can't both apply it
+(tsk437 review).
+
+**Agent rules follow the agent.** An `Actor::Lens { on_behalf_of }`
+whose chain ends at an agent (`Actor::is_agent_driven`) gets the agent
+policy and can never confirm, exactly like the agent.
+
+**A `BestEffort` run whose recording fails** (its writes already
+committed in the service's own transaction) is reported as done and
+unrecorded — `audit_id: None`, logged at error level — never as an
+error, which would claim the change didn't happen.
 
 A command whose confirmation depends on the input sets
 `Command::with_confirm_for(fn(&input) -> Confirm)`; the bus consults it

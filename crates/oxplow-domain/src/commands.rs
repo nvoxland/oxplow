@@ -156,6 +156,25 @@ impl Actor {
         }
     }
 
+    /// An agent, or a lens acting for one (at any depth). Agent-only
+    /// rules — the agent policy, "can never confirm" — apply to both.
+    pub fn is_agent_driven(&self) -> bool {
+        match self {
+            Actor::Agent { .. } => true,
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.is_agent_driven(),
+            Actor::Human | Actor::System => false,
+        }
+    }
+
+    /// The agent behind this actor, if any (see [`Self::is_agent_driven`]).
+    pub fn agent_thread(&self) -> Option<Option<ThreadId>> {
+        match self {
+            Actor::Agent { thread_id, .. } => Some(*thread_id),
+            Actor::Lens { on_behalf_of, .. } => on_behalf_of.agent_thread(),
+            Actor::Human | Actor::System => None,
+        }
+    }
+
     pub fn invoker(&self) -> Invoker {
         match self {
             Actor::Human | Actor::System => Invoker::Human,
