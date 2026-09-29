@@ -23,8 +23,8 @@ pub mod tree_diff;
 
 pub use agent::AgentKind;
 pub use commands::{
-    Actor, Atomicity, CommandCall, CommandError, CommandOutcome, CommandSpec, Confirm,
-    InputValidator, Invoker, Invokers, Lifecycle, Preview,
+    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandOutcome, CommandSpec,
+    Confirm, InputValidator, Invoker, Invokers, Lifecycle, Preview,
 };
 pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,

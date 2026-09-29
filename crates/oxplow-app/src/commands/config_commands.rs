@@ -25,8 +25,8 @@ use oxplow_config::keys::{config_key, config_keys, key_value, with_key, ConfigKe
 use oxplow_config::{write_project_config, OxplowConfig};
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
 use oxplow_domain::{
-    Actor, Atomicity, CommandCall, CommandError, CommandSpec, Confirm, Envelope, InputValidator,
-    Invokers, Lifecycle,
+    Actor, Atomicity, CommandCall, CommandEffect, CommandError, CommandSpec, Confirm, Envelope,
+    InputValidator, Invokers, Lifecycle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -84,16 +84,18 @@ fn schema_of<T: JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes")
 }
 
-fn spec(name: &str, summary: &str, input_schema: Value, undoable: bool) -> CommandSpec {
+/// Every config write records its inverse; the reads have none.
+fn spec(name: &str, summary: &str, input_schema: Value, effect: CommandEffect) -> CommandSpec {
     CommandSpec {
         name: name.into(),
         summary: summary.into(),
         input_schema,
         invokers: Invokers::ALL,
         confirm: Confirm::Never,
-        undoable,
+        undoable: effect == CommandEffect::Write,
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::Tx,
+        effect,
     }
 }
 
@@ -241,7 +243,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 "Every .oxplow/project.yaml key with its doc, value schema, current value and \
                  whether only a person may set it.",
                 schema_of::<NoInput>(),
-                false,
+                CommandEffect::Read,
             ),
             Handler::Tx(Arc::new(move |_conn, _actor, input| {
                 parse::<NoInput>(input)?;
@@ -265,7 +267,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 GET,
                 "One .oxplow/project.yaml key: its doc, value schema and current value.",
                 schema_of::<KeyInput>(),
-                false,
+                CommandEffect::Read,
             ),
             Handler::Tx(Arc::new(move |_conn, _actor, input| {
                 let input: KeyInput = parse(input)?;
@@ -289,7 +291,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                  config.changed; undo restores the prior value. Human-only keys need a \
                  person's confirmation.",
                 schema_of::<SetInput>(),
-                true,
+                CommandEffect::Write,
             ),
             Handler::Tx(Arc::new(move |_conn, actor, input| {
                 let input: SetInput = parse(input)?;
@@ -307,7 +309,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 "Remove one .oxplow/project.yaml key so it returns to its default; logged as \
                  config.changed, undo restores it.",
                 schema_of::<KeyInput>(),
-                true,
+                CommandEffect::Write,
             ),
             Handler::Tx(Arc::new(move |_conn, actor, input| {
                 let input: KeyInput = parse(input)?;
@@ -497,7 +499,9 @@ mod tests {
         assert!(changed.envelope.cause.is_some());
         // Undo: the inverse of a first set is an unset.
         assert_eq!(out.inverse.as_ref().unwrap().name, UNSET);
-        bus.undo(&agent(), out.audit_id, false).await.unwrap();
+        bus.undo(&agent(), out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
         assert!(!file(&dir).contains("zones"), "{}", file(&dir));
         assert!(target.config.read().unwrap().zones.is_empty());
         // A no-op set changes nothing and logs nothing new.

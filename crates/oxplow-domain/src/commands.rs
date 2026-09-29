@@ -87,6 +87,17 @@ pub enum Atomicity {
     BestEffort,
 }
 
+/// Whether a command changes anything. A `Read` runs without an audit
+/// row or a `command.executed` event (a polling agent must not fill the
+/// log), and an agent thread that may not write can still run it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandEffect {
+    Read,
+    #[default]
+    Write,
+}
+
 /// What a command declares about itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct CommandSpec {
@@ -103,6 +114,7 @@ pub struct CommandSpec {
     pub undoable: bool,
     pub lifecycle: Lifecycle,
     pub atomicity: Atomicity,
+    pub effect: CommandEffect,
 }
 
 impl CommandSpec {
@@ -209,10 +221,10 @@ pub struct Preview {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct CommandOutcome {
     pub result: Value,
-    /// The `command_audit` row.
-    pub audit_id: i64,
-    /// The `command.executed` event.
-    pub event_id: EventId,
+    /// The `command_audit` row; `None` for a `Read` command.
+    pub audit_id: Option<i64>,
+    /// The `command.executed` event; `None` for a `Read` command.
+    pub event_id: Option<EventId>,
     /// Present when the command is undoable: `commands.undo(audit_id)`
     /// runs it.
     pub inverse: Option<CommandCall>,

@@ -21,6 +21,7 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 | `undoable` | the handler returns an inverse call that `undo` applies |
 | `lifecycle` | `Stable` / `Experimental` |
 | `atomicity` | `Tx` (handler runs inside the bus's transaction) or `BestEffort` (see below) |
+| `effect` | `Write` (the default) or `Read`: a read runs without an audit row or `command.executed`, so a polling agent doesn't fill the log, and a thread that may not write can still run it (`config.list_keys`, `config.get`) |
 
 `Actor` is who runs it: `Human`, `Agent { thread_id, stream_id }`,
 `Lens { lens_id, on_behalf_of }`, `System`. Its `source()` (`human`,
@@ -35,9 +36,11 @@ A command is a typed operation named `<capability|plugin>.<verb>`
 2. **Invoker check** — the spec's `invokers` must admit the actor's surface
    → `Denied` (audited).
 3. **Agent policy** — for an agent, `AgentPolicy::check_command(thread,
-   spec)` (`agent_policy.rs`) → `Denied` (audited). Today it enforces the
-   agent gate; the write guard and filing apply to worktree edits, which
-   no command performs yet.
+   spec, may_write)` (`agent_policy.rs`) → `Denied` (audited). A `Write`
+   command needs a thread that may write: the bus asks its `WriteGate`
+   (`Services` wires "the thread exists and is its stream's writer"), so
+   a queued or closed thread can read but not change state (tsk437
+   review).
 4. **Confirmation** — when `confirm` requires it and the call isn't
    `confirmed`, `NeedsConfirmation { preview }` and **nothing is written,
    not even an audit row**. An agent's `confirmed` is ignored: it gets
@@ -50,6 +53,10 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    rolls all of it back and is audited as `error` in a transaction of its
    own.
 6. Post-commit: wake the event pump.
+
+A `Read` command stops after step 4: its handler runs on a connection
+and the outcome has `audit_id: None`, `event_id: None`. A `Read` must
+not write — nothing records it.
 
 `CommandBus::undo(actor, audit_id, confirmed)` loads the row, refuses a
 run that didn't complete, was already undone or has no inverse, runs the
@@ -137,8 +144,12 @@ opencode: `{env:OXPLOW_THREAD_ID}` in its config headers; Claude: a
 per-thread `mcp-config.<thread>.json` with the literal headers, since
 Claude's MCP config reads no env vars), or `?thread=…&stream=…` on the
 endpoint URL (Codex, whose config has no per-session headers). A
-connection with neither is an anonymous agent: it may list and read,
-and `run_command` refuses it — no write without an actor to audit it to.
+connection with neither is an anonymous agent: it may list, and
+`run_command` / `transition_tasks` refuse it — no run without an actor
+to audit it to. **The header is a claim, not a proof**:
+`OxplowMcp::verified_actor` resolves the thread and refuses an unknown
+thread or a stream header that isn't the thread's stream, and the actor
+carries the thread's real stream.
 The wire test `crates/oxplow-control-plane/tests/mcp_wire.rs` proves the
 headers reach `command.executed`'s `source = agent:thr…`.
 

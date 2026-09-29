@@ -4662,7 +4662,7 @@ impl OxplowMcp {
         // Each transition is the `work_item.transition` command, run as
         // the calling agent: audited, policy-checked, `command.executed`
         // logged with `source = agent:thr…`.
-        let actor = caller_of(&extensions).actor();
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
         let mut updated: Vec<oxplow_domain::Task> = Vec::with_capacity(parsed_ids.len());
         for id in parsed_ids {
             let outcome = self
@@ -6463,16 +6463,53 @@ impl OxplowMcp {
         caller: &McpCaller,
         params: RunCommandParams,
     ) -> Result<CallToolResult, McpError> {
-        if caller.thread_id.is_none() {
-            return Err(McpError::invalid_params(ANONYMOUS_WRITE, None));
-        }
+        let actor = self.verified_actor(caller).await?;
         let outcome = self
             .services
             .commands
-            .run(&caller.actor(), &params.name, params.input, false)
+            .run(&actor, &params.name, params.input, false)
             .await
             .map_err(command_error)?;
         json_result(&outcome)
+    }
+
+    /// The caller as a command actor, checked: the thread header is a
+    /// claim, so it must name a real thread, and a stream header must be
+    /// that thread's stream (the actor then carries the thread's stream).
+    /// An anonymous connection is refused — a run with no actor behind it
+    /// is audited to no one.
+    async fn verified_actor(&self, caller: &McpCaller) -> Result<oxplow_domain::Actor, McpError> {
+        use oxplow_domain::stores::ThreadStore as _;
+        let Some(thread_id) = caller.thread_id else {
+            return Err(McpError::invalid_params(ANONYMOUS_WRITE, None));
+        };
+        let thread = self
+            .services
+            .thread_store
+            .get(&thread_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("unknown thread `{thread_id}` in this connection's identity"),
+                    None,
+                )
+            })?;
+        if let Some(stream) = caller.stream_id {
+            if stream != thread.stream_id {
+                return Err(McpError::invalid_params(
+                    format!(
+                        "thread `{thread_id}` belongs to stream `{}`, not `{stream}`",
+                        thread.stream_id
+                    ),
+                    None,
+                ));
+            }
+        }
+        Ok(oxplow_domain::Actor::Agent {
+            thread_id: Some(thread_id),
+            stream_id: Some(thread.stream_id),
+        })
     }
 }
 
@@ -7808,6 +7845,71 @@ mod tests {
         assert!(specs
             .iter()
             .all(|s| s["input_schema"].is_object() && s["summary"].is_string()));
+    }
+
+    /// The thread header is a claim, not a proof: an unknown thread, or a
+    /// stream header that isn't the thread's stream, is refused, and
+    /// `transition_tasks` needs an identity like `run_command` does.
+    #[tokio::test]
+    async fn commands_refuse_unknown_or_mismatched_callers() {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let (_proj, services, server) = boot();
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let list = || RunCommandParams {
+            name: "config.list_keys".into(),
+            input: serde_json::json!({}),
+        };
+        let err = server
+            .run_command_as(
+                &McpCaller {
+                    thread_id: Some(oxplow_domain::ThreadId::new(999)),
+                    stream_id: None,
+                },
+                list(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown thread"), "{err}");
+        let err = server
+            .run_command_as(
+                &McpCaller {
+                    thread_id: Some(thread.id),
+                    stream_id: Some(oxplow_domain::StreamId::new(999)),
+                },
+                list(),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("belongs to"), "{err}");
+        server
+            .run_command_as(
+                &McpCaller {
+                    thread_id: Some(thread.id),
+                    stream_id: None,
+                },
+                list(),
+            )
+            .await
+            .unwrap();
+        let err = server
+            .transition_tasks(
+                rmcp::model::Extensions::new(),
+                Parameters(TransitiontasksParams {
+                    ids: vec!["tsk1".into()],
+                    status: "done".into(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("thread identity"), "{err}");
     }
 
     /// The zones write path after `set_zones` (tsk392): the agent runs

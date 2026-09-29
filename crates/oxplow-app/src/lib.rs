@@ -816,12 +816,26 @@ impl Services {
             .with_attribution(attribution_store.clone())
             .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         let agent_policy = Arc::new(agent_policy::AgentPolicy::default());
-        let commands = Arc::new(commands::CommandBus::new(
-            db.clone(),
-            (*event_log_store).clone(),
-            agent_policy.clone(),
-            event_pump.clone(),
-        ));
+        let commands = Arc::new(
+            commands::CommandBus::new(
+                db.clone(),
+                (*event_log_store).clone(),
+                agent_policy.clone(),
+                event_pump.clone(),
+            )
+            // Only a stream's writer thread may change state; an unknown
+            // thread may not.
+            .with_write_gate({
+                let threads = thread_store.clone();
+                Arc::new(move |thread| {
+                    let threads = threads.clone();
+                    Box::pin(async move {
+                        use oxplow_domain::stores::ThreadStore as _;
+                        matches!(threads.get(&thread).await, Ok(Some(t)) if t.status.is_writer())
+                    })
+                })
+            }),
+        );
         commands
             .register(commands::work_item::command(tasks.clone()))
             .expect("core commands register");

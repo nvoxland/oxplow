@@ -124,6 +124,11 @@ impl Command {
     }
 }
 
+/// May this agent thread write? (`Thread::status.is_writer()` in
+/// production.) The bus asks before an agent runs a `Write` command.
+pub type WriteGate =
+    Arc<dyn Fn(oxplow_domain::ThreadId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
+
 pub struct CommandBus {
     db: Database,
     log: SqliteEventLogStore,
@@ -131,6 +136,7 @@ pub struct CommandBus {
     policy: Arc<AgentPolicy>,
     pump: Arc<EventPump>,
     commands: RwLock<BTreeMap<String, Arc<Command>>>,
+    write_gate: Option<WriteGate>,
 }
 
 impl CommandBus {
@@ -147,7 +153,15 @@ impl CommandBus {
             policy,
             pump,
             commands: RwLock::new(BTreeMap::new()),
+            write_gate: None,
         }
+    }
+
+    /// Consult `gate` before an agent thread runs a `Write` command: a
+    /// queued or closed thread can read but not change anything.
+    pub fn with_write_gate(mut self, gate: WriteGate) -> Self {
+        self.write_gate = Some(gate);
+        self
     }
 
     /// Register a command. A second command of the same name is refused:
@@ -237,8 +251,13 @@ impl CommandBus {
         }
         // 3. …and an agent must also pass the agent policy.
         if let Actor::Agent { thread_id, .. } = actor {
+            let may_write = match (spec.effect, thread_id, &self.write_gate) {
+                (oxplow_domain::CommandEffect::Write, Some(t), Some(gate)) => Some(gate(*t).await),
+                _ => None,
+            };
             if let PolicyDecision::Deny { reason, .. } =
-                self.policy.check_command(thread_id.as_ref(), spec)
+                self.policy
+                    .check_command(thread_id.as_ref(), spec, may_write)
             {
                 let err = CommandError::Denied { reason };
                 self.audit_only(actor, spec, &input, Outcome::Denied, Some(err.to_string()))
@@ -258,6 +277,10 @@ impl CommandBus {
                     destructive: matches!(confirm, oxplow_domain::Confirm::Destructive),
                 }),
             });
+        }
+        // 5a. A read runs without a record: no audit row, no event.
+        if spec.effect == oxplow_domain::CommandEffect::Read {
+            return self.run_read(&command, actor, input).await;
         }
         // 5. Run, and record the run with its event in one transaction.
         let outcome = match &command.handler {
@@ -337,12 +360,55 @@ impl CommandBus {
         let outcome = self
             .run(actor, &inverse.name, inverse.input.clone(), confirmed)
             .await?;
-        let done_by = outcome.audit_id;
+        let Some(done_by) = outcome.audit_id else {
+            return Err(CommandError::Failed {
+                message: format!("`{}` is a read and can't undo anything", inverse.name),
+            });
+        };
         self.db
             .transaction(move |tx| mark_undone_tx(tx, audit_id, done_by))
             .await
             .map_err(CommandError::from)?;
         Ok(outcome)
+    }
+
+    /// Step 5 for a `Read` command: the handler on a plain connection,
+    /// nothing recorded. A `Read` must not write (it isn't audited).
+    async fn run_read(
+        &self,
+        command: &Command,
+        actor: &Actor,
+        input: Value,
+    ) -> Result<CommandOutcome, CommandError> {
+        let out = match &command.handler {
+            Handler::Tx(handler) => {
+                let handler = handler.clone();
+                let actor = actor.clone();
+                let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
+                let failed_c = failed.clone();
+                self.db
+                    .transaction(move |tx| {
+                        handler(tx, &actor, input.clone()).map_err(|err| {
+                            *failed_c.lock() = Some(err);
+                            oxplow_domain::DomainError::Invariant("read command failed".into())
+                        })
+                    })
+                    .await
+                    .map_err(|db_err| {
+                        failed
+                            .lock()
+                            .take()
+                            .unwrap_or_else(|| CommandError::from(db_err))
+                    })?
+            }
+            Handler::BestEffort(handler) => handler(actor.clone(), input).await?,
+        };
+        Ok(CommandOutcome {
+            result: out.result,
+            audit_id: None,
+            event_id: None,
+            inverse: None,
+        })
     }
 
     /// Audit a run that wrote nothing (invalid input, a denied invoker, a
@@ -412,8 +478,8 @@ fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutcome {
     }
     CommandOutcome {
         result: out.result,
-        audit_id: recorded.audit_id,
-        event_id: recorded.event_id,
+        audit_id: Some(recorded.audit_id),
+        event_id: Some(recorded.event_id),
         inverse: out.inverse,
     }
 }
@@ -499,7 +565,9 @@ fn undoable(row: &CommandAudit) -> Result<CommandCall, CommandError> {
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
-    use oxplow_domain::{Confirm, EventSchemaRegistry, Invokers, Lifecycle, ThreadId};
+    use oxplow_domain::{
+        CommandEffect, Confirm, EventSchemaRegistry, Invokers, Lifecycle, ThreadId,
+    };
     use serde_json::json;
 
     fn bus() -> (Database, CommandBus) {
@@ -541,6 +609,7 @@ mod tests {
             undoable: true,
             lifecycle: Lifecycle::Stable,
             atomicity: Atomicity::Tx,
+            effect: CommandEffect::Write,
         }
     }
 
@@ -611,6 +680,63 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_command_is_not_recorded() {
+        let (_db, bus) = bus();
+        let mut spec = kv_spec("kv.get", Invokers::ALL, Confirm::Never);
+        spec.effect = CommandEffect::Read;
+        bus.register(
+            Command::new(
+                spec,
+                Handler::Tx(Arc::new(|_conn, _actor, input| {
+                    Ok(HandlerOutput {
+                        result: input,
+                        ..HandlerOutput::default()
+                    })
+                })),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let out = bus
+            .run(&agent(), "kv.get", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        assert_eq!(out.result["k"], "a");
+        assert_eq!((out.audit_id, out.event_id), (None, None));
+        assert!(bus.log.read_after(0, 10).await.unwrap().is_empty());
+        assert!(bus.audit_store().list_recent(10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_agent_thread_that_may_not_write_is_refused_writes_not_reads() {
+        let (db, bus) = bus();
+        let bus = bus.with_write_gate(Arc::new(|thread| {
+            Box::pin(async move { thread != ThreadId::new(7) })
+        }));
+        bus.register(
+            Command::new(kv_spec("kv.set", Invokers::ALL, Confirm::Never), kv_set()).unwrap(),
+        )
+        .unwrap();
+        let err = bus
+            .run(&agent(), "kv.set", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
+        assert_eq!(kv(&db, "a").await, None);
+        // Another thread may; a person is never gated.
+        let other = Actor::Agent {
+            thread_id: Some(ThreadId::new(8)),
+            stream_id: None,
+        };
+        bus.run(&other, "kv.set", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        bus.run(&Actor::Human, "kv.set", json!({"k": "b", "v": "1"}), false)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_tx_command_writes_its_state_audit_and_events_together() {
         let (db, bus) = bus();
         bus.register(
@@ -623,11 +749,16 @@ mod tests {
             .unwrap();
         assert_eq!(out.result, json!({"k": "a", "v": "1"}));
         assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
-        let audit = bus.audit_store().get(out.audit_id).await.unwrap().unwrap();
+        let audit = bus
+            .audit_store()
+            .get(out.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(audit.command, "kv.set");
         assert_eq!(audit.thread_id, Some(ThreadId::new(7)));
         assert_eq!(audit.outcome, Outcome::Ok);
-        assert_eq!(audit.event_id, Some(out.event_id.clone()));
+        assert_eq!(audit.event_id, out.event_id.clone());
         assert_eq!(
             audit.inverse.as_ref().unwrap().input,
             json!({"k": "a", "v": ""})
@@ -636,12 +767,15 @@ mod tests {
         let events = bus.log.read_after(0, 10).await.unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].envelope.event_type, "command.executed");
-        assert_eq!(events[0].envelope.payload["audit_id"], out.audit_id);
+        assert_eq!(
+            events[0].envelope.payload["audit_id"],
+            out.audit_id.unwrap()
+        );
         assert_eq!(events[0].envelope.payload["actor_kind"], "agent");
         assert_eq!(events[0].envelope.source, "agent:thr7");
         assert_eq!(events[0].envelope.subject, vec!["command:kv.set"]);
         assert_eq!(events[1].envelope.event_type, "config.changed");
-        assert_eq!(events[1].envelope.cause, Some(out.event_id));
+        assert_eq!(events[1].envelope.cause, out.event_id);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -788,19 +922,19 @@ mod tests {
             .unwrap();
         assert_eq!(kv(&db, "a").await.as_deref(), Some("2"));
         let undo = bus
-            .undo(&Actor::Human, second.audit_id, false)
+            .undo(&Actor::Human, second.audit_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(kv(&db, "a").await.as_deref(), Some("1"));
         let row = bus
             .audit_store()
-            .get(second.audit_id)
+            .get(second.audit_id.unwrap())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(row.undone_by, Some(undo.audit_id));
+        assert_eq!(row.undone_by, undo.audit_id);
         let err = bus
-            .undo(&Actor::Human, second.audit_id, false)
+            .undo(&Actor::Human, second.audit_id.unwrap(), false)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("already undone"), "{err}");

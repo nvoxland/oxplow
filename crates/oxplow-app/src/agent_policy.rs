@@ -73,24 +73,34 @@ pub fn claude_intent(body: &serde_json::Value) -> Option<ClaudeIntent> {
 }
 
 impl AgentPolicy {
-    /// May an agent run `spec`? The command's own `invokers` is the first
-    /// gate; this is the agent-specific policy on top of it — today, that
-    /// a command open to agents may be run by any agent thread. The write
-    /// guard and filing concern worktree edits, which no command performs
-    /// yet; when one does, its handler consults `check_tool`'s facts here.
+    /// May an agent run `spec`? The bus has already admitted the invoker;
+    /// this is the agent-specific layer on top: a `Write` command needs a
+    /// thread that may write (`may_write`, from the bus's write gate —
+    /// a queued or closed thread can read, not change). `None` means the
+    /// gate had nothing to say (a read, or no thread/gate).
     pub fn check_command(
         &self,
-        _thread_id: Option<&ThreadId>,
+        thread_id: Option<&ThreadId>,
         spec: &oxplow_domain::CommandSpec,
+        may_write: Option<bool>,
     ) -> PolicyDecision {
-        if spec.invokers.agent {
-            PolicyDecision::Allow
-        } else {
-            PolicyDecision::Deny {
+        if !spec.invokers.agent {
+            return PolicyDecision::Deny {
                 layer: oxplow_runtime::policy::DenyLayer::Command,
                 reason: format!("`{}` is not open to agents", spec.name),
-            }
+            };
         }
+        if may_write == Some(false) {
+            return PolicyDecision::Deny {
+                layer: oxplow_runtime::policy::DenyLayer::Command,
+                reason: format!(
+                    "`{}` changes state, and thread {} may not write (only the stream's writer thread can)",
+                    spec.name,
+                    thread_id.map(|t| t.to_string()).unwrap_or_default()
+                ),
+            };
+        }
+        PolicyDecision::Allow
     }
 
     /// May `thread_id` run `intent` now? Allows when the thread is

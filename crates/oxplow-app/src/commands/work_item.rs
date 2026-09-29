@@ -41,6 +41,7 @@ pub fn spec() -> CommandSpec {
         undoable: true,
         lifecycle: Lifecycle::Stable,
         atomicity: Atomicity::BestEffort,
+        effect: oxplow_domain::CommandEffect::Write,
     }
 }
 
