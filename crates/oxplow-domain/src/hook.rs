@@ -26,6 +26,10 @@ pub enum HookKind {
     /// Agent boot sentinel — fires once per session_id when oxplow first
     /// observes traffic for it.
     AgentBoot,
+    /// A harness session began (Codex posts it; Claude's is command-only).
+    SessionStart,
+    /// A harness session ended — `reason: "clear"` for `/clear`.
+    SessionEnd,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

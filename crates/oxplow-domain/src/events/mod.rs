@@ -130,6 +130,12 @@ impl Envelope {
         self
     }
 
+    /// [`Self::with_dedupe_key`] when the producer has a key.
+    pub fn with_dedupe_key_opt(mut self, key: Option<String>) -> Self {
+        self.dedupe_key = key;
+        self
+    }
+
     /// The namespace: the text before the first `.`.
     pub fn namespace(&self) -> &str {
         self.event_type.split('.').next().unwrap_or("")

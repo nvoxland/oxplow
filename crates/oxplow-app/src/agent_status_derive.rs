@@ -184,6 +184,8 @@ pub fn derive_thread_status_with_activity(
                 pending_user_input = 0;
                 open_tools = 0;
             }
+            // Informational: a session starting or ending isn't a status.
+            HookKind::SessionStart | HookKind::SessionEnd => {}
         }
     }
 

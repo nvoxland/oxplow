@@ -34,7 +34,7 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-use oxplow_app::{HookEnvelope, Services};
+use oxplow_app::{HookEnvelope, Services, ToolDecision};
 use oxplow_domain::{HookKind, StreamId, ThreadId};
 
 #[derive(Debug, Error)]
@@ -374,36 +374,34 @@ async fn handle_hook_inner(
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
 
-    // SessionStart is runtime state, not a persisted domain hook. A
-    // startup/resume/clear/compact gives the agent a fresh system
-    // prompt, so discard both comparison baselines and let the next
-    // UserPromptSubmit inject one fresh block for the new context.
-    if event == "SessionStart" {
-        ctx.services
-            .agent_activity
-            .reset_session(session_id.as_deref());
-        return hook_ack();
-    }
-
-    // SessionEnd: `/clear` ends the session and Claude Code starts a
-    // fresh one WITHOUT any HTTP hook for it (SessionStart hooks are
-    // command-type only), so thread.resume_session_id keeps pointing
-    // at the cleared session until the new one's first prompt. A
-    // daemon restart inside that window would relaunch with
-    // `--resume <cleared>` and resurrect the session the user just
-    // discarded. SessionEnd IS delivered over HTTP and carries the
-    // ending session id + reason — drop the resume token when an
-    // explicit clear ends exactly the session we'd resume.
-    if event == "SessionEnd" {
-        ctx.services
-            .agent_activity
-            .clear_resume_on_session_end(
-                &ctx.services,
-                thread_id.as_ref(),
-                session_id.as_deref(),
-                body_value.as_ref(),
-            )
-            .await;
+    // SessionStart / SessionEnd: the ingest tracks the session (the
+    // thread's resume id, `agent.session.*`; a `/clear` of the resume
+    // session drops it — see `hook_ingest`). A startup/resume/clear/compact
+    // also gives the agent a fresh system prompt, so discard the context
+    // baselines and let the next prompt inject one fresh block.
+    if event == "SessionStart" || event == "SessionEnd" {
+        if event == "SessionStart" {
+            ctx.services
+                .agent_activity
+                .reset_session(session_id.as_deref());
+        }
+        let kind = if event == "SessionStart" {
+            HookKind::SessionStart
+        } else {
+            HookKind::SessionEnd
+        };
+        let envelope = HookEnvelope {
+            kind,
+            thread_id,
+            stream_id,
+            session_id,
+            payload_json: body_str,
+            prompt: None,
+            decision: None,
+        };
+        if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
+            warn!(?event, ?err, "hook ingest failed");
+        }
         return hook_ack();
     }
 
@@ -429,9 +427,9 @@ async fn handle_hook_inner(
     // PreToolUse — runs BEFORE ingest so denial returns immediately
     // and the persisted record reflects what actually happened.
     if kind == HookKind::PreToolUse {
-        if let Some(deny) = pre_tool_check(&ctx, thread_id.as_ref(), body_value.as_ref()).await {
-            // Persist the event with a deny outcome so the hook log
-            // shows what the runtime did.
+        if let Some(reason) = pre_tool_check(&ctx, thread_id.as_ref(), body_value.as_ref()).await {
+            // Logged with the policy's decision, so the record shows what
+            // the runtime did.
             let envelope = HookEnvelope {
                 kind,
                 thread_id,
@@ -439,9 +437,13 @@ async fn handle_hook_inner(
                 session_id: session_id.clone(),
                 payload_json: body_str,
                 prompt: None,
+                decision: Some(ToolDecision {
+                    allowed: false,
+                    reason: Some(reason.clone()),
+                }),
             };
             let _ = ctx.services.hook_ingest.ingest(envelope).await;
-            return (StatusCode::OK, Json(deny)).into_response();
+            return (StatusCode::OK, Json(pre_tool_deny(reason))).into_response();
         }
     }
 
@@ -452,6 +454,10 @@ async fn handle_hook_inner(
         session_id,
         payload_json: body_str,
         prompt,
+        decision: (kind == HookKind::PreToolUse).then_some(ToolDecision {
+            allowed: true,
+            reason: None,
+        }),
     };
 
     // Mine per-turn signals BEFORE ingest closes the open agent_turn
@@ -478,16 +484,6 @@ async fn handle_hook_inner(
         warn!(?event, ?err, "hook ingest failed");
         return hook_ack();
     }
-
-    // Resume-tracker: Claude Code drops HTTP hooks for SessionStart, so
-    // we learn the session_id from whichever hook fires next. Persist
-    // it onto the thread so the next agent spawn passes
-    // `--resume <session_id>` and Claude actually picks up where it
-    // left off (without this, every re-attach starts a fresh session).
-    ctx.services
-        .agent_activity
-        .track_resume(&ctx.services, &envelope_for_resume)
-        .await;
 
     // Token usage (tsk104): on Stop, parse the transcript tail referenced
     // by the hook payload and record this turn's token delta against the
@@ -602,17 +598,29 @@ fn hook_ack() -> Response {
     (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
+/// Claude's `hookSpecificOutput` refusing a PreToolUse for `reason`.
+fn pre_tool_deny(reason: String) -> serde_json::Value {
+    use oxplow_runtime::write_guard::{HookSpecificOutput, WriteGuardDeny};
+    serde_json::to_value(WriteGuardDeny {
+        hook_specific_output: HookSpecificOutput {
+            hook_event_name: "PreToolUse",
+            permission_decision: "deny",
+            permission_decision_reason: reason,
+        },
+    })
+    .unwrap_or_default()
+}
+
 /// Run the shared agent policy (write guard, then filing) against the
-/// PreToolUse payload and render a deny as Claude's `hookSpecificOutput`.
-/// `None` allows. Tools neither rule can refuse skip the policy's I/O
-/// (`claude_intent` returns `None` for them).
+/// PreToolUse payload. `Some(reason)` refuses; `None` allows. Tools
+/// neither rule can refuse skip the policy's I/O (`claude_intent`
+/// returns `None` for them).
 async fn pre_tool_check(
     ctx: &AppCtx,
     thread_id: Option<&ThreadId>,
     body: Option<&serde_json::Value>,
-) -> Option<serde_json::Value> {
+) -> Option<String> {
     use oxplow_runtime::policy::{PolicyDecision, ToolIntent};
-    use oxplow_runtime::write_guard::{HookSpecificOutput, WriteGuardDeny};
     let intent = oxplow_app::agent_policy::claude_intent(body?)?;
     let decision = ctx
         .services
@@ -629,14 +637,7 @@ async fn pre_tool_check(
         .await;
     match decision {
         PolicyDecision::Allow => None,
-        PolicyDecision::Deny { reason, .. } => serde_json::to_value(WriteGuardDeny {
-            hook_specific_output: HookSpecificOutput {
-                hook_event_name: "PreToolUse",
-                permission_decision: "deny",
-                permission_decision_reason: reason,
-            },
-        })
-        .ok(),
+        PolicyDecision::Deny { reason, .. } => Some(reason),
     }
 }
 

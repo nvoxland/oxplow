@@ -1,24 +1,34 @@
-//! Hook ingest pipeline.
+//! Hook ingest: where every agent harness's activity enters oxplow.
 //!
-//! Receives a `HookEnvelope` from Claude Code (or a synthetic
-//! oxplow-internal source like a pane interrupt), persists it, and
-//! drives the agent_turn lifecycle + agent_status transitions:
+//! Claude/Codex/opencode hooks (via the control plane) and the ACP client
+//! all hand a Claude-shaped [`HookEnvelope`] to [`HookIngestService::ingest`].
+//! One envelope is **one transaction** (P3.3, tsk473): the state it changes
+//! (the thread's resume session, the agent turn) and the `agent.*` events
+//! that record it commit together, anchored to the thread's stream, its open
+//! turn and its single open effort. Large bodies (tool input and output)
+//! go into `event_content` by hash. Reactors on the event pump do the rest
+//! (tool-call rows, effort claims, collection, token usage).
 //!
-//! - `UserPromptSubmit`: open a new agent_turn, mark the pane Running.
-//! - `Stop`: close the open agent_turn for the thread, mark the pane
-//!   Idle (or AwaitingUser if a `mcp__oxplow__await_user` call fired
-//!   during the turn — recorded as a sentinel in the payload).
-//! - `SubagentStop`: persist the hook event only. The parent turn is
-//!   still in flight when a Task-tool subagent finishes, so we MUST
-//!   NOT close the open turn or flip status to Idle here — doing so
-//!   makes the agent indicator render "waiting" mid-turn whenever the
-//!   parent dispatches a subagent.
-//! - `Interrupt`: close any open turn with a synthetic answer note,
-//!   mark the pane Stopped.
+//! Per kind:
+//! - `UserPromptSubmit`: `agent.prompt.submitted`; opens a turn when none
+//!   is open (`agent.turn.started`); status Running.
+//! - `PreToolUse` / `PostToolUse`: `agent.tool.requested` (with the
+//!   policy's decision) / `agent.tool.finished`, deduped by the harness's
+//!   `tool_use_id` so a re-posted hook logs once.
+//! - `Stop` / `Interrupt`: closes the open turns (`agent.turn.ended`);
+//!   status Idle / AwaitingUser / Stopped; then the turn-end snapshot.
+//! - `SubagentStop`: nothing — the parent turn is still in flight.
+//! - `AgentBoot`: status Idle.
+//! - `SessionStart` / `SessionEnd`: a session id seen for the first time on
+//!   a thread (on any kind) becomes its resume id and logs
+//!   `agent.session.started`; `SessionEnd{reason: clear}` of the resume
+//!   session clears it; `agent.session.ended`.
 //!
-//! Pure orchestration: stores own persistence; this module is the
-//! state machine on top.
+//! Agent status stays in memory (`AgentStatusStore`); a transition is
+//! logged as `agent.status.changed`, compared against it outside the
+//! transaction.
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
@@ -31,14 +41,32 @@ use thiserror::Error;
 /// `ThreadRuntimeRegistry` ring buffer, so there's no rowid to allocate).
 static NEXT_HOOK_EVENT_ID: AtomicI64 = AtomicI64::new(1);
 
-use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore, HookEventStore};
+use oxplow_db::agent_stores::{activity_anchors_tx, close_turn_tx, open_turn_ids_tx, open_turn_tx};
+use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
+use oxplow_db::{event_content_store, Database};
+use oxplow_domain::events::schema::{
+    AgentPromptSubmitted, AgentPromptSubmittedV1, AgentSessionEnded, AgentSessionEndedV1,
+    AgentSessionStarted, AgentSessionStartedV1, AgentStatusChanged, AgentStatusChangedV1,
+    AgentToolFinished, AgentToolFinishedV1, AgentToolRequested, AgentToolRequestedV1, ContentRef,
+    ToolDecision as Decision,
+};
+use oxplow_domain::refs::build::{thread_ref, turn_ref};
+use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
 use oxplow_domain::{
-    AgentStatus, AgentStatusState, AgentTurn, AgentTurnId, DomainError, HookEvent, HookEventId,
-    HookKind, StreamId, ThreadId, Timestamp,
+    AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, EventSchemaRegistry,
+    HookEvent, HookEventId, HookKind, StreamId, ThreadId, Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
 use oxplow_domain::hook::TurnOutcome;
+
+/// What the agent policy decided about a tool call (PreToolUse), carried
+/// on the envelope so the log records it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct ToolDecision {
+    pub allowed: bool,
+    pub reason: Option<String>,
+}
 
 /// What the hook subprocess sends us.
 ///
@@ -55,6 +83,9 @@ pub struct HookEnvelope {
     /// Optional client-supplied prompt body for UserPromptSubmit so
     /// the agent_turn row carries the visible prompt text.
     pub prompt: Option<String>,
+    /// PreToolUse only: the policy's verdict (`None` reads as allowed).
+    #[serde(default)]
+    pub decision: Option<ToolDecision>,
 }
 
 #[derive(Debug, Error)]
@@ -63,30 +94,66 @@ pub enum HookIngestError {
     Storage(#[from] DomainError),
 }
 
+/// What one ingest did, for the request path that follows it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IngestOutcome {
+    /// The in-memory hook-log row.
+    pub hook_event: Option<HookEventId>,
+    /// The thread's open turn after the ingest (the one a prompt opened).
+    pub turn: Option<AgentTurnId>,
+    /// The turn a Stop / Interrupt closed.
+    pub closed_turn: Option<AgentTurnId>,
+}
+
+/// What the transaction decided, applied after it commits.
+#[derive(Default)]
+struct Applied {
+    turn: Option<AgentTurnId>,
+    opened_turn: bool,
+    closed_turn: Option<AgentTurnId>,
+    status: Option<(AgentStatusState, Option<String>)>,
+}
+
 #[derive(Clone)]
 pub struct HookIngestService {
+    db: Database,
+    schemas: Arc<EventSchemaRegistry>,
+    /// Paths the tools name are made relative to the thread's worktree; a
+    /// stream with none recorded works in the project directory.
+    project_dir: PathBuf,
     hooks: Arc<dyn HookEventStore>,
     statuses: Arc<dyn AgentStatusStore>,
-    turns: Arc<dyn AgentTurnStore>,
     events: EventBus,
+    pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
     turn_snapshots: Option<Arc<dyn crate::turn_snapshots::TurnSnapshots>>,
 }
 
 impl HookIngestService {
     pub fn new(
+        db: Database,
+        schemas: Arc<EventSchemaRegistry>,
+        project_dir: PathBuf,
         hooks: Arc<dyn HookEventStore>,
         statuses: Arc<dyn AgentStatusStore>,
-        turns: Arc<dyn AgentTurnStore>,
         events: EventBus,
     ) -> Self {
         Self {
+            db,
+            schemas,
+            project_dir,
             hooks,
             statuses,
-            turns,
             events,
+            pump: None,
             turn_snapshots: None,
         }
+    }
+
+    /// Wake the event pump after each ingest, so reactors see the events.
+    pub fn with_event_pump(mut self, pump: Arc<crate::event_pump::EventPump>) -> Self {
+        self.pump = Some(pump);
+        self
     }
 
     /// Take a `turn_end` snapshot whenever a turn closes.
@@ -98,10 +165,8 @@ impl HookIngestService {
         self
     }
 
-    /// Persist the envelope and drive the state machine. Returns the
-    /// persisted hook event id so callers can correlate events to
-    /// downstream reactions in tests.
-    pub async fn ingest(&self, env: HookEnvelope) -> Result<HookEventId, HookIngestError> {
+    /// Record the envelope and drive the turn / status state machine.
+    pub async fn ingest(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
         let now = Timestamp::now();
         let stored = HookEvent {
             id: HookEventId::new(NEXT_HOOK_EVENT_ID.fetch_add(1, Ordering::Relaxed)),
@@ -114,175 +179,70 @@ impl HookIngestService {
         };
         self.hooks.append(&stored).await?;
         self.events.emit(OxplowEvent::HookEventsChanged);
-
-        // The agent_turn / agent_status branches need a thread.
-        let thread = match env.thread_id {
-            Some(t) => t,
-            None => return Ok(stored.id),
+        let mut outcome = IngestOutcome {
+            hook_event: Some(stored.id),
+            ..IngestOutcome::default()
+        };
+        let Some(thread) = env.thread_id else {
+            return Ok(outcome);
         };
 
-        match env.kind {
-            HookKind::UserPromptSubmit => {
-                // Open a new turn unless one is already open (a
-                // mid-turn re-prompt from the user).
-                let open = self.turns.list_open(&thread).await?;
-                if open.is_empty() {
-                    let turn = AgentTurn {
-                        id: AgentTurnId::placeholder(),
-                        thread_id: thread,
-                        prompt: env.prompt.unwrap_or_default(),
-                        answer: None,
-                        session_id: env.session_id.clone(),
-                        started_at: now,
-                        ended_at: None,
-                        start_snapshot_id: None,
-                        snapshot_id: None,
-                    };
-                    self.turns.open(&turn).await?;
-                    self.events
-                        .emit(OxplowEvent::AgentTurnsChanged { thread_id: thread });
-                }
-                self.set_status(&thread, AgentStatusState::Running, None)
-                    .await?;
-            }
-            HookKind::Stop => {
-                let ended = self
-                    .close_open_turns(&thread, None, TurnOutcome::Completed)
-                    .await?;
-                // Did the agent park on the user this turn? Two signals:
-                //  - a sentinel in THIS Stop payload (kept for the
-                //    synthetic-event path and tests), or
-                //  - an AwaitingUser status the `await_user` MCP tool
-                //    already set earlier in the turn. The real Claude
-                //    Stop payload carries no sentinel, so without the
-                //    second check it would clobber the MCP-set
-                //    AwaitingUser (and its question) back to Idle within
-                //    the same turn — the rail "awaiting you" dot would
-                //    never persist. A fresh UserPromptSubmit clears
-                //    AwaitingUser first, so a stale flag from a prior
-                //    turn can't leak in here.
-                let current = self.current_status(&thread).await;
-                let currently_awaiting = current
-                    .as_ref()
-                    .is_some_and(|s| s.state == AgentStatusState::AwaitingUser);
-                let (state, detail) =
-                    if payload_signals_await_user(&env.payload_json) || currently_awaiting {
-                        // Prefer a question carried on this payload; else
-                        // keep whatever the MCP tool stored as detail (the
-                        // question text).
-                        let question = await_user_question(&env.payload_json)
-                            .or_else(|| current.and_then(|s| s.detail));
-                        (AgentStatusState::AwaitingUser, question)
-                    } else {
-                        (AgentStatusState::Idle, None)
-                    };
-                self.set_status(&thread, state, detail).await?;
-                // The status is out first: the snapshot is bookkeeping and
-                // must not hold the UI on "running".
-                self.take_turn_end(&thread, ended).await;
-            }
-            HookKind::SubagentStop => {
-                // A Task-tool subagent finished. The parent agent is
-                // still working — do NOT close the parent turn or
-                // flip the status. Hook event is already persisted
-                // at the top of ingest; that's all we need here.
-            }
-            HookKind::Interrupt => {
-                let ended = self
-                    .close_open_turns(
-                        &thread,
-                        Some("interrupted".into()),
-                        TurnOutcome::Interrupted,
-                    )
-                    .await?;
-                self.set_status(&thread, AgentStatusState::Stopped, Some("interrupt".into()))
-                    .await?;
-                self.take_turn_end(&thread, ended).await;
-            }
-            HookKind::AgentBoot => {
-                self.set_status(&thread, AgentStatusState::Idle, Some("boot".into()))
-                    .await?;
-            }
-            HookKind::PreToolUse | HookKind::PostToolUse => {
-                // No agent_turn / agent_status table transition, but
-                // these events DO change the renderer's derived
-                // status (PreToolUse(Task) bumps pending_tasks etc.
-                // — see agent_status_derive). Re-derive from the
-                // hook event log and emit AgentStatusChanged with
-                // the new state so the renderer can update without
-                // a refetch round-trip.
-                //
-                // Exception: if `await_user` parked the thread on the
-                // user this turn (store = AwaitingUser), preserve it —
-                // the derive can't see the synthetic marker and would
-                // return Running, flickering the rail dot off "awaiting
-                // you" on the very PostToolUse of the await_user call.
-                // Cleared by the next UserPromptSubmit, same as Stop.
-                let (state, detail) = match self.current_status(&thread).await {
-                    Some(s) if s.state == AgentStatusState::AwaitingUser => {
-                        (AgentStatusState::AwaitingUser, s.detail)
-                    }
-                    _ => {
-                        let recent = self
-                            .hooks
-                            .list_recent(Some(&thread), 200)
-                            .await
-                            .unwrap_or_default();
-                        let derived = crate::agent_status_derive::derive_thread_status(
-                            &recent,
-                            Timestamp::now(),
-                        );
-                        (derived, None)
-                    }
-                };
-                self.events.emit(OxplowEvent::AgentStatusChanged {
-                    thread_id: thread,
-                    pane_target: self.thread_pane(&thread).await,
-                    state,
-                    detail,
-                });
-            }
-        }
+        let current = self.current_status(&thread).await;
+        let schemas = self.schemas.clone();
+        let project_dir = self.project_dir.clone();
+        let applied = self
+            .db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "hook_ingest");
+                record_tx(tx, &ev, &project_dir, thread, &env, current.as_ref(), now)
+            })
+            .await?;
 
-        Ok(stored.id)
+        outcome.turn = applied.turn;
+        outcome.closed_turn = applied.closed_turn;
+        if applied.opened_turn || applied.closed_turn.is_some() {
+            self.events
+                .emit(OxplowEvent::AgentTurnsChanged { thread_id: thread });
+        }
+        match applied.status {
+            Some((state, detail)) => self.publish_status(&thread, state, detail).await?,
+            None => self.announce_derived_status(&thread, stored.kind).await,
+        }
+        if let Some(pump) = &self.pump {
+            pump.wake();
+        }
+        // The status is out first: the snapshot is bookkeeping and must
+        // not hold the UI on "running".
+        if let (Some(snapshots), Some(turn)) = (&self.turn_snapshots, applied.closed_turn) {
+            snapshots.take_turn_end(thread, turn).await;
+        }
+        Ok(outcome)
     }
 
-    /// Close the thread's open turns. Returns the most recent turn THIS
-    /// call closed (a concurrent Stop that got there first closes nothing
-    /// here), which is the one the turn-end snapshot belongs to.
-    async fn close_open_turns(
+    /// Set, log and announce a thread's status outside a hook (the ACP
+    /// session's awaiting-permission state).
+    pub async fn set_status(
         &self,
         thread: &ThreadId,
-        answer: Option<String>,
-        outcome: TurnOutcome,
-    ) -> Result<Option<AgentTurnId>, HookIngestError> {
-        // `list_open` is newest first.
-        let open = self.turns.list_open(thread).await?;
-        let mut latest_closed = None;
-        for t in open {
-            if self.turns.close(&t.id, answer.clone(), outcome).await? && latest_closed.is_none() {
-                latest_closed = Some(t.id);
-            }
+        state: AgentStatusState,
+        detail: Option<String>,
+    ) -> Result<(), HookIngestError> {
+        let current = self.current_status(thread).await;
+        if changed(current.as_ref(), state, detail.as_deref()) {
+            let schemas = self.schemas.clone();
+            let (thread_c, detail_c) = (*thread, detail.clone());
+            self.db
+                .transaction(move |tx| {
+                    let ev = EventCtx::system(&schemas, "hook_ingest");
+                    log_status_tx(tx, &ev, thread_c, state, detail_c.clone())
+                })
+                .await?;
         }
-        if latest_closed.is_some() {
-            self.events
-                .emit(OxplowEvent::AgentTurnsChanged { thread_id: *thread });
-        }
-        Ok(latest_closed)
+        self.publish_status(thread, state, detail).await
     }
 
-    /// The turn ends at a snapshot, bounded by the turn budget. One take
-    /// per Stop: an older turn left open alongside (a missed Stop) closes
-    /// without one of its own.
-    async fn take_turn_end(&self, thread: &ThreadId, turn: Option<AgentTurnId>) {
-        if let (Some(snapshots), Some(turn)) = (&self.turn_snapshots, turn) {
-            snapshots.take_turn_end(*thread, turn).await;
-        }
-    }
-
-    /// Set and announce a thread's status directly (the ACP session's
-    /// awaiting-permission state; hooks go through [`Self::ingest`]).
-    pub async fn set_status(
+    /// Write the status to the in-memory store and announce it.
+    async fn publish_status(
         &self,
         thread: &ThreadId,
         state: AgentStatusState,
@@ -302,21 +262,360 @@ impl HookIngestService {
         Ok(())
     }
 
+    /// Tool hooks set no status of their own, but they change what the
+    /// renderer derives (an open `Task` keeps a thread working). Re-derive
+    /// from the hook log and announce it, keeping an `await_user` that
+    /// parked the thread this turn (the derive can't see its marker).
+    async fn announce_derived_status(&self, thread: &ThreadId, kind: HookKind) {
+        if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
+            return;
+        }
+        let (state, detail) = match self.current_status(thread).await {
+            Some(s) if s.state == AgentStatusState::AwaitingUser => {
+                (AgentStatusState::AwaitingUser, s.detail)
+            }
+            _ => {
+                let recent = self
+                    .hooks
+                    .list_recent(Some(thread), 200)
+                    .await
+                    .unwrap_or_default();
+                let derived =
+                    crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now());
+                (derived, None)
+            }
+        };
+        self.events.emit(OxplowEvent::AgentStatusChanged {
+            thread_id: *thread,
+            pane_target: self.thread_pane(thread).await,
+            state,
+            detail,
+        });
+    }
+
     /// Read the current agent status for a thread's working pane, if any.
-    /// Used by the Stop path to avoid clobbering an in-turn AwaitingUser.
     async fn current_status(&self, thread: &ThreadId) -> Option<AgentStatus> {
         let pane = self.thread_pane(thread).await;
         self.statuses.get(thread, &pane).await.ok().flatten()
     }
 
-    /// Resolve the pane target for the thread. Default to "working" if
-    /// we can't figure it out — caller is fault-tolerant.
+    /// The pane a thread's status is kept under.
     async fn thread_pane(&self, _thread: &ThreadId) -> String {
-        // ThreadStore lookup avoided here to keep this service free of
-        // the thread store dependency. Callers who care about the
-        // exact pane can subscribe to status events and query.
         "working".to_string()
     }
+}
+
+/// A timestamp as every table stores it (fixed-width RFC 3339).
+fn ts_string(ts: Timestamp) -> String {
+    serde_json::to_value(ts)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// Whether moving to `state`/`detail` is a change from `current`.
+fn changed(current: Option<&AgentStatus>, state: AgentStatusState, detail: Option<&str>) -> bool {
+    match current {
+        Some(c) => c.state != state || c.detail.as_deref() != detail,
+        None => true,
+    }
+}
+
+fn log_status_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    state: AgentStatusState,
+    detail: Option<String>,
+) -> Result<(), DomainError> {
+    let env = ev
+        .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+            thread: thread_ref(thread),
+            state,
+            detail,
+        })
+        .with_anchors(activity_anchors_tx(conn, thread)?)
+        .with_subject([thread_ref(thread)]);
+    ev.append(conn, &env)?;
+    Ok(())
+}
+
+/// The thread row fields the ingest needs.
+struct ThreadRow {
+    resume_session_id: String,
+    agent: AgentKind,
+    worktree: PathBuf,
+}
+
+fn thread_row_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    project_dir: &Path,
+) -> Result<Option<ThreadRow>, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    conn.query_row(
+        "SELECT th.resume_session_id, th.agent, COALESCE(s.worktree_path, '')
+           FROM threads th LEFT JOIN streams s ON s.id = th.stream_id
+          WHERE th.id = ?1",
+        [thread.value()],
+        |r| {
+            let agent: String = r.get(1)?;
+            let worktree: String = r.get(2)?;
+            Ok(ThreadRow {
+                resume_session_id: r.get(0)?,
+                agent: serde_json::from_value(serde_json::Value::String(agent)).unwrap_or_default(),
+                worktree: if worktree.is_empty() {
+                    project_dir.to_path_buf()
+                } else {
+                    PathBuf::from(worktree)
+                },
+            })
+        },
+    )
+    .optional()
+    .map_err(oxplow_db::map_sql_err)
+}
+
+/// The envelope's state changes and events, in one transaction.
+fn record_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    project_dir: &Path,
+    thread: ThreadId,
+    env: &HookEnvelope,
+    current: Option<&AgentStatus>,
+    now: Timestamp,
+) -> Result<Applied, DomainError> {
+    let Some(row) = thread_row_tx(conn, thread, project_dir)? else {
+        return Ok(Applied::default()); // an unknown thread: the hook log only
+    };
+    let body: serde_json::Value = serde_json::from_str(&env.payload_json).unwrap_or_default();
+    let session = env.session_id.as_deref().filter(|s| !s.is_empty());
+    if env.kind != HookKind::SessionEnd {
+        if let Some(sid) = session {
+            track_session_tx(conn, ev, thread, &row, sid, now)?;
+        }
+    }
+    let mut applied = Applied {
+        turn: open_turn_ids_tx(conn, thread)?.first().copied(),
+        ..Applied::default()
+    };
+    let mut status = None;
+    match env.kind {
+        HookKind::UserPromptSubmit => {
+            let reprompt = applied.turn.is_some();
+            if !reprompt {
+                let prompt = env.prompt.as_deref().unwrap_or_default();
+                applied.turn = Some(open_turn_tx(conn, ev, thread, prompt, session, now)?);
+                applied.opened_turn = true;
+            }
+            let payload = AgentPromptSubmittedV1 {
+                thread: thread_ref(thread),
+                turn: applied.turn.map(turn_ref),
+                session: session.map(str::to_string),
+                reprompt,
+            };
+            let env = ev
+                .typed::<AgentPromptSubmitted>(&payload)
+                .with_anchors(activity_anchors_tx(conn, thread)?)
+                .with_subject([applied
+                    .turn
+                    .map(turn_ref)
+                    .unwrap_or_else(|| thread_ref(thread))]);
+            ev.append(conn, &env)?;
+            status = Some((AgentStatusState::Running, None));
+        }
+        HookKind::PreToolUse | HookKind::PostToolUse => {
+            log_tool_tx(conn, ev, thread, &row.worktree, env, &body, session)?;
+        }
+        HookKind::Stop | HookKind::Interrupt => {
+            let (answer, outcome) = if env.kind == HookKind::Stop {
+                (None, TurnOutcome::Completed)
+            } else {
+                (Some("interrupted"), TurnOutcome::Interrupted)
+            };
+            let transcript = body.get("transcript_path").and_then(|p| p.as_str());
+            // Newest first: the newest closed turn owns the turn-end snapshot.
+            for id in open_turn_ids_tx(conn, thread)? {
+                if close_turn_tx(conn, ev, id, answer, outcome, transcript)?.is_some()
+                    && applied.closed_turn.is_none()
+                {
+                    applied.closed_turn = Some(id);
+                }
+            }
+            applied.turn = None;
+            status = Some(if env.kind == HookKind::Interrupt {
+                (AgentStatusState::Stopped, Some("interrupt".to_string()))
+            } else {
+                stop_status(&env.payload_json, current)
+            });
+        }
+        HookKind::AgentBoot => status = Some((AgentStatusState::Idle, Some("boot".to_string()))),
+        HookKind::SessionEnd => {
+            if let Some(sid) = session {
+                end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
+            }
+        }
+        HookKind::SubagentStop | HookKind::SessionStart => {}
+    }
+    if let Some((state, detail)) = &status {
+        if changed(current, *state, detail.as_deref()) {
+            log_status_tx(conn, ev, thread, *state, detail.clone())?;
+        }
+    }
+    applied.status = status;
+    Ok(applied)
+}
+
+/// A Stop parks the thread on the person when the agent asked them
+/// something this turn — a sentinel on this payload, or an `await_user`
+/// the MCP tool already recorded (the real Stop payload carries none, and
+/// a fresh prompt clears it first) — else it goes idle.
+fn stop_status(payload: &str, current: Option<&AgentStatus>) -> (AgentStatusState, Option<String>) {
+    let awaiting = current.is_some_and(|s| s.state == AgentStatusState::AwaitingUser);
+    if payload_signals_await_user(payload) || awaiting {
+        let question =
+            await_user_question(payload).or_else(|| current.and_then(|s| s.detail.clone()));
+        (AgentStatusState::AwaitingUser, question)
+    } else {
+        (AgentStatusState::Idle, None)
+    }
+}
+
+/// A session id seen for the first time on this thread: log
+/// `agent.session.started` (once per id, ever) and make it the resume id,
+/// so the next spawn passes `--resume <id>`.
+fn track_session_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    row: &ThreadRow,
+    session: &str,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    let env = ev
+        .typed::<AgentSessionStarted>(&AgentSessionStartedV1 {
+            session: session.to_string(),
+            thread: thread_ref(thread),
+            harness: row.agent,
+            resumed: row.resume_session_id == session,
+        })
+        .with_anchors(activity_anchors_tx(conn, thread)?)
+        .with_subject([thread_ref(thread)])
+        .with_dedupe_key(format!("session:{session}:started"));
+    append_unique_tx(conn, ev.schemas, &env)?;
+    if row.resume_session_id != session {
+        conn.execute(
+            "UPDATE threads SET resume_session_id = ?2, updated_at = ?3 WHERE id = ?1",
+            rusqlite::params![thread.value(), session, ts_string(now)],
+        )
+        .map_err(oxplow_db::map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// `SessionEnd`: log it, and drop the resume id only when an explicit
+/// `/clear` ended exactly the session it points at — a normal exit keeps
+/// it (a restart should resume), and clearing a stale session must not
+/// wipe a newer one. (Claude starts the post-clear session with no HTTP
+/// hook, so without this a restart would resurrect the cleared session.)
+fn end_session_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    row: &ThreadRow,
+    session: &str,
+    body: &serde_json::Value,
+    now: Timestamp,
+) -> Result<(), DomainError> {
+    let reason = body.get("reason").and_then(|r| r.as_str());
+    let env = ev
+        .typed::<AgentSessionEnded>(&AgentSessionEndedV1 {
+            session: session.to_string(),
+            thread: thread_ref(thread),
+            reason: reason.map(str::to_string),
+        })
+        .with_anchors(activity_anchors_tx(conn, thread)?)
+        .with_subject([thread_ref(thread)])
+        .with_dedupe_key(format!("session:{session}:ended"));
+    append_unique_tx(conn, ev.schemas, &env)?;
+    if reason == Some("clear") && row.resume_session_id == session {
+        conn.execute(
+            "UPDATE threads SET resume_session_id = '', updated_at = ?2 WHERE id = ?1",
+            rusqlite::params![thread.value(), ts_string(now)],
+        )
+        .map_err(oxplow_db::map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// `agent.tool.requested` / `agent.tool.finished` for a tool hook, with
+/// the input (and output) stored by hash.
+fn log_tool_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    worktree: &Path,
+    env: &HookEnvelope,
+    body: &serde_json::Value,
+    session: Option<&str>,
+) -> Result<(), DomainError> {
+    let Some(parts) = crate::tool_calls::parse_tool_call(&env.payload_json, worktree) else {
+        return Ok(()); // no tool name: nothing to record
+    };
+    let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
+        match body.get(key) {
+            Some(v) if !v.is_null() => {
+                let bytes =
+                    serde_json::to_vec(v).map_err(|e| DomainError::Invalid(e.to_string()))?;
+                event_content_store::put_tx(conn, "agent", &bytes).map(Some)
+            }
+            _ => Ok(None),
+        }
+    };
+    let tool_use = body.get("tool_use_id").and_then(|t| t.as_str());
+    let dedupe =
+        |phase: &str| tool_use.map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")));
+    let anchors = activity_anchors_tx(conn, thread)?;
+    let subject = anchors
+        .turn_id
+        .map(|t| turn_ref(AgentTurnId::new(t)))
+        .unwrap_or_else(|| thread_ref(thread));
+    let envelope = if env.kind == HookKind::PreToolUse {
+        let decision = env.decision.clone().unwrap_or(ToolDecision {
+            allowed: true,
+            reason: None,
+        });
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV1 {
+            tool: parts.tool,
+            path: parts.path,
+            detail: parts.detail,
+            input: content("tool_input")?,
+            decision: if decision.allowed {
+                Decision::Allowed
+            } else {
+                Decision::Denied
+            },
+            reason: decision.reason,
+        })
+        .with_dedupe_key_opt(dedupe("requested"))
+    } else {
+        let exit_code =
+            crate::collection::parse_bash_post_tool(&env.payload_json).and_then(|b| b.exit_code);
+        ev.typed::<AgentToolFinished>(&AgentToolFinishedV1 {
+            tool: parts.tool,
+            path: parts.path,
+            detail: parts.detail,
+            ok: parts.ok,
+            exit_code,
+            input: content("tool_input")?,
+            output: content("tool_response")?,
+        })
+        .with_dedupe_key_opt(dedupe("finished"))
+    };
+    let envelope = envelope.with_anchors(anchors).with_subject([subject]);
+    append_unique_tx(conn, ev.schemas, &envelope)?;
+    Ok(())
 }
 
 /// Heuristic: did the agent call mcp__oxplow__await_user during the
@@ -349,9 +648,11 @@ fn await_user_question(payload: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::thread_runtime::ThreadRuntimeRegistry;
-    use oxplow_db::{Database, SqliteAgentTurnStore, SqliteStreamStore, SqliteThreadStore};
+    use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
+    use oxplow_domain::stores::AgentTurnStore as _;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamKind, Thread, ThreadStatus};
+    use serde_json::json;
 
     async fn fixture() -> (HookIngestService, ThreadId) {
         let db = Database::in_memory();
@@ -397,12 +698,283 @@ mod tests {
         threads.upsert(&t).await.unwrap();
         let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
         let svc = HookIngestService::new(
+            db,
+            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+            std::path::PathBuf::from("/p"),
             registry.clone(),
             registry,
-            Arc::new(SqliteAgentTurnStore::new(db)),
             EventBus::new(),
         );
         (svc, t.id)
+    }
+
+    fn turns(svc: &HookIngestService) -> oxplow_db::SqliteAgentTurnStore {
+        oxplow_db::SqliteAgentTurnStore::new(svc.db.clone())
+    }
+
+    /// Every event in the log, oldest first.
+    async fn logged(svc: &HookIngestService) -> Vec<oxplow_domain::StoredEvent> {
+        oxplow_db::SqliteEventLogStore::new(svc.db.clone(), svc.schemas.clone())
+            .read_after(0, 1000)
+            .await
+            .unwrap()
+    }
+
+    fn of_type<'a>(
+        events: &'a [oxplow_domain::StoredEvent],
+        ty: &str,
+    ) -> Vec<&'a oxplow_domain::StoredEvent> {
+        events
+            .iter()
+            .filter(|e| e.envelope.event_type == ty)
+            .collect()
+    }
+
+    fn hook(
+        kind: HookKind,
+        tid: ThreadId,
+        session: Option<&str>,
+        body: serde_json::Value,
+    ) -> HookEnvelope {
+        HookEnvelope {
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            session_id: session.map(str::to_string),
+            payload_json: body.to_string(),
+            prompt: body
+                .get("prompt")
+                .and_then(|p| p.as_str())
+                .map(str::to_string),
+            decision: None,
+        }
+    }
+
+    async fn open_effort(svc: &HookIngestService) -> i64 {
+        svc.db
+            .transaction(|c| {
+                c.execute(
+                    "INSERT INTO effort (work_item, thread_id, started_at)
+                       VALUES ('work_item:linear:ENG-1', 1, '2026-01-01T00:00:00.000000Z')",
+                    [],
+                )
+                .map_err(|e| DomainError::Storage(e.to_string()))?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap()
+    }
+
+    /// P3.3 (tsk473): a finished tool call is an `agent.tool.finished`
+    /// anchored to stream, thread, turn and effort, with its input and
+    /// output stored by hash and its path made worktree-relative.
+    #[tokio::test]
+    async fn a_finished_tool_is_logged_with_four_anchors_and_its_content() {
+        let (svc, tid) = fixture().await;
+        let effort = open_effort(&svc).await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("s1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::PostToolUse,
+            tid,
+            Some("s1"),
+            json!({
+                "tool_name": "Edit",
+                "tool_use_id": "tu1",
+                "tool_input": {"file_path": "/p/src/a.rs", "old_string": "a", "new_string": "b"},
+                "tool_response": {"filePath": "/p/src/a.rs"}
+            }),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        let finished = of_type(&events, "agent.tool.finished");
+        assert_eq!(finished.len(), 1);
+        let e = &finished[0].envelope;
+        let turn = turns(&svc).list_open(&tid).await.unwrap()[0].id.value();
+        assert_eq!(e.anchors.stream_id.map(|s| s.value()), Some(1));
+        assert_eq!(e.anchors.thread_id, Some(tid));
+        assert_eq!(e.anchors.turn_id, Some(turn));
+        assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
+        assert_eq!(e.payload["tool"], "Edit");
+        assert_eq!(e.payload["path"], "src/a.rs");
+        assert_eq!(e.payload["ok"], true);
+        let hash = e.payload["input"]["hash"].as_str().unwrap().to_string();
+        let input = oxplow_db::event_content_store::read(&svc.db, &hash)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&input).unwrap()["new_string"],
+            "b"
+        );
+        assert!(e.payload["output"]["hash"].is_string());
+        // The same hook posted again (a harness retry) logs nothing new.
+        svc.ingest(hook(
+            HookKind::PostToolUse,
+            tid,
+            Some("s1"),
+            json!({"tool_name": "Edit", "tool_use_id": "tu1", "tool_input": {"file_path": "src/a.rs"}}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(of_type(&logged(&svc).await, "agent.tool.finished").len(), 1);
+    }
+
+    /// A PreToolUse the policy refused is logged with its decision.
+    #[tokio::test]
+    async fn a_denied_request_is_logged_as_denied() {
+        let (svc, tid) = fixture().await;
+        let mut env = hook(
+            HookKind::PreToolUse,
+            tid,
+            None,
+            json!({"tool_name": "Write", "tool_input": {"file_path": "src/b.rs", "content": "x"}}),
+        );
+        env.decision = Some(ToolDecision {
+            allowed: false,
+            reason: Some("no effort is open".into()),
+        });
+        svc.ingest(env).await.unwrap();
+        let events = logged(&svc).await;
+        let requested = of_type(&events, "agent.tool.requested");
+        assert_eq!(requested.len(), 1);
+        let p = &requested[0].envelope.payload;
+        assert_eq!(
+            (
+                p["tool"].as_str(),
+                p["decision"].as_str(),
+                p["reason"].as_str()
+            ),
+            (Some("Write"), Some("denied"), Some("no effort is open"))
+        );
+    }
+
+    /// A session id seen for the first time starts a session (once), and
+    /// becomes the thread's resume id; `/clear` of that session ends it.
+    #[tokio::test]
+    async fn sessions_are_tracked_by_the_ingest() {
+        let (svc, tid) = fixture().await;
+        for _ in 0..2 {
+            svc.ingest(hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("s1"),
+                json!({"prompt": "go"}),
+            ))
+            .await
+            .unwrap();
+        }
+        let started = of_type(&logged(&svc).await, "agent.session.started")
+            .into_iter()
+            .map(|e| e.envelope.payload.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            started,
+            vec![
+                json!({"session": "s1", "thread": "thread:thr1", "harness": "claude", "resumed": false})
+            ]
+        );
+        let resume = || async {
+            let db = svc.db.clone();
+            db.transaction(move |c| {
+                c.query_row(
+                    "SELECT resume_session_id FROM threads WHERE id = 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(|e| DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap()
+        };
+        assert_eq!(resume().await, "s1");
+        // An exit that isn't a clear keeps the resume id; a clear of a
+        // stale session keeps it too; a clear of the resume session drops it.
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("s1"),
+            json!({"reason": "other"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(resume().await, "s1");
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("old"),
+            json!({"reason": "clear"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(resume().await, "s1");
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("s1"),
+            json!({"reason": "clear"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(resume().await, "");
+        let ended = of_type(&logged(&svc).await, "agent.session.ended").len();
+        assert_eq!(ended, 2, "one per session id that ended");
+    }
+
+    /// Every prompt is logged — one inside an open turn is a re-prompt —
+    /// and status moves are logged once per transition.
+    #[tokio::test]
+    async fn prompts_and_status_transitions_are_logged() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            None,
+            json!({"prompt": "a"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            None,
+            json!({"prompt": "b"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            None,
+            json!({"transcript_path": "/t.jsonl"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(HookKind::Stop, tid, None, json!({})))
+            .await
+            .unwrap();
+        let events = logged(&svc).await;
+        let reprompts: Vec<bool> = of_type(&events, "agent.prompt.submitted")
+            .iter()
+            .map(|e| e.envelope.payload["reprompt"].as_bool().unwrap())
+            .collect();
+        assert_eq!(reprompts, vec![false, true]);
+        let states: Vec<String> = of_type(&events, "agent.status.changed")
+            .iter()
+            .map(|e| e.envelope.payload["state"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(states, vec!["running", "idle"]);
+        let ended = of_type(&events, "agent.turn.ended");
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0].envelope.v, 2);
+        assert_eq!(ended[0].envelope.payload["transcript_path"], "/t.jsonl");
     }
 
     #[tokio::test]
@@ -427,6 +999,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("p".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -438,6 +1011,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
@@ -450,6 +1024,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
@@ -466,10 +1041,11 @@ mod tests {
             session_id: Some("sess".into()),
             payload_json: "{}".into(),
             prompt: Some("do the thing".into()),
+            decision: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
-        let turns = svc.turns.list_open(&tid).await.unwrap();
+        let turns = turns(&svc).list_open(&tid).await.unwrap();
         assert_eq!(turns.len(), 1);
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Running);
@@ -486,6 +1062,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("do".into()),
+            decision: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -495,9 +1072,10 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         };
         svc.ingest(stop).await.unwrap();
-        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
     }
@@ -512,6 +1090,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("do".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -522,6 +1101,7 @@ mod tests {
             session_id: None,
             payload_json: r#"{"await_user":true}"#.into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
@@ -539,6 +1119,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("p".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -549,12 +1130,13 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
-        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -567,6 +1149,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("p".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -577,11 +1160,12 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
         // Parent turn must still be open and status still Running.
-        assert_eq!(svc.turns.list_open(&tid).await.unwrap().len(), 1);
+        assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Running);
     }
@@ -599,10 +1183,11 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
-        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
     }
@@ -617,12 +1202,13 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("orphan".into()),
+            decision: None,
         })
         .await
         .unwrap();
         // No turn opened, no status row created — the thread-scoped
         // state machine never ran.
-        assert!(svc.turns.list_open(&tid).await.unwrap().is_empty());
+        assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
         assert!(svc.statuses.get(&tid, "working").await.unwrap().is_none());
     }
 
@@ -637,11 +1223,12 @@ mod tests {
                 session_id: None,
                 payload_json: "{}".into(),
                 prompt: Some(prompt.into()),
+                decision: None,
             })
             .await
             .unwrap();
         }
-        let open = svc.turns.list_open(&tid).await.unwrap();
+        let open = turns(&svc).list_open(&tid).await.unwrap();
         assert_eq!(open.len(), 1);
         assert_eq!(open[0].prompt, "first");
     }
@@ -658,6 +1245,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("p".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -668,10 +1256,11 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
-        assert_eq!(svc.turns.list_open(&tid).await.unwrap().len(), 1);
+        assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
         let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
         assert_eq!(status.detail.as_deref(), Some("boot"));
@@ -692,6 +1281,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("do".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -712,6 +1302,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
@@ -734,6 +1325,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: Some("do".into()),
+            decision: None,
         })
         .await
         .unwrap();
@@ -754,6 +1346,7 @@ mod tests {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();
@@ -780,6 +1373,7 @@ mod tests {
             session_id: None,
             payload_json: r#"{"await_user":true,"question":"Pick A or B"}"#.into(),
             prompt: None,
+            decision: None,
         })
         .await
         .unwrap();

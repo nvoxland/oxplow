@@ -7,20 +7,20 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
     AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1, EventSchemaRegistry,
 };
-use oxplow_domain::events::{Anchors, Envelope};
+use oxplow_domain::events::Anchors;
 use oxplow_domain::hook::TurnOutcome;
-use oxplow_domain::refs::build::{system_source, thread_ref, turn_ref};
+use oxplow_domain::refs::build::{thread_ref, turn_ref};
 use oxplow_domain::stores::AgentTurnStore;
 use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
-use crate::event_log_store::append_tx;
+use crate::event_log_store::{anchors_for_thread_tx, EventCtx};
 
 fn map_err_text(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
@@ -52,26 +52,117 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
     })
 }
 
-/// The anchors a turn's events carry: its thread and that thread's stream.
-fn turn_anchors(
-    conn: &rusqlite::Connection,
+/// The anchors agent activity on `thread` carries (P3.3): the thread, its
+/// stream, the thread's open turn and its single open effort (none when
+/// two or more are open — attribution never guesses).
+pub fn activity_anchors_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
+    let mut anchors = anchors_for_thread_tx(conn, thread)?;
+    anchors.turn_id = open_turn_ids_tx(conn, thread)?.first().map(|t| t.value());
+    anchors.effort_id =
+        crate::effort_store::find_single_open_for_thread_tx(conn, thread)?.map(|e| e.id);
+    Ok(anchors)
+}
+
+/// The thread's open turns, newest first.
+pub fn open_turn_ids_tx(
+    conn: &Connection,
     thread: ThreadId,
-    turn: AgentTurnId,
-) -> Result<Anchors, DomainError> {
-    let stream: Option<i64> = conn
+) -> Result<Vec<AgentTurnId>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id FROM agent_turn WHERE thread_id = ?1 AND ended_at IS NULL
+              ORDER BY started_at DESC, id DESC",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map([thread.value()], |r| r.get::<_, i64>(0))
+        .map_err(map_sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)?;
+    Ok(rows.into_iter().map(AgentTurnId::new).collect())
+}
+
+/// Open a turn on `thread` and log `agent.turn.started`, in the caller's
+/// transaction. The turn starts at its stream's current snapshot.
+pub fn open_turn_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    prompt: &str,
+    session: Option<&str>,
+    started_at: Timestamp,
+) -> Result<AgentTurnId, DomainError> {
+    conn.execute(
+        "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at) VALUES (?1, ?2, ?3, ?4)",
+        params![thread.value(), prompt, session, ts_to_string(started_at)],
+    )
+    .map_err(map_sql_err)?;
+    let id = AgentTurnId::new(conn.last_insert_rowid());
+    let anchors = activity_anchors_tx(conn, thread)?;
+    if let Some(stream) = anchors.stream_id {
+        // Its diff runs from here to the snapshot it ends at.
+        let start =
+            crate::analytics_stores::current_snapshot_tx(conn, stream).map_err(map_sql_err)?;
+        conn.execute(
+            "UPDATE agent_turn SET start_snapshot_id = ?2 WHERE id = ?1",
+            params![id.value(), start],
+        )
+        .map_err(map_sql_err)?;
+    }
+    let env = ev
+        .typed::<AgentTurnStarted>(&AgentTurnStartedV1 {
+            turn: turn_ref(id),
+            thread: thread_ref(thread),
+            session: session.map(str::to_string),
+        })
+        .with_anchors(Anchors {
+            turn_id: Some(id.value()),
+            ..anchors
+        })
+        .with_subject([turn_ref(id), thread_ref(thread)]);
+    ev.append(conn, &env)?;
+    Ok(id)
+}
+
+/// Close turn `id` and log `agent.turn.ended`, in the caller's
+/// transaction. Returns its thread, or `None` when it was already closed
+/// (nothing logged).
+pub fn close_turn_tx(
+    conn: &Connection,
+    ev: &EventCtx<'_>,
+    id: AgentTurnId,
+    answer: Option<&str>,
+    outcome: TurnOutcome,
+    transcript_path: Option<&str>,
+) -> Result<Option<ThreadId>, DomainError> {
+    let thread: Option<i64> = conn
         .query_row(
-            "SELECT stream_id FROM threads WHERE id = ?1",
-            params![thread.value()],
+            "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
+              WHERE id = ?1 AND ended_at IS NULL
+              RETURNING thread_id",
+            params![id.value(), ts_to_string(Timestamp::now()), answer],
             |r| r.get(0),
         )
         .optional()
         .map_err(map_sql_err)?;
-    Ok(Anchors {
-        stream_id: stream.map(StreamId::new),
-        thread_id: Some(thread),
-        turn_id: Some(turn.value()),
-        ..Anchors::default()
-    })
+    let Some(thread) = thread.map(ThreadId::new) else {
+        return Ok(None);
+    };
+    let env = ev
+        .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
+            turn: turn_ref(id),
+            thread: thread_ref(thread),
+            outcome,
+            transcript_path: transcript_path.map(str::to_string),
+            usage: None,
+        })
+        .with_anchors(Anchors {
+            turn_id: Some(id.value()),
+            ..activity_anchors_tx(conn, thread)?
+        })
+        .with_subject([turn_ref(id), thread_ref(thread)]);
+    ev.append(conn, &env)?;
+    Ok(Some(thread))
 }
 
 /// `agent_turn` rows, and the `agent.turn.started` / `agent.turn.ended`
@@ -114,8 +205,18 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         let schemas = self.event_schemas.clone();
         self.db
             .transaction(move |tx| {
-                let fresh = turn.id.is_placeholder();
-                let id_param: Option<i64> = (!fresh).then(|| turn.id.value());
+                if turn.id.is_placeholder() {
+                    let ev = EventCtx::system(&schemas, "hook_ingest");
+                    return open_turn_tx(
+                        tx,
+                        &ev,
+                        turn.thread_id,
+                        &turn.prompt,
+                        turn.session_id.as_deref(),
+                        turn.started_at,
+                    );
+                }
+                // Re-writing an existing id is an update, not a new turn.
                 tx.execute(
                     "INSERT INTO agent_turn (id, thread_id, prompt, answer, session_id, started_at, ended_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -123,7 +224,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                         prompt = excluded.prompt,
                         session_id = excluded.session_id",
                     params![
-                        id_param,
+                        turn.id.value(),
                         turn.thread_id.value(),
                         turn.prompt,
                         turn.answer,
@@ -133,44 +234,14 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     ],
                 )
                 .map_err(map_sql_err)?;
-                let id = if fresh {
-                    AgentTurnId::new(tx.last_insert_rowid())
-                } else {
-                    turn.id
-                };
-                let anchors = turn_anchors(tx, turn.thread_id, id)?;
-                if fresh {
-                    // The turn starts at the stream's current snapshot; its
-                    // diff runs from here to the snapshot it ends at.
-                    if let Some(stream) = anchors.stream_id {
-                        let start = crate::analytics_stores::current_snapshot_tx(tx, stream)
-                            .map_err(map_sql_err)?;
-                        tx.execute(
-                            "UPDATE agent_turn SET start_snapshot_id = ?2 WHERE id = ?1",
-                            params![id.value(), start],
-                        )
-                        .map_err(map_sql_err)?;
-                    }
-                }
-                // A re-open of an existing id is an update, not a new turn.
-                if fresh {
-                    let env = Envelope::typed::<AgentTurnStarted>(
-                        system_source("hook_ingest"),
-                        &AgentTurnStartedV1 {
-                            turn: turn_ref(id),
-                            thread: thread_ref(turn.thread_id),
-                            session: turn.session_id.clone(),
-                        },
-                    )
-                    .with_anchors(anchors)
-                    .with_subject([turn_ref(id), thread_ref(turn.thread_id)]);
-                    append_tx(tx, &schemas, &env)?;
-                }
-                Ok(id)
+                Ok(turn.id)
             })
             .await
     }
 
+    /// Outside the hook ingest (which closes in its own transaction), a
+    /// turn is closed by restart recovery: `Restart` logs as
+    /// `system:recovery`.
     async fn close(
         &self,
         id: &AgentTurnId,
@@ -178,37 +249,15 @@ impl AgentTurnStore for SqliteAgentTurnStore {
         outcome: TurnOutcome,
     ) -> Result<bool, DomainError> {
         let id = *id;
-        let now = ts_to_string(Timestamp::now());
         let schemas = self.event_schemas.clone();
         self.db
             .transaction(move |tx| {
-                let thread: Option<i64> = tx
-                    .query_row(
-                        "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
-                          WHERE id = ?1 AND ended_at IS NULL
-                          RETURNING thread_id",
-                        params![id.value(), now, answer],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(map_sql_err)?;
-                let Some(thread) = thread.map(ThreadId::new) else {
-                    return Ok(false); // already closed
+                let component = match outcome {
+                    TurnOutcome::Restart => "recovery",
+                    _ => "hook_ingest",
                 };
-                let env = Envelope::typed::<AgentTurnEnded>(
-                    system_source("hook_ingest"),
-                    &AgentTurnEndedV2 {
-                        turn: turn_ref(id),
-                        thread: thread_ref(thread),
-                        outcome,
-                        transcript_path: None,
-                        usage: None,
-                    },
-                )
-                .with_anchors(turn_anchors(tx, thread, id)?)
-                .with_subject([turn_ref(id), thread_ref(thread)]);
-                append_tx(tx, &schemas, &env)?;
-                Ok(true)
+                let ev = EventCtx::system(&schemas, component);
+                Ok(close_turn_tx(tx, &ev, id, answer.as_deref(), outcome, None)?.is_some())
             })
             .await
     }
@@ -405,5 +454,50 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap()
+    }
+
+    /// P3.3 (tsk473): outside the hook ingest a turn is closed by restart
+    /// recovery, and its `agent.turn.ended` says so.
+    #[tokio::test]
+    async fn a_restart_close_is_logged_as_recovery() {
+        let db = Database::in_memory();
+        let now = "2026-09-29T00:00:00.000000Z";
+        let seed = format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (1, 1, 't', 'active', '{now}', '{now}');"
+        );
+        db.transaction(move |tx| tx.execute_batch(&seed).map_err(map_sql_err))
+            .await
+            .unwrap();
+        let store = SqliteAgentTurnStore::new(db.clone());
+        let id = store
+            .open(&AgentTurn {
+                id: AgentTurnId::placeholder(),
+                thread_id: ThreadId::new(1),
+                prompt: "p".into(),
+                answer: None,
+                session_id: None,
+                started_at: Timestamp::now(),
+                ended_at: None,
+                start_snapshot_id: None,
+                snapshot_id: None,
+            })
+            .await
+            .unwrap();
+        assert!(store.close(&id, None, TurnOutcome::Restart).await.unwrap());
+        let source: String = db
+            .transaction(|tx| {
+                tx.query_row(
+                    "SELECT source FROM event_log WHERE type = 'agent.turn.ended'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(source, "system:recovery");
     }
 }

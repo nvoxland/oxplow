@@ -2493,6 +2493,8 @@ export type HookEnvelope = {
 	 *  the agent_turn row carries the visible prompt text.
 	 */
 	prompt: string | null,
+	// PreToolUse only: the policy's verdict (`None` reads as allowed).
+	decision?: ToolDecision | null,
 };
 
 export type HookEvent = {
@@ -2524,7 +2526,11 @@ export type HookKind =
  *  Agent boot sentinel — fires once per session_id when oxplow first
  *  observes traffic for it.
  */
-"agent_boot";
+"agent_boot" | 
+// A harness session began (Codex posts it; Claude's is command-only).
+"session_start" | 
+// A harness session ended — `reason: "clear"` for `/clear`.
+"session_end";
 
 export type InstalledLspPackage = {
 	name: string,
@@ -4234,6 +4240,15 @@ export type ToolCall = {
 	diffs: ToolDiff[],
 	// Text content blocks (command output, messages).
 	text: string[],
+};
+
+/**
+ *  What the agent policy decided about a tool call (PreToolUse), carried
+ *  on the envelope so the log records it.
+ */
+export type ToolDecision = {
+	allowed: boolean,
+	reason: string | null,
 };
 
 // One file change a tool call reports. `old_text: None` means a new file.

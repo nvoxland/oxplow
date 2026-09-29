@@ -87,6 +87,32 @@ pub fn anchors_for_thread_tx(conn: &Connection, thread: ThreadId) -> Result<Anch
     })
 }
 
+/// Append `env` unless an event with its `dedupe_key` is already logged —
+/// for a producer that may see the same fact twice (a re-posted hook).
+/// `Ok(false)` when it was already there; nothing is written and the
+/// caller's transaction carries on. An envelope with no dedupe key is
+/// always appended.
+pub fn append_unique_tx(
+    conn: &Connection,
+    schemas: &EventSchemaRegistry,
+    env: &Envelope,
+) -> Result<bool, DomainError> {
+    if let Some(key) = &env.dedupe_key {
+        let seen: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM event_log WHERE dedupe_key = ?1)",
+                [key],
+                |r| r.get(0),
+            )
+            .map_err(map_sql_err)?;
+        if seen {
+            return Ok(false);
+        }
+    }
+    append_tx(conn, schemas, env)?;
+    Ok(true)
+}
+
 /// Append one envelope. Returns its `seq`. The payload must validate
 /// against the registered schema for `type@v` ([`DomainError::Invalid`]
 /// otherwise, nothing written). A duplicate `dedupe_key` (or `id`) fails

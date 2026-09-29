@@ -7,8 +7,8 @@
 //! and `tool_input.file_path` / `command`.
 //!
 //! State kept here is runtime-only (losing it on a restart costs at most
-//! one repeated context block or DB read): the launch role and last
-//! context per agent session, and the last resume id persisted per thread.
+//! one repeated context block): the launch role and last context per agent
+//! session. The session's resume id is the hook ingest's (`hook_ingest`).
 //! See `.context/agent-model.md`.
 
 use std::collections::HashMap;
@@ -21,9 +21,7 @@ use parking_lot::Mutex;
 use tracing::warn;
 
 use crate::agent_policy::TurnSignals;
-use crate::{
-    build_session_context_block_with_role, role_change_banner, HookEnvelope, RoleMode, Services,
-};
+use crate::{build_session_context_block_with_role, role_change_banner, RoleMode, Services};
 
 /// A tool call in the canonical (Claude-shaped) vocabulary, for transports
 /// whose agents don't speak it natively. [`Self::to_payload`] is the one
@@ -75,10 +73,6 @@ const DECISIONS_KEY_SUFFIX: &str = "#decisions";
 #[derive(Default)]
 pub struct AgentActivity {
     role_state: Mutex<RoleState>,
-    /// Last resume session id persisted per thread; lets repeated events
-    /// skip the thread read. A stale entry costs one extra read, never a
-    /// wrong write.
-    resume_state: Mutex<HashMap<ThreadId, String>>,
 }
 
 impl AgentActivity {
@@ -94,85 +88,6 @@ impl AgentActivity {
         state
             .last_context_by_session_id
             .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
-    }
-
-    /// Adopt the observed session id as the thread's resume token when it
-    /// differs. Best-effort: failures are logged and skipped.
-    pub async fn track_resume(&self, svc: &Services, env: &HookEnvelope) {
-        let Some(observed) = env.session_id.as_deref() else {
-            return;
-        };
-        if observed.is_empty() {
-            return;
-        }
-        let Some(thread_id) = env.thread_id.as_ref() else {
-            return;
-        };
-        // The resume id changes once per session, so a cached thread
-        // short-circuits before the DB.
-        if resume_cache_allows_skip(
-            self.resume_state.lock().get(thread_id).map(|s| s.as_str()),
-            observed,
-        ) {
-            return;
-        }
-        let thread = match svc.thread_store.get(thread_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => return,
-            Err(err) => {
-                warn!(?err, "resume-tracker: thread lookup failed");
-                return;
-            }
-        };
-        if thread.resume_session_id == observed {
-            // Already in sync: seed the cache (a cold cache after restart).
-            self.resume_state
-                .lock()
-                .insert(*thread_id, observed.to_string());
-            return;
-        }
-        let mut updated = thread;
-        updated.resume_session_id = observed.to_string();
-        updated.updated_at = oxplow_domain::Timestamp::now();
-        if let Err(err) = svc.thread_store.upsert(&updated).await {
-            warn!(?err, "resume-tracker: thread upsert failed");
-            return;
-        }
-        self.resume_state
-            .lock()
-            .insert(*thread_id, observed.to_string());
-    }
-
-    /// SessionEnd: drop the resume token when an explicit `/clear` ended
-    /// exactly the session it points at (see [`resume_should_clear`]).
-    pub async fn clear_resume_on_session_end(
-        &self,
-        svc: &Services,
-        thread_id: Option<&ThreadId>,
-        session_id: Option<&str>,
-        body: Option<&serde_json::Value>,
-    ) {
-        let (Some(thread_id), Some(ended)) = (thread_id, session_id) else {
-            return;
-        };
-        let reason = body.and_then(|v| v.get("reason")).and_then(|r| r.as_str());
-        let thread = match svc.thread_store.get(thread_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => return,
-            Err(err) => {
-                warn!(?err, "resume-tracker: thread lookup failed on SessionEnd");
-                return;
-            }
-        };
-        if !resume_should_clear(reason, ended, &thread.resume_session_id) {
-            return;
-        }
-        let mut updated = thread;
-        updated.resume_session_id = String::new();
-        updated.updated_at = oxplow_domain::Timestamp::now();
-        if let Err(err) = svc.thread_store.upsert(&updated).await {
-            warn!(?err, "resume-tracker: clearing resume token failed");
-        }
     }
 
     /// What this turn did so far (read from the hook log since the open
@@ -558,19 +473,6 @@ fn wiki_page_slug_from_path(raw: &str, project_dir: &Path) -> Option<String> {
     (ext == "md").then_some(stem)
 }
 
-/// Skip the resume tracker's DB work when the cache already holds this
-/// exact session id for the thread.
-fn resume_cache_allows_skip(cached: Option<&str>, observed: &str) -> bool {
-    cached == Some(observed)
-}
-
-/// Drop the resume token only when an explicit `/clear` ended exactly the
-/// session it points at; normal exits keep it, and clearing a stale
-/// session must not wipe a newer token.
-fn resume_should_clear(reason: Option<&str>, ended_session: &str, current_resume: &str) -> bool {
-    reason == Some("clear") && !ended_session.is_empty() && ended_session == current_resume
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,20 +529,6 @@ mod tests {
             q("SELECT path FROM v_effort_file").await,
             serde_json::json!([["src/a.rs"]])
         );
-    }
-
-    #[test]
-    fn resume_clear_decision() {
-        // Only an explicit clear of the exact resume session drops it.
-        assert!(resume_should_clear(Some("clear"), "s1", "s1"));
-        // Other exit reasons keep the token (restart should resume).
-        assert!(!resume_should_clear(Some("other"), "s1", "s1"));
-        assert!(!resume_should_clear(Some("prompt_input_exit"), "s1", "s1"));
-        assert!(!resume_should_clear(None, "s1", "s1"));
-        // A clear of a stale session must not wipe a newer token.
-        assert!(!resume_should_clear(Some("clear"), "old", "newer"));
-        // Degenerate ids never match.
-        assert!(!resume_should_clear(Some("clear"), "", ""));
     }
 
     #[test]
@@ -719,18 +607,6 @@ mod tests {
         // Missing path → None.
         let ti_empty = serde_json::json!({});
         assert!(effort_claim_path_from_edit("Edit", Some(&ti_empty), tmp.path()).is_none());
-    }
-
-    #[test]
-    fn resume_cache_skips_only_on_exact_match() {
-        // Cache hit: the thread already has this session id persisted →
-        // skip the DB round-trip entirely.
-        assert!(resume_cache_allows_skip(Some("s1"), "s1"));
-        // Cache miss / changed / first-seen → must hit the DB.
-        assert!(!resume_cache_allows_skip(None, "s1"));
-        assert!(!resume_cache_allows_skip(Some("s0"), "s1"));
-        // Degenerate empty cached value never matches a real id.
-        assert!(!resume_cache_allows_skip(Some(""), "s1"));
     }
 
     #[test]

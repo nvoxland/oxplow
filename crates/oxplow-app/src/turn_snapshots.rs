@@ -118,6 +118,7 @@ mod tests {
             session_id: Some("s".into()),
             payload_json: "{}".into(),
             prompt: Some("go".into()),
+            decision: None,
         }
     }
 
@@ -207,7 +208,13 @@ mod tests {
         anchored.sort();
         assert_eq!(
             anchored,
-            vec!["agent.turn.ended", "agent.turn.started", "snapshot.taken"]
+            vec![
+                "agent.prompt.submitted",
+                "agent.status.changed",
+                "agent.turn.ended",
+                "agent.turn.started",
+                "snapshot.taken"
+            ]
         );
     }
 

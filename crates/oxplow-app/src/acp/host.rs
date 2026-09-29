@@ -91,6 +91,7 @@ impl ServicesAcpHost {
             session_id: Some(session_id.to_string()),
             payload_json: payload.to_string(),
             prompt,
+            decision: None,
         }
     }
 
@@ -117,13 +118,20 @@ impl AcpHost for ServicesAcpHost {
             .agent_policy
             .check_tool(&svc, thread, &intent.as_intent())
             .await;
-        let env = self.envelope(
+        let mut env = self.envelope(
             HookKind::PreToolUse,
             thread,
             session_id,
             payload.clone(),
             None,
         );
+        env.decision = Some(crate::hook_ingest::ToolDecision {
+            allowed: matches!(decision, PolicyDecision::Allow),
+            reason: match &decision {
+                PolicyDecision::Deny { reason, .. } => Some(reason.clone()),
+                PolicyDecision::Allow => None,
+            },
+        });
         self.ingest(&svc, env).await;
         decision
     }
@@ -139,7 +147,7 @@ impl AcpHost for ServicesAcpHost {
             serde_json::json!({ "session_id": session_id }),
             None,
         );
-        svc.agent_activity.track_resume(&svc, &env).await;
+        // The ingest tracks the session (resume id, `agent.session.started`).
         self.ingest(&svc, env).await;
     }
 
@@ -288,6 +296,7 @@ impl AcpHost for ServicesAcpHost {
             session_id: None,
             payload_json: "{}".into(),
             prompt: None,
+            decision: None,
         };
         self.ingest(&svc, env).await;
     }

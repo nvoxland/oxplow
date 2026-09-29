@@ -104,7 +104,9 @@ pub use agent_prompt::{
 pub use events::{
     event_channels, CodeQualityScanPhase, EventBus, OxplowEvent, WorkspaceChangeKind,
 };
-pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
+pub use hook_ingest::{
+    HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
+};
 pub use oxplow_lsp::{LspError, LspProxy};
 pub use task_service::{
     BacklogState, CreateTaskInput, TaskService, TaskServiceError, UpdateTaskChanges,
@@ -659,11 +661,14 @@ impl Services {
         let tasks = TaskService::new(task_store.clone()).with_event_pump(event_pump.clone());
         let event_bus = EventBus::new();
         let hook_ingest = HookIngestService::new(
+            db.clone(),
+            event_schemas.clone(),
+            layout.project_dir.clone(),
             hook_event_store.clone(),
             agent_status_store.clone(),
-            agent_turn_store.clone(),
             event_bus.clone(),
-        );
+        )
+        .with_event_pump(event_pump.clone());
         let recovery_svc = recovery::RecoveryService::new(
             agent_turn_store.clone(),
             task_store.clone(),

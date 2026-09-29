@@ -65,8 +65,10 @@ impl SqliteReasoningStore {
         self.db
             .call(move |c| {
                 c.execute(
-                    "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    // Made in the thread's open turn, when one is open.
+                    "INSERT INTO decision (thread_id, task_id, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT id FROM agent_turn
+                        WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
                     rusqlite::params![
                         d.thread_id, d.task_id, d.effort_id, d.question, d.choice,
                         alternatives, d.confidence, d.why, now
@@ -144,8 +146,9 @@ impl SqliteReasoningStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, evidence_ref, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, evidence_ref, created_at, turn_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, (SELECT id FROM agent_turn
+                        WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
                     rusqlite::params![c.thread_id, c.task_id, c.effort_id, c.statement, c.kind, c.evidence_ref, now],
                 )?;
                 Ok(conn.last_insert_rowid())

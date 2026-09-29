@@ -302,24 +302,38 @@ to `runtime.handleHookEnvelope`, which:
 
 1. Stores the event in `HookEventStore` (a ring buffer, also fed to the UI's
    Hook Events tool window via the `hook.recorded` EventBus event).
-2. If the normalized payload carries a session id that differs from
-   `thread.resume_session_id`, persists the new id so a later oxplow restart
-   relaunches claude with `--resume <id>`. This fires on *every* hook but
-   the id changes once per session, so an in-memory per-thread cache
-   (`resume_state` in AppCtx, gated by `resume_cache_allows_skip`) lets
-   repeat hooks short-circuit before the `thread_store.get` + upsert. The
-   cache mirrors what was last persisted; a stale entry only ever costs
-   one redundant read (never a wrong write), so losing it across a daemon
-   restart is fine. The inverse runs on
-   `SessionEnd(reason=clear)`: `/clear` starts a fresh session with NO
-   HTTP hook for it (SessionStart is command-type only), so until the
-   new session's first prompt the token still points at the cleared
-   one — a restart in that window would resurrect it. The SessionEnd
-   branch (`resume_should_clear` in
-   `crates/oxplow-control-plane/src/lib.rs`) blanks the token when an
-   explicit clear ends exactly the session it points at; other end
-   reasons (`other`, `prompt_input_exit`, …) keep it so normal
-   restarts still resume.
+2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
+   P3.3): **one transaction per envelope** writes the state the hook changes
+   and the `agent.*` events that record it, anchored to the thread's stream,
+   its open turn and its single open effort (`activity_anchors_tx`):
+   - every prompt → `agent.prompt.submitted` (`reprompt: true` inside an
+     open turn); a prompt with no turn open also opens one
+     (`agent.turn.started`);
+   - PreToolUse → `agent.tool.requested` with the policy's `decision`
+     (`HookEnvelope.decision`, set by the control plane's `pre_tool_check`
+     and by `AcpHost::check_tool`); PostToolUse → `agent.tool.finished`.
+     `path` / `detail` / `ok` / `exit_code` are computed here
+     (`tool_calls::parse_tool_call` against the thread's worktree), and the
+     tool's input and output go to `event_content` by hash (the payload
+     carries `{hash, size}`). The harness's `tool_use_id` is the dedupe key,
+     so a re-posted hook logs once;
+   - Stop / Interrupt close the open turns (`agent.turn.ended@2`, with
+     Claude's `transcript_path`);
+   - a status the hook sets (Running, Idle / AwaitingUser, Stopped, boot
+     Idle) is logged as `agent.status.changed` when it differs from the
+     in-memory `AgentStatusStore` — compared outside the transaction,
+     since status itself stays in memory.
+   **Session tracking is part of it.** A session id seen for the first time
+   on a thread (on any hook — Claude posts no HTTP SessionStart) logs
+   `agent.session.started` once (dedupe key `session:<id>:started`) and
+   becomes `thread.resume_session_id`, so a later restart relaunches with
+   `--resume <id>`. `SessionEnd` logs `agent.session.ended`, and when
+   `reason` is `clear` and the id is the resume id it blanks it: `/clear`
+   starts a fresh session with no HTTP hook, so until its first prompt the
+   token would still point at the cleared one. Other end reasons keep it so
+   normal restarts still resume, and a clear of a stale session never wipes
+   a newer token. (The in-memory resume cache is gone: the ingest reads
+   the thread row in its transaction anyway.)
    A second cleanup runs at **launch** for a token that's stale for any
    other reason (transcript pruned, machine moved, id rotted). Before
    passing `--resume`, `open_terminal_session`'s direct branch probes the
@@ -367,8 +381,8 @@ to `runtime.handleHookEnvelope`, which:
 6. For `Stop`: runs `computeStopDirective` (below).
 
 **Side-band hook steps are best-effort by design.** The PostToolUse
-extras (collection observations, wiki-page attribution, the resume
-tracker) are individually try/warn — a coverage parse failure must
+extras (collection observations, wiki-page attribution) are individually
+try/warn — a coverage parse failure must
 never fail the hook or block the agent. This is deliberate policy,
 not an oversight; the durable lifecycle writes they decorate are
 covered by the transactional invariants in `data-model.md` instead.
@@ -614,8 +628,8 @@ policy that every agent transport asks, not logic in the hook route.
     detached). It returns the ROLE CHANGE banner or a nudge.
   - `prompt_context` builds the session-context block, advisories and
     decisions, deduped per session.
-  - `mine_turn_signals`, `track_resume` / `clear_resume_on_session_end`
-    and `reset_session` round it out.
+  - `mine_turn_signals` and `reset_session` round it out; session and
+    resume tracking moved into the hook ingest (P3.3).
   - Transports that don't speak Claude's tool vocabulary build a
     `CanonicalToolEvent` and record its `to_payload()`. That is the one
     place the canonical shape is built; every recorder and hook-log
