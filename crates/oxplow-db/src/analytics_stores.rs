@@ -1138,7 +1138,7 @@ fn insert_rows_tx(
 /// The snapshot the stream's worktree is at: the latest op's snapshot
 /// (the op log is complete since V97's backfill), else the newest
 /// snapshot row.
-fn current_snapshot_tx(
+pub(crate) fn current_snapshot_tx(
     conn: &rusqlite::Connection,
     stream_id: StreamId,
 ) -> rusqlite::Result<Option<i64>> {

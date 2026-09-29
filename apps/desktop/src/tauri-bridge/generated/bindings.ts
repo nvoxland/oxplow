@@ -1470,6 +1470,12 @@ export type AgentTurn = {
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
 	/**
+	 *  The snapshot the stream's worktree was at when the turn opened;
+	 *  `start_snapshot_id → snapshot_id` is what the turn changed.
+	 *  `None` when the stream had no snapshot yet.
+	 */
+	start_snapshot_id: number | null,
+	/**
 	 *  The snapshot the worktree was at when the turn ended (its
 	 *  `turn_end` take); `None` while running.
 	 */

@@ -494,6 +494,7 @@ mod tests {
                 session_id: None,
                 started_at: oxplow_domain::Timestamp::now(),
                 ended_at: None,
+                start_snapshot_id: None,
                 snapshot_id: None,
             })
             .await

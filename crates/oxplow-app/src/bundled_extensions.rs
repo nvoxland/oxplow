@@ -370,6 +370,7 @@ mod tests {
             session_id: None,
             started_at: at,
             ended_at: None,
+            start_snapshot_id: None,
             snapshot_id: None,
         };
         let now = oxplow_domain::Timestamp::now();

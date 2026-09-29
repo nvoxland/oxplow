@@ -616,10 +616,12 @@ task-local — dropping the registry's `Arc` alone never wakes the
 task, so without the signal an archived stream's watcher would
 linger until process exit.
 
-**Turns end at snapshots (V98, P2.3 tsk425).** `agent_turn.snapshot_id`
-is the snapshot the worktree was at when the turn ended — set in the
-`turn_end` take's transaction (`record_take` stamps it whenever the take
-carries a `turn_id`). `agent_turn.task_id` is gone (nothing ever set
+**Turns are bracketed by snapshots (V98 P2.3 tsk425, V99 tsk438).**
+`agent_turn.start_snapshot_id` is the stream's current snapshot when the
+turn opened (set in the open transaction); `snapshot_id` is the snapshot
+the worktree was at when it ended — set in the `turn_end` take's
+transaction (`record_take` stamps it whenever the take carries a
+`turn_id`). The turn's changes are start → end, like an effort's. `agent_turn.task_id` is gone (nothing ever set
 it). `agent_turn` open/close log `agent.turn.started@1` /
 `agent.turn.ended@1` in the same transaction as the row change;
 `event_log` has a `turn_id` index. `SqliteAgentTurnStore::

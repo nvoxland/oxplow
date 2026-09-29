@@ -502,7 +502,7 @@ const CATALOG: &[CatalogView] = &[
             ("seq", "Operation order within the project."),
             ("stream_id", "Stream (worktree) the take ran on."),
             ("snapshot_id", "Snapshot the worktree is at after the take (v_snapshot.id)."),
-            ("parent_snapshot_id", "Snapshot it was at before; parent → snapshot is what the take changed."),
+            ("parent_snapshot_id", "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."),
             ("trigger", "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy."),
             ("thread_id", "Thread the take belongs to, if any."),
             ("turn_id", "Agent turn the take belongs to, if any (v_agent_turn.id)."),
@@ -610,7 +610,7 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_agent_turn",
-        description: "Agent turns: each human prompt and the agent's answer, per thread. A finished turn points at the snapshot it ended at; its turn_end op in v_snapshot_op has the parent, so parent → snapshot is what the turn changed.",
+        description: "Agent turns: each human prompt and the agent's answer, per thread. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended).",
         columns: &[
             ("id", "Turn id."),
             ("thread_id", "Thread the turn ran in."),
@@ -619,6 +619,7 @@ const CATALOG: &[CatalogView] = &[
             ("session_id", "The harness session id, when it reported one."),
             ("started_at", "RFC 3339 timestamp."),
             ("ended_at", "RFC 3339 timestamp; NULL while running."),
+            ("start_snapshot_id", "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."),
             ("snapshot_id", "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."),
         ],
     },

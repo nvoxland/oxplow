@@ -284,6 +284,7 @@ mod tests {
             session_id: None,
             started_at: now,
             ended_at: None,
+            start_snapshot_id: None,
             snapshot_id: None,
         };
         turns.open(&turn).await.unwrap();

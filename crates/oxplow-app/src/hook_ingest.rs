@@ -135,6 +135,7 @@ impl HookIngestService {
                         session_id: env.session_id.clone(),
                         started_at: now,
                         ended_at: None,
+                        start_snapshot_id: None,
                         snapshot_id: None,
                     };
                     self.turns.open(&turn).await?;

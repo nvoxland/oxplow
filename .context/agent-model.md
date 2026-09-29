@@ -1860,8 +1860,13 @@ when takes happen.
   `HookIngestService::ingest` — `turn_snapshots::CaptureTurnSnapshots`
   runs a `turn_end` take anchored to the turn, its thread and the
   thread's single open effort, and `agent_turn.snapshot_id` records the
-  snapshot the turn ended at. Its op's parent → snapshot is what the turn
-  changed.
+  snapshot the turn ended at. **What the turn changed is
+  `agent_turn.start_snapshot_id → snapshot_id`** — the start is recorded
+  in the turn's open transaction (the stream's current snapshot). Not the
+  take's op parent: other takes during the turn (`complete_task`'s
+  `effort_end`, a commit's `git_refs`, another thread's turn end) move
+  that, and the usual flow — edit, `complete_task`, Stop — would read as
+  a turn that changed nothing (V99, tsk438).
 - **The budget.** The Stop hook waits at most `snapshotTurnBudgetMs`
   (default 2000, min 100; a `config.set` key, not human-only). A slower
   take is never aborted: it finishes in the background and its op and

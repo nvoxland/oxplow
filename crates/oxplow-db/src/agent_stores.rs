@@ -46,6 +46,7 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
             .map(|s| string_to_ts(&s))
             .transpose()
             .map_err(map_err_text)?,
+        start_snapshot_id: row.get("start_snapshot_id")?,
         snapshot_id: row.get("snapshot_id")?,
     })
 }
@@ -136,6 +137,20 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 } else {
                     turn.id
                 };
+                let anchors = turn_anchors(tx, turn.thread_id, id)?;
+                if fresh {
+                    // The turn starts at the stream's current snapshot; its
+                    // diff runs from here to the snapshot it ends at.
+                    if let Some(stream) = anchors.stream_id {
+                        let start = crate::analytics_stores::current_snapshot_tx(tx, stream)
+                            .map_err(map_sql_err)?;
+                        tx.execute(
+                            "UPDATE agent_turn SET start_snapshot_id = ?2 WHERE id = ?1",
+                            params![id.value(), start],
+                        )
+                        .map_err(map_sql_err)?;
+                    }
+                }
                 // A re-open of an existing id is an update, not a new turn.
                 if fresh {
                     let env = Envelope::typed::<AgentTurnStarted>(
@@ -146,7 +161,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                             session: turn.session_id.clone(),
                         },
                     )
-                    .with_anchors(turn_anchors(tx, turn.thread_id, id)?)
+                    .with_anchors(anchors)
                     .with_subject([format!("turn:{id}"), format!("thread:{}", turn.thread_id)]);
                     append_tx(tx, &schemas, &env)?;
                 }
@@ -317,6 +332,7 @@ mod tests {
             session_id: Some("s1".into()),
             started_at: Timestamp::now(),
             ended_at: None,
+            start_snapshot_id: None,
             snapshot_id: None,
         };
         let id = store.open(&turn).await.unwrap();

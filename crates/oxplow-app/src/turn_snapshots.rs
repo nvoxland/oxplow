@@ -4,8 +4,10 @@
 //! When a turn ends (Stop, or an interrupt — every harness reaches this
 //! through `HookIngestService::ingest`), the worktree is snapshotted with a
 //! `turn_end` take anchored to the turn, its thread and the thread's open
-//! effort. The take's op row records the parent, so "what changed this
-//! turn" is parent → snapshot, and `agent_turn.snapshot_id` points at it.
+//! effort, and `agent_turn.snapshot_id` points at it. "What changed this
+//! turn" is `agent_turn.start_snapshot_id` (recorded when the turn opened)
+//! → `snapshot_id` — NOT the take's op parent, which other takes during
+//! the turn (an effort closing, a commit, another thread's turn) move.
 //!
 //! **The budget.** The Stop hook is on the agent's critical path, so it
 //! waits at most `snapshotTurnBudgetMs` (default 2000). A take that runs
@@ -120,21 +122,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_turn_ends_at_a_snapshot_anchored_to_it() {
+    async fn a_turn_ends_at_a_snapshot_and_its_diff_runs_from_where_it_started() {
         let f = services_with_effort().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
+        // A baseline before the turn.
+        std::fs::write(svc.layout.project_dir.join("seed.txt"), "seed").unwrap();
+        capture.enqueue_startup_diff().await.unwrap();
+        let baseline = capture
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap()
+            .unwrap();
         svc.hook_ingest
             .ingest(envelope(HookKind::UserPromptSubmit, f.thread))
             .await
             .unwrap();
         let turn = svc.agent_turn_store.list_open(&f.thread).await.unwrap()[0].id;
+        let opened = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
+        assert_eq!(opened.start_snapshot_id, Some(baseline));
 
-        // The agent edits a file during the turn (staged by the sweep so the
-        // new-path settle gate doesn't defer it).
+        // The agent edits a file, then closes its effort (complete_task's
+        // effort_end take captures the edit) before the turn ends — the
+        // usual flow, which used to make the turn look empty.
         std::fs::write(svc.layout.project_dir.join("made.txt"), "by the agent").unwrap();
         capture.enqueue_startup_diff().await.unwrap();
+        capture
+            .request_snapshot(SnapshotTrigger::EffortEnd)
+            .await
+            .unwrap();
         svc.hook_ingest
             .ingest(envelope(HookKind::Stop, f.thread))
             .await
@@ -147,11 +164,17 @@ mod tests {
         assert_eq!(op.thread_id, Some(f.thread));
         assert_eq!(op.effort_id, Some(f.effort));
         assert_eq!(op.budget_ms, Some(2000));
+        assert_eq!(
+            op.parent_snapshot_id,
+            Some(op.snapshot_id),
+            "nothing new at Stop"
+        );
         let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
         assert_eq!(ended.snapshot_id, Some(op.snapshot_id));
+        // The turn's diff is start → end, and it has the edit.
         let changed = svc
             .snapshot_store
-            .diff_snapshots(op.parent_snapshot_id, op.snapshot_id)
+            .diff_snapshots(ended.start_snapshot_id, op.snapshot_id)
             .await
             .unwrap();
         assert!(changed.iter().any(|c| c.path == "made.txt"), "{changed:?}");
