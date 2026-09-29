@@ -82,6 +82,33 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
+## The cube decision at 7.1 M facts (P4.4, tsk489, 2026-09-29)
+
+Measured before `metric_grid()` (P4.5) builds on the engine: the harness on a
+`VACUUM INTO` copy of the live project DB (2.4 GB, **7,097,464 facts**, 47
+measures, 73 specs), cube cleared, release build. The harness now prints
+per-spec times and reads the cube pass through a fresh engine, so no
+in-memory state from the fact pass can pass for the cube.
+
+| | |
+|---|---|
+| All 73 specs fact-served (the oracle) | **68.3 s** |
+| Cube build (58,232 captures folded, one-time; then incremental) | 53.9 s |
+| All 73 specs with the cube (61 cube-served, 12 declined to facts) | **1.6 s** |
+| `oxplow.fn_count` | 23,938 ms → 1.3 ms |
+| `oxplow.tests.duration_ms` / `.passed` / `.failed` / `.total` | 6,880–11,356 ms → 11–13 ms |
+| `oxplow.coverage.abs_pct` | 827 ms → 27 ms |
+| the 12 declined specs (`long_functions`, `high_complexity_fns`, `coverage.untested_files`, …) | ~same both passes (270–380 ms) |
+
+Every series was identical to the oracle. **Decision: keep the cube** as the
+engine's accelerator behind `metric_grid()`; it wins by ~44× overall and by
+three to four orders of magnitude on the specs a person actually opens. The
+declined specs are the next place to look, not the cube.
+
+**The size is per-case test facts:** `oxplow.test_case` (3.16 M) and
+`oxplow.test_duration` (3.06 M) are 88% of all facts — retention or
+aggregation of those is its own task (filed with this measurement).
+
 ## Zero-splice producer discovery (tsk239)
 
 The effort panel asks, per measure, "which producers emit this metric's slice"

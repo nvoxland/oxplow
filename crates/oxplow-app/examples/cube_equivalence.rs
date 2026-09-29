@@ -45,6 +45,9 @@ async fn main() {
         &repo_dir,
     ));
     let engine = MetricEngine::new(facts.clone()).with_visibility(resolver.clone());
+    // The cube pass reads through its own engine, so nothing the oracle
+    // pass left in an engine's memory can pass for the cube's speed.
+    let cube_engine = MetricEngine::new(facts.clone()).with_visibility(resolver.clone());
     let builder = MetricCubeBuilder::new(facts.clone()).with_visibility(resolver);
 
     let measures = facts.list_measures().await.unwrap();
@@ -67,8 +70,11 @@ async fn main() {
     // The ORACLE: every spec fact-served, timed.
     let t = Instant::now();
     let mut oracles = Vec::new();
+    let mut fact_times = Vec::new();
     for s in &specs {
+        let one = Instant::now();
         oracles.push(engine.series_for_spec(s, None).await.unwrap());
+        fact_times.push(one.elapsed().as_secs_f64() * 1000.0);
     }
     let fact_ms = t.elapsed().as_millis();
     eprintln!("FACT : {} specs in {fact_ms} ms", specs.len());
@@ -89,8 +95,11 @@ async fn main() {
     let mut diverged: Vec<String> = Vec::new();
     let mut served = 0usize;
     let mut declined: Vec<String> = Vec::new();
+    let mut cube_times = Vec::new();
     for (s, oracle) in specs.iter().zip(&oracles) {
-        let read = engine.series_for_spec(s, None).await.unwrap();
+        let one = Instant::now();
+        let read = cube_engine.series_for_spec(s, None).await.unwrap();
+        cube_times.push(one.elapsed().as_secs_f64() * 1000.0);
         if &read != oracle {
             diverged.push(s.key.clone());
         }
@@ -121,6 +130,18 @@ async fn main() {
     );
     for d in &declined {
         eprintln!("        - {d}");
+    }
+
+    // Per spec, slowest fact read first: fact-served ms, cube pass ms.
+    let mut rows: Vec<(&str, f64, f64)> = specs
+        .iter()
+        .zip(fact_times.iter().zip(&cube_times))
+        .map(|(s, (f, c))| (s.key.as_str(), *f, *c))
+        .collect();
+    rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+    eprintln!("SPEC : fact ms -> cube ms");
+    for (key, f, c) in &rows {
+        eprintln!("        {key}: {f:.1} -> {c:.1}");
     }
 
     assert!(
