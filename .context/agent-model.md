@@ -1159,7 +1159,7 @@ intermediate `ready` step.
   dispatched sub-agent **names its task** through MCP: `record_test_run` takes
   an optional `task_id`, and `complete_task`/`update_task` take
   `claim_runs`/`disclaim_runs`. A run is attributed (1) EXACTLY when a `task_id`
-  is named — resolved via `find_open_for_task`, correct even under concurrency,
+  is named — resolved via `find_open_for_work_item`, correct even under concurrency,
   with no "which sub-agent" visibility; naming a task is **exact-or-nothing**
   (tsk271): when the named task has no open effort the run is left *unclaimed*,
   never auto-attributed to whatever single effort happens to be open (that

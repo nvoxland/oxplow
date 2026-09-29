@@ -79,6 +79,13 @@ or `42`, as agents write in impacts). `system_source(component)` gives
 the `system:<component>` event source a system producer uses; an
 actor's runs use `Actor::source()`.
 
+`refs::build::validate_work_item_ref` is stricter: efforts key on the
+ref string (one open effort per work item is a unique index), so it
+accepts only the canonical spelling — no `@rev`, no `#frag`, no escaped
+spelling, and `oxplow:tsk<n>` exactly as `work_item_ref` writes it
+(`tsk01` is refused). `command` ids have two or more dot segments;
+`commit` ids are 7–64 hex (SHA-256 repositories).
+
 `refs::validate_ref` parses a ref and checks it against the kind
 registry. The event log's `append_tx` runs it on every `subject`
 entry, so an event naming `zones`, `config:`, `nope:thing`,

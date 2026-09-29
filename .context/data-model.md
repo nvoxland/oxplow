@@ -384,7 +384,7 @@ subagent fills the body by calling `oxplow__record_query_finding`
 back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
 reverse-chronological, capped at 100.
 
-### `effort` — `TaskEffortStore` (`crates/oxplow-db/src/effort_store.rs`)
+### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
 An **effort** is one bracketed span of work on a **work item**, today
 one `in_progress → done` (or blocked/canceled) cycle of a task. V100
@@ -395,8 +395,13 @@ replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
 ref (`work_item:oxplow:tsk42`, or another provider's
 `work_item:linear:ENG-12`; built with `refs::build::work_item_ref`).
 `v_effort` / `v_effort_file` derive `task_id` from it (NULL for other
-providers). Tasks are only soft-deleted, so the old FK's CASCADE never
-fired; an effort still goes with its thread.
+providers). An effort goes with its thread (`thread_id … ON DELETE
+CASCADE`), not its task: deleting a stream cascades through its threads
+to their tasks and efforts, but an effort another stream's thread
+recorded against one of those tasks (`record_effort_atomic`) survives
+as history about a work item that no longer exists — readers LEFT JOIN
+`v_task`. The V100 migration header says tasks are only soft-deleted;
+that was wrong, and the file stays as applied (refinery checksums it).
 
 In Rust (P2.5b, tsk428) the row is `Effort { work_item, … }` with
 `task_id() -> Option<TaskId>`; `EffortStore` (was `TaskEffortStore`)
@@ -552,7 +557,7 @@ an `unattributed` row, which the agent resolves via
 `amend_effort`/`complete_task`/`update_task` `claim_runs`/`disclaim_runs`.
 **Window-dominance** keeps that residue from over-surfacing: at reconcile a
 run that falls inside a strictly-nested sibling effort's time window
-(`SqliteTaskEffortStore::nested_efforts`) is the *narrower* effort's to
+(`SqliteEffortStore::nested_efforts`) is the *narrower* effort's to
 own, so the wider effort drops it; truly-overlapping (non-nested) siblings
 have no dominant effort, so the run stays in both and the agent
 disambiguates by claiming. The ledger's `run:<id>` refs are `metric_capture`

@@ -121,7 +121,7 @@ hook + MCP wiring):
   **Attribution (tsk347):** the run is pinned to its effort via the `"run"`
   ledger. An agent forces EXACT attribution by prefixing the command with
   `OXPLOW_TASK=<task id>` — `parse_task_token` reads it and `record_test_run`
-  claims the run for that task's open effort (`find_open_for_task`), correct even
+  claims the run for that task's open effort (`find_open_for_work_item`), correct even
   under concurrent efforts. Without the token, resolution is, in order:
   **single open effort** → **target overlap** (tsk169: score each open effort by
   what the command names — `-p <crate>`, path args — against the files it has
@@ -277,7 +277,7 @@ NOT try to recover it by reading sub-agent transcripts / `SubagentStop` /
 the two cross-agent-stable surfaces oxplow owns: the filesystem snapshot (which
 runs don't touch) and the **MCP contract**. So a sub-agent records its runs
 through `record_test_run`, passing `task_id` so the run attributes EXACTLY to
-its effort even under concurrency (resolved via `find_open_for_task`); the
+its effort even under concurrency (resolved via `find_open_for_work_item`); the
 `dispatch_task` brief instructs this. Without a named task, a run attributes
 automatically when one effort is open, else is left unclaimed for the close
 reconcile + window-dominance + the agent's claim — never guessed onto one.

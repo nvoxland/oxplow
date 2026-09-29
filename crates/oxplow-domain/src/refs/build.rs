@@ -90,13 +90,28 @@ pub fn work_item_label(r: &str) -> String {
     }
 }
 
-/// A `work_item` ref, or `Invalid` naming what's wrong with it.
+/// A `work_item` ref in its one canonical spelling, or `Invalid` naming
+/// what's wrong with it. Efforts key on the string (one open effort per
+/// work item is a unique index), so an alias — a revision, a fragment,
+/// an escaped spelling, `oxplow:tsk01` for `oxplow:tsk1` — is refused
+/// rather than treated as a different item.
 pub fn validate_work_item_ref(r: &str) -> Result<(), crate::DomainError> {
+    let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{r}` {why}")));
     let parsed = crate::refs::validate_ref(r)?;
     if parsed.kind != "work_item" {
-        return Err(crate::DomainError::Invalid(format!(
-            "`{r}` is not a work_item ref"
-        )));
+        return invalid("is not a work_item ref");
+    }
+    if parsed.rev.is_some() || parsed.frag.is_some() {
+        return invalid("names a work item with a revision or fragment");
+    }
+    if parsed.to_string() != r {
+        return invalid(&format!("is not canonical; write `{parsed}`"));
+    }
+    if let Some(native) = parsed.id.strip_prefix(&format!("{OXPLOW_PROVIDER}:")) {
+        match TaskId::try_from_str(native) {
+            Some(t) if work_item_ref(t) == r => {}
+            _ => return invalid("is not an oxplow task (`work_item:oxplow:tsk<n>`)"),
+        }
     }
     Ok(())
 }
@@ -163,6 +178,18 @@ mod tests {
         assert_eq!(work_item_label("odd"), "odd");
         for bad in ["", "tsk1", "effort:eff1", "work_item:"] {
             assert!(validate_work_item_ref(bad).is_err(), "{bad}");
+        }
+        // Only the canonical spelling is a key: the open-effort index
+        // compares strings, so `tsk01`, a fragment, a revision or an
+        // escaped spelling would slip a second open effort past it.
+        for alias in [
+            "work_item:oxplow:tsk01",
+            "work_item:oxplow:nope",
+            "work_item:oxplow:tsk1#x",
+            "work_item:oxplow:tsk1@v2",
+            "work_item:linear:ENG%2D1",
+        ] {
+            assert!(validate_work_item_ref(alias).is_err(), "{alias}");
         }
     }
 }

@@ -1041,7 +1041,7 @@ read-side effort attribution (T-D) resolves an effort's facts from *its captures
 (`captures_for_effort`). So the effort-scoped producers stamp `capture.effort_id`
 at write time using the **same** resolution the run-ledger auto-claim uses —
 `CollectionService::resolve_owning_effort(thread, task)`: a named task is
-exact-or-nothing (`find_open_for_task`); an unnamed one claims only the single
+exact-or-nothing (`find_open_for_work_item`); an unnamed one claims only the single
 open effort (`find_single_open_for_thread`), else stays null (deferred to
 reconcile). Stamped by: **tokens/turns** (`token_usage.rs`, the effort resolved
 once in `on_stop` and threaded to the capture), **tests / lint-hits / coverage /

@@ -98,7 +98,7 @@ per-line attribution via `localBlame(stream.id, filePath)` and EditorPane
 renders an absolutely-positioned DOM overlay on the left gutter (the
 `BlameOverlay` sub-component). The merge is computed server-side in
 `crates/oxplow-git/src/blame.rs` (`computeLocalBlame`) — it walks closed
-task efforts newest-first (`TaskEffortStore.listEffortsForPath`),
+task efforts newest-first (`EffortStore.listEffortsForPath`),
 diffs each effort's start/end snapshot content to figure out which lines
 the effort introduced, and falls back to `gitBlame` for any line the
 local walk can't attribute. Snapshots pruned by the 7-day retention

@@ -240,9 +240,15 @@ impl AgentPolicy {
                         .flatten()
                         .unwrap_or_default(),
                 };
-                let title = oxplow_domain::refs::build::task_of_work_item_ref(&work_item)
-                    .and_then(|t| titles_by_id.get(&t.value()).cloned())
-                    .unwrap_or_else(|| oxplow_domain::refs::build::work_item_label(&work_item));
+                // The effort row can be gone (its thread was deleted); the
+                // review then names the effort alone.
+                let title = if work_item.is_empty() {
+                    format!("effort {eid}")
+                } else {
+                    oxplow_domain::refs::build::task_of_work_item_ref(&work_item)
+                        .and_then(|t| titles_by_id.get(&t.value()).cloned())
+                        .unwrap_or_else(|| oxplow_domain::refs::build::work_item_label(&work_item))
+                };
                 pending_reviews.push(PendingEffortReview {
                     effort_id: file_review
                         .as_ref()
@@ -522,12 +528,16 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
     for r in reviews {
         // Canonical ids (`tsk42`, `eff313`): what `update_task` /
         // `amend_effort` parse, so the agent can paste them back (tsk341).
-        out.push_str(&format!(
-            "  • [{}] {} (effort {})\n",
-            oxplow_domain::refs::build::work_item_label(&r.work_item),
-            r.task_title,
-            r.effort_id
-        ));
+        if r.work_item.is_empty() {
+            out.push_str(&format!("  • {} (effort {})\n", r.task_title, r.effort_id));
+        } else {
+            out.push_str(&format!(
+                "  • [{}] {} (effort {})\n",
+                oxplow_domain::refs::build::work_item_label(&r.work_item),
+                r.task_title,
+                r.effort_id
+            ));
+        }
         if !r.claimed_but_not_changed.is_empty() {
             out.push_str("      You claimed these files but the worktree didn't change:\n");
             for p in &r.claimed_but_not_changed {

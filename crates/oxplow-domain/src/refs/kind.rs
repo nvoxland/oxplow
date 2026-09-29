@@ -164,7 +164,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("effort", &prefixed("eff")),
         KindSpec::new("turn", &prefixed("trn")),
         KindSpec::new("snapshot", r"^[A-Za-z0-9]+$"),
-        KindSpec::new("commit", r"^[0-9a-f]{7,40}$").map(|k| k.wikilink_prefix("git")),
+        // 7..=40 hex for SHA-1 abbreviations and ids, up to 64 for SHA-256.
+        KindSpec::new("commit", r"^[0-9a-f]{7,64}$").map(|k| k.wikilink_prefix("git")),
         KindSpec::new("branch", r"^[^\s]+$"),
         KindSpec::new("file", PATH_ID).map(KindSpec::revisioned),
         KindSpec::new("dir", PATH_ID).map(KindSpec::revisioned),
@@ -178,7 +179,8 @@ pub fn core_kinds() -> KindRegistry {
         KindSpec::new("metric", r"^[a-z0-9_.-]+$"),
         KindSpec::new("model", r"^v_[a-z0-9_]+$"),
         KindSpec::new("plugin", r"^[a-z0-9-]+$"),
-        KindSpec::new("command", r"^[a-z0-9_]+\.[a-z0-9_]+$"),
+        // Two or more dot segments, as `CommandSpec::validate_name` allows.
+        KindSpec::new("command", r"^[a-z0-9_]+(\.[a-z0-9_]+)+$"),
         // A `.oxplow/project.yaml` key (`config.changed`'s subject).
         KindSpec::new("config", r"^[A-Za-z][A-Za-z0-9]*$"),
         KindSpec::new("finding", r"^\S+$"),

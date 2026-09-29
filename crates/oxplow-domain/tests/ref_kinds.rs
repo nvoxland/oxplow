@@ -47,6 +47,17 @@ fn the_core_kinds_are_registered_and_validate_ids() {
     // The id regex applies: a commit is hex, a work item is <provider>:<id>.
     assert!(reg.validate(&canon("commit:4c44d495")).is_ok());
     assert!(reg.validate(&canon("commit:not-hex!")).is_err());
+    // A SHA-256 repository's commit ids are 64 hex chars.
+    assert!(reg
+        .validate(&canon(&format!("commit:{}", "a".repeat(64))))
+        .is_ok());
+    assert!(reg
+        .validate(&canon(&format!("commit:{}", "a".repeat(65))))
+        .is_err());
+    // A command name has two or more dot segments, like `CommandSpec` allows.
+    assert!(reg.validate(&canon("command:config.set")).is_ok());
+    assert!(reg.validate(&canon("command:dashboard.item.add")).is_ok());
+    assert!(reg.validate(&canon("command:nodots")).is_err());
     assert!(reg.validate(&canon("work_item:oxplow:tsk42")).is_ok());
     assert!(
         reg.validate(&canon("work_item:tsk42")).is_err(),

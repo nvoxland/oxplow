@@ -79,31 +79,6 @@ export interface SnapshotDiffResult {
 
 // ---- Backlog / efforts ----
 
-export interface TaskEffort {
-  id: string;
-  tasksId: number;
-  startedAt: string;
-  endedAt: string | null;
-}
-
-export interface EffortDetail {
-  effort: TaskEffort;
-  files: { path: string; changeKind: string }[];
-}
-
-export interface ThreadFollowup {
-  id: string;
-  threadId: string;
-  body: string;
-  createdAt: string;
-}
-
-export interface ThreadWorkState {
-  tasks: Task[];
-  effortsInFlight: TaskEffort[];
-  followups: ThreadFollowup[];
-}
-
 export interface BacklogState {
   items: Task[];
 }
