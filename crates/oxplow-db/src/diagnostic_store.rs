@@ -6,6 +6,7 @@
 use oxplow_domain::{DomainError, Timestamp};
 
 use crate::database::map_sql_err;
+use crate::database::ts_to_string;
 use crate::Database;
 
 /// One diagnostic, positions 1-based.
@@ -20,13 +21,6 @@ pub struct DiagnosticRow {
     pub col: i64,
     pub end_line: i64,
     pub end_col: i64,
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
 }
 
 #[derive(Clone)]

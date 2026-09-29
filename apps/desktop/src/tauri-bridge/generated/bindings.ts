@@ -4163,7 +4163,7 @@ export type ThreadWorkState = {
 	followups: Followup[],
 };
 
-// Wall-clock UTC timestamp serialized as RFC 3339 strings.
+// Wall-clock UTC timestamp serialized as a fixed-width RFC 3339 string.
 export type Timestamp = string;
 
 /**

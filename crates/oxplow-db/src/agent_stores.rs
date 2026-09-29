@@ -11,18 +11,7 @@ use oxplow_domain::stores::AgentTurnStore;
 use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, TaskId, ThreadId, Timestamp};
 
 use crate::database::Database;
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
+use crate::database::{string_to_ts, ts_to_string};
 
 fn map_err_text(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))

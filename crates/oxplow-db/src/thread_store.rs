@@ -5,6 +5,7 @@ use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentKind, DomainError, StreamId, Thread, ThreadId, ThreadStatus, Timestamp};
 
 use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 
 #[derive(Clone)]
 pub struct SqliteThreadStore {
@@ -50,18 +51,6 @@ fn str_to_agent(s: &str) -> Result<AgentKind, DomainError> {
             "unknown thread agent: {other}"
         ))),
     }
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
 fn row_to_thread(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {

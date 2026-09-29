@@ -15,18 +15,7 @@ use specta::Type;
 use oxplow_domain::{DomainError, EffortId, ThreadId, Timestamp};
 
 use crate::database::Database;
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
+use crate::database::{string_to_ts, ts_to_string};
 
 /// One persisted nudge row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]

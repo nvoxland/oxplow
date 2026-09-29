@@ -7328,7 +7328,7 @@ mod tests {
         assert!(daily[0]["captured_at"]
             .as_str()
             .unwrap()
-            .ends_with("T00:00:00Z"));
+            .ends_with("T00:00:00.000000Z"));
         assert!(daily[0]["group"].is_string(), "grouped by stream");
         assert!(server
             .list_metric_samples(Parameters(samples("fortnight")))

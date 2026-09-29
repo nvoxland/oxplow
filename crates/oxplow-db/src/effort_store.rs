@@ -14,7 +14,8 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
 
-use crate::database::{canonical_ts, Database};
+use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
     work_item_id, KIND_WORK_ITEM,
@@ -130,17 +131,6 @@ pub struct RecordEffortAtomic {
 pub struct EffortAtSnapshot {
     pub snapshot_id: i64,
     pub effort: TaskEffort,
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    let raw = serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string();
-    // Fixed-width canonical form so the effort-window overlap comparisons
-    // (`list_in_window`, the metric-substrate effort overlay) order correctly
-    // against sub-second sample timestamps (tsk243).
-    canonical_ts(&raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -268,11 +258,6 @@ fn most_recent_for_task_tx(
     )?;
     let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
     rows.next().transpose()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
 fn change_to_str(c: EffortFileChange) -> &'static str {

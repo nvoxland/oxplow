@@ -10,17 +10,8 @@ use specta::Type;
 use oxplow_domain::events::schema::{ActorKind, CommandOutcome as Outcome};
 use oxplow_domain::{CommandCall, DomainError, EventId, ThreadId, Timestamp};
 
-use crate::database::{canonical_ts, map_sql_err, Database};
-
-fn ts_to_string(ts: Timestamp) -> String {
-    let raw = serde_json::to_string(&ts).expect("Timestamp serializes to JSON");
-    canonical_ts(raw.trim_matches('"'))
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{s}\""))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
+use crate::database::{map_sql_err, Database};
+use crate::database::{string_to_ts, ts_to_string};
 
 fn actor_kind_str(k: ActorKind) -> &'static str {
     match k {

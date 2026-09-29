@@ -15,25 +15,9 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
-
-fn ts_to_string(ts: Timestamp) -> String {
-    // Canonical fixed-width form (6-digit fraction), like fact_store — these
-    // strings are compared lexicographically by every `ORDER BY … _at`, and
-    // the `time` crate's trimmed RFC-3339 inverts same-second neighbors
-    // ("…20.5Z" > "…20.51Z"). V67 normalized the pre-existing rows (tsk107).
-    crate::database::canonical_ts(
-        serde_json::to_string(&ts)
-            .expect("Timestamp serializes to JSON")
-            .trim_matches('"'),
-    )
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
 
 // ---------------- Page visits ----------------
 

@@ -13,22 +13,11 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 use crate::page_ref_projections::{
     link_edge, note_edges, task_link_ref_types, work_item_id, KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
 
 fn link_type_to_str(t: TaskLinkType) -> &'static str {
     match t {

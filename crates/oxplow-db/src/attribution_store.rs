@@ -8,18 +8,8 @@ use rusqlite::params;
 
 use oxplow_domain::{DomainError, EffortId, Timestamp};
 
-use crate::database::{canonical_ts, Database};
-
-/// `Timestamp` → the fixed-width canonical string the `recorded_at` column
-/// stores (so lexicographic ordering matches chronological). Mirrors the
-/// per-store helper in `effort_store`/`metric_store`.
-fn ts_to_string(ts: Timestamp) -> String {
-    let raw = serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string();
-    canonical_ts(&raw)
-}
+use crate::database::ts_to_string;
+use crate::database::Database;
 
 /// The attribution states a `(effort, kind, ref)` can hold — exactly one at a
 /// time (the claim-first invariant, enforced by the row's primary key).

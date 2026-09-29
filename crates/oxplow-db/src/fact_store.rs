@@ -22,22 +22,11 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, Timestamp};
 
-use crate::database::{canonical_ts, map_sql_err, Database};
+use crate::database::{map_sql_err, Database};
+use crate::database::{string_to_ts, ts_to_string};
 
 // Timestamp <-> canonical string helpers (mirror `metric_store.rs`; kept local so
 // the fact layer doesn't couple to the old module that will be deleted).
-fn ts_to_string(ts: Timestamp) -> String {
-    let raw = serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string();
-    canonical_ts(&raw)
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
 
 fn ts_conv_err(e: DomainError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))

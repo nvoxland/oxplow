@@ -5,6 +5,7 @@ use oxplow_domain::stores::StreamStore;
 use oxplow_domain::{DomainError, Stream, StreamId, StreamKind, Timestamp};
 
 use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 
 #[derive(Clone)]
 pub struct SqliteStreamStore {
@@ -32,18 +33,6 @@ fn str_to_kind(s: &str) -> Result<StreamKind, DomainError> {
             "unknown stream kind: {other}"
         ))),
     }
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
 fn row_to_stream(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stream> {

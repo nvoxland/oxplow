@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+use oxplow_domain::{DomainError, Timestamp};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
@@ -336,34 +337,19 @@ impl Database {
 /// instead of pattern-matching on stringified SQL errors:
 /// constraint violations → `Constraint`, `SQLITE_BUSY`/`SQLITE_LOCKED`
 /// → `Busy` (retryable), everything else → `Storage`.
-/// Normalize an RFC-3339 UTC timestamp string to a **fixed-width** canonical
-/// form (`YYYY-MM-DDTHH:MM:SS.ffffffZ`, always 6 fractional digits) for SQLite
-/// storage. The `time` crate's RFC-3339 formatter trims trailing fractional
-/// zeros (and omits the fraction entirely when it's zero), so a whole-second
-/// `…20Z` and a `…20.123Z` at the same second sort in the *wrong* order under
-/// SQLite's lexicographic comparison — which breaks the `captured_at` range /
-/// `ORDER BY` queries the metric substrate and effort-window overlay rely on.
-/// Pinning the fraction to a fixed width makes string order match chronological
-/// order. Sub-microsecond precision is truncated (ordering-preserving). A
-/// non-UTC / unexpected shape is returned unchanged (all oxplow timestamps are
-/// UTC, so this is a safety fallback, not a real path).
-pub(crate) fn canonical_ts(rfc3339_utc: &str) -> String {
-    let Some(body) = rfc3339_utc.strip_suffix('Z') else {
-        return rfc3339_utc.to_string();
-    };
-    let (datetime, frac) = match body.split_once('.') {
-        Some((d, f)) => (d, f),
-        None => (body, ""),
-    };
-    let mut frac6: String = frac
-        .chars()
-        .take(6)
-        .filter(|c| c.is_ascii_digit())
-        .collect();
-    while frac6.len() < 6 {
-        frac6.push('0');
-    }
-    format!("{datetime}.{frac6}Z")
+/// A `Timestamp` as the TEXT SQLite stores: the fixed-width RFC 3339 form
+/// (`YYYY-MM-DDTHH:MM:SS.ffffffZ`, 27 chars) that `Timestamp` itself
+/// produces, so lexicographic `ORDER BY` / `BETWEEN` on a timestamp column
+/// is chronological. Every store goes through this one helper (tsk387);
+/// V95 normalized the rows written before the serializer was fixed.
+pub(crate) fn ts_to_string(ts: Timestamp) -> String {
+    ts.to_text()
+}
+
+/// The inverse of [`ts_to_string`]; accepts any RFC 3339 text (rows from
+/// before V95, other producers).
+pub(crate) fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
+    Timestamp::parse(s).map_err(|e| DomainError::Invalid(format!("bad timestamp `{s}`: {e}")))
 }
 
 pub(crate) fn map_sql_err(e: rusqlite::Error) -> oxplow_domain::DomainError {
@@ -473,33 +459,16 @@ mod tests {
     }
 
     #[test]
-    fn canonical_ts_is_fixed_width_and_orders_chronologically() {
-        // Variable-width RFC-3339 (the time crate's output) → fixed 6-digit.
-        assert_eq!(
-            canonical_ts("2023-11-14T22:13:20Z"),
-            "2023-11-14T22:13:20.000000Z"
-        );
-        assert_eq!(
-            canonical_ts("2023-11-14T22:13:20.1Z"),
-            "2023-11-14T22:13:20.100000Z"
-        );
-        assert_eq!(
-            canonical_ts("2023-11-14T22:13:20.123Z"),
-            "2023-11-14T22:13:20.123000Z"
-        );
-        // Sub-microsecond is truncated (ordering-preserving).
-        assert_eq!(
-            canonical_ts("2023-11-14T22:13:20.123456789Z"),
-            "2023-11-14T22:13:20.123456Z"
-        );
-        // The headline bug: a whole second and a fraction at the SAME second now
-        // sort chronologically (raw strings sort the whole second LAST because
-        // 'Z' > '.').
-        let whole = canonical_ts("2023-11-14T22:13:20Z");
-        let frac = canonical_ts("2023-11-14T22:13:20.123Z");
-        assert!(whole < frac, "{whole} should sort before {frac}");
-        // Non-UTC / unexpected shape is passed through untouched.
-        assert_eq!(canonical_ts("not-a-timestamp"), "not-a-timestamp");
+    fn ts_helpers_are_fixed_width_and_accept_old_rows() {
+        let half = Timestamp::from_unix_ms(1_700_000_000_500);
+        let text = ts_to_string(half);
+        assert_eq!(text, "2023-11-14T22:13:20.500000Z");
+        assert_eq!(text.len(), Timestamp::TEXT_LEN);
+        // Rows written before V95 (trimmed) still read back.
+        assert_eq!(string_to_ts("2023-11-14T22:13:20.5Z").unwrap(), half);
+        assert_eq!(string_to_ts(&text).unwrap(), half);
+        let err = string_to_ts("nope").unwrap_err();
+        assert!(matches!(err, DomainError::Invalid(_)), "{err}");
     }
 
     #[tokio::test]
@@ -809,6 +778,92 @@ mod tests {
             [now],
         );
         assert!(r.is_err(), "task_note with both parents should fail CHECK");
+    }
+
+    /// V95 pads every trimmed timestamp to the fixed-width form. Migrate to
+    /// V94, write the three shapes the `time` crate used to emit, finish
+    /// migrating, and check they now sort chronologically.
+    #[test]
+    fn v95_normalizes_trimmed_timestamps_so_text_order_is_chronological() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(94))
+            .run(&mut conn)
+            .unwrap();
+        // Chronological: whole second < .5 < .500001 — but the trimmed text
+        // sorts them .500001 < .5 < whole.
+        for (id, at) in [
+            (1, "2023-11-14T22:13:20Z"),
+            (2, "2023-11-14T22:13:20.5Z"),
+            (3, "2023-11-14T22:13:20.500001Z"),
+        ] {
+            conn.execute(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                 VALUES (?1, 'worktree', 's', 'b', 'r', 'r', '/r', ?2, ?2)",
+                rusqlite::params![id, at],
+            )
+            .unwrap();
+        }
+        let before: Vec<i64> = conn
+            .prepare("SELECT id FROM streams ORDER BY created_at")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(before, vec![3, 2, 1], "the pre-V95 order is inverted");
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let after: Vec<(i64, String)> = conn
+            .prepare("SELECT id, created_at FROM streams ORDER BY created_at")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            after,
+            vec![
+                (1, "2023-11-14T22:13:20.000000Z".to_string()),
+                (2, "2023-11-14T22:13:20.500000Z".to_string()),
+                (3, "2023-11-14T22:13:20.500001Z".to_string()),
+            ]
+        );
+        for (_, at) in &after {
+            assert_eq!(string_to_ts(at).unwrap().to_text(), *at);
+        }
+    }
+
+    /// V95 must name every TEXT timestamp column the schema had at V94; a
+    /// column it missed would keep its trimmed rows sorting wrong against
+    /// the fixed-width ones written since. Columns added after V95 are born
+    /// fixed-width, so this list is closed.
+    #[test]
+    fn v95_covers_every_timestamp_column_in_the_schema() {
+        const V95: &str = include_str!("../migrations/V95__fixed_width_timestamps.sql");
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.name, p.name FROM sqlite_master m JOIN pragma_table_info(m.name) p
+                 WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE 'refinery_%'
+                   AND (p.name LIKE '%_at' OR p.name = 'at')
+                   AND upper(p.type) LIKE 'TEXT%'
+                 ORDER BY 1, 2",
+            )
+            .unwrap();
+        let columns: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(columns.len() >= 60, "{}", columns.len());
+        let missing: Vec<String> = columns
+            .iter()
+            .filter(|(t, c)| !V95.contains(&format!("UPDATE {t} SET {c} =")))
+            .map(|(t, c)| format!("{t}.{c}"))
+            .collect();
+        assert!(missing.is_empty(), "V95 does not normalize: {missing:?}");
     }
 
     /// V90 widens `threads.agent` with a column swap. A table rebuild

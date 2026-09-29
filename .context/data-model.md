@@ -1188,15 +1188,22 @@ metric store: producers write facts on captures, metrics are SPECS aggregated
 at read time by `MetricEngine`, and the run identity for attribution is the
 capture id. See `.context/metrics.md`.
 
-> **Timestamp ordering gotcha (tsk243).** Timestamps are stored as RFC 3339
-> TEXT and compared lexicographically by SQLite. The `time` crate trims trailing
-> fractional-second zeros, so `…20Z` (whole second) and `…20.123Z` at the *same*
-> second sort in the wrong order — which would corrupt the `captured_at`
-> range/`ORDER BY` queries and the effort-window overlay (`task_effort` span vs
-> sample time). The metric and effort stores therefore write timestamps in a
-> **fixed-width canonical form** (`…SS.ffffffZ`, 6 digits) via
-> `database::canonical_ts`. Any new store that orders or range-compares on a
-> timestamp column should do the same.
+> **Timestamps are fixed-width by construction (tsk243 → tsk387/tsk419).**
+> Timestamps are RFC 3339 TEXT that SQLite compares lexicographically. The
+> `time` crate's default formatter trims trailing fractional zeros, and `'Z'`
+> sorts after every digit, so a trimmed `…20.5Z` sorted *after* `…20.500001Z`
+> and a whole-second `…20Z` after everything in its second — inverting
+> `ORDER BY …_at` and window comparisons. The first fix (`canonical_ts`, used
+> by six stores) left the other twelve trimmed; the flaky
+> `thread_grows_and_orders_oldest_first` was two comment messages inside one
+> trimmed prefix. Now `Timestamp` itself serializes to the fixed-width
+> `YYYY-MM-DDTHH:MM:SS.ffffffZ` (27 chars; `Timestamp::to_text`,
+> `oxplow-domain/src/time.rs`), every store writes through the one
+> `database::ts_to_string` / `string_to_ts` pair, and **V95** normalized every
+> `*_at` / `at` TEXT column that existed at V94 (a test in `database.rs` pins
+> that the migration names every such column). Parsing still accepts any RFC
+> 3339 text. A new store needs no special handling — there is no other way to
+> turn a `Timestamp` into text.
 
 ### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` tsk96 + `V63__branch_aware_cube.sql` tsk97)
 

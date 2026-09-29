@@ -6,6 +6,7 @@
 use oxplow_domain::{DomainError, Timestamp};
 
 use crate::database::map_sql_err;
+use crate::database::ts_to_string;
 use crate::Database;
 
 /// One commit, as the indexer read it.
@@ -42,13 +43,6 @@ pub struct GitBranchRow {
     pub head_sha: Option<String>,
     /// The stream whose worktree has it checked out, if any.
     pub stream_id: Option<i64>,
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
 }
 
 #[derive(Clone)]

@@ -140,9 +140,9 @@ mod tests {
     fn bucket_starts_are_utc_midnight_day_monday_and_first_of_month() {
         let at = ts("2026-09-27T18:30:00Z"); // a Sunday
         let s = |b: TimeBucket| serde_json::to_value(b.start_of(at)).unwrap();
-        assert_eq!(s(TimeBucket::Day), "2026-09-27T00:00:00Z");
-        assert_eq!(s(TimeBucket::Week), "2026-09-21T00:00:00Z");
-        assert_eq!(s(TimeBucket::Month), "2026-09-01T00:00:00Z");
+        assert_eq!(s(TimeBucket::Day), "2026-09-27T00:00:00.000000Z");
+        assert_eq!(s(TimeBucket::Week), "2026-09-21T00:00:00.000000Z");
+        assert_eq!(s(TimeBucket::Month), "2026-09-01T00:00:00.000000Z");
     }
 
     #[test]

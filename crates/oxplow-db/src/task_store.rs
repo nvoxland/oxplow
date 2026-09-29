@@ -11,6 +11,7 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
+use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::append_tx;
 use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
 use crate::page_ref_store::SqlitePageRefStore;
@@ -126,10 +127,7 @@ impl SqliteTaskStore {
                         .map_err(map_sql_err)?
                     {
                         Some(open) => {
-                            let now = serde_json::to_string(&Timestamp::now())
-                                .expect("Timestamp serializes to JSON")
-                                .trim_matches('"')
-                                .to_string();
+                            let now = ts_to_string(Timestamp::now());
                             crate::effort_store::finish_tx(tx, open.id, None, None, &now)
                                 .map_err(map_sql_err)?;
                             Ok(EffortTransition::Finished(open.id))
@@ -299,18 +297,6 @@ fn str_to_author(s: &str) -> Result<TaskAuthor, DomainError> {
             "unknown task author: {other}"
         ))),
     }
-}
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {

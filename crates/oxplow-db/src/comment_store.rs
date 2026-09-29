@@ -13,18 +13,7 @@ use oxplow_domain::{
 };
 
 use crate::database::Database;
-
-fn ts_to_string(ts: Timestamp) -> String {
-    serde_json::to_string(&ts)
-        .expect("Timestamp serializes to JSON")
-        .trim_matches('"')
-        .to_string()
-}
-
-fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
-    serde_json::from_str(&format!("\"{}\"", s))
-        .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
-}
+use crate::database::{string_to_ts, ts_to_string};
 
 fn intent_to_str(i: CommentIntent) -> &'static str {
     match i {
