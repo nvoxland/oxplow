@@ -208,17 +208,15 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_recent_usage_rollup,
             // code quality (duplication only — metrics scan retired, tsk229)
             // snapshots
-            commands::generated::list_snapshots,
+            commands::generated::list_file_snapshots,
             commands::generated::list_snapshots_for_stream,
             commands::generated::list_files_for_snapshot,
             commands::generated::list_wiki_slugs_for_snapshots,
-            commands::generated::get_snapshot,
-            commands::generated::get_snapshot_pair_diff,
+            commands::generated::get_file_snapshot,
             commands::generated::diff_endpoints,
-            commands::generated::get_snapshot_summary,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
-            commands::generated::restore_file_from_snapshot,
+            commands::generated::restore_file_snapshot,
             // branch
             commands::generated::list_branches,
             commands::generated::get_default_branch,

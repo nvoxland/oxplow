@@ -999,9 +999,14 @@ Domains mirrored onto MCP so far (beyond the original task/wiki/comment
 surface): **git reads** (`git_status`, `git_log`, `git_blame`,
 `git_diff`, `read_file_at_ref`, `list_branches` — `stream_id` optional;
 mutations stay on Bash); **snapshots / local history**
-(`list_snapshots_for_stream`, `list_files_for_snapshot`, `get_snapshot`,
-`get_snapshot_stats`, `list_snapshot_change_entries`,
-`read_snapshot_file_content`, `restore_file_from_snapshot`);
+(`list_snapshots_for_stream`, `list_files_for_snapshot`,
+`get_snapshot_stats`, `list_snapshot_change_entries` take a `snapshot_id`
+— a whole capture; `get_file_snapshot`, `read_file_snapshot`,
+`restore_file_snapshot` take a `file_snapshot_id` — one captured file
+row; `read_file_at_snapshot { snapshot_id, path }` reads a path as of a
+capture. Reads and restore share `oxplow_app::snapshot_files`, and a
+restore writes into the row's stream's worktree, not the primary
+checkout — P2.9, tsk433);
 **code quality** (`run_code_quality_scan`, `list_code_quality_scans`,
 `list_code_quality_findings` — the scan orchestration is shared via
 `Services::run_code_quality_scan`); **comments + lifecycle**
@@ -2048,8 +2053,8 @@ snapshot `S`:
 
 `get_effort_files` is implemented in
 `crates/oxplow-tauri-ipc/src/commands/effort.rs` over the
-`EffortStore` and `SnapshotStore` and wired to IPC via the same
-pattern as `get_snapshot_summary`.
+`EffortStore` and `SnapshotStore` and wired to IPC like the other
+snapshot reads.
 
 ## Task lifecycle
 

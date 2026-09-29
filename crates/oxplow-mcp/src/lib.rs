@@ -1148,8 +1148,24 @@ pub struct SiteSearchParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotIdParams {
-    /// A `snapshot` or `file_snapshot` row id (integer).
+    /// A `snapshot` id — one whole capture (integer, as
+    /// `list_snapshots_for_stream` returns).
     pub snapshot_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileSnapshotIdParams {
+    /// A `file_snapshot` id — one captured file row (integer, as
+    /// `list_files_for_snapshot` returns).
+    pub file_snapshot_id: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileAtSnapshotParams {
+    /// A `snapshot` id — one whole capture.
+    pub snapshot_id: i64,
+    /// A repo-relative path.
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2270,9 +2286,9 @@ impl OxplowMcp {
     // `blobs`, so the agent can inspect and restore its own change history.
     // (Unlike the UI reads, these don't strip `generated` paths — the agent
     // sees the raw capture history.) The composed dashboard DTOs
-    // (`get_snapshot_summary`, `get_snapshot_pair_diff`) stay IPC-only; their
-    // logic lives in the command layer, so the agent composes equivalents from
-    // `get_snapshot` + `read_snapshot_file_content`.
+    // (`list_file_snapshots`) stay IPC-only. Ids are honest: a `snapshot_id`
+    // is a whole capture, a `file_snapshot_id` one captured file row
+    // (P2.9); reads and restore share `oxplow_app::snapshot_files`.
 
     #[tool(description = "List snapshot rows for a stream (one per capture batch), newest first.")]
     async fn list_snapshots_for_stream(
@@ -2310,15 +2326,15 @@ impl OxplowMcp {
         json_result(&rows)
     }
 
-    #[tool(description = "Get a single file_snapshot row by id (null if absent).")]
-    async fn get_snapshot(
+    #[tool(description = "Get one captured file row by its file_snapshot id (null if absent).")]
+    async fn get_file_snapshot(
         &self,
-        params: Parameters<SnapshotIdParams>,
+        params: Parameters<FileSnapshotIdParams>,
     ) -> Result<CallToolResult, McpError> {
         let row = self
             .services
             .snapshot_store
-            .get(params.0.snapshot_id)
+            .get(params.0.file_snapshot_id)
             .await
             .map_err(internal)?;
         json_result(&row)
@@ -2353,75 +2369,60 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Read a file_snapshot's blob content as a (UTF-8 lossy) string. \
-                          Null when the row, blob, or content is absent."
+        description = "Read a captured file row (file_snapshot id) as a (UTF-8 lossy) string. \
+                          Null when the row is gone or has no content (oversize, a deletion, \
+                          or expired from Local History)."
     )]
-    async fn read_snapshot_file_content(
+    async fn read_file_snapshot(
         &self,
-        params: Parameters<SnapshotIdParams>,
+        params: Parameters<FileSnapshotIdParams>,
     ) -> Result<CallToolResult, McpError> {
-        let content = match self
-            .services
-            .snapshot_store
-            .get(params.0.snapshot_id)
-            .await
-            .map_err(internal)?
-        {
-            Some(snap) => match snap.blob_hash.clone() {
-                Some(hash) => oxplow_app::snapshot_content::read_snapshot_content(
-                    snap.storage,
-                    &hash,
-                    &self.services.layout.project_dir,
-                    &self.services.blobs,
-                )
-                .ok()
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
-                None => None,
-            },
-            None => None,
-        };
+        let content = oxplow_app::snapshot_files::read_file_snapshot(
+            &self.services,
+            params.0.file_snapshot_id,
+        )
+        .await
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         json_result(&content)
     }
 
     #[tool(
-        description = "Restore a file's contents from a snapshot, writing the blob back \
-                          to its workspace path. Errors if the row or blob is gone."
+        description = "Read a path as it was at a snapshot (a whole capture, snapshot id) as a \
+                          (UTF-8 lossy) string. Null when the path didn't exist then."
     )]
-    async fn restore_file_from_snapshot(
+    async fn read_file_at_snapshot(
         &self,
-        params: Parameters<SnapshotIdParams>,
+        params: Parameters<FileAtSnapshotParams>,
     ) -> Result<CallToolResult, McpError> {
-        let snap = self
-            .services
-            .snapshot_store
-            .get(params.0.snapshot_id)
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| McpError::invalid_params("snapshot row not found", None))?;
-        let hash = snap.blob_hash.clone().ok_or_else(|| {
-            McpError::invalid_params("snapshot has no blob (oversize or deleted)", None)
-        })?;
-        let bytes = oxplow_app::snapshot_content::read_snapshot_content(
-            snap.storage,
-            &hash,
-            &self.services.layout.project_dir,
-            &self.services.blobs,
+        let p = params.0;
+        let content = oxplow_app::snapshot_files::read_file_at_snapshot(
+            &self.services,
+            p.snapshot_id,
+            &p.path,
         )
-        .map_err(|e| match e {
-            // Routine since tsk105: the record is permanent, the bytes expire.
-            oxplow_app::snapshot_content::SnapshotReadError::Blob(_) => McpError::invalid_params(
-                "this snapshot's content has expired from Local History — the record is \
-                 permanent, but file bytes are only kept for the retention window",
-                None,
-            ),
-            other => internal(other),
-        })?;
-        let target = self.services.layout.project_dir.join(&snap.path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(internal)?;
-        }
-        std::fs::write(&target, &bytes).map_err(internal)?;
-        json_result(&serde_json::json!({ "restored": snap.path }))
+        .await
+        .map_err(snapshot_file_error)?
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        json_result(&content)
+    }
+
+    #[tool(
+        description = "Restore a captured file row (file_snapshot id) into its stream's \
+                          worktree, writing its bytes back to its path. Errors if the row is gone \
+                          or has no content."
+    )]
+    async fn restore_file_snapshot(
+        &self,
+        params: Parameters<FileSnapshotIdParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let restored = oxplow_app::snapshot_files::restore_file_snapshot(
+            &self.services,
+            params.0.file_snapshot_id,
+        )
+        .await
+        .map_err(snapshot_file_error)?;
+        json_result(&serde_json::json!({ "restored": restored }))
     }
 
     // ---------- code quality (duplication) ----------
@@ -5653,10 +5654,11 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_branches",
     "list_snapshots_for_stream",
     "list_files_for_snapshot",
-    "get_snapshot",
+    "get_file_snapshot",
     "get_snapshot_stats",
     "list_snapshot_change_entries",
-    "read_snapshot_file_content",
+    "read_file_snapshot",
+    "read_file_at_snapshot",
     "list_code_quality_findings",
     "list_thread_work",
     "list_tasks",
@@ -5726,7 +5728,7 @@ const WRITE_TOOLS: &[&str] = &[
     "update_extension",
     "create_dashboard",
     "add_dashboard_item",
-    "restore_file_from_snapshot",
+    "restore_file_snapshot",
     "create_comment",
     "set_comment_intent",
     "rename_thread",
@@ -6470,6 +6472,15 @@ impl OxplowMcp {
             thread_id: Some(thread_id),
             stream_id: Some(thread.stream_id),
         })
+    }
+}
+
+/// A snapshot read/restore failure as the MCP error the agent can act on.
+fn snapshot_file_error(err: oxplow_app::snapshot_files::SnapshotFileError) -> McpError {
+    use oxplow_app::snapshot_files::SnapshotFileError as E;
+    match err {
+        E::Other(m) => internal(m),
+        other => McpError::invalid_params(other.to_string(), None),
     }
 }
 

@@ -607,7 +607,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_snapshots", { path })),
+	listFileSnapshots: (path: string) => typedError<FileSnapshot[], IpcError>(__TAURI_INVOKE("list_file_snapshots", { path })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -627,7 +627,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	getSnapshot: (id: number) => typedError<{
+	getFileSnapshot: (fileSnapshotId: number) => typedError<{
 	id: number,
 	stream_id: StreamId,
 	path: string,
@@ -667,27 +667,12 @@ export const commands = {
 	 *  [`capture_batch`]: SqliteSnapshotStore::capture_batch
 	 */
 	content_hash: string | null,
-} | null, IpcError>(__TAURI_INVOKE("get_snapshot", { id })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getSnapshotPairDiff: (beforeId: number | null, afterId: number | null) => typedError<SnapshotPairDiff, IpcError>(__TAURI_INVOKE("get_snapshot_pair_diff", { beforeId, afterId })),
+} | null, IpcError>(__TAURI_INVOKE("get_file_snapshot", { fileSnapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
 	diffEndpoints: (start: { kind: "snapshot"; snapshot_id: number } | { kind: "commit"; sha: string } | { kind: "working" } | null, end: DiffEndpoint) => typedError<DiffEntry[], IpcError>(__TAURI_INVOKE("diff_endpoints", { start, end })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	getSnapshotSummary: (snapshotId: number) => typedError<{
-	snapshot: FileSnapshot,
-	previousSnapshotId: string | null,
-	files: { [key in string]: SnapshotFileRow },
-	counts: SnapshotSummaryCounts,
-} | null, IpcError>(__TAURI_INVOKE("get_snapshot_summary", { snapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -702,7 +687,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	restoreFileFromSnapshot: (snapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_from_snapshot", { snapshotId })),
+	restoreFileSnapshot: (fileSnapshotId: number) => typedError<null, IpcError>(__TAURI_INVOKE("restore_file_snapshot", { fileSnapshotId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -3778,37 +3763,6 @@ export type Snapshot = {
 	tree_hash: string | null,
 };
 
-export type SnapshotEntry = {
-	hash: string,
-	mtimeMs: number,
-	size: number,
-	/**
-	 *  "present" for normal captures, "oversize" for files that
-	 *  exceeded the configured cap (no blob written).
-	 */
-	state: string,
-};
-
-export type SnapshotFileRow = {
-	entry: SnapshotEntry,
-	/**
-	 *  "created" when this is the first capture of `path`,
-	 *  "updated" when the prior capture had a different blob,
-	 *  "deleted" when the current capture has no blob (file gone).
-	 */
-	kind: string,
-};
-
-export type SnapshotPairDiff = {
-	before: FileSnapshot | null,
-	after: FileSnapshot | null,
-	/**
-	 *  True when the two captures hash differently (i.e. content
-	 *  changed between them). Always false when either side is None.
-	 */
-	changed: boolean,
-};
-
 /**
  *  Aggregate created/modified/deleted counts for the file rows
  *  captured under one snapshot. Derived by comparing each child
@@ -3840,19 +3794,6 @@ export type SnapshotStats = {
  *    row marking the path gone as of this snapshot.
  */
 export type SnapshotStorage = "oxplow" | "git" | "oversize" | "deleted";
-
-export type SnapshotSummary = {
-	snapshot: FileSnapshot,
-	previousSnapshotId: string | null,
-	files: { [key in string]: SnapshotFileRow },
-	counts: SnapshotSummaryCounts,
-};
-
-export type SnapshotSummaryCounts = {
-	created: number,
-	updated: number,
-	deleted: number,
-};
 
 /**
  *  Why a snapshot take happened: one row of the operation log each

@@ -3,9 +3,6 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-use specta::Type;
-
 pub use oxplow_app::endpoint_diff::{DiffEndpoint, DiffEntry};
 use oxplow_app::Services;
 use oxplow_db::{FileSnapshot, Snapshot, SnapshotStats};
@@ -34,7 +31,11 @@ fn current_filter(svc: &Services) -> WorkspaceFilter {
         .unwrap_or_default()
 }
 
-pub async fn list_snapshots(svc: &Services, path: String) -> Result<Vec<FileSnapshot>, IpcError> {
+/// Every captured row of one file path, newest first (`file_snapshot` rows).
+pub async fn list_file_snapshots(
+    svc: &Services,
+    path: String,
+) -> Result<Vec<FileSnapshot>, IpcError> {
     // Whole-path filter: if the queried path itself is currently
     // marked generated, return an empty history rather than the
     // pre-config captures. The UI shouldn't surface a "history" view
@@ -110,43 +111,12 @@ pub async fn list_files_for_snapshot(
         .collect())
 }
 
-pub async fn get_snapshot(svc: &Services, id: i64) -> Result<Option<FileSnapshot>, IpcError> {
-    Ok(svc.snapshot_store.get(id).await?)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct SnapshotPairDiff {
-    pub before: Option<FileSnapshot>,
-    pub after: Option<FileSnapshot>,
-    /// True when the two captures hash differently (i.e. content
-    /// changed between them). Always false when either side is None.
-    pub changed: bool,
-}
-
-/// Compare two captures of the same path. The renderer surfaces this
-/// in the snapshots panel as "what changed between then and now".
-pub async fn get_snapshot_pair_diff(
+/// One captured file row by its `file_snapshot` id.
+pub async fn get_file_snapshot(
     svc: &Services,
-    before_id: Option<i64>,
-    after_id: Option<i64>,
-) -> Result<SnapshotPairDiff, IpcError> {
-    let before = match before_id {
-        Some(id) => svc.snapshot_store.get(id).await?,
-        None => None,
-    };
-    let after = match after_id {
-        Some(id) => svc.snapshot_store.get(id).await?,
-        None => None,
-    };
-    let changed = match (&before, &after) {
-        (Some(b), Some(a)) => b.blob_hash != a.blob_hash,
-        _ => false,
-    };
-    Ok(SnapshotPairDiff {
-        before,
-        after,
-        changed,
-    })
+    file_snapshot_id: i64,
+) -> Result<Option<FileSnapshot>, IpcError> {
+    Ok(svc.snapshot_store.get(file_snapshot_id).await?)
 }
 
 /// Diff two endpoints. `start = None` diffs `end` against the empty
@@ -202,171 +172,33 @@ pub async fn diff_endpoints(
     .map_err(IpcError::internal)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SnapshotEntry {
-    pub hash: String,
-    pub mtime_ms: i64,
-    pub size: i64,
-    /// "present" for normal captures, "oversize" for files that
-    /// exceeded the configured cap (no blob written).
-    pub state: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct SnapshotFileRow {
-    pub entry: SnapshotEntry,
-    /// "created" when this is the first capture of `path`,
-    /// "updated" when the prior capture had a different blob,
-    /// "deleted" when the current capture has no blob (file gone).
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Default)]
-pub struct SnapshotSummaryCounts {
-    pub created: i64,
-    pub updated: i64,
-    pub deleted: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SnapshotSummary {
-    pub snapshot: FileSnapshot,
-    pub previous_snapshot_id: Option<String>,
-    pub files: std::collections::HashMap<String, SnapshotFileRow>,
-    pub counts: SnapshotSummaryCounts,
-}
-
-/// Build a per-snapshot summary: the FileSnapshot row, the id of the
-/// prior capture of the same path (if any), and a one-row diff
-/// describing how the captured file relates to its predecessor
-/// (created / updated / deleted). The renderer's local-history pane
-/// keys off this shape.
-pub async fn get_snapshot_summary(
-    svc: &Services,
-    snapshot_id: i64,
-) -> Result<Option<SnapshotSummary>, IpcError> {
-    let Some(snap) = svc.snapshot_store.get(snapshot_id).await? else {
-        return Ok(None);
-    };
-    // Order is DESC by captured_at; find the row immediately after
-    // ours (i.e. older). Equal-timestamp ties fall back to id order
-    // implicitly via SQLite's row order.
-    let history = svc.snapshot_store.list_for_path(&snap.path).await?;
-    let mut prev: Option<&FileSnapshot> = None;
-    let mut found_self = false;
-    for row in &history {
-        if found_self {
-            prev = Some(row);
-            break;
-        }
-        if row.id == snap.id {
-            found_self = true;
-        }
-    }
-    let kind = match (&snap.blob_hash, prev.and_then(|p| p.blob_hash.clone())) {
-        (None, _) => "deleted",
-        (Some(_), None) => "created",
-        (Some(cur), Some(prev_hash)) if *cur == prev_hash => "updated",
-        (Some(_), Some(_)) => "updated",
-    };
-    let state_label = if snap.storage.is_oversize() {
-        "oversize"
-    } else {
-        "present"
-    };
-    let entry = SnapshotEntry {
-        hash: snap.blob_hash.clone().unwrap_or_default(),
-        mtime_ms: 0,
-        size: snap.size_bytes,
-        state: state_label.to_string(),
-    };
-    let mut files = std::collections::HashMap::new();
-    files.insert(
-        snap.path.clone(),
-        SnapshotFileRow {
-            entry,
-            kind: kind.to_string(),
-        },
-    );
-    let counts = SnapshotSummaryCounts {
-        created: if kind == "created" { 1 } else { 0 },
-        updated: if kind == "updated" { 1 } else { 0 },
-        deleted: if kind == "deleted" { 1 } else { 0 },
-    };
-    Ok(Some(SnapshotSummary {
-        snapshot: snap,
-        previous_snapshot_id: prev.map(|p| p.id.to_string()),
-        files,
-        counts,
-    }))
-}
-
-/// Restore a file's contents from a snapshot. Reads the bytes from
-/// the content-addressed blob store using the snapshot's `blob_hash`
-/// and writes them back to the snapshot's path inside the workspace.
-/// Errors with NOT_FOUND if the snapshot row is gone or its blob
-/// was pruned.
-pub async fn restore_file_from_snapshot(svc: &Services, snapshot_id: i64) -> Result<(), IpcError> {
-    let snap = svc
-        .snapshot_store
-        .get(snapshot_id)
-        .await?
-        .ok_or_else(IpcError::not_found)?;
-    let hash = snap
-        .blob_hash
-        .clone()
-        .ok_or_else(|| IpcError::invalid("snapshot has no blob (oversize or deleted)"))?;
-    // Route through the read seam so a git-backed row recovers its bytes
-    // from the git odb instead of the (absent) blob store.
-    let bytes = oxplow_app::snapshot_content::read_snapshot_content(
-        snap.storage,
-        &hash,
-        &svc.layout.project_dir,
-        &svc.blobs,
-    )
-    .map_err(|e| match e {
-        // The routine miss since tsk105: records are permanent, but the
-        // on-disk bytes age out of the retention window. Refuse plainly —
-        // never a half-restore, never an opaque internal error.
-        oxplow_app::snapshot_content::SnapshotReadError::Blob(_) => IpcError::invalid(
-            "this snapshot's content has expired from Local History — the record is \
-             permanent, but file bytes are only kept for the retention window",
-        ),
-        other => IpcError::internal(other.to_string()),
-    })?;
-    let target = svc.layout.project_dir.join(&snap.path);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| IpcError::internal(e.to_string()))?;
-    }
-    std::fs::write(&target, &bytes).map_err(|e| IpcError::internal(e.to_string()))?;
-    Ok(())
+/// Restore a captured file (`file_snapshot` id) into its stream's
+/// worktree (`oxplow_app::snapshot_files`).
+pub async fn restore_file_snapshot(svc: &Services, file_snapshot_id: i64) -> Result<(), IpcError> {
+    use oxplow_app::snapshot_files::{restore_file_snapshot, SnapshotFileError as E};
+    restore_file_snapshot(svc, file_snapshot_id)
+        .await
+        .map(|_| ())
+        .map_err(|e| match e {
+            E::NotFound => IpcError::not_found(),
+            E::NoContent | E::Expired => IpcError::invalid(e.to_string()),
+            E::Other(m) => IpcError::internal(m),
+        })
 }
 
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn list_snapshots_dispatches() {
+    async fn list_file_snapshots_dispatches() {
         let (svc, _dir) = crate::test_support::services();
         let out = crate::dispatch(
-            "list_snapshots",
+            "list_file_snapshots",
             serde_json::json!({ "path": "src/main.rs" }),
             &svc,
         )
         .await
         .unwrap();
         assert!(out.is_array(), "expected a JSON array, got {out}");
-    }
-
-    #[tokio::test]
-    async fn get_snapshot_pair_diff_accepts_optional_ids() {
-        let (svc, _dir) = crate::test_support::services();
-        // Both ids missing → None/None → changed: false.
-        let out = crate::dispatch("get_snapshot_pair_diff", serde_json::json!({}), &svc)
-            .await
-            .unwrap();
-        assert_eq!(out["changed"], serde_json::json!(false));
     }
 
     #[tokio::test]

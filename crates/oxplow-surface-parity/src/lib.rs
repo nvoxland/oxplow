@@ -301,19 +301,18 @@ pub const MANIFEST: &[Capability] = &[
     // ---- snapshots / local history: reads + restore mirrored to MCP (Child 3) ----
     both("list_snapshots_for_stream"),
     both("list_files_for_snapshot"),
-    both("get_snapshot"),
+    both("get_file_snapshot"),
     both("get_snapshot_stats"),
     agent("list_snapshot_change_entries"),
-    agent("read_snapshot_file_content"),
-    both("restore_file_from_snapshot"),
+    agent("read_file_snapshot"),
+    agent("read_file_at_snapshot"),
+    both("restore_file_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
     ui("diff_endpoints"),
     // Per-file content at an endpoint, feeding the diff view's function
     // analysis (base + head). UI-only.
     // ---- agent_todo: composed dashboard DTOs / generated-filtered (deferred) ----
-    todo("list_snapshots"),
-    todo("get_snapshot_pair_diff"),
-    todo("get_snapshot_summary"),
+    todo("list_file_snapshots"),
     // ---- code quality: duplication findings mirrored to MCP (metrics scan
     //      retired in tsk229; signals moved to the metric substrate) ----
     agent("list_code_quality_findings"),

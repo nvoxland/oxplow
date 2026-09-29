@@ -209,27 +209,18 @@ async fn top_visited_pages_empty_for_fresh_project() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_snapshots_empty_for_unknown_path() {
+async fn list_file_snapshots_empty_for_unknown_path() {
     let app = TestApp::build();
-    let v = commands::generated::list_snapshots(app.state(), "nope.txt".into())
+    let v = commands::generated::list_file_snapshots(app.state(), "nope.txt".into())
         .await
         .unwrap();
     assert!(v.is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_snapshot_missing_returns_none() {
+async fn get_file_snapshot_missing_returns_none() {
     let app = TestApp::build();
-    let v = commands::generated::get_snapshot(app.state(), 99999)
-        .await
-        .unwrap();
-    assert!(v.is_none());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn get_snapshot_summary_missing_returns_none() {
-    let app = TestApp::build();
-    let v = commands::generated::get_snapshot_summary(app.state(), 99999)
+    let v = commands::generated::get_file_snapshot(app.state(), 99999)
         .await
         .unwrap();
     assert!(v.is_none());
@@ -761,8 +752,7 @@ async fn snapshot_reads_empty_for_fresh_project() {
         .await
         .unwrap();
     let _ = commands::generated::get_snapshot_stats(app.state(), 999).await;
-    let _ = commands::generated::get_snapshot_pair_diff(app.state(), None, None).await;
-    let _ = commands::generated::restore_file_from_snapshot(app.state(), 999).await;
+    let _ = commands::generated::restore_file_snapshot(app.state(), 999).await;
 }
 
 // ---- workspace reads + file round-trip ----

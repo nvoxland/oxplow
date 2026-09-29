@@ -65,18 +65,6 @@ export interface TaskNote {
 // shape (label, source enum, created_at) and is the version every
 // consumer reads.
 
-export interface SnapshotSummary {
-  files: import("./api.js").SnapshotFileRow[];
-}
-
-export type SnapshotDiffSide = "absent" | import("./api.js").SnapshotEntryState;
-
-export interface SnapshotDiffResult {
-  pathA: string;
-  pathB: string;
-  diff: string;
-}
-
 // ---- Backlog / efforts ----
 
 export interface BacklogState {

@@ -9,9 +9,9 @@
 //!
 //! Bytes are persisted to a content-addressed blob store under
 //! `<project>/.oxplow/snapshots/<aa>/<aaaa...>`, keyed by the
-//! SHA-256 hash. The `local_blame` overlay and
-//! `restore_file_from_snapshot` both read through `BlobStore::read`
-//! to recover past file content.
+//! content hash. The `local_blame` overlay and `snapshot_files`
+//! (read / restore) both read through `BlobStore::read` to recover past
+//! file content.
 //!
 //! Cheap to clone — the underlying state is held in an `Arc`. Spawn
 //! the watcher loop once at boot via `spawn_watcher()`; everything

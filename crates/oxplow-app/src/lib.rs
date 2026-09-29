@@ -77,6 +77,7 @@ pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
 pub mod snapshot_content;
+pub mod snapshot_files;
 pub mod source_runner;
 pub mod task_service;
 pub mod task_writes;

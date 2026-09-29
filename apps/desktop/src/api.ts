@@ -381,14 +381,6 @@ export interface SnapshotSummary {
   counts: { created: number; updated: number; deleted: number };
 }
 
-export type SnapshotDiffSide = "absent" | SnapshotEntryState;
-
-export interface SnapshotDiffResult {
-  before: string | null;
-  after: string | null;
-  beforeState: SnapshotDiffSide;
-  afterState: SnapshotDiffSide;
-}
 
 export interface TaskEffort {
   id: string;
@@ -2018,7 +2010,7 @@ export interface FileSnapshotRow {
 export async function listFileSnapshotsForPath(
   path: string,
 ): Promise<FileSnapshotRow[]> {
-  const rows = unwrap(await commands.listSnapshots(path)) as unknown as Array<{
+  const rows = unwrap(await commands.listFileSnapshots(path)) as unknown as Array<{
     id: number;
     stream_id: string;
     path: string;
@@ -2115,28 +2107,6 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
     oversize: r.storage === "oversize",
     mtimeMs: r.mtime_ms,
   }));
-}
-
-export async function getSnapshotSummary(
-  snapshotId: string,
-  _previousSnapshotId?: string | null,
-): Promise<SnapshotSummary | null> {
-  const id = Number(snapshotId);
-  if (!Number.isFinite(id)) return null;
-  return unwrap(await commands.getSnapshotSummary(id)) as unknown as SnapshotSummary | null;
-}
-
-export async function getSnapshotPairDiff(
-  beforeSnapshotId: string | null,
-  afterSnapshotId: string,
-  _path: string,
-): Promise<SnapshotDiffResult> {
-  return unwrap(
-    await commands.getSnapshotPairDiff(
-      beforeSnapshotId === null ? null : Number(beforeSnapshotId),
-      Number(afterSnapshotId),
-    ),
-  ) as unknown as SnapshotDiffResult;
 }
 
 /** Diff two endpoints, each a snapshot id or a git commit. `start =
@@ -2312,12 +2282,10 @@ export async function listEffortsOverlappingRange(
   return rows.map(toOverlappingEffort);
 }
 
-export async function restoreFileFromSnapshot(
-  _streamId: string,
-  snapshotId: string,
-  _path: string,
-): Promise<void> {
-  unwrap(await commands.restoreFileFromSnapshot(Number(snapshotId)));
+/** Restore a captured file (a `file_snapshot` id) into its stream's
+ *  worktree. */
+export async function restoreFileSnapshot(fileSnapshotId: number): Promise<void> {
+  unwrap(await commands.restoreFileSnapshot(fileSnapshotId));
 }
 
 export interface SnapshotTakenEventPayload {

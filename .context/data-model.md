@@ -733,8 +733,7 @@ production write path; `create_snapshot` / `capture` / `capture_batch` /
 **Baseline is hidden from Local History.** The first snapshot per
 stream has no predecessor, so there's nothing to diff against and
 nothing meaningful to show. `listFileSnapshotsForStream` excludes it
-(subsequent snapshots use it as their "previous" via
-`getSnapshotSummary`). The baseline still lives in the DB — only the
+(subsequent snapshots use it as their "previous"). The baseline still lives in the DB — only the
 UI list skips it.
 
 **Rows come with pre-joined labels.** `listSnapshotsForStream` joins
@@ -796,8 +795,9 @@ every 24h) GCs `.oxplow/snapshots/objects/` down to
 (default 7 days, `snapshotRetentionDays` in `.oxplow/project.yaml`)
 plus each `(stream, path)`'s newest row at ANY age — so every
 worktree's current tree stays viewable/rollbackable forever. Older
-content reads degrade to "expired": `read_snapshot_file_content` →
-`None`, restores refuse with an explicit message, never a half-restore.
+content reads degrade to "expired": `read_file_snapshot` → `None`
+(`SnapshotFileError::Expired` in `oxplow_app::snapshot_files`), restores
+refuse with an explicit message, never a half-restore.
 Only `oxplow`-class rows hold blob-store hashes; `git` rows reference
 the git odb, which this GC never touches. The blob store is shared
 across all streams, so GC runs at the project level and dedupes

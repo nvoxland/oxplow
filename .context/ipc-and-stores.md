@@ -265,17 +265,15 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 
 - `listSnapshots(streamId, limit?)` — snapshot rows newest-first,
   baseline excluded, each with `label`/`label_kind`.
-- `getSnapshotSummary(snapshotId, previousSnapshotId?)` — snapshot
-  row, manifest entries joined with A/M/D kind against the given
-  baseline (defaults to the preceding snapshot in time for the
-  stream), plus counts.
-- `getSnapshotPairDiff(beforeId, afterId, path)` — arbitrary-pair
-  diff, used by the Snapshots panel, the Activity tab's per-turn
-  view, and the Plan modal's per-effort view.
-- `restoreFileFromSnapshot(streamId, snapshotId, path)` — overwrites
-  the worktree file with the snapshot's content via the existing
-  `writeWorkspaceFile` path (so the UI-echo filter and workspace
-  event bus behave the same as a UI edit).
+- `listFileSnapshotsForPath(path)` (RPC `list_file_snapshots { path }`)
+  — every captured row of one file, newest first.
+- `restoreFileSnapshot(fileSnapshotId)` (RPC `restore_file_snapshot`)
+  — writes a captured file row's bytes back into its stream's worktree
+  (`oxplow_app::snapshot_files`, shared with MCP). Ids are honest
+  (P2.9): a `snapshot_id` is a whole capture, a `file_snapshot_id` one
+  captured file row. The old `get_snapshot_summary` /
+  `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
+  through `diff_endpoints`.
 - `listTaskEfforts(itemId)` (RPC `list_work_item_efforts { workItem }`,
   called with `work_item:oxplow:<itemId>`) — returns per-effort rows (one per
   `in_progress → human_check` cycle) with pre-joined start/end
