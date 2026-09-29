@@ -330,27 +330,35 @@ export function gitDashboardRef(): TabRef {
 }
 
 /**
- * The diff view (`diff-view` route) frames a change as an explicit
- * start→end diff. Three entry shapes, all rendered by `DiffViewPage`:
+ * A change framed as an explicit start→end diff, all rendered by
+ * `DiffViewPage`. The things with an identity are entity pages whose id
+ * is their canonical ref (P2.11); only an ad-hoc pair of endpoints is a
+ * `diff-view` route:
  *
- * - **snapshot** (`?snapshot=<N>`) — a single capture, framed as
- *   `[prev → N]`; the page resolves the previous snapshot on load.
- * - **effort** (`?effort=<effortId>`) — resolves the effort's own
- *   start/end snapshot bracket on load, carrying the task title + "in
- *   progress" state.
- * - **endpoints** (`?start=<tok>&end=<tok>`) — an explicit pair of
- *   snapshot/commit/working endpoints. `start = null` (`none`) diffs
- *   `end` against the empty tree (everything added).
+ * - **snapshot** (`snapshot:<N>`) — a single capture, framed as
+ *   `[parent → N]` (its recorded parent).
+ * - **effort** (`effort:<effN>`) — the effort's start/end snapshot
+ *   bracket, carrying the task title + "in progress" state.
+ * - **turn** (`turn:<trnN>`) — an agent turn's start/end snapshots:
+ *   what the turn changed.
+ * - **endpoints** (`page:diff-view?start=<tok>&end=<tok>`) — an explicit
+ *   pair of snapshot/commit/working endpoints. `start = null` (`none`)
+ *   diffs `end` against the empty tree (everything added).
  */
 export type DiffViewPayload =
   | { mode: "snapshot"; snapshotId: number }
   | { mode: "effort"; effortId: string }
+  | { mode: "turn"; turnId: string }
   | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
 
-/** Diff view of a single captured snapshot. Drill-in from the Local
- *  History dashboard, file version history, and snapshot backlinks. */
+/** A single captured snapshot's page. Drill-in from the Local History
+ *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
-  return route("diff-view", { mode: "snapshot", snapshotId }, { snapshot: snapshotId });
+  return {
+    id: canonicalId("snapshot", String(snapshotId)),
+    kind: "snapshot",
+    payload: { mode: "snapshot", snapshotId },
+  };
 }
 
 /** Stable single-token encoding of one endpoint for the id. */
@@ -374,11 +382,19 @@ function decodeEndpoint(token: string): DiffEndpoint | null {
   return null;
 }
 
-/** Diff view scoped to one effort — resolves the effort's start/end
- *  snapshot bracket on load. The 'View diff' button on a completed
- *  effort points here. */
+/** An effort's page — its start/end snapshot bracket as a diff. The
+ *  'View diff' button on a completed effort points here. */
 export function effortDiffRef(effortId: string): TabRef {
-  return route("diff-view", { mode: "effort", effortId }, { effort: effortId });
+  return {
+    id: canonicalId("effort", effortId),
+    kind: "effort",
+    payload: { mode: "effort", effortId },
+  };
+}
+
+/** An agent turn's page (`trn<N>`) — what the turn changed. */
+export function turnRef(turnId: string): TabRef {
+  return { id: canonicalId("turn", turnId), kind: "turn", payload: { mode: "turn", turnId } };
 }
 
 /** Diff view between two explicit endpoints (snapshot / commit /
@@ -498,13 +514,6 @@ const ROUTES: Record<RoutePageKind, (params: URLSearchParams) => TabRef | null> 
     return diffRef({ path, leftVersion: left, rightVersion: right, baseLabel: "", labelOverride: p.get("label") ?? undefined });
   },
   "diff-view": (p) => {
-    const snapshot = p.get("snapshot");
-    if (snapshot !== null) {
-      const n = Number(snapshot);
-      return Number.isFinite(n) ? snapshotRef(n) : null;
-    }
-    const effort = p.get("effort");
-    if (effort) return effortDiffRef(effort);
     const end = decodeEndpoint(p.get("end") ?? "");
     if (end) return endpointDiffRef(decodeEndpoint(p.get("start") ?? "none"), end);
     return null;
@@ -577,6 +586,14 @@ export function refFromTabId(id: string): TabRef | null {
       return gitCommitRef(canonical.id);
     case "metric":
       return metricRef(canonical.id);
+    case "snapshot": {
+      const n = Number(canonical.id);
+      return Number.isInteger(n) ? snapshotRef(n) : null;
+    }
+    case "effort":
+      return effortDiffRef(canonical.id);
+    case "turn":
+      return turnRef(canonical.id);
     case "lens":
       return lensRefFromTail(id.slice("lens:".length));
     case "page": {
@@ -594,6 +611,17 @@ export function pageKindOf(tabId: string): PageKind | null {
   const canonical = parseRef(tabId);
   if (!canonical) return null;
   if (canonical.kind === "page") return routeNameOf(tabId);
-  const entity: readonly string[] = ["file", "dir", "wiki", "work_item", "commit", "metric", "lens"];
+  const entity: readonly string[] = [
+    "file",
+    "dir",
+    "wiki",
+    "work_item",
+    "commit",
+    "metric",
+    "lens",
+    "snapshot",
+    "effort",
+    "turn",
+  ];
   return entity.includes(canonical.kind) ? (canonical.kind as PageKind) : null;
 }

@@ -101,8 +101,12 @@ export function cellLinkRef(
     }
     case "wiki":
       return wikiPageRef(s);
-    case "effort-diff":
-      return effortDiffRef(s);
+    case "effort-diff": {
+      // A lens row carries the effort's row id (`7`) or its id (`eff7`);
+      // the page is the canonical `effort:eff7`.
+      const n = effortRowId(s);
+      return n === null ? null : effortDiffRef(`eff${n}`);
+    }
   }
 }
 

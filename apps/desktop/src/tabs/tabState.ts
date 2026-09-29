@@ -23,7 +23,11 @@ export type EntityPageKind =
   | "work_item"
   | "commit"
   | "metric"
-  | "lens";
+  | "lens"
+  // A capture, an effort and an agent turn render as their diff (P2.11).
+  | "snapshot"
+  | "effort"
+  | "turn";
 
 export type RoutePageKind =
   | "agent"

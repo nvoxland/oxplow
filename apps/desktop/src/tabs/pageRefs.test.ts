@@ -21,8 +21,10 @@ import {
   newTaskRef,
   opErrorRef,
   refFromTabId,
+  pageKindOf,
   snapshotRef,
   streamSettingsRef,
+  turnRef,
   threadSettingsRef,
   wikiFreshnessRef,
   wikiPageRef,
@@ -106,12 +108,35 @@ describe("pageRefs", () => {
     expect(newTaskRef({ parentId: 1 }).id).toBe("page:new-task");
   });
 
-  test("effortDiffRef encodes the effort id under the diff-view route", () => {
-    const ref = effortDiffRef("eff42");
-    expect(ref.id).toBe("page:diff-view?effort=eff42");
-    expect(ref.kind).toBe("diff-view");
-    expect(ref.payload).toEqual({ mode: "effort", effortId: "eff42" });
-    expect(snapshotRef(112).id).toBe("page:diff-view?snapshot=112");
+  test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
+    const effort = effortDiffRef("eff42");
+    expect(effort).toEqual({
+      id: "effort:eff42",
+      kind: "effort",
+      payload: { mode: "effort", effortId: "eff42" },
+    });
+    expect(snapshotRef(112)).toEqual({
+      id: "snapshot:112",
+      kind: "snapshot",
+      payload: { mode: "snapshot", snapshotId: 112 },
+    });
+    expect(turnRef("trn7")).toEqual({
+      id: "turn:trn7",
+      kind: "turn",
+      payload: { mode: "turn", turnId: "trn7" },
+    });
+    for (const ref of [effort, snapshotRef(112), turnRef("trn7")]) {
+      expect(refFromTabId(ref.id)).toEqual(ref);
+      expect(pageKindOf(ref.id)).toBe(ref.kind);
+    }
+  });
+
+  test("a file path with ref-reserved characters round-trips (P2.11)", () => {
+    const path = "docs/a@b#c.md";
+    const ref = fileRef(path);
+    expect(ref.id).toBe("file:docs/a%40b%23c.md");
+    expect(diskFilePath(ref.id)).toBe(path);
+    expect(refFromTabId(ref.id)).toEqual(ref);
   });
 
   test("endpointDiffRef encodes both endpoints; ids are stable + distinct", () => {
@@ -133,8 +158,8 @@ describe("pageRefs", () => {
 });
 
 describe("refFromTabId — diff-view", () => {
-  test("round-trips an effort diff", () => {
-    expect(refFromTabId("page:diff-view?effort=eff42")).toEqual(effortDiffRef("eff42"));
+  test("an effort is its own page now, not a diff-view route", () => {
+    expect(refFromTabId("page:diff-view?effort=eff42")).toBeNull();
   });
 
   test("round-trips snapshot↔snapshot endpoints", () => {

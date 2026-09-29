@@ -57,6 +57,16 @@ pub async fn list_open_agent_turns(
     Ok(svc.agent_turn_store.list_open(&thread_id).await?)
 }
 
+/// One agent turn by id — the turn page's source for its start and end
+/// snapshots (P2.11). `None` for an unknown id.
+pub async fn get_agent_turn(
+    svc: &Services,
+    turn_id: oxplow_domain::AgentTurnId,
+) -> Result<Option<AgentTurn>, IpcError> {
+    use oxplow_domain::stores::AgentTurnStore as _;
+    Ok(svc.agent_turn_store.get(&turn_id).await?)
+}
+
 // Derivation logic + its unit tests live in
 // oxplow_app::agent_status_derive — list_agent_statuses just wires
 // the store calls together.

@@ -140,8 +140,19 @@ matching the backend's `CommentTarget`), and lens `link.kind` targets.
 `kindForTabId` and `refFromTabId` go through `parseRef` first, so a `:`
 inside an id never splits it.
 
+**A snapshot, an effort and an agent turn are entity pages** (P2.11):
+`snapshot:<N>`, `effort:<effN>`, `turn:<trnN>` (kinds `snapshot` /
+`effort` / `turn`, built by `snapshotRef` / `effortDiffRef` / `turnRef`
+in `tabs/pageRefs.ts`), each rendering its diff in `DiffViewPage`
+(`DiffViewPayload.mode`). Only an ad-hoc pair of endpoints stays a
+route (`page:diff-view?start=…&end=…`). A lens `effort-diff` link
+normalizes a row id (`7`) to `effort:eff7`. Tab ids are always built
+through the ref helpers (`fileRef(path).id`, never `` `file:${path}` ``):
+`escapeId` percent-encodes a path's `@` / `#` / `%`, which a hand-built
+id would read as a revision or fragment.
+
 **Shell routes are `page:<name>[?params]`** (`page:agent`, `page:tasks`,
-`page:diff-view?effort=eff9`, `page:external-url?url=…`). A route is a
+`page:diff-view?start=s1&end=s9`, `page:external-url?url=…`). A route is a
 page of the shell, not a thing in the graph, so it never appears in
 `page_ref`; its `TabRef.kind` is the route name. The route names keep
 their hyphenated spelling (`diff-view`) — they are ids inside the

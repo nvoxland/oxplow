@@ -416,6 +416,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("list_hook_events"),
     ui("list_agent_statuses"),
     ui("list_open_agent_turns"),
+    ui("get_agent_turn"),
     // ---- ui-only: config ----
     ui("get_config"),
     ui("set_agent_prompt_append"),

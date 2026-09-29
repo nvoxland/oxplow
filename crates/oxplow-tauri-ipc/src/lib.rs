@@ -257,6 +257,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_hook_events,
             commands::generated::list_agent_statuses,
             commands::generated::list_open_agent_turns,
+            commands::generated::get_agent_turn,
             // config
             commands::generated::get_config,
             commands::generated::set_agent_prompt_append,

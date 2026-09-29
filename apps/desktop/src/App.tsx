@@ -463,7 +463,7 @@ export function App() {
       // thread restores its prior tab; only initial entry uses the file-session
       // selected path as a heuristic.
       if (nextThread) {
-        const seeded = nextSession.selectedPath ? `file:${nextSession.selectedPath}` : AGENT_TAB_ID;
+        const seeded = nextSession.selectedPath ? fileRef(nextSession.selectedPath).id : AGENT_TAB_ID;
         setThreadCenterActive((prev) => (
           prev[nextThread.id] !== undefined ? prev : { ...prev, [nextThread.id]: seeded }
         ));
@@ -562,7 +562,7 @@ export function App() {
           return { ...prev, [selectedThreadId]: [...existing, ref] };
         });
       }
-      setCenterActive(`file:${path}`);
+      setCenterActive(fileRef(path).id);
       setError(null);
       void recordUsage({
         kind: "editor-file",
@@ -633,7 +633,7 @@ export function App() {
   async function handleNavigateToLocation(target: EditorNavigationTarget) {
     await handleOpenFile(target.path);
     setEditorNavigationTarget(target);
-    setCenterActive(`file:${target.path}`);
+    setCenterActive(fileRef(target.path).id);
   }
 
   function handleEditorChange(value: string) {
@@ -666,7 +666,7 @@ export function App() {
   function handleSelectOpenFile(path: string) {
     if (!stream) return;
     mutateFileSession(stream.id, (s) => selectOpenFile(s, path));
-    setCenterActive(`file:${path}`);
+    setCenterActive(fileRef(path).id);
   }
 
   function handleCloseOpenFile(path: string) {
@@ -694,7 +694,7 @@ export function App() {
             const restored = setLoadedFileContent(session, path, stashed.savedContent);
             return updateFileDraft(restored, path, stashed.draftContent);
           });
-          setCenterActive(`file:${path}`);
+          setCenterActive(fileRef(path).id);
         },
       });
       return;
@@ -1357,7 +1357,7 @@ export function App() {
     },
     find() {
       if (!selectedFilePath) return;
-      setCenterActive(`file:${selectedFilePath}`);
+      setCenterActive(fileRef(selectedFilePath).id);
       setEditorFindRequest((current) => current + 1);
     },
     showFiles() {
@@ -2496,6 +2496,35 @@ export function App() {
         },
       };
     };
+    // A snapshot, an effort, an agent turn (entity pages, P2.11) and an
+    // ad-hoc endpoints pair (`diff-view` route) all render as a diff.
+    const diffViewTab = (ref: TabRef, nav: SlotNav): CenterTab | null => {
+      const payload = ref.payload as DiffViewPayload | null;
+      if (!payload) return null;
+      const label =
+        payload.mode === "snapshot"
+          ? `Snapshot ${payload.snapshotId}`
+          : payload.mode === "effort"
+            ? `Effort ${payload.effortId}`
+            : payload.mode === "turn"
+              ? `Turn ${payload.turnId}`
+              : "Diff";
+      return {
+        id: ref.id,
+        label,
+        closable: true,
+        render: () => (
+          <DiffViewPage
+            stream={stream}
+            spec={payload}
+            onOpenDiff={nav.navOpenDiff}
+            onOpenDiffInTab={nav.navOpenDiff}
+            onOpenPage={nav.navOpen}
+            onOpenFile={nav.navOpenFile}
+          />
+        ),
+      };
+    };
     const pageRenderers: Record<PageKind, (ref: TabRef, nav: SlotNav) => CenterTab | null> = {
       // The agent tab is slot 0 above; it is never a page tab.
       agent: () => null,
@@ -2659,29 +2688,10 @@ export function App() {
           ),
         };
       },
-      "diff-view": (ref, nav) => {
-        const payload = ref.payload as DiffViewPayload | null;
-        if (payload) {
-          const label =
-            payload.mode === "snapshot" ? `Snapshot ${payload.snapshotId}` : "Diff";
-          return {
-            id: ref.id,
-            label,
-            closable: true,
-            render: () => (
-              <DiffViewPage
-                stream={stream}
-                spec={payload}
-                onOpenDiff={nav.navOpenDiff}
-                onOpenDiffInTab={nav.navOpenDiff}
-                onOpenPage={nav.navOpen}
-                onOpenFile={nav.navOpenFile}
-              />
-            ),
-          };
-        }
-        return null;
-      },
+      "diff-view": (ref, nav) => diffViewTab(ref, nav),
+      snapshot: (ref, nav) => diffViewTab(ref, nav),
+      effort: (ref, nav) => diffViewTab(ref, nav),
+      turn: (ref, nav) => diffViewTab(ref, nav),
       "git-history": (ref, nav) => {
         return {
           id: ref.id,

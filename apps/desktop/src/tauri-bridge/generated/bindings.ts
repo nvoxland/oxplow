@@ -877,6 +877,30 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	getAgentTurn: (turnId: AgentTurnId) => typedError<{
+	id: AgentTurnId,
+	thread_id: ThreadId,
+	prompt: string,
+	answer: string | null,
+	session_id: string | null,
+	started_at: Timestamp,
+	ended_at: Timestamp | null,
+	/**
+	 *  The snapshot the stream's worktree was at when the turn opened;
+	 *  `start_snapshot_id → snapshot_id` is what the turn changed.
+	 *  `None` when the stream had no snapshot yet.
+	 */
+	start_snapshot_id: number | null,
+	/**
+	 *  The snapshot the worktree was at when the turn ended (its
+	 *  `turn_end` take); `None` while running.
+	 */
+	snapshot_id: number | null,
+} | null, IpcError>(__TAURI_INVOKE("get_agent_turn", { turnId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	getConfig: () => typedError<OxplowConfig, IpcError>(__TAURI_INVOKE("get_config")),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

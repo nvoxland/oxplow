@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { BranchChangeEntry, EffortAtSnapshot, Snapshot, Stream } from "../api.js";
 import {
+  getAgentTurn,
   getEffort,
   getTask,
   getTaskSummaries,
@@ -30,6 +31,8 @@ import {
   endpointDiffRef,
   snapshotRef,
   taskRef,
+  turnRef,
+  type DiffViewPayload,
 } from "../tabs/pageRefs.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
@@ -44,21 +47,21 @@ import { formatFullDateTime, formatTimeOnly } from "../components/format.js";
 import { workItemLabel } from "../workItemRef.js";
 
 /**
- * What a diff view renders. Reached three ways, all via `DiffViewPage`:
+ * What a diff view renders. Reached four ways, all via `DiffViewPage`:
  *
- * - `snapshot` — the legacy `snapshotRef(N)` drill-in: a prev→N diff of
- *   a single captured snapshot (full function/duplication analysis,
- *   unchanged from the old SnapshotDetailPage).
- * - `effort` — `effortDiffRef(effortId)`: resolves the effort's own
- *   start/end snapshot bracket on load, with the task title + an
- *   "in progress" notice when the effort is still open.
+ * - `snapshot` — the `snapshot:<N>` page: a parent→N diff of a single
+ *   capture (its recorded parent; full function/duplication analysis).
+ * - `effort` — the `effort:<effN>` page: the effort's own start/end
+ *   snapshot bracket, with the task title + an "in progress" notice when
+ *   the effort is still open.
+ * - `turn` — the `turn:<trnN>` page: what an agent turn changed, its
+ *   start snapshot → its end snapshot (start → working tree while it runs).
  * - `endpoints` — `endpointDiffRef(start, end)`: an explicit pair of
  *   snapshot/commit/working endpoints diffed via the unified substrate.
  */
-export type DiffViewSpec =
-  | { mode: "snapshot"; snapshotId: number }
-  | { mode: "effort"; effortId: string }
-  | { mode: "endpoints"; start: DiffEndpoint | null; end: DiffEndpoint };
+/** What the page diffs — the payload of a snapshot / effort / turn page
+ *  or a `diff-view` endpoints route (`tabs/pageRefs.ts`). */
+export type DiffViewSpec = DiffViewPayload;
 
 export interface DiffViewPageProps {
   stream: Stream | null;
@@ -116,6 +119,7 @@ function DiffBody({
   const graphRef = useMemo<TabRef>(() => {
     if (spec.mode === "snapshot") return snapshotRef(spec.snapshotId);
     if (spec.mode === "effort") return effortDiffRef(spec.effortId);
+    if (spec.mode === "turn") return turnRef(spec.turnId);
     return endpointDiffRef(spec.start, spec.end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -164,6 +168,34 @@ function DiffBody({
         .catch((err) => {
           if (cancelled) return;
           logUi("warn", "effort resolve failed", { error: String(err) });
+          setResolveError(err instanceof Error ? err.message : String(err));
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (spec.mode === "turn") {
+      // A turn diffs its start snapshot → its end snapshot; one still
+      // running diffs its start against the working tree.
+      void getAgentTurn(spec.turnId)
+        .then((turn) => {
+          if (cancelled) return;
+          if (!turn) {
+            setResolveError("Turn not found.");
+            return;
+          }
+          setResolved({
+            ...resolveEffortEndpoints({
+              startSnapshotId: turn.startSnapshotId,
+              endSnapshotId: turn.snapshotId,
+            }),
+            taskId: null,
+            effortId: null,
+          });
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          logUi("warn", "turn resolve failed", { error: String(err) });
           setResolveError(err instanceof Error ? err.message : String(err));
         });
       return () => {
@@ -225,6 +257,8 @@ function specKey(spec: DiffViewSpec): string {
       return `snapshot:${spec.snapshotId}`;
     case "effort":
       return `effort:${spec.effortId}`;
+    case "turn":
+      return `turn:${spec.turnId}`;
     case "endpoints":
       return `endpoints:${JSON.stringify(spec.start)}:${JSON.stringify(spec.end)}`;
   }

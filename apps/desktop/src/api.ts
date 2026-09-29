@@ -2144,6 +2144,21 @@ export async function getEffortFiles(effortId: string): Promise<SnapshotSummary 
   ) as unknown as SnapshotSummary | null;
 }
 
+/** One agent turn by id (`trn<N>`) — its start and end snapshots, for
+ *  the turn page's diff. `null` when the id is unknown. */
+export async function getAgentTurn(
+  turnId: string,
+): Promise<{ id: string; startSnapshotId: number | null; snapshotId: number | null } | null> {
+  const row = unwrap(await commands.getAgentTurn(turnId)) as unknown as {
+    id: string;
+    start_snapshot_id: number | null;
+    snapshot_id: number | null;
+  } | null;
+  return row
+    ? { id: row.id, startSnapshotId: row.start_snapshot_id, snapshotId: row.snapshot_id }
+    : null;
+}
+
 /** One effort by id — its snapshot bracket + task id, so the diff view
  *  can resolve `effortDiffRef(effortId)` into (start, end) endpoints.
  *  `null` when the id is unknown. */

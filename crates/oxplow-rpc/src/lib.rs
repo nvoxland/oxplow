@@ -268,6 +268,7 @@ macro_rules! oxplow_command_table {
                 list_hook_events => $crate::commands::hooks::list_hook_events { thread_id: Option<::oxplow_domain::ThreadId>, limit: Option<usize> } -> Vec<::oxplow_domain::HookEvent>,
                 list_agent_statuses => $crate::commands::hooks::list_agent_statuses {} -> Vec<::oxplow_domain::AgentStatus>,
                 list_open_agent_turns => $crate::commands::hooks::list_open_agent_turns { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_domain::AgentTurn>,
+                get_agent_turn => $crate::commands::hooks::get_agent_turn { turn_id: ::oxplow_domain::AgentTurnId } -> Option<::oxplow_domain::AgentTurn>,
                 // wiki
                 list_wiki_pages => $crate::commands::wiki::list_wiki_pages {} -> Vec<::oxplow_db::WikiPage>,
                 upsert_wiki_page => $crate::commands::wiki::upsert_wiki_page { note: ::oxplow_db::WikiPage } -> (),

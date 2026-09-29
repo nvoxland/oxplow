@@ -66,6 +66,10 @@ export function pageKindIconComponent(kind: string): LucideIcon | null {
       return Folder;
     case "diff":
     case "diff-view":
+    // A snapshot, an effort and a turn open as their diff (P2.11).
+    case "snapshot":
+    case "effort":
+    case "turn":
       return GitCompare;
     case "duplicate-block":
       return Copy;
