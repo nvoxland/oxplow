@@ -19,8 +19,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use std::sync::Arc;
+
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, Envelope, EventId, StoredEvent, StreamId, ThreadId, Timestamp,
+    Anchors, DomainError, EffortId, Envelope, EventId, EventSchemaRegistry, StoredEvent, StreamId,
+    ThreadId, Timestamp,
 };
 
 use crate::database::{canonical_ts, map_sql_err, Database};
@@ -35,11 +38,17 @@ fn string_to_ts(s: &str) -> Result<Timestamp, DomainError> {
         .map_err(|e| DomainError::Invalid(format!("bad timestamp: {e}")))
 }
 
-/// Append one envelope. Returns its `seq`. A duplicate `dedupe_key` (or
-/// `id`) fails with [`DomainError::Constraint`] and writes nothing, which
-/// is what lets an at-least-once producer retry blindly.
-pub fn append_tx(conn: &Connection, env: &Envelope) -> Result<i64, DomainError> {
-    oxplow_domain::events::validate_type_name(&env.event_type)?;
+/// Append one envelope. Returns its `seq`. The payload must validate
+/// against the registered schema for `type@v` ([`DomainError::Invalid`]
+/// otherwise, nothing written). A duplicate `dedupe_key` (or `id`) fails
+/// with [`DomainError::Constraint`] and writes nothing, which is what lets
+/// an at-least-once producer retry blindly.
+pub fn append_tx(
+    conn: &Connection,
+    schemas: &EventSchemaRegistry,
+    env: &Envelope,
+) -> Result<i64, DomainError> {
+    schemas.validate_envelope(env)?;
     let subject = serde_json::to_string(&env.subject)
         .map_err(|e| DomainError::Invalid(format!("subject: {e}")))?;
     let payload = serde_json::to_string(&env.payload)
@@ -254,17 +263,27 @@ pub fn list_dead_letters_tx(conn: &Connection, all: bool) -> Result<Vec<DeadLett
 #[derive(Clone)]
 pub struct SqliteEventLogStore {
     db: Database,
+    schemas: Arc<EventSchemaRegistry>,
 }
 
 impl SqliteEventLogStore {
-    pub fn new(db: Database) -> Self {
-        Self { db }
+    pub fn new(db: Database, schemas: Arc<EventSchemaRegistry>) -> Self {
+        Self { db, schemas }
+    }
+
+    /// The registry `append` validates against; producers composing
+    /// [`append_tx`] into their own transaction take it from here.
+    pub fn schemas(&self) -> &Arc<EventSchemaRegistry> {
+        &self.schemas
     }
 
     /// Append in a transaction of its own. For activity that has no
     /// state write of its own (an agent tool call, a lens view).
     pub async fn append(&self, env: Envelope) -> Result<i64, DomainError> {
-        self.db.transaction(move |tx| append_tx(tx, &env)).await
+        let schemas = self.schemas.clone();
+        self.db
+            .transaction(move |tx| append_tx(tx, &schemas, &env))
+            .await
     }
 
     pub async fn read_after(
@@ -320,10 +339,31 @@ impl SqliteEventLogStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use oxplow_domain::events::schema::{
+        ActorKind, CommandExecuted, CommandExecutedV1, CommandOutcome, ConfigChanged,
+        ConfigChangedV1, WorkItemTransitioned, WorkItemTransitionedV1,
+    };
+    use oxplow_domain::TaskStatus;
+    use serde_json::{json, Value};
 
-    fn env(kind: &str, key: Option<&str>) -> Envelope {
-        let e = Envelope::new(kind, 1, "test", json!({"n": 1})).unwrap();
+    fn schemas() -> Arc<EventSchemaRegistry> {
+        Arc::new(EventSchemaRegistry::core())
+    }
+
+    fn store(db: &Database) -> SqliteEventLogStore {
+        SqliteEventLogStore::new(db.clone(), schemas())
+    }
+
+    /// A valid `config.changed@1` envelope, optionally with a dedupe key.
+    fn env(key: Option<&str>) -> Envelope {
+        let e = Envelope::typed::<ConfigChanged>(
+            "test",
+            &ConfigChangedV1 {
+                key: "zones".into(),
+                before: Value::Null,
+                after: json!([]),
+            },
+        );
         match key {
             Some(k) => e.with_dedupe_key(k),
             None => e,
@@ -333,10 +373,11 @@ mod tests {
     #[tokio::test]
     async fn append_inside_a_rolled_back_transaction_leaves_no_row() {
         let db = Database::in_memory();
-        let store = SqliteEventLogStore::new(db.clone());
+        let store = store(&db);
+        let schemas = schemas();
         let res = db
-            .transaction(|tx| {
-                append_tx(tx, &env("work_item.transitioned", None))?;
+            .transaction(move |tx| {
+                append_tx(tx, &schemas, &env(None))?;
                 Err::<(), _>(DomainError::Invariant("boom".into()))
             })
             .await;
@@ -347,19 +388,39 @@ mod tests {
     #[tokio::test]
     async fn append_commits_with_the_state_change_and_reads_back_in_order() {
         let db = Database::in_memory();
-        let store = SqliteEventLogStore::new(db.clone());
-        let e1 = env("work_item.transitioned", Some("k1"))
-            .with_anchors(Anchors {
-                stream_id: Some(StreamId::new(3)),
-                thread_id: Some(ThreadId::new(4)),
-                ..Anchors::default()
-            })
-            .with_subject(["work_item:oxplow:tsk4", "effort:eff9"]);
-        let e2 = env("command.executed", None).with_cause(e1.id.clone());
+        let store = store(&db);
+        let e1 = Envelope::typed::<WorkItemTransitioned>(
+            "human",
+            &WorkItemTransitionedV1 {
+                work_item: "work_item:oxplow:tsk4".into(),
+                from: TaskStatus::Ready,
+                to: TaskStatus::InProgress,
+                effort: Some("effort:eff9".into()),
+            },
+        )
+        .with_dedupe_key("k1")
+        .with_anchors(Anchors {
+            stream_id: Some(StreamId::new(3)),
+            thread_id: Some(ThreadId::new(4)),
+            ..Anchors::default()
+        })
+        .with_subject(["work_item:oxplow:tsk4", "effort:eff9"]);
+        let e2 = Envelope::typed::<CommandExecuted>(
+            "agent:thr4",
+            &CommandExecutedV1 {
+                command: "work_item.transition".into(),
+                actor_kind: ActorKind::Agent,
+                actor_id: Some("thr4".into()),
+                outcome: CommandOutcome::Ok,
+                audit_id: 1,
+                undoable: true,
+            },
+        )
+        .with_cause(e1.id.clone());
         let (s1, s2) = db
             .transaction({
-                let (e1, e2) = (e1.clone(), e2.clone());
-                move |tx| Ok((append_tx(tx, &e1)?, append_tx(tx, &e2)?))
+                let (e1, e2, schemas) = (e1.clone(), e2.clone(), schemas());
+                move |tx| Ok((append_tx(tx, &schemas, &e1)?, append_tx(tx, &schemas, &e2)?))
             })
             .await
             .unwrap();
@@ -393,39 +454,36 @@ mod tests {
     #[tokio::test]
     async fn a_duplicate_dedupe_key_is_a_constraint_error_and_writes_nothing() {
         let db = Database::in_memory();
-        let store = SqliteEventLogStore::new(db.clone());
-        store
-            .append(env("effort.opened", Some("same")))
-            .await
-            .unwrap();
-        let err = store
-            .append(env("effort.opened", Some("same")))
-            .await
-            .unwrap_err();
+        let store = store(&db);
+        store.append(env(Some("same"))).await.unwrap();
+        let err = store.append(env(Some("same"))).await.unwrap_err();
         assert!(matches!(err, DomainError::Constraint(_)), "{err:?}");
         assert_eq!(store.read_after(0, 10).await.unwrap().len(), 1);
         // No key → no dedupe.
-        store.append(env("effort.opened", None)).await.unwrap();
-        store.append(env("effort.opened", None)).await.unwrap();
+        store.append(env(None)).await.unwrap();
+        store.append(env(None)).await.unwrap();
         assert_eq!(store.read_after(0, 10).await.unwrap().len(), 3);
     }
 
     #[tokio::test]
-    async fn a_malformed_type_name_is_rejected_before_the_write() {
+    async fn an_unregistered_type_or_invalid_payload_is_refused_before_the_write() {
         let db = Database::in_memory();
-        let mut e = env("effort.opened", None);
-        e.event_type = "Opened".into();
-        let err = SqliteEventLogStore::new(db.clone())
-            .append(e)
-            .await
-            .unwrap_err();
+        let store = store(&db);
+        let mut unknown = env(None);
+        unknown.event_type = "effort.opened".into();
+        let err = store.append(unknown).await.unwrap_err();
         assert!(matches!(err, DomainError::Invalid(_)), "{err:?}");
+        let mut bad = env(None);
+        bad.payload = json!({"n": 1});
+        let err = store.append(bad).await.unwrap_err();
+        assert!(matches!(err, DomainError::Invalid(_)), "{err:?}");
+        assert!(store.read_after(0, 10).await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn checkpoints_start_at_zero_and_upsert() {
         let db = Database::in_memory();
-        let store = SqliteEventLogStore::new(db);
+        let store = store(&db);
         assert_eq!(store.checkpoint("page_ref".into()).await.unwrap(), 0);
         store.set_checkpoint("page_ref".into(), 5).await.unwrap();
         store.set_checkpoint("page_ref".into(), 9).await.unwrap();
@@ -436,8 +494,8 @@ mod tests {
     #[tokio::test]
     async fn dead_letters_park_repeat_and_resolve() {
         let db = Database::in_memory();
-        let store = SqliteEventLogStore::new(db);
-        let seq = store.append(env("effort.opened", None)).await.unwrap();
+        let store = store(&db);
+        let seq = store.append(env(None)).await.unwrap();
         store
             .dead_letter("c".into(), seq, "first".into())
             .await

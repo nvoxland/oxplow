@@ -4,8 +4,10 @@
 //! state changes and is written in the **same transaction** as the
 //! change (the outbox pattern), so the two never disagree. This module
 //! is the envelope only — pure data, no IO. Persistence lives in
-//! `oxplow_db::event_log_store`; the per-type payload schemas and the
-//! delivery pump are later P1 steps.
+//! `oxplow_db::event_log_store`; the per-type payload schemas live in
+//! [`schema`]; the delivery pump is a later P1 step.
+
+pub mod schema;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

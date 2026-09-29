@@ -89,6 +89,9 @@ tracing-appender = "0.2"
 
 # IDs / time
 uuid = { version = "1.26", features = ["v4", "v7", "serde"] }
+
+# Schemas
+schemars = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # DB

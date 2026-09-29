@@ -24,6 +24,7 @@ pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
 };
 pub use error::DomainError;
+pub use events::schema::{EventSchemaRegistry, EventType};
 pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 pub use ids::{

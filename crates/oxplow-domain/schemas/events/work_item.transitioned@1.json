@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "TaskStatus": {
+      "enum": [
+        "ready",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled",
+        "archived"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`work_item.transitioned@1`: a task changed status.",
+  "properties": {
+    "effort": {
+      "description": "The effort this transition opened or closed, when it did either.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "from": {
+      "$ref": "#/$defs/TaskStatus"
+    },
+    "to": {
+      "$ref": "#/$defs/TaskStatus"
+    },
+    "work_item": {
+      "description": "The task's canonical ref (`work_item:oxplow:tsk42`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "work_item",
+    "from",
+    "to"
+  ],
+  "title": "WorkItemTransitionedV1",
+  "type": "object"
+}

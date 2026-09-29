@@ -959,7 +959,7 @@ time), `type` (`namespace.name`, snake_case, validated on append), `v`
 `system:snapshot_capture`), `anchors` (nullable stream / thread / effort
 / turn / snapshot columns, so per-anchor timelines are indexed range
 scans), `subject` (JSON array of canonical refs), `payload` (JSON;
-validated against `type@v` from P1.5), `payload_hash` (reserved for
+validated against `type@v`'s schema on append), `payload_hash` (reserved for
 forgettable bodies stored by content hash), `cause`, `dedupe_key`
 (UNIQUE — the emitter derives it from the occurrence, so an at-least-once
 producer's second append fails with `Constraint` and writes nothing).
@@ -968,8 +968,32 @@ producer's second append fails with `Constraint` and writes nothing).
 These are the schema's first **STRICT** tables; every later spine table
 is STRICT too.
 
-**The contract is `append_tx(&Connection, &Envelope) -> seq`**, composed
-inside the producer's `Database::transaction` closure. The async
+**Schemas (P1.5, tsk407).** `oxplow_domain::events::schema` has one
+Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
+upcast }`) and `EventSchemaRegistry`, which holds every type the log
+accepts. `Services.event_schemas` is `EventSchemaRegistry::core()`
+(`work_item.transitioned@1`, `command.executed@1`, `config.changed@1`,
+`effect.result@1`); plugin types join it via `register_plugin(plugin)`
+when manifests load (P1.11) and may only use the plugin's own name as
+namespace — never a core namespace (`CORE_NAMESPACES`, §5.3). `append_tx`
+refuses an unregistered `type@v` or a payload that fails its schema
+(`DomainError::Invalid`, naming the JSON path) before writing. Core
+producers build envelopes with `Envelope::typed::<T>(source, &payload)`
+so the shape is checked by the compiler too.
+
+**Golden schemas.** Each core `type@v`'s JSON Schema is checked in at
+`crates/oxplow-domain/schemas/events/<type>@<v>.json`;
+`tests/event_schemas.rs` regenerates it from the Rust type and fails on
+any difference. A published event shape is a contract, so a change is a
+new version — `V + 1` with an `upcast` from the old shape — never an edit
+of the old file. `OXPLOW_BLESS=1` writes a golden for a type that has
+never shipped. Every `type@v` also has an example payload at
+`tests/fixtures/events/<type>@<v>.json`; the test validates each at its
+own version and, upcast through the chain (`upcast_to_latest`), at the
+newest, so a consumer only ever reads the newest shape.
+
+**The contract is `append_tx(&Connection, &EventSchemaRegistry, &Envelope)
+-> seq`**, composed inside the producer's `Database::transaction` closure. The async
 `SqliteEventLogStore::append` opens a transaction of its own and is for
 activity with no state write (a tool call, a lens view). Reads:
 `read_after_tx(after_seq, limit)` (oldest first — the pump's cursor),

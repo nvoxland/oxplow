@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effect.result@1`: the recorded outcome of a side effect (§5.3).\nShape only in P1; the effects runtime that emits it is later.",
+  "properties": {
+    "detail": {
+      "default": null,
+      "description": "Effect-specific detail, opaque to the log."
+    },
+    "effect": {
+      "description": "The effect's name (`notify.desktop`, `git.push`).",
+      "type": "string"
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "target": {
+      "description": "The canonical ref the effect acted on, when it had one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "effect",
+    "ok"
+  ],
+  "title": "EffectResultV1",
+  "type": "object"
+}

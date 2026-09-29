@@ -1,0 +1,7 @@
+{
+  "effect": "notify.desktop",
+  "target": "work_item:oxplow:tsk42",
+  "ok": false,
+  "error": "notification center unavailable",
+  "detail": { "attempt": 2 }
+}

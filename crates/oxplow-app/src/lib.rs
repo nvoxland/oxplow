@@ -130,6 +130,7 @@ use oxplow_db::{
     SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
+use oxplow_domain::EventSchemaRegistry;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
 #[derive(Debug, Error)]
@@ -395,6 +396,9 @@ pub struct Services {
     /// append inside their own transaction via `event_log_store::append_tx`;
     /// this handle is for reads and the pump.
     pub event_log_store: Arc<SqliteEventLogStore>,
+    /// Every event `type@v` the log accepts, with its schema. Core types
+    /// at boot; plugin types join when their manifests load.
+    pub event_schemas: Arc<EventSchemaRegistry>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -572,7 +576,8 @@ impl Services {
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone()));
+        let event_schemas = Arc::new(EventSchemaRegistry::core());
+        let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), event_schemas.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
@@ -792,6 +797,7 @@ impl Services {
             work_note_store,
             task_link_store,
             event_log_store,
+            event_schemas,
             wiki_page_store,
             page_visit_store,
             usage_store,

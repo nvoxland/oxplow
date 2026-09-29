@@ -10,7 +10,9 @@ use specta::Type;
 use crate::ids::{TaskId, TaskLinkId, ThreadId};
 use crate::time::Timestamp;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Ready,

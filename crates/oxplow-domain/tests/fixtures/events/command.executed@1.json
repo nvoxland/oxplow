@@ -1,0 +1,8 @@
+{
+  "command": "config.set",
+  "actor_kind": "agent",
+  "actor_id": "thr3",
+  "outcome": "ok",
+  "audit_id": 12,
+  "undoable": true
+}
