@@ -973,8 +973,9 @@ Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
 accepts. `Services.event_schemas` is `EventSchemaRegistry::core()`
 (`work_item.transitioned@1`, `command.executed@1`, `config.changed@1`,
-`effect.result@1`); plugin types join it via `register_plugin(plugin)`
-when manifests load (P1.11) and may only use the plugin's own name as
+`effect.result@1`); plugin types will join it via `register_plugin(plugin)`
+once plugin `event_types` run (today the manifest parses and
+lifecycle-checks them only) and may only use the plugin's own name as
 namespace — never a core namespace (`CORE_NAMESPACES`, §5.3). `append_tx`
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
@@ -1041,7 +1042,9 @@ inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 as the status flip and the effort open/finish — subject
 `work_item:oxplow:tskN` (+ `effort:effN`), anchors `thread`/`effort`,
 payload `{ work_item, from, to, effort? }`, source `task_service` (the
-command bus supplies the real actor in P1.8). A same-status re-issue logs
+actor is on the `command.executed` event and the `command_audit` row the
+bus writes alongside; the domain event's `source` names the actor once
+`work_item.transition` becomes a `Tx` handler). A same-status re-issue logs
 nothing; a failed transition rolls the row back with the rest. It sets
 no dedupe key: a transactional producer's retry has already rolled back,
 so keys are for at-least-once producers. `TaskService` keeps its

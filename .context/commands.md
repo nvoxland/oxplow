@@ -3,9 +3,9 @@
 What this doc covers: the command bus — what a command declares, who
 may run it, the pipeline every run goes through, the audit and undo,
 and how a new command is added. Target design:
-[target-architecture.md](./target-architecture.md) §7. Built in P1.8
-(tsk410); the generic MCP surface (`list_commands` / `run_command`)
-and `config.*` follow in P1.9–P1.10.
+[target-architecture.md](./target-architecture.md) §7. Built in
+P1.8–P1.10 (tsk410–412): the bus, `config.*`, and the generic MCP
+surface (`list_commands` / `run_command`) with caller identity.
 
 ## What a command is
 
@@ -79,7 +79,7 @@ to `RawConfig` makes it managed, documented and settable at once.
 `set_zones` is gone (tsk392): `zones` is just a key.
 
 `CommandBus::list(actor)` is the specs that actor may run —
-`list_commands` for the agent (P1.10), the launcher for the human.
+`list_commands` for the agent, the launcher for the human.
 
 ## `Tx` vs `BestEffort`
 
@@ -102,7 +102,8 @@ spec's `atomicity` is refused, as is a second command of the same name.
 | `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`), write the file, swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `lsp`, `collection`, `extensions` — each runs a program, picks the model, or enables code) needs a person's confirmation per input |
 
 **Callers.** MCP `transition_tasks` runs one `work_item.transition` per
-id as `Actor::Agent` (thread identity arrives in P1.10); RPC
+id as `Actor::Agent` with the caller's thread and stream (`McpCaller`,
+read from the request headers or query — see "MCP identity"); RPC
 `update_task` routes a status-only change through the bus as
 `Actor::Human` and applies any other field change directly.
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):

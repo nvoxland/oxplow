@@ -7,6 +7,17 @@ For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
 
+**First: is it a command?** Every write a person, agent or lens can
+invoke is a command on the bus ([commands.md](./commands.md)): the
+handler is layer 3 below, and the bus adds validation, policy,
+confirmation, audit, undo and the `command.executed` event, so the
+RPC/MCP layers become thin callers of `CommandBus::run`. A write that
+must log a domain event appends it with `append_tx` in the same
+transaction as the state change ([data-model.md](./data-model.md)
+"event_log"); the in-memory `EventBus` broadcast stays the post-commit
+wake-up for the UI and the pump. A new write path that bypasses the bus
+needs a reason recorded here.
+
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
 

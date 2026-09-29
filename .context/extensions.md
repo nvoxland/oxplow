@@ -32,6 +32,10 @@ the bundled `oxplow-analytics` example extension.
 > - **Current:** extension-declared dimensions (tsk328).
 > - **Current:** lens action buttons (tsk329) and the `settings` slot
 >   (tsk330).
+> - **Current (P1, 2026-09-28/29):** manifest v2 with `intent`,
+>   `sharing` and the stable/experimental split (tsk413), the textual
+>   v1→v2 migrator (tsk414), the per-root catalog cache (tsk415, tsk390) and
+>   the SDK: `oxplow plugin new|check|migrate` (tsk416; "The SDK").
 >
 > When a piece ships, move it from "target" to "current" here, in the
 > same commit.
@@ -221,7 +225,8 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     - `save_lens` refuses to write into a bundled extension.
 - **Slots (current: `effort-review`, `task-detail`, `thread`, `commit`,
   `uncommitted`).**
-  - `extension.yaml` declares `slots: [{slot, lens}]`. `SLOTS` in
+  - `extension.yaml` declares `slot_mounts: [{slot, lens}]` (v1:
+    `slots`). `SLOTS` in
     `extensions.rs` names each slot and the params it **offers**; a
     mounted lens gets the ones it declares and must declare at least one,
     or the mount is an error. Loaded as `Extension.slots`.
