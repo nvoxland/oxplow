@@ -67,9 +67,10 @@ status flip and effort open/finish commit in one transaction
 unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
 double-open a `Constraint` error; and boot recovery
 (`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
-Snapshot pins are backfilled after commit (`set_start_snapshot` /
-`set_end_snapshot`) — an effort row is never gated on snapshot
-success.
+Snapshot pins are taken after commit by the effort-lifecycle consumer
+on the event pump (`set_start_snapshot` / `set_end_snapshot`; see
+"event_log" → async consumers) — an effort row is never gated on
+snapshot success, and a crash between the two is resumed, not lost.
 
 **Error typing.** Store failures surface as typed `DomainError`
 variants, not stringified blobs: `map_sql_err`
@@ -663,7 +664,7 @@ and `effort.end_snapshot_id`, each pointing at a `snapshot.id`.
 A closed effort's `end_snapshot_id` is non-null whenever the effort has
 a baseline — capture de-dupes an unchanged tree to the latest existing
 snapshot id rather than writing a near-identical row, and on a no-op
-close `backfill_effort_snapshot` falls back to the effort's
+close the effort-lifecycle consumer (`TaskService::on_effort_closed`) falls back to the effort's
 `start_snapshot_id`. `end_snapshot_id` is null only while the effort is
 open (`end_snapshot_id` null ⇔ effort in progress); there is no
 time-based gap.
@@ -1132,7 +1133,35 @@ producers call after their commit — or every 5s); `TaskService` wakes it
 after a transition. A handler error that is retryable (`DomainError::
 Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
-(tsk437 review). Letters are `pending | retried | discarded`; the
+(tsk437 review).
+
+**Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
+handles(type), async handle(&StoredEvent) }` is for work that can't run
+in a SQLite transaction (take a snapshot, call a service). The pump runs
+the handler outside any transaction — on its own task, so a panic is a
+failure — and checkpoints in a transaction after it returns: a crash
+mid-work re-delivers, so handlers must be idempotent. `Busy` leaves the
+checkpoint (the next run retries; later events for that consumer wait
+behind it, `PumpReport.deferred`); any other failure or a panic is a dead
+letter plus checkpoint, and `retry_dead_letter` re-runs the async handler.
+Registered with `register_async` after the services they drive exist; one
+run at a time (a `run_lock`). `EventPump::settle(timeout)` spawns a run and
+waits for it, for callers whose answer needs a consumer's effect.
+
+The one async consumer so far is **`effort.lifecycle`**
+(`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
+`effort.closed`: `TaskService::on_effort_opened` waits for the startup
+sweep, takes the `effort_start` snapshot and pins it (skipped when already
+pinned or already closed); `on_effort_closed` takes and pins the
+`effort_end` snapshot (falling back to the start pin), reconciles
+unclaimed files and runs, projects the lifecycle metrics, then emits the
+in-memory `EffortFinished`. A `retroactive` effort (recorded by
+`record_effort_atomic` for an item never opened) gets only the metrics.
+`TaskService::update` / `create` / the record path call `settle` (30s) so
+`complete_task`'s file review sees the end pin; the consumer holds
+`TaskService::without_event_pump()` so there's no reference cycle.
+Recovery's opens and closes now get pins, metrics and `EffortFinished`
+too, since they log the same events. Letters are `pending | retried | discarded`; the
 person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
 the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**

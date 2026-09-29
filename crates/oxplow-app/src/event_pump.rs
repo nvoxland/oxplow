@@ -11,6 +11,21 @@
 //! stalls the pump, and nothing is skipped silently — a person retries
 //! or discards the letter (`retry_dead_letter` / `discard_dead_letter`).
 //!
+//! **Async consumers** (P2.6.2, tsk454) do work that can't live in a
+//! SQLite transaction — take a snapshot, call a service. The pump runs the
+//! handler outside any transaction and checkpoints only after it returns,
+//! so a crash mid-work re-delivers the event on the next run: an async
+//! handler must be idempotent. A `Busy` failure leaves the checkpoint
+//! where it is (the event is retried on the next run, and later events for
+//! that consumer wait behind it); any other failure or a panic parks the
+//! event as a dead letter and moves on, like the sync kind.
+//!
+//! [`EventPump::settle`] runs the pump now and waits (bounded) for it — a
+//! caller whose answer depends on a consumer's effect (`complete_task`'s
+//! file review needs the effort's end snapshot) settles instead of
+//! re-implementing the effect inline. One run at a time: the loop and a
+//! settle never deliver the same event concurrently.
+//!
 //! **Waking.** Producers call [`EventPump::wake`] after their transaction
 //! commits (the in-memory `OxplowEvent` broadcast is the UI's wake-up;
 //! this is the pump's). The loop also runs on boot and on a slow timer,
@@ -26,6 +41,17 @@ use oxplow_db::event_log_store::{
 use oxplow_db::Database;
 use oxplow_domain::{DomainError, StoredEvent};
 use tokio::sync::Notify;
+
+/// A consumer whose work runs outside the pump's transaction (see the
+/// module docs). `handle` must be idempotent: it is re-run after a crash
+/// between the work and the checkpoint.
+#[async_trait::async_trait]
+pub trait AsyncEventConsumer: Send + Sync {
+    /// Stable name, keying the checkpoint and dead letters.
+    fn name(&self) -> &'static str;
+    fn handles(&self, event_type: &str) -> bool;
+    async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError>;
+}
 
 /// Something that reacts to events: a projection, an ingester, an effect.
 pub trait EventConsumer: Send + Sync {
@@ -49,12 +75,17 @@ pub struct PumpReport {
     pub handled: usize,
     pub skipped: usize,
     pub dead_lettered: usize,
+    /// Async deliveries that failed transiently and wait for the next run.
+    pub deferred: usize,
 }
 
 pub struct EventPump {
     db: Database,
     log: SqliteEventLogStore,
     consumers: Vec<Arc<dyn EventConsumer>>,
+    async_consumers: parking_lot::RwLock<Vec<Arc<dyn AsyncEventConsumer>>>,
+    /// One delivery run at a time (the loop, `settle`, a manual run).
+    run_lock: tokio::sync::Mutex<()>,
     notify: Notify,
     batch: usize,
 }
@@ -72,8 +103,42 @@ impl EventPump {
             db,
             log,
             consumers,
+            async_consumers: parking_lot::RwLock::new(Vec::new()),
+            run_lock: tokio::sync::Mutex::new(()),
             notify: Notify::new(),
             batch: 64,
+        }
+    }
+
+    /// Add an async consumer. Services registers them once the services
+    /// they drive exist, before the loop is spawned.
+    pub fn register_async(&self, consumer: Arc<dyn AsyncEventConsumer>) {
+        self.async_consumers.write().push(consumer);
+    }
+
+    fn async_consumers(&self) -> Vec<Arc<dyn AsyncEventConsumer>> {
+        self.async_consumers.read().clone()
+    }
+
+    /// Run the pump now and wait up to `timeout` for it to catch up.
+    /// `true` when everything outstanding was delivered (handled or
+    /// parked); `false` on timeout, a run error, or a deferred delivery —
+    /// the work then finishes on a later run. The run is spawned, so a
+    /// timeout abandons the wait, never the work.
+    pub async fn settle(self: &Arc<Self>, timeout: Duration) -> bool {
+        let pump = self.clone();
+        let run = tokio::spawn(async move { pump.run_once().await });
+        match tokio::time::timeout(timeout, run).await {
+            Ok(Ok(Ok(report))) => report.deferred == 0,
+            Ok(Ok(Err(err))) => {
+                tracing::warn!(error = %err, "event pump: settle run failed");
+                false
+            }
+            Ok(Err(join)) => {
+                tracing::warn!(error = %join, "event pump: settle run panicked");
+                false
+            }
+            Err(_) => false,
         }
     }
 
@@ -89,6 +154,7 @@ impl EventPump {
 
     /// Run every consumer until each has caught up with the log.
     pub async fn run_once(&self) -> Result<PumpReport, DomainError> {
+        let _one_run = self.run_lock.lock().await;
         let mut report = PumpReport::default();
         for consumer in &self.consumers {
             loop {
@@ -102,11 +168,71 @@ impl EventPump {
                         Delivery::Handled => report.handled += 1,
                         Delivery::Skipped => report.skipped += 1,
                         Delivery::DeadLettered => report.dead_lettered += 1,
+                        Delivery::Deferred => report.deferred += 1,
+                    }
+                }
+            }
+        }
+        for consumer in self.async_consumers() {
+            'consumer: loop {
+                let cp = self.log.checkpoint(consumer.name().to_string()).await?;
+                let events = self.log.read_after(cp, self.batch).await?;
+                if events.is_empty() {
+                    break;
+                }
+                for event in events {
+                    match self
+                        .deliver_async(consumer.clone(), Arc::new(event))
+                        .await?
+                    {
+                        Delivery::Handled => report.handled += 1,
+                        Delivery::Skipped => report.skipped += 1,
+                        Delivery::DeadLettered => report.dead_lettered += 1,
+                        Delivery::Deferred => {
+                            // Later events wait behind this one (per-consumer
+                            // order); the next run tries it again.
+                            report.deferred += 1;
+                            break 'consumer;
+                        }
                     }
                 }
             }
         }
         Ok(report)
+    }
+
+    /// One event to one async consumer: the handler outside any
+    /// transaction, then the checkpoint (and, on a permanent failure, the
+    /// dead letter) in one transaction after it returns.
+    async fn deliver_async(
+        &self,
+        consumer: Arc<dyn AsyncEventConsumer>,
+        event: Arc<StoredEvent>,
+    ) -> Result<Delivery, DomainError> {
+        let name = consumer.name();
+        let seq = event.seq;
+        let outcome = if consumer.handles(&event.envelope.event_type) {
+            match run_async_handler(consumer, event).await {
+                Ok(()) => Delivery::Handled,
+                Err(err) if err.is_retryable() => return Ok(Delivery::Deferred),
+                Err(err) => {
+                    let message = err.to_string();
+                    self.db
+                        .transaction(move |tx| {
+                            dead_letter_tx(tx, name, seq, &message)?;
+                            set_checkpoint_tx(tx, name, seq)
+                        })
+                        .await?;
+                    return Ok(Delivery::DeadLettered);
+                }
+            }
+        } else {
+            Delivery::Skipped
+        };
+        self.db
+            .transaction(move |tx| set_checkpoint_tx(tx, name, seq))
+            .await?;
+        Ok(outcome)
     }
 
     /// One event to one consumer: handler (under a savepoint) and
@@ -153,6 +279,15 @@ impl EventPump {
                 letter.state
             )));
         }
+        if let Some(consumer) = self
+            .async_consumers()
+            .into_iter()
+            .find(|c| c.name() == letter.consumer)
+        {
+            return self
+                .retry_async_letter(consumer, id, letter.event_seq)
+                .await;
+        }
         let consumer = self
             .consumers
             .iter()
@@ -174,6 +309,28 @@ impl EventPump {
                     Ok(()) => set_dead_letter_state_tx(tx, id, "retried"),
                     Err(err) => dead_letter_tx(tx, consumer.name(), seq, &err.to_string()),
                 }
+            })
+            .await?;
+        self.find_letter(id).await
+    }
+
+    async fn retry_async_letter(
+        &self,
+        consumer: Arc<dyn AsyncEventConsumer>,
+        id: i64,
+        seq: i64,
+    ) -> Result<DeadLetter, DomainError> {
+        let event = self
+            .db
+            .transaction(move |tx| event_by_seq_tx(tx, seq))
+            .await?
+            .ok_or(DomainError::NotFound)?;
+        let name = consumer.name();
+        let result = run_async_handler(consumer, Arc::new(event)).await;
+        self.db
+            .transaction(move |tx| match &result {
+                Ok(()) => set_dead_letter_state_tx(tx, id, "retried"),
+                Err(err) => dead_letter_tx(tx, name, seq, &err.to_string()),
             })
             .await?;
         self.find_letter(id).await
@@ -229,6 +386,30 @@ enum Delivery {
     Handled,
     Skipped,
     DeadLettered,
+    /// Async only: a transient failure; the checkpoint didn't move.
+    Deferred,
+}
+
+/// An async handler on its own task, so a panic is a failure the pump
+/// parks rather than one that takes the loop down.
+async fn run_async_handler(
+    consumer: Arc<dyn AsyncEventConsumer>,
+    event: Arc<StoredEvent>,
+) -> Result<(), DomainError> {
+    match tokio::spawn(async move { consumer.handle(&event).await }).await {
+        Ok(result) => result,
+        Err(join) => {
+            let msg = match join.try_into_panic() {
+                Ok(panic) => panic
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "handler panicked".to_string()),
+                Err(join) => join.to_string(),
+            };
+            Err(DomainError::Invariant(format!("handler panicked: {msg}")))
+        }
+    }
 }
 
 /// The handler under a savepoint, so a failing handler's partial writes
@@ -386,6 +567,133 @@ mod tests {
         .unwrap()
     }
 
+    /// An async consumer (P2.6.2, tsk454): work outside the pump's
+    /// transaction, checkpoint after it completes. Scripted outcomes per
+    /// call; `Ok` once the script runs out.
+    struct AsyncRecorder {
+        seen: Mutex<Vec<String>>,
+        script: Mutex<std::collections::VecDeque<Result<(), DomainError>>>,
+    }
+
+    impl AsyncRecorder {
+        fn new(script: Vec<Result<(), DomainError>>) -> Arc<Self> {
+            Arc::new(Self {
+                seen: Mutex::new(Vec::new()),
+                script: Mutex::new(script.into()),
+            })
+        }
+        fn seen(&self) -> Vec<String> {
+            self.seen.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncEventConsumer for AsyncRecorder {
+        fn name(&self) -> &'static str {
+            "async_rec"
+        }
+        fn handles(&self, event_type: &str) -> bool {
+            event_type == "config.changed"
+        }
+        async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
+            let key = event.envelope.payload["key"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            self.seen.lock().push(key.clone());
+            if key == "panic" {
+                panic!("async boom");
+            }
+            self.script.lock().pop_front().unwrap_or(Ok(()))
+        }
+    }
+
+    fn async_pump(
+        db: &Database,
+        store: &SqliteEventLogStore,
+        consumer: Arc<AsyncRecorder>,
+    ) -> EventPump {
+        let pump = EventPump::new(db.clone(), store.clone(), vec![]);
+        pump.register_async(consumer);
+        pump
+    }
+
+    #[tokio::test]
+    async fn an_async_consumer_checkpoints_after_its_work() {
+        let (db, store) = setup().await;
+        for key in ["a", "b"] {
+            store.append(config_changed(key)).await.unwrap();
+        }
+        let rec = AsyncRecorder::new(vec![]);
+        let pump = async_pump(&db, &store, rec.clone());
+        let report = pump.run_once().await.unwrap();
+        assert_eq!(report.handled, 2);
+        assert_eq!(rec.seen(), vec!["a", "b"]);
+        assert_eq!(store.checkpoint("async_rec".into()).await.unwrap(), 2);
+        // A fresh pump over the same log (a restart) has nothing to redo.
+        let again = AsyncRecorder::new(vec![]);
+        let restarted = async_pump(&db, &store, again.clone());
+        restarted.run_once().await.unwrap();
+        assert!(again.seen().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_async_transient_failure_waits_and_retries_instead_of_parking() {
+        let (db, store) = setup().await;
+        for key in ["a", "b"] {
+            store.append(config_changed(key)).await.unwrap();
+        }
+        let rec = AsyncRecorder::new(vec![Err(DomainError::Busy("locked".into()))]);
+        let pump = async_pump(&db, &store, rec.clone());
+        let first = pump.run_once().await.unwrap();
+        assert_eq!(
+            (first.handled, first.deferred, first.dead_lettered),
+            (0, 1, 0)
+        );
+        assert_eq!(store.checkpoint("async_rec".into()).await.unwrap(), 0);
+        assert!(pump.list_dead_letters(false).await.unwrap().is_empty());
+        // The next run delivers it again, then moves on.
+        let second = pump.run_once().await.unwrap();
+        assert_eq!(second.handled, 2);
+        assert_eq!(rec.seen(), vec!["a", "a", "b"]);
+        assert_eq!(store.checkpoint("async_rec".into()).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_async_permanent_failure_or_panic_is_parked_and_retryable() {
+        let (db, store) = setup().await;
+        for key in ["bad", "panic", "c"] {
+            store.append(config_changed(key)).await.unwrap();
+        }
+        let rec = AsyncRecorder::new(vec![Err(DomainError::Invariant("nope".into()))]);
+        let pump = async_pump(&db, &store, rec.clone());
+        let report = pump.run_once().await.unwrap();
+        assert_eq!((report.handled, report.dead_lettered), (1, 2));
+        assert_eq!(store.checkpoint("async_rec".into()).await.unwrap(), 3);
+        let letters = pump.list_dead_letters(false).await.unwrap();
+        assert_eq!(letters.len(), 2);
+        assert!(letters[0].error.contains("nope"), "{}", letters[0].error);
+        assert!(
+            letters[1].error.contains("async boom"),
+            "{}",
+            letters[1].error
+        );
+        // Retrying the first runs the async handler again; it succeeds now.
+        let retried = pump.retry_dead_letter(letters[0].id).await.unwrap();
+        assert_eq!(retried.state, "retried");
+        assert_eq!(rec.seen(), vec!["bad", "panic", "c", "bad"]);
+    }
+
+    #[tokio::test]
+    async fn settle_delivers_what_is_outstanding_before_returning() {
+        let (db, store) = setup().await;
+        let rec = AsyncRecorder::new(vec![]);
+        let pump = Arc::new(async_pump(&db, &store, rec.clone()));
+        store.append(config_changed("a")).await.unwrap();
+        assert!(pump.settle(std::time::Duration::from_secs(5)).await);
+        assert_eq!(rec.seen(), vec!["a"]);
+    }
+
     #[tokio::test]
     async fn a_poison_event_is_dead_lettered_and_the_pump_moves_on() {
         let (db, store) = setup().await;
@@ -400,7 +708,8 @@ mod tests {
             PumpReport {
                 handled: 2,
                 skipped: 0,
-                dead_lettered: 1
+                dead_lettered: 1,
+                deferred: 0,
             }
         );
         // The failing handler's own write rolled back; the others stuck.

@@ -13,6 +13,10 @@
         "null"
       ]
     },
+    "retroactive": {
+      "description": "Recorded after the fact (attribution for work on an item that was\nnever opened), so there is no bracket to snapshot.",
+      "type": "boolean"
+    },
     "work_item": {
       "type": "string"
     }

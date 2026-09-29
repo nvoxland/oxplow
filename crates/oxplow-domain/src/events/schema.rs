@@ -492,6 +492,10 @@ pub struct EffortOpenedV1 {
     /// `snapshot:N`, when the open already had its start snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_snapshot: Option<String>,
+    /// Recorded after the fact (attribution for work on an item that was
+    /// never opened), so there is no bracket to snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retroactive: bool,
 }
 
 pub struct EffortOpened;
@@ -510,6 +514,10 @@ pub struct EffortClosedV1 {
     /// `snapshot:N`, when the close already had its end snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_snapshot: Option<String>,
+    /// Recorded after the fact (attribution for work on an item that was
+    /// never opened), so there is no bracket to snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retroactive: bool,
 }
 
 pub struct EffortClosed;

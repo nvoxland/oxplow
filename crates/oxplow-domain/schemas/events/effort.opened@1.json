@@ -7,6 +7,10 @@
       "description": "`effort:eff12`.",
       "type": "string"
     },
+    "retroactive": {
+      "description": "Recorded after the fact (attribution for work on an item that was\nnever opened), so there is no bracket to snapshot.",
+      "type": "boolean"
+    },
     "start_snapshot": {
       "description": "`snapshot:N`, when the open already had its start snapshot.",
       "type": [

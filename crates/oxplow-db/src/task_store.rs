@@ -97,6 +97,7 @@ impl SqliteTaskStore {
                     thread,
                     None,
                     Timestamp::now(),
+                    false,
                 )?;
                 Ok((id, effort))
             })
@@ -168,6 +169,7 @@ impl SqliteTaskStore {
                             thread,
                             None,
                             Timestamp::now(),
+                            false,
                         )?)),
                     }
                 } else {
@@ -176,7 +178,9 @@ impl SqliteTaskStore {
                     {
                         Some(open) => {
                             let now = ts_to_string(Timestamp::now());
-                            crate::effort_store::finish_tx(tx, &ev, open.id, None, None, &now)?;
+                            crate::effort_store::finish_tx(
+                                tx, &ev, open.id, None, None, &now, false,
+                            )?;
                             Ok(EffortTransition::Finished(open.id))
                         }
                         None => Ok(EffortTransition::NoOpenEffort),

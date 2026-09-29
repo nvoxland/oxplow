@@ -22,7 +22,7 @@ use thiserror::Error;
 use oxplow_db::SqliteTaskStore;
 use oxplow_db::SqliteThreadStore;
 use oxplow_db::{
-    EffortFileChange, EffortStore, NewFact, NewMetricCapture, SqliteAttributionStore,
+    Effort, EffortFileChange, EffortStore, NewFact, NewMetricCapture, SqliteAttributionStore,
     SqliteEffortStore, SqliteFactStore, SqliteSnapshotStore,
 };
 use oxplow_domain::stores::ThreadStore;
@@ -137,6 +137,10 @@ pub struct TaskService {
     event_pump: Option<Arc<crate::event_pump::EventPump>>,
 }
 
+/// How long a status change waits for the effort-lifecycle consumer (the
+/// `effort_start` / `effort_end` snapshot) before returning anyway.
+const LIFECYCLE_SETTLE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Returns true iff any item in `items` has this id as its parent_id.
 fn is_epic(item: &Task, items: &[Task]) -> bool {
     items.iter().any(|c| c.parent_id == Some(item.id))
@@ -169,6 +173,15 @@ impl TaskService {
     pub fn with_event_pump(mut self, pump: Arc<crate::event_pump::EventPump>) -> Self {
         self.event_pump = Some(pump);
         self
+    }
+
+    /// This service without its pump — what a pump consumer holds, so the
+    /// pump → consumer → service → pump chain isn't a reference cycle.
+    pub fn without_event_pump(&self) -> Self {
+        Self {
+            event_pump: None,
+            ..self.clone()
+        }
     }
 
     /// Attach the attribution ledger so closing an effort reconciles the run
@@ -298,14 +311,9 @@ impl TaskService {
             matches!(item.status, TaskStatus::InProgress) && self.effort_store.is_some();
         match (opens_effort, item.thread_id) {
             (true, Some(thread_id)) => {
-                let (id, effort) = self.store.insert_with_effort(&item, thread_id).await?;
+                let (id, _effort) = self.store.insert_with_effort(&item, thread_id).await?;
                 item.id = id;
-                self.backfill_effort_snapshot(
-                    &item,
-                    true,
-                    oxplow_db::EffortTransition::Opened(effort),
-                )
-                .await;
+                self.settle_lifecycle().await;
             }
             _ => item.id = self.store.insert(&item).await?,
         }
@@ -361,29 +369,15 @@ impl TaskService {
             item.thread_id,
         ) {
             (true, true, Some(thread_id)) => {
-                let transition = self
-                    .store
+                // The effort's snapshot pin, reconciliation, lifecycle
+                // metrics and `EffortFinished` are the effort-lifecycle
+                // consumer's (it reacts to the `effort.opened` / `closed`
+                // this transaction logged); settle so they're done when
+                // this returns.
+                self.store
                     .update_with_effort_transition(&item, thread_id, prior_status)
                     .await?;
-                if let Some(pump) = self.event_pump.as_ref() {
-                    pump.wake();
-                }
-                self.backfill_effort_snapshot(&item, crossed_in, transition)
-                    .await;
-                // Effort just closed: project derived process metrics
-                // (cycle time, efforts-per-task) into the substrate.
-                if let (true, oxplow_db::EffortTransition::Finished(effort_id)) =
-                    (crossed_out, transition)
-                {
-                    self.project_effort_lifecycle_metrics(item.id, &thread_id, &effort_id, false)
-                        .await;
-                    if let Some(events) = self.events.as_ref() {
-                        events.emit(crate::OxplowEvent::EffortFinished {
-                            thread_id,
-                            effort_id: effort_id.value(),
-                        });
-                    }
-                }
+                self.settle_lifecycle().await;
             }
             _ => {
                 self.store.update(&item).await?;
@@ -392,120 +386,126 @@ impl TaskService {
         Ok(item)
     }
 
-    /// Post-commit half of the lifecycle transition: request the
-    /// EffortStart/EffortEnd snapshot and stamp it onto the effort row
-    /// the transaction opened/finished. Best-effort by design — the
-    /// effort row is already durable, so a snapshot failure degrades
-    /// to a missing pin (no bracket diff), never missing attribution.
-    async fn backfill_effort_snapshot(
-        &self,
-        item: &Task,
-        entering: bool,
-        transition: oxplow_db::EffortTransition,
-    ) {
-        let effort_id = match transition {
-            oxplow_db::EffortTransition::Opened(id) | oxplow_db::EffortTransition::Finished(id) => {
-                id
+    /// Run the event pump now and wait (bounded) for the effort-lifecycle
+    /// consumer to take and pin the snapshot a just-committed open/close
+    /// logged, so a caller that reads the effort next (`complete_task`'s
+    /// file review) sees its bracket. On timeout the work finishes on a
+    /// later run; nothing is lost.
+    async fn settle_lifecycle(&self) {
+        if let Some(pump) = self.event_pump.as_ref() {
+            if !pump.settle(LIFECYCLE_SETTLE).await {
+                tracing::debug!("effort lifecycle: pump didn't settle in time; continuing");
             }
-            oxplow_db::EffortTransition::NoOpenEffort => {
-                tracing::debug!(task = %item.id, "effort lifecycle: no open effort to finish");
-                return;
-            }
-        };
+        }
+    }
+
+    /// `effort.opened` (the effort-lifecycle consumer, P2.6.2): take the
+    /// `effort_start` snapshot and pin it. Idempotent: an effort already
+    /// pinned — or already closed, when delivery lagged — is left alone.
+    /// A missing capture service or an empty tree pins nothing.
+    pub(crate) async fn on_effort_opened(&self, effort_id: EffortId) -> Result<(), DomainError> {
         let Some(effort_store) = self.effort_store.as_ref() else {
-            return;
+            return Ok(());
         };
-        let Some(thread_id) = item.thread_id else {
-            return;
+        let Some(effort) = effort_store.get_effort(&effort_id).await? else {
+            return Ok(());
         };
-        let Some(snapshot) = self.service_for_thread(&thread_id).await else {
-            return;
-        };
-        let source = crate::snapshot_capture::TakeRequest {
-            trigger: if entering {
-                oxplow_domain::snapshot::SnapshotTrigger::EffortStart
-            } else {
-                oxplow_domain::snapshot::SnapshotTrigger::EffortEnd
-            },
-            thread_id: Some(thread_id),
-            turn_id: None,
-            effort_id: Some(effort_id),
-            budget: None,
-        };
-        // An effort's start baseline must reflect the full pre-edit tree.
-        // If the initial startup sweep is still in flight, wait for it so
-        // `start_snapshot_id` pins a complete baseline rather than a
-        // half-captured one. No-op once the sweep is done (or for streams
-        // that never sweep).
-        if entering {
-            snapshot.await_initial_ready().await;
+        if effort.start_snapshot_id.is_some() || effort.ended_at.is_some() {
+            return Ok(());
         }
-        let captured = match snapshot.request_snapshot(source).await {
-            Ok(opt) => opt,
-            Err(e) => {
-                tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot failed");
+        let Some(snapshot) = self.service_for_thread(&effort.thread_id).await else {
+            return Ok(());
+        };
+        // An effort's start baseline must reflect the full pre-edit tree:
+        // wait for the startup sweep (a no-op once it's done).
+        snapshot.await_initial_ready().await;
+        let captured = snapshot
+            .request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortStart,
+                thread_id: Some(effort.thread_id),
+                turn_id: None,
+                effort_id: Some(effort_id),
+                budget: None,
+            })
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: start snapshot failed");
                 None
-            }
-        };
-        let snap_id = if entering {
-            // A start pin needs a real captured baseline — there's
-            // nothing to diff an effort against without one.
-            match captured {
-                Some(id) => id,
-                None => return,
-            }
-        } else {
-            // Close: keep the invariant `end_snapshot_id` null ⇔ effort
-            // in progress. When capture yielded nothing (no-op close or
-            // a capture failure), fall back to the effort's own start
-            // snapshot so a closed effort with any baseline is never
-            // end-null (it degrades to an empty-diff effort).
-            let effort_start = effort_store
-                .get_effort(&effort_id)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|e| e.start_snapshot_id);
-            match close_end_snapshot(captured, effort_start) {
-                Some(id) => id,
-                None => return,
-            }
-        };
-        let stamp = if entering {
-            effort_store.set_start_snapshot(&effort_id, snap_id).await
-        } else {
-            effort_store.set_end_snapshot(&effort_id, snap_id).await
-        };
-        if let Err(e) = stamp {
-            tracing::warn!(error = %e, task = %item.id, "effort lifecycle: snapshot backfill failed");
-            return;
+            });
+        if let Some(id) = captured {
+            effort_store.set_start_snapshot(&effort_id, id).await?;
         }
-        // Claim-first reconciliation: on CLOSE (now that the end snapshot
-        // pins the bracket), record any changed-but-not-claimed paths as
-        // unattributed audit residue so an out-of-band close can't leave
-        // parallel/external writes looking like the agent's authored work.
-        // Best-effort; the existing complete_task nudge is unaffected.
-        if !entering {
-            let marked =
-                reconcile_unattributed_on_close(effort_store, snapshot.store(), &effort_id).await;
-            if !marked.is_empty() {
-                tracing::debug!(
-                    task = %item.id,
-                    count = marked.len(),
-                    "effort close: recorded unattributed changes"
-                );
+        Ok(())
+    }
+
+    /// `effort.closed` (the effort-lifecycle consumer, P2.6.2): take and
+    /// pin the `effort_end` snapshot, reconcile unclaimed files and runs,
+    /// project the lifecycle metrics, then tell in-process reactors
+    /// (`EffortFinished`). A retroactive effort (recorded after the fact)
+    /// has no bracket, so it gets the metrics only. Re-delivery re-pins
+    /// nothing (the pin is checked) and re-reconciles idempotently.
+    pub(crate) async fn on_effort_closed(
+        &self,
+        effort_id: EffortId,
+        retroactive: bool,
+    ) -> Result<(), DomainError> {
+        let Some(effort_store) = self.effort_store.as_ref() else {
+            return Ok(());
+        };
+        let Some(effort) = effort_store.get_effort(&effort_id).await? else {
+            return Ok(());
+        };
+        if effort.ended_at.is_none() {
+            return Ok(());
+        }
+        if !retroactive {
+            if let Some(snapshot) = self.service_for_thread(&effort.thread_id).await {
+                if effort.end_snapshot_id.is_none() {
+                    let captured = snapshot
+                        .request_snapshot(crate::snapshot_capture::TakeRequest {
+                            trigger: oxplow_domain::snapshot::SnapshotTrigger::EffortEnd,
+                            thread_id: Some(effort.thread_id),
+                            turn_id: None,
+                            effort_id: Some(effort_id),
+                            budget: None,
+                        })
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, effort = %effort_id, "effort lifecycle: end snapshot failed");
+                            None
+                        });
+                    // Keep "end_snapshot_id null ⇔ effort open": a close
+                    // that captured nothing falls back to the start pin.
+                    if let Some(id) = close_end_snapshot(captured, effort.start_snapshot_id) {
+                        effort_store.set_end_snapshot(&effort_id, id).await?;
+                    }
+                }
+                // Claim-first reconciliation: changed-but-not-claimed paths
+                // become unattributed residue, and so do the concurrent
+                // case's runs (tsk263/tsk269).
+                let marked =
+                    reconcile_unattributed_on_close(effort_store, snapshot.store(), &effort_id)
+                        .await;
+                if !marked.is_empty() {
+                    tracing::debug!(effort = %effort_id, count = marked.len(), "effort close: recorded unattributed changes");
+                }
             }
-            // Reconcile the unified run kind (tsk263/tsk269): every agent-work run
-            // (tests/coverage/analysis) in this effort's window that wasn't
-            // attributed to it (the concurrent case — a parallel effort's, or
-            // another actor's) becomes the close residue for the EFFORT REVIEW.
-            // Single-effort runs were already auto-attributed at record, so their
-            // residue is empty.
             if let (Some(attribution), Some(facts)) = (&self.attribution, &self.fact_store) {
                 let kind = crate::attribution::RunKind::runs(effort_store, facts, attribution);
                 let _ = crate::attribution::reconcile_close(&kind, &effort_id).await;
             }
         }
+        self.project_effort_lifecycle_metrics(&effort, retroactive)
+            .await;
+        if !retroactive {
+            if let Some(events) = self.events.as_ref() {
+                events.emit(crate::OxplowEvent::EffortFinished {
+                    thread_id: effort.thread_id,
+                    effort_id: effort_id.value(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Project derived process metrics into the unified substrate when an
@@ -521,16 +521,14 @@ impl TaskService {
     /// the mean down with a number that describes bookkeeping, not work. Every
     /// other lifecycle fact still lands, so the work stops being invisible to
     /// the pairing metrics.
-    async fn project_effort_lifecycle_metrics(
-        &self,
-        task_id: TaskId,
-        thread_id: &ThreadId,
-        effort_id: &EffortId,
-        synthesized: bool,
-    ) {
+    async fn project_effort_lifecycle_metrics(&self, effort: &Effort, synthesized: bool) {
         let Some(effort_store) = self.effort_store.as_ref() else {
             return;
         };
+        let effort_id = &effort.id;
+        let thread_id = &effort.thread_id;
+        // The `task.efforts` redo-rate fact is per oxplow task.
+        let task_id = effort.task_id();
         // Resolve the stream the thread belongs to (the hard CASCADE scope).
         let Some(thread_store) = self.thread_store.as_ref() else {
             return;
@@ -539,23 +537,11 @@ impl TaskService {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
         };
-        // Read the just-closed effort for its timing.
-        let effort = match effort_store.get_effort(effort_id).await {
-            Ok(Some(e)) => e,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(error = %e, "effort lifecycle metrics: effort lookup failed");
-                return;
-            }
-        };
         let Some(ended_at) = effort.ended_at else {
             return; // not actually closed — nothing to measure
         };
         let cycle_ms = (ended_at.unix_ms() - effort.started_at.unix_ms()).max(0);
-        let efforts_so_far = match effort_store
-            .list_for_work_item(&work_item_ref(task_id))
-            .await
-        {
+        let efforts_so_far = match effort_store.list_for_work_item(&effort.work_item).await {
             Ok(rows) => rows.len() as i64,
             Err(e) => {
                 tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
@@ -601,19 +587,21 @@ impl TaskService {
                         });
                     }
                 }
-                if facts
-                    .measure_has_active_spec("oxplow.task_effort")
-                    .await
-                    .unwrap_or(true)
-                {
-                    if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
-                        rows.push(NewFact {
-                            subject_kind: Some("task".into()),
-                            subject_ref: Some(task_id.to_string()),
-                            numerator: Some(efforts_so_far as f64),
-                            denominator: Some(1.0),
-                            ..NewFact::new(measure.id, efforts_so_far as f64)
-                        });
+                if let Some(task_id) = task_id {
+                    if facts
+                        .measure_has_active_spec("oxplow.task_effort")
+                        .await
+                        .unwrap_or(true)
+                    {
+                        if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
+                            rows.push(NewFact {
+                                subject_kind: Some("task".into()),
+                                subject_ref: Some(task_id.to_string()),
+                                numerator: Some(efforts_so_far as f64),
+                                denominator: Some(1.0),
+                                ..NewFact::new(measure.id, efforts_so_far as f64)
+                            });
+                        }
                     }
                 }
                 // The effort's captures back several per-close producers below
@@ -971,15 +959,13 @@ impl TaskService {
         // finish/summary) commits as one transaction, so a crash can
         // no longer leave files recorded without their summary/finish.
         // No prior effort means the atomic op below will SYNTHESIZE one: the
-        // task was closed without ever being `in_progress`, so the status
-        // transition never crossed out of the in-progress band and
-        // `project_effort_lifecycle_metrics` never ran for it (tsk172). We
-        // project it ourselves at the tail — otherwise the work is invisible to
-        // exactly the metrics that measure how the pairing is going.
+        // task was closed without ever being `in_progress` (tsk172). Its
+        // `effort.opened` / `closed` are logged `retroactive`, and the
+        // effort-lifecycle consumer projects its metrics — otherwise the work
+        // is invisible to exactly the metrics that measure the pairing.
         let prior = effort_store
             .most_recent_for_work_item(&work_item_ref(item))
             .await?;
-        let synthesized = prior.is_none();
         let version = match prior {
             Some(e) => self.resolve_effort_file_version(&e).await,
             // No effort yet — the atomic op will open one with no
@@ -1000,7 +986,7 @@ impl TaskService {
                 (p, change)
             })
             .collect();
-        let effort_id = effort_store
+        effort_store
             .record_effort_atomic(oxplow_db::RecordEffortAtomic {
                 work_item: work_item_ref(item),
                 thread: *thread,
@@ -1014,13 +1000,9 @@ impl TaskService {
                 summary,
             })
             .await?;
-        if synthesized {
-            // Only in the synthesized case — a task that WAS `in_progress`
-            // gets this from its status transition, and projecting here too
-            // would double-count `task.efforts`.
-            self.project_effort_lifecycle_metrics(item, thread, &effort_id, true)
-                .await;
-        }
+        // A synthesized effort's lifecycle metrics come from the
+        // effort-lifecycle consumer (its `effort.closed` is retroactive).
+        self.settle_lifecycle().await;
         Ok(())
     }
 
@@ -1735,7 +1717,74 @@ mod tests {
                 Arc::new(oxplow_db::SqliteAgentTurnStore::new(db.clone())),
                 Arc::new(oxplow_db::SqliteCommentStore::new(db.clone())),
             );
+        let svc = with_lifecycle_pump(svc, &db);
         (svc, t.id, effort_store, project, snapshot_captures)
+    }
+
+    /// The pump with the effort-lifecycle consumer on it, as `Services`
+    /// wires it: effort snapshots, reconciliation and lifecycle metrics
+    /// run there (P2.6.2).
+    fn with_lifecycle_pump(svc: TaskService, db: &Database) -> TaskService {
+        let log = oxplow_db::SqliteEventLogStore::new(
+            db.clone(),
+            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+        );
+        let pump = Arc::new(crate::event_pump::EventPump::new(db.clone(), log, vec![]));
+        pump.register_async(Arc::new(
+            crate::effort_lifecycle::EffortLifecycleConsumer::new(svc.without_event_pump()),
+        ));
+        svc.with_event_pump(pump)
+    }
+
+    /// P2.6.2 (tsk454): the effort-start snapshot is the pump's, so a
+    /// process that dies after the transition commits — before the snapshot
+    /// — has it taken by the next pump run instead of losing the pin.
+    #[tokio::test]
+    async fn a_committed_open_is_pinned_by_the_next_pump_run_after_a_crash() {
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "crash".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let primary = captures.primary().unwrap();
+        std::fs::write(project.path().join("a.txt"), "v").unwrap();
+        primary.mark_dirty(
+            project.path().join("a.txt"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        // The "crashed" process: it commits the transition, and no pump runs.
+        svc.without_event_pump()
+            .update(
+                item.id,
+                UpdateTaskChanges {
+                    status: Some(TaskStatus::InProgress),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let open = effort_store
+            .find_open_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(open.start_snapshot_id.is_none(), "nothing pinned yet");
+
+        // The restart's pump picks the logged `effort.opened` up.
+        let pump = svc.event_pump.clone().unwrap();
+        pump.run_once().await.unwrap();
+        let pinned = effort_store.get_effort(&open.id).await.unwrap().unwrap();
+        assert!(pinned.start_snapshot_id.is_some(), "{pinned:?}");
+        // Re-delivery (a crash before the checkpoint) changes nothing.
+        svc.on_effort_opened(open.id).await.unwrap();
+        let still = effort_store.get_effort(&open.id).await.unwrap().unwrap();
+        assert_eq!(still.start_snapshot_id, pinned.start_snapshot_id);
     }
 
     #[tokio::test]
@@ -3279,10 +3328,13 @@ mod tests {
         };
         thread_store_handle.upsert(&thread).await.unwrap();
 
-        let svc = TaskService::new(task_store)
-            .with_effort_store(effort_store.clone())
-            .with_snapshot_captures(snapshot_captures.clone())
-            .with_thread_store(Arc::new(SqliteThreadStore::new(db.clone())));
+        let svc = with_lifecycle_pump(
+            TaskService::new(task_store)
+                .with_effort_store(effort_store.clone())
+                .with_snapshot_captures(snapshot_captures.clone())
+                .with_thread_store(Arc::new(SqliteThreadStore::new(db.clone()))),
+            &db,
+        );
 
         // Seed a baseline snapshot in the worktree stream so the
         // EffortStart capture has something to anchor `start_snapshot_id`

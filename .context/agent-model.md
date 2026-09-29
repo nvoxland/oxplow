@@ -1900,9 +1900,11 @@ when takes happen.
   an `effort_end` one on `end_snapshot_id` (both anchored to the effort).
   An unchanged tree records an op on the current snapshot rather than a
   new row, so `end_snapshot_id` is set whenever the stream has any
-  snapshot (null ⇔ effort in progress); `backfill_effort_snapshot` falls
-  back to the start snapshot on a capture failure. The flush is automatic
-  inside the status transition — agents never flush explicitly.
+  snapshot (null ⇔ effort in progress); the effort-lifecycle pump
+  consumer falls back to the start snapshot on a capture failure. The
+  take is automatic after the status transition (the transition logs
+  `effort.opened` / `effort.closed`, and the call settles the pump) —
+  agents never flush explicitly.
 - **Boot.** The primary stream's startup sweep (`enqueue_startup_diff`,
   then a `startup` take) records what changed while oxplow was down;
   recovery brackets orphaned efforts with an `effort_end` take.

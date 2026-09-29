@@ -173,6 +173,7 @@ pub(crate) fn start_tx(
     thread: ThreadId,
     start_snapshot_id: Option<i64>,
     now: Timestamp,
+    retroactive: bool,
 ) -> Result<EffortId, DomainError> {
     conn.execute(
         "INSERT INTO effort
@@ -195,6 +196,7 @@ pub(crate) fn start_tx(
             work_item: work_item.to_string(),
             thread: thread_ref(thread),
             start_snapshot: start_snapshot_id.map(snapshot_ref),
+            retroactive,
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
@@ -216,6 +218,7 @@ pub(crate) fn finish_tx(
     end_snapshot_id: Option<i64>,
     summary: Option<&str>,
     now: &str,
+    retroactive: bool,
 ) -> Result<bool, DomainError> {
     use rusqlite::OptionalExtension;
     let closed: Option<(String, i64)> = conn
@@ -237,6 +240,7 @@ pub(crate) fn finish_tx(
             effort: effort_ref(id),
             work_item: work_item.clone(),
             end_snapshot: end_snapshot_id.map(snapshot_ref),
+            retroactive,
         })
         .with_anchors(Anchors {
             effort_id: Some(id),
@@ -690,7 +694,17 @@ impl SqliteEffortStore {
                 let (effort_id, open) = match &existing {
                     Some(e) => (e.id, e.ended_at.is_none()),
                     None => (
-                        start_tx(tx, &ev, &a.work_item, a.thread, None, Timestamp::now())?,
+                        // Synthesized: the item was never opened, so this
+                        // effort is recorded after the fact.
+                        start_tx(
+                            tx,
+                            &ev,
+                            &a.work_item,
+                            a.thread,
+                            None,
+                            Timestamp::now(),
+                            true,
+                        )?,
                         true,
                     ),
                 };
@@ -716,6 +730,7 @@ impl SqliteEffortStore {
                         None,
                         a.summary.as_deref(),
                         &ts_to_string(Timestamp::now()),
+                        existing.is_none(),
                     )?;
                 } else if a.summary.is_some() {
                     // Lifecycle finish already closed the row but left
@@ -827,7 +842,7 @@ impl EffortStore for SqliteEffortStore {
             .db
             .transaction(move |tx| {
                 let ev = EventCtx::system(&schemas, "effort_store");
-                start_tx(tx, &ev, &w, thread, start_snapshot_id, now)
+                start_tx(tx, &ev, &w, thread, start_snapshot_id, now, false)
             })
             .await?;
         Ok(Effort {
@@ -865,6 +880,7 @@ impl EffortStore for SqliteEffortStore {
                     end_snapshot_id,
                     summary.as_deref(),
                     &now,
+                    false,
                 )
             })
             .await?;
@@ -1961,6 +1977,11 @@ mod tests {
             events[1].envelope.payload["effort"],
             format!("effort:{}", eff.id)
         );
+        // A lifecycle effort has a bracket to snapshot; a synthesized one
+        // was recorded after the fact.
+        assert!(opened.payload.get("retroactive").is_none());
+        assert_eq!(events[2].envelope.payload["retroactive"], true);
+        assert_eq!(events[3].envelope.payload["retroactive"], true);
     }
 
     #[tokio::test]
