@@ -277,7 +277,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
   - Struggled Here (`v_struggle`)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
-    changed, its claims and recorded decisions, and what to report)
+    changed, its claims and recorded decisions, and what to report; an
+    effort on another provider's work item has no task row, so the lens
+    LEFT JOINs `v_task` and names the `work_item` ref instead, tsk458.
+    What Deviated stays silent there: with no task text, no area is
+    stated)
   - Context Read (`v_context_read`)
 
   It also has a Waiting on Me lens, reachable from the launcher:

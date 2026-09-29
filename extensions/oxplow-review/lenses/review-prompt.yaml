@@ -4,8 +4,10 @@ params:
   - { name: effort_id, label: Effort }
 query: |
   WITH e AS (
-    SELECT e.id, t.title, coalesce(t.description, '') AS description, coalesce(e.summary, '') AS summary
-    FROM v_effort e JOIN v_task t ON t.id = e.task_id
+    -- Another provider's work item has no oxplow task: name its ref.
+    SELECT e.id, coalesce(t.title, e.work_item) AS title, coalesce(t.description, '') AS description,
+           coalesce(e.summary, '') AS summary
+    FROM v_effort e LEFT JOIN v_task t ON t.id = e.task_id
     WHERE e.id = :effort_id
   ),
   files AS (

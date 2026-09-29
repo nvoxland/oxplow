@@ -569,6 +569,33 @@ mod tests {
         }
     }
 
+    /// An effort on another provider's work item has no oxplow task; the
+    /// prompt names the work item instead of coming back empty (tsk458).
+    #[tokio::test]
+    async fn review_prompt_names_a_foreign_work_item() {
+        use oxplow_db::EffortStore as _;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let effort = f
+            .svc
+            .effort_store
+            .start("work_item:linear:ENG-1", &f.thread, None)
+            .await
+            .unwrap();
+        let rows = run_bundled_lens(
+            &f,
+            "oxplow-review/review-prompt",
+            &[("effort_id", effort.id.value())],
+        )
+        .await;
+        let prompt = rows[0][0]
+            .as_str()
+            .unwrap_or_else(|| panic!("no prompt: {rows}"));
+        assert!(
+            prompt.contains("**work_item:linear:ENG-1**"),
+            "missing the work item in:\n{prompt}"
+        );
+    }
+
     /// The stream-level review starters list the viewer's stream's
     /// decisions and unbacked claims, newest first (tsk374).
     #[tokio::test]
