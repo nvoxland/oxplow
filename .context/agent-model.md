@@ -1085,7 +1085,10 @@ intermediate `ready` step.
   (whose end lands *after* this window). The latter is capped at 10
   entries (`unclaimed_overflow` carries the original count when
   truncated) so the agent isn't asked to triage a wall of paths
-  from parallel efforts or formatters. `amend_effort(effort_id, add_files,
+  from parallel efforts or formatters. The review names each row by its
+  **canonical ids** — `[tsk42] title (effort eff313)` — because those are
+  what `update_task` / `amend_effort` parse; a bare `313` is rejected
+  (tsk341; pinned by the `stop_effort_review_*` goldens). `amend_effort(effort_id, add_files,
   remove_files, claim_runs, disclaim_runs)` is the corrective tool —
   adds/removes `task_effort_file` rows AND, for every path in
   `remove_files`, records an acknowledgement row in

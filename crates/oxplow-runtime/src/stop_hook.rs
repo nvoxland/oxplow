@@ -47,6 +47,7 @@ pub struct ThreadSnapshot<'a> {
 /// upstream dependency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingEffortReview {
+    /// The canonical `eff<N>` form — what `amend_effort` parses.
     pub effort_id: String,
     pub task_id: i64,
     pub task_title: String,

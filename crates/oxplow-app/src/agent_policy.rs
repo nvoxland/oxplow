@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use oxplow_domain::stores::{TaskStore, ThreadStore};
-use oxplow_domain::{TaskStatus, Thread, ThreadId};
+use oxplow_domain::{TaskId, TaskStatus, Thread, ThreadId};
 use oxplow_runtime::policy::{decide_tool, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};
 use oxplow_runtime::stop_hook::{
     decide_stop_directive, DirectiveBuilders, PendingEffortReview, StopDirective,
@@ -238,7 +238,7 @@ impl AgentPolicy {
                     effort_id: file_review
                         .as_ref()
                         .map(|r| r.effort_id.clone())
-                        .unwrap_or_else(|| eid.value().to_string()),
+                        .unwrap_or_else(|| eid.to_string()),
                     task_id,
                     task_title: title,
                     claimed_but_not_changed: file_review
@@ -395,7 +395,7 @@ pub fn git_operation_in_progress(project_dir: &Path) -> bool {
 fn build_in_progress_audit_reason(items: &[oxplow_domain::Task]) -> String {
     let titles: Vec<String> = items
         .iter()
-        .map(|i| format!("  • [{}] {}", i.id.value(), i.title))
+        .map(|i| format!("  • [{}] {}", i.id, i.title))
         .collect();
     format!(
         "AUDIT: this turn is closing with {} task(s) still `in_progress`:\n{}\n\n\
@@ -511,9 +511,13 @@ fn build_effort_file_review_reason(reviews: &[PendingEffortReview]) -> String {
          the test/coverage/analysis runs that happened during your effort. For each:\n\n",
     );
     for r in reviews {
+        // Canonical ids (`tsk42`, `eff313`): what `update_task` /
+        // `amend_effort` parse, so the agent can paste them back (tsk341).
         out.push_str(&format!(
             "  • [{}] {} (effort {})\n",
-            r.task_id, r.task_title, r.effort_id
+            TaskId::new(r.task_id),
+            r.task_title,
+            r.effort_id
         ));
         if !r.claimed_but_not_changed.is_empty() {
             out.push_str("      You claimed these files but the worktree didn't change:\n");
