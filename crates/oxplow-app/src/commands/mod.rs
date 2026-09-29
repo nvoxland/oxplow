@@ -52,8 +52,12 @@ pub struct HandlerOutput {
     /// in the same transaction. A `BestEffort` handler's own transactions
     /// log their events themselves; this is for `Tx` handlers.
     pub events: Vec<Envelope>,
-    /// Runs once the run has committed — the place for the in-memory
-    /// broadcast that wakes the UI (`OxplowEvent`), never for a write.
+    /// Runs once the run has committed: the in-memory broadcast that wakes
+    /// the UI (`OxplowEvent`), and side effects outside the database that
+    /// mirror the committed change (`config.set` writes project.yaml here).
+    /// Never a database write, and it must tolerate failure — the run is
+    /// already recorded. The handler itself must stay pure: it can run
+    /// more than once (`Database::transaction` retries on SQLITE_BUSY).
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 

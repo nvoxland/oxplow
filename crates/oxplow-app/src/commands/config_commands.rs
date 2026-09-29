@@ -9,9 +9,14 @@
 //! confirmation per input, so an agent gets `NeedsConfirmation` while a
 //! person's confirmed call goes through.
 //!
-//! The handlers are `Tx`: the file write happens inside the bus's
-//! transaction so a failed write leaves no audit row or event; the
-//! in-memory config is replaced only once the file is written.
+//! The handlers are `Tx` and **pure**: inside the bus's transaction they
+//! only validate and compute before/after (the closure may run more than
+//! once — `Database::transaction` retries on SQLITE_BUSY). The file write
+//! and the in-memory swap happen after commit, re-applying just this key
+//! to the config as it is then, so two sets of different keys can't lose
+//! each other. A post-commit write failure is logged at error level; the
+//! audit and `config.changed` then describe a change the file lacks —
+//! rare (a full disk), visible, and fixed by setting the key again.
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -127,8 +132,8 @@ fn report(target: &ConfigTarget, cfg: &OxplowConfig, key: ConfigKey) -> KeyRepor
     }
 }
 
-/// Set (`Some`) or unset (`None`) `key`: validate, write the file, swap the
-/// in-memory config, and describe the change.
+/// Set (`Some`) or unset (`None`) `key`: validate and describe the change;
+/// the file write and config swap run after commit ([`apply_committed`]).
 fn change(
     target: &ConfigTarget,
     actor: &Actor,
@@ -153,9 +158,13 @@ fn change(
                 other => other,
             })?;
     }
-    let mut guard = target.config.write().unwrap_or_else(|e| e.into_inner());
-    let before = key_value(&guard, &target.project_dir, key);
-    let next = with_key(&guard, &target.project_dir, key, value.as_ref()).map_err(|e| {
+    let current = target
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let before = key_value(&current, &target.project_dir, key);
+    let next = with_key(&current, &target.project_dir, key, value.as_ref()).map_err(|e| {
         CommandError::Invalid {
             field: Some("/value".into()),
             message: e.to_string(),
@@ -169,11 +178,6 @@ fn change(
             ..HandlerOutput::default()
         });
     }
-    write_project_config(&target.project_dir, &next).map_err(|e| CommandError::Failed {
-        message: format!("writing project.yaml: {e}"),
-    })?;
-    *guard = next;
-    drop(guard);
     let inverse = match &before {
         Some(prev) => CommandCall {
             name: SET.into(),
@@ -193,13 +197,38 @@ fn change(
         },
     )
     .with_subject([format!("config:{key}")]);
-    let events = target.events.clone();
+    let committed = target.clone();
+    let key_owned = key.to_string();
     Ok(HandlerOutput {
         result: json!({ "key": key, "before": before, "after": after, "changed": true }),
         inverse: Some(inverse),
         events: vec![event],
-        after_commit: Some(Box::new(move || events.emit(OxplowEvent::ConfigChanged))),
+        after_commit: Some(Box::new(move || {
+            apply_committed(&committed, &key_owned, value.as_ref())
+        })),
     })
+}
+
+/// After commit: apply `key` to the config as it is NOW (another key may
+/// have changed since the handler ran), write the file, swap memory, wake
+/// the UI. Holding the write lock across write + swap keeps the file and
+/// the in-memory config in step.
+fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>) {
+    let mut guard = target.config.write().unwrap_or_else(|e| e.into_inner());
+    let next = match with_key(&guard, &target.project_dir, key, value) {
+        Ok(next) => next,
+        Err(e) => {
+            tracing::error!(key, error = %e, "config.set: committed change no longer applies");
+            return;
+        }
+    };
+    if let Err(e) = write_project_config(&target.project_dir, &next) {
+        tracing::error!(key, error = %e, "config.set: writing project.yaml after commit failed");
+        return;
+    }
+    *guard = next;
+    drop(guard);
+    target.events.emit(OxplowEvent::ConfigChanged);
 }
 
 /// The four `config.*` commands over `target`.
@@ -332,6 +361,72 @@ mod tests {
 
     fn file(dir: &tempfile::TempDir) -> String {
         std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap_or_default()
+    }
+
+    /// `Database::transaction` re-runs a handler when its commit hits
+    /// SQLITE_BUSY. The handler must be pure: running it twice (the first
+    /// attempt rolled back, its after-commit never ran) records the same
+    /// change both times, and nothing touches the file or the in-memory
+    /// config until the after-commit step.
+    #[test]
+    fn set_is_retry_safe_and_writes_only_after_commit() {
+        let (dir, target, _bus) = setup(None);
+        let set = commands(target.clone())
+            .into_iter()
+            .find(|c| c.spec.name == SET)
+            .unwrap();
+        let Handler::Tx(handler) = &set.handler else {
+            panic!("config.set is a Tx handler")
+        };
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let input = json!({ "key": "metricRetentionDays", "value": 30 });
+        let first = handler(&conn, &agent(), input.clone()).unwrap();
+        assert_eq!(first.result["changed"], true);
+        // Attempt one rolled back: no file, config untouched.
+        assert_eq!(file(&dir), "");
+        assert_ne!(target.config.read().unwrap().metric_retention_days, 30);
+        drop(first);
+        let second = handler(&conn, &agent(), input).unwrap();
+        assert_eq!(
+            second.result["changed"], true,
+            "the retry still sees the change"
+        );
+        assert!(second.inverse.is_some());
+        assert_eq!(second.events.len(), 1);
+        (second.after_commit.unwrap())();
+        assert!(
+            file(&dir).contains("metricRetentionDays: 30"),
+            "{}",
+            file(&dir)
+        );
+        assert_eq!(target.config.read().unwrap().metric_retention_days, 30);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sets_of_different_keys_each_survive() {
+        let (dir, target, bus) = setup(None);
+        bus.run(
+            &agent(),
+            SET,
+            json!({ "key": "metricRetentionDays", "value": 30 }),
+            false,
+        )
+        .await
+        .unwrap();
+        bus.run(
+            &agent(),
+            SET,
+            json!({ "key": "zones", "value": [{ "match": "src/**", "zone": "core" }] }),
+            false,
+        )
+        .await
+        .unwrap();
+        let text = file(&dir);
+        assert!(text.contains("metricRetentionDays: 30"), "{text}");
+        assert!(text.contains("zone: core"), "{text}");
+        let cfg = target.config.read().unwrap();
+        assert_eq!(cfg.metric_retention_days, 30);
+        assert_eq!(cfg.zones.len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
