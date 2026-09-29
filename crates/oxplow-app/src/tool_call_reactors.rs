@@ -215,14 +215,33 @@ impl AsyncEventConsumer for EffortClaimConsumer {
                 Some(&worktree),
             )
             .await
-            .map(|_| ())
-            .map_err(|e| DomainError::Storage(e.to_string()))
+            .map_or_else(claim_outcome, |_| Ok(()))
+    }
+}
+
+/// A failed claim as the pump reads it: a storage error keeps its kind (a
+/// `Busy` defers the event rather than parking it); a task that no longer
+/// exists has nothing to claim.
+fn claim_outcome(err: crate::task_service::TaskServiceError) -> Result<(), DomainError> {
+    match err {
+        crate::task_service::TaskServiceError::Storage(e) => Err(e),
+        crate::task_service::TaskServiceError::NotFound(_) => Ok(()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_busy_claim_defers_and_a_vanished_task_is_nothing_to_claim() {
+        use crate::task_service::TaskServiceError;
+        let busy = claim_outcome(TaskServiceError::Storage(DomainError::Busy(
+            "locked".into(),
+        )));
+        assert!(busy.unwrap_err().is_retryable());
+        assert!(claim_outcome(TaskServiceError::NotFound(oxplow_domain::TaskId::new(1))).is_ok());
+    }
     use crate::{HookEnvelope, ToolDecision};
     use oxplow_db::EffortStore as _;
     use oxplow_domain::HookKind;

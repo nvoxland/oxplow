@@ -279,7 +279,11 @@ judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
 (a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
 the first delivery saw; a run delivered more than 10 minutes late is recorded
 but gets no nudges (tsk505). The explicit MCP ingest uses a window ending now.
-It needs no open effort. **Coverage** is
+It needs no open effort. **A run's effort is the one its event was anchored
+to** (`run_effort`, tsk507) — for the effort-relative advisories, the
+static-analysis snapshot pin and the `oxplow.nudge` fact — so a late delivery
+keeps the effort it ran in; only a live call with no event resolves the
+thread's single open effort now. **Coverage** is
 effort-relative (diff vs the effort's start snapshot), so it can't store the diff
 at record: `observe_coverage` stores the **absolute** whole-report coverage
 (per-file coverage facts + the instrumented/covered line-sets in the capture's

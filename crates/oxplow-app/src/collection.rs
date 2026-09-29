@@ -836,6 +836,21 @@ impl CollectionService {
     /// DIFFERENT task's effort. Used both to claim the run in the ledger AND to
     /// stamp `metric_capture.effort_id`, so the fact-attribution read
     /// (`captures_for_effort`, T-D) attributes the producer's facts (tsk37).
+    /// The effort a run belongs to: the one its event was anchored to (so a
+    /// late delivery keeps the effort it ran in, open or closed since), else
+    /// — a live call with no event — the thread's single open effort.
+    async fn run_effort(
+        &self,
+        thread: &ThreadId,
+        cause: Option<&RunCause>,
+    ) -> Result<Option<Effort>, DomainError> {
+        match anchored_effort(cause) {
+            Some(id) => self.efforts.get_effort(&id).await,
+            None if cause.is_some() => Ok(None),
+            None => self.efforts.find_single_open_for_thread(thread).await,
+        }
+    }
+
     async fn resolve_owning_effort(
         &self,
         thread: &ThreadId,
@@ -1796,10 +1811,7 @@ impl CollectionService {
         // precondition for recording. The single open effort (if any) is resolved
         // here only for the effort-RELATIVE advisories (coverage, nudges),
         // which legitimately no-op when ambiguous.
-        let effort_opt = match anchored_effort(cause) {
-            Some(id) => self.efforts.get_effort(&id).await?,
-            None => self.efforts.find_single_open_for_thread(thread).await?,
-        };
+        let effort_opt = self.run_effort(thread, cause).await?;
 
         // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
         // which never says "commit" — may carry "This reverts commit <sha>"
@@ -2012,7 +2024,8 @@ impl CollectionService {
                 // Project the fired nudge into the metric substrate (tsk216):
                 // `agent.nudges.fired` is an agent-activity signal — the agent
                 // drifted off-task often enough to be corrected.
-                self.project_nudge_metric(thread, kind).await;
+                self.project_nudge_metric(thread, effort.map(|e| e.id), kind, cause)
+                    .await;
             }
             Err(err) => tracing::warn!(?err, "persisting agent nudge failed"),
         }
@@ -2023,7 +2036,13 @@ impl CollectionService {
     /// down which guardrail fired). Event kind → run-less. Best-effort: a
     /// metric write error is logged and never fails the hook. Lower is
     /// better — fewer nudges means the agent stayed on task.
-    async fn project_nudge_metric(&self, thread: &ThreadId, kind: &str) {
+    async fn project_nudge_metric(
+        &self,
+        thread: &ThreadId,
+        effort: Option<EffortId>,
+        kind: &str,
+        cause: Option<&RunCause>,
+    ) {
         let stream_val = match self.threads.get(thread).await {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
@@ -2051,10 +2070,14 @@ impl CollectionService {
                     dims_json: Some(format!("{{\"kind\":\"{kind}\"}}")),
                     ..NewFact::new(measure.id, 1.0)
                 };
-                let owning_val = self
-                    .resolve_owning_effort(thread, None)
-                    .await
-                    .map(|e| e.id.value());
+                // The nudge's effort, else the one its run was anchored to;
+                // only a live call with neither resolves one now.
+                let owning = match effort.or_else(|| anchored_effort(cause)) {
+                    Some(id) => Some(id),
+                    None if cause.is_some() => None,
+                    None => self.resolve_owning_effort(thread, None).await.map(|e| e.id),
+                };
+                let owning_val = owning.map(|e| e.value());
                 let mut capture = NewMetricCapture::done(stream_val, "nudges", "nudges");
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
@@ -2319,9 +2342,9 @@ impl CollectionService {
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
-        // Optional single open effort — for the snapshot pin + panel refresh only;
+        // The run's effort — for the snapshot pin + panel refresh only;
         // attribution rides the ledger (auto-claimed below when unambiguous).
-        let effort = self.efforts.find_single_open_for_thread(thread).await?;
+        let effort = self.run_effort(thread, cause).await?;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -5806,6 +5829,45 @@ mod tests {
             assert_eq!(d.baseline, None);
             assert_eq!(d.current, 3000.0); // 1000 + 2000
             assert_eq!(d.delta, Some(3000.0));
+        }
+
+        #[tokio::test]
+        async fn a_nudge_fact_takes_the_effort_its_run_was_anchored_to() {
+            // A late delivery: the run's event was anchored to the effort;
+            // judged now, no single effort is open (it closed, or others
+            // opened) — the `oxplow.nudge` fact still belongs to it.
+            let h = build(None).await;
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            for spec in crate::producer_metrics::builtin_producer_specs() {
+                oxplow_db::SqliteFactStore::new(h.db.clone())
+                    .upsert_spec(spec)
+                    .await
+                    .unwrap();
+            }
+            let cause = RunCause {
+                event_id: "evt-anchored".into(),
+                anchors: oxplow_domain::Anchors {
+                    effort_id: Some(eid),
+                    ..Default::default()
+                },
+                at: Timestamp::now(),
+            };
+            h.efforts.finish(&eid, None, None).await.unwrap();
+            h.service
+                .persist_nudge(&h.thread, None, "report-less-run", "m", "cmd", Some(&cause))
+                .await;
+            let owner: Option<i64> =
+                h.db.read(|c| {
+                    c.query_row(
+                        "SELECT effort_id FROM metric_capture WHERE producer = 'nudges'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+            assert_eq!(owner, Some(eid.value()));
         }
 
         #[tokio::test]
