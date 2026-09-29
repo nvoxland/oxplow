@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Stream, Thread, ThreadState } from "../api.js";
 import { Navigator } from "./Navigator.js";
@@ -101,7 +101,7 @@ test("hovering the strip does not open the overlay", () => {
   fireEvent.mouseEnter(getByTestId("navigator-strip").parentElement as HTMLElement);
   fireEvent.mouseEnter(getByTestId("navigator-strip"));
 
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
 
 test("strip glyphs carry their full title as a tooltip", () => {
@@ -144,9 +144,9 @@ test("clicking a thread glyph in the strip selects that thread", () => {
 test("the bottom-pinned chevron expands the panel", () => {
   const { getByTestId, queryByTestId } = renderNavigator();
 
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
   fireEvent.click(getByTestId("navigator-expand"));
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 test("clicking empty space in the strip expands the panel", () => {
@@ -156,7 +156,7 @@ test("clicking empty space in the strip expands the panel", () => {
   // panel. A bonus route in; the chevron is the discoverable one.
   const empty = getByTestId("navigator-strip-empty");
   fireEvent.click(empty, { target: empty });
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 // --- Collapsing -----------------------------------------------------------
@@ -165,23 +165,23 @@ test("a pointerdown outside the overlay collapses it so rail clicks aren't inter
   const { getByTestId, queryByTestId } = renderNavigator();
 
   openOverlay(getByTestId);
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 
   // A press anywhere outside the overlay (the rail / center / tab bar)
   // must collapse it immediately (tsk131) — the very next click then
   // lands on the rail instead of being swallowed by the overlay.
   fireEvent.pointerDown(document.body);
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
 
 test("Escape collapses the expanded overlay", () => {
   const { getByTestId, queryByTestId } = renderNavigator();
 
   openOverlay(getByTestId);
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 
   fireEvent.keyDown(document, { key: "Escape" });
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
 
 test("clicking an empty area inside the panel closes it", () => {
@@ -190,7 +190,7 @@ test("clicking an empty area inside the panel closes it", () => {
   const panel = openOverlay(getByTestId);
   fireEvent.click(panel, { target: panel });
 
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  expect(queryByTestId("navigator-overlay") === null).toBe(true);
 });
 
 test("clicking a control inside the panel does NOT close it", () => {
@@ -205,8 +205,8 @@ test("clicking a control inside the panel does NOT close it", () => {
   const input = getByTestId("navigator-new-thread-input");
   fireEvent.click(input);
 
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
-  expect(queryByTestId("navigator-new-thread-input")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
+  expect(queryByTestId("navigator-new-thread-input") !== null).toBe(true);
 });
 
 test("the panel closes when the pointer moves outside its bounds", async () => {
@@ -219,9 +219,7 @@ test("the panel closes when the pointer moves outside its bounds", async () => {
   // because it's inside the wrapper's subtree the wrapper's mouseleave
   // never fires while the pointer sits over the covered region.
   fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
-  await settle();
-
-  expect(queryByTestId("navigator-overlay")).toBeNull();
+  await waitFor(() => expect(queryByTestId("navigator-overlay") === null).toBe(true));
 });
 
 test("a pointer still inside the panel keeps it open", async () => {
@@ -231,9 +229,9 @@ test("a pointer still inside the panel keeps it open", async () => {
   stubPanelRect(panel);
 
   fireEvent.pointerMove(document, { clientX: 120, clientY: 300 });
-  await settle();
+  await act(settle);
 
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 });
 
 test("the panel stays open while a form is active even if the pointer leaves", async () => {
@@ -248,10 +246,10 @@ test("the panel stays open while a form is active even if the pointer leaves", a
   // Mid-new-thread the user is committed to an action inside the panel —
   // an overshoot with the mouse must not throw their typing away.
   fireEvent.pointerMove(document, { clientX: 400, clientY: 300 });
-  await settle();
+  await act(settle);
 
-  expect(queryByTestId("navigator-overlay")).not.toBeNull();
-  expect(queryByTestId("navigator-new-thread-input")).not.toBeNull();
+  expect(queryByTestId("navigator-overlay") !== null).toBe(true);
+  expect(queryByTestId("navigator-new-thread-input") !== null).toBe(true);
 });
 
 // --- "Make writer" promote action (tsk132) -------------------------------
@@ -285,9 +283,9 @@ test("the active writer's menu does NOT offer 'Make writer'", () => {
 
   // The writer is already writable; only queued/read-only threads can be
   // promoted, so the action is absent rather than shown-but-disabled.
-  expect(queryByTestId("menu-item-thread.promote")).toBeNull();
+  expect(queryByTestId("menu-item-thread.promote") === null).toBe(true);
   // The menu still renders its other actions.
-  expect(queryByTestId("menu-item-thread.rename")).not.toBeNull();
+  expect(queryByTestId("menu-item-thread.rename") !== null).toBe(true);
 });
 
 test("clicking 'Make writer' promotes that thread via the IPC handler", () => {

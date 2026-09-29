@@ -163,6 +163,24 @@ to ~0.
 first time instead of the run cancelling before it prints which test failed.
 Don't remove that flag.
 
+### Frontend timers: never sleep-then-assert (tsk342)
+
+A React state change fired from a `setTimeout` (the slide-out strips'
+180 ms pointer-leave grace, say) lands **outside `act`**, so React only
+*schedules* the re-render. A test that sleeps past the timer and then reads
+the DOM races that render and loses under `bun test` load — once, then never
+in isolation. Rules, applied in `TerminalTabStrip.test.tsx`,
+`Navigator.test.tsx` and `useSlideoutStrip.test.tsx`:
+
+- A change that **should** happen: `await waitFor(() => …)` — it polls and
+  flushes through `act`. Never `await sleep(); expect(…)`.
+- A change that must **not** happen: sleep *inside* `act` (`await
+  act(settle)`) so anything pending has flushed before you look.
+- Absence is a boolean: `expect(queryByTestId("x") === null).toBe(true)`.
+  `expect(el).toBeNull()` on a present element serializes the whole
+  happy-dom tree into the JUnit message — that is how
+  `apps/desktop/test-report.xml` once reached 1.8 GB.
+
 ### Coverage floors & pass-through crates
 
 Two CI gates enforce line coverage: a **workspace floor**

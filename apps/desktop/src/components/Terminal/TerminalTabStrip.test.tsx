@@ -1,12 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { TerminalTabStrip } from "./TerminalTabStrip.js";
 import type { TerminalTab } from "./terminalTabs.js";
 
 afterEach(cleanup);
 
-/** The panel's pointer-leave grace (180ms) plus slack. */
+/** Past the panel's pointer-leave grace (180ms). Only for asserting a close did NOT
+ *  happen — a close that should happen is awaited with `waitFor`, never a sleep. */
 const settle = () => new Promise((r) => setTimeout(r, 260));
 
 const TABS: TerminalTab[] = [
@@ -63,7 +64,7 @@ test("hovering the strip does not open the overlay", () => {
   fireEvent.mouseEnter(getByTestId("terminal-tab-strip").parentElement as HTMLElement);
   fireEvent.mouseEnter(getByTestId("terminal-tab-strip"));
 
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") === null).toBe(true);
 });
 
 test("glyphs carry their full title as a tooltip and activate on click", () => {
@@ -79,9 +80,9 @@ test("glyphs carry their full title as a tooltip and activate on click", () => {
 test("the bottom-pinned chevron expands the panel", () => {
   const { getByTestId, queryByTestId } = renderStrip();
 
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") === null).toBe(true);
   fireEvent.click(getByTestId("terminal-tab-expand"));
-  expect(queryByTestId("terminal-tab-overlay")).not.toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") !== null).toBe(true);
 });
 
 test("Escape and an outside pointerdown both collapse the panel", () => {
@@ -89,13 +90,13 @@ test("Escape and an outside pointerdown both collapse the panel", () => {
 
   openOverlay(getByTestId);
   fireEvent.keyDown(document, { key: "Escape" });
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") === null).toBe(true);
 
   openOverlay(getByTestId);
   // The old strip had NO outside-press dismissal at all — only Escape —
   // so the panel could sit over the xterm surface swallowing clicks.
   fireEvent.pointerDown(document.body);
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") === null).toBe(true);
 });
 
 test("clicking an empty area inside the panel closes it", () => {
@@ -104,7 +105,7 @@ test("clicking an empty area inside the panel closes it", () => {
   const panel = openOverlay(getByTestId);
   fireEvent.click(panel, { target: panel });
 
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") === null).toBe(true);
 });
 
 test("the panel closes when the pointer moves outside its bounds", async () => {
@@ -114,9 +115,7 @@ test("the panel closes when the pointer moves outside its bounds", async () => {
   stubPanelRect(panel);
 
   fireEvent.pointerMove(document, { clientX: 500, clientY: 300 });
-  await settle();
-
-  expect(queryByTestId("terminal-tab-overlay")).toBeNull();
+  await waitFor(() => expect(queryByTestId("terminal-tab-overlay") === null).toBe(true));
 });
 
 test("an overshoot mid-rename does not discard the rename", async () => {
@@ -136,9 +135,9 @@ test("an overshoot mid-rename does not discard the rename", async () => {
   // The old strip's scheduleClose cleared `renamingId` outright, so
   // drifting the mouse away silently threw the edit on the floor.
   fireEvent.pointerMove(document, { clientX: 500, clientY: 300 });
-  await settle();
+  await act(settle);
 
-  expect(queryByTestId("terminal-tab-overlay")).not.toBeNull();
+  expect(queryByTestId("terminal-tab-overlay") !== null).toBe(true);
   expect(getByTestId("terminal-tab-rename-input-t2")).not.toBeNull();
 
   fireEvent.keyDown(input, { key: "Enter" });
