@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod icon_tint;
+mod plugin_cli;
 
 use oxplow_tauri_ipc::{specta_builder, windows};
 use tauri::Manager;
@@ -13,6 +14,9 @@ fn main() {
     if let Some(event) = hook_event_arg() {
         run_hook_command(&event);
         return;
+    }
+    if let Some(args) = plugin_args() {
+        std::process::exit(plugin_cli::run(&args));
     }
 
     init_tracing();
@@ -27,6 +31,17 @@ fn hook_event_arg() -> Option<String> {
     let mut args = std::env::args().skip(1);
     match (args.next().as_deref(), args.next(), args.next()) {
         (Some("hook"), Some(event), None) => Some(event),
+        _ => None,
+    }
+}
+
+/// `oxplow plugin <new|check|migrate> …`: the SDK CLI, handled before
+/// Tauri boots (like `hook`). Everything after `plugin` is the
+/// subcommand's argv.
+fn plugin_args() -> Option<Vec<String>> {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("plugin") => Some(args.collect()),
         _ => None,
     }
 }

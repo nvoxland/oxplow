@@ -27,6 +27,7 @@ members = [
     "crates/oxplow-collect-plugin",
     "crates/oxplow-tree-source",
     "crates/oxplow-surface-parity",
+    "crates/oxplow-sdk",
     "crates/oxplow-ai",
     "crates/oxplow-acp-fake",
 ]
@@ -178,6 +179,7 @@ oxplow-rpc = { path = "crates/oxplow-rpc" }
 oxplow-daemon = { path = "crates/oxplow-daemon" }
 oxplow-tauri-ipc = { path = "crates/oxplow-tauri-ipc" }
 oxplow-plugin = { path = "crates/oxplow-plugin" }
+oxplow-sdk = { path = "crates/oxplow-sdk" }
 oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 
 [profile.release]

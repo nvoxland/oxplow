@@ -187,8 +187,11 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       any read-only query (Cmd/Ctrl+Enter runs it).
     - "Show as" switches the viz.
     - **Save as Lens** writes the file through the UI-only `save_lens`
-      IPC, then opens the new lens. It creates the extension if missing,
-      refuses to overwrite a lens, and refuses git-installed extensions.
+      IPC, then opens the new lens. It creates the extension if missing
+      (with the same v2 manifest `oxplow plugin new` writes —
+      `extensions::scaffold_manifest`, so a saved lens starts as a
+      checkable extension with an `intent` to fill in), refuses to
+      overwrite a lens, and refuses git-installed extensions.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to
     Dashboard" on a lens page, or MCP `add_dashboard_item(kind: "lens",
     lens_id)`.
@@ -406,7 +409,7 @@ kind is exactly the evidence promotion requires (target §10.1, §12).
 key is v1 (`sources`, `slots`, no intent). The loader runs
 `extensions::migrate_v1::migrate_v1_to_v2` on its text in memory, reads
 the result as v2, and carries a warning to run `oxplow plugin migrate`
-(P1.14 writes the same text to the file). The migration is **textual**
+(which writes the same text to the file; see "The SDK"). The migration is **textual**
 so a person's consent survives it: it prepends `manifest: 2`, inserts
 `sharing: private` and an `intent` skeleton (`purpose` from
 `description`, `origin: null`, `examples: []` — the agent fills those
@@ -419,6 +422,42 @@ comments included, is unchanged, and it is idempotent.
 included `extension.yaml`, and the advisory program hash is over the
 advisories' content, so rewriting a manifest from v1 to v2 asks for no
 re-approval (tested).
+
+## The SDK
+
+`crates/oxplow-sdk` (P1.14, tsk416; target §10.5) is the one
+implementation behind three doors: the `oxplow plugin new|check|migrate`
+CLI, the RPC/MCP `validate_extension`, and `save_lens`'s manifest. Every
+door gives an author the same report, so an agent editing from a terminal
+and one calling MCP read identical `file:line: what — fix` lines.
+
+- **`scaffold(root, Kind::Lens|Extension, name, origin)`** writes
+  `oxplow/extensions/<name>/extension.yaml` (v2, `sharing: private`, an
+  `intent` whose `origin` is the ref passed with `--origin`, one
+  example), `fixtures/basic.yaml` (the example as a fixture for the
+  future `plugin test`), and for a lens `lenses/<name>.yaml` (open tasks
+  in the viewer's stream). It refuses an existing folder, a bad name and
+  a non-ref origin; what it writes passes `check` with no warnings.
+- **`check(root, name, catalog, layer: Option<&SemanticLayer>)`** is
+  `catalog.named` (manifest shape, lifecycle, cross-refs, lens shape)
+  plus, with a layer, `extensions::validate_extension`'s dry run of every
+  lens and advisory. It returns a `CheckReport { ok, errors, warnings,
+  sql_checked, extension }`; `render_findings` prints it as text
+  (`error: <file:line …>` lines then a one-line summary) or JSON.
+- **`migrate(root, name)`** writes `migrate_v1::migrate_v1_to_v2` to the
+  file; `changed: false` when it was already v2.
+- **The CLI** is `apps/desktop/src-tauri/src/plugin_cli.rs`, dispatched
+  by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
+  bare name (under `--root` or the cwd) or the extension folder's path
+  (the project is read off `…/oxplow/extensions/<name>`). `check` opens
+  `<root>/.oxplow/local.sqlite` when it exists so lens SQL is dry-run
+  against the real project; without one it says so and checks everything
+  else. Exit 0 clean, 1 with errors (or an SDK error such as an unknown
+  extension), 2 usage.
+- **`validate_extension`** (RPC and MCP) returns the `CheckReport`, not
+  the bare `Extension`; the extension is inside it.
+
+The `oxplow-extension` skill requires `check` after every edit.
 
 ## Lenses
 

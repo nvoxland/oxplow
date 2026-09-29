@@ -11,7 +11,9 @@ Lenses live in **extensions**: folders of plain files in the repo. The user
 can use a lens themselves, share it with their team by committing it, or
 publish the extension for anyone.
 
-You build them with your normal file tools. No special tool writes them.
+You build them with your normal file tools. `oxplow plugin new lens
+<name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
+an intent, one example and fixture, and a starter lens; then edit.
 
 ## 1. Find the data
 
@@ -56,8 +58,9 @@ slot_mounts:            # optional: mount a lens into a core page
 ```
 
 A manifest without `manifest: 2` is read as the old v1 shape with a
-warning; write v2. Unknown keys are errors, and `validate_extension`
-reports every problem as `file:line: what — fix`.
+warning; write v2 (`oxplow plugin migrate <name>` rewrites a v1 file in
+place). Unknown keys are errors, and `check` reports every problem as
+`file:line: what — fix`.
 
 `lenses/<slug>.yaml`:
 
@@ -142,12 +145,23 @@ empty: Nothing is waiting on you.
 
 ## 3. Check it
 
-1. `validate_extension(name, stream_id)` reports:
-   - load errors (YAML, unknown keys, a name/folder mismatch);
-   - a dry run of every lens with its default params (SQL errors, and
-     `columns` keys the query doesn't return).
+**Run `check` after every edit, before anything else.** Not once at the
+end: after each file you write or change. It is cheap, and the message
+names the file and line and says what to change.
 
-   Fix everything it reports.
+1. `validate_extension(name, stream_id)` (MCP), or `oxplow plugin check
+   <name>` from the worktree, is the same check and the same report:
+   - manifest errors (YAML, unknown keys, a name/folder mismatch, a
+     missing `intent`, an experimental kind in a `shared` extension);
+   - cross-references that don't resolve (a slot mount naming a lens
+     that doesn't exist, a link kind nobody registered);
+   - a dry run of every lens and advisory with its default params (SQL
+     errors, and `columns` keys the query doesn't return).
+
+   `ok: true` (exit 0) means it works. Fix every `error`; fix a `warning`
+   unless you can say why not. (The CLI dry-runs SQL only when the project
+   has been opened in oxplow, so `.oxplow/local.sqlite` exists; the MCP
+   tool always does.)
 2. `run_lens(id, params?, stream_id, thread_id?)` returns exactly the
    rows the user will see. Check that they answer the question.
 3. Pass **your own `stream_id`** to both when you're in a worktree

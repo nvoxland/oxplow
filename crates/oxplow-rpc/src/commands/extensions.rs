@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use oxplow_app::extensions::{self, Extension, Lens, LensRun, NewLens};
 use oxplow_app::Services;
 use oxplow_db::{SemanticLayer, SqlCell};
+use oxplow_domain::DomainError;
 
 use crate::error::IpcError;
 
@@ -92,14 +93,25 @@ pub async fn run_lens_action(
     .await?)
 }
 
-/// Load one extension and dry-run each lens, returning every problem.
+/// Load one extension and dry-run each lens, returning every problem —
+/// the SDK's `check`, the same report `oxplow plugin check` prints.
 pub async fn validate_extension(
     svc: &Services,
     name: String,
     stream_id: Option<String>,
-) -> Result<Extension, IpcError> {
+) -> Result<oxplow_sdk::CheckReport, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::validate_extension(&layer(svc), &svc.extension_catalog, &root, &name).await?)
+    oxplow_sdk::check(&root, &name, &svc.extension_catalog, Some(&layer(svc)))
+        .await
+        .map_err(sdk_error)
+}
+
+fn sdk_error(e: oxplow_sdk::SdkError) -> IpcError {
+    match e {
+        oxplow_sdk::SdkError::NotFound(_) => DomainError::NotFound.into(),
+        oxplow_sdk::SdkError::Domain(d) => d.into(),
+        other => DomainError::Invalid(other.to_string()).into(),
+    }
 }
 
 /// Turn an extension on or off for the project (`extensions.disabled` in

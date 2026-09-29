@@ -10,6 +10,7 @@ import type {
   AiSettings,
   ChangeRow,
   ChangeTarget,
+  CheckReport,
   CommentIntent,
   CommentMessage,
   CommentStatus,
@@ -536,7 +537,7 @@ export async function runLensAction(
 }
 
 /// Load an extension and dry-run every lens, returning all problems.
-export async function validateExtension(name: string, streamId: string | null): Promise<Extension> {
+export async function validateExtension(name: string, streamId: string | null): Promise<CheckReport> {
   return unwrap(await commands.validateExtension(name, streamId));
 }
 

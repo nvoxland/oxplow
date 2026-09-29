@@ -2058,10 +2058,11 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Check an extension after editing it: load errors (bad YAML, unknown \
-                       keys, name/folder mismatch) plus a dry run of every lens with its \
-                       default params (SQL errors, `columns` keys the query doesn't return). \
-                       An empty `errors` list means it works."
+        description = "Check an extension after editing it (the same report as `oxplow plugin \
+                       check`): manifest and lifecycle errors with file:line, unresolved \
+                       cross-references, plus a dry run of every lens and advisory (SQL \
+                       errors, `columns` keys the query doesn't return). `ok: true` means it \
+                       works; `warnings` are worth fixing but don't block."
     )]
     async fn validate_extension(
         &self,
@@ -2074,15 +2075,15 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(p.stream_id.as_deref())
             .await;
-        let ext = oxplow_app::extensions::validate_extension(
-            &oxplow_db::SemanticLayer::new(self.services.db.clone()),
-            &self.services.extension_catalog,
+        let report = oxplow_sdk::check(
             &root,
             &p.name,
+            &self.services.extension_catalog,
+            Some(&oxplow_db::SemanticLayer::new(self.services.db.clone())),
         )
         .await
         .map_err(|e| match e {
-            oxplow_domain::DomainError::NotFound => McpError::invalid_params(
+            oxplow_sdk::SdkError::NotFound(_) => McpError::invalid_params(
                 format!(
                     "no extension `{}` under oxplow/extensions/ in that stream",
                     p.name
@@ -2091,7 +2092,7 @@ impl OxplowMcp {
             ),
             other => internal(other),
         })?;
-        json_result(&ext)
+        json_result(&report)
     }
 
     #[tool(

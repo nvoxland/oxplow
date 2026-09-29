@@ -17,6 +17,7 @@ license.workspace = true
 oxplow-domain = { workspace = true }
 oxplow-session = { workspace = true }
 oxplow-app = { workspace = true }
+oxplow-sdk = { workspace = true }
 # The full non-Tauri dep set of oxplow-tauri-ipc, mirrored up front so
 # migrating a command module never requires a manifest change.
 oxplow-config = { workspace = true }

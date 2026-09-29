@@ -1,0 +1,29 @@
+[package]
+name = "oxplow-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# The plugin SDK (`.context/extensions.md` "The SDK"): scaffold, check and
+# migrate an extension. A library so the `oxplow plugin …` CLI (the Tauri
+# binary), the RPC/MCP `validate_extension` and `save_lens` share one
+# implementation and one set of messages.
+
+[dependencies]
+oxplow-app = { workspace = true }
+oxplow-db = { workspace = true }
+oxplow-domain = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+specta = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

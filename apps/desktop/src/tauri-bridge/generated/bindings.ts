@@ -348,7 +348,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	validateExtension: (name: string, streamId: string | null) => typedError<Extension, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
+	validateExtension: (name: string, streamId: string | null) => typedError<CheckReport, IpcError>(__TAURI_INVOKE("validate_extension", { name, streamId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1647,6 +1647,19 @@ export type ChangeTarget =
  *  tree while it's open).
  */
 { kind: "effort"; effortId: string };
+
+// What `check` found.
+export type CheckReport = {
+	name: string,
+	// No errors (warnings don't fail a check).
+	ok: boolean,
+	// `file:line: what — fix` lines.
+	errors: string[],
+	warnings: string[],
+	// Whether every lens and advisory was dry-run against a database.
+	sqlChecked: boolean,
+	extension: Extension,
+};
 
 /**
  *  Code-quality scan lifecycle phase the bus broadcasts. Mirrors the

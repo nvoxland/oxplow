@@ -1643,7 +1643,7 @@ fn installed_source(root: &Path, name: &str) -> Result<ExtensionSource, DomainEr
 
 /// Lowercase letters, digits and single dashes — safe as a folder name
 /// and a lens-id prefix.
-fn is_valid_name(name: &str) -> bool {
+pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('-')
         && !name.ends_with('-')
@@ -1883,8 +1883,21 @@ pub fn save_lens(
     std::fs::create_dir_all(file.parent().unwrap_or(&dir)).map_err(storage)?;
     let manifest = dir.join("extension.yaml");
     if !manifest.exists() {
-        std::fs::write(&manifest, format!("name: {extension}\ndescription: \"\"\n"))
-            .map_err(storage)?;
+        // The same v2 manifest `oxplow plugin new` writes, so a lens saved
+        // from Explore Data starts as a checkable extension with an intent.
+        std::fs::write(
+            &manifest,
+            scaffold_manifest(&ManifestScaffold {
+                name: extension,
+                description: "TODO: one line on what this extension shows or does",
+                purpose: &format!("TODO: what the `{slug}` lens answers"),
+                origin: None,
+                example_name: slug,
+                example_input: &format!("{{ lens: {slug} }}"),
+                example_expect: "TODO: what a run should show",
+            }),
+        )
+        .map_err(storage)?;
     }
     let body = serde_yaml::to_string(&SavedLensFile {
         title: &lens.title,
@@ -1899,6 +1912,41 @@ pub fn save_lens(
         .into_iter()
         .find(|l| l.slug == slug)
         .ok_or(DomainError::NotFound)
+}
+
+/// What a scaffolded `extension.yaml` says. One template for
+/// `oxplow plugin new` and `save_lens`, so every new extension starts
+/// with an intent and passes `check`.
+pub struct ManifestScaffold<'a> {
+    pub name: &'a str,
+    pub description: &'a str,
+    pub purpose: &'a str,
+    /// The thread/effort ref that asked for it, when known.
+    pub origin: Option<&'a str>,
+    pub example_name: &'a str,
+    /// YAML flow text for the example's input (`{ lens: demo }`).
+    pub example_input: &'a str,
+    pub example_expect: &'a str,
+}
+
+/// A private v2 manifest with an `intent` and one example.
+pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
+    let quote = |s: &str| {
+        serde_yaml::to_string(s)
+            .expect("string serializes")
+            .trim_end()
+            .to_string()
+    };
+    format!(
+        "manifest: 2\nname: {name}\ndescription: {description}\nsharing: private\nintent:\n  purpose: {purpose}\n  origin: {origin}\n  examples:\n    - name: {example_name}\n      input: {input}\n      expect: {expect}\n",
+        name = m.name,
+        description = quote(m.description),
+        purpose = quote(m.purpose),
+        origin = m.origin.unwrap_or("null"),
+        example_name = m.example_name,
+        input = m.example_input,
+        expect = quote(m.example_expect),
+    )
 }
 
 /// The on-disk shape [`save_lens`] writes (a subset of [`LensFile`]).
