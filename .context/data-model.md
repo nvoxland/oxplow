@@ -1049,9 +1049,12 @@ which decorate each row with a best-effort `source_label` from
 the source store) and as MCP tools of the same names.
 
 Boot-time backfill: `oxplow_app::page_ref_backfill::run(...)` re-
-projects every existing task body, link, effort (touched files +
-summary refs), and finding into the table on app start,
-idempotently. Wiki bodies and recent commits are covered by their
+projects every existing task body, link and finding into the table on
+app start, idempotently; the effort slice (touched files + summary refs
++ declared impacts) goes through the effort store's own
+`project_effort_slice` for every work item with an effort
+(`list_work_items`) — another provider's included (tsk452; a copy of the
+projection in the backfill used to drop declared impacts on every boot). Wiki bodies and recent commits are covered by their
 own initial-scan paths and don't need separate backfill.
 
 The effort slice has three contributors that run independently —

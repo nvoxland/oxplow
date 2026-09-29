@@ -17,15 +17,12 @@
 //! kinds whose data lives entirely in SQLite (tasks, links,
 //! efforts, findings).
 
-use oxplow_domain::refs::build::work_item_ref;
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{
-    effort_ref_types, effort_summary_edges, effort_touched_file_edges, finding_edges, link_edge,
-    note_edges, task_body_ref_types, task_edges, task_link_ref_types, work_item_id, KIND_FINDING,
-    KIND_TASK_NOTE, KIND_WORK_ITEM,
+    finding_edges, link_edge, note_edges, task_body_ref_types, task_edges, task_link_ref_types,
+    work_item_id, KIND_FINDING, KIND_TASK_NOTE, KIND_WORK_ITEM,
 };
-use oxplow_db::EffortStore as _;
 use oxplow_db::{
     SqliteCodeQualityStore, SqliteEffortStore, SqlitePageRefStore, SqliteTaskLinkStore,
     SqliteTaskNoteStore, SqliteTaskStore,
@@ -67,46 +64,17 @@ pub async fn run(
                 continue;
             }
             counts.tasks += 1;
-            // Effort-owned slice = touched-file union ∪ parsed
-            // refs from every summary body. For touched files, the
-            // most-recent effort's `change_kind` wins per path so
-            // the renderer can display "created"/"modified"/
-            // "deleted" rather than a flat "touched".
-            use std::collections::BTreeMap;
-            let mut paths: BTreeMap<String, String> = BTreeMap::new();
-            let mut summaries: Vec<String> = Vec::new();
-            if let Ok(item_efforts) = efforts.list_for_work_item(&work_item_ref(item.id)).await {
-                // list_for_item is sorted started_at DESC; walking
-                // in reverse gives oldest-first so the latest write
-                // wins via plain `insert`.
-                let efforts_oldest_first: Vec<_> = item_efforts.into_iter().rev().collect();
-                for ef in efforts_oldest_first {
-                    if let Some(s) = &ef.summary {
-                        if !s.trim().is_empty() {
-                            summaries.push(s.clone());
-                        }
-                    }
-                    if let Ok(rows) = efforts.list_files(&ef.id).await {
-                        for r in rows {
-                            let kind_str = match r.change {
-                                oxplow_db::EffortFileChange::Created => "created",
-                                oxplow_db::EffortFileChange::Updated => "updated",
-                                oxplow_db::EffortFileChange::Deleted => "deleted",
-                            };
-                            paths.insert(r.path, kind_str.to_string());
-                        }
-                    }
-                }
-            }
-            let path_vec: Vec<(String, String)> = paths.into_iter().collect();
-            let mut edges = effort_touched_file_edges(&id_str, &path_vec);
-            edges.extend(effort_summary_edges(&id_str, &summaries));
-            let had_payload = !path_vec.is_empty() || !summaries.is_empty();
-            let _ = page_refs
-                .replace_source_for_ref_types(KIND_WORK_ITEM, &id_str, effort_ref_types(), edges)
-                .await;
-            if had_payload {
-                counts.efforts += 1;
+        }
+    }
+
+    // 1b. The effort-owned slice (touched files, summary mentions,
+    //     declared impacts) of every work item with an effort — an oxplow
+    //     task's or another provider's — through the store's own projector.
+    if let Ok(work_items) = efforts.list_work_items().await {
+        for work_item in work_items {
+            match efforts.project_effort_slice(&work_item).await {
+                Ok(()) => counts.efforts += 1,
+                Err(e) => tracing::warn!(?e, %work_item, "page-ref backfill: effort slice failed"),
             }
         }
     }
@@ -258,13 +226,47 @@ mod tests {
             .await
             .unwrap();
 
-        let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
-        // Wipe the slice the insert just projected so the table looks
-        // like a DB written before ref mirroring existed.
-        page_refs
-            .replace_source("work_item", &format!("oxplow:{task_id}"), Vec::new())
+        // An effort on the task that declared an impact, and one on another
+        // provider's work item with a summary mention (tsk452).
+        use oxplow_db::EffortStore as _;
+        let effort_writer = SqliteEffortStore::new(db.clone());
+        let own = effort_writer
+            .start(
+                &oxplow_domain::refs::build::work_item_ref(task_id),
+                &ThreadId::new(1),
+                None,
+            )
             .await
             .unwrap();
+        effort_writer
+            .set_impacts(
+                &own.id,
+                &[oxplow_domain::TaskImpact {
+                    kind: "wiki".into(),
+                    id: "auth-flow".into(),
+                    action: Some("updated".into()),
+                }],
+            )
+            .await
+            .unwrap();
+        let foreign = effort_writer
+            .start("work_item:linear:ENG-12", &ThreadId::new(1), None)
+            .await
+            .unwrap();
+        effort_writer
+            .finish(&foreign.id, None, Some("touched [[src/lib.rs]]".into()))
+            .await
+            .unwrap();
+
+        let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
+        // Wipe the slices the writes just projected so the table looks
+        // like a DB written before ref mirroring existed.
+        for source in [format!("oxplow:{task_id}"), "linear:ENG-12".to_string()] {
+            page_refs
+                .replace_source("work_item", &source, Vec::new())
+                .await
+                .unwrap();
+        }
         let pre = page_refs
             .list_backlinks("file", "src/app.rs", None)
             .await
@@ -295,5 +297,23 @@ mod tests {
             .unwrap();
         assert_eq!(post.len(), 1, "got {post:?}");
         assert_eq!(post[0].source_id, format!("oxplow:{task_id}"));
+        // Another provider's work item is backfilled too …
+        let foreign_refs = page_refs
+            .list_backlinks("file", "src/lib.rs", None)
+            .await
+            .unwrap();
+        assert_eq!(
+            foreign_refs
+                .iter()
+                .map(|r| r.source_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["linear:ENG-12"]
+        );
+        // … and a declared impact survives the backfill.
+        let impacts = page_refs
+            .list_backlinks("wiki", "auth-flow", None)
+            .await
+            .unwrap();
+        assert_eq!(impacts.len(), 1, "got {impacts:?}");
     }
 }

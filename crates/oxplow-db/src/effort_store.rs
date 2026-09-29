@@ -566,7 +566,7 @@ impl SqliteEffortStore {
     /// `summary` body, and the declared `TaskImpact` rows.
     /// Replaces under `effort_ref_types()` so the task-body slice
     /// (owned by `task_store`) is unaffected.
-    async fn project_effort_slice(&self, work_item: &str) -> Result<(), DomainError> {
+    pub async fn project_effort_slice(&self, work_item: &str) -> Result<(), DomainError> {
         let Some(source) = work_item_id_of_ref(work_item).map(str::to_string) else {
             return Err(DomainError::Invalid(format!(
                 "`{work_item}` is not a work_item ref"
@@ -771,6 +771,19 @@ impl SqliteEffortStore {
                       ORDER BY e.started_at, e.id",
                 )?;
                 let rows = stmt.query_map(params![stream.value()], row_to_effort)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+    }
+
+    /// Every work item that has an effort — an oxplow task's or another
+    /// provider's — for the boot `page_ref` backfill.
+    pub async fn list_work_items(&self) -> Result<Vec<String>, DomainError> {
+        self.db
+            .call(|conn| {
+                let mut stmt =
+                    conn.prepare("SELECT DISTINCT work_item FROM effort ORDER BY work_item")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
