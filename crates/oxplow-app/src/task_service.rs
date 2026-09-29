@@ -139,7 +139,10 @@ pub struct TaskService {
 
 /// How long a status change waits for the effort-lifecycle consumer (the
 /// `effort_start` / `effort_end` snapshot) before returning anyway.
-const LIFECYCLE_SETTLE: std::time::Duration = std::time::Duration::from_secs(30);
+/// Long, like the inline capture it replaced (which had no limit): the
+/// start snapshot is the effort's baseline, and on a huge repo it waits
+/// for the startup sweep. It only bounds a stuck pump.
+const LIFECYCLE_SETTLE: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// Returns true iff any item in `items` has this id as its parent_id.
 fn is_epic(item: &Task, items: &[Task]) -> bool {
@@ -381,12 +384,25 @@ impl TaskService {
         let Some(effort) = effort_store.get_effort(&effort_id).await? else {
             return Ok(());
         };
-        if effort.start_snapshot_id.is_some() || effort.ended_at.is_some() {
+        if effort.start_snapshot_id.is_some() {
             return Ok(());
         }
         let Some(snapshot) = self.service_for_thread(&effort.thread_id).await else {
             return Ok(());
         };
+        if effort.ended_at.is_some() {
+            // Delivered after its close (nothing settled in between): a
+            // capture now would include the effort's own work, so the
+            // baseline is the stream's last snapshot from before it began.
+            if let Some(prior) = snapshot
+                .store()
+                .latest_snapshot_at_or_before(*snapshot.stream_id(), effort.started_at)
+                .await?
+            {
+                effort_store.set_start_snapshot(&effort_id, prior).await?;
+            }
+            return Ok(());
+        }
         // An effort's start baseline must reflect the full pre-edit tree:
         // wait for the startup sweep (a no-op once it's done).
         snapshot.await_initial_ready().await;
@@ -1704,6 +1720,62 @@ mod tests {
             ),
         ));
         svc.with_event_pump(pump)
+    }
+
+    /// Review of P2.6 (tsk461): an open and its close both pending when the
+    /// pump runs (nothing settled in between) still get a baseline — the
+    /// stream's last snapshot from before the effort started, rather than
+    /// no start pin at all.
+    #[tokio::test]
+    async fn an_open_delivered_after_its_close_pins_the_prior_snapshot() {
+        let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
+        let primary = captures.primary().unwrap();
+        std::fs::write(project.path().join("base.txt"), "b").unwrap();
+        primary.mark_dirty(
+            project.path().join("base.txt"),
+            oxplow_fs_watch::WatchEventKind::Other,
+        );
+        let baseline = primary
+            .request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: None,
+            })
+            .await
+            .unwrap()
+            .expect("a baseline snapshot");
+        let item = svc
+            .create(
+                Some(tid),
+                CreateTaskInput {
+                    title: "fast".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let quiet = svc.without_event_pump();
+        for status in [TaskStatus::InProgress, TaskStatus::Done] {
+            quiet
+                .update(
+                    item.id,
+                    UpdateTaskChanges {
+                        status: Some(status),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        svc.event_pump.clone().unwrap().run_once().await.unwrap();
+        let effort = &effort_store
+            .list_for_work_item(&work_item_ref(item.id))
+            .await
+            .unwrap()[0];
+        assert_eq!(effort.start_snapshot_id, Some(baseline));
+        assert!(effort.end_snapshot_id.is_some());
     }
 
     /// P2.6.2 (tsk454): the effort-start snapshot is the pump's, so a

@@ -1157,7 +1157,10 @@ The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
 `effort.closed`: `TaskService::on_effort_opened` waits for the startup
 sweep, takes the `effort_start` snapshot and pins it (skipped when already
-pinned or already closed); `on_effort_closed` takes and pins the
+pinned). An open delivered after its close — nothing settled in between —
+pins the stream's last snapshot at or before `started_at` instead
+(`latest_snapshot_at_or_before`): a capture then would include the
+effort's own work. `on_effort_closed` takes and pins the
 `effort_end` snapshot (falling back to the start pin), reconciles
 unclaimed files and runs, projects the lifecycle metrics, then logs
 **`effort.finished@1 { effort, work_item, end_snapshot?, retroactive? }`**
@@ -1173,8 +1176,12 @@ decisions — a model call; failures logged), `effort.gauges`
 of it). The in-memory `OxplowEvent::EffortFinished` is gone — it dropped on
 lag and never fired for synthesized or recovered efforts, which now reach
 every reactor.
-`TaskService::update` / `create` / the record path call `settle` (30s) so
-`complete_task`'s file review sees the end pin; the consumer holds
+`TaskService::update` / `create` / the record path, `task_writes`, and
+MCP `run_command` after any write call `settle` on `effort.lifecycle`
+(up to 10 min — the inline capture it replaced waited without limit; a
+start baseline on a huge repo waits for the startup sweep) so
+`complete_task`'s file review sees the end pin and a batch's opens pin
+before its closes; the consumer holds
 `TaskService::without_event_pump()` so there's no reference cycle.
 Recovery's opens and closes now get pins, metrics and `effort.finished`
 too, since they log the same events. Letters are `pending | retried | discarded`; the

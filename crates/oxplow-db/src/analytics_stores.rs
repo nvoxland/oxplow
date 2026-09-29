@@ -1696,6 +1696,26 @@ impl SqliteSnapshotStore {
             .await
     }
 
+    /// The stream's newest snapshot taken at or before `at` — the tree as
+    /// it stood then, as far as oxplow saw it. `None` when there's none.
+    pub async fn latest_snapshot_at_or_before(
+        &self,
+        stream_id: StreamId,
+        at: Timestamp,
+    ) -> Result<Option<i64>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    params![stream_id.value(), ts_to_string(at)],
+                    |row| row.get(0),
+                )
+                .optional()
+            })
+            .await
+    }
+
     /// Snapshot rows for a stream, newest first.
     pub async fn list_snapshots_for_stream(
         &self,

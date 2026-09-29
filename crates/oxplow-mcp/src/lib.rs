@@ -4649,19 +4649,11 @@ impl OxplowMcp {
         let actor = self.verified_actor(&caller_of(&extensions)).await?;
         let mut updated: Vec<oxplow_domain::Task> = Vec::with_capacity(parsed_ids.len());
         for id in parsed_ids {
-            let outcome = self
-                .services
-                .commands
-                .run(
-                    &actor,
-                    oxplow_app::commands::work_item::NAME,
-                    serde_json::json!({ "id": id.to_string(), "to": target }),
-                    false,
-                )
+            // Settles the effort lifecycle after each, so an open's start
+            // snapshot is taken before a later close in the batch.
+            let row = oxplow_app::task_writes::set_status(&self.services, &actor, id, target)
                 .await
                 .map_err(command_error)?;
-            let row: oxplow_domain::Task =
-                serde_json::from_value(outcome.result).map_err(|e| internal(e.to_string()))?;
             updated.push(row);
         }
         let mut threads: std::collections::HashSet<Option<oxplow_domain::ThreadId>> =
@@ -6412,6 +6404,12 @@ impl OxplowMcp {
             .run(&actor, &params.name, params.input, false)
             .await
             .map_err(command_error)?;
+        // A write may have opened or closed an effort (`effort.open`,
+        // `work_item.transition`): let its snapshot pin land before the
+        // agent's next step.
+        if outcome.audit_id.is_some() {
+            self.services.tasks.settle_lifecycle().await;
+        }
         json_result(&outcome)
     }
 

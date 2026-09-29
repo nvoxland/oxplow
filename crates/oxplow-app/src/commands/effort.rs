@@ -79,23 +79,45 @@ fn storage(e: rusqlite::Error) -> CommandError {
     CommandError::from(oxplow_db::map_sql_err(e))
 }
 
-/// The stream `thread` belongs to; `Invalid` for an unknown thread.
-fn stream_of(ctx: &TxCtx<'_>, thread: ThreadId, field: &str) -> Result<StreamId, CommandError> {
-    ctx.conn
+/// The stream `thread` belongs to; `Invalid` for an unknown thread, or —
+/// when `working` — one that isn't its stream's working (writer) thread:
+/// a queued or closed thread takes no new effort (closing one is fine).
+fn stream_of(
+    ctx: &TxCtx<'_>,
+    thread: ThreadId,
+    field: &str,
+    working: bool,
+) -> Result<StreamId, CommandError> {
+    let (stream, status): (i64, String) = ctx
+        .conn
         .query_row(
-            "SELECT stream_id FROM threads WHERE id = ?1",
+            "SELECT stream_id, status FROM threads WHERE id = ?1",
             [thread.value()],
-            |r| r.get::<_, i64>(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(storage)?
-        .map(StreamId::new)
-        .ok_or_else(|| invalid(field, format!("unknown thread `{thread}`")))
+        .ok_or_else(|| invalid(field, format!("unknown thread `{thread}`")))?;
+    let status: oxplow_domain::ThreadStatus =
+        serde_json::from_value(serde_json::Value::String(status.clone()))
+            .map_err(|_| invalid(field, format!("thread `{thread}` has status `{status}`")))?;
+    if working && !status.is_writer() {
+        return Err(invalid(
+            field,
+            format!("thread `{thread}` is {status:?}, not its stream's working thread"),
+        ));
+    }
+    Ok(StreamId::new(stream))
 }
 
 /// An agent acts only within its own stream.
-fn within_actor_stream(ctx: &TxCtx<'_>, thread: ThreadId, field: &str) -> Result<(), CommandError> {
-    let stream = stream_of(ctx, thread, field)?;
+fn within_actor_stream(
+    ctx: &TxCtx<'_>,
+    thread: ThreadId,
+    field: &str,
+    working: bool,
+) -> Result<(), CommandError> {
+    let stream = stream_of(ctx, thread, field, working)?;
     match ctx.actor.stream_id() {
         Some(own) if own != stream => Err(invalid(
             field,
@@ -138,7 +160,7 @@ pub fn open_command() -> Command {
                 .thread_id()
                 .ok_or_else(|| invalid("/thread", "no thread given and the caller has none"))?,
         };
-        within_actor_stream(ctx, thread, "/thread")?;
+        within_actor_stream(ctx, thread, "/thread", true)?;
         if let Some(open) =
             oxplow_db::effort_store::find_open_for_work_item_tx(ctx.conn, &input.work_item)
                 .map_err(storage)?
@@ -211,7 +233,7 @@ pub fn close_command() -> Command {
         let (work_item, thread) =
             row.ok_or_else(|| invalid("/effort", format!("no effort `{id}`")))?;
         not_an_oxplow_task(&work_item, "/effort")?;
-        within_actor_stream(ctx, ThreadId::new(thread), "/effort")?;
+        within_actor_stream(ctx, ThreadId::new(thread), "/effort", false)?;
         let closed = oxplow_db::effort_store::finish_tx(
             ctx.conn,
             &ctx.events,
@@ -385,6 +407,31 @@ mod tests {
                 &agent(&fx),
                 OPEN,
                 json!({ "work_item": LINEAR, "thread": "thr2" }),
+                false,
+            )
+            .await
+            .unwrap_err(),
+            "/thread",
+        );
+        // A thread in the caller's stream that isn't working (queued,
+        // closed) can't take an effort.
+        fx.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (3, 1, 'q', 'queued',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        refused(
+            bus.run(
+                &Actor::Human,
+                OPEN,
+                json!({ "work_item": LINEAR, "thread": "thr3" }),
                 false,
             )
             .await
