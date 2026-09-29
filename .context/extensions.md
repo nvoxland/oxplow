@@ -455,9 +455,11 @@ and one calling MCP read identical `file:line: what — fix` lines.
   by `main.rs` before Tauri boots exactly like `oxplow hook`. It takes a
   bare name (under `--root` or the cwd) or the extension folder's path
   (the project is read off `…/oxplow/extensions/<name>`). `check` opens
-  `<root>/.oxplow/local.sqlite` when it exists so lens SQL is dry-run
-  against the real project; without one it says so and checks everything
-  else. Exit 0 clean, 1 with errors (or an SDK error such as an unknown
+  `<root>/.oxplow/local.sqlite` **read-only** (`Database::open_read_only`:
+  no migrations, no writes, refused unless its schema version matches
+  this build — the CLI may not be the app's version) so lens SQL is
+  dry-run against the real project; without a usable one it warns on
+  stderr with the reason and checks everything else. Exit 0 clean, 1 with errors (or an SDK error such as an unknown
   extension), 2 usage.
 - **`validate_extension`** (RPC and MCP) returns the `CheckReport`, not
   the bare `Extension`; the extension is inside it.

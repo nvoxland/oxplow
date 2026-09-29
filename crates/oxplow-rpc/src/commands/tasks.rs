@@ -88,10 +88,12 @@ pub async fn update_task(svc: &Services, req: UpdateTaskRequest) -> Result<Task,
                 &oxplow_domain::Actor::Human,
                 oxplow_app::commands::work_item::NAME,
                 serde_json::json!({ "id": req.id.to_string(), "to": to }),
-                true,
+                // Not pre-confirmed: if a transition ever needs a person's
+                // confirmation, the UI gets NEEDS_CONFIRMATION and asks.
+                false,
             )
             .await
-            .map_err(|e| IpcError::invalid(e.to_string()))?;
+            .map_err(IpcError::from)?;
         let item: Task = serde_json::from_value(outcome.result)
             .map_err(|e| IpcError::internal(format!("command result: {e}")))?;
         svc.events.emit(OxplowEvent::TasksChanged {

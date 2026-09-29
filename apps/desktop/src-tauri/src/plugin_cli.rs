@@ -39,7 +39,7 @@ pub fn run(args: &[String]) -> i32 {
 
 /// [`run`] writing to the given streams (what the tests call).
 pub fn run_to(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
-    match run_inner(args, out) {
+    match run_inner(args, out, err) {
         Ok(code) => code,
         Err(Failure::Usage(msg)) => {
             let _ = writeln!(err, "oxplow plugin: {msg}\n\n{USAGE}");
@@ -104,7 +104,7 @@ fn parse(args: &[String]) -> Result<Parsed, Failure> {
     Ok(p)
 }
 
-fn run_inner(args: &[String], out: &mut dyn Write) -> Result<i32, Failure> {
+fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Result<i32, Failure> {
     let p = parse(args)?;
     let mut pos = p.positional.iter();
     let Some(sub) = pos.next() else {
@@ -138,8 +138,21 @@ fn run_inner(args: &[String], out: &mut dyn Write) -> Result<i32, Failure> {
                 .ok_or_else(|| Failure::Usage("check needs an extension name or path".into()))?;
             let (root, name) = locate(p.root.as_deref(), target);
             let catalog = ExtensionCatalog::new();
-            let db = oxplow_sdk::project_database(&root)
-                .and_then(|path| oxplow_db::Database::open(path).ok());
+            // Read-only, no migrations: this CLI may not be the app's
+            // version, and it must never change the project's database.
+            let db = oxplow_sdk::project_database(&root).and_then(|path| {
+                match oxplow_db::Database::open_read_only(&path) {
+                    Ok(db) => Some(db),
+                    Err(e) => {
+                        let _ = writeln!(
+                            err,
+                            "warning: could not open the project database ({}): {e}",
+                            path.display()
+                        );
+                        None
+                    }
+                }
+            });
             let layer = db.map(oxplow_db::SemanticLayer::new);
             let report = block_on(oxplow_sdk::check(&root, &name, &catalog, layer.as_ref()))?;
             let format = if p.json { Format::Json } else { Format::Text };
@@ -248,7 +261,7 @@ mod tests {
         let (code, out, err) = cli(&["check", folder.to_str().unwrap()]);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.contains("demo: 0 errors, 0 warnings"), "{out}");
-        assert!(out.contains("no project database found"), "{out}");
+        assert!(out.contains("lens SQL was not dry-run"), "{out}");
         // Same by name with --root, and as JSON.
         let (code, out, _) = cli(&["check", "demo", "--root", root, "--json"]);
         assert_eq!(code, 0);
@@ -309,6 +322,26 @@ mod tests {
         let (code, _, err) = cli(&["new", "lens", "x", "--origin", "junk", "--root", root]);
         assert_eq!(code, 1);
         assert!(err.contains("not a canonical ref"), "{err}");
+    }
+
+    /// `check` must never migrate or write the project's database, and an
+    /// unreadable one is reported, not passed off as "none found".
+    #[test]
+    fn check_opens_the_project_database_read_only_and_reports_trouble() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        assert_eq!(cli(&["new", "lens", "demo", "--root", root]).0, 0);
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(dir.path().join(".oxplow/local.sqlite"), "not a database").unwrap();
+        let (code, out, err) = cli(&["check", "demo", "--root", root]);
+        assert_eq!(code, 0, "the manifest itself is fine: {out}{err}");
+        assert!(err.contains("could not open the project database"), "{err}");
+        assert!(out.contains("lens SQL was not dry-run"), "{out}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".oxplow/local.sqlite")).unwrap(),
+            "not a database",
+            "check wrote to the project's database"
+        );
     }
 
     #[test]

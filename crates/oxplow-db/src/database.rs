@@ -105,6 +105,54 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
 }
 
 impl Database {
+    /// Open an existing project database **read-only**, without migrating
+    /// or writing anything — for a tool (the `oxplow plugin check` CLI)
+    /// that may be a different oxplow version than the app that owns the
+    /// file. Refuses a file whose schema version differs from this build's
+    /// (its views may not match what this build would query).
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
+        use rusqlite::OpenFlags;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let probe =
+            Connection::open_with_flags(path.as_ref(), flags).map_err(DbInitError::Sqlite)?;
+        let have: Option<i64> = probe
+            .query_row(
+                "SELECT max(version) FROM refinery_schema_history",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(DbInitError::Sqlite)?;
+        drop(probe);
+        let want = embedded::migrations::runner()
+            .get_migrations()
+            .iter()
+            .map(|m| i64::from(m.version()))
+            .max();
+        if have != want {
+            return Err(DbInitError::Migration(format!(
+                "schema version {} but this oxplow expects {}; open the project in a matching oxplow first",
+                have.map_or("none".into(), |v| v.to_string()),
+                want.map_or("none".into(), |v| v.to_string()),
+            )));
+        }
+        let manager = SqliteConnectionManager::file(path.as_ref())
+            .with_flags(flags)
+            .with_init(|c| {
+                c.pragma_update(None, "foreign_keys", "ON")?;
+                c.busy_timeout(std::time::Duration::from_secs(5))
+            });
+        let pool = Pool::builder()
+            .max_size(2)
+            .build(manager)
+            .map_err(DbInitError::Pool)?;
+        let permits = pool.max_size() as usize;
+        Ok(Self {
+            pool: Arc::new(pool),
+            memo: Arc::new(QueryMemo::default()),
+            gate: Arc::new(Semaphore::new(permits)),
+        })
+    }
+
     /// Open (or create) the SQLite file at `path` and apply migrations.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, DbInitError> {
         // `journal_mode` is persisted in the file, so set it once here
@@ -778,6 +826,42 @@ mod tests {
             [now],
         );
         assert!(r.is_err(), "task_note with both parents should fail CHECK");
+    }
+
+    #[test]
+    fn open_read_only_neither_migrates_nor_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("local.sqlite");
+        // Not a database, or an older schema: refused, file untouched.
+        std::fs::write(&path, "junk").unwrap();
+        assert!(Database::open_read_only(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"junk");
+        std::fs::remove_file(&path).unwrap();
+        {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            // As `open` does: a migration's WAL pragma can't run inside
+            // the migration transaction on a file database.
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            embedded::migrations::runner()
+                .set_target(refinery::Target::Version(94))
+                .run(&mut conn)
+                .unwrap();
+        }
+        let err = match Database::open_read_only(&path) {
+            Ok(_) => panic!("an older schema must be refused"),
+            Err(e) => e.to_string(),
+        };
+        assert!(err.contains("schema version 94"), "{err}");
+        // A current database opens and can be read, but not written.
+        std::fs::remove_file(&path).unwrap();
+        drop(Database::open(&path).unwrap());
+        let db = Database::open_read_only(&path).unwrap();
+        let conn = db.conn().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM v_task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+        assert!(conn.execute("DELETE FROM task", []).is_err());
     }
 
     /// V95 pads every trimmed timestamp to the fixed-width form. Migrate to

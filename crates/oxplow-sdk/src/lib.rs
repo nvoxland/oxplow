@@ -252,7 +252,7 @@ pub fn render_findings(report: &CheckReport, format: Format) -> String {
             let sql = if report.sql_checked {
                 "lenses and advisories dry-run against the project's database"
             } else {
-                "no project database found, so lens SQL was not dry-run (open the project in oxplow or use validate_extension)"
+                "lens SQL was not dry-run (no usable project database: open the project in oxplow, or use validate_extension)"
             };
             out.push_str(&format!(
                 "{}: {} error{}, {} warning{}; {sql}\n",

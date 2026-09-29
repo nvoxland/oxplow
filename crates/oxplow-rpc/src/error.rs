@@ -54,6 +54,29 @@ impl IpcError {
     }
 }
 
+/// A command-bus refusal keeps its meaning over IPC: unknown → not
+/// found, invalid input → `INVALID`, a policy refusal → `DENIED`, a needed
+/// confirmation → `NEEDS_CONFIRMATION` (the UI asks the person), a handler
+/// failure → `INTERNAL`.
+impl From<oxplow_domain::CommandError> for IpcError {
+    fn from(value: oxplow_domain::CommandError) -> Self {
+        use oxplow_domain::CommandError as E;
+        let message = value.to_string();
+        let code = match &value {
+            E::Unknown { .. } => "NOT_FOUND",
+            E::Invalid { .. } => "INVALID",
+            E::Denied { .. } => "DENIED",
+            E::NeedsConfirmation { .. } => "NEEDS_CONFIRMATION",
+            E::Failed { .. } => "INTERNAL",
+        };
+        Self {
+            code: code.into(),
+            message,
+            cause: None,
+        }
+    }
+}
+
 impl From<DomainError> for IpcError {
     fn from(value: DomainError) -> Self {
         match &value {
@@ -196,6 +219,27 @@ mod tests {
         let e = IpcError::invalid("bad input");
         assert_eq!(e.code, "INVALID");
         assert_eq!(e.message, "bad input");
+    }
+
+    #[test]
+    fn command_errors_keep_their_meaning_over_ipc() {
+        use oxplow_domain::CommandError as E;
+        let code = |e: E| IpcError::from(e).code;
+        assert_eq!(code(E::Unknown { name: "x.y".into() }), "NOT_FOUND");
+        assert_eq!(
+            code(E::Invalid {
+                field: None,
+                message: "m".into()
+            }),
+            "INVALID"
+        );
+        assert_eq!(code(E::Denied { reason: "r".into() }), "DENIED");
+        assert_eq!(
+            code(E::Failed {
+                message: "db".into()
+            }),
+            "INTERNAL"
+        );
     }
 
     #[test]
