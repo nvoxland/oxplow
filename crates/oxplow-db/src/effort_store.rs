@@ -166,7 +166,7 @@ pub struct EffortAtSnapshot {
 /// (`validate_work_item_ref`) or built with `work_item_ref`, and logs
 /// `effort.opened@1` in the same transaction — every open, whichever path
 /// made it (lifecycle, `record_effort_atomic`, recovery, a command).
-pub(crate) fn start_tx(
+pub fn start_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     work_item: &str,
@@ -211,13 +211,13 @@ pub(crate) fn start_tx(
 /// Closes an open effort and logs `effort.closed@1` in the same
 /// transaction. An effort that is already closed (or gone) is left alone
 /// and nothing is logged; returns whether this call closed it.
-pub(crate) fn finish_tx(
+pub fn finish_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     id: EffortId,
     end_snapshot_id: Option<i64>,
     summary: Option<&str>,
-    now: &str,
+    now: Timestamp,
     retroactive: bool,
 ) -> Result<bool, DomainError> {
     use rusqlite::OptionalExtension;
@@ -227,7 +227,7 @@ pub(crate) fn finish_tx(
              SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
              WHERE id = ?1 AND ended_at IS NULL
              RETURNING work_item, thread_id",
-            params![id.value(), now, end_snapshot_id, summary],
+            params![id.value(), ts_to_string(now), end_snapshot_id, summary],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
@@ -306,7 +306,7 @@ fn record_file_tx(
     Ok(())
 }
 
-pub(crate) fn find_open_for_work_item_tx(
+pub fn find_open_for_work_item_tx(
     conn: &rusqlite::Connection,
     work_item: &str,
 ) -> rusqlite::Result<Option<Effort>> {
@@ -729,7 +729,7 @@ impl SqliteEffortStore {
                         effort_id,
                         None,
                         a.summary.as_deref(),
-                        &ts_to_string(Timestamp::now()),
+                        Timestamp::now(),
                         existing.is_none(),
                     )?;
                 } else if a.summary.is_some() {
@@ -868,7 +868,7 @@ impl EffortStore for SqliteEffortStore {
             .as_deref()
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
-        let now = ts_to_string(Timestamp::now());
+        let now = Timestamp::now();
         let schemas = self.event_schemas.clone();
         self.db
             .transaction(move |tx| {
@@ -879,7 +879,7 @@ impl EffortStore for SqliteEffortStore {
                     id_for_sql,
                     end_snapshot_id,
                     summary.as_deref(),
-                    &now,
+                    now,
                     false,
                 )
             })

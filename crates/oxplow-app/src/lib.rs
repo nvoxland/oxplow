@@ -848,6 +848,12 @@ impl Services {
         commands
             .register(commands::work_item::command())
             .expect("core commands register");
+        for command in [
+            commands::effort::open_command(),
+            commands::effort::close_command(),
+        ] {
+            commands.register(command).expect("core commands register");
+        }
         for command in
             commands::config_commands::commands(commands::config_commands::ConfigTarget {
                 config: config_arc.clone(),

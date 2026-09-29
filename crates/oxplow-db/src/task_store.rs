@@ -181,8 +181,15 @@ fn apply_status_tx(
                 .map_err(map_sql_err)?
             {
                 Some(open) => {
-                    let now = ts_to_string(Timestamp::now());
-                    crate::effort_store::finish_tx(conn, ev, open.id, None, None, &now, false)?;
+                    crate::effort_store::finish_tx(
+                        conn,
+                        ev,
+                        open.id,
+                        None,
+                        None,
+                        Timestamp::now(),
+                        false,
+                    )?;
                     EffortTransition::Finished(open.id)
                 }
                 None => EffortTransition::NoOpenEffort,
