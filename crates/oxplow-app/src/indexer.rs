@@ -1,9 +1,12 @@
 //! Site-wide search indexer.
 //!
-//! Owns every write into the unified `search_store` (FTS5/BM25). It runs as a
-//! single background task that first **backfills** the index from current
-//! state, then **subscribes to the event bus** and keeps the index fresh as
-//! content changes. One uniform mechanism for both DB-resident content
+//! Owns every write into the unified `search_store` (FTS5/BM25). It first
+//! **backfills** the index from current state, then keeps it fresh two
+//! ways: tasks and snapshot files from the **event log** (the `search.index`
+//! pump consumer, P3.10 — durable, redelivered after a crash, on
+//! `work_item.created/edited/transitioned/deleted` and `snapshot.taken`),
+//! and notes, comments and wiki pages from the **in-memory bus** until those
+//! capabilities log events (P5). One uniform mechanism for both DB-resident content
 //! (tasks, comments, notes) and disk-derived content (wiki bodies, file
 //! contents — file handling lives alongside in the snapshot-event handler).
 //!
@@ -28,6 +31,95 @@ pub const KIND_COMMENT: &str = "comment";
 pub const KIND_NOTE: &str = "note";
 pub const KIND_WIKI: &str = "wiki";
 pub const KIND_FILE: &str = "file";
+
+/// The pump consumer's name.
+pub const SEARCH_INDEX: &str = "search.index";
+
+/// Register the `search.index` consumer on `svc`'s pump (boot, before it
+/// spawns).
+pub fn register(svc: &Arc<Services>) {
+    svc.event_pump.register_async(Arc::new(SearchIndexConsumer {
+        services: Arc::downgrade(svc),
+    }));
+}
+
+/// Keeps tasks and snapshot files in the search index from the event log.
+struct SearchIndexConsumer {
+    services: std::sync::Weak<Services>,
+}
+
+#[async_trait::async_trait]
+impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
+    fn name(&self) -> &'static str {
+        SEARCH_INDEX
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        matches!(
+            event_type,
+            "work_item.created"
+                | "work_item.edited"
+                | "work_item.transitioned"
+                | "work_item.deleted"
+                | "snapshot.taken"
+        )
+    }
+
+    async fn handle(
+        &self,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), oxplow_domain::DomainError> {
+        let Some(svc) = self.services.upgrade() else {
+            return Err(oxplow_domain::DomainError::Busy(
+                "services are shutting down".into(),
+            ));
+        };
+        let indexer = Indexer::new(svc.clone());
+        let payload = &event.envelope.payload;
+        if event.envelope.event_type == "snapshot.taken" {
+            let stream = payload["stream"]
+                .as_str()
+                .and_then(|r| r.strip_prefix("stream:"));
+            let snapshot = payload["snapshot"]
+                .as_str()
+                .and_then(|r| r.strip_prefix("snapshot:"))
+                .and_then(|n| n.parse::<i64>().ok());
+            let files = payload["file_count"].as_u64().unwrap_or(0);
+            if let (Some(stream), Some(snapshot), true) =
+                (stream.and_then(StreamId::try_from_str), snapshot, files > 0)
+            {
+                indexer.index_snapshot_files(&stream, snapshot).await;
+            }
+            return Ok(());
+        }
+        // Only oxplow tasks have rows to index.
+        let Some(task) = payload["work_item"]
+            .as_str()
+            .and_then(oxplow_domain::refs::build::task_of_work_item_ref)
+        else {
+            return Ok(());
+        };
+        match svc.task_store.get(task).await? {
+            // A live task: (re)index it where it lives now.
+            Some(t) if t.deleted_at.is_none() => {
+                let stream = match t.thread_id.as_ref() {
+                    Some(tid) => indexer.stream_for_thread(tid).await,
+                    None => None,
+                };
+                indexer.index_task(&t, stream.as_ref()).await;
+            }
+            // Deleted (or gone): out of the index, under the stream the
+            // event was anchored to (the task row can't be read back).
+            _ => {
+                let stream = event.envelope.anchors.stream_id.map(|s| s.to_string());
+                svc.search_store
+                    .remove(KIND_TASK, &task.to_string(), stream.as_deref())
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Skip indexing file bodies larger than this (the FTS index stores its own
 /// copy of the text; bound it so a few huge files can't bloat the DB).
@@ -77,9 +169,6 @@ impl Indexer {
     /// handled here too (see `index_snapshot_files`).
     pub async fn handle(&self, ev: OxplowEvent) {
         match ev {
-            OxplowEvent::TasksChanged { thread_id } => {
-                self.reindex_thread_tasks(thread_id.as_ref()).await
-            }
             OxplowEvent::WorkNotesChanged {
                 thread_id: Some(tid),
                 ..
@@ -90,12 +179,7 @@ impl Indexer {
                 ..
             } => self.reindex_target_comments(&target_kind, &target_id).await,
             OxplowEvent::WikiPagesChanged { slug } => self.index_wiki(&slug).await,
-            OxplowEvent::SnapshotTaken {
-                stream_id,
-                snapshot_id,
-                file_count,
-                ..
-            } if file_count > 0 => self.index_snapshot_files(&stream_id, snapshot_id).await,
+            // Tasks and snapshot files come off the event log (`register`).
             _ => {}
         }
     }
@@ -360,6 +444,57 @@ mod tests {
         git2::Repository::init(dir.path()).unwrap();
         let svc = Arc::new(Services::in_memory(dir.path()).expect("in-memory services"));
         (svc, dir)
+    }
+
+    /// P3.10 (tsk480): a task is indexed from its `work_item.*` events on
+    /// the pump — filed, edited, and removed when deleted — with no
+    /// in-memory bus in the loop.
+    #[tokio::test]
+    async fn tasks_are_indexed_from_their_events() {
+        let (svc, _dir) = services().await;
+        register(&svc);
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let sid = stream.id.to_string();
+        let found = |q: &'static str| {
+            let svc = svc.clone();
+            let sid = sid.clone();
+            async move {
+                svc.search_store
+                    .search(q, Some(&sid), &[], 10)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|h| h.kind == KIND_TASK)
+            }
+        };
+        let task = svc
+            .tasks
+            .create(
+                Some(thread.id),
+                crate::CreateTaskInput {
+                    title: "Quux the sprocket".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(found("sprocket").await, "indexed on work_item.created");
+
+        let mut edited = task.clone();
+        edited.title = "Quux the flange".into();
+        svc.task_store.update(&edited).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(found("flange").await, "re-indexed on work_item.edited");
+
+        svc.tasks.soft_delete(task.id).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(!found("flange").await, "removed on work_item.deleted");
     }
 
     #[test]

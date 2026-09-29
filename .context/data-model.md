@@ -1752,9 +1752,10 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   title above body (`bm25(search_fts, 5.0, 1.0)`).
 - The store is a **derived cache**, never a source of truth. It is written
   exclusively by the `Indexer` service (`crates/oxplow-app/src/indexer.rs`),
-  which backfills at boot and then subscribes to the event bus
-  (`TasksChanged` / `WorkNotesChanged` / `CommentsChanged` / `WikiPagesChanged`
-  / `FileSnapshot*`). `purge_stream` is called when a stream is archived/deleted.
+  which backfills at boot, indexes tasks and snapshot files from the event log
+  (the `search.index` pump consumer, P3.10) and notes / comments / wiki from
+  the in-memory bus (`WorkNotesChanged` / `CommentsChanged` /
+  `WikiPagesChanged`). `purge_stream` is called when a stream is archived/deleted.
 - `sanitize_query` turns arbitrary user input into a safe MATCH expression
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
   syntax errors. Exposed as the `search` IPC command + MCP tool.

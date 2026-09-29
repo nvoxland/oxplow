@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    WorkItemCreated, WorkItemCreatedV1, WorkItemEdited, WorkItemEditedV1, WorkItemTransitioned,
-    WorkItemTransitionedV1,
+    WorkItemCreated, WorkItemCreatedV1, WorkItemDeleted, WorkItemDeletedV1, WorkItemEdited,
+    WorkItemEditedV1, WorkItemTransitioned, WorkItemTransitionedV1,
 };
 use oxplow_domain::refs::build::{effort_ref, work_item_ref};
 use oxplow_domain::stores::TaskStore;
@@ -761,16 +761,20 @@ impl TaskStore for SqliteTaskStore {
         Ok(new_id)
     }
 
+    /// Write the row's fields; an edit of the task's own fields logs
+    /// `work_item.edited@1` in the same transaction (P3.10 — every edit
+    /// reaches the log, so what reacts to edits, like the search index,
+    /// sees them all). Status is never written here.
     async fn update(&self, item: &Task) -> Result<(), DomainError> {
         let item = item.clone();
         let edges_item = item.clone();
-        let rows_affected: usize = self
-            .db
-            .call(move |conn| update_task_tx(conn, &item))
+        let schemas = self.event_schemas.clone();
+        self.db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "task_store");
+                update_with_status_tx(tx, &ev, &item, None, Timestamp::now()).map(|_| ())
+            })
             .await?;
-        if rows_affected == 0 {
-            return Err(DomainError::NotFound);
-        }
         {
             let refs = &self.page_refs;
             let edges = task_edges(&edges_item);
@@ -792,18 +796,38 @@ impl TaskStore for SqliteTaskStore {
         self.db
             .transaction(move |tx| {
                 let now = Timestamp::now();
-                tx.execute(
-                    "UPDATE task SET deleted_at = ?2, updated_at = ?2
-                     WHERE id = ?1 AND deleted_at IS NULL",
-                    params![id.value(), ts_to_string(now)],
-                )
-                .map_err(crate::database::map_sql_err)?;
+                let thread: Option<Option<i64>> = tx
+                    .query_row(
+                        "UPDATE task SET deleted_at = ?2, updated_at = ?2
+                         WHERE id = ?1 AND deleted_at IS NULL
+                         RETURNING thread_id",
+                        params![id.value(), ts_to_string(now)],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .map_err(crate::database::map_sql_err)?;
                 if let Some(open) =
                     crate::effort_store::find_open_for_work_item_tx(tx, &work_item_ref(id))
                         .map_err(crate::database::map_sql_err)?
                 {
                     let ev = EventCtx::system(&schemas, "task_service");
                     crate::effort_store::finish_tx(tx, &ev, open.id, None, None, now, false)?;
+                }
+                if let Some(thread) = thread {
+                    // What indexes or links the task learns it's gone.
+                    let ev = EventCtx::system(&schemas, "task_store");
+                    let work_item = work_item_ref(id);
+                    let anchors = match thread {
+                        Some(t) => anchors_for_thread_tx(tx, ThreadId::new(t))?,
+                        None => Anchors::default(),
+                    };
+                    let env = ev
+                        .typed::<WorkItemDeleted>(&WorkItemDeletedV1 {
+                            work_item: work_item.clone(),
+                        })
+                        .with_anchors(anchors)
+                        .with_subject([work_item]);
+                    ev.append(tx, &env)?;
                 }
                 Ok(())
             })
@@ -994,7 +1018,12 @@ mod tests {
         assert!(ended.is_some(), "the effort closed with its task");
         assert_eq!(
             events,
-            vec!["effort.opened", "work_item.created", "effort.closed"]
+            vec![
+                "effort.opened",
+                "work_item.created",
+                "effort.closed",
+                "work_item.deleted"
+            ]
         );
 
         let mut edit = filed.clone();
@@ -1009,7 +1038,7 @@ mod tests {
             .call(|c| c.query_row("SELECT count(*) FROM event_log", [], |r| r.get(0)))
             .await
             .unwrap();
-        assert_eq!(logged, 3, "a refused edit logs nothing");
+        assert_eq!(logged, 4, "a refused edit logs nothing");
         let live = store
             .db
             .transaction(move |c| get_task_tx(c, id))

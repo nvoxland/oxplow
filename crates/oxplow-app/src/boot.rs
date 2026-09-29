@@ -146,6 +146,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // The event pump: delivers the log to its consumers (page_ref
     // projections first); catches up on anything logged while down.
     crate::effort_reactors::register(state);
+    crate::indexer::register(state);
     state.event_pump.clone().spawn();
     crate::source_runner::spawn_scheduler(state.clone());
     crate::effort_evidence::spawn(state.clone());
