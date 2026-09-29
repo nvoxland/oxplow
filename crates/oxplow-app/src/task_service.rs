@@ -910,13 +910,12 @@ impl TaskService {
         id: TaskId,
         dest: Option<ThreadId>,
     ) -> Result<Task, TaskServiceError> {
-        let mut item = self.load(id).await?;
-        let next_sort = self.next_sort_index(dest.as_ref()).await?;
-        item.thread_id = dest;
-        item.sort_index = next_sort;
-        item.updated_at = Timestamp::now();
-        self.store.update(&item).await?;
-        Ok(item)
+        // The task's claim moves with it (the store closes the old
+        // thread's effort and opens one on the new thread); settle so the
+        // new effort's start snapshot is pinned.
+        let moved = self.store.move_task(id, dest).await?;
+        self.settle_lifecycle().await;
+        Ok(moved)
     }
 
     pub async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, TaskServiceError> {

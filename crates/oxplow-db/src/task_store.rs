@@ -121,6 +121,43 @@ impl SqliteTaskStore {
             .await
     }
 
+    /// Move a task to another thread (or the backlog, `None`) at the end
+    /// of its list, taking its claim with it in the same transaction: an
+    /// open effort on the old thread closes, and an `in_progress` task
+    /// landing on a thread opens one there (another stream's included —
+    /// an effort's snapshots belong to one stream). Returns the moved row.
+    pub async fn move_task(&self, id: TaskId, dest: Option<ThreadId>) -> Result<Task, DomainError> {
+        let schemas = self.event_schemas.clone();
+        let moved = self
+            .db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "task_service");
+                let now = Timestamp::now();
+                let mut item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
+                if item.thread_id == dest {
+                    return Ok(item);
+                }
+                item.thread_id = dest;
+                item.sort_index = next_sort_index_tx(tx, dest)?;
+                item.updated_at = now;
+                if update_task_tx(tx, &item).map_err(crate::database::map_sql_err)? == 0 {
+                    return Err(DomainError::NotFound);
+                }
+                let work_item = work_item_ref(id);
+                if let Some(open) = crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
+                    .map_err(crate::database::map_sql_err)?
+                {
+                    crate::effort_store::finish_tx(tx, &ev, open.id, None, None, now, false)?;
+                }
+                if let (Some(thread), TaskStatus::InProgress) = (dest, item.status) {
+                    crate::effort_store::start_tx(tx, &ev, &work_item, thread, None, now, false)?;
+                }
+                Ok(item)
+            })
+            .await?;
+        Ok(moved)
+    }
+
     /// Move task `id` to `to` in its own transaction ([`set_status_tx`]).
     pub async fn set_status(
         &self,
@@ -857,6 +894,70 @@ mod tests {
             note_count: 0,
             author: Some(TaskAuthor::User),
         }
+    }
+
+    /// Moving an in_progress task takes its claim with it: the effort on
+    /// the old thread closes and one opens on the new thread (another
+    /// stream included); moved to the backlog, it just closes (tsk465).
+    #[tokio::test]
+    async fn moving_an_in_progress_task_moves_its_effort() {
+        let (store, tid) = fixture().await;
+        store
+            .db
+            .call(|c| {
+                c.execute_batch(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                       VALUES (2, 'worktree', 'b', 'b', 'refs/heads/b', 'main', '/b',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+                     INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (2, 2, 'other', 'active',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
+                )
+            })
+            .await
+            .unwrap();
+        let mut filed = item(Some(tid));
+        filed.status = TaskStatus::InProgress;
+        let (id, first) = store.insert_logged(&filed).await.unwrap();
+        let first = first.unwrap();
+
+        let moved = store.move_task(id, Some(ThreadId::new(2))).await.unwrap();
+        assert_eq!(moved.thread_id, Some(ThreadId::new(2)));
+        let open_on = |thread: i64| {
+            let db = store.db.clone();
+            async move {
+                db.call(move |c| {
+                    c.query_row(
+                        "SELECT count(*) FROM effort WHERE thread_id = ?1 AND ended_at IS NULL",
+                        params![thread],
+                        |r| r.get::<_, i64>(0),
+                    )
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            open_on(tid.value()).await,
+            0,
+            "the old thread's claim closed"
+        );
+        assert_eq!(open_on(2).await, 1, "the new thread holds the claim");
+        let first_ended: Option<String> = store
+            .db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT ended_at FROM effort WHERE id = ?1",
+                    params![first.value()],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert!(first_ended.is_some());
+
+        store.move_task(id, None).await.unwrap();
+        assert_eq!(open_on(2).await, 0, "the backlog holds no claim");
     }
 
     /// A deleted task can't be edited (nothing is logged or re-projected),
