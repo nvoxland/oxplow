@@ -579,7 +579,16 @@ impl SnapshotCaptureService {
     pub async fn request_snapshot_for_git_refs(
         &self,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        let after_drain = self.request_snapshot(SnapshotTrigger::GitRefs).await?;
+        // One lock from the drain to the stamp: a take slipping in between
+        // would capture a fresh edit that the stamp would then call HEAD.
+        let started = Instant::now();
+        let _serialized = self.inner.take_lock.lock().await;
+        let after_drain = self
+            .capture_inner(SnapshotTrigger::GitRefs.into(), started)
+            .await?;
+        let Some(current) = after_drain else {
+            return Ok(None);
+        };
         // Bypass GitService's caches (see `record`).
         let project_dir = self.inner.project_dir.clone();
         let head = tokio::task::spawn_blocking(move || {
@@ -595,12 +604,12 @@ impl SnapshotCaptureService {
             // Dirty (the next take records the commit) or not a repo.
             return Ok(after_drain);
         };
-        let _serialized = self.inner.take_lock.lock().await;
         let Some(moved) = self
             .inner
             .store
             .record_head_moved(
                 self.inner.stream_id,
+                current,
                 head_sha,
                 "system:snapshot_capture".into(),
             )

@@ -1344,13 +1344,15 @@ fn record_head_moved_tx(
     tx: &rusqlite::Connection,
     schemas: &EventSchemaRegistry,
     stream_id: StreamId,
+    expected: i64,
     sha: &str,
     source: &str,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
-    let Some(sid) = current_snapshot_tx(tx, stream_id).map_err(map_sql_err)? else {
+    let sid = expected;
+    if current_snapshot_tx(tx, stream_id).map_err(map_sql_err)? != Some(sid) {
         return Ok(None);
-    };
+    }
     let from: Option<String> = tx
         .query_row(
             "SELECT git_commit FROM snapshot WHERE id = ?1",
@@ -1518,20 +1520,25 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// HEAD moved while the worktree was clean: re-stamp the stream's
-    /// current snapshot with `sha` (and every exact-pin file ref on it),
-    /// record a `head_moved` op and `vcs.head.moved`, in one transaction.
-    /// `Ok(None)` when the stream has no snapshot or already points at
-    /// `sha`.
+    /// HEAD moved while the worktree was clean: re-stamp `snapshot_id` —
+    /// the snapshot the caller saw the clean tree at — with `sha` (and
+    /// every exact-pin file ref on it), record a `head_moved` op and
+    /// `vcs.head.moved`, in one transaction. `Ok(None)` when the stream's
+    /// current snapshot is no longer `snapshot_id` (a take landed since:
+    /// stamping it would claim a dirty tree is the commit), or it already
+    /// points at `sha`.
     pub async fn record_head_moved(
         &self,
         stream_id: StreamId,
+        snapshot_id: i64,
         sha: String,
         source: String,
     ) -> Result<Option<TakeOutcome>, DomainError> {
         let schemas = self.event_schemas.clone();
         self.db
-            .transaction(move |tx| record_head_moved_tx(tx, &schemas, stream_id, &sha, &source))
+            .transaction(move |tx| {
+                record_head_moved_tx(tx, &schemas, stream_id, snapshot_id, &sha, &source)
+            })
             .await
     }
 
@@ -3016,7 +3023,7 @@ mod tests {
         let store = SqliteSnapshotStore::new(db.clone());
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), "aaa".into(), "test".into())
+                .record_head_moved(StreamId::new(1), 1, "aaa".into(), "test".into())
                 .await
                 .unwrap(),
             None,
@@ -3037,13 +3044,23 @@ mod tests {
         // Same commit: nothing to record.
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), "aaa".into(), "test".into())
+                .record_head_moved(
+                    StreamId::new(1),
+                    base.snapshot_id,
+                    "aaa".into(),
+                    "test".into()
+                )
                 .await
                 .unwrap(),
             None
         );
         let moved = store
-            .record_head_moved(StreamId::new(1), "bbb".into(), "test".into())
+            .record_head_moved(
+                StreamId::new(1),
+                base.snapshot_id,
+                "bbb".into(),
+                "test".into(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -3068,6 +3085,32 @@ mod tests {
         assert_eq!(exact, ("bbb".into(), 1));
         let ops = store.list_ops(StreamId::new(1), 5).await.unwrap();
         assert_eq!(ops[0].trigger, SnapshotTrigger::HeadMoved);
+        // A take landed after the caller saw the clean tree: the stamp is
+        // refused rather than claiming the new (dirty) snapshot is HEAD.
+        let later = store
+            .record_take(take(1, vec![("a.txt", "dirty")], SnapshotTrigger::TurnEnd))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store
+                .record_head_moved(
+                    StreamId::new(1),
+                    base.snapshot_id,
+                    "ccc".into(),
+                    "test".into()
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .get_snapshot_git_commit(later.snapshot_id)
+                .await
+                .unwrap(),
+            None
+        );
         let moved_events = events(&db, "vcs.head.moved");
         assert_eq!(moved_events.len(), 1);
         assert_eq!(moved_events[0]["from"], "commit:aaa");

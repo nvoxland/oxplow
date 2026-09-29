@@ -680,7 +680,10 @@ production write path; `create_snapshot` / `capture` / `capture_batch` /
   SnapshotTrigger`). V97 backfilled one `legacy` op per existing
   snapshot, parent = the previous snapshot of the same stream.
 - **HEAD moved on a clean tree** is its own op: `record_head_moved`
-  re-stamps the current snapshot's `git_commit` (and flips every
+  re-stamps the snapshot the caller saw the clean tree at — refusing if a
+  take has moved the stream on since (tsk440), and the git-refs path
+  holds the take lock from its drain through the stamp — with the new
+  `git_commit` (and flips every
   exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@1`,
   in one transaction. The git-refs listener runs a `git_refs` take first
   (draining anything dirty), then this.
