@@ -694,11 +694,20 @@ don't suppress".
 activity (e.g. filed a task) but ended with the agent asking the
 user a question still needs to stop cleanly — the Q&A short-circuit
 won't fire because activity ≠ false. The agent signals this
-explicitly via `mcp__oxplow__await_user({ threadId, question })`.
-The runtime tracks `awaitingUserByThread`; when set, the Stop pipeline's
+explicitly via `mcp__oxplow__await_user({ threadId, question })`, which
+logs `agent.status.changed{awaiting_user}` anchored to the open turn.
+`TurnSignals.awaiting_user` is true when such an event is anchored to
+the closed turn (the status a Stop sets is anchored to the turn it
+closed, so a Stop-payload sentinel counts too); then the Stop pipeline's
 top branch returns "allow stop" and **suppresses every directive**
-(in-progress audit, filing-enforcement). The flag is cleared on the
-next UserPromptSubmit.
+(in-progress audit, filing-enforcement) (tsk504). The next turn starts
+clean.
+
+**Subagent carve-out.** `TurnSignals.subagent_in_flight` is true when
+the turn's allowed subagent requests (`SUBAGENT_TOOLS`: `Task`, `Agent`)
+outnumber its finished ones; the in-progress audit then stays quiet
+while the subagent still works. The status derivation counts open
+subagents from the same list.
 
 The same `await_user` call also drives the **rail agent-status dot**
 (tsk30). The MCP handler flips `agent_status` to `AwaitingUser` with the
@@ -711,7 +720,7 @@ of overwriting it — the real `Stop` payload carries no sentinel and the
 `derive_thread_status` reducer can't see the synthetic marker, so
 without these guards the dot would either vanish when the turn ends or
 flicker off on the `await_user` call's own `PostToolUse`
-(`current_status` checks in `crates/oxplow-app/src/hook_ingest.rs`). The
+(the logged-status checks in `crates/oxplow-app/src/hook_ingest.rs`). The
 flag is cleared by the next `UserPromptSubmit`; a resume that skips that
 hook is the one path where the dot can stay stale (rare). The question rides
 `AgentStatusChanged { detail }` to the renderer, which collapses

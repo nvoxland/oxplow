@@ -52,7 +52,8 @@ left no trace; that's why `f` is `Fn`). It begins **IMMEDIATE** (tsk503):
 the write lock is taken at BEGIN and waited for under `busy_timeout`, so
 a read-then-write closure (the hook ingest, most `_tx` cores) can't fail
 with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
-and its first write. A pure read therefore uses `db.call`, not
+and its first write. A pure read therefore uses `Database::read` (a
+DEFERRED snapshot that is always rolled back, no write lock), not
 `transaction`. **The event-log row is the one
 write that belongs inside the closure**: a producer composes
 `event_log_store::append_tx(tx, &envelope)` next to its state change

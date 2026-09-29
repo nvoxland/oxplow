@@ -325,6 +325,26 @@ impl Database {
 }
 
 impl Database {
+    /// Run a read-only closure off the async runtime, in a DEFERRED
+    /// transaction: one consistent snapshot across its statements, and no
+    /// write lock (a [`Self::transaction`] begins IMMEDIATE). Always rolled
+    /// back, so a stray write in `f` never lands.
+    pub async fn read<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
+    where
+        F: FnOnce(&rusqlite::Connection) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        R: Send + 'static,
+    {
+        self.call_mut(move |conn| {
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+                .map_err(map_sql_err)?;
+            let out = f(&tx)?;
+            tx.rollback().map_err(map_sql_err)?;
+            Ok(out)
+        })
+        .await
+    }
+
     /// Run `f` inside a single SQLite transaction, off the async
     /// runtime. THE composition point for multi-write actions: services
     /// compose sync `*_tx(conn, …)` store cores inside one closure so a

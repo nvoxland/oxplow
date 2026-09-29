@@ -195,7 +195,8 @@ mod tests {
             1
         );
 
-        // The turn's own events carry the anchor too.
+        // The turn's own events carry the anchor too — the status its
+        // prompt set (running) and the one its Stop set (idle).
         let mut anchored: Vec<String> = svc
             .event_log_store
             .read_after(0, 1000)
@@ -210,6 +211,7 @@ mod tests {
             anchored,
             vec![
                 "agent.prompt.submitted",
+                "agent.status.changed",
                 "agent.status.changed",
                 "agent.turn.ended",
                 "agent.turn.started",

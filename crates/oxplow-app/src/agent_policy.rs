@@ -276,23 +276,17 @@ impl AgentPolicy {
             tasks: &tasks,
             open_efforts: &open_efforts,
             last_in_progress_audit_signature: last_signature.as_deref(),
-            // Mined from hook_event_store between this turn's started_at
-            // and now. Letting the Q&A-turn carve-out fire silences the
-            // audit nudge on read-only / one-off question turns where
-            // there's no work to claim.
+            // Read from the events anchored to the closed turn
+            // (`TurnSignals::of_turn`). Letting the Q&A-turn carve-out fire
+            // silences the audit nudge on read-only / one-off question
+            // turns where there's no work to claim.
             turn_had_activity: turn_signals.map(|s| s.had_activity),
             turn_had_writes: turn_signals.map(|s| s.had_writes).unwrap_or(false),
-            // Not yet wired (default false ⇒ branches stay silent rather
-            // than emit wrong directives):
-            // - subagent_in_flight: would need PreToolUse(Task) /
-            //   PostToolUse(Task) correlation
-            // - turn_had_filing / turn_filed_ready_item: would need MCP
-            //   call attribution back to this thread/turn
-            // - awaiting_user: only set when await_user MCP tool fires,
-            //   which is tracked via agent_status_store but not surfaced
-            //   here yet
-            subagent_in_flight: false,
-            awaiting_user: false,
+            subagent_in_flight: turn_signals.is_some_and(|s| s.subagent_in_flight),
+            awaiting_user: turn_signals.is_some_and(|s| s.awaiting_user),
+            // Not yet wired (default false ⇒ the branch stays silent rather
+            // than emit a wrong directive): turn_had_filing /
+            // turn_filed_ready_item need MCP call attribution to the turn.
             turn_had_filing: false,
             turn_filed_ready_item: false,
             filed_but_didnt_ship_fired,
@@ -338,32 +332,58 @@ pub struct TurnSignals {
     /// One of them was Edit/Write/MultiEdit/NotebookEdit (a refused write
     /// still counts: the agent tried to change files).
     pub had_writes: bool,
+    /// The turn parked on the person: an `agent.status.changed
+    /// {awaiting_user}` anchored to it (`await_user`, or the Stop's own).
+    pub awaiting_user: bool,
+    /// A subagent it started (an allowed `Task` request) hadn't finished
+    /// when the turn ended.
+    pub subagent_in_flight: bool,
 }
 
+/// The tool names that start a subagent. One list, shared with the status
+/// derivation.
+pub const SUBAGENT_TOOLS: &[&str] = &["Task", "Agent"];
+
 impl TurnSignals {
-    /// The signals of `turn`, read from its `agent.tool.requested` /
-    /// `agent.tool.finished` events — exact by turn, so neither a turn
-    /// before nor one alongside can leak in.
+    /// The signals of `turn`, read from the tool and status events
+    /// anchored to it — exact by turn, so neither a turn before nor one
+    /// alongside can leak in.
     pub async fn of_turn(
         db: &oxplow_db::Database,
         turn: oxplow_domain::AgentTurnId,
     ) -> Result<Self, oxplow_domain::DomainError> {
-        db.transaction(move |conn| {
-            conn.query_row(
-                "SELECT count(*) > 0,
-                        coalesce(max(json_extract(payload, '$.tool')
-                                     IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')), 0)
-                   FROM event_log
-                  WHERE turn_id = ?1
-                    AND type IN ('agent.tool.requested', 'agent.tool.finished')",
-                [turn.value()],
-                |r| {
-                    Ok(TurnSignals {
-                        had_activity: r.get(0)?,
-                        had_writes: r.get(1)?,
-                    })
-                },
-            )
+        let subagent = SUBAGENT_TOOLS
+            .iter()
+            .map(|t| format!("'{t}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT coalesce(sum(type <> 'agent.status.changed'), 0) > 0,
+                    coalesce(max(type <> 'agent.status.changed'
+                                 AND json_extract(payload, '$.tool')
+                                     IN ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')), 0),
+                    coalesce(max(type = 'agent.status.changed'
+                                 AND json_extract(payload, '$.state') = 'awaiting_user'), 0),
+                    coalesce(sum(type = 'agent.tool.requested'
+                                 AND json_extract(payload, '$.decision') = 'allowed'
+                                 AND json_extract(payload, '$.tool') IN ({subagent})), 0)
+                  > coalesce(sum(type = 'agent.tool.finished'
+                                 AND json_extract(payload, '$.tool') IN ({subagent})), 0)
+               FROM event_log
+              WHERE turn_id = ?1
+                AND type IN ('agent.tool.requested', 'agent.tool.finished',
+                             'agent.status.changed')
+                AND payload_expired_at IS NULL"
+        );
+        db.read(move |conn| {
+            conn.query_row(&sql, [turn.value()], |r| {
+                Ok(TurnSignals {
+                    had_activity: r.get(0)?,
+                    had_writes: r.get(1)?,
+                    awaiting_user: r.get(2)?,
+                    subagent_in_flight: r.get(3)?,
+                })
+            })
             .map_err(oxplow_db::map_sql_err)
         })
         .await
@@ -713,6 +733,75 @@ mod tests {
         }
         assert_eq!(seen, vec![(true, false), (true, true), (false, false)]);
     }
+    /// The Stop gates read the turn from the log (tsk504): a turn that
+    /// parked on the person, or left a subagent running, suppresses the
+    /// Stop directives even with in_progress work open.
+    #[tokio::test]
+    async fn awaiting_user_and_a_running_subagent_come_from_the_turn() {
+        use crate::{HookEnvelope, ToolDecision};
+        use oxplow_domain::{AgentStatusState, HookKind};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let hook = |kind: HookKind, body: serde_json::Value| HookEnvelope {
+            kind,
+            thread_id: Some(f.thread),
+            stream_id: None,
+            session_id: Some("s".into()),
+            payload_json: body.to_string(),
+            prompt: Some("go".into()),
+            decision: (kind == HookKind::PreToolUse).then_some(ToolDecision {
+                allowed: true,
+                reason: None,
+            }),
+        };
+        let ingest = |env: HookEnvelope| {
+            let svc = f.svc.clone();
+            async move { svc.hook_ingest.ingest(env).await.unwrap() }
+        };
+        let tool = |t: &str| serde_json::json!({"tool_name": t, "tool_input": {}});
+
+        // A turn that asks the person something.
+        ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({}))).await;
+        ingest(hook(HookKind::PreToolUse, tool("mcp__oxplow__await_user"))).await;
+        f.svc
+            .hook_ingest
+            .set_status(
+                &f.thread,
+                AgentStatusState::AwaitingUser,
+                Some("A or B?".into()),
+            )
+            .await
+            .unwrap();
+        let asked = ingest(hook(HookKind::Stop, serde_json::json!({}))).await;
+        let asked = TurnSignals::of_turn(&f.svc.db, asked.closed_turn.unwrap())
+            .await
+            .unwrap();
+        assert!(asked.awaiting_user && !asked.subagent_in_flight);
+        assert!(
+            f.svc
+                .agent_policy
+                .on_turn_end(&f.svc, &f.thread, Some(&asked))
+                .await
+                .is_none(),
+            "a turn waiting on the person gets no directive"
+        );
+
+        // A turn whose subagent is still running, then one whose finished.
+        let mut seen = Vec::new();
+        for finished in [false, true] {
+            ingest(hook(HookKind::UserPromptSubmit, serde_json::json!({}))).await;
+            ingest(hook(HookKind::PreToolUse, tool("Task"))).await;
+            if finished {
+                ingest(hook(HookKind::PostToolUse, tool("Task"))).await;
+            }
+            let stop = ingest(hook(HookKind::Stop, serde_json::json!({}))).await;
+            let s = TurnSignals::of_turn(&f.svc.db, stop.closed_turn.unwrap())
+                .await
+                .unwrap();
+            seen.push((s.awaiting_user, s.subagent_in_flight));
+        }
+        assert_eq!(seen, vec![(false, true), (false, false)]);
+    }
+
     use oxplow_domain::refs::build::work_item_ref;
     use oxplow_domain::stores::StreamStore;
     use oxplow_domain::{

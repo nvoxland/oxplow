@@ -216,7 +216,9 @@ pub fn derive_thread_status_with_activity(
                 state = AgentStatusState::Running;
                 open_tools += 1;
                 match ev.tool.as_deref() {
-                    Some("Task") => pending_tasks += 1,
+                    Some(t) if crate::agent_policy::SUBAGENT_TOOLS.contains(&t) => {
+                        pending_tasks += 1
+                    }
                     Some(t) if is_user_input_tool(t) => pending_user_input += 1,
                     _ => {}
                 }
@@ -227,7 +229,12 @@ pub fn derive_thread_status_with_activity(
                     open_tools -= 1;
                 }
                 match ev.tool.as_deref() {
-                    Some("Task") if pending_tasks > 0 => pending_tasks -= 1,
+                    Some(t)
+                        if crate::agent_policy::SUBAGENT_TOOLS.contains(&t)
+                            && pending_tasks > 0 =>
+                    {
+                        pending_tasks -= 1
+                    }
                     Some(t) if is_user_input_tool(t) && pending_user_input > 0 => {
                         pending_user_input -= 1;
                     }

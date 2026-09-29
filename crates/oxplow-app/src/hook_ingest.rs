@@ -230,7 +230,7 @@ impl HookIngestService {
                 if !changed(current.as_ref(), state, detail_c.as_deref()) {
                     return Ok(false);
                 }
-                log_status_tx(tx, &ev, thread_c, state, detail_c.clone())?;
+                log_status_tx(tx, &ev, thread_c, None, state, detail_c.clone())?;
                 Ok(true)
             })
             .await?;
@@ -299,20 +299,28 @@ fn changed(current: Option<&AgentStatus>, state: AgentStatusState, detail: Optio
     }
 }
 
+/// Log a status change, anchored to the thread's open turn — or, for the
+/// status a Stop sets, to the turn that Stop closed (`turn`), so the
+/// turn's own record says how it ended (`TurnSignals::awaiting_user`).
 fn log_status_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
+    turn: Option<AgentTurnId>,
     state: AgentStatusState,
     detail: Option<String>,
 ) -> Result<(), DomainError> {
+    let mut anchors = activity_anchors_tx(conn, thread)?;
+    if let Some(turn) = turn {
+        anchors.turn_id = Some(turn.value());
+    }
     let env = ev
         .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
             thread: thread_ref(thread),
             state,
             detail,
         })
-        .with_anchors(activity_anchors_tx(conn, thread)?)
+        .with_anchors(anchors)
         .with_subject([thread_ref(thread)]);
     ev.append(conn, &env)?;
     Ok(())
@@ -454,7 +462,14 @@ fn record_tx(
             *state,
             detail.as_deref(),
         ) {
-            log_status_tx(conn, ev, thread, *state, detail.clone())?;
+            log_status_tx(
+                conn,
+                ev,
+                thread,
+                applied.closed_turn,
+                *state,
+                detail.clone(),
+            )?;
         }
     }
     applied.status = status;
