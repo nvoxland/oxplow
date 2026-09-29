@@ -141,14 +141,15 @@ never the physical tables, which stay internal and free to change.
 | `v_effort` | bracketed spans of work on a work item (`work_item` ref; `task_id` derived for oxplow tasks, V100) |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
-| `v_snapshot` | worktree snapshots |
+| `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
+| `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn / effort anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_effort_file` | files each effort touched, with change kind and the effort's `work_item` (V74, V100) |
 | `v_task_note` | task / thread notes (V74) |
 | `v_task_link` | typed links between tasks (V74) |
-| `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |
+| `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject refs and payload (V94; see [data-model.md](./data-model.md) "event_log") |

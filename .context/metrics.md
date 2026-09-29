@@ -955,10 +955,13 @@ Landed:
 | effort lifecycle (T-B) | `task_service.rs::project_effort_lifecycle_metrics` | one `oxplow.cycle_time` fact per close (subject=effort) + one `oxplow.task_effort` fact (subject=task, the efforts-so-far redo signal); both carry `numerator=value, denominator=1` (the measures are non-additive per V47, so Σn/Σd across time = the MEAN across closes, tsk42); capture **stamps `effort_id`** (unambiguous — this producer knows the exact effort). **Also (tsk38)** emits four `oxplow.effort_test_outcome` facts per close, sliced by `oxplow.tests_stat` — `at_close` (failed count of the last run = quality gate), `peak` (max failed in any run), `distinct_failed` (distinct cases red in ≥1 run), `red_runs` (# runs with ≥1 failure). Computed by the pure `test_outcome::{runs_from_case_facts, compute_effort_test_outcome}` from the effort's `oxplow.test_case` facts (grouped per capture): these "within-effort" aggregates are **not expressible** as a spec (the engine's temporal collapse is only sum/last/Σn÷Σd), so they're materialized here. Gated by `measure_has_active_spec("oxplow.effort_test_outcome")` |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 
-**Two entry points, not one (tsk172).** `project_effort_lifecycle_metrics` runs
-from the status transition (`update`, on crossing OUT of `in_progress`) **and**
-from `record_effort`, which synthesizes an effort when `complete_task` closes a
-task that was never `in_progress`. Only the transition path existed originally,
+**Every close, one place (tsk172, P2.6.2).** `project_effort_lifecycle_metrics`
+runs from the effort-lifecycle pump consumer on `effort.closed` — so for a
+status transition out of `in_progress`, for an effort `record_effort`
+synthesizes when `complete_task` closes a task that was never `in_progress`
+(its close is `retroactive`: no cycle time), for recovery and for
+`effort.close` alike — once per effort (it stops at an existing
+`effort-lifecycle` capture). Only the transition path existed originally,
 so synthesized efforts produced files but **no lifecycle facts at all** — the
 work was invisible to exactly the measures that answer "how is the driving
 going", and the bias ran toward small/quick tasks (the ones most likely to be

@@ -249,16 +249,19 @@ schema.
 
 `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`) is a hybrid: a
 SQLite-indexed table (`file_snapshot`) plus an on-disk content-
-addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
-are time-ordered and deduplicated on a `version_hash` (no parent
-chain). Rows returned by `listSnapshotsForStream` are pre-enriched
-with `label` + `label_kind` joined from `effort`, and
-exclude the first-ever baseline (nothing to diff against). Snapshots
-anchor to efforts via `file_snapshot.effort_id` (and the mirror
-columns `effort.start_snapshot_id` /
-`end_snapshot_id`). Unlike other stores it doesn't expose a `subscribe()`; the
-runtime publishes `file-snapshot.created` on the EventBus after each
-successful flush that actually inserted a row.
+addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. A take
+is one transaction (`record_take`: the snapshot row, its file rows, a
+`snapshot_op` row and `snapshot.taken@1`); a snapshot's identity is its
+`tree_hash`, and the operation log records each take's parent, so there
+is an ancestry chain (see data-model.md "Takes and the operation log").
+Rows returned by `listSnapshotsForStream` carry their creating op's
+`parent_snapshot_id` / `trigger` / `over_budget`, and exclude the
+first-ever baseline (nothing to diff against). Efforts anchor to
+snapshots through `effort.start_snapshot_id` / `end_snapshot_id` and
+agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
+Unlike other stores it doesn't expose a `subscribe()`; the capture
+service publishes `SnapshotTaken` on the EventBus after a take
+commits.
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 `preload.ts` → `apps/desktop/src/api.ts`):

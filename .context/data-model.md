@@ -57,13 +57,17 @@ so the log and the state can never disagree (the outbox pattern; see
 snapshot requests — runs AFTER commit, never inside the closure. Don't
 convert existing single-op methods preemptively — extract a `_tx` core
 the first time an op needs to join a transaction. Current users:
-`record_effort_atomic` and `update_with_effort_transition`.
+`record_effort_atomic`, the task-store status cores (`set_status_tx`,
+`update_with_status_tx`, `insert_logged_tx`), the effort cores
+(`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
+handler (which runs in the bus's transaction).
 
 **Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
 has exactly one open `effort` row. Enforced three ways: the
 status flip and effort open/finish commit in one transaction
-(`SqliteTaskStore::update_with_effort_transition`, and
-`insert_with_effort` for a task filed straight into `in_progress`); a V31 partial
+(`task_store::apply_status_tx`, via `set_status_tx` /
+`update_with_status_tx` / `insert_logged_tx` — the cores of
+`work_item.transition` / `work_item.update` / `work_item.create`); a V31 partial
 unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
 double-open a `Constraint` error; and boot recovery
 (`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
@@ -1260,7 +1264,8 @@ post-commit `TasksChanged` broadcast as the UI wake-up.
 `finish_tx` — the only cores that open or close an effort — append
 `effort.opened@1 { effort, work_item, thread, start_snapshot? }` and
 `effort.closed@1 { effort, work_item, end_snapshot? }` themselves, so
-every path logs: the status transition, `insert_with_effort`,
+every path logs: the status transition, filing straight into
+`in_progress` (`insert_logged_tx`),
 `record_effort_atomic`'s synthesized efforts, recovery, and the async
 `start` / `finish`. Subject `[effort:effN, <work_item ref>]`; anchors
 stream / thread / effort (+ `snapshot` when pinned at open or close). A

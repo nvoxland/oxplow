@@ -2062,8 +2062,11 @@ Tasks (`task` rows) are the user-visible primitive. The Work
 panel's in_progress bucket is driven purely by `task` rows —
 there are no synthesized "live turn" rows, no auto-file /
 auto-complete / adoption. Per-effort attribution and snapshots are
-anchored to `effort`, which the runtime opens/closes on
-status transitions.
+anchored to `effort`, which opens and closes in the same transaction as
+a task's status change (`work_item.create` / `.update` / `.transition`,
+all audited to the actor); work tracked outside oxplow brackets itself
+with `effort.open` / `effort.close`. The filing guard's claim is an open
+effort in the stream (see "Filing enforcement").
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 
@@ -2088,12 +2091,13 @@ Agent rules (mirrored verbatim in the project root `CLAUDE.md`):
 The Stop-hook pipeline (see "Stop-hook pipeline" above) carries one
 task-shaped branch on the writer thread:
 
-- **Task audit (priority 4).** If any item is `in_progress`, the
-  runtime emits `buildInProgressAuditStopReason` listing each
-  in_progress item (id + title) and instructing the agent to
-  reconcile: still active → leave alone; criteria met →
-  `complete_task` (status `done`); stuck → `blocked`; paused
-  → `ready`; obsolete → `canceled`.
+- **Open-effort audit (priority 4).** If any effort is open in the
+  stream, the runtime emits `build_open_effort_audit_reason` listing
+  each (`[eff12] tsk42 — title`, or a foreign item's label) and
+  instructing the agent to reconcile: still active → leave alone;
+  criteria met → `complete_task` (or `effort.close` for a foreign
+  item); stuck → `blocked`; paused → `ready`; obsolete → `canceled`
+  (P2.7).
 
 There is intentionally no ready-work branch — cross-turn queue
 progression is user-driven (a plain prompt, or `/work-next` shipped
