@@ -1164,6 +1164,21 @@ no dedupe key: a transactional producer's retry has already rolled back,
 so keys are for at-least-once producers. `TaskService` keeps its
 post-commit `TasksChanged` broadcast as the UI wake-up.
 
+**Effort events (P2.6.1, tsk453).** `effort_store::start_tx` and
+`finish_tx` — the only cores that open or close an effort — append
+`effort.opened@1 { effort, work_item, thread, start_snapshot? }` and
+`effort.closed@1 { effort, work_item, end_snapshot? }` themselves, so
+every path logs: the status transition, `insert_with_effort`,
+`record_effort_atomic`'s synthesized efforts, recovery, and the async
+`start` / `finish`. Subject `[effort:effN, <work_item ref>]`; anchors
+stream / thread / effort (+ `snapshot` when pinned at open or close). A
+`finish_tx` on an already-closed effort changes nothing and logs nothing
+(`UPDATE … RETURNING`). Cores take an `EventCtx { schemas, source, cause
+}` (`event_log_store`): `EventCtx::system(schemas, "task_service")` for a
+system writer; a bus command will pass its actor's source and its
+`command.executed` id as cause. `anchors_for_thread_tx` gives the thread
++ its stream for any event about work on a thread.
+
 V93 also dropped `task_event` (a per-task audit table nothing had written
 since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
 

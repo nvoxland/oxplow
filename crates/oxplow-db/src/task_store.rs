@@ -4,16 +4,16 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
-use oxplow_domain::refs::build::{effort_ref, system_source, work_item_ref};
+use oxplow_domain::refs::build::{effort_ref, work_item_ref};
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
-    Anchors, DomainError, EffortId, Envelope, EventSchemaRegistry, Task, TaskActorKind, TaskAuthor,
-    TaskId, TaskPriority, TaskStatus, ThreadId, Timestamp,
+    Anchors, DomainError, EffortId, EventSchemaRegistry, Task, TaskActorKind, TaskAuthor, TaskId,
+    TaskPriority, TaskStatus, ThreadId, Timestamp,
 };
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
-use crate::event_log_store::append_tx;
+use crate::event_log_store::{anchors_for_thread_tx, EventCtx};
 use crate::page_ref_projections::{task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM};
 use crate::page_ref_store::SqlitePageRefStore;
 
@@ -84,18 +84,20 @@ impl SqliteTaskStore {
     ) -> Result<(TaskId, EffortId), DomainError> {
         use crate::database::map_sql_err;
         let owned = Arc::new(item.clone());
+        let schemas = self.event_schemas.clone();
         let (id, effort) = self
             .db
             .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "task_service");
                 let id = insert_task_tx(tx, &owned).map_err(map_sql_err)?;
                 let effort = crate::effort_store::start_tx(
                     tx,
+                    &ev,
                     &work_item_ref(id),
                     thread,
                     None,
                     Timestamp::now(),
-                )
-                .map_err(map_sql_err)?;
+                )?;
                 Ok((id, effort))
             })
             .await?;
@@ -148,6 +150,7 @@ impl SqliteTaskStore {
         let outcome = self
             .db
             .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "task_service");
                 let rows = update_task_tx(tx, &item).map_err(map_sql_err)?;
                 if rows == 0 {
                     return Err(DomainError::NotFound);
@@ -158,16 +161,14 @@ impl SqliteTaskStore {
                         .map_err(map_sql_err)?
                     {
                         Some(open) => Ok(EffortTransition::Opened(open.id)),
-                        None => Ok(EffortTransition::Opened(
-                            crate::effort_store::start_tx(
-                                tx,
-                                &work_item,
-                                thread,
-                                None,
-                                Timestamp::now(),
-                            )
-                            .map_err(map_sql_err)?,
-                        )),
+                        None => Ok(EffortTransition::Opened(crate::effort_store::start_tx(
+                            tx,
+                            &ev,
+                            &work_item,
+                            thread,
+                            None,
+                            Timestamp::now(),
+                        )?)),
                     }
                 } else {
                     match crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
@@ -175,8 +176,7 @@ impl SqliteTaskStore {
                     {
                         Some(open) => {
                             let now = ts_to_string(Timestamp::now());
-                            crate::effort_store::finish_tx(tx, open.id, None, None, &now)
-                                .map_err(map_sql_err)?;
+                            crate::effort_store::finish_tx(tx, &ev, open.id, None, None, &now)?;
                             Ok(EffortTransition::Finished(open.id))
                         }
                         None => Ok(EffortTransition::NoOpenEffort),
@@ -189,33 +189,22 @@ impl SqliteTaskStore {
                     };
                     let mut subject = vec![work_item.clone()];
                     subject.extend(effort.map(effort_ref));
-                    let stream: Option<i64> = tx
-                        .query_row(
-                            "SELECT stream_id FROM threads WHERE id = ?1",
-                            params![thread.value()],
-                            |r| r.get(0),
-                        )
-                        .map_err(map_sql_err)?;
                     // No dedupe key: this producer is transactional, so a
                     // retried attempt has already rolled back and can't
                     // double-log. Keys are for at-least-once producers.
-                    let env = Envelope::typed::<WorkItemTransitioned>(
-                        system_source("task_service"),
-                        &WorkItemTransitionedV1 {
+                    let env = ev
+                        .typed::<WorkItemTransitioned>(&WorkItemTransitionedV1 {
                             work_item,
                             from,
                             to: item.status,
                             effort: effort.map(effort_ref),
-                        },
-                    )
-                    .with_anchors(Anchors {
-                        stream_id: stream.map(oxplow_domain::StreamId::new),
-                        thread_id: Some(thread),
-                        effort_id: effort,
-                        ..Anchors::default()
-                    })
-                    .with_subject(subject);
-                    append_tx(tx, &schemas, &env)?;
+                        })
+                        .with_anchors(Anchors {
+                            effort_id: effort,
+                            ..anchors_for_thread_tx(tx, thread)?
+                        })
+                        .with_subject(subject);
+                    ev.append(tx, &env)?;
                 }
                 Ok(transition)
             })
@@ -711,6 +700,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows, 1, "the failed insert rolled back with its effort");
+        let logged: Vec<String> = store
+            .db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.envelope.event_type)
+            .collect();
+        assert_eq!(
+            logged,
+            vec!["effort.opened"],
+            "only the first insert's effort"
+        );
     }
 
     #[tokio::test]

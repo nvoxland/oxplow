@@ -15,16 +15,22 @@ use specta::Type;
 
 use oxplow_domain::{DomainError, EffortId, TaskId, TaskImpact, ThreadId, Timestamp};
 
+use crate::database::map_sql_err;
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
+use crate::event_log_store::{anchors_for_thread_tx, EventCtx};
 use crate::page_ref_projections::{
     effort_impact_edges, effort_ref_types, effort_summary_edges, effort_touched_file_edges,
     KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
+use oxplow_domain::events::schema::{EffortClosed, EffortClosedV1, EffortOpened, EffortOpenedV1};
 use oxplow_domain::refs::build::{
-    task_of_work_item_ref, validate_work_item_ref, work_item_id_of_ref,
+    effort_ref, snapshot_ref, task_of_work_item_ref, thread_ref, validate_work_item_ref,
+    work_item_id_of_ref,
 };
+use oxplow_domain::{Anchors, EventSchemaRegistry};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -157,14 +163,17 @@ pub struct EffortAtSnapshot {
 // ---------------------------------------------------------------------------
 
 /// Opens an effort on `work_item`, which the caller has validated
-/// (`validate_work_item_ref`) or built with `work_item_ref`.
+/// (`validate_work_item_ref`) or built with `work_item_ref`, and logs
+/// `effort.opened@1` in the same transaction — every open, whichever path
+/// made it (lifecycle, `record_effort_atomic`, recovery, a command).
 pub(crate) fn start_tx(
     conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
     work_item: &str,
     thread: ThreadId,
     start_snapshot_id: Option<i64>,
     now: Timestamp,
-) -> rusqlite::Result<EffortId> {
+) -> Result<EffortId, DomainError> {
     conn.execute(
         "INSERT INTO effort
            (id, work_item, thread_id, started_at, ended_at,
@@ -177,24 +186,66 @@ pub(crate) fn start_tx(
             ts_to_string(now),
             start_snapshot_id,
         ],
-    )?;
-    Ok(EffortId::new(conn.last_insert_rowid()))
+    )
+    .map_err(map_sql_err)?;
+    let id = EffortId::new(conn.last_insert_rowid());
+    let env = ev
+        .typed::<EffortOpened>(&EffortOpenedV1 {
+            effort: effort_ref(id),
+            work_item: work_item.to_string(),
+            thread: thread_ref(thread),
+            start_snapshot: start_snapshot_id.map(snapshot_ref),
+        })
+        .with_anchors(Anchors {
+            effort_id: Some(id),
+            snapshot_id: start_snapshot_id,
+            ..anchors_for_thread_tx(conn, thread)?
+        })
+        .with_subject([effort_ref(id), work_item.to_string()]);
+    ev.append(conn, &env)?;
+    Ok(id)
 }
 
+/// Closes an open effort and logs `effort.closed@1` in the same
+/// transaction. An effort that is already closed (or gone) is left alone
+/// and nothing is logged; returns whether this call closed it.
 pub(crate) fn finish_tx(
     conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
     id: EffortId,
     end_snapshot_id: Option<i64>,
     summary: Option<&str>,
     now: &str,
-) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE effort
-         SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
-         WHERE id = ?1 AND ended_at IS NULL",
-        params![id.value(), now, end_snapshot_id, summary],
-    )?;
-    Ok(())
+) -> Result<bool, DomainError> {
+    use rusqlite::OptionalExtension;
+    let closed: Option<(String, i64)> = conn
+        .query_row(
+            "UPDATE effort
+             SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
+             WHERE id = ?1 AND ended_at IS NULL
+             RETURNING work_item, thread_id",
+            params![id.value(), now, end_snapshot_id, summary],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let Some((work_item, thread)) = closed else {
+        return Ok(false);
+    };
+    let env = ev
+        .typed::<EffortClosed>(&EffortClosedV1 {
+            effort: effort_ref(id),
+            work_item: work_item.clone(),
+            end_snapshot: end_snapshot_id.map(snapshot_ref),
+        })
+        .with_anchors(Anchors {
+            effort_id: Some(id),
+            snapshot_id: end_snapshot_id,
+            ..anchors_for_thread_tx(conn, ThreadId::new(thread))?
+        })
+        .with_subject([effort_ref(id), work_item]);
+    ev.append(conn, &env)?;
+    Ok(true)
 }
 
 fn set_summary_tx(
@@ -486,13 +537,22 @@ pub trait EffortStore: Send + Sync {
 pub struct SqliteEffortStore {
     db: Database,
     page_refs: SqlitePageRefStore,
+    /// Validates the `effort.*` envelopes this store logs.
+    event_schemas: Arc<EventSchemaRegistry>,
 }
 
 impl SqliteEffortStore {
+    /// A store with its own core schema registry. `Services` shares one
+    /// registry across stores via [`Self::with_event_schemas`].
     pub fn new(db: Database) -> Self {
+        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+    }
+
+    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
         Self {
             page_refs: SqlitePageRefStore::new(db.clone()),
             db,
+            event_schemas,
         }
     }
 
@@ -620,16 +680,17 @@ impl SqliteEffortStore {
         validate_work_item_ref(&args.work_item)?;
         let work_item = args.work_item.clone();
         let a = std::sync::Arc::new(args);
+        let schemas = self.event_schemas.clone();
         let effort_id = self
             .db
             .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "effort_attribution");
                 let existing =
                     most_recent_for_work_item_tx(tx, &a.work_item).map_err(map_sql_err)?;
                 let (effort_id, open) = match &existing {
                     Some(e) => (e.id, e.ended_at.is_none()),
                     None => (
-                        start_tx(tx, &a.work_item, a.thread, None, Timestamp::now())
-                            .map_err(map_sql_err)?,
+                        start_tx(tx, &ev, &a.work_item, a.thread, None, Timestamp::now())?,
                         true,
                     ),
                 };
@@ -650,12 +711,12 @@ impl SqliteEffortStore {
                     // is attribution, not a status transition.
                     finish_tx(
                         tx,
+                        &ev,
                         effort_id,
                         None,
                         a.summary.as_deref(),
                         &ts_to_string(Timestamp::now()),
-                    )
-                    .map_err(map_sql_err)?;
+                    )?;
                 } else if a.summary.is_some() {
                     // Lifecycle finish already closed the row but left
                     // summary NULL — backfill it.
@@ -761,9 +822,13 @@ impl EffortStore for SqliteEffortStore {
         let now = Timestamp::now();
         let work_item = work_item.to_string();
         let w = work_item.clone();
+        let schemas = self.event_schemas.clone();
         let id = self
             .db
-            .call(move |conn| start_tx(conn, &w, thread, start_snapshot_id, now))
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "effort_store");
+                start_tx(tx, &ev, &w, thread, start_snapshot_id, now)
+            })
             .await?;
         Ok(Effort {
             id,
@@ -789,9 +854,18 @@ impl EffortStore for SqliteEffortStore {
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
         let now = ts_to_string(Timestamp::now());
+        let schemas = self.event_schemas.clone();
         self.db
-            .call(move |conn| {
-                finish_tx(conn, id_for_sql, end_snapshot_id, summary.as_deref(), &now)
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "effort_store");
+                finish_tx(
+                    tx,
+                    &ev,
+                    id_for_sql,
+                    end_snapshot_id,
+                    summary.as_deref(),
+                    &now,
+                )
             })
             .await?;
         if summary_has_body {
@@ -1766,10 +1840,25 @@ mod tests {
         // The outbox: one `work_item.transitioned@1` per status change,
         // committed with it — the re-issued (same-status) call logged
         // nothing. Subject and anchors name the task and its effort.
-        let events = db
+        let all = db
             .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
             .await
             .unwrap();
+        // The effort's own open/close ride the same transactions.
+        let types: Vec<&str> = all.iter().map(|e| e.envelope.event_type.as_str()).collect();
+        assert_eq!(
+            types,
+            vec![
+                "effort.opened",
+                "work_item.transitioned",
+                "effort.closed",
+                "work_item.transitioned"
+            ]
+        );
+        let events: Vec<_> = all
+            .iter()
+            .filter(|e| e.envelope.event_type == "work_item.transitioned")
+            .collect();
         assert_eq!(events.len(), 2, "{events:#?}");
         let opened = &events[0].envelope;
         assert_eq!(opened.event_type, "work_item.transitioned");
@@ -1797,6 +1886,81 @@ mod tests {
         assert_eq!(finished.payload["to"], "done");
         assert_eq!(finished.anchors.effort_id, Some(eff));
         assert!(events[1].seq > events[0].seq);
+    }
+
+    /// P2.6.1 (tsk453): every effort open and close is logged in the
+    /// write's own transaction, whichever path made it.
+    #[tokio::test]
+    async fn effort_open_and_close_are_logged_with_the_write() {
+        let (store, db, tid, t) = fixture_with_db().await;
+        let foreign = "work_item:linear:ENG-12";
+        let eff = store.start(foreign, &t, Some(1)).await.ok();
+        // No snapshot 1 exists; the FK refuses it and nothing is logged.
+        assert!(eff.is_none());
+        let eff = store.start(foreign, &t, None).await.unwrap();
+        store
+            .finish(&eff.id, None, Some("done".into()))
+            .await
+            .unwrap();
+        // Finishing an already-closed effort changes nothing and logs nothing.
+        store.finish(&eff.id, None, None).await.unwrap();
+        // A synthesized effort (no lifecycle open) logs both.
+        let synthesized = store
+            .record_effort_atomic(RecordEffortAtomic {
+                work_item: work_item_ref(tid),
+                thread: t,
+                files: vec![],
+                version: OwnedFileRefVersion {
+                    local_snapshot_id: 0,
+                    closest_git_version: None,
+                    git_version_exact: false,
+                },
+                impacts: vec![],
+                summary: Some("s".into()),
+            })
+            .await
+            .unwrap();
+
+        let events = db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap();
+        let seen: Vec<(String, Vec<String>)> = events
+            .iter()
+            .map(|e| (e.envelope.event_type.clone(), e.envelope.subject.clone()))
+            .collect();
+        let ours = work_item_ref(tid);
+        assert_eq!(
+            seen,
+            vec![
+                (
+                    "effort.opened".into(),
+                    vec![format!("effort:{}", eff.id), foreign.into()]
+                ),
+                (
+                    "effort.closed".into(),
+                    vec![format!("effort:{}", eff.id), foreign.into()]
+                ),
+                (
+                    "effort.opened".into(),
+                    vec![format!("effort:{synthesized}"), ours.clone()]
+                ),
+                (
+                    "effort.closed".into(),
+                    vec![format!("effort:{synthesized}"), ours]
+                ),
+            ]
+        );
+        let opened = &events[0].envelope;
+        assert_eq!(opened.anchors.effort_id, Some(eff.id));
+        assert_eq!(opened.anchors.thread_id, Some(t));
+        assert!(opened.anchors.stream_id.is_some());
+        assert_eq!(opened.payload["work_item"], foreign);
+        assert_eq!(opened.payload["thread"], format!("thread:{t}"));
+        assert_eq!(
+            events[1].envelope.payload["effort"],
+            format!("effort:{}", eff.id)
+        );
     }
 
     #[tokio::test]

@@ -65,7 +65,7 @@ pub use effort_store::{
     Effort, EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, EffortStore,
     FileRefVersion, OwnedFileRefVersion, RecordEffortAtomic, SqliteEffortStore,
 };
-pub use event_log_store::{DeadLetter, SqliteEventLogStore};
+pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use ext_source_store::{
     EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
 };

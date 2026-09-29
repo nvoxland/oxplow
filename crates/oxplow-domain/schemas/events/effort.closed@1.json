@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`effort.closed@1`: a bracket of work ended.",
+  "properties": {
+    "effort": {
+      "type": "string"
+    },
+    "end_snapshot": {
+      "description": "`snapshot:N`, when the close already had its end snapshot.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "work_item": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "effort",
+    "work_item"
+  ],
+  "title": "EffortClosedV1",
+  "type": "object"
+}

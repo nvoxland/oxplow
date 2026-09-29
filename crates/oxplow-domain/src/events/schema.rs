@@ -106,6 +106,8 @@ impl EventSchemaRegistry {
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
+        r.register::<EffortOpened>().expect("core type registers");
+        r.register::<EffortClosed>().expect("core type registers");
         r
     }
 
@@ -477,6 +479,46 @@ impl EventType for AgentTurnEnded {
     type Payload = AgentTurnEndedV1;
 }
 
+/// `effort.opened@1`: a bracket of work on a work item began.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortOpenedV1 {
+    /// `effort:eff12`.
+    pub effort: String,
+    /// `work_item:oxplow:tsk42`, or another provider's item.
+    pub work_item: String,
+    /// `thread:thr3` — the thread doing the work.
+    pub thread: String,
+    /// `snapshot:N`, when the open already had its start snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_snapshot: Option<String>,
+}
+
+pub struct EffortOpened;
+impl EventType for EffortOpened {
+    const TYPE: &'static str = "effort.opened";
+    const V: u32 = 1;
+    type Payload = EffortOpenedV1;
+}
+
+/// `effort.closed@1`: a bracket of work ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortClosedV1 {
+    pub effort: String,
+    pub work_item: String,
+    /// `snapshot:N`, when the close already had its end snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_snapshot: Option<String>,
+}
+
+pub struct EffortClosed;
+impl EventType for EffortClosed {
+    const TYPE: &'static str = "effort.closed";
+    const V: u32 = 1;
+    type Payload = EffortClosedV1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,6 +535,8 @@ mod tests {
                 ("command.executed".to_string(), 1),
                 ("config.changed".to_string(), 1),
                 ("effect.result".to_string(), 1),
+                ("effort.closed".to_string(), 1),
+                ("effort.opened".to_string(), 1),
                 ("snapshot.taken".to_string(), 1),
                 ("vcs.head.moved".to_string(), 1),
                 ("work_item.transitioned".to_string(), 1),

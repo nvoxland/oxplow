@@ -624,7 +624,10 @@ impl Services {
             db.clone(),
             event_schemas.clone(),
         ));
-        let effort_store = Arc::new(SqliteEffortStore::new(db.clone()));
+        let effort_store = Arc::new(SqliteEffortStore::with_event_schemas(
+            db.clone(),
+            event_schemas.clone(),
+        ));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
             SqliteSnapshotStore::new(db.clone()),

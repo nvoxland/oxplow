@@ -29,6 +29,64 @@ use oxplow_domain::{
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
 
+/// Who is writing the events a store's transaction core appends — so a
+/// core (`effort_store::start_tx`, …) logs its own change without every
+/// caller having to remember, and a command's run can still name itself
+/// as the source and cause.
+#[derive(Clone)]
+pub struct EventCtx<'a> {
+    pub schemas: &'a EventSchemaRegistry,
+    /// `system:<component>`, or an actor's source when a command runs.
+    pub source: String,
+    /// The event that caused these (a command's `command.executed`).
+    pub cause: Option<EventId>,
+}
+
+impl<'a> EventCtx<'a> {
+    /// A system component writing on its own behalf (`system:<component>`).
+    pub fn system(schemas: &'a EventSchemaRegistry, component: &str) -> Self {
+        Self {
+            schemas,
+            source: oxplow_domain::refs::build::system_source(component),
+            cause: None,
+        }
+    }
+
+    /// A typed envelope carrying this context's source and cause.
+    pub fn typed<T: oxplow_domain::events::schema::EventType>(
+        &self,
+        payload: &T::Payload,
+    ) -> Envelope {
+        let env = Envelope::typed::<T>(self.source.clone(), payload);
+        match &self.cause {
+            Some(c) => env.with_cause(c.clone()),
+            None => env,
+        }
+    }
+
+    pub fn append(&self, conn: &Connection, env: &Envelope) -> Result<i64, DomainError> {
+        append_tx(conn, self.schemas, env)
+    }
+}
+
+/// The anchors an event about work on `thread` carries: the thread and
+/// its stream (looked up in the same transaction).
+pub fn anchors_for_thread_tx(conn: &Connection, thread: ThreadId) -> Result<Anchors, DomainError> {
+    let stream: Option<i64> = conn
+        .query_row(
+            "SELECT stream_id FROM threads WHERE id = ?1",
+            params![thread.value()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    Ok(Anchors {
+        stream_id: stream.map(StreamId::new),
+        thread_id: Some(thread),
+        ..Anchors::default()
+    })
+}
+
 /// Append one envelope. Returns its `seq`. The payload must validate
 /// against the registered schema for `type@v` ([`DomainError::Invalid`]
 /// otherwise, nothing written). A duplicate `dedupe_key` (or `id`) fails
