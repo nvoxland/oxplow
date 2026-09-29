@@ -1146,7 +1146,12 @@ event stays. It is separate from the snapshot blob store because the
 retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
-and stamps it.
+and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
+boot + daily; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
+`test` and `code` 90 / 30, everything else kept). An expired payload no
+longer validates against its schema, so a dead letter older than its
+payload window can't be retried (discard it). The activity log shows an
+expired row as "(details expired)".
 
 **Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
 and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one

@@ -19,6 +19,7 @@ pub mod effort_evidence_store;
 pub mod effort_store;
 pub mod event_content_store;
 pub mod event_log_store;
+pub mod event_retention;
 pub mod ext_source_store;
 pub mod fact_store;
 pub mod git_store;

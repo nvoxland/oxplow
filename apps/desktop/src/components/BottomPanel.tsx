@@ -81,6 +81,8 @@ function str(p: Payload, key: string): string {
 /** What a row says about its event, from the payload. */
 export function detail(kind: string, raw: unknown): string {
   const p = (raw && typeof raw === "object" ? raw : {}) as Payload;
+  // Retention replaced the payload (every live agent payload has fields).
+  if (raw && typeof raw === "object" && Object.keys(p).length === 0) return "(details expired)";
   switch (kind) {
     case "tool.requested": {
       const target = str(p, "path") || str(p, "detail");

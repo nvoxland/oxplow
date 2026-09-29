@@ -21,6 +21,9 @@ describe("agent activity rows", () => {
     expect(detail("prompt.submitted", { reprompt: true })).toBe("re-prompt");
     expect(detail("session.started", { harness: "claude", resumed: true })).toBe("claude (resumed)");
   });
+  test("a payload retention replaced says so", () => {
+    expect(detail("tool.finished", {})).toBe("(details expired)");
+  });
   test("an unknown kind or payload shows nothing rather than throwing", () => {
     expect(detail("tool.finished", null)).toBe("");
     expect(detail("something.else", { x: 1 })).toBe("");
