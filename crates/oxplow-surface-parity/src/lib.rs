@@ -174,8 +174,9 @@ pub const MANIFEST: &[Capability] = &[
     agent("run_command"),
     // ---- the event log's dead-letter queue ----
     both("list_dead_letters"),
-    both("retry_dead_letter"),
-    both("discard_dead_letter"),
+    // A person decides a dead letter's fate (V93): agents can list them.
+    ui("retry_dead_letter"),
+    ui("discard_dead_letter"),
     both("search"),
     both("query_sql"),
     both("describe_schema"),

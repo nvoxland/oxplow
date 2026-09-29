@@ -1096,10 +1096,15 @@ consumer doesn't `handle` are skipped but checkpointed. Renaming a
 consumer restarts it from the beginning of the log. `Services.event_pump`
 is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
 producers call after their commit — or every 5s); `TaskService` wakes it
-after a transition. Letters are `pending | retried | discarded`; the
-person's moves are `list_dead_letters(all?)`, `retry_dead_letter(id)`
-(re-runs the consumer now; `retried` on success, else `pending` with the
-new error) and `discard_dead_letter(id)` — RPC + MCP (parity `both`), and
+after a transition. A handler error that is retryable (`DomainError::
+Busy`) is not a poison event: the delivery transaction fails and retries,
+and if the database stays busy the event waits, checkpoint unmoved
+(tsk437 review). Letters are `pending | retried | discarded`; the
+person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
+`retried` on success, else `pending` with the new error; refused unless
+the letter is `pending`) and `discard_dead_letter(id)` — **RPC only**
+(parity `ui`): a person decides a letter's fate. `list_dead_letters(all?)`
+is RPC + MCP. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 

@@ -122,6 +122,10 @@ impl EventPump {
                 let outcome = if consumer.handles(&event.envelope.event_type) {
                     match run_handler(consumer.as_ref(), tx, &event) {
                         Ok(()) => Delivery::Handled,
+                        // A lock blip isn't a poison event: fail the whole
+                        // delivery so the transaction retries it, and if it
+                        // stays busy the event waits (checkpoint unmoved).
+                        Err(err) if err.is_retryable() => return Err(err),
                         Err(err) => {
                             dead_letter_tx(tx, consumer.name(), event.seq, &err.to_string())?;
                             Delivery::DeadLettered
@@ -141,6 +145,14 @@ impl EventPump {
     /// error and one more attempt. Returns the letter's new state.
     pub async fn retry_dead_letter(&self, id: i64) -> Result<DeadLetter, DomainError> {
         let letter = self.find_letter(id).await?;
+        if letter.state != "pending" {
+            // Re-running a resolved or discarded event would run a possibly
+            // non-idempotent handler a second time.
+            return Err(DomainError::Invalid(format!(
+                "dead letter {id} is `{}`, not `pending`; only a pending letter can be retried",
+                letter.state
+            )));
+        }
         let consumer = self
             .consumers
             .iter()
@@ -492,5 +504,63 @@ mod tests {
             pump.retry_dead_letter(9999).await.unwrap_err(),
             DomainError::NotFound
         ));
+        // Only a pending letter can be retried: re-running a resolved or
+        // discarded one would run a possibly non-idempotent handler again.
+        *recorder.poison.lock() = None;
+        let err = pump.retry_dead_letter(id).await.unwrap_err();
+        assert!(err.to_string().contains("retried"), "{err}");
+        let err = pump.retry_dead_letter(id2).await.unwrap_err();
+        assert!(err.to_string().contains("discarded"), "{err}");
+    }
+
+    /// Fails with a retryable `Busy` a set number of times, then handles.
+    struct Flaky {
+        busy_left: parking_lot::Mutex<u32>,
+    }
+    impl EventConsumer for Flaky {
+        fn name(&self) -> &'static str {
+            "flaky"
+        }
+        fn handles(&self, _event_type: &str) -> bool {
+            true
+        }
+        fn handle(
+            &self,
+            _conn: &rusqlite::Connection,
+            _event: &StoredEvent,
+        ) -> Result<(), DomainError> {
+            let mut left = self.busy_left.lock();
+            if *left > 0 {
+                *left -= 1;
+                return Err(DomainError::Busy("database is locked".into()));
+            }
+            Ok(())
+        }
+    }
+
+    /// A lock blip inside a handler is not a poison event: the delivery
+    /// is retried, and if the database stays busy the event stays
+    /// undelivered (checkpoint unmoved) for the next run — never parked.
+    #[tokio::test]
+    async fn a_transient_busy_error_is_retried_not_dead_lettered() {
+        let (db, store) = setup().await;
+        store.append(config_changed("a")).await.unwrap();
+        let flaky = Arc::new(Flaky {
+            busy_left: parking_lot::Mutex::new(1),
+        });
+        let pump = pump(&db, &store, vec![flaky.clone()]);
+        let report = pump.run_once().await.unwrap();
+        assert_eq!(report.handled, 1);
+        assert!(pump.list_dead_letters(true).await.unwrap().is_empty());
+        // Busy for longer than the transaction's own retries: the run
+        // errors, nothing is parked, and the checkpoint stays put.
+        store.append(config_changed("b")).await.unwrap();
+        *flaky.busy_left.lock() = 10;
+        assert!(pump.run_once().await.is_err());
+        assert!(pump.list_dead_letters(true).await.unwrap().is_empty());
+        assert_eq!(store.checkpoint("flaky".into()).await.unwrap(), 1);
+        *flaky.busy_left.lock() = 0;
+        assert_eq!(pump.run_once().await.unwrap().handled, 1);
+        assert_eq!(store.checkpoint("flaky".into()).await.unwrap(), 2);
     }
 }
