@@ -36,9 +36,10 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::blob_store::BlobStore;
-use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
+use crate::events::{EventBus, OxplowEvent};
 use crate::producer_metrics::builtin_producer_metrics;
 use crate::snapshot_content::read_snapshot_content;
+use oxplow_domain::snapshot::SnapshotTrigger;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -1227,7 +1228,7 @@ impl MetricsService {
                 event,
                 Ok(OxplowEvent::TasksChanged { .. }
                     | OxplowEvent::SourceSynced { .. }
-                    | OxplowEvent::FileSnapshotsBatchCreated { .. })
+                    | OxplowEvent::SnapshotTaken { .. })
             ) {
                 self.capture_entity_states(false).await;
             }
@@ -1242,25 +1243,17 @@ impl MetricsService {
                     self.seed_catalog().await;
                     self.capture_entity_states(true).await;
                 }
-                Ok(OxplowEvent::FileSnapshotsBatchCreated {
-                    stream_id: Some(stream_id),
+                Ok(OxplowEvent::SnapshotTaken {
+                    stream_id,
                     snapshot_id,
-                    file_count,
-                    source,
+                    trigger,
                     ..
                 }) => {
-                    // A git-refs re-stamp with no content change can't move a
+                    // A HEAD re-stamp with no content change can't move a
                     // tree metric — skip it to avoid recompute storms.
-                    if matches!(source, SnapshotSourceKind::GitRefs) && file_count == 0 {
+                    if trigger == SnapshotTrigger::HeadMoved {
                         continue;
                     }
-                    self.run_snapshot_gauges(stream_id, snapshot_id).await;
-                }
-                Ok(OxplowEvent::FileSnapshotCreated {
-                    stream_id: Some(stream_id),
-                    snapshot_id,
-                    ..
-                }) => {
                     self.run_snapshot_gauges(stream_id, snapshot_id).await;
                 }
                 Ok(OxplowEvent::EffortFinished {

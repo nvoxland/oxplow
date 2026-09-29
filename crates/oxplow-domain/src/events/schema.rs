@@ -101,6 +101,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<ConfigChanged>().expect("core type registers");
         r.register::<EffectResult>().expect("core type registers");
+        r.register::<SnapshotTaken>().expect("core type registers");
+        r.register::<VcsHeadMoved>().expect("core type registers");
         r
     }
 
@@ -375,13 +377,66 @@ impl EventType for EffectResult {
     type Payload = EffectResultV1;
 }
 
+/// `snapshot.taken@1`: one snapshot take (one `snapshot_op` row). Refs
+/// are canonical (`.context/refs.md`): `stream:str1`, `snapshot:123`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotTakenV1 {
+    pub stream: String,
+    /// The snapshot the worktree is at after the take: a new one, or the
+    /// parent when nothing changed (`unchanged`).
+    pub snapshot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub trigger: crate::snapshot::SnapshotTrigger,
+    /// True when the take recorded no new snapshot.
+    pub unchanged: bool,
+    /// File rows the take recorded (0 when unchanged).
+    pub file_count: u32,
+    pub elapsed_ms: u64,
+    /// The time budget the caller gave the take, when it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_ms: Option<u64>,
+    /// `elapsed_ms > budget_ms`: reported, never silent.
+    pub over_budget: bool,
+}
+
+pub struct SnapshotTaken;
+impl EventType for SnapshotTaken {
+    const TYPE: &'static str = "snapshot.taken";
+    const V: u32 = 1;
+    type Payload = SnapshotTakenV1;
+}
+
+/// `vcs.head.moved@1`: HEAD moved while the worktree was clean, so the
+/// latest snapshot now also is that commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VcsHeadMovedV1 {
+    pub stream: String,
+    /// The snapshot re-stamped with the new commit.
+    pub snapshot: String,
+    /// `commit:<sha>` the snapshot pointed at before, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// `commit:<sha>` HEAD points at now.
+    pub to: String,
+}
+
+pub struct VcsHeadMoved;
+impl EventType for VcsHeadMoved {
+    const TYPE: &'static str = "vcs.head.moved";
+    const V: u32 = 1;
+    type Payload = VcsHeadMovedV1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     #[test]
-    fn core_registry_knows_the_four_p1_types_at_v1() {
+    fn core_registry_knows_every_core_type_at_v1() {
         let r = EventSchemaRegistry::core();
         assert_eq!(
             r.versions(),
@@ -389,6 +444,8 @@ mod tests {
                 ("command.executed".to_string(), 1),
                 ("config.changed".to_string(), 1),
                 ("effect.result".to_string(), 1),
+                ("snapshot.taken".to_string(), 1),
+                ("vcs.head.moved".to_string(), 1),
                 ("work_item.transitioned".to_string(), 1),
             ]
         );

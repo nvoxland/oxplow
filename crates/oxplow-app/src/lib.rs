@@ -96,8 +96,7 @@ pub use agent_prompt::{
     RoleMode,
 };
 pub use events::{
-    event_channels, CodeQualityScanPhase, EventBus, OxplowEvent, SnapshotSourceKind,
-    WorkspaceChangeKind,
+    event_channels, CodeQualityScanPhase, EventBus, OxplowEvent, WorkspaceChangeKind,
 };
 pub use hook_ingest::{HookEnvelope, HookIngestError, HookIngestService};
 pub use oxplow_lsp::{LspError, LspProxy};
@@ -609,9 +608,11 @@ impl Services {
         // any stream's OIDs.
         let snapshot_store = Arc::new({
             let dir = layout.project_dir.clone();
-            SqliteSnapshotStore::new(db.clone()).with_content_hasher(Arc::new(move |oid: &str| {
-                oxplow_git::read_blob(&dir, oid).map(|bytes| blob_store::BlobStore::hash(&bytes))
-            }))
+            SqliteSnapshotStore::with_event_schemas(db.clone(), event_schemas.clone())
+                .with_content_hasher(Arc::new(move |oid: &str| {
+                    oxplow_git::read_blob(&dir, oid)
+                        .map(|bytes| blob_store::BlobStore::hash(&bytes))
+                }))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime =
@@ -1029,7 +1030,7 @@ impl Services {
             .await
             .map_err(|e| e.to_string())?;
         let drained = capture
-            .request_snapshot(crate::events::SnapshotSourceKind::Manual)
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
             .await
             .map_err(|e| e.to_string())?;
         let snapshot_id = match drained {

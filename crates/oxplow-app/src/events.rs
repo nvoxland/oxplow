@@ -56,28 +56,6 @@ pub enum WorkspaceChangeKind {
     Renamed,
 }
 
-/// Snapshot trigger source. The renderer renders these differently in
-/// the Snapshots panel ("startup" rows are dimmer than "effort-end").
-///
-/// Tasks themselves don't have a start/end — only efforts do. The
-/// Effort* variants are the snapshot bracket for a single effort
-/// row's lifetime.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum SnapshotSourceKind {
-    EffortStart,
-    EffortEnd,
-    EffortEvent,
-    Startup,
-    Manual,
-    /// Triggered by a HEAD/refs change (commit, branch switch, pull,
-    /// rebase, …). The capture service still drains any pending
-    /// dirty files; the new variant exists so an empty drain can
-    /// still emit a snapshot row that records the new HEAD when the
-    /// previous snapshot pointed at a different commit.
-    GitRefs,
-}
-
 /// Code-quality scan lifecycle phase the bus broadcasts. Mirrors the
 /// renderer-era enum.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -178,28 +156,21 @@ pub enum OxplowEvent {
         stream_id: Option<StreamId>,
         thread_id: Option<ThreadId>,
     },
-    /// A file snapshot landed in the snapshot store. Driven by the
-    /// background snapshot capture loop or an explicit task event.
-    FileSnapshotCreated {
-        stream_id: Option<StreamId>,
-        snapshot_id: i64,
-        source: SnapshotSourceKind,
-        effort_id: Option<String>,
-        thread_id: Option<ThreadId>,
-    },
-    /// A batched flush of N file snapshots landed under one parent.
-    /// Emitted instead of N per-file `FileSnapshotCreated` events when
-    /// `request_snapshot` drains many paths at once (startup sweep,
-    /// branch switch). Renderer treats it the same as the per-file
-    /// variant — fire-and-forget refetch — so a 34k-file batch causes
-    /// one refetch, not 34k.
-    FileSnapshotsBatchCreated {
-        stream_id: Option<StreamId>,
+    /// A snapshot take recorded something new: a new snapshot (its
+    /// `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
+    /// current snapshot re-stamped with a new HEAD. Emitted after the
+    /// take's transaction commits (`SqliteSnapshotStore::record_take`),
+    /// never for an unchanged take. The durable record is the
+    /// `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
+    /// event in the log; this is the UI / reactor wake-up.
+    SnapshotTaken {
+        stream_id: StreamId,
         snapshot_id: i64,
         file_count: u32,
-        source: SnapshotSourceKind,
-        effort_id: Option<String>,
+        trigger: oxplow_domain::snapshot::SnapshotTrigger,
         thread_id: Option<ThreadId>,
+        turn_id: Option<i64>,
+        effort_id: Option<oxplow_domain::EffortId>,
     },
     /// Effort-scoped collection observations changed for `effort_id`
     /// (a test-run or diff-coverage row landed). The renderer refetches

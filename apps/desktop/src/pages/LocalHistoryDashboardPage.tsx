@@ -228,11 +228,8 @@ export function LocalHistoryDashboardPage({
     void refresh();
   }, [refresh]);
 
-  // Snapshot events fire on every `request_snapshot()` flush; the
-  // batched event the writer emits is the one the dashboard cares
-  // about. `subscribeSnapshotEvents` already coalesces both per-file
-  // and batched variants into a single callback shape, so one
-  // refresh covers either case.
+  // A take that recorded something new (a snapshot, or a HEAD
+  // re-stamp) is the one thing that changes this list.
   useEffect(() => {
     if (!streamId) return;
     const unsub = subscribeSnapshotEvents(streamId, () => {

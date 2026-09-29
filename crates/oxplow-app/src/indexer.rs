@@ -61,7 +61,7 @@ impl Indexer {
     /// Backfill the DB + wiki portion of the index from current state, then
     /// process events forever. Spawned once at boot (see `main.rs`). File
     /// contents backfill for free via the snapshot startup sweep, which emits
-    /// `FileSnapshotsBatchCreated`.
+    /// `SnapshotTaken`.
     pub async fn run(self, mut rx: broadcast::Receiver<OxplowEvent>) {
         self.backfill().await;
         loop {
@@ -90,16 +90,12 @@ impl Indexer {
                 ..
             } => self.reindex_target_comments(&target_kind, &target_id).await,
             OxplowEvent::WikiPagesChanged { slug } => self.index_wiki(&slug).await,
-            OxplowEvent::FileSnapshotCreated {
-                stream_id: Some(stream_id),
+            OxplowEvent::SnapshotTaken {
+                stream_id,
                 snapshot_id,
+                file_count,
                 ..
-            }
-            | OxplowEvent::FileSnapshotsBatchCreated {
-                stream_id: Some(stream_id),
-                snapshot_id,
-                ..
-            } => self.index_snapshot_files(&stream_id, snapshot_id).await,
+            } if file_count > 0 => self.index_snapshot_files(&stream_id, snapshot_id).await,
             _ => {}
         }
     }

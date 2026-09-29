@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`vcs.head.moved@1`: HEAD moved while the worktree was clean, so the\nlatest snapshot now also is that commit.",
+  "properties": {
+    "from": {
+      "description": "`commit:<sha>` the snapshot pointed at before, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot": {
+      "description": "The snapshot re-stamped with the new commit.",
+      "type": "string"
+    },
+    "stream": {
+      "type": "string"
+    },
+    "to": {
+      "description": "`commit:<sha>` HEAD points at now.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stream",
+    "snapshot",
+    "to"
+  ],
+  "title": "VcsHeadMovedV1",
+  "type": "object"
+}

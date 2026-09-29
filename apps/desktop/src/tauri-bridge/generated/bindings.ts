@@ -3284,19 +3284,15 @@ detail: string | null } |
  */
 { kind: "usageRecorded"; usageKind: string; key: string; streamId: StreamId | null; threadId: ThreadId | null } | 
 /**
- *  A file snapshot landed in the snapshot store. Driven by the
- *  background snapshot capture loop or an explicit task event.
+ *  A snapshot take recorded something new: a new snapshot (its
+ *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
+ *  current snapshot re-stamped with a new HEAD. Emitted after the
+ *  take's transaction commits (`SqliteSnapshotStore::record_take`),
+ *  never for an unchanged take. The durable record is the
+ *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
+ *  event in the log; this is the UI / reactor wake-up.
  */
-{ kind: "fileSnapshotCreated"; streamId: StreamId | null; snapshotId: number; source: SnapshotSourceKind; effortId: string | null; threadId: ThreadId | null } | 
-/**
- *  A batched flush of N file snapshots landed under one parent.
- *  Emitted instead of N per-file `FileSnapshotCreated` events when
- *  `request_snapshot` drains many paths at once (startup sweep,
- *  branch switch). Renderer treats it the same as the per-file
- *  variant — fire-and-forget refetch — so a 34k-file batch causes
- *  one refetch, not 34k.
- */
-{ kind: "fileSnapshotsBatchCreated"; streamId: StreamId | null; snapshotId: number; fileCount: number; source: SnapshotSourceKind; effortId: string | null; threadId: ThreadId | null } | 
+{ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null } | 
 /**
  *  Effort-scoped collection observations changed for `effort_id`
  *  (a test-run or diff-coverage row landed). The renderer refetches
@@ -3789,24 +3785,6 @@ export type SnapshotPairDiff = {
 };
 
 /**
- *  Snapshot trigger source. The renderer renders these differently in
- *  the Snapshots panel ("startup" rows are dimmer than "effort-end").
- * 
- *  Tasks themselves don't have a start/end — only efforts do. The
- *  Effort* variants are the snapshot bracket for a single effort
- *  row's lifetime.
- */
-export type SnapshotSourceKind = "effort-start" | "effort-end" | "effort-event" | "startup" | "manual" | 
-/**
- *  Triggered by a HEAD/refs change (commit, branch switch, pull,
- *  rebase, …). The capture service still drains any pending
- *  dirty files; the new variant exists so an empty drain can
- *  still emit a snapshot row that records the new HEAD when the
- *  previous snapshot pointed at a different commit.
- */
-"git-refs";
-
-/**
  *  Aggregate created/modified/deleted counts for the file rows
  *  captured under one snapshot. Derived by comparing each child
  *  row's `blob_hash` to the most-recent prior row for the same
@@ -3850,6 +3828,36 @@ export type SnapshotSummaryCounts = {
 	updated: number,
 	deleted: number,
 };
+
+/**
+ *  Why a snapshot take happened: one row of the operation log each
+ *  (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
+ */
+export type SnapshotTrigger = 
+// An agent turn ended (Stop / interrupt).
+"turn_end" | 
+// The worktree went quiet with no turn open (human edits).
+"quiet" | 
+// An effort opened (its start bracket).
+"effort_start" | 
+/**
+ *  An effort closed (its end bracket), including a restart closing
+ *  an orphaned effort.
+ */
+"effort_end" | 
+// The boot sweep.
+"startup" | 
+// An explicit request (metric baseline rebuild, tests).
+"manual" | 
+// HEAD or a ref moved; the take drains whatever was dirty.
+"git_refs" | 
+/**
+ *  HEAD moved on a clean tree: the latest snapshot now also is the
+ *  new commit (a re-stamp, no new snapshot).
+ */
+"head_moved" | 
+// Backfilled for a snapshot taken before the operation log existed.
+"legacy";
 
 export type SourceColumn = {
 	name: string,

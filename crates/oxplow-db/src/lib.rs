@@ -42,9 +42,9 @@ pub use agent_stores::SqliteAgentTurnStore;
 pub use ai_call_store::{NewAiCall, SqliteAiCallStore};
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,
-    PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotStats,
+    PageVisitStore, Snapshot, SnapshotChangeEntry, SnapshotContentRef, SnapshotOp, SnapshotStats,
     SnapshotStorage, SqliteCodeQualityStore, SqlitePageVisitStore, SqliteSnapshotStore,
-    SqliteUsageStore, StampedSnapshot, UsageEvent, UsageRollup,
+    SqliteUsageStore, StampedSnapshot, TakeOutcome, TakeRecord, UsageEvent, UsageRollup,
 };
 pub use attribution_store::{
     SqliteAttributionStore, STATE_ACKNOWLEDGED, STATE_CLAIMED, STATE_UNATTRIBUTED,

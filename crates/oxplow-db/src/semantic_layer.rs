@@ -496,6 +496,25 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
+        name: "v_snapshot_op",
+        description: "The snapshot operation log: one row per take (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A take that changed nothing points at its parent.",
+        columns: &[
+            ("seq", "Operation order within the project."),
+            ("stream_id", "Stream (worktree) the take ran on."),
+            ("snapshot_id", "Snapshot the worktree is at after the take (v_snapshot.id)."),
+            ("parent_snapshot_id", "Snapshot it was at before; parent → snapshot is what the take changed."),
+            ("trigger", "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy."),
+            ("thread_id", "Thread the take belongs to, if any."),
+            ("turn_id", "Agent turn the take belongs to, if any (v_agent_turn.id)."),
+            ("effort_id", "Effort the take belongs to, if any (v_effort.id)."),
+            ("at", "RFC 3339 timestamp."),
+            ("elapsed_ms", "How long the take took."),
+            ("budget_ms", "The caller's time budget, if it had one."),
+            ("over_budget", "1 when elapsed_ms exceeded budget_ms."),
+            ("file_count", "File rows recorded (0 when nothing changed)."),
+        ],
+    },
+    CatalogView {
         name: "v_measure",
         description: "Measures: the catalog of fact types (what a v_fact.value means).",
         columns: &[
@@ -1363,6 +1382,7 @@ mod tests {
             "v_comment",
             "v_wiki_page",
             "v_snapshot",
+            "v_snapshot_op",
             "v_measure",
             "v_capture",
             "v_fact",

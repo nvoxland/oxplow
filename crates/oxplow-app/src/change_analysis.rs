@@ -575,12 +575,7 @@ pub fn spawn_invalidation(state: std::sync::Arc<crate::Services>) {
     tokio::spawn(async move {
         loop {
             let stream = match rx.recv().await {
-                Ok(OxplowEvent::FileSnapshotCreated {
-                    stream_id: Some(s), ..
-                })
-                | Ok(OxplowEvent::FileSnapshotsBatchCreated {
-                    stream_id: Some(s), ..
-                })
+                Ok(OxplowEvent::SnapshotTaken { stream_id: s, .. })
                 | Ok(OxplowEvent::GitRefsChanged { stream_id: s }) => s.value(),
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,

@@ -641,14 +641,48 @@ size and mtime are unchanged, and a tombstone for a path already
 deleted. The sweep's reverse-deletion pass tombstones oversize files too
 (it used to key on `blob_hash`, which oversize rows lack).
 
-**No ancestry link.** Snapshots have no parent/child column — each
-is independent. The "previous" snapshot for diff purposes is just
-the most recent `file_snapshot` row with `created_at <
-target.created_at` for the same stream. `getSnapshotSummary(id,
-previousId?)` returns created/updated/deleted counts relative to
-that previous snapshot (or an explicit one if provided);
-`getSnapshotPairDiff(beforeId, afterId, path)` serves arbitrary pair
-diffs.
+**Takes and the operation log (`snapshot_op`, V97, P2.2 tsk424).** A
+**take** (`SnapshotCaptureService::request_snapshot(TakeRequest)`) drains
+the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
+which writes — in **one transaction** — the new `snapshot` row (with
+`git_branch`, `git_commit` when the tree is clean, and `tree_hash`), its
+`file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@1`
+event (anchors: stream, thread, turn, effort, snapshot). It is the only
+production write path; `create_snapshot` / `capture` / `capture_batch` /
+`set_snapshot_git_*` remain as fixture seeders for tests.
+
+- `snapshot_op(seq, stream_id, snapshot_id, parent_snapshot_id, trigger,
+  thread_id, turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget,
+  file_count)` (STRICT). `snapshot_id` is where the worktree is after
+  the take; `parent_snapshot_id` where it was before (the stream's
+  current snapshot = its latest op's `snapshot_id`). Readable as
+  `v_snapshot_op`.
+- **Every take records an op**, including one that found nothing new:
+  its op points at the unchanged snapshot (`parent = snapshot`,
+  `file_count = 0`, `snapshot.taken.unchanged = true`) and no new
+  snapshot row is written. Rows whose tree equals the parent's
+  `tree_hash` are dropped in the same transaction (unchanged).
+- `trigger` ∈ `turn_end, quiet, effort_start, effort_end, startup,
+  manual, git_refs, head_moved, legacy` (`oxplow_domain::snapshot::
+  SnapshotTrigger`). V97 backfilled one `legacy` op per existing
+  snapshot, parent = the previous snapshot of the same stream.
+- **HEAD moved on a clean tree** is its own op: `record_head_moved`
+  re-stamps the current snapshot's `git_commit` (and flips every
+  exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@1`,
+  in one transaction. The git-refs listener runs a `git_refs` take first
+  (draining anything dirty), then this.
+- Takes are **serialized** per stream (`take_lock`) and each caller
+  records its own op, so two threads ending turns on one worktree give
+  two ops, usually on the same snapshot (§4.3: a snapshot taken for one
+  thread's turn is also "at" the other's).
+- `budget_ms` / `over_budget` record a caller's time budget and whether
+  the take exceeded it (P2.3 gives turn-end takes one); over-budget is
+  logged at warn and visible on the op and event, never silent.
+- The in-memory bus gets `OxplowEvent::SnapshotTaken` **after commit**,
+  only when something new was recorded (a new snapshot, or a HEAD
+  re-stamp with 0 files) — the indexer, metric gauges, change analysis
+  and the UI wake on it. It replaced `FileSnapshotCreated` (never
+  emitted) and `FileSnapshotsBatchCreated`.
 
 **Baseline is hidden from Local History.** The first snapshot per
 stream has no predecessor, so there's nothing to diff against and

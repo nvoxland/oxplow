@@ -430,10 +430,16 @@ impl TaskService {
         let Some(snapshot) = self.service_for_thread(&thread_id).await else {
             return;
         };
-        let source = if entering {
-            crate::events::SnapshotSourceKind::EffortStart
-        } else {
-            crate::events::SnapshotSourceKind::EffortEnd
+        let source = crate::snapshot_capture::TakeRequest {
+            trigger: if entering {
+                oxplow_domain::snapshot::SnapshotTrigger::EffortStart
+            } else {
+                oxplow_domain::snapshot::SnapshotTrigger::EffortEnd
+            },
+            thread_id: Some(thread_id),
+            turn_id: None,
+            effort_id: Some(effort_id),
+            budget: None,
         };
         // An effort's start baseline must reflect the full pre-edit tree.
         // If the initial startup sweep is still in flight, wait for it so
@@ -3266,7 +3272,7 @@ mod tests {
         let worktree_svc_pre = snapshot_captures.get(&worktree.id).unwrap();
         worktree_svc_pre.mark_dirty(seed, oxplow_fs_watch::WatchEventKind::Other);
         let _ = worktree_svc_pre
-            .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+            .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
             .await
             .unwrap();
 

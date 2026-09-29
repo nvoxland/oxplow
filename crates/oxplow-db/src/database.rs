@@ -834,15 +834,59 @@ mod tests {
         }
     }
 
+    /// V97 backfills one `legacy` op per existing snapshot, each pointing
+    /// at the previous snapshot of its own stream.
+    #[test]
+    fn v97_backfills_legacy_ops_with_per_stream_parents() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(96))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/a', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z'),
+                      (2, 'worktree', 'b', 'b', 'r', 'r', '/b', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES
+               (1, 1, '2026-01-01T00:00:01.000000Z'),
+               (2, 2, '2026-01-01T00:00:02.000000Z'),
+               (3, 1, '2026-01-01T00:00:03.000000Z');
+             INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
+               VALUES (1, 'a', 'h', 1, '2026-01-01T00:00:01.000000Z', 'oxplow', 1),
+                      (1, 'b', 'h', 1, '2026-01-01T00:00:01.000000Z', 'oxplow', 1);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let ops: Vec<(i64, Option<i64>, String, i64)> = conn
+            .prepare("SELECT snapshot_id, parent_snapshot_id, trigger, file_count FROM snapshot_op ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            ops,
+            vec![
+                (1, None, "legacy".into(), 2),
+                (2, None, "legacy".into(), 0),
+                (3, Some(1), "legacy".into(), 0),
+            ]
+        );
+    }
+
     /// V95 must name every TEXT timestamp column the schema had at V94; a
     /// column it missed would keep its trimmed rows sorting wrong against
     /// the fixed-width ones written since. Columns added after V95 are born
-    /// fixed-width, so this list is closed.
+    /// fixed-width, so the check reads the schema AS OF V94.
     #[test]
     fn v95_covers_every_timestamp_column_in_the_schema() {
         const V95: &str = include_str!("../migrations/V95__fixed_width_timestamps.sql");
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(94))
+            .run(&mut conn)
+            .unwrap();
         let mut stmt = conn
             .prepare(
                 "SELECT m.name, p.name FROM sqlite_master m JOIN pragma_table_info(m.name) p

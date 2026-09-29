@@ -1,0 +1,11 @@
+{
+  "stream": "stream:str1",
+  "snapshot": "snapshot:12",
+  "parent": "snapshot:11",
+  "trigger": "turn_end",
+  "unchanged": false,
+  "file_count": 3,
+  "elapsed_ms": 140,
+  "budget_ms": 2000,
+  "over_budget": false
+}

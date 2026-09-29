@@ -13,6 +13,7 @@ pub mod events;
 pub mod hook;
 pub mod ids;
 pub mod refs;
+pub mod snapshot;
 pub mod stores;
 pub mod stream;
 pub mod task;

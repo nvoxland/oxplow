@@ -14,9 +14,17 @@ use oxplow_domain::{
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
+use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::page_ref_store::SqlitePageRefStore;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
+use oxplow_domain::events::schema::{
+    EventSchemaRegistry, SnapshotTaken, SnapshotTakenV1, VcsHeadMoved, VcsHeadMovedV1,
+};
+use oxplow_domain::events::{Anchors, Envelope};
+use oxplow_domain::snapshot::{snapshot_ref, SnapshotTrigger};
+use oxplow_domain::EffortId;
+use std::sync::Arc;
 
 // ---------------- Page visits ----------------
 
@@ -1091,18 +1099,472 @@ pub(crate) fn tree_at_conn(
     rows.collect()
 }
 
+/// Insert `file_snapshot` rows, returning their ids in order. An `oxplow`
+/// row's address IS its content hash, so `content_hash` is filled from
+/// `blob_hash` when the caller didn't set it.
+fn insert_rows_tx(
+    conn: &rusqlite::Connection,
+    rows: &[FileSnapshot],
+) -> rusqlite::Result<Vec<i64>> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO file_snapshot
+           (stream_id, path, blob_hash, size_bytes, captured_at, storage,
+            snapshot_id, mtime_ms, content_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
+    let mut ids = Vec::with_capacity(rows.len());
+    for snap in rows {
+        let content_hash = snap.content_hash.clone().or_else(|| {
+            (snap.storage == SnapshotStorage::Oxplow)
+                .then(|| snap.blob_hash.clone())
+                .flatten()
+        });
+        stmt.execute(params![
+            snap.stream_id.value(),
+            snap.path,
+            snap.blob_hash,
+            snap.size_bytes,
+            ts_to_string(snap.captured_at),
+            snap.storage.as_db_str(),
+            snap.snapshot_id,
+            snap.mtime_ms,
+            content_hash,
+        ])?;
+        ids.push(conn.last_insert_rowid());
+    }
+    Ok(ids)
+}
+
+/// The snapshot the stream's worktree is at: the latest op's snapshot
+/// (the op log is complete since V97's backfill), else the newest
+/// snapshot row.
+fn current_snapshot_tx(
+    conn: &rusqlite::Connection,
+    stream_id: StreamId,
+) -> rusqlite::Result<Option<i64>> {
+    let from_ops: Option<i64> = conn
+        .query_row(
+            "SELECT snapshot_id FROM snapshot_op WHERE stream_id = ?1 ORDER BY seq DESC LIMIT 1",
+            params![stream_id.value()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if from_ops.is_some() {
+        return Ok(from_ops);
+    }
+    conn.query_row(
+        "SELECT id FROM snapshot WHERE stream_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        params![stream_id.value()],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+/// Point a snapshot at `sha` and flip every file ref pinned to it to an
+/// exact git version.
+fn stamp_git_commit_tx(
+    conn: &rusqlite::Connection,
+    snapshot_id: i64,
+    sha: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
+        params![sha, snapshot_id],
+    )?;
+    for table in ["task_effort_file", "page_ref"] {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET closest_git_version = ?1, git_version_exact = 1
+                  WHERE local_snapshot_id = ?2"
+            ),
+            params![sha, snapshot_id],
+        )?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_op_tx(
+    conn: &rusqlite::Connection,
+    stream_id: StreamId,
+    snapshot_id: i64,
+    parent: Option<i64>,
+    trigger: SnapshotTrigger,
+    anchors: (Option<ThreadId>, Option<i64>, Option<EffortId>),
+    elapsed_ms: u64,
+    budget_ms: Option<u64>,
+    file_count: u32,
+) -> rusqlite::Result<i64> {
+    let over = budget_ms.is_some_and(|b| elapsed_ms > b);
+    conn.execute(
+        "INSERT INTO snapshot_op
+           (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id, effort_id,
+            at, elapsed_ms, budget_ms, over_budget, file_count)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            stream_id.value(),
+            snapshot_id,
+            parent,
+            trigger.as_db_str(),
+            anchors.0.map(|t| t.value()),
+            anchors.1,
+            anchors.2.map(|e| e.value()),
+            ts_to_string(Timestamp::now()),
+            elapsed_ms as i64,
+            budget_ms.map(|b| b as i64),
+            over as i64,
+            file_count as i64,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn record_take_tx(
+    tx: &rusqlite::Connection,
+    schemas: &EventSchemaRegistry,
+    take: &TakeRecord,
+) -> Result<Option<TakeOutcome>, DomainError> {
+    use crate::database::map_sql_err;
+    let parent = current_snapshot_tx(tx, take.stream_id).map_err(map_sql_err)?;
+    let (snapshot_id, unchanged, file_count) = if take.rows.is_empty() {
+        match parent {
+            None => return Ok(None),
+            Some(p) => (p, true, 0u32),
+        }
+    } else {
+        tx.execute(
+            "INSERT INTO snapshot (stream_id, created_at, git_branch, git_commit)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                take.stream_id.value(),
+                ts_to_string(Timestamp::now()),
+                take.git_branch,
+                take.git_commit,
+            ],
+        )
+        .map_err(map_sql_err)?;
+        let sid = tx.last_insert_rowid();
+        let rows: Vec<FileSnapshot> = take
+            .rows
+            .iter()
+            .cloned()
+            .map(|mut r| {
+                r.snapshot_id = Some(sid);
+                r
+            })
+            .collect();
+        insert_rows_tx(tx, &rows).map_err(map_sql_err)?;
+        let hash = manifest_hash(&tree_at_conn(tx, sid).map_err(map_sql_err)?);
+        let parent_hash: Option<String> = match parent {
+            Some(p) => tx
+                .query_row(
+                    "SELECT tree_hash FROM snapshot WHERE id = ?1",
+                    params![p],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(map_sql_err)?
+                .flatten(),
+            None => None,
+        };
+        match parent {
+            // Same files as the parent (e.g. a change and its revert
+            // landing in one take): no new snapshot. Its rows go with it.
+            Some(p) if parent_hash.as_deref() == Some(hash.as_str()) => {
+                tx.execute("DELETE FROM snapshot WHERE id = ?1", params![sid])
+                    .map_err(map_sql_err)?;
+                (p, true, 0)
+            }
+            _ => {
+                tx.execute(
+                    "UPDATE snapshot SET tree_hash = ?2 WHERE id = ?1",
+                    params![sid, hash],
+                )
+                .map_err(map_sql_err)?;
+                (sid, false, rows.len() as u32)
+            }
+        }
+    };
+    let op_seq = insert_op_tx(
+        tx,
+        take.stream_id,
+        snapshot_id,
+        parent,
+        take.trigger,
+        (take.thread_id, take.turn_id, take.effort_id),
+        take.elapsed_ms,
+        take.budget_ms,
+        file_count,
+    )
+    .map_err(map_sql_err)?;
+    let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
+    let stream = format!("stream:{}", take.stream_id);
+    let env = Envelope::typed::<SnapshotTaken>(
+        take.source.clone(),
+        &SnapshotTakenV1 {
+            stream: stream.clone(),
+            snapshot: snapshot_ref(snapshot_id),
+            parent: parent.map(snapshot_ref),
+            trigger: take.trigger,
+            unchanged,
+            file_count,
+            elapsed_ms: take.elapsed_ms,
+            budget_ms: take.budget_ms,
+            over_budget,
+        },
+    )
+    .with_anchors(Anchors {
+        stream_id: Some(take.stream_id),
+        thread_id: take.thread_id,
+        effort_id: take.effort_id,
+        turn_id: take.turn_id,
+        snapshot_id: Some(snapshot_id),
+    })
+    .with_subject([stream, snapshot_ref(snapshot_id)]);
+    append_tx(tx, schemas, &env)?;
+    Ok(Some(TakeOutcome {
+        op_seq,
+        snapshot_id,
+        parent_snapshot_id: parent,
+        unchanged,
+        file_count,
+        over_budget,
+    }))
+}
+
+fn record_head_moved_tx(
+    tx: &rusqlite::Connection,
+    schemas: &EventSchemaRegistry,
+    stream_id: StreamId,
+    sha: &str,
+    source: &str,
+) -> Result<Option<TakeOutcome>, DomainError> {
+    use crate::database::map_sql_err;
+    let Some(sid) = current_snapshot_tx(tx, stream_id).map_err(map_sql_err)? else {
+        return Ok(None);
+    };
+    let from: Option<String> = tx
+        .query_row(
+            "SELECT git_commit FROM snapshot WHERE id = ?1",
+            params![sid],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
+    if from.as_deref() == Some(sha) {
+        return Ok(None);
+    }
+    stamp_git_commit_tx(tx, sid, sha).map_err(map_sql_err)?;
+    let op_seq = insert_op_tx(
+        tx,
+        stream_id,
+        sid,
+        Some(sid),
+        SnapshotTrigger::HeadMoved,
+        (None, None, None),
+        0,
+        None,
+        0,
+    )
+    .map_err(map_sql_err)?;
+    let stream = format!("stream:{stream_id}");
+    let env = Envelope::typed::<VcsHeadMoved>(
+        source.to_string(),
+        &VcsHeadMovedV1 {
+            stream: stream.clone(),
+            snapshot: snapshot_ref(sid),
+            from: from.map(|f| format!("commit:{f}")),
+            to: format!("commit:{sha}"),
+        },
+    )
+    .with_anchors(Anchors {
+        stream_id: Some(stream_id),
+        snapshot_id: Some(sid),
+        ..Anchors::default()
+    })
+    .with_subject([stream, snapshot_ref(sid), format!("commit:{sha}")]);
+    append_tx(tx, schemas, &env)?;
+    Ok(Some(TakeOutcome {
+        op_seq,
+        snapshot_id: sid,
+        parent_snapshot_id: Some(sid),
+        unchanged: true,
+        file_count: 0,
+        over_budget: false,
+    }))
+}
+
+fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
+    let conv = |e: DomainError| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+    };
+    let trigger: String = row.get(4)?;
+    let at: String = row.get(8)?;
+    Ok(SnapshotOp {
+        seq: row.get(0)?,
+        stream_id: StreamId::new(row.get(1)?),
+        snapshot_id: row.get(2)?,
+        parent_snapshot_id: row.get(3)?,
+        trigger: SnapshotTrigger::from_db_str(&trigger).ok_or_else(|| {
+            conv(DomainError::Invalid(format!(
+                "unknown snapshot trigger `{trigger}`"
+            )))
+        })?,
+        thread_id: row.get::<_, Option<i64>>(5)?.map(ThreadId::new),
+        turn_id: row.get(6)?,
+        effort_id: row.get::<_, Option<i64>>(7)?.map(EffortId::new),
+        at: string_to_ts(&at).map_err(conv)?,
+        elapsed_ms: row.get(9)?,
+        budget_ms: row.get(10)?,
+        over_budget: row.get::<_, i64>(11)? != 0,
+        file_count: row.get(12)?,
+    })
+}
+
+/// One snapshot take, as [`SqliteSnapshotStore::record_take`] writes it.
+#[derive(Debug, Clone)]
+pub struct TakeRecord {
+    pub stream_id: StreamId,
+    /// The file rows the take captured (`snapshot_id` is filled in).
+    /// Empty when nothing changed.
+    pub rows: Vec<FileSnapshot>,
+    pub trigger: SnapshotTrigger,
+    pub thread_id: Option<ThreadId>,
+    /// `agent_turn.id`, when the take belongs to a turn.
+    pub turn_id: Option<i64>,
+    pub effort_id: Option<EffortId>,
+    /// The branch HEAD was on (recorded clean or dirty).
+    pub git_branch: Option<String>,
+    /// HEAD's sha when the worktree was clean at the take.
+    pub git_commit: Option<String>,
+    pub elapsed_ms: u64,
+    pub budget_ms: Option<u64>,
+    /// The envelope `source` of `snapshot.taken` (`system:snapshot_capture`).
+    pub source: String,
+}
+
+/// What a take recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeOutcome {
+    /// The `snapshot_op.seq` of this take.
+    pub op_seq: i64,
+    /// The snapshot the worktree is at after the take.
+    pub snapshot_id: i64,
+    pub parent_snapshot_id: Option<i64>,
+    /// No new snapshot: nothing changed (or the tree equals the parent's).
+    pub unchanged: bool,
+    pub file_count: u32,
+    pub over_budget: bool,
+}
+
+/// One row of the operation log (`snapshot_op`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct SnapshotOp {
+    pub seq: i64,
+    pub stream_id: StreamId,
+    pub snapshot_id: i64,
+    pub parent_snapshot_id: Option<i64>,
+    pub trigger: SnapshotTrigger,
+    pub thread_id: Option<ThreadId>,
+    pub turn_id: Option<i64>,
+    pub effort_id: Option<EffortId>,
+    pub at: Timestamp,
+    pub elapsed_ms: i64,
+    pub budget_ms: Option<i64>,
+    pub over_budget: bool,
+    pub file_count: i64,
+}
+
 #[derive(Clone)]
 pub struct SqliteSnapshotStore {
     db: Database,
     content_hasher: Option<ContentHasher>,
+    /// Validates the `snapshot.taken` / `vcs.head.moved` envelopes.
+    event_schemas: Arc<EventSchemaRegistry>,
 }
 
 impl SqliteSnapshotStore {
     pub fn new(db: Database) -> Self {
+        Self::with_event_schemas(db, Arc::new(EventSchemaRegistry::core()))
+    }
+
+    pub fn with_event_schemas(db: Database, event_schemas: Arc<EventSchemaRegistry>) -> Self {
         Self {
             db,
             content_hasher: None,
+            event_schemas,
         }
+    }
+
+    /// Record one take — the only production write path for snapshots
+    /// (P2.2, tsk424). In ONE transaction: the new `snapshot` row (with
+    /// its branch, clean-tree commit and `tree_hash`), its file rows, the
+    /// `snapshot_op` row and the `snapshot.taken` event. When `rows` is
+    /// empty, or the resulting tree equals the parent's (`tree_hash`), no
+    /// snapshot is created: the op points at the parent and the event
+    /// says `unchanged`. `Ok(None)` only when the stream has no snapshot
+    /// at all yet and nothing to record.
+    pub async fn record_take(&self, take: TakeRecord) -> Result<Option<TakeOutcome>, DomainError> {
+        let schemas = self.event_schemas.clone();
+        self.db
+            .transaction(move |tx| record_take_tx(tx, &schemas, &take))
+            .await
+    }
+
+    /// HEAD moved while the worktree was clean: re-stamp the stream's
+    /// current snapshot with `sha` (and every exact-pin file ref on it),
+    /// record a `head_moved` op and `vcs.head.moved`, in one transaction.
+    /// `Ok(None)` when the stream has no snapshot or already points at
+    /// `sha`.
+    pub async fn record_head_moved(
+        &self,
+        stream_id: StreamId,
+        sha: String,
+        source: String,
+    ) -> Result<Option<TakeOutcome>, DomainError> {
+        let schemas = self.event_schemas.clone();
+        self.db
+            .transaction(move |tx| record_head_moved_tx(tx, &schemas, stream_id, &sha, &source))
+            .await
+    }
+
+    /// The stream's operation log, newest first.
+    pub async fn list_ops(
+        &self,
+        stream_id: StreamId,
+        limit: usize,
+    ) -> Result<Vec<SnapshotOp>, DomainError> {
+        self.db
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
+                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count
+                       FROM snapshot_op WHERE stream_id = ?1
+                      ORDER BY seq DESC LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![stream_id.value(), limit as i64], row_to_op)?;
+                rows.collect()
+            })
+            .await
+    }
+
+    /// The op that CREATED `snapshot_id` (its first op), which carries the
+    /// snapshot's parent and trigger.
+    pub async fn op_for_snapshot(
+        &self,
+        snapshot_id: i64,
+    ) -> Result<Option<SnapshotOp>, DomainError> {
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
+                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count
+                       FROM snapshot_op WHERE snapshot_id = ?1 ORDER BY seq ASC LIMIT 1",
+                    params![snapshot_id],
+                    row_to_op,
+                )
+                .optional()
+            })
+            .await
     }
 
     /// Supply the lazy git-content hasher (the app wires one over the git
@@ -1129,43 +1591,7 @@ impl SqliteSnapshotStore {
             return Ok(Vec::new());
         }
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                let mut ids = Vec::with_capacity(snaps.len());
-                {
-                    let mut stmt = tx
-                        .prepare(
-                            "INSERT INTO file_snapshot
-                           (stream_id, path, blob_hash, size_bytes, captured_at, storage,
-                            snapshot_id, mtime_ms, content_hash)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                        )
-                        .map_err(crate::database::map_sql_err)?;
-                    for snap in &snaps {
-                        // An oxplow row's address IS its content hash.
-                        let content_hash = snap.content_hash.clone().or_else(|| {
-                            (snap.storage == SnapshotStorage::Oxplow)
-                                .then(|| snap.blob_hash.clone())
-                                .flatten()
-                        });
-                        stmt.execute(params![
-                            snap.stream_id.value(),
-                            snap.path,
-                            snap.blob_hash,
-                            snap.size_bytes,
-                            ts_to_string(snap.captured_at),
-                            snap.storage.as_db_str(),
-                            snap.snapshot_id,
-                            snap.mtime_ms,
-                            content_hash,
-                        ])
-                        .map_err(crate::database::map_sql_err)?;
-                        ids.push(tx.last_insert_rowid());
-                    }
-                }
-                tx.commit().map_err(crate::database::map_sql_err)?;
-                Ok(ids)
-            })
+            .transaction(move |tx| insert_rows_tx(tx, &snaps).map_err(crate::database::map_sql_err))
             .await
     }
 
@@ -1213,34 +1639,8 @@ impl SqliteSnapshotStore {
         sha: String,
     ) -> Result<(), DomainError> {
         self.db
-            .call_mut(move |conn| {
-                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
-                tx.execute(
-                    "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
-                    params![sha, snapshot_id],
-                )
-                .map_err(crate::database::map_sql_err)?;
-                // Cascade: every file-ref row pointing at this snapshot
-                // now has an exact git pin. Flip both the version sha
-                // (in case capture-time wrote a different HEAD) and the
-                // exactness flag.
-                tx.execute(
-                    "UPDATE task_effort_file
-                    SET closest_git_version = ?1,
-                        git_version_exact   = 1
-                  WHERE local_snapshot_id = ?2",
-                    params![sha, snapshot_id],
-                )
-                .map_err(crate::database::map_sql_err)?;
-                tx.execute(
-                    "UPDATE page_ref
-                    SET closest_git_version = ?1,
-                        git_version_exact   = 1
-                  WHERE local_snapshot_id = ?2",
-                    params![sha, snapshot_id],
-                )
-                .map_err(crate::database::map_sql_err)?;
-                tx.commit().map_err(crate::database::map_sql_err)
+            .transaction(move |tx| {
+                stamp_git_commit_tx(tx, snapshot_id, &sha).map_err(crate::database::map_sql_err)
             })
             .await
     }
@@ -2401,6 +2801,269 @@ mod tests {
         let t = store.tree_at(1).await.unwrap();
         assert_eq!(t["o.txt"].content_hash.as_deref(), Some("xo"));
         assert_eq!(t["g.txt"].content_hash, None, "git rows are hashed lazily");
+    }
+
+    fn take(stream: i64, rows: Vec<(&str, &str)>, trigger: SnapshotTrigger) -> TakeRecord {
+        TakeRecord {
+            stream_id: StreamId::new(stream),
+            rows: rows
+                .into_iter()
+                .map(|(path, hash)| FileSnapshot {
+                    id: 0,
+                    stream_id: StreamId::new(stream),
+                    path: path.into(),
+                    blob_hash: Some(hash.into()),
+                    size_bytes: 1,
+                    captured_at: Timestamp::now(),
+                    storage: SnapshotStorage::Oxplow,
+                    snapshot_id: None,
+                    mtime_ms: Some(1),
+                    content_hash: None,
+                })
+                .collect(),
+            trigger,
+            thread_id: None,
+            turn_id: None,
+            effort_id: None,
+            git_branch: Some("main".into()),
+            git_commit: None,
+            elapsed_ms: 5,
+            budget_ms: None,
+            source: "test".into(),
+        }
+    }
+
+    fn count(db: &Database, sql: &str) -> i64 {
+        db.conn().unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    fn events(db: &Database, ty: &str) -> Vec<serde_json::Value> {
+        let conn = db.conn().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT payload FROM event_log WHERE type = ?1 ORDER BY seq")
+            .unwrap();
+        stmt.query_map(params![ty], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|p| serde_json::from_str(&p.unwrap()).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_take_writes_snapshot_rows_op_and_event_together() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        // Nothing to record and no baseline: no op at all.
+        assert_eq!(
+            store
+                .record_take(take(1, vec![], SnapshotTrigger::Startup))
+                .await
+                .unwrap(),
+            None
+        );
+        let mut first = take(
+            1,
+            vec![("a.txt", "a1"), ("b.txt", "b1")],
+            SnapshotTrigger::Startup,
+        );
+        first.git_commit = Some("c0ffee".into());
+        let one = store.record_take(first).await.unwrap().unwrap();
+        assert!(!one.unchanged);
+        assert_eq!((one.parent_snapshot_id, one.file_count), (None, 2));
+        let listed = store
+            .list_snapshots_for_stream(StreamId::new(1), 5)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].git_branch.as_deref(), Some("main"));
+        assert_eq!(listed[0].git_commit.as_deref(), Some("c0ffee"));
+        assert_eq!(
+            listed[0].tree_hash.as_deref(),
+            Some(
+                crate::snapshot_tree::manifest_hash(&store.tree_at(one.snapshot_id).await.unwrap())
+                    .as_str()
+            )
+        );
+
+        db.conn()
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                   VALUES (7, 1, 't', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                   VALUES (3, 7, 'p', '2026-01-01');",
+            )
+            .unwrap();
+        let mut second = take(1, vec![("a.txt", "a2")], SnapshotTrigger::TurnEnd);
+        second.thread_id = Some(ThreadId::new(7));
+        second.turn_id = Some(3);
+        second.budget_ms = Some(2);
+        let two = store.record_take(second).await.unwrap().unwrap();
+        assert_eq!(two.parent_snapshot_id, Some(one.snapshot_id));
+        assert!(two.over_budget, "5 ms against a 2 ms budget");
+
+        let ops = store.list_ops(StreamId::new(1), 10).await.unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
+        assert_eq!(ops[0].parent_snapshot_id, Some(one.snapshot_id));
+        assert_eq!(
+            (ops[0].turn_id, ops[0].thread_id),
+            (Some(3), Some(ThreadId::new(7)))
+        );
+        assert!(ops[0].over_budget);
+        assert_eq!(ops[0].budget_ms, Some(2));
+        let taken = events(&db, "snapshot.taken");
+        assert_eq!(taken.len(), 2);
+        assert_eq!(
+            taken[1]["snapshot"],
+            format!("snapshot:{}", two.snapshot_id)
+        );
+        assert_eq!(taken[1]["parent"], format!("snapshot:{}", one.snapshot_id));
+        assert_eq!(taken[1]["trigger"], "turn_end");
+        assert_eq!(taken[1]["over_budget"], true);
+        let turn_anchor: Option<i64> = db
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT turn_id FROM event_log WHERE type = 'snapshot.taken' ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(turn_anchor, Some(3));
+        assert_eq!(
+            store
+                .op_for_snapshot(two.snapshot_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .seq,
+            ops[0].seq
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_or_identical_take_records_an_op_on_the_parent() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        let base = store
+            .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup))
+            .await
+            .unwrap()
+            .unwrap();
+        // Nothing dirty.
+        let empty = store
+            .record_take(take(1, vec![], SnapshotTrigger::TurnEnd))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(empty.unchanged);
+        assert_eq!(empty.snapshot_id, base.snapshot_id);
+        assert_eq!(empty.parent_snapshot_id, Some(base.snapshot_id));
+        // Rows that net out to the same tree (a change and its revert).
+        let same = store
+            .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Quiet))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(same.unchanged);
+        assert_eq!(same.snapshot_id, base.snapshot_id);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot"), 1);
+        assert_eq!(count(&db, "SELECT count(*) FROM file_snapshot"), 1);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 3);
+        let taken = events(&db, "snapshot.taken");
+        assert_eq!(taken.len(), 3);
+        assert_eq!(taken[1]["unchanged"], true);
+        assert_eq!(taken[1]["file_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_take_leaves_no_snapshot_rows_op_or_event() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        // The second row names a stream that doesn't exist: its insert
+        // fails after the snapshot row and the first file row went in.
+        let mut bad = take(
+            1,
+            vec![("a.txt", "a1"), ("b.txt", "b1")],
+            SnapshotTrigger::Manual,
+        );
+        bad.rows[1].stream_id = StreamId::new(999);
+        assert!(store.record_take(bad).await.is_err());
+        for table in ["snapshot", "file_snapshot", "snapshot_op", "event_log"] {
+            assert_eq!(
+                count(&db, &format!("SELECT count(*) FROM {table}")),
+                0,
+                "{table}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_head_move_restamps_the_current_snapshot_with_an_op_and_event() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        assert_eq!(
+            store
+                .record_head_moved(StreamId::new(1), "aaa".into(), "test".into())
+                .await
+                .unwrap(),
+            None,
+            "no snapshot yet"
+        );
+        let mut first = take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup);
+        first.git_commit = Some("aaa".into());
+        let base = store.record_take(first).await.unwrap().unwrap();
+        db.conn()
+            .unwrap()
+            .execute(
+                "INSERT INTO page_ref (source_kind, source_id, target_kind, target_id, ref_type,
+                   local_snapshot_id, git_version_exact)
+                 VALUES ('wiki', 'w', 'file', 'a.txt', 'mention', ?1, 0)",
+                params![base.snapshot_id],
+            )
+            .unwrap();
+        // Same commit: nothing to record.
+        assert_eq!(
+            store
+                .record_head_moved(StreamId::new(1), "aaa".into(), "test".into())
+                .await
+                .unwrap(),
+            None
+        );
+        let moved = store
+            .record_head_moved(StreamId::new(1), "bbb".into(), "test".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.snapshot_id, base.snapshot_id);
+        assert_eq!(
+            store
+                .get_snapshot_git_commit(base.snapshot_id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("bbb")
+        );
+        let exact: (String, i64) = db
+            .conn()
+            .unwrap()
+            .query_row(
+                "SELECT closest_git_version, git_version_exact FROM page_ref",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(exact, ("bbb".into(), 1));
+        let ops = store.list_ops(StreamId::new(1), 5).await.unwrap();
+        assert_eq!(ops[0].trigger, SnapshotTrigger::HeadMoved);
+        let moved_events = events(&db, "vcs.head.moved");
+        assert_eq!(moved_events.len(), 1);
+        assert_eq!(moved_events[0]["from"], "commit:aaa");
+        assert_eq!(moved_events[0]["to"], "commit:bbb");
     }
 
     #[tokio::test]

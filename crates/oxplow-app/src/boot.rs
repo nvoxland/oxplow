@@ -99,7 +99,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
                         },
                     );
                     match svc
-                        .request_snapshot(crate::events::SnapshotSourceKind::Startup)
+                        .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
                         .await
                     {
                         Ok(parent) => {

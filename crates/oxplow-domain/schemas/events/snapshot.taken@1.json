@@ -1,0 +1,114 @@
+{
+  "$defs": {
+    "SnapshotTrigger": {
+      "description": "Why a snapshot take happened: one row of the operation log each\n(`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.",
+      "oneOf": [
+        {
+          "const": "turn_end",
+          "description": "An agent turn ended (Stop / interrupt).",
+          "type": "string"
+        },
+        {
+          "const": "quiet",
+          "description": "The worktree went quiet with no turn open (human edits).",
+          "type": "string"
+        },
+        {
+          "const": "effort_start",
+          "description": "An effort opened (its start bracket).",
+          "type": "string"
+        },
+        {
+          "const": "effort_end",
+          "description": "An effort closed (its end bracket), including a restart closing\nan orphaned effort.",
+          "type": "string"
+        },
+        {
+          "const": "startup",
+          "description": "The boot sweep.",
+          "type": "string"
+        },
+        {
+          "const": "manual",
+          "description": "An explicit request (metric baseline rebuild, tests).",
+          "type": "string"
+        },
+        {
+          "const": "git_refs",
+          "description": "HEAD or a ref moved; the take drains whatever was dirty.",
+          "type": "string"
+        },
+        {
+          "const": "head_moved",
+          "description": "HEAD moved on a clean tree: the latest snapshot now also is the\nnew commit (a re-stamp, no new snapshot).",
+          "type": "string"
+        },
+        {
+          "const": "legacy",
+          "description": "Backfilled for a snapshot taken before the operation log existed.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`snapshot.taken@1`: one snapshot take (one `snapshot_op` row). Refs\nare canonical (`.context/refs.md`): `stream:str1`, `snapshot:123`.",
+  "properties": {
+    "budget_ms": {
+      "description": "The time budget the caller gave the take, when it had one.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "elapsed_ms": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "file_count": {
+      "description": "File rows the take recorded (0 when unchanged).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "over_budget": {
+      "description": "`elapsed_ms > budget_ms`: reported, never silent.",
+      "type": "boolean"
+    },
+    "parent": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot": {
+      "description": "The snapshot the worktree is at after the take: a new one, or the\nparent when nothing changed (`unchanged`).",
+      "type": "string"
+    },
+    "stream": {
+      "type": "string"
+    },
+    "trigger": {
+      "$ref": "#/$defs/SnapshotTrigger"
+    },
+    "unchanged": {
+      "description": "True when the take recorded no new snapshot.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "stream",
+    "snapshot",
+    "trigger",
+    "unchanged",
+    "file_count",
+    "elapsed_ms",
+    "over_budget"
+  ],
+  "title": "SnapshotTakenV1",
+  "type": "object"
+}

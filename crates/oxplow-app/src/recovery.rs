@@ -18,9 +18,10 @@ use oxplow_db::{SqliteTaskEffortStore, SqliteTaskStore, SqliteThreadStore, TaskE
 use oxplow_domain::stores::{AgentTurnStore, ThreadStore};
 use oxplow_domain::DomainError;
 
-use crate::events::{EventBus, OxplowEvent, SnapshotSourceKind};
+use crate::events::{EventBus, OxplowEvent};
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
 use crate::task_service::reconcile_unattributed_on_close;
+use oxplow_domain::snapshot::SnapshotTrigger;
 
 #[derive(Clone)]
 pub struct RecoveryService {
@@ -166,7 +167,13 @@ impl RecoveryService {
             // Still attempt a snapshot — a partial drain is better than none.
         }
         match capture
-            .request_snapshot(SnapshotSourceKind::EffortEnd)
+            .request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: SnapshotTrigger::EffortEnd,
+                thread_id: Some(effort.thread_id),
+                turn_id: None,
+                effort_id: Some(effort.id),
+                budget: None,
+            })
             .await
         {
             Ok(id) => id,
@@ -392,7 +399,6 @@ mod tests {
         use std::time::Duration;
 
         use crate::blob_store::BlobStore;
-        use crate::events::SnapshotSourceKind;
         use crate::snapshot_capture::SnapshotCaptureService;
         use crate::snapshot_capture_registry::{
             SnapshotCaptureRegistry, SnapshotCaptureRegistryConfig,
@@ -472,7 +478,7 @@ mod tests {
         std::fs::write(project.path().join("foo.rs"), "v1").unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         let start_id = capture
-            .request_snapshot(SnapshotSourceKind::EffortStart)
+            .request_snapshot(SnapshotTrigger::EffortStart)
             .await
             .unwrap()
             .expect("start snapshot");

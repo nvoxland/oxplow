@@ -1,4 +1,5 @@
 import { commands } from "./tauri-bridge/generated/bindings.js";
+import type { SnapshotTrigger } from "./tauri-bridge/generated/bindings.js";
 import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/transport.js";
 
 export { onRemoteReconnect, triggerRemoteResync };
@@ -344,13 +345,8 @@ export interface TaskNote {
 }
 
 
-export type SnapshotSource =
-  | "effort-start"
-  | "effort-end"
-  | "effort-event"
-  | "startup"
-  | "manual"
-  | "git-refs";
+/** Why a snapshot take ran (`snapshot_op.trigger`). */
+export type SnapshotSource = SnapshotTrigger;
 
 export interface FileSnapshot {
   id: string;
@@ -2322,26 +2318,28 @@ export async function restoreFileFromSnapshot(
   unwrap(await commands.restoreFileFromSnapshot(Number(snapshotId)));
 }
 
-export interface FileSnapshotCreatedEventPayload {
+export interface SnapshotTakenEventPayload {
   streamId: string;
   snapshotId: string;
-  kind: SnapshotSource;
+  trigger: SnapshotTrigger;
   effortId: string | null;
   threadId: string | null;
 }
 
+/** Fires after a snapshot take recorded something new for `streamId`
+ *  (a new snapshot, or the current one re-stamped with a new HEAD). */
 export function subscribeSnapshotEvents(
   streamId: string,
-  fn: (payload: FileSnapshotCreatedEventPayload) => void,
+  fn: (payload: SnapshotTakenEventPayload) => void,
 ): () => void {
   return subscribeOxplowEvents((event) => {
-    if (event.kind !== "fileSnapshotCreated" && event.kind !== "fileSnapshotsBatchCreated") return;
-    const eventStreamId = (event.streamId as string | null | undefined) ?? null;
-    if (eventStreamId != null && eventStreamId !== streamId) return;
+    if (event.kind !== "snapshotTaken") return;
+    const eventStreamId = event.streamId as string;
+    if (eventStreamId !== streamId) return;
     fn({
-      streamId: eventStreamId ?? streamId,
+      streamId: eventStreamId,
       snapshotId: String(event.snapshotId),
-      kind: (event.source as SnapshotSource) ?? "effort-event",
+      trigger: event.trigger as SnapshotTrigger,
       effortId: (event.effortId as string | null | undefined) ?? null,
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
