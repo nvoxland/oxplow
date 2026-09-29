@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{AgentTurnId, HookEventId, StreamId, TaskId, ThreadId};
+use crate::ids::{AgentTurnId, HookEventId, StreamId, ThreadId};
 use crate::time::Timestamp;
 
 /// Discriminant for hook events. Matches the kinds Claude Code emits
@@ -77,12 +77,26 @@ pub struct AgentStatus {
 pub struct AgentTurn {
     pub id: AgentTurnId,
     pub thread_id: ThreadId,
-    pub task_id: Option<TaskId>,
     pub prompt: String,
     pub answer: Option<String>,
     pub session_id: Option<String>,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
+    /// The snapshot the worktree was at when the turn ended (its
+    /// `turn_end` take); `None` while running.
+    pub snapshot_id: Option<i64>,
+}
+
+/// How a turn ended (`agent.turn.ended`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    /// The agent finished (Stop).
+    Completed,
+    /// The person interrupted it.
+    Interrupted,
+    /// oxplow restarted with the turn still open; recovery closed it.
+    Restart,
 }
 
 #[cfg(test)]

@@ -489,18 +489,22 @@ mod tests {
             .open(&oxplow_domain::AgentTurn {
                 id: oxplow_domain::AgentTurnId::placeholder(),
                 thread_id: f.thread,
-                task_id: Some(f.task),
                 prompt: "Add CSV export".into(),
                 answer: None,
                 session_id: None,
                 started_at: oxplow_domain::Timestamp::now(),
                 ended_at: None,
+                snapshot_id: None,
             })
             .await
             .unwrap();
         f.svc
             .agent_turn_store
-            .close(&turn, Some("Used the csv crate.".into()))
+            .close(
+                &turn,
+                Some("Used the csv crate.".into()),
+                oxplow_domain::hook::TurnOutcome::Completed,
+            )
             .await
             .unwrap();
         f.svc

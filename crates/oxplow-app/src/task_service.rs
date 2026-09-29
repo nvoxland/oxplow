@@ -2096,12 +2096,12 @@ mod tests {
                 .open(&oxplow_domain::AgentTurn {
                     id: oxplow_domain::AgentTurnId::placeholder(),
                     thread_id: tid,
-                    task_id: None,
                     prompt: "steer".into(),
                     answer: None,
                     session_id: None,
                     started_at,
                     ended_at: None,
+                    snapshot_id: None,
                 })
                 .await
                 .unwrap();

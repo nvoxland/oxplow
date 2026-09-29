@@ -1845,67 +1845,47 @@ toast (`useBackendSubscriptions.ts` → `formatAgentStallAlert`).
 
 ## Snapshot tracking
 
-The runtime keeps a content-addressed history of worktree files so the
-UI (and future tooling) can render turn- and effort-level diffs without
-relying on git. Snapshots are **time-ordered** and deduplicated by a
-`version_hash` over `(path, hash, size, state)` tuples — there is no
-parent chain, and two flushes of an unchanged worktree return the same
-snapshot id. Mechanics:
+The runtime keeps a content-addressed history of each worktree so the
+UI and the agent can see what changed per turn and per effort without
+relying on git. The store and its guarantees (content identity,
+`tree_hash`, the `snapshot_op` operation log, one-transaction takes) are
+in [data-model.md](./data-model.md) "snapshot + file_snapshot"; this is
+when takes happen.
 
-- A per-stream in-memory **dirty set** accumulates relative paths. It
-  is populated by the workspace fs-watcher (always, regardless of
-  thread state) and by the PostToolUse hook's `markDirty` branch. No
-  separate per-path log is kept — the dirty set is passed to
-  `SnapshotStore.flushSnapshot` as an optimizer hint so only changed
-  paths need restat, and every other entry carries forward from the
-  previous snapshot.
-- Snapshots are anchored to **efforts**, not turns. A status
-  transition into `in_progress` flushes a `task-start` snapshot and
-  records its id on `task_effort.start_snapshot_id`. Any move
-  *out* of `in_progress` (done / blocked / ready / canceled /
-  archived) flushes a `task-end` snapshot recorded on
-  `task_effort.end_snapshot_id`. The close **always** requests a
-  snapshot; content-hash dedup reuses the latest existing snapshot id
-  when nothing changed (rather than writing a near-identical row), so
-  `end_snapshot_id` is set whenever the stream holds any snapshot — it
-  is null only while the effort is open (`end_snapshot_id` null ⇔
-  effort in progress). There is **no** time-based gap. The flush
-  is automatic inside the status-transition path
-  (`backfill_effort_snapshot`, which the MCP work-item tools all
-  delegate to) — agents never need to flush explicitly.
-- On project open, `takeStartupSnapshot` runs once per stream — a full
-  worktree walk that emits `source: "startup"`. If nothing changed
-  while the app was down, `version_hash` dedup returns the existing
-  snapshot and no new row is written; otherwise a fresh one is
-  recorded so the "changes during downtime" are visible.
-- On task status transitions, `handleStatusTransition` (and the
-  pure `applyStatusTransition` helper it delegates to) runs. A
-  transition *into* `in_progress` flushes `source: "task-start"` and
-  opens a new `task_effort` row pointing at it; a transition
-  *out of* `in_progress` (to `done`, `canceled`, `blocked`, etc.)
-  flushes `source: "task-end"` and closes the effort.
-  Re-entering `in_progress` creates a second effort — efforts are a
-  per-cycle record, not a single lifetime span. A DB-level UNIQUE
-  partial index on `task_effort(task_id) WHERE ended_at IS
-  NULL` enforces "at most one open effort per item."
-- Effort close de-dupes by **content hash**, not time. The close
-  always requests a `task-end` snapshot, but an unchanged tree reuses
-  the latest existing snapshot id instead of writing a near-identical
-  row. So a closed effort's `end_snapshot_id` is non-null whenever the
-  effort has a baseline: `backfill_effort_snapshot` pins it to the
-  freshly-captured snapshot, or — when capture yields nothing — falls
-  back to the effort's own `start_snapshot_id` (an empty-diff effort).
-  There is no `END_SNAPSHOT_MIN_GAP_MS` / minute-scale gap.
-- Effort-level diffs come from
-  `getSnapshotPairDiff(task_effort.start_snapshot_id,
-  task_effort.end_snapshot_id, path)` and the analogous
-  `getSnapshotSummary` call, exposed to the UI via
-  `taskApi.listTaskEfforts`.
-
-See [data-model.md](./data-model.md) for the `file_snapshot` and
-`task_effort` schemas, and
-[ipc-and-stores.md](./ipc-and-stores.md) for the `file-snapshot.created`
-EventBus event and the snapshot/effort IPC methods.
+- **Dirty set.** A per-stream in-memory set of changed paths, fed by the
+  workspace fs-watcher and the PostToolUse hook. A take drains it; only
+  those paths are re-stat'ed, everything else carries forward.
+- **Turn end (P2.3).** When a turn closes — Stop, or an interrupt; every
+  harness (Claude hooks, ACP, opencode, codex) reaches this through
+  `HookIngestService::ingest` — `turn_snapshots::CaptureTurnSnapshots`
+  runs a `turn_end` take anchored to the turn, its thread and the
+  thread's single open effort, and `agent_turn.snapshot_id` records the
+  snapshot the turn ended at. Its op's parent → snapshot is what the turn
+  changed.
+- **The budget.** The Stop hook waits at most `snapshotTurnBudgetMs`
+  (default 2000, min 100; a `config.set` key, not human-only). A slower
+  take is never aborted: it finishes in the background and its op and
+  `snapshot.taken` record `over_budget` (plus a warn log). The clock
+  starts before the per-stream take lock, so waiting behind another take
+  counts.
+- **Turn events.** `agent_turn` open/close log `agent.turn.started@1` /
+  `agent.turn.ended@1 { outcome: completed | interrupted | restart }` in
+  the same transaction, anchored to turn, thread and stream.
+- **Effort brackets.** Entering `in_progress` takes an `effort_start`
+  snapshot recorded on `task_effort.start_snapshot_id`; leaving it takes
+  an `effort_end` one on `end_snapshot_id` (both anchored to the effort).
+  An unchanged tree records an op on the current snapshot rather than a
+  new row, so `end_snapshot_id` is set whenever the stream has any
+  snapshot (null ⇔ effort in progress); `backfill_effort_snapshot` falls
+  back to the start snapshot on a capture failure. The flush is automatic
+  inside the status transition — agents never flush explicitly.
+- **Boot.** The primary stream's startup sweep (`enqueue_startup_diff`,
+  then a `startup` take) records what changed while oxplow was down;
+  recovery brackets orphaned efforts with an `effort_end` take.
+- **HEAD moves.** The git-refs listener runs a `git_refs` take, then —
+  on a clean tree — a `head_moved` re-stamp (`vcs.head.moved@1`).
+- **Effort-level diffs** are `diff_snapshots(start, end)` (content
+  identity), exposed to the UI via `listTaskEfforts`.
 
 ## Per-effort write log
 

@@ -85,6 +85,7 @@ pub mod thread_lifecycle;
 pub mod thread_runtime;
 pub mod token_usage;
 pub mod tool_calls;
+pub mod turn_snapshots;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
@@ -619,7 +620,10 @@ impl Services {
             Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
         let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
-        let agent_turn_store = Arc::new(SqliteAgentTurnStore::new(db.clone()));
+        let agent_turn_store = Arc::new(SqliteAgentTurnStore::with_event_schemas(
+            db.clone(),
+            event_schemas.clone(),
+        ));
         let effort_store = Arc::new(SqliteTaskEffortStore::new(db.clone()));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
@@ -764,6 +768,13 @@ impl Services {
         // orphaned efforts left open by a crash (death/restart case).
         let recovery_svc =
             recovery_svc.with_snapshot_reconcile(thread_store.clone(), snapshot_captures.clone());
+        let hook_ingest =
+            hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
+                captures: snapshot_captures.clone(),
+                threads: thread_store.clone(),
+                efforts: effort_store.clone(),
+                config: config_arc.clone(),
+            }));
         // Built before the metric runner, which reports whole-tree gauge sweeps
         // through it (tsk48).
         let background_tasks = BackgroundTaskStore::new();

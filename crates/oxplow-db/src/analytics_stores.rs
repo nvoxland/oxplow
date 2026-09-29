@@ -1297,6 +1297,14 @@ fn record_take_tx(
         file_count,
     )
     .map_err(map_sql_err)?;
+    if let Some(turn) = take.turn_id {
+        // The turn ended at this snapshot (P2.3).
+        tx.execute(
+            "UPDATE agent_turn SET snapshot_id = ?2 WHERE id = ?1",
+            params![turn, snapshot_id],
+        )
+        .map_err(map_sql_err)?;
+    }
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
     let stream = format!("stream:{}", take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(

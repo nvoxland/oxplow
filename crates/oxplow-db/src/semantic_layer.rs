@@ -610,15 +610,16 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_agent_turn",
-        description: "Agent turns: each human prompt and the agent's answer, per thread (and task when known).",
+        description: "Agent turns: each human prompt and the agent's answer, per thread. A finished turn points at the snapshot it ended at; its turn_end op in v_snapshot_op has the parent, so parent → snapshot is what the turn changed.",
         columns: &[
             ("id", "Turn id."),
             ("thread_id", "Thread the turn ran in."),
-            ("task_id", "Task in progress at the time, if known."),
             ("prompt", "What the human typed."),
             ("answer", "The agent's final answer, once the turn ended."),
+            ("session_id", "The harness session id, when it reported one."),
             ("started_at", "RFC 3339 timestamp."),
             ("ended_at", "RFC 3339 timestamp; NULL while running."),
+            ("snapshot_id", "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."),
         ],
     },
     CatalogView {

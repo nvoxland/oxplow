@@ -103,6 +103,9 @@ impl EventSchemaRegistry {
         r.register::<EffectResult>().expect("core type registers");
         r.register::<SnapshotTaken>().expect("core type registers");
         r.register::<VcsHeadMoved>().expect("core type registers");
+        r.register::<AgentTurnStarted>()
+            .expect("core type registers");
+        r.register::<AgentTurnEnded>().expect("core type registers");
         r
     }
 
@@ -430,6 +433,42 @@ impl EventType for VcsHeadMoved {
     type Payload = VcsHeadMovedV1;
 }
 
+/// `agent.turn.started@1`: a person's prompt opened a turn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTurnStartedV1 {
+    /// `turn:trn12`.
+    pub turn: String,
+    /// `thread:thr3`.
+    pub thread: String,
+    /// The harness session id, when it reported one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
+
+pub struct AgentTurnStarted;
+impl EventType for AgentTurnStarted {
+    const TYPE: &'static str = "agent.turn.started";
+    const V: u32 = 1;
+    type Payload = AgentTurnStartedV1;
+}
+
+/// `agent.turn.ended@1`: a turn closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTurnEndedV1 {
+    pub turn: String,
+    pub thread: String,
+    pub outcome: crate::hook::TurnOutcome,
+}
+
+pub struct AgentTurnEnded;
+impl EventType for AgentTurnEnded {
+    const TYPE: &'static str = "agent.turn.ended";
+    const V: u32 = 1;
+    type Payload = AgentTurnEndedV1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +480,8 @@ mod tests {
         assert_eq!(
             r.versions(),
             vec![
+                ("agent.turn.ended".to_string(), 1),
+                ("agent.turn.started".to_string(), 1),
                 ("command.executed".to_string(), 1),
                 ("config.changed".to_string(), 1),
                 ("effect.result".to_string(), 1),

@@ -38,6 +38,7 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
+use oxplow_domain::hook::TurnOutcome;
 
 /// What the hook subprocess sends us.
 ///
@@ -68,6 +69,8 @@ pub struct HookIngestService {
     statuses: Arc<dyn AgentStatusStore>,
     turns: Arc<dyn AgentTurnStore>,
     events: EventBus,
+    /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
+    turn_snapshots: Option<Arc<dyn crate::turn_snapshots::TurnSnapshots>>,
 }
 
 impl HookIngestService {
@@ -82,7 +85,17 @@ impl HookIngestService {
             statuses,
             turns,
             events,
+            turn_snapshots: None,
         }
+    }
+
+    /// Take a `turn_end` snapshot whenever a turn closes.
+    pub fn with_turn_snapshots(
+        mut self,
+        snapshots: Arc<dyn crate::turn_snapshots::TurnSnapshots>,
+    ) -> Self {
+        self.turn_snapshots = Some(snapshots);
+        self
     }
 
     /// Persist the envelope and drive the state machine. Returns the
@@ -117,12 +130,12 @@ impl HookIngestService {
                     let turn = AgentTurn {
                         id: AgentTurnId::placeholder(),
                         thread_id: thread,
-                        task_id: None,
                         prompt: env.prompt.unwrap_or_default(),
                         answer: None,
                         session_id: env.session_id.clone(),
                         started_at: now,
                         ended_at: None,
+                        snapshot_id: None,
                     };
                     self.turns.open(&turn).await?;
                     self.events
@@ -132,7 +145,8 @@ impl HookIngestService {
                     .await?;
             }
             HookKind::Stop => {
-                self.close_open_turns(&thread, None).await?;
+                self.close_open_turns(&thread, None, TurnOutcome::Completed)
+                    .await?;
                 // Did the agent park on the user this turn? Two signals:
                 //  - a sentinel in THIS Stop payload (kept for the
                 //    synthetic-event path and tests), or
@@ -169,8 +183,12 @@ impl HookIngestService {
                 // at the top of ingest; that's all we need here.
             }
             HookKind::Interrupt => {
-                self.close_open_turns(&thread, Some("interrupted".into()))
-                    .await?;
+                self.close_open_turns(
+                    &thread,
+                    Some("interrupted".into()),
+                    TurnOutcome::Interrupted,
+                )
+                .await?;
                 self.set_status(&thread, AgentStatusState::Stopped, Some("interrupt".into()))
                     .await?;
             }
@@ -226,11 +244,16 @@ impl HookIngestService {
         &self,
         thread: &ThreadId,
         answer: Option<String>,
+        outcome: TurnOutcome,
     ) -> Result<(), HookIngestError> {
         let open = self.turns.list_open(thread).await?;
         let closed_any = !open.is_empty();
         for t in open {
-            self.turns.close(&t.id, answer.clone()).await?;
+            self.turns.close(&t.id, answer.clone(), outcome).await?;
+            // The turn ends at a snapshot; bounded by the turn budget.
+            if let Some(snapshots) = &self.turn_snapshots {
+                snapshots.take_turn_end(*thread, t.id).await;
+            }
         }
         if closed_any {
             self.events

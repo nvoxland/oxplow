@@ -86,7 +86,11 @@ impl RecoveryService {
         let open = self.turns.list_all_open().await?;
         for turn in open {
             self.turns
-                .close(&turn.id, Some("interrupted_by_restart".into()))
+                .close(
+                    &turn.id,
+                    Some("interrupted_by_restart".into()),
+                    oxplow_domain::hook::TurnOutcome::Restart,
+                )
                 .await?;
             closed_turns += 1;
         }
@@ -275,12 +279,12 @@ mod tests {
         let turn = AgentTurn {
             id: AgentTurnId::placeholder(),
             thread_id: t.id,
-            task_id: None,
             prompt: "do".into(),
             answer: None,
             session_id: None,
             started_at: now,
             ended_at: None,
+            snapshot_id: None,
         };
         turns.open(&turn).await.unwrap();
 

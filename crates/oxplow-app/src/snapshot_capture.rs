@@ -1189,8 +1189,11 @@ impl SnapshotCaptureService {
         req: impl Into<TakeRequest>,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
         let req = req.into();
+        // The clock starts before the lock: waiting behind another take
+        // counts against this one's budget.
+        let started = Instant::now();
         let _serialized = self.inner.take_lock.lock().await;
-        self.capture_inner(req).await
+        self.capture_inner(req, started).await
     }
 
     /// Body of `request_snapshot`: drain → classify / read / hash /
@@ -1198,8 +1201,8 @@ impl SnapshotCaptureService {
     async fn capture_inner(
         &self,
         req: TakeRequest,
+        started: Instant,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
-        let started = Instant::now();
         // Yield long enough for the fs-watch debouncer + broadcast hop
         // + `run_watcher` to drain any in-flight events into the dirty
         // set. Without this, an edit that landed on disk less than

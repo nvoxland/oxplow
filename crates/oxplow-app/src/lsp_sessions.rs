@@ -852,6 +852,7 @@ mod tests {
             metric_detail_retention_days: 30,
             generated: oxplow_config::GeneratedConfig::default(),
             snapshot_max_file_bytes: 0,
+            snapshot_turn_budget_ms: 2000,
             inject_session_context: true,
             icon_tint: None,
             collection: Default::default(),

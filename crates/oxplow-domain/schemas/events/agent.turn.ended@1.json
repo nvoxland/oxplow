@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "TurnOutcome": {
+      "description": "How a turn ended (`agent.turn.ended`).",
+      "oneOf": [
+        {
+          "const": "completed",
+          "description": "The agent finished (Stop).",
+          "type": "string"
+        },
+        {
+          "const": "interrupted",
+          "description": "The person interrupted it.",
+          "type": "string"
+        },
+        {
+          "const": "restart",
+          "description": "oxplow restarted with the turn still open; recovery closed it.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.turn.ended@1`: a turn closed.",
+  "properties": {
+    "outcome": {
+      "$ref": "#/$defs/TurnOutcome"
+    },
+    "thread": {
+      "type": "string"
+    },
+    "turn": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "turn",
+    "thread",
+    "outcome"
+  ],
+  "title": "AgentTurnEndedV1",
+  "type": "object"
+}

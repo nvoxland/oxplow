@@ -365,12 +365,12 @@ mod tests {
         let turn = |at: oxplow_domain::Timestamp| oxplow_domain::AgentTurn {
             id: oxplow_domain::AgentTurnId::placeholder(),
             thread_id: f.thread,
-            task_id: None,
             prompt: "do it".into(),
             answer: None,
             session_id: None,
             started_at: at,
             ended_at: None,
+            snapshot_id: None,
         };
         let now = oxplow_domain::Timestamp::now();
         f.svc

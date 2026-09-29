@@ -90,6 +90,10 @@ const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
 const DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER: u32 = 100;
 const DEFAULT_METRIC_DETAIL_RETENTION_DAYS: u32 = 30;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+/// How long a turn-end snapshot may hold up the Stop hook (P2.3).
+pub const DEFAULT_SNAPSHOT_TURN_BUDGET_MS: u64 = 2000;
+/// The smallest budget accepted: the capture's own predrain wait is 300 ms.
+const MIN_SNAPSHOT_TURN_BUDGET_MS: u64 = 100;
 const DEFAULT_INJECT_SESSION_CONTEXT: bool = true;
 
 /// An agent oxplow talks to over the Agent Client Protocol (tsk335): a
@@ -758,6 +762,11 @@ pub struct OxplowConfig {
     /// files get a stat-only entry. Default 5 MiB.
     #[serde(rename = "snapshotMaxFileBytes")]
     pub snapshot_max_file_bytes: u64,
+    /// How long the Stop hook waits for the turn-end snapshot, in ms.
+    /// A take that runs longer keeps going in the background and is
+    /// recorded as over budget. Default 2000.
+    #[serde(rename = "snapshotTurnBudgetMs")]
+    pub snapshot_turn_budget_ms: u64,
     /// When true, the UserPromptSubmit hook injects a session-context
     /// block into every agent prompt.
     #[serde(rename = "injectSessionContext")]
@@ -977,6 +986,9 @@ struct RawConfig {
     /// Largest file snapshotted by content; bigger files get a stat-only entry.
     #[serde(rename = "snapshotMaxFileBytes", default)]
     snapshot_max_file_bytes: Option<f64>,
+    /// How long (ms) the Stop hook waits for the turn-end snapshot before moving on; the take keeps going and is recorded as over budget. Default 2000, minimum 100.
+    #[serde(rename = "snapshotTurnBudgetMs", default)]
+    snapshot_turn_budget_ms: Option<f64>,
     /// Inject the session-context block into every agent prompt.
     #[serde(rename = "injectSessionContext", default)]
     inject_session_context: Option<bool>,
@@ -1245,6 +1257,12 @@ pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serd
         doc.insert(
             "snapshotMaxFileBytes".into(),
             config.snapshot_max_file_bytes.into(),
+        );
+    }
+    if config.snapshot_turn_budget_ms != DEFAULT_SNAPSHOT_TURN_BUDGET_MS {
+        doc.insert(
+            "snapshotTurnBudgetMs".into(),
+            config.snapshot_turn_budget_ms.into(),
         );
     }
     if config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT {
@@ -1566,6 +1584,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         metric_detail_retention_days: DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
         generated: GeneratedConfig::default(),
         snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+        snapshot_turn_budget_ms: DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
         inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
         icon_tint: None,
         collection: CollectionConfig::default(),
@@ -1699,6 +1718,16 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         None => DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
     };
 
+    let snapshot_turn_budget_ms = match raw.snapshot_turn_budget_ms {
+        Some(n) if !n.is_finite() || n < MIN_SNAPSHOT_TURN_BUDGET_MS as f64 => {
+            return Err(ConfigError::Invalid(format!(
+                "snapshotTurnBudgetMs must be a number >= {MIN_SNAPSHOT_TURN_BUDGET_MS}"
+            )));
+        }
+        Some(n) => n.floor() as u64,
+        None => DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
+    };
+
     let inject_session_context = raw
         .inject_session_context
         .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
@@ -1786,6 +1815,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         metric_detail_retention_days,
         generated,
         snapshot_max_file_bytes,
+        snapshot_turn_budget_ms,
         inject_session_context,
         icon_tint,
         collection,

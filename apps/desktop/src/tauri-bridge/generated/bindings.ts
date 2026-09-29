@@ -1464,12 +1464,16 @@ export type AgentStatusState = "idle" | "running" | "awaiting_user" | "stopped" 
 export type AgentTurn = {
 	id: AgentTurnId,
 	thread_id: ThreadId,
-	task_id: TaskId | null,
 	prompt: string,
 	answer: string | null,
 	session_id: string | null,
 	started_at: Timestamp,
 	ended_at: Timestamp | null,
+	/**
+	 *  The snapshot the worktree was at when the turn ended (its
+	 *  `turn_end` take); `None` while running.
+	 */
+	snapshot_id: number | null,
 };
 
 export type AgentTurnId = string;
@@ -3121,6 +3125,12 @@ export type OxplowConfig = {
 	 *  files get a stat-only entry. Default 5 MiB.
 	 */
 	snapshotMaxFileBytes: number,
+	/**
+	 *  How long the Stop hook waits for the turn-end snapshot, in ms.
+	 *  A take that runs longer keeps going in the background and is
+	 *  recorded as over budget. Default 2000.
+	 */
+	snapshotTurnBudgetMs: number,
 	/**
 	 *  When true, the UserPromptSubmit hook injects a session-context
 	 *  block into every agent prompt.
