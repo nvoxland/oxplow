@@ -135,7 +135,7 @@ pub fn assemble_system_prompt(
 
 /// The system prompt for an ACP agent: the same, minus the
 /// `<session-context>` block. An ACP session's first human prompt always
-/// carries a fresh one (`AgentActivity::prompt_context`), so including it
+/// carries a fresh one (`AgentContext::prompt_context`), so including it
 /// here too would send it twice.
 pub fn assemble_acp_system_prompt(
     project_dir: &Path,

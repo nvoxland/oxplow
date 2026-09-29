@@ -448,7 +448,7 @@ the same JSON.
 - `intent_for` makes the policy intent:
   - edit, delete and move are `WorktreeWrite`, anything else is `Other`;
   - paths come from `locations`, then the diffs, then path-like `rawInput` keys (`file_path`, `path`, `absolute_path`, `notebook_path`, `source`/`destination`, `old_path`/`new_path`), deduplicated.
-- `canonical_events` makes the Claude-shaped events `AgentActivity` records:
+- `canonical_events` makes the Claude-shaped events the ingest records:
   - read → `Read`;
   - edit → `Edit`, or `Write` when every diff is a new file;
   - delete and move → one `Edit` per path, so effort claims see them;
@@ -487,7 +487,7 @@ the same JSON.
 - `AgentBoot` plus the resume id on start;
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
-- `PostToolUse` plus `AgentActivity::on_post_tool` on each finished tool call (per canonical event);
+- `PostToolUse` plus `AgentContext::post_tool_context` on each finished tool call (per canonical event);
 - `Stop` with the turn's reported counts on its body (counted by the `token_usage.turns` reactor), then the closed turn's signals read from the log and `AgentPolicy::on_turn_end` for the directive;
 - `Interrupt` when the agent goes away.
 
@@ -620,22 +620,24 @@ policy that every agent transport asks, not logic in the hook route.
   - `on_turn_end(svc, thread, signals)` is the Stop pipeline below. It
     owns `StopState`, the reason builders and `describe_run`.
   - `claude_intent(body)` maps a Claude-shaped payload to an intent.
-- **Recording and prompt context** are shared the same way:
-  `Services.agent_activity` (`crates/oxplow-app/src/agent_activity.rs`,
-  tsk334).
-  - `on_post_tool` runs collection plus post-tool advisories (detached)
-    and returns the ROLE CHANGE banner or a nudge. The tool-call row, the
-    effort-file claim and wiki attribution are pump reactors on
-    `agent.tool.finished` (P3.5).
+- **Recording is the ingest's and the pump's; context is shared.** Every
+  transport hands its envelopes to `HookIngestService::ingest`, which logs
+  `agent.*` events; pump reactors record from them (tool-call rows, effort
+  claims, wiki attribution, collection, advisories, tokens — P3.5–P3.7).
+  What the agent is told comes from `Services.agent_context`
+  (`crates/oxplow-app/src/agent_context.rs`, `AgentContext`, P3.8 — it was
+  `AgentActivity`, whose hand-wired fan-out is gone):
+  - `post_tool_context` returns the ROLE CHANGE banner, else the thread's
+    undelivered nudges after settling the reactors that write them.
   - `prompt_context` builds the session-context block, advisories and
     decisions, deduped per session.
-  - `reset_session` rounds it out. Session and resume tracking moved into
-    the hook ingest (P3.3); turn signals are read from the log
-    (`TurnSignals::of_turn`, P3.4).
+  - `reset_session` clears the per-session baselines. Session and resume
+    tracking live in the hook ingest (P3.3); turn signals are read from the
+    log (`TurnSignals::of_turn`, P3.4).
   - Transports that don't speak Claude's tool vocabulary build a
-    `CanonicalToolEvent` and record its `to_payload()`. That is the one
-    place the canonical shape is built; every recorder and hook-log
-    reader keys on Claude's tool names.
+    `CanonicalToolEvent` (`crates/oxplow-app/src/acp/mapping.rs`) and ingest
+    its `to_payload()`. That is the one place the canonical shape is built;
+    the ingest and every reactor key on Claude's tool names.
 - **Transports only render the answer.**
   - The hook route renders `hookSpecificOutput` for a deny and
     `{decision:"block", reason}` for Stop.
@@ -1453,7 +1455,7 @@ table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
 `.context/data-model.md`) tagged with kind, the message, the trigger (bash
 command), the turn and the **cause** (the `agent.tool.finished` event — a
 redelivered event can't fire the same kind twice). **The persisted nudge is
-the delivery:** `AgentActivity::on_post_tool` settles the two reactors (≤2.5
+the delivery:** `AgentContext::post_tool_context` settles the two reactors (≤2.5
 s) and returns the thread's nudges with no `delivered_at`
 (`take_undelivered`, which stamps them) — oxplow's own kinds first, then
 advisories — so one that finishes after its hook answered reaches the agent

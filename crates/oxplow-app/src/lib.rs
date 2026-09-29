@@ -9,8 +9,8 @@
 
 pub mod acp;
 pub mod advisories;
-pub mod agent_activity;
 pub mod agent_command;
+pub mod agent_context;
 pub mod agent_pane;
 pub mod agent_path;
 pub mod agent_policy;
@@ -511,7 +511,7 @@ pub struct Services {
     /// transport (the hook route, ACP).
     pub agent_policy: Arc<agent_policy::AgentPolicy>,
     /// Recording and prompt context shared by every agent transport.
-    pub agent_activity: Arc<agent_activity::AgentActivity>,
+    pub agent_context: Arc<agent_context::AgentContext>,
     /// Open ACP agent sessions (tsk281). Sessions get a
     /// `acp::host::ServicesAcpHost` holding `Services` weakly.
     pub acp: Arc<acp::manager::AcpManager>,
@@ -1019,7 +1019,7 @@ impl Services {
             blobs,
             lsp_sessions: lsp,
             agent_policy,
-            agent_activity: Arc::new(agent_activity::AgentActivity::default()),
+            agent_context: Arc::new(agent_context::AgentContext::default()),
             acp: Arc::new(acp::manager::AcpManager::new()),
             approvals,
             lsp_installer: lsp_installer_svc,

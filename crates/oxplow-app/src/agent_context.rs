@@ -1,10 +1,10 @@
-//! What an agent's activity records, and the context oxplow hands it,
-//! shared by every agent transport (tsk334). The hook route feeds it
-//! Claude's hook payloads; the ACP client feeds it [`CanonicalToolEvent`]s
-//! rendered into the same shape, so every recorder (tool calls, effort
-//! claims, wiki attribution, collection) and every reader of the hook log
-//! keys on one vocabulary: Claude's tool names (`Edit`, `Read`, `Bash`, …)
-//! and `tool_input.file_path` / `command`.
+//! The context oxplow hands an agent, shared by every transport (tsk334,
+//! P3.8): the `<session-context>` block (deduped per session), prompt
+//! advisories and the open effort's decisions on a prompt; the ROLE CHANGE
+//! banner or the thread's undelivered nudges after a tool call. What an
+//! agent *did* is recorded elsewhere — the hook ingest logs `agent.*` events
+//! and pump reactors record from them (`tool_call_reactors`,
+//! `post_tool_reactors`, the token reactor).
 //!
 //! State kept here is runtime-only (losing it on a restart costs at most
 //! one repeated context block): the launch role and last context per agent
@@ -19,37 +19,6 @@ use parking_lot::Mutex;
 use tracing::warn;
 
 use crate::{build_session_context_block_with_role, role_change_banner, RoleMode, Services};
-
-/// A tool call in the canonical (Claude-shaped) vocabulary, for transports
-/// whose agents don't speak it natively. [`Self::to_payload`] is the one
-/// place that shape is built.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CanonicalToolEvent {
-    /// `Edit`, `Write`, `Read`, `Grep`, `Bash`, `WebFetch`, `mcp__…`, …
-    pub tool_name: String,
-    /// `{file_path}`, `{command}`, `{pattern}`, `{url}`, …
-    pub tool_input: serde_json::Value,
-    /// `{is_error: bool, …}` once the call finished.
-    pub tool_response: Option<serde_json::Value>,
-    pub session_id: Option<String>,
-}
-
-impl CanonicalToolEvent {
-    /// The hook-payload shape every recorder reads.
-    pub fn to_payload(&self) -> serde_json::Value {
-        let mut v = serde_json::json!({
-            "tool_name": self.tool_name,
-            "tool_input": self.tool_input,
-        });
-        if let Some(r) = &self.tool_response {
-            v["tool_response"] = r.clone();
-        }
-        if let Some(s) = &self.session_id {
-            v["session_id"] = serde_json::Value::String(s.clone());
-        }
-        v
-    }
-}
 
 /// The launch role and the last context block per agent session.
 #[derive(Default)]
@@ -69,13 +38,13 @@ const POST_TOOL_SETTLE: std::time::Duration = std::time::Duration::from_millis(2
 const DECISIONS_KEY_SUFFIX: &str = "#decisions";
 
 /// Recording and context shared by every agent transport
-/// (`Services.agent_activity`).
+/// (`Services.agent_context`).
 #[derive(Default)]
-pub struct AgentActivity {
+pub struct AgentContext {
     role_state: Mutex<RoleState>,
 }
 
-impl AgentActivity {
+impl AgentContext {
     /// A fresh agent context (startup / resume / clear / compact): forget
     /// the session's baselines so the next prompt carries fresh context.
     pub fn reset_session(&self, session_id: Option<&str>) {
@@ -98,7 +67,7 @@ impl AgentActivity {
     /// then takes whatever is undelivered — a nudge that lands after the
     /// window goes out on the thread's next tool call instead of being lost.
     /// Collection nudges come before advisories.
-    pub async fn on_post_tool(
+    pub async fn post_tool_context(
         &self,
         svc: &Services,
         thread_id: &ThreadId,
@@ -290,11 +259,10 @@ impl AgentActivity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn session_context_emits_initial_and_changed_blocks_only() {
-        let state = AgentActivity::default();
+        let state = AgentContext::default();
 
         assert!(state.should_emit(Some("session-1"), "context-a"));
         assert!(!state.should_emit(Some("session-1"), "context-a"));
@@ -303,14 +271,14 @@ mod tests {
 
     #[test]
     fn session_context_without_session_id_is_never_suppressed() {
-        let state = AgentActivity::default();
+        let state = AgentContext::default();
         assert!(state.should_emit(None, "context"));
         assert!(state.should_emit(None, "context"));
     }
 
     #[test]
     fn clearing_session_context_baseline_allows_fresh_emission() {
-        let state = AgentActivity::default();
+        let state = AgentContext::default();
         state
             .role_state
             .lock()
@@ -324,26 +292,5 @@ mod tests {
             .initial_role_by_session_id
             .contains_key("session-1"));
         assert!(state.should_emit(Some("session-1"), "context"));
-    }
-
-    #[test]
-    fn a_canonical_event_renders_the_hook_payload_shape() {
-        let ev = CanonicalToolEvent {
-            tool_name: "Edit".into(),
-            tool_input: serde_json::json!({"file_path": "src/a.rs"}),
-            tool_response: Some(serde_json::json!({"is_error": false})),
-            session_id: Some("s1".into()),
-        };
-        assert_eq!(
-            ev.to_payload(),
-            serde_json::json!({"tool_name": "Edit", "tool_input": {"file_path": "src/a.rs"}, "tool_response": {"is_error": false}, "session_id": "s1"})
-        );
-        // What the ingest reads: the tool, its path and outcome.
-        let body = ev.to_payload();
-        let parts = crate::tool_calls::parse_tool_call(&body.to_string(), Path::new("/p")).unwrap();
-        assert_eq!(
-            (parts.tool.as_str(), parts.path.as_deref()),
-            ("Edit", Some("src/a.rs"))
-        );
     }
 }

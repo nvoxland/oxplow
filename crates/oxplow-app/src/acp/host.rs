@@ -1,7 +1,7 @@
 //! What an ACP session asks of the rest of oxplow: the policy, and the
 //! same recording a terminal agent's hooks get. [`AcpHost`] is the seam
 //! (tests use a recording double); [`ServicesAcpHost`] is the real one,
-//! routing through `AgentPolicy`, `AgentActivity` and hook ingest so an
+//! routing through `AgentPolicy`, `AgentContext` and hook ingest so an
 //! ACP turn lands in the same tables as a hooked one.
 
 use std::sync::{Arc, Weak};
@@ -13,7 +13,7 @@ use tracing::warn;
 
 use super::mapping::AcpIntent;
 use super::wire::TurnTokens;
-use crate::agent_activity::CanonicalToolEvent;
+use crate::acp::mapping::CanonicalToolEvent;
 use crate::hook_ingest::HookEnvelope;
 use crate::Services;
 
@@ -153,7 +153,7 @@ impl AcpHost for ServicesAcpHost {
 
     async fn prompt_context(&self, thread: &ThreadId, session_id: &str) -> Option<String> {
         let svc = self.svc.upgrade()?;
-        svc.agent_activity
+        svc.agent_context
             .prompt_context(&svc, thread, Some(session_id))
             .await
     }
@@ -188,8 +188,8 @@ impl AcpHost for ServicesAcpHost {
             None,
         );
         self.ingest(&svc, env).await;
-        svc.agent_activity
-            .on_post_tool(&svc, thread, Some(session_id), &body)
+        svc.agent_context
+            .post_tool_context(&svc, thread, Some(session_id), &body)
             .await
     }
 

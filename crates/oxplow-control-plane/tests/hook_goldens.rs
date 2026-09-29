@@ -1,7 +1,7 @@
 //! Golden tests: the EXACT response bodies the hook route returns to the
 //! agent's harness. The wording steers the agent, so these pin it
 //! byte-for-byte while enforcement and recording move behind the shared
-//! `AgentPolicy` / `AgentActivity` services (tsk281). `hook_marshaling.rs`
+//! `AgentPolicy` / `AgentContext` services (tsk281). `hook_marshaling.rs`
 //! checks shapes; these check every byte.
 //!
 //! Goldens live in `tests/goldens/<name>.json` with the temp project path

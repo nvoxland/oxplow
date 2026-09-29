@@ -1,5 +1,5 @@
 //! ACP tool calls in oxplow's terms: the policy intent the gate checks and
-//! the canonical (Claude-shaped) events `AgentActivity` records. Pure.
+//! the canonical (Claude-shaped) events `AgentContext` records. Pure.
 //!
 //! Edit, delete and move are worktree writes. Their paths come from
 //! `locations`, the diffs, and the path-like keys adapters put in
@@ -8,7 +8,6 @@
 use oxplow_runtime::policy::{IntentKind, ToolIntent};
 
 use super::model::{ToolCall, ToolKind, ToolStatus};
-use crate::agent_activity::CanonicalToolEvent;
 
 /// `rawInput` keys adapters use for the file a tool touches.
 const PATH_KEYS: &[&str] = &[
@@ -129,6 +128,37 @@ fn display_name(t: &ToolCall) -> String {
         .unwrap_or_else(|| t.title.clone())
 }
 
+/// A tool call in the canonical (Claude-shaped) vocabulary, for transports
+/// whose agents don't speak it natively. [`Self::to_payload`] is the one
+/// place that shape is built.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CanonicalToolEvent {
+    /// `Edit`, `Write`, `Read`, `Grep`, `Bash`, `WebFetch`, `mcp__…`, …
+    pub tool_name: String,
+    /// `{file_path}`, `{command}`, `{pattern}`, `{url}`, …
+    pub tool_input: serde_json::Value,
+    /// `{is_error: bool, …}` once the call finished.
+    pub tool_response: Option<serde_json::Value>,
+    pub session_id: Option<String>,
+}
+
+impl CanonicalToolEvent {
+    /// The hook-payload shape every recorder reads.
+    pub fn to_payload(&self) -> serde_json::Value {
+        let mut v = serde_json::json!({
+            "tool_name": self.tool_name,
+            "tool_input": self.tool_input,
+        });
+        if let Some(r) = &self.tool_response {
+            v["tool_response"] = r.clone();
+        }
+        if let Some(s) = &self.session_id {
+            v["session_id"] = serde_json::Value::String(s.clone());
+        }
+        v
+    }
+}
+
 /// The canonical events for a call: one per path for writes (recorders
 /// read a single `file_path`), one otherwise, none for unrecorded kinds.
 pub fn canonical_events(t: &ToolCall, session_id: Option<&str>) -> Vec<CanonicalToolEvent> {
@@ -205,6 +235,29 @@ fn tool_response(t: &ToolCall) -> Option<serde_json::Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_canonical_event_renders_the_hook_payload_shape() {
+        let ev = CanonicalToolEvent {
+            tool_name: "Edit".into(),
+            tool_input: serde_json::json!({"file_path": "src/a.rs"}),
+            tool_response: Some(serde_json::json!({"is_error": false})),
+            session_id: Some("s1".into()),
+        };
+        assert_eq!(
+            ev.to_payload(),
+            serde_json::json!({"tool_name": "Edit", "tool_input": {"file_path": "src/a.rs"}, "tool_response": {"is_error": false}, "session_id": "s1"})
+        );
+        // What the ingest reads: the tool, its path and outcome.
+        let body = ev.to_payload();
+        let parts =
+            crate::tool_calls::parse_tool_call(&body.to_string(), std::path::Path::new("/p"))
+                .unwrap();
+        assert_eq!(
+            (parts.tool.as_str(), parts.path.as_deref()),
+            ("Edit", Some("src/a.rs"))
+        );
+    }
+
     use super::*;
     use crate::acp::model::ToolDiff;
     use serde_json::json;

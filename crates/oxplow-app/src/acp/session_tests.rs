@@ -20,7 +20,7 @@ use super::model::PermissionAnswer;
 use super::session::{AcpError, AcpEvent, AcpEventBody, AcpStatus, SessionSpec};
 use super::transcript::ItemBody;
 use super::wire::{McpHttp, TurnTokens};
-use crate::agent_activity::CanonicalToolEvent;
+use crate::acp::mapping::CanonicalToolEvent;
 
 #[derive(Default)]
 struct Host {

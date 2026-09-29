@@ -382,7 +382,7 @@ async fn handle_hook_inner(
     if event == "SessionStart" || event == "SessionEnd" {
         if event == "SessionStart" {
             ctx.services
-                .agent_activity
+                .agent_context
                 .reset_session(session_id.as_deref());
         }
         let kind = if event == "SessionStart" {
@@ -493,8 +493,8 @@ async fn handle_hook_inner(
         {
             if let Some(context) = ctx
                 .services
-                .agent_activity
-                .on_post_tool(
+                .agent_context
+                .post_tool_context(
                     &ctx.services,
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
@@ -522,7 +522,7 @@ async fn handle_hook_inner(
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(combined) = ctx
                 .services
-                .agent_activity
+                .agent_context
                 .prompt_context(
                     &ctx.services,
                     thread_id,

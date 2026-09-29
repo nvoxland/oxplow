@@ -5,7 +5,7 @@
 //! by the event (a redelivery records nothing twice) and anchored to the
 //! turn and effort the tool ran in. What they want the agent to hear is
 //! persisted as a nudge; the hook response takes the thread's undelivered
-//! nudges (`AgentActivity::on_post_tool`), so a nudge that finishes after
+//! nudges (`AgentContext::post_tool_context`), so a nudge that finishes after
 //! its hook's window goes out on the next one instead of being lost.
 //!
 //! - `collection` — a Bash command's test / analysis / coverage runs
@@ -227,8 +227,8 @@ mod tests {
             .unwrap();
         let body = bash("bun test");
         let first = svc
-            .agent_activity
-            .on_post_tool(svc, &f.thread, Some("s"), &body)
+            .agent_context
+            .post_tool_context(svc, &f.thread, Some("s"), &body)
             .await;
         assert!(
             first
@@ -237,8 +237,8 @@ mod tests {
             "{first:?}"
         );
         assert_eq!(
-            svc.agent_activity
-                .on_post_tool(svc, &f.thread, Some("s"), &body)
+            svc.agent_context
+                .post_tool_context(svc, &f.thread, Some("s"), &body)
                 .await,
             None,
             "delivered once"
@@ -248,8 +248,8 @@ mod tests {
             .persist_nudge(&f.thread, None, "late", "a late nudge", "cmd", None)
             .await;
         assert_eq!(
-            svc.agent_activity
-                .on_post_tool(svc, &f.thread, Some("s"), &json!({"tool_name": "Read"}))
+            svc.agent_context
+                .post_tool_context(svc, &f.thread, Some("s"), &json!({"tool_name": "Read"}))
                 .await
                 .as_deref(),
             Some("a late nudge")
