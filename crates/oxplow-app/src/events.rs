@@ -219,9 +219,6 @@ pub enum OxplowEvent {
         extension: String,
         source_id: String,
     },
-    /// An effort closed (its task left `in_progress`). Background work
-    /// that reviews a finished effort (inferred decisions) keys off this.
-    EffortFinished { thread_id: ThreadId, effort_id: i64 },
     /// A language server published diagnostics (or restarted) for
     /// `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
     DiagnosticsChanged { stream_id: i64 },

@@ -369,7 +369,10 @@ impl TaskService {
     /// later run; nothing is lost.
     pub async fn settle_lifecycle(&self) {
         if let Some(pump) = self.event_pump.as_ref() {
-            if !pump.settle(LIFECYCLE_SETTLE).await {
+            if !pump
+                .settle(&[crate::effort_lifecycle::NAME], LIFECYCLE_SETTLE)
+                .await
+            {
                 tracing::debug!("effort lifecycle: pump didn't settle in time; continuing");
             }
         }
@@ -416,23 +419,24 @@ impl TaskService {
 
     /// `effort.closed` (the effort-lifecycle consumer, P2.6.2): take and
     /// pin the `effort_end` snapshot, reconcile unclaimed files and runs,
-    /// project the lifecycle metrics, then tell in-process reactors
-    /// (`EffortFinished`). A retroactive effort (recorded after the fact)
-    /// has no bracket, so it gets the metrics only. Re-delivery re-pins
-    /// nothing (the pin is checked) and re-reconciles idempotently.
+    /// and project the lifecycle metrics. A retroactive effort (recorded
+    /// after the fact) has no bracket, so it gets the metrics only.
+    /// Re-delivery re-pins nothing (the pin is checked) and re-reconciles
+    /// idempotently. Returns the finished effort (the consumer then logs
+    /// `effort.finished`), or `None` when there is nothing to finish.
     pub(crate) async fn on_effort_closed(
         &self,
         effort_id: EffortId,
         retroactive: bool,
-    ) -> Result<(), DomainError> {
+    ) -> Result<Option<Effort>, DomainError> {
         let Some(effort_store) = self.effort_store.as_ref() else {
-            return Ok(());
+            return Ok(None);
         };
         let Some(effort) = effort_store.get_effort(&effort_id).await? else {
-            return Ok(());
+            return Ok(None);
         };
         if effort.ended_at.is_none() {
-            return Ok(());
+            return Ok(None);
         }
         if !retroactive {
             if let Some(snapshot) = self.service_for_thread(&effort.thread_id).await {
@@ -473,15 +477,7 @@ impl TaskService {
         }
         self.project_effort_lifecycle_metrics(&effort, retroactive)
             .await;
-        if !retroactive {
-            if let Some(events) = self.events.as_ref() {
-                events.emit(crate::OxplowEvent::EffortFinished {
-                    thread_id: effort.thread_id,
-                    effort_id: effort_id.value(),
-                });
-            }
-        }
-        Ok(())
+        effort_store.get_effort(&effort_id).await
     }
 
     /// Project derived process metrics into the unified substrate when an
@@ -1707,7 +1703,13 @@ mod tests {
         );
         let pump = Arc::new(crate::event_pump::EventPump::new(db.clone(), log, vec![]));
         pump.register_async(Arc::new(
-            crate::effort_lifecycle::EffortLifecycleConsumer::new(svc.without_event_pump()),
+            crate::effort_lifecycle::EffortLifecycleConsumer::new(
+                svc.without_event_pump(),
+                oxplow_db::SqliteEventLogStore::new(
+                    db.clone(),
+                    Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+                ),
+            ),
         ));
         svc.with_event_pump(pump)
     }
@@ -3432,9 +3434,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn closing_an_effort_emits_effort_finished() {
+    async fn closing_an_effort_logs_effort_finished_once_its_bracket_is_pinned() {
+        // P2.6b (tsk451): the durable `effort.finished@1` — what the effort
+        // reactors consume — follows the lifecycle work, once per effort.
         let f = crate::test_fixtures::services_with_effort().await;
-        let mut rx = f.svc.events.subscribe();
         f.svc
             .tasks
             .update(
@@ -3446,12 +3449,31 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut seen = None;
-        while let Ok(ev) = rx.try_recv() {
-            if let crate::OxplowEvent::EffortFinished { effort_id, .. } = ev {
-                seen = Some(effort_id);
-            }
-        }
-        assert_eq!(seen, Some(f.effort.value()));
+        let finished = |events: &[oxplow_domain::StoredEvent]| {
+            events
+                .iter()
+                .filter(|e| e.envelope.event_type == "effort.finished")
+                .map(|e| e.envelope.clone())
+                .collect::<Vec<_>>()
+        };
+        let events = f.svc.event_log_store.read_after(0, 100).await.unwrap();
+        let done = finished(&events);
+        assert_eq!(done.len(), 1, "{done:#?}");
+        assert_eq!(done[0].payload["effort"], format!("effort:{}", f.effort));
+        assert_eq!(done[0].anchors.effort_id, Some(f.effort));
+        let closed = events
+            .iter()
+            .find(|e| e.envelope.event_type == "effort.closed")
+            .unwrap();
+        assert_eq!(done[0].cause.as_ref(), Some(&closed.envelope.id));
+        // Re-delivery (a crash before the checkpoint) doesn't log it twice.
+        let consumer = crate::effort_lifecycle::EffortLifecycleConsumer::new(
+            f.svc.tasks.without_event_pump(),
+            (*f.svc.event_log_store).clone(),
+        );
+        use crate::event_pump::AsyncEventConsumer as _;
+        consumer.handle(closed).await.unwrap();
+        let again = f.svc.event_log_store.read_after(0, 100).await.unwrap();
+        assert_eq!(finished(&again).len(), 1);
     }
 }

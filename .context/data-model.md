@@ -1144,9 +1144,14 @@ mid-work re-delivers, so handlers must be idempotent. `Busy` leaves the
 checkpoint (the next run retries; later events for that consumer wait
 behind it, `PumpReport.deferred`); any other failure or a panic is a dead
 letter plus checkpoint, and `retry_dead_letter` re-runs the async handler.
-Registered with `register_async` after the services they drive exist; one
-run at a time (a `run_lock`). `EventPump::settle(timeout)` spawns a run and
-waits for it, for callers whose answer needs a consumer's effect.
+Registered with `register_async` after the services they drive exist. Each
+async consumer has its own lock, wake-up and loop (P2.6b), so a slow one —
+a model call — delays only itself: `spawn` starts one loop for the sync
+consumers and one per async consumer, `wake()` wakes them all, and a loop
+that handled something wakes the others (its handler may have logged what
+they consume). `EventPump::settle(&[names], timeout)` spawns a catch-up of
+just the named consumers and waits for it, for callers whose answer needs
+their effect (`TaskService` settles `effort.lifecycle`).
 
 The one async consumer so far is **`effort.lifecycle`**
 (`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
@@ -1154,13 +1159,24 @@ The one async consumer so far is **`effort.lifecycle`**
 sweep, takes the `effort_start` snapshot and pins it (skipped when already
 pinned or already closed); `on_effort_closed` takes and pins the
 `effort_end` snapshot (falling back to the start pin), reconciles
-unclaimed files and runs, projects the lifecycle metrics, then emits the
-in-memory `EffortFinished`. A `retroactive` effort (recorded by
-`record_effort_atomic` for an item never opened) gets only the metrics.
+unclaimed files and runs, projects the lifecycle metrics, then logs
+**`effort.finished@1 { effort, work_item, end_snapshot?, retroactive? }`**
+(caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
+re-delivery's second append is a no-op). A `retroactive` effort (recorded
+by `record_effort_atomic` for an item never opened) gets only the metrics.
+
+**Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
+consume `effort.finished`, each its own async consumer registered at boot:
+`effort.evidence` (rebuild evidence rows), `effort.decisions` (infer
+decisions — a model call; failures logged), `effort.gauges`
+(on-effort-complete gauges). They hold `Services` weakly (the pump is part
+of it). The in-memory `OxplowEvent::EffortFinished` is gone — it dropped on
+lag and never fired for synthesized or recovered efforts, which now reach
+every reactor.
 `TaskService::update` / `create` / the record path call `settle` (30s) so
 `complete_task`'s file review sees the end pin; the consumer holds
 `TaskService::without_event_pump()` so there's no reference cycle.
-Recovery's opens and closes now get pins, metrics and `EffortFinished`
+Recovery's opens and closes now get pins, metrics and `effort.finished`
 too, since they log the same events. Letters are `pending | retried | discarded`; the
 person's moves are `retry_dead_letter(id)` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless

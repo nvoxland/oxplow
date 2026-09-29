@@ -24,7 +24,7 @@ pub fn affects_open_efforts(event: &OxplowEvent) -> bool {
 }
 
 /// Recompute one effort's evidence and announce it; failures are logged.
-async fn refresh(state: &crate::Services, effort_id: i64) {
+pub(crate) async fn refresh(state: &crate::Services, effort_id: i64) {
     let id = oxplow_domain::EffortId::new(effort_id).to_string();
     match state
         .collection
@@ -67,10 +67,6 @@ pub fn spawn(state: Arc<crate::Services>) {
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
-                Ok(OxplowEvent::EffortFinished { effort_id, .. }) => {
-                    let state = state.clone();
-                    tokio::spawn(async move { refresh(&state, effort_id).await });
-                }
                 Ok(ev) if affects_open_efforts(&ev) => {
                     let _ = dirty_tx.send(());
                 }
@@ -110,8 +106,7 @@ mod tests {
     async fn closing_an_effort_stores_its_evidence_and_announces_it() {
         let f = crate::test_fixtures::services_with_effort().await;
         let mut rx = f.svc.events.subscribe();
-        spawn(f.svc.clone());
-        tokio::task::yield_now().await;
+        crate::effort_reactors::register(&f.svc);
         f.svc
             .tasks
             .update(
@@ -123,6 +118,8 @@ mod tests {
             )
             .await
             .unwrap();
+        // The close's `effort.finished` reaches the `effort.evidence` reactor.
+        f.svc.event_pump.run_once().await.unwrap();
         let want = f.effort.value();
         let got = tokio::time::timeout(Duration::from_secs(10), async {
             loop {

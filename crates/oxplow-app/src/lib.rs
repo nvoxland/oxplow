@@ -37,6 +37,7 @@ pub mod diagnostics;
 pub mod duplication_scan;
 pub mod effort_evidence;
 pub mod effort_lifecycle;
+pub mod effort_reactors;
 pub mod endpoint_diff;
 pub mod entity_metrics;
 pub mod event_pump;
@@ -823,6 +824,7 @@ impl Services {
         // The post-commit half of effort open/close runs on the pump.
         event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
             tasks.without_event_pump(),
+            (*event_log_store).clone(),
         )));
         let agent_policy = Arc::new(agent_policy::AgentPolicy::default());
         let commands = Arc::new(

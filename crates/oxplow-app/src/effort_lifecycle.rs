@@ -10,18 +10,58 @@
 //! which is idempotent under re-delivery.
 
 use async_trait::async_trait;
-use oxplow_domain::{DomainError, EffortId, StoredEvent};
+use oxplow_db::SqliteEventLogStore;
+use oxplow_domain::events::schema::{EffortFinished, EffortFinishedV1};
+use oxplow_domain::refs::build::{snapshot_ref, system_source};
+use oxplow_domain::{DomainError, EffortId, Envelope, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
 use crate::task_service::TaskService;
 
+/// The consumer's name (its checkpoint key; what callers settle on).
+pub const NAME: &str = "effort.lifecycle";
+
 pub struct EffortLifecycleConsumer {
     tasks: TaskService,
+    log: SqliteEventLogStore,
 }
 
 impl EffortLifecycleConsumer {
-    pub fn new(tasks: TaskService) -> Self {
-        Self { tasks }
+    pub fn new(tasks: TaskService, log: SqliteEventLogStore) -> Self {
+        Self { tasks, log }
+    }
+
+    /// Log `effort.finished@1` for a close this consumer finished handling.
+    /// Its dedupe key makes a re-delivery's second append a no-op.
+    async fn log_finished(
+        &self,
+        closed: &StoredEvent,
+        effort: &oxplow_db::Effort,
+        retroactive: bool,
+    ) -> Result<(), DomainError> {
+        let env = Envelope::typed::<EffortFinished>(
+            system_source(NAME),
+            &EffortFinishedV1 {
+                effort: closed.envelope.payload["effort"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                work_item: effort.work_item.clone(),
+                end_snapshot: effort.end_snapshot_id.map(snapshot_ref),
+                retroactive,
+            },
+        )
+        .with_anchors(oxplow_domain::Anchors {
+            snapshot_id: effort.end_snapshot_id,
+            ..closed.envelope.anchors.clone()
+        })
+        .with_subject(closed.envelope.subject.clone())
+        .with_cause(closed.envelope.id.clone())
+        .with_dedupe_key(format!("effort.finished:{}", effort.id));
+        match self.log.append(env).await {
+            Ok(_) | Err(DomainError::Constraint(_)) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -43,7 +83,7 @@ fn effort_of(event: &StoredEvent) -> Result<EffortId, DomainError> {
 #[async_trait]
 impl AsyncEventConsumer for EffortLifecycleConsumer {
     fn name(&self) -> &'static str {
-        "effort.lifecycle"
+        NAME
     }
 
     fn handles(&self, event_type: &str) -> bool {
@@ -59,7 +99,10 @@ impl AsyncEventConsumer for EffortLifecycleConsumer {
             // A retroactive open is closed in the same transaction; only its
             // close has work (the metrics).
             "effort.opened" if !retroactive => self.tasks.on_effort_opened(effort).await,
-            "effort.closed" => self.tasks.on_effort_closed(effort, retroactive).await,
+            "effort.closed" => match self.tasks.on_effort_closed(effort, retroactive).await? {
+                Some(finished) => self.log_finished(event, &finished, retroactive).await,
+                None => Ok(()),
+            },
             _ => Ok(()),
         }
     }

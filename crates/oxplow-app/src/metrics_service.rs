@@ -1214,9 +1214,10 @@ impl MetricsService {
         Ok(key.to_string())
     }
 
-    /// Event loop: seed once, then reseed on `ConfigChanged`, run on-snapshot
-    /// gauges when a snapshot batch lands, and on-effort-complete gauges on
-    /// `EffortFinished`. Spawned at boot (see `boot.rs`).
+    /// Event loop: seed once, then reseed on `ConfigChanged` and run
+    /// on-snapshot gauges when a snapshot batch lands. Spawned at boot (see
+    /// `boot.rs`). On-effort-complete gauges run from the `effort.gauges`
+    /// pump consumer (`effort_reactors`).
     pub async fn run(self, mut rx: tokio::sync::broadcast::Receiver<OxplowEvent>) {
         self.seed_catalog().await;
         self.capture_entity_states(true).await;
@@ -1255,13 +1256,6 @@ impl MetricsService {
                         continue;
                     }
                     self.run_snapshot_gauges(stream_id, snapshot_id).await;
-                }
-                Ok(OxplowEvent::EffortFinished {
-                    thread_id,
-                    effort_id,
-                }) => {
-                    self.run_effort_complete_gauges(&thread_id, &EffortId::new(effort_id))
-                        .await;
                 }
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -3511,8 +3505,8 @@ def transform(input):
 
     #[tokio::test]
     async fn effort_finished_runs_on_effort_complete_gauges() {
-        // Effort-complete gauges key off the EffortFinished event, not a
-        // direct call from TaskService.
+        // Effort-complete gauges run from the `effort.gauges` pump consumer
+        // on `effort.finished` (P2.6b), not a direct call from TaskService.
         use oxplow_domain::stores::TaskStore as _;
         use oxplow_domain::{Task, TaskActorKind, TaskAuthor, TaskId, TaskPriority, TaskStatus};
         let (svc, dir) = fixture().await;
@@ -3544,6 +3538,7 @@ def transform(input):
             .start(&work_item_ref(task), &thread, None)
             .await
             .unwrap();
+        crate::effort_reactors::register(&svc);
         std::fs::create_dir_all(dir.path().join("oxplow/metrics")).unwrap();
         std::fs::write(
             dir.path().join("oxplow/metrics/eff.star"),
@@ -3565,12 +3560,17 @@ def transform(input):
                     ..Default::default()
                 }),
             });
-        tokio::spawn(svc.metrics.clone().run(svc.events.subscribe()));
-        tokio::task::yield_now().await;
-        svc.events.emit(OxplowEvent::EffortFinished {
-            thread_id: thread,
-            effort_id: effort.id.value(),
-        });
+        svc.tasks
+            .update(
+                task,
+                crate::task_service::UpdateTaskChanges {
+                    status: Some(TaskStatus::Done),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
         for _ in 0..100 {
             let caps = svc
                 .fact_store
@@ -3582,7 +3582,7 @@ def transform(input):
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
-        panic!("the on-effort-complete gauge didn't run after EffortFinished");
+        panic!("the on-effort-complete gauge didn't run after effort.finished");
     }
 
     #[tokio::test]

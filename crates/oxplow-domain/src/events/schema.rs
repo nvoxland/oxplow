@@ -108,6 +108,7 @@ impl EventSchemaRegistry {
         r.register::<AgentTurnEnded>().expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
+        r.register::<EffortFinished>().expect("core type registers");
         r
     }
 
@@ -527,6 +528,30 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV1;
 }
 
+/// `effort.finished@1`: an effort's close is fully handled — its end
+/// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
+/// Logged once per effort by the effort-lifecycle consumer (dedupe key
+/// `effort.finished:<effort>`), caused by the `effort.closed` it handled;
+/// what the effort reactors (evidence, inferred decisions, gauges) consume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EffortFinishedV1 {
+    pub effort: String,
+    pub work_item: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_snapshot: Option<String>,
+    /// Recorded after the fact; there was no bracket to snapshot.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retroactive: bool,
+}
+
+pub struct EffortFinished;
+impl EventType for EffortFinished {
+    const TYPE: &'static str = "effort.finished";
+    const V: u32 = 1;
+    type Payload = EffortFinishedV1;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,6 +569,7 @@ mod tests {
                 ("config.changed".to_string(), 1),
                 ("effect.result".to_string(), 1),
                 ("effort.closed".to_string(), 1),
+                ("effort.finished".to_string(), 1),
                 ("effort.opened".to_string(), 1),
                 ("snapshot.taken".to_string(), 1),
                 ("vcs.head.moved".to_string(), 1),

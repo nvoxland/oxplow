@@ -3369,11 +3369,6 @@ detail: string | null } |
  */
 { kind: "sourceSynced"; extension: string; sourceId: string } | 
 /**
- *  An effort closed (its task left `in_progress`). Background work
- *  that reviews a finished effort (inferred decisions) keys off this.
- */
-{ kind: "effortFinished"; threadId: ThreadId; effortId: number } | 
-/**
  *  A language server published diagnostics (or restarted) for
  *  `stream_id`: `v_diagnostic` changed. Debounced; lenses re-run.
  */

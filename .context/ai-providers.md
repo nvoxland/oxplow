@@ -159,10 +159,10 @@ UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.
 
 The first built-in use of a role (`oxplow-app/src/inferred_decisions.rs`).
 
-- The effort-lifecycle pump consumer emits `EffortFinished` when an
-  effort closes (after its end snapshot is pinned);
-  `spawn_on_effort_finished` (started from boot) runs `infer_for_effort`
-  on its own task for each one.
+- The `effort.decisions` pump consumer (`effort_reactors.rs`) runs
+  `infer_for_effort` for each `effort.finished` — logged once the
+  effort's end snapshot is pinned — on its own loop, so a slow model
+  never delays other consumers.
 - Off until the `summarize` role has a model: `InferOutcome::Off`, no call.
 - It digests the effort: task title; the thread's turns that overlap the
   effort's time window (`v_agent_turn` has no `effort_id`); its tool calls;

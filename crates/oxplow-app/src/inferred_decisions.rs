@@ -228,33 +228,6 @@ pub async fn infer_for_effort(
     Ok(InferOutcome::Stored(stored))
 }
 
-/// Background: infer decisions for each effort as it closes. Each pass
-/// runs on its own task so a slow model never holds up the event loop.
-/// Failures are logged; the review packet just shows no inferred section.
-pub fn spawn_on_effort_finished(state: std::sync::Arc<crate::Services>) {
-    let mut rx = state.events.subscribe();
-    tokio::spawn(async move {
-        loop {
-            let effort_id = match rx.recv().await {
-                Ok(crate::OxplowEvent::EffortFinished { effort_id, .. }) => effort_id,
-                Ok(_) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(missed = n, "inferred decisions: missed events");
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            };
-            let state = state.clone();
-            tokio::spawn(async move {
-                match infer_for_effort(&state, effort_id).await {
-                    Ok(outcome) => tracing::debug!(effort_id, ?outcome, "inferred decisions"),
-                    Err(error) => tracing::warn!(effort_id, %error, "inferring decisions failed"),
-                }
-            });
-        }
-    });
-}
-
 /// Read what the agent did during `effort_id`.
 pub async fn gather(layer: &SemanticLayer, effort_id: i64) -> Result<EffortActivity, String> {
     let q = |sql: &'static str| async move {
@@ -603,8 +576,7 @@ mod tests {
             })
             .await
             .unwrap();
-        spawn_on_effort_finished(f.svc.clone());
-        tokio::task::yield_now().await;
+        crate::effort_reactors::register(&f.svc);
         f.svc
             .tasks
             .update(
@@ -616,6 +588,9 @@ mod tests {
             )
             .await
             .unwrap();
+        // The close logged `effort.finished`; the pump hands it to the
+        // `effort.decisions` reactor.
+        f.svc.event_pump.run_once().await.unwrap();
         let layer = SemanticLayer::new(f.svc.db.clone());
         for _ in 0..100 {
             let out = layer

@@ -79,15 +79,36 @@ pub struct PumpReport {
     pub deferred: usize,
 }
 
+impl PumpReport {
+    fn add(&mut self, other: PumpReport) {
+        self.handled += other.handled;
+        self.skipped += other.skipped;
+        self.dead_lettered += other.dead_lettered;
+        self.deferred += other.deferred;
+    }
+}
+
 pub struct EventPump {
     db: Database,
     log: SqliteEventLogStore,
     consumers: Vec<Arc<dyn EventConsumer>>,
-    async_consumers: parking_lot::RwLock<Vec<Arc<dyn AsyncEventConsumer>>>,
-    /// One delivery run at a time (the loop, `settle`, a manual run).
+    async_consumers: parking_lot::RwLock<Vec<Arc<AsyncSlot>>>,
+    /// One sync-consumer run at a time.
     run_lock: tokio::sync::Mutex<()>,
     notify: Notify,
     batch: usize,
+    /// Set by [`Self::spawn`], so a consumer registered later gets its loop.
+    spawned: std::sync::OnceLock<std::sync::Weak<EventPump>>,
+}
+
+/// One async consumer and what keeps it independent of the others: its
+/// own run lock (the loop, a settle and a manual run never deliver the same
+/// event twice) and its own wake-up, so a slow consumer (a model call)
+/// delays only itself.
+struct AsyncSlot {
+    consumer: Arc<dyn AsyncEventConsumer>,
+    lock: tokio::sync::Mutex<()>,
+    notify: Notify,
 }
 
 /// How long the loop sleeps between unprompted runs.
@@ -107,27 +128,50 @@ impl EventPump {
             run_lock: tokio::sync::Mutex::new(()),
             notify: Notify::new(),
             batch: 64,
+            spawned: std::sync::OnceLock::new(),
         }
     }
 
-    /// Add an async consumer. Services registers them once the services
-    /// they drive exist, before the loop is spawned.
+    /// Add an async consumer. Services and boot register them once the
+    /// services they drive exist; one registered after [`Self::spawn`]
+    /// gets its loop at once.
     pub fn register_async(&self, consumer: Arc<dyn AsyncEventConsumer>) {
-        self.async_consumers.write().push(consumer);
+        let slot = Arc::new(AsyncSlot {
+            consumer,
+            lock: tokio::sync::Mutex::new(()),
+            notify: Notify::new(),
+        });
+        self.async_consumers.write().push(slot.clone());
+        if let Some(pump) = self.spawned.get().and_then(std::sync::Weak::upgrade) {
+            pump.spawn_slot(slot);
+        }
     }
 
-    fn async_consumers(&self) -> Vec<Arc<dyn AsyncEventConsumer>> {
+    fn async_slots(&self) -> Vec<Arc<AsyncSlot>> {
         self.async_consumers.read().clone()
     }
 
-    /// Run the pump now and wait up to `timeout` for it to catch up.
-    /// `true` when everything outstanding was delivered (handled or
-    /// parked); `false` on timeout, a run error, or a deferred delivery —
+    /// Run the named async consumers now and wait up to `timeout` for them
+    /// to catch up — for a caller whose answer needs their effect.
+    /// `true` when everything outstanding for them was delivered (handled
+    /// or parked); `false` on timeout, a run error, or a deferred delivery —
     /// the work then finishes on a later run. The run is spawned, so a
-    /// timeout abandons the wait, never the work.
-    pub async fn settle(self: &Arc<Self>, timeout: Duration) -> bool {
+    /// timeout abandons the wait, never the work. Only the named consumers
+    /// run: a slow one elsewhere (a model call) never holds a settle up.
+    pub async fn settle(self: &Arc<Self>, consumers: &[&str], timeout: Duration) -> bool {
         let pump = self.clone();
-        let run = tokio::spawn(async move { pump.run_once().await });
+        let slots: Vec<Arc<AsyncSlot>> = self
+            .async_slots()
+            .into_iter()
+            .filter(|s| consumers.contains(&s.consumer.name()))
+            .collect();
+        let run = tokio::spawn(async move {
+            let mut report = PumpReport::default();
+            for slot in slots {
+                report.add(pump.run_slot(&slot).await?);
+            }
+            Ok::<_, DomainError>(report)
+        });
         match tokio::time::timeout(timeout, run).await {
             Ok(Ok(Ok(report))) => report.deferred == 0,
             Ok(Ok(Err(err))) => {
@@ -146,14 +190,35 @@ impl EventPump {
         &self.consumers
     }
 
-    /// Tell the loop there is something new. Cheap; call it after a
+    fn wake_others(&self, except: &AsyncSlot) {
+        self.notify.notify_one();
+        for slot in self.async_slots() {
+            if !std::ptr::eq(slot.as_ref(), except) {
+                slot.notify.notify_one();
+            }
+        }
+    }
+
+    /// Tell the loops there is something new. Cheap; call it after a
     /// producer's transaction commits.
     pub fn wake(&self) {
         self.notify.notify_one();
+        for slot in self.async_slots() {
+            slot.notify.notify_one();
+        }
     }
 
     /// Run every consumer until each has caught up with the log.
     pub async fn run_once(&self) -> Result<PumpReport, DomainError> {
+        let mut report = self.run_sync().await?;
+        for slot in self.async_slots() {
+            report.add(self.run_slot(&slot).await?);
+        }
+        Ok(report)
+    }
+
+    /// The sync consumers, one run at a time.
+    async fn run_sync(&self) -> Result<PumpReport, DomainError> {
         let _one_run = self.run_lock.lock().await;
         let mut report = PumpReport::default();
         for consumer in &self.consumers {
@@ -173,7 +238,16 @@ impl EventPump {
                 }
             }
         }
-        for consumer in self.async_consumers() {
+        Ok(report)
+    }
+
+    /// One async consumer until it has caught up (or deferred), under its
+    /// own lock.
+    async fn run_slot(&self, slot: &AsyncSlot) -> Result<PumpReport, DomainError> {
+        let _one_run = slot.lock.lock().await;
+        let consumer = &slot.consumer;
+        let mut report = PumpReport::default();
+        {
             'consumer: loop {
                 let cp = self.log.checkpoint(consumer.name().to_string()).await?;
                 let events = self.log.read_after(cp, self.batch).await?;
@@ -280,8 +354,9 @@ impl EventPump {
             )));
         }
         if let Some(consumer) = self
-            .async_consumers()
+            .async_slots()
             .into_iter()
+            .map(|s| s.consumer.clone())
             .find(|c| c.name() == letter.consumer)
         {
             return self
@@ -356,11 +431,52 @@ impl EventPump {
             .ok_or(DomainError::NotFound)
     }
 
-    /// The delivery loop: run, then wait for a wake or the idle interval.
-    pub fn spawn(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+    /// One async consumer's own loop: catch up, then wait for a wake or
+    /// the idle interval.
+    fn spawn_slot(self: &Arc<Self>, slot: Arc<AsyncSlot>) {
+        let pump = Arc::downgrade(self);
         tokio::spawn(async move {
             loop {
-                match self.run_once().await {
+                let Some(p) = pump.upgrade() else { return };
+                let ran = p.run_slot(&slot).await;
+                // A handler may have logged events (`effort.finished`) that
+                // other consumers wait on.
+                if matches!(&ran, Ok(report) if report.handled > 0) {
+                    p.wake_others(&slot);
+                }
+                match ran {
+                    Ok(report) if report.dead_lettered > 0 => tracing::warn!(
+                        consumer = slot.consumer.name(),
+                        dead_lettered = report.dead_lettered,
+                        "event pump: events parked in the dead-letter queue"
+                    ),
+                    Ok(_) => {}
+                    Err(err) => tracing::warn!(
+                        consumer = slot.consumer.name(),
+                        error = %err,
+                        "event pump: run failed; retrying after the idle interval"
+                    ),
+                }
+                drop(p);
+                tokio::select! {
+                    _ = slot.notify.notified() => {}
+                    _ = tokio::time::sleep(IDLE_INTERVAL) => {}
+                }
+            }
+        });
+    }
+
+    /// The delivery loops: one for the sync consumers and one per async
+    /// consumer, each running, then waiting for a wake or the idle
+    /// interval.
+    pub fn spawn(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let _ = self.spawned.set(Arc::downgrade(&self));
+        for slot in self.async_slots() {
+            self.spawn_slot(slot);
+        }
+        tokio::spawn(async move {
+            loop {
+                match self.run_sync().await {
                     Ok(report) if report.dead_lettered > 0 => {
                         tracing::warn!(
                             dead_lettered = report.dead_lettered,
@@ -690,7 +806,10 @@ mod tests {
         let rec = AsyncRecorder::new(vec![]);
         let pump = Arc::new(async_pump(&db, &store, rec.clone()));
         store.append(config_changed("a")).await.unwrap();
-        assert!(pump.settle(std::time::Duration::from_secs(5)).await);
+        assert!(
+            pump.settle(&["async_rec"], std::time::Duration::from_secs(5))
+                .await
+        );
         assert_eq!(rec.seen(), vec!["a"]);
     }
 
