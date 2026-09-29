@@ -43,8 +43,9 @@ validation), `crates/oxplow-rpc/src/commands/extensions.rs` (IPC), and the
 lens tools in `crates/oxplow-mcp/src/lib.rs`.
 
 - **Files.**
-  - `oxplow/extensions/<name>/extension.yaml` contains `name` (must equal
-    the folder) and `description`.
+  - `oxplow/extensions/<name>/extension.yaml` is a **manifest v2**
+    (`manifest: 2`, `name` = the folder, `sharing`, `intent`, the
+    contribution kinds; see "`extension.yaml`" below).
   - `lenses/<slug>.yaml` contains `title`, `description`, `query`, `viz`
     (`table` | `list` | `number` | `markdown`), `params` (`name`, `label`,
     `default`), `columns` (`key`, `label`, `link: {kind: task | file |
@@ -190,7 +191,7 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       project-global.
     - The launcher's new **Data** category holds Explore Data, Metrics
       and Dashboards.
-- **Sources.** Declared under `sources:` in `extension.yaml` and parsed
+- **Sources (collectors).** Declared under `collectors:` in `extension.yaml` (v1: `sources:`) and parsed
   into `Extension.sources`. A bad source is reported in `errors` without
   hiding the extension's lenses. Settings → Data shows each source
   (runtime, schedule, row counts or failure, Approve & Run / Sync Now);
@@ -333,37 +334,76 @@ error for that extension only; it never breaks the others or core.
 
 ## `extension.yaml`
 
-These are the only top-level keys the loader accepts (`ExtensionFile` in
-`extensions.rs`, `deny_unknown_fields`):
+Manifest **version 2** (P1.11, tsk413; `crates/oxplow-app/src/extensions/manifest_v2.rs`).
+Every contribution is declared as data, unknown keys are errors, and the
+loader resolves cross-references with `file:line` messages.
 
 ```yaml
+manifest: 2
 name: oxplow-analytics   # must equal the folder name
 description: …
-sources:     [...]   # exec / starlark / jaq sources → entities (see semantic-layer.md);
-                     # a starlark/jaq source with `input:` SQL is how you derive data
+sharing: shared          # private (default) | shared — see below
+engine: ">=0.7"          # the oxplow it targets; required when shared
+intent:                  # required
+  purpose: What question it answers, or what job it does
+  origin: effort:eff42   # the thread/effort ref that created it, or null
+  examples:              # inputs → expected outputs; fixtures for `plugin test`
+    - { name: …, input: {…}, expect: … }
+# stable kinds (permanent API)
 measures:    [...]   # same schema as .oxplow/project.yaml
-metrics:     [...]
-gauges:      [...]   # starlark / jaq only
+metrics:     [...]   # `key:` definitions; sourceMeasure must be declared here or oxplow.*
+gauges:      [...]   # starlark / jaq only; emits must be declared here or oxplow.*
 dimensions:  [...]
-slots:               # mount lenses into core pages; only `slot` and `lens`
-  - {slot: effort-review, lens: change-review}
-  - {slot: task-detail,  lens: task-tokens}
+collectors:  [...]   # v1 `sources`: exec / starlark / jaq programs → entities (see semantic-layer.md)
+slot_mounts:         # v1 `slots`: mount lenses into core pages
+  - { slot: effort-review, lens: change-review }
 advisories:  [...]   # see "Advisories"
+launcher:            # entries for non-lens targets (a page, a command); a lens uses its own launcher: block
+  - { label: …, category: Data, target: page:… }
+models: …  commands: …  pages: …  panels: …  config: …   # parsed as data; runtimes land in later phases
+# experimental kinds — a PRIVATE extension only
+providers: … effects: … event_types: … ref_kinds: … custom_components: … decorators: … replacements: …
 ```
 
 Lenses aren't listed here: every `lenses/*.yaml` file in the folder is
 loaded. A lens gets into the launcher through its own `launcher.category`
-(or stays out with `hidden: true`), not a slot.
+(or stays out with `hidden: true`).
 
-> **Target (not built yet).** Keys from the original design that the
-> loader rejects today:
-> - `ai:` — AI-function usages by role, cached as facts (see
->   [ai-providers.md](./ai-providers.md)).
-> - slot `order:` (slots render in declaration order) and `as: badge`
->   (a `rail` lens is always shown by its alert).
->
-> Dropped: a top-level `derived:` block (derived sources cover it) and a
-> `lenses:` list (lenses are discovered from the folder).
+**Private vs shared.** `sharing: private` is the usual case (this
+project, this person, agent-built): experimental kinds allowed, fast
+evolution. `sharing: shared` (committed for a team, installed from git,
+bundled — bundled *must* be shared) is held to the strict lifecycle:
+stable kinds only, `engine` declared and satisfied. Using an
+experimental kind in a shared extension is an error naming the key and
+its line.
+
+**What the loader checks** (`Extension.errors` / `Extension.warnings`):
+- shape: unknown keys, `manifest` version, `intent` present and
+  `intent.origin` a canonical ref; an empty `intent.examples` is a
+  warning;
+- lifecycle: sharing rules above; `engine` is `>=MAJOR.MINOR[.PATCH]`;
+- cross-references: a `slot_mounts` lens exists (and declares a param
+  the slot binds); a grid's `children` exist — in this extension or,
+  once everything is loaded, in another; a `launcher` target is a
+  canonical ref. A metric's `sourceMeasure` or a gauge's `emits` that
+  is neither declared in the extension nor an `oxplow.*` built-in is a
+  **warning** (it may come from the project's or another extension's
+  `measures:`, which resolves when the catalog is assembled).
+
+**Decision (2026-09-28): `advisories` is a stable kind.** The plan sketch
+had it experimental, but the bundled `oxplow-analytics` — shared by
+definition — ships on it, and a first-party extension depending on a
+kind is exactly the evidence promotion requires (target §10.1, §12).
+
+**v1 still loads.** A manifest with no `manifest:` key is read as v1
+(`sources`, `slots`, no intent), converted in memory, and carries a
+warning to run `oxplow plugin migrate` (P1.12). `Extension.manifest_version`
+says which path a loaded extension took.
+
+**Consent is unaffected by the migration.** `approval_hash` never
+included `extension.yaml`, and the advisory program hash is over the
+advisories' content, so rewriting a manifest from v1 to v2 asks for no
+re-approval (tested).
 
 ## Lenses
 

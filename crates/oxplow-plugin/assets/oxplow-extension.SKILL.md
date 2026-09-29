@@ -37,12 +37,27 @@ oxplow/extensions/<name>/lenses/<slug>.yaml
 `<name>/<slug>`. Reuse an existing extension when the lens fits it; start a
 new one for a new area.
 
-`extension.yaml`:
+`extension.yaml` (manifest v2):
 
 ```yaml
+manifest: 2
 name: review            # must equal the folder name
 description: Lenses for reviewing agent work
+sharing: private        # private is the default; `shared` = for the team, stable kinds only + `engine`
+intent:                 # required: what it is for, and how to know it works
+  purpose: Show what is waiting on the reviewer in this stream
+  origin: effort:eff42  # the effort you are working under, or null
+  examples:
+    - name: a stream with one blocked task
+      input: { lens: waiting-on-me, params: { stream_id: 1 } }
+      expect: one row for the blocked task
+slot_mounts:            # optional: mount a lens into a core page
+  - { slot: rail, lens: waiting-on-me }
 ```
+
+A manifest without `manifest: 2` is read as the old v1 shape with a
+warning; write v2. Unknown keys are errors, and `validate_extension`
+reports every problem as `file:line: what — fix`.
 
 `lenses/<slug>.yaml`:
 
@@ -98,8 +113,8 @@ empty: Nothing is waiting on you.
   launcher heading (Work, Code, Git, Activity, Knowledge, Data, Lenses,
   System; default Lenses). **`hidden: true`** keeps it out of the
   launcher, for lenses only a slot shows.
-- **Slots** mount a lens into a core page (`slots: [{ slot, lens }]` in
-  `extension.yaml`). The lens must declare at least one param the slot
+- **Slots** mount a lens into a core page (`slot_mounts: [{ slot, lens }]`
+  in `extension.yaml`). The lens must declare at least one param the slot
   binds, and gets only the ones it declares:
   - `effort-review` (an effort's diff) → `effort_id`, `change_id`;
   - `commit` (a commit page) and `uncommitted` (the working tree) →
@@ -197,7 +212,7 @@ CI runs), add a **source** to the extension:
 
 - Write a script that prints
   `{"entities": {"<name>": [ {col: value, …} ]}}`.
-- Declare it under `sources:` in `extension.yaml`, with its entities'
+- Declare it under `collectors:` in `extension.yaml`, with its entities'
   typed columns and key.
 - `examples/extensions/github/` in the oxplow repo is a complete, working
   example; copy its shape.

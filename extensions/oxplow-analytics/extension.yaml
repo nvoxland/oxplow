@@ -1,6 +1,22 @@
+manifest: 2
 name: oxplow-analytics
 description: Oxplow's own instruments, built as an ordinary extension. Metric movement, coverage and threshold guidance for the agent; usage, dashboards, code quality and change analysis lenses.
-slots:
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Show how an effort moved the code — coverage and tests, metric deltas and
+    threshold crossings, churn, duplication and cross-zone imports — and steer
+    the agent toward tests and thresholds while the effort is open.
+  origin: null
+  examples:
+    - name: an effort whose changed lines are under-covered
+      input: { lens: effort-tests, params: { effort_id: 1 } }
+      expect: the effort's test runs, its diff coverage and the uncovered changed lines
+    - name: a metric pushed past its warn threshold during an effort
+      input: { advisory: threshold-crossed, effort_id: 1 }
+      expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
+slot_mounts:
   - { slot: effort-review, lens: change-review }
   - { slot: commit, lens: change-review }
   - { slot: uncommitted, lens: change-review }

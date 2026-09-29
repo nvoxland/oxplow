@@ -2094,6 +2094,19 @@ export type Extension = {
 	 *  failed to load is listed here and missing from `lenses`.
 	 */
 	errors: string[],
+	/**
+	 *  Things worth fixing that don't stop it loading: a v1 manifest, an
+	 *  intent with no examples.
+	 */
+	warnings: string[],
+	/**
+	 *  `2` for a current manifest; `1` for one read through the v1
+	 *  compatibility path (see `warnings`).
+	 */
+	manifestVersion: number,
+	sharing: Sharing,
+	// Why it exists (required at v2; `None` for a v1 manifest).
+	intent: Intent | null,
 	lenses: Lens[],
 	/**
 	 *  Where it was installed from, for extensions added with
@@ -2442,6 +2455,28 @@ export type InstalledLspPackage = {
 	version: string,
 	language_ids: string[],
 	binary: string,
+};
+
+/**
+ *  Why the extension exists — what makes it regenerable, repairable and
+ *  reviewable against what it was for.
+ */
+export type Intent = {
+	// The question it answers, or the job it does.
+	purpose: string,
+	// The thread or effort ref that created it (`effort:eff42`), when known.
+	origin?: string | null,
+	examples?: IntentExample[],
+};
+
+/**
+ *  One acceptance example: an input and what the extension should make
+ *  of it. Fixtures for `oxplow plugin test`; data here.
+ */
+export type IntentExample = {
+	name: string,
+	input?: unknown,
+	expect?: unknown,
 };
 
 /**
@@ -3645,6 +3680,13 @@ export type SetThreadPromptRequest = {
 	id: ThreadId,
 	prompt: string | null,
 };
+
+/**
+ *  Who the extension is for. Explicit and checked: a shared extension
+ *  (committed for a team, installed from git, bundled) may use stable
+ *  kinds only and must name the engine it targets.
+ */
+export type Sharing = "private" | "shared";
 
 /**
  *  `snapshot` row — one per `request_snapshot()` call that had

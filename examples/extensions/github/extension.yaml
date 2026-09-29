@@ -1,6 +1,19 @@
+manifest: 2
 name: github
 description: Pull requests from this repo's GitHub, joined to oxplow tasks and streams.
-sources:
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Bring the repo's pull requests into the semantic layer as v_github_pr,
+    joined to streams by branch and to tasks by the tsk id in the title, so
+    lenses can show what is open against each stream.
+  origin: null
+  examples:
+    - name: a stream whose branch has an open PR
+      input: { lens: open-prs, params: { stream_id: 1 } }
+      expect: the PR's number, title and author on that stream's row
+collectors:
   - id: prs
     doc: The repo's 100 most recent pull requests (open and closed).
     runtime: exec

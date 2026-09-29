@@ -16,6 +16,10 @@ use oxplow_db::{SemanticLayer, SqlCell, SqlQueryResult};
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod manifest_v2;
+use manifest_v2::{at, key_line, line_under, ManifestV2, SlotMount};
+pub use manifest_v2::{Intent, IntentExample, Sharing};
+
 /// Where project extensions live, relative to a worktree root.
 pub const EXTENSIONS_DIR: &str = "oxplow/extensions";
 
@@ -426,7 +430,10 @@ fn default_viz() -> LensViz {
     LensViz::Table
 }
 
-/// `extension.yaml` as written on disk.
+/// `extension.yaml` as written on disk at manifest v1 (no `manifest:`
+/// key). Still read — converted to [`ManifestV2`] in memory with a
+/// warning — so an unmigrated extension keeps loading while
+/// `oxplow plugin migrate` rewrites its file.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExtensionFile {
@@ -452,6 +459,47 @@ struct ExtensionFile {
     gauges: Option<serde_yaml::Value>,
     #[serde(default)]
     dimensions: Option<serde_yaml::Value>,
+}
+
+/// The v1 manifest as a v2 one: `sources` → `collectors`, `slots` →
+/// `slot_mounts`, no intent, private. What `oxplow plugin migrate`
+/// writes to disk, applied in memory here.
+fn v1_to_v2(m: ExtensionFile) -> ManifestV2 {
+    ManifestV2 {
+        manifest: manifest_v2::CURRENT,
+        name: m.name,
+        description: m.description,
+        sharing: Sharing::Private,
+        engine: None,
+        intent: None,
+        models: None,
+        measures: m.measures,
+        metrics: m.metrics,
+        gauges: m.gauges,
+        dimensions: m.dimensions,
+        collectors: m.sources,
+        commands: None,
+        pages: None,
+        panels: None,
+        launcher: Vec::new(),
+        slot_mounts: m
+            .slots
+            .into_iter()
+            .map(|s| SlotMount {
+                slot: s.slot,
+                lens: s.lens,
+            })
+            .collect(),
+        config: None,
+        providers: None,
+        effects: None,
+        event_types: None,
+        ref_kinds: None,
+        custom_components: None,
+        decorators: None,
+        replacements: None,
+        advisories: m.advisories,
+    }
 }
 
 /// When core runs an advisory.
@@ -586,6 +634,15 @@ pub struct Extension {
     /// Problems found while loading; empty when healthy. A lens that
     /// failed to load is listed here and missing from `lenses`.
     pub errors: Vec<String>,
+    /// Things worth fixing that don't stop it loading: a v1 manifest, an
+    /// intent with no examples.
+    pub warnings: Vec<String>,
+    /// `2` for a current manifest; `1` for one read through the v1
+    /// compatibility path (see `warnings`).
+    pub manifest_version: u32,
+    pub sharing: Sharing,
+    /// Why it exists (required at v2; `None` for a v1 manifest).
+    pub intent: Option<Intent>,
     pub lenses: Vec<Lens>,
     /// Where it was installed from, for extensions added with
     /// `install_extension`; `None` for ones written in this repo.
@@ -734,6 +791,28 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));
+    // A grid's child in ANOTHER extension resolves here, once every
+    // extension is loaded; a missing one is an error and the grid is
+    // dropped so every loaded lens renders.
+    let all_ids: Vec<String> = out
+        .iter()
+        .flat_map(|e| e.lenses.iter().map(|l| l.id.clone()))
+        .collect();
+    for ext in &mut out {
+        let mut bad = Vec::new();
+        for l in ext.lenses.iter().filter(|l| l.viz == LensViz::Grid) {
+            for c in &l.children {
+                if !all_ids.contains(c) {
+                    ext.errors.push(format!(
+                        "{}: child lens `{c}` isn't in any loaded extension",
+                        l.path
+                    ));
+                    bad.push(l.id.clone());
+                }
+            }
+        }
+        ext.lenses.retain(|l| !bad.contains(&l.id));
+    }
     let disabled = oxplow_config::disabled_extensions(root);
     out.into_iter()
         .map(|e| apply_disabled(e, &disabled))
@@ -817,6 +896,10 @@ fn empty_extension(name: &str, path: &str, origin: &str) -> Extension {
         description: String::new(),
         path: path.to_string(),
         errors: Vec::new(),
+        warnings: Vec::new(),
+        manifest_version: manifest_v2::CURRENT,
+        sharing: Sharing::Private,
+        intent: None,
         lenses: Vec::new(),
         source: None,
         sources: Vec::new(),
@@ -848,112 +931,193 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.push(format!("{rel}: missing extension.yaml"));
         return ext;
     };
-    let slot_files = match serde_yaml::from_str::<ExtensionFile>(&manifest) {
+    let file = format!("{rel}/extension.yaml");
+    // `manifest: 2` says which shape to read; a file without it is v1.
+    let is_v2 = key_line(&manifest, "manifest").is_some();
+    let parsed: Result<ManifestV2, String> = if is_v2 {
+        serde_yaml::from_str::<ManifestV2>(&manifest).map_err(|e| e.to_string())
+    } else {
+        serde_yaml::from_str::<ExtensionFile>(&manifest)
+            .map(v1_to_v2)
+            .map_err(|e| e.to_string())
+    };
+    let m = match parsed {
         Ok(m) if m.name != name => {
             ext.errors.push(format!(
-                "{rel}/extension.yaml: name `{}` must match its folder `{name}`",
+                "{file}: name `{}` must match its folder `{name}`",
                 m.name
             ));
             return ext;
         }
-        Ok(m) => {
-            ext.description = m.description;
-            if let Some(v) = m.sources {
-                let (sources, errors) = crate::extension_sources::parse_sources(name, &v);
-                ext.sources = sources;
-                ext.errors.extend(
-                    errors
-                        .into_iter()
-                        .map(|e| format!("{rel}/extension.yaml: {e}")),
-                );
-            }
-            for v in m.advisories {
-                match serde_yaml::from_value::<AdvisoryFile>(v).map(|a| Advisory {
-                    id: a.id,
-                    on: a.on,
-                    query: a.query,
-                    once_per: a.once_per,
-                    heading: a.heading,
-                }) {
-                    Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(format!(
-                        "{rel}/extension.yaml: advisory id `{}` must be lowercase letters, digits and dashes",
-                        a.id
-                    )),
-                    Ok(a) => ext.advisories.push(a),
-                    Err(e) => ext.errors.push(format!("{rel}/extension.yaml: advisory: {e}")),
-                }
-            }
-            let err = |e: String| format!("{rel}/extension.yaml: {e}");
-            match parse_block(m.measures)
-                .and_then(|v| oxplow_config::validate_measures(v).map_err(|e| e.to_string()))
-            {
-                Ok(v) => ext.measures = v,
-                Err(e) => ext.errors.push(err(e)),
-            }
-            match parse_block(m.dimensions)
-                .and_then(|v| oxplow_config::validate_dimensions(v).map_err(|e| e.to_string()))
-            {
-                Ok(v) => {
-                    for d in v {
-                        if d.promote {
-                            ext.errors.push(err(format!(
-                                "dimension `{}`: `promote` belongs in .oxplow/project.yaml (it rebuilds the metric cube)",
-                                d.key.clone().unwrap_or_default()
-                            )));
-                        } else {
-                            ext.dimensions.push(d);
-                        }
-                    }
-                }
-                Err(e) => ext.errors.push(err(e)),
-            }
-            match parse_block(m.metrics)
-                .and_then(|v| oxplow_config::validate_metrics(v).map_err(|e| e.to_string()))
-            {
-                Ok(v) => {
-                    for e in v {
-                        if e.key.is_some() {
-                            ext.metrics.push(e);
-                        } else {
-                            ext.errors.push(err(format!(
-                                "metrics: `use: {}` belongs in .oxplow/project.yaml; an extension defines metrics with `key:`",
-                                e.use_key.unwrap_or_default()
-                            )));
-                        }
-                    }
-                }
-                Err(e) => ext.errors.push(err(e)),
-            }
-            match parse_block(m.gauges)
-                .and_then(|v| oxplow_config::validate_gauges(v).map_err(|e| e.to_string()))
-            {
-                Ok(v) => {
-                    for g in v {
-                        let key = g.key.clone().unwrap_or_default();
-                        let compute = g.compute.clone().unwrap_or_default();
-                        let entry = compute.entry_file.clone().unwrap_or_default();
-                        if !matches!(compute.runtime.as_str(), "starlark" | "jaq") {
-                            ext.errors.push(err(format!(
-                                "gauge `{key}`: extension gauges run `starlark` or `jaq` only, not `{}` (a program belongs in a source, which needs your approval)",
-                                compute.runtime
-                            )));
-                        } else if files.read(&entry).is_none() {
-                            ext.errors.push(err(format!(
-                                "gauge `{key}`: entryFile `{entry}` isn't in the extension"
-                            )));
-                        } else {
-                            ext.gauges.push(g);
-                        }
-                    }
-                }
-                Err(e) => ext.errors.push(err(e)),
-            }
-            m.slots
-        }
+        Ok(m) => m,
         Err(e) => {
-            ext.errors.push(format!("{rel}/extension.yaml: {e}"));
+            ext.errors.push(format!("{file}: {e}"));
             return ext;
         }
+    };
+    ext.manifest_version = if is_v2 { manifest_v2::CURRENT } else { 1 };
+    ext.sharing = m.sharing;
+    ext.intent = m.intent.clone();
+    ext.description = m.description.clone();
+    if is_v2 {
+        let (errors, warnings) = manifest_v2::check(&m, &file, &manifest, origin == "bundled");
+        ext.errors.extend(errors);
+        ext.warnings.extend(warnings);
+    } else {
+        ext.warnings.push(at(
+            &file,
+            Some(1),
+            "manifest v1 (no `manifest:` key); run `oxplow plugin migrate` to rewrite it as v2 with an `intent`",
+        ));
+    }
+    let slot_files = {
+        if let Some(v) = &m.collectors {
+            let (sources, errors) = crate::extension_sources::parse_sources(name, v);
+            ext.sources = sources;
+            ext.errors.extend(errors.into_iter().map(|e| {
+                at(
+                    &file,
+                    key_line(&manifest, "collectors").or_else(|| key_line(&manifest, "sources")),
+                    e,
+                )
+            }));
+        }
+        for v in m.advisories.clone() {
+            match serde_yaml::from_value::<AdvisoryFile>(v).map(|a| Advisory {
+                id: a.id,
+                on: a.on,
+                query: a.query,
+                once_per: a.once_per,
+                heading: a.heading,
+            }) {
+                Ok(a) if !is_advisory_id(&a.id) => ext.errors.push(at(
+                    &file,
+                    line_under(&manifest, "advisories", &a.id),
+                    format!(
+                        "advisory id `{}` must be lowercase letters, digits and dashes",
+                        a.id
+                    ),
+                )),
+                Ok(a) => ext.advisories.push(a),
+                Err(e) => ext.errors.push(at(
+                    &file,
+                    key_line(&manifest, "advisories"),
+                    format!("advisory: {e}"),
+                )),
+            }
+        }
+        let err_at = |key: &str, e: String| at(&file, key_line(&manifest, key), e);
+        match parse_block(m.measures.clone())
+            .and_then(|v| oxplow_config::validate_measures(v).map_err(|e| e.to_string()))
+        {
+            Ok(v) => ext.measures = v,
+            Err(e) => ext.errors.push(err_at("measures", e)),
+        }
+        match parse_block(m.dimensions.clone())
+            .and_then(|v| oxplow_config::validate_dimensions(v).map_err(|e| e.to_string()))
+        {
+            Ok(v) => {
+                for d in v {
+                    if d.promote {
+                        ext.errors.push(err_at(
+                            "dimensions",
+                            format!(
+                                "dimension `{}`: `promote` belongs in .oxplow/project.yaml (it rebuilds the metric cube)",
+                                d.key.clone().unwrap_or_default()
+                            ),
+                        ));
+                    } else {
+                        ext.dimensions.push(d);
+                    }
+                }
+            }
+            Err(e) => ext.errors.push(err_at("dimensions", e)),
+        }
+        match parse_block(m.metrics.clone())
+            .and_then(|v| oxplow_config::validate_metrics(v).map_err(|e| e.to_string()))
+        {
+            Ok(v) => {
+                for e in v {
+                    if e.key.is_some() {
+                        ext.metrics.push(e);
+                    } else {
+                        ext.errors.push(err_at(
+                            "metrics",
+                            format!(
+                                "metrics: `use: {}` belongs in .oxplow/project.yaml; an extension defines metrics with `key:`",
+                                e.use_key.unwrap_or_default()
+                            ),
+                        ));
+                    }
+                }
+            }
+            Err(e) => ext.errors.push(err_at("metrics", e)),
+        }
+        match parse_block(m.gauges.clone())
+            .and_then(|v| oxplow_config::validate_gauges(v).map_err(|e| e.to_string()))
+        {
+            Ok(v) => {
+                for g in v {
+                    let key = g.key.clone().unwrap_or_default();
+                    let compute = g.compute.clone().unwrap_or_default();
+                    let entry = compute.entry_file.clone().unwrap_or_default();
+                    if !matches!(compute.runtime.as_str(), "starlark" | "jaq") {
+                        ext.errors.push(err_at(
+                            "gauges",
+                            format!(
+                                "gauge `{key}`: extension gauges run `starlark` or `jaq` only, not `{}` (a program belongs in a collector, which needs your approval)",
+                                compute.runtime
+                            ),
+                        ));
+                    } else if files.read(&entry).is_none() {
+                        ext.errors.push(err_at(
+                            "gauges",
+                            format!("gauge `{key}`: entryFile `{entry}` isn't in the extension"),
+                        ));
+                    } else {
+                        ext.gauges.push(g);
+                    }
+                }
+            }
+            Err(e) => ext.errors.push(err_at("gauges", e)),
+        }
+        // Cross-references inside the catalog: a metric's source measure
+        // and a gauge's emitted measures are normally ones this extension
+        // declares or oxplow's built-ins. A measure from another scope
+        // (the project's or another extension's `measures:`) resolves
+        // when the catalog is assembled, so that is a warning, not an
+        // error — but a typo would be silent otherwise.
+        let measure_known = |key: &str| {
+            key.starts_with("oxplow.")
+                || ext.measures.iter().any(|mm| mm.key.as_deref() == Some(key))
+        };
+        for spec in &ext.metrics {
+            if let Some(sm) = spec.source_measure.as_deref() {
+                if !measure_known(sm) {
+                    ext.warnings.push(err_at(
+                        "metrics",
+                        format!(
+                            "metric `{}`: sourceMeasure `{sm}` is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
+                            spec.key.clone().unwrap_or_default()
+                        ),
+                    ));
+                }
+            }
+        }
+        for g in &ext.gauges {
+            for emitted in &g.emits {
+                if !measure_known(emitted) {
+                    ext.warnings.push(err_at(
+                        "gauges",
+                        format!(
+                            "gauge `{}`: emits `{emitted}`, which is not a measure this extension declares (or a built-in `oxplow.*`); it must come from the project's or another extension's `measures:`",
+                            g.key.clone().unwrap_or_default()
+                        ),
+                    ));
+                }
+            }
+        }
+        m.slot_mounts.clone()
     };
     if let Some(text) = files.read(SOURCE_FILE) {
         match serde_yaml::from_str::<ExtensionSource>(&text) {
@@ -1043,28 +1207,50 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             }
             _ => vec![],
         };
+        let mount_line = line_under(&manifest, "slot_mounts", &format!("lens: {}", s.lens))
+            .or_else(|| line_under(&manifest, "slots", &format!("lens: {}", s.lens)));
         if slot_params.is_none() {
-            ext.errors.push(format!(
-                "{rel}/extension.yaml: unknown slot `{}` (known: {})",
-                s.slot,
-                SLOTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "unknown slot `{}` (known: {})",
+                    s.slot,
+                    SLOTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+                ),
             ));
         } else if !missing.is_empty() {
-            ext.errors.push(format!(
-                "{rel}/extension.yaml: slot `{}` passes {}; lens `{}` must declare at least one in `params`",
-                s.slot,
-                missing.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "),
-                s.lens
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "slot `{}` passes {}; lens `{}` must declare at least one in `params`",
+                    s.slot,
+                    missing
+                        .iter()
+                        .map(|p| format!("`{p}`"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    s.lens
+                ),
             ));
         } else if lens.is_none() {
-            ext.errors.push(format!(
-                "{rel}/extension.yaml: slot `{}` mounts lens `{}`, which isn't in lenses/",
-                s.slot, s.lens
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "slot `{}` mounts lens `{}`, which isn't in lenses/",
+                    s.slot, s.lens
+                ),
             ));
         } else if s.slot == "rail" && lens.is_some_and(|l| l.alert.is_none()) {
-            ext.errors.push(format!(
-                "{rel}/extension.yaml: the `rail` slot shows alerts; lens `{}` declares no `alert`",
-                s.lens
+            ext.errors.push(at(
+                &file,
+                mount_line,
+                format!(
+                    "the `rail` slot shows alerts; lens `{}` declares no `alert`",
+                    s.lens
+                ),
             ));
         } else {
             ext.slots.push(LensSlot {
@@ -2500,6 +2686,243 @@ empty: No tasks.
         assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
     }
 
+    const EXT_V2: &str = "manifest: 2\nname: review\ndescription: Review helpers\nintent:\n  purpose: Review agent work\n  examples:\n    - { name: one, input: {}, expect: {} }\n";
+
+    fn only(root: &Path, name: &str) -> Extension {
+        load_extensions(root)
+            .into_iter()
+            .find(|e| e.name == name && e.origin == "project")
+            .unwrap()
+    }
+
+    #[test]
+    fn a_v2_manifest_needs_an_intent_and_says_where() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            "manifest: 2\nname: review\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/tasks.yaml",
+            LENS,
+        );
+        let e = only(dir.path(), "review");
+        assert_eq!(e.manifest_version, 2);
+        assert!(
+            e.errors.iter().any(
+                |m| m.starts_with("oxplow/extensions/review/extension.yaml:1:")
+                    && m.contains("`intent` is required")
+            ),
+            "{:?}",
+            e.errors
+        );
+        // The lenses still load: an intent problem is the manifest's.
+        assert_eq!(e.lenses.len(), 1);
+        // A clean v2 manifest has no errors and no warnings.
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            EXT_V2,
+        );
+        let e = only(dir.path(), "review");
+        assert!(
+            e.errors.is_empty() && e.warnings.is_empty(),
+            "{:?} {:?}",
+            e.errors,
+            e.warnings
+        );
+        assert_eq!(e.sharing, Sharing::Private);
+        assert_eq!(e.intent.as_ref().unwrap().purpose, "Review agent work");
+    }
+
+    #[test]
+    fn a_shared_manifest_may_not_use_an_experimental_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = "manifest: 2\nname: review\nsharing: shared\nengine: \">=0.1\"\nintent:\n  purpose: x\n  examples: [{ name: a }]\nref_kinds:\n  - kind: ticket\n";
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            manifest,
+        );
+        let e = only(dir.path(), "review");
+        let err = e
+            .errors
+            .iter()
+            .find(|m| m.contains("`ref_kinds` is experimental"))
+            .unwrap_or_else(|| panic!("{:?}", e.errors));
+        assert!(
+            err.starts_with("oxplow/extensions/review/extension.yaml:8:"),
+            "{err}"
+        );
+        assert_eq!(e.sharing, Sharing::Shared);
+    }
+
+    #[test]
+    fn a_slot_mount_to_a_missing_lens_names_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = format!("{EXT_V2}slot_mounts:\n  - {{ slot: rail, lens: tasks }}\n  - {{ slot: task-detail, lens: nope }}\n");
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            &manifest,
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/tasks.yaml",
+            LENS,
+        );
+        let e = only(dir.path(), "review");
+        let err = e
+            .errors
+            .iter()
+            .find(|m| m.contains("mounts lens `nope`"))
+            .unwrap_or_else(|| panic!("{:?}", e.errors));
+        assert!(
+            err.starts_with("oxplow/extensions/review/extension.yaml:10:"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_metric_naming_a_measure_from_elsewhere_is_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = format!(
+            "{EXT_V2}measures:\n  - {{ key: review.todo, title: TODOs, unit: count, subjectKind: file }}\nmetrics:\n  - {{ key: review.todo_total, title: TODO total, sourceMeasure: review.todo, aggregation: sum }}\n  - {{ key: review.bad, title: Bad, sourceMeasure: review.missing, aggregation: sum }}\n"
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            &manifest,
+        );
+        let e = only(dir.path(), "review");
+        assert!(e.errors.is_empty(), "{:?}", e.errors);
+        let warn = e
+            .warnings
+            .iter()
+            .find(|m| m.contains("sourceMeasure `review.missing`"))
+            .unwrap_or_else(|| panic!("{:?}", e.warnings));
+        assert!(warn.contains("extension.yaml:"), "{warn}");
+        assert_eq!(e.metrics.len(), 2, "both specs still load");
+    }
+
+    #[test]
+    fn a_v1_manifest_still_loads_with_a_migration_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            "name: review\ndescription: Review helpers\nslots:\n  - { slot: task-detail, lens: tasks }\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/tasks.yaml",
+            "title: Task\nquery: SELECT id FROM v_task WHERE id = :task_id\nparams: [{ name: task_id }]\n",
+        );
+        let e = only(dir.path(), "review");
+        assert!(e.errors.is_empty(), "{:?}", e.errors);
+        assert_eq!(e.manifest_version, 1);
+        assert!(e.intent.is_none());
+        assert!(
+            e.warnings
+                .iter()
+                .any(|w| w.contains("manifest v1") && w.contains("plugin migrate")),
+            "{:?}",
+            e.warnings
+        );
+        assert_eq!(e.slots.len(), 1, "v1 `slots` become slot mounts");
+    }
+
+    /// Rewriting a manifest from v1 to v2 must not ask the person to
+    /// approve the extension's programs again: neither hash reads the
+    /// manifest's shape.
+    #[test]
+    fn migrating_a_manifest_to_v2_keeps_the_consent_hashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let ext_rel = "oxplow/extensions/review";
+        let source = "  - id: github\n    runtime: exec\n    entry: bin/sync.sh\n    env: [GITHUB_TOKEN]\n    network: [api.github.com]\n    entities:\n      - name: pr\n        key: number\n        columns:\n          number: int\n";
+        let advisory =
+            "  - id: coverage-target\n    on: post-tool-use\n    query: SELECT 'x' AS message\n";
+        write(
+            dir.path(),
+            &format!("{ext_rel}/bin/sync.sh"),
+            "#!/bin/sh\necho '{}'\n",
+        );
+        write(
+            dir.path(),
+            &format!("{ext_rel}/extension.yaml"),
+            &format!("name: review\ndescription: d\nsources:\n{source}advisories:\n{advisory}"),
+        );
+        let v1 = only(dir.path(), "review");
+        assert!(v1.errors.is_empty(), "{:?}", v1.errors);
+        assert_eq!(v1.manifest_version, 1);
+        let ext_dir = dir.path().join(ext_rel);
+        let source_hash_v1 = crate::source_runner::approval_hash(&ext_dir, &v1.sources[0]).unwrap();
+        let advisory_hash_v1 = crate::exec_consent::advisory_program(&v1)
+            .hash(Path::new(""))
+            .unwrap();
+
+        write(
+            dir.path(),
+            &format!("{ext_rel}/extension.yaml"),
+            &format!(
+                "manifest: 2\nname: review\ndescription: d\nintent:\n  purpose: Pull requests and coverage nudges\n  examples: [{{ name: a }}]\ncollectors:\n{source}advisories:\n{advisory}"
+            ),
+        );
+        let v2 = only(dir.path(), "review");
+        assert!(v2.errors.is_empty(), "{:?}", v2.errors);
+        assert!(v2.warnings.is_empty(), "{:?}", v2.warnings);
+        assert_eq!(v2.manifest_version, 2);
+        assert_eq!(v2.sources, v1.sources);
+        assert_eq!(v2.advisories, v1.advisories);
+        assert_eq!(
+            crate::source_runner::approval_hash(&ext_dir, &v2.sources[0]).unwrap(),
+            source_hash_v1
+        );
+        assert_eq!(
+            crate::exec_consent::advisory_program(&v2)
+                .hash(Path::new(""))
+                .unwrap(),
+            advisory_hash_v1
+        );
+    }
+
+    #[test]
+    fn a_grid_child_in_another_extension_resolves_once_everything_is_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "oxplow/extensions/review/extension.yaml",
+            EXT_V2,
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/review/lenses/tasks.yaml",
+            LENS,
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/board/extension.yaml",
+            "manifest: 2\nname: board\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
+        );
+        write(
+            dir.path(),
+            "oxplow/extensions/board/lenses/all.yaml",
+            "title: All\nquery: SELECT 1\nviz: grid\nchildren: [review/tasks, review/missing]\n",
+        );
+        let board = only(dir.path(), "board");
+        assert!(
+            board
+                .errors
+                .iter()
+                .any(|m| m.contains("child lens `review/missing` isn't in any loaded extension")),
+            "{:?}",
+            board.errors
+        );
+        assert!(board.lenses.is_empty(), "the broken grid is dropped");
+    }
+
     #[tokio::test]
     async fn bundled_extensions_load_validate_and_mount_slots() {
         let dir = tempfile::tempdir().unwrap();
@@ -2510,6 +2933,17 @@ empty: No tasks.
             .expect("bundled extension present");
         assert_eq!(review.origin, "bundled");
         assert!(review.errors.is_empty(), "{:?}", review.errors);
+        // Bundled manifests are v2, shared, with an intent, and clean.
+        for e in exts.iter().filter(|e| e.origin == "bundled") {
+            assert!(e.warnings.is_empty(), "{}: {:?}", e.name, e.warnings);
+            assert_eq!(e.manifest_version, 2, "{}", e.name);
+            assert_eq!(e.sharing, Sharing::Shared, "{}", e.name);
+            assert!(
+                !e.intent.as_ref().unwrap().examples.is_empty(),
+                "{}",
+                e.name
+            );
+        }
         assert!(review
             .lenses
             .iter()

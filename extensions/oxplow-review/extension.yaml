@@ -1,6 +1,23 @@
+manifest: 2
 name: oxplow-review
 description: The effort review packet. What to check before accepting an agent's work, shown on each effort's diff.
-slots:
+sharing: shared
+engine: ">=0.7"
+intent:
+  purpose: >-
+    Put what a reviewer must check before accepting an agent's work on the
+    effort's diff: the decisions it made, the claims it didn't verify, where it
+    deviated or struggled, the tests it weakened, and what is waiting on the
+    person.
+  origin: null
+  examples:
+    - name: an effort that claimed passing tests without a run
+      input: { lens: unverified-claims, params: { effort_id: 1 } }
+      expect: the claim listed with no verifying test run
+    - name: a stream with blocked tasks and open follow-ups
+      input: { lens: waiting-on-me, params: { stream_id: 1 } }
+      expect: the blocked tasks and open follow-up comments, and the rail alert firing
+slot_mounts:
   - { slot: effort-review, lens: decisions }
   - { slot: effort-review, lens: inferred-decisions }
   - { slot: effort-review, lens: unverified-claims }
