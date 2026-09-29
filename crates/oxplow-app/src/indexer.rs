@@ -99,22 +99,18 @@ impl crate::event_pump::AsyncEventConsumer for SearchIndexConsumer {
         else {
             return Ok(());
         };
-        match svc.task_store.get(task).await? {
-            // A live task: (re)index it where it lives now.
-            Some(t) if t.deleted_at.is_none() => {
+        // Out of every stream first: a task that moved leaves no row where
+        // it was, and a deleted one is simply gone.
+        svc.search_store
+            .remove_everywhere(KIND_TASK, &task.to_string())
+            .await?;
+        if let Some(t) = svc.task_store.get(task).await? {
+            if t.deleted_at.is_none() {
                 let stream = match t.thread_id.as_ref() {
                     Some(tid) => indexer.stream_for_thread(tid).await,
                     None => None,
                 };
                 indexer.index_task(&t, stream.as_ref()).await;
-            }
-            // Deleted (or gone): out of the index, under the stream the
-            // event was anchored to (the task row can't be read back).
-            _ => {
-                let stream = event.envelope.anchors.stream_id.map(|s| s.to_string());
-                svc.search_store
-                    .remove(KIND_TASK, &task.to_string(), stream.as_deref())
-                    .await?;
             }
         }
         Ok(())
@@ -495,6 +491,57 @@ mod tests {
         svc.tasks.soft_delete(task.id).await.unwrap();
         svc.event_pump.run_once().await.unwrap();
         assert!(!found("flange").await, "removed on work_item.deleted");
+    }
+
+    /// A task moved to another thread is indexed where it lives now and
+    /// nowhere else (tsk508).
+    #[tokio::test]
+    async fn a_moved_task_is_indexed_only_where_it_now_lives() {
+        let (svc, _dir) = services().await;
+        register(&svc);
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        let thread = svc
+            .threads
+            .create(&stream.id, "T", "working", oxplow_domain::AgentKind::Claude)
+            .await
+            .unwrap();
+        let task = svc
+            .tasks
+            .create(
+                Some(thread.id),
+                crate::CreateTaskInput {
+                    title: "Quux the sprocket".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        let rows = |svc: Arc<Services>, id: String| async move {
+            svc.db
+                .read(move |c| {
+                    let mut s = c
+                        .prepare(
+                            "SELECT stream_id FROM search_entry WHERE kind = 'task' AND ref_id = ?1",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let r = s
+                        .query_map([id], |r| r.get::<_, Option<String>>(0))
+                        .map_err(oxplow_db::map_sql_err)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(r)
+                })
+                .await
+                .unwrap()
+        };
+        assert_eq!(
+            rows(svc.clone(), task.id.to_string()).await,
+            vec![Some(stream.id.to_string())]
+        );
+        svc.tasks.move_to(task.id, None).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(rows(svc.clone(), task.id.to_string()).await, vec![None]);
     }
 
     #[test]

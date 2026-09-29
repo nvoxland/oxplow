@@ -1312,7 +1312,8 @@ reads the committed status inside its transaction (`set_status_tx`), so a
 copy read before a concurrent status change can't revert it (review of
 P2.6, tsk460). `update_with_status_tx` writes fields, logs
 `work_item.edited@1 { work_item, fields }` when title / description /
-priority / parent changed, then moves the status — the core of
+priority / parent / thread changed (`move_task` logs `thread` too, anchored
+to the destination), then moves the status — the core of
 `work_item.update` and `TaskService::update`. Filing a task
 (`insert_logged_tx`, the core of `work_item.create` and
 `TaskService::create`) logs **`work_item.created@1 { work_item, status,

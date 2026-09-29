@@ -686,13 +686,15 @@ service (`crates/oxplow-app/src/indexer.rs`) backfills at boot and then keeps
 the index fresh two ways (P3.10): tasks and snapshot files from the **event
 log** — the `search.index` pump consumer on `work_item.created` / `edited` /
 `transitioned` / `deleted` and `snapshot.taken` (durable, redelivered after a
-crash; a deleted task is removed under the stream its `work_item.deleted`
-was anchored to) — and notes, comments and wiki pages from the in-memory
+crash; on any of them the task's rows are removed in every stream and it is
+re-indexed where it lives now, so a moved or deleted task leaves no stale
+row, tsk508) — and notes, comments and wiki pages from the in-memory
 **EventBus** (`WorkNotesChanged`, `CommentsChanged`, `WikiPagesChanged`) until
 those capabilities log events (P5). It upserts/removes the affected rows.
 Every task field edit logs `work_item.edited` (the store's raw `update` goes
-through `update_with_status_tx`), so the log sees them all; a task moved to
-another stream leaves its old row until the next boot backfill. This is the inverse of the usual "command writes store + emits
+through `update_with_status_tx`), and a move to another thread logs
+`work_item.edited{fields: [thread]}` (`move_task`), so the log sees them
+all. This is the inverse of the usual "command writes store + emits
 event" flow: the search index is a derived projection that *consumes* the same
 events the UI does, so no command needs a special "also reindex" step. It's
 spawned in `apps/desktop/src-tauri/src/main.rs` alongside the commit indexer.

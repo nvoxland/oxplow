@@ -154,6 +154,29 @@ impl SqliteSearchStore {
             .await
     }
 
+    /// Drop an entity's rows in every stream — for one that moved, or is gone.
+    pub async fn remove_everywhere(&self, kind: &str, ref_id: &str) -> Result<(), DomainError> {
+        let (kind, ref_id) = (kind.to_string(), ref_id.to_string());
+        self.db
+            .call_mut(move |conn| {
+                let tx = conn.transaction().map_err(crate::database::map_sql_err)?;
+                tx.execute(
+                    "DELETE FROM search_fts WHERE rowid IN \
+                     (SELECT rowid FROM search_entry WHERE kind = ?1 AND ref_id = ?2)",
+                    params![kind, ref_id],
+                )
+                .map_err(crate::database::map_sql_err)?;
+                tx.execute(
+                    "DELETE FROM search_entry WHERE kind = ?1 AND ref_id = ?2",
+                    params![kind, ref_id],
+                )
+                .map_err(crate::database::map_sql_err)?;
+                tx.commit().map_err(crate::database::map_sql_err)?;
+                Ok(())
+            })
+            .await
+    }
+
     /// Drop every index row owned by a stream (called when a stream is
     /// archived/deleted so its file rows don't linger).
     pub async fn purge_stream(&self, stream_id: &str) -> Result<(), DomainError> {

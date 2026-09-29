@@ -143,6 +143,7 @@ impl SqliteTaskStore {
                 if update_task_tx(tx, &item).map_err(crate::database::map_sql_err)? == 0 {
                     return Err(DomainError::NotFound);
                 }
+                log_edited_tx(tx, &ev, &item, vec!["thread".to_string()])?;
                 let work_item = work_item_ref(id);
                 if let Some(open) = crate::effort_store::find_open_for_work_item_tx(tx, &work_item)
                     .map_err(crate::database::map_sql_err)?
@@ -334,7 +335,34 @@ fn edited_fields(before: &Task, after: &Task) -> Vec<String> {
     if before.parent_id != after.parent_id {
         fields.push("parent".to_string());
     }
+    if before.thread_id != after.thread_id {
+        fields.push("thread".to_string());
+    }
     fields
+}
+
+/// Log `work_item.edited@1` for `fields` of `item`, anchored to the thread
+/// it is on now (none on the backlog).
+fn log_edited_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    item: &Task,
+    fields: Vec<String>,
+) -> Result<(), DomainError> {
+    let work_item = work_item_ref(item.id);
+    let anchors = match item.thread_id {
+        Some(thread) => anchors_for_thread_tx(conn, thread)?,
+        None => Anchors::default(),
+    };
+    let env = ev
+        .typed::<WorkItemEdited>(&WorkItemEditedV1 {
+            work_item: work_item.clone(),
+            fields,
+        })
+        .with_anchors(anchors)
+        .with_subject([work_item]);
+    ev.append(conn, &env)?;
+    Ok(())
 }
 
 /// Write `item`'s fields (never its status) and, when `status` is given,
@@ -355,19 +383,7 @@ pub fn update_with_status_tx(
     }
     let fields = edited_fields(&before, item);
     if !fields.is_empty() {
-        let work_item = work_item_ref(item.id);
-        let anchors = match item.thread_id {
-            Some(thread) => anchors_for_thread_tx(conn, thread)?,
-            None => Anchors::default(),
-        };
-        let env = ev
-            .typed::<WorkItemEdited>(&WorkItemEditedV1 {
-                work_item: work_item.clone(),
-                fields,
-            })
-            .with_anchors(anchors)
-            .with_subject([work_item]);
-        ev.append(conn, &env)?;
+        log_edited_tx(conn, ev, item, fields)?;
     }
     let effort = match status {
         Some(to) => set_status_tx(conn, ev, item.id, to, now)?.effort,
