@@ -9,15 +9,18 @@
 //! JSONL line and [`parse_claude_usage`] summed every line (the dedupe-by
 //! `message.id` fix here removed that).
 //!
-//! The **transcript path** ([`TokenUsageService::on_stop`]) survives for what
-//! OTEL lacks: the per-turn `agent_token_usage` rows (with the human prompt
-//! text) and the `oxplow.turn` facts. The hook payload oxplow receives on Stop
-//! carries `transcript_path` (the agent session JSONL); for Claude each
+//! The **transcript path** ([`TokenUsageService::on_stop_for`], run by the
+//! `token_usage.turns` reactor on `agent.turn.ended`) survives for what OTEL
+//! lacks: the per-turn `agent_token_usage` rows (with the human prompt text)
+//! and the `oxplow.turn` facts. The event carries the Stop's
+//! `transcript_path` (the agent session JSONL); for Claude each
 //! `type=="assistant"` line carries a `message.usage` block + `message.model`.
-//! On Stop we read the NEW records since the last Stop (offset-tracked via a
-//! persisted per-session cursor, so we never re-sum the whole file or
-//! double-count across restarts) and persist one row per turn attributed to the
-//! open effort + thread. Provenance is `observed`.
+//! We read the NEW records since the last turn (offset-tracked via a
+//! persisted per-session cursor that commits with the rows, so we never re-sum
+//! the whole file or double-count across restarts or redeliveries) and persist
+//! one row per turn attributed to the effort the turn ran in. An ACP turn's
+//! counts ride the event instead ([`TokenUsageService::record_turn_for`]).
+//! Provenance is `observed`.
 //!
 //! Pluggable per agent kind: Claude is implemented; Codex/Opencode return
 //! `None` (their session formats differ — and are wired later). We track
@@ -1171,9 +1174,9 @@ mod tests {
                 decision: None,
             })
             .await
-            .unwrap()
-            .turn
-            .unwrap()
+            .unwrap();
+        use oxplow_domain::stores::AgentTurnStore as _;
+        svc.agent_turn_store.list_open(&thread).await.unwrap()[0].id
     }
 
     /// P3.7 (tsk477): a turn's tokens are counted by the `token_usage.turns`

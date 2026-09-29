@@ -309,8 +309,10 @@ to `runtime.handleHookEnvelope`, which:
    and the `agent.*` events that record it, anchored to the thread's stream,
    its open turn and its single open effort (`activity_anchors_tx`):
    - every prompt → `agent.prompt.submitted` (`reprompt: true` inside an
-     open turn); a prompt with no turn open also opens one
-     (`agent.turn.started`);
+     open turn), its text in `event_content` (`prompt: ContentRef`, read
+     with `read_event_content` body `prompt`) — so a re-prompt's text is
+     kept, not only the turn's first; a prompt with no turn open also opens
+     one (`agent.turn.started`);
    - PreToolUse → `agent.tool.requested` with the policy's `decision`
      (`HookEnvelope.decision`, set by the control plane's `pre_tool_check`
      and by `AcpHost::check_tool`); PostToolUse → `agent.tool.finished`.
@@ -727,8 +729,8 @@ hook is the one path where the dot can stay stale (rare). The question rides
 `awaiting_user → "awaiting"` (`collapseAgentStatusState` in
 `apps/desktop/src/api.ts`) and shows a distinct blue pulsing dot whose
 tooltip is the question — so a *different* thread parked on your answer
-is visible from the rail without switching to it. Live-session only:
-`agent_status` is in-memory, reset on restart.
+is visible from the rail without switching to it. It survives a
+restart: the status is the thread's newest logged `agent.status.changed`.
 
 **Filing enforcement (writer thread, PreToolUse).** Enforcement runs
 in the PreToolUse hook (`buildFilingEnforcementPreToolDeny` in
@@ -1829,11 +1831,11 @@ recomputes on every tool hook and emits `agent-status.changed`. The UI shows it 
 tab — yellow pulsing for `working`, red for `waiting`. The two states
 encode the only signal a tab indicator actually needs: is the agent
 burning cycles, or does the user owe the next move? Brand-new threads,
-finished turns (`stop`), exited processes (`session-end`), permission
-prompts (`notification`), and user interrupts all collapse to `waiting`.
+completed turns, a session (re)start and user interrupts all collapse to
+`waiting`.
 
-**Subagent-in-flight carve-out.** The reducer counts unreturned `Task`
-tool calls (PreToolUse + / PostToolUse -). When a `stop` event arrives
+**Subagent-in-flight carve-out.** The reducer counts unreturned subagent
+tool calls (`SUBAGENT_TOOLS`: `Task`, `Agent`; requested + / finished -). When a `stop` event arrives
 while the count is >0, status stays `working` instead of flipping to
 `waiting`. Without this the tab icon would flip the moment the parent
 paused for a subagent, even though the subagent was still doing real
@@ -1864,10 +1866,10 @@ the reducer would otherwise stay `working` until the next prompt. The
 runtime's `sendTerminalMessage` watches the websocket input stream and,
 when it sees a bare `\x1b` or `\x03` byte (interrupt heuristic in
 `terminalInputIsInterrupt`, `crates/oxplow-runtime/src/lib.rs`), ingests a synthetic
-`Interrupt` meta hook event for the thread that owns the terminal
-session. The reducer's `meta` branch treats `hookEventName ===
-"Interrupt"` as a forced reset: status drops back to `done` and
-`pendingTasks` is cleared. The synthesis only fires when the thread is
+`Interrupt` hook for the thread that owns the terminal session. The
+ingest closes the open turn as interrupted (`agent.turn.ended{interrupted}`),
+which the reducer treats as a reset: the open tools and pending subagents
+are cleared and the thread reads as not working. The synthesis only fires when the thread is
 currently `working` so a user idly tapping Escape at a prompt is a
 no-op. Multi-byte ESC sequences (arrow keys, etc.) are explicitly
 filtered out — only the bare interrupt byte counts. See the original ticket history.

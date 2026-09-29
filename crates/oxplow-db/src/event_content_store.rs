@@ -62,6 +62,21 @@ pub fn put_json_tx(
     Ok(r)
 }
 
+/// Store a text body (a prompt) as its UTF-8 bytes, cut to
+/// [`MAX_STORED_BYTES`] on a character boundary.
+pub fn put_text_tx(
+    conn: &Connection,
+    namespace: &str,
+    text: &str,
+) -> Result<ContentRef, DomainError> {
+    let bytes = text.as_bytes();
+    let kept = &bytes[..char_boundary_at_or_below(bytes, MAX_STORED_BYTES)];
+    let mut r = put_tx(conn, namespace, kept)?;
+    r.size = bytes.len() as u64;
+    r.truncated = kept.len() < bytes.len();
+    Ok(r)
+}
+
 /// `v` with every object's keys in sorted order.
 fn canonical(v: &serde_json::Value) -> serde_json::Value {
     match v {

@@ -678,6 +678,9 @@ pub struct AgentPromptSubmittedV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     pub reprompt: bool,
+    /// The text the person submitted, stored in `event_content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<ContentRef>,
 }
 
 pub struct AgentPromptSubmitted;

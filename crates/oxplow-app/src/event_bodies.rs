@@ -1,4 +1,5 @@
-//! Reading an event's stored body — a tool call's input or output — for the
+//! Reading an event's stored body — a tool call's input or output, a
+//! prompt's text — for the
 //! activity panel (a person, any stream) and the MCP `read_event_content`
 //! tool (an agent, its own stream only). One routine for both, so the
 //! scope and the size cap can't differ between them (tsk509).
@@ -19,6 +20,8 @@ pub const MAX_READ_BYTES: usize = 64 * 1024;
 pub enum EventBodyKey {
     Input,
     Output,
+    /// An `agent.prompt.submitted`'s text.
+    Prompt,
 }
 
 impl EventBodyKey {
@@ -26,6 +29,7 @@ impl EventBodyKey {
         match self {
             EventBodyKey::Input => "input",
             EventBodyKey::Output => "output",
+            EventBodyKey::Prompt => "prompt",
         }
     }
 }
@@ -148,5 +152,45 @@ mod tests {
             read(&f.svc, "evt-none", EventBodyKey::Input, None).await,
             Err(EventBodyError::UnknownEvent(_))
         ));
+    }
+
+    /// Every prompt's text is kept with its event — a re-prompt inside an
+    /// open turn too, which the turn row (holding the first) never saw.
+    #[tokio::test]
+    async fn a_reprompts_text_is_kept_with_its_event() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        for text in ["first ask", "and then this"] {
+            f.svc
+                .hook_ingest
+                .ingest(HookEnvelope {
+                    kind: HookKind::UserPromptSubmit,
+                    thread_id: Some(f.thread),
+                    stream_id: None,
+                    session_id: Some("s".into()),
+                    payload_json: "{}".into(),
+                    prompt: Some(text.into()),
+                    decision: None,
+                })
+                .await
+                .unwrap();
+        }
+        let prompts = f
+            .svc
+            .event_log_store
+            .recent("agent.prompt", Some(f.thread), None, 10)
+            .await
+            .unwrap();
+        let reprompt = &prompts[0];
+        assert_eq!(reprompt.envelope.payload["reprompt"], true);
+        let body = read(
+            &f.svc,
+            reprompt.envelope.id.as_str(),
+            EventBodyKey::Prompt,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(body.text, "and then this");
     }
 }

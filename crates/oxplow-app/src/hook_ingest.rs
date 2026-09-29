@@ -40,7 +40,7 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::agent_stores::{
-    activity_anchors_tx, close_turn_tx, last_status_tx, open_turn_ids_tx, open_turn_tx,
+    activity_anchors_tx, close_turn_tx, last_status_tx, open_turn_ids_tx, open_turn_tx, TurnEnd,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
@@ -83,8 +83,9 @@ pub struct HookEnvelope {
     pub stream_id: Option<StreamId>,
     pub session_id: Option<String>,
     pub payload_json: String,
-    /// Optional client-supplied prompt body for UserPromptSubmit so
-    /// the agent_turn row carries the visible prompt text.
+    /// UserPromptSubmit: the text the person submitted — stored with its
+    /// `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
+    /// turn it opens.
     pub prompt: Option<String>,
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
@@ -100,8 +101,6 @@ pub enum HookIngestError {
 /// What one ingest did, for the request path that follows it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct IngestOutcome {
-    /// The thread's open turn after the ingest (the one a prompt opened).
-    pub turn: Option<AgentTurnId>,
     /// The turn a Stop / Interrupt closed.
     pub closed_turn: Option<AgentTurnId>,
 }
@@ -189,7 +188,6 @@ impl HookIngestService {
 
         // The activity log (the Hook events page) refetches on this.
         self.events.emit(OxplowEvent::HookEventsChanged);
-        outcome.turn = applied.turn;
         outcome.closed_turn = applied.closed_turn;
         if applied.opened_turn || applied.closed_turn.is_some() {
             self.events
@@ -384,15 +382,11 @@ fn record_tx(
     if starts {
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
-        applied.closed_turn = close_open_turns_tx(
-            conn,
-            ev,
-            thread,
-            Some("session restarted"),
-            TurnOutcome::Interrupted,
-            None,
-            None,
-        )?;
+        let end = TurnEnd {
+            answer: Some("session restarted"),
+            ..TurnEnd::new(now, TurnOutcome::Interrupted)
+        };
+        applied.closed_turn = close_open_turns_tx(conn, ev, thread, &end)?;
         status = Some((AgentStatusState::Idle, None));
     }
     if env.kind != HookKind::SessionEnd {
@@ -409,11 +403,15 @@ fn record_tx(
                 applied.turn = Some(open_turn_tx(conn, ev, thread, prompt, session, now)?);
                 applied.opened_turn = true;
             }
+            let text = env.prompt.as_deref().filter(|p| !p.is_empty());
             let payload = AgentPromptSubmittedV1 {
                 thread: thread_ref(thread),
                 turn: applied.turn.map(turn_ref),
                 session: session.map(str::to_string),
                 reprompt,
+                prompt: text
+                    .map(|t| event_content_store::put_text_tx(conn, "agent", t))
+                    .transpose()?,
             };
             let env = ev
                 .typed::<AgentPromptSubmitted>(&payload)
@@ -434,21 +432,21 @@ fn record_tx(
             } else {
                 (Some("interrupted"), TurnOutcome::Interrupted)
             };
-            let transcript = body.get("transcript_path").and_then(|p| p.as_str());
-            // Counts a harness reported with the turn itself (ACP).
-            let usage: Option<oxplow_domain::events::schema::TurnUsage> = body
-                .get(TURN_USAGE_KEY)
-                .and_then(|u| serde_json::from_value(u.clone()).ok());
-            applied.closed_turn =
-                close_open_turns_tx(conn, ev, thread, answer, outcome, transcript, usage)?;
+            let end = TurnEnd {
+                answer,
+                transcript_path: body.get("transcript_path").and_then(|p| p.as_str()),
+                // Counts a harness reported with the turn itself (ACP).
+                usage: body
+                    .get(TURN_USAGE_KEY)
+                    .and_then(|u| serde_json::from_value(u.clone()).ok()),
+                ..TurnEnd::new(now, outcome)
+            };
+            applied.closed_turn = close_open_turns_tx(conn, ev, thread, &end)?;
             applied.turn = None;
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
             } else {
-                stop_status(
-                    &env.payload_json,
-                    last_status_tx(conn, ev.schemas, thread)?.as_ref(),
-                )
+                stop_status(last_status_tx(conn, ev.schemas, thread)?.as_ref())
             });
         }
         HookKind::SessionEnd => {
@@ -479,17 +477,14 @@ fn record_tx(
 }
 
 /// A Stop parks the thread on the person when the agent asked them
-/// something this turn — a sentinel on this payload, or an `await_user`
-/// the MCP tool already recorded (the real Stop payload carries none, and
-/// a fresh prompt clears it first) — else it goes idle.
-fn stop_status(payload: &str, current: Option<&AgentStatus>) -> (AgentStatusState, Option<String>) {
-    let awaiting = current.is_some_and(|s| s.state == AgentStatusState::AwaitingUser);
-    if payload_signals_await_user(payload) || awaiting {
-        let question =
-            await_user_question(payload).or_else(|| current.and_then(|s| s.detail.clone()));
-        (AgentStatusState::AwaitingUser, question)
-    } else {
-        (AgentStatusState::Idle, None)
+/// something this turn (`await_user` logged `awaiting_user`, and a fresh
+/// prompt clears it first) — keeping the question — else it goes idle.
+fn stop_status(current: Option<&AgentStatus>) -> (AgentStatusState, Option<String>) {
+    match current {
+        Some(s) if s.state == AgentStatusState::AwaitingUser => {
+            (AgentStatusState::AwaitingUser, s.detail.clone())
+        }
+        _ => (AgentStatusState::Idle, None),
     }
 }
 
@@ -506,17 +501,12 @@ fn close_open_turns_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
-    answer: Option<&str>,
-    outcome: TurnOutcome,
-    transcript: Option<&str>,
-    usage: Option<oxplow_domain::events::schema::TurnUsage>,
+    end: &TurnEnd<'_>,
 ) -> Result<Option<AgentTurnId>, DomainError> {
     let mut newest = None;
     // Newest first.
     for id in open_turn_ids_tx(conn, thread)? {
-        if close_turn_tx(conn, ev, id, answer, outcome, transcript, usage.clone())?.is_some()
-            && newest.is_none()
-        {
+        if close_turn_tx(conn, ev, id, end)?.is_some() && newest.is_none() {
             newest = Some(id);
         }
     }
@@ -565,8 +555,8 @@ fn track_session_tx(
 /// `SessionEnd`: log it, and drop the resume id only when an explicit
 /// `/clear` ended exactly the session it points at — a normal exit keeps
 /// it (a restart should resume), and clearing a stale session must not
-/// wipe a newer one. (Claude starts the post-clear session with no HTTP
-/// hook, so without this a restart would resurrect the cleared session.)
+/// wipe a newer one. (Until a hook names the post-clear session, a restart
+/// would otherwise resurrect the cleared one.)
 fn end_session_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
@@ -659,32 +649,6 @@ fn log_tool_tx(
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
     append_unique_tx(conn, ev.schemas, &envelope)?;
     Ok(())
-}
-
-/// Heuristic: did the agent call mcp__oxplow__await_user during the
-/// turn? Encoded as a sentinel in the payload so we don't have to
-/// thread state through the pipeline.
-fn payload_signals_await_user(payload: &str) -> bool {
-    if !payload.contains("await_user") {
-        return false;
-    }
-    // Cheap substring match — a full JSON parse on every Stop is
-    // overkill since we control the sentinel writer.
-    let lower = payload.to_ascii_lowercase();
-    lower.contains("\"await_user\":true") || lower.contains("await_user_called")
-}
-
-/// Extract the question text from an await_user sentinel payload. Returns
-/// None when the payload isn't an await_user signal or carries no
-/// (non-empty) `question` field — callers then fall back to any question
-/// already stored on `agent_status.detail`.
-fn await_user_question(payload: &str) -> Option<String> {
-    if !payload_signals_await_user(payload) {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let q = v.get("question")?.as_str()?.trim();
-    (!q.is_empty()).then(|| q.to_string())
 }
 
 #[cfg(test)]
@@ -1160,35 +1124,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_with_await_user_signal_marks_awaiting() {
-        let (svc, tid) = fixture().await;
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: Some("do".into()),
-            decision: None,
-        })
-        .await
-        .unwrap();
-        svc.ingest(HookEnvelope {
-            kind: HookKind::Stop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: r#"{"await_user":true}"#.into(),
-            prompt: None,
-            decision: None,
-        })
-        .await
-        .unwrap();
-        let status = status(&svc, tid).await.unwrap();
-        assert_eq!(status.state, AgentStatusState::AwaitingUser);
-    }
-
-    #[tokio::test]
     async fn interrupt_closes_open_turn() {
         let (svc, tid) = fixture().await;
         svc.ingest(HookEnvelope {
@@ -1513,52 +1448,5 @@ mod tests {
         let (state, detail) = emitted.expect("PostToolUse should emit AgentStatusChanged");
         assert_eq!(state, AgentStatusState::AwaitingUser);
         assert_eq!(detail.as_deref(), Some("Pick A or B?"));
-    }
-
-    #[tokio::test]
-    async fn stop_await_user_signal_carries_question() {
-        // A Stop payload carrying the sentinel + a question lands the
-        // question on detail so the renderer can show it in the tooltip.
-        let (svc, tid) = fixture().await;
-        svc.ingest(HookEnvelope {
-            kind: HookKind::Stop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: r#"{"await_user":true,"question":"Pick A or B"}"#.into(),
-            prompt: None,
-            decision: None,
-        })
-        .await
-        .unwrap();
-        let status = status(&svc, tid).await.unwrap();
-        assert_eq!(status.state, AgentStatusState::AwaitingUser);
-        assert_eq!(status.detail.as_deref(), Some("Pick A or B"));
-    }
-
-    #[test]
-    fn await_user_payload_detection() {
-        assert!(payload_signals_await_user(r#"{"await_user":true}"#));
-        assert!(payload_signals_await_user(r#"{"x":"await_user_called"}"#));
-        assert!(!payload_signals_await_user(r#"{}"#));
-        assert!(!payload_signals_await_user(r#"{"await_user":false}"#));
-    }
-
-    #[test]
-    fn await_user_question_extraction() {
-        assert_eq!(
-            await_user_question(r#"{"await_user":true,"question":"Pick A or B"}"#).as_deref(),
-            Some("Pick A or B")
-        );
-        // Sentinel present but no question → None (caller falls back to
-        // whatever detail the MCP tool already stored).
-        assert_eq!(await_user_question(r#"{"await_user":true}"#), None);
-        // Blank question → None.
-        assert_eq!(
-            await_user_question(r#"{"await_user":true,"question":"  "}"#),
-            None
-        );
-        // Not an await_user payload → None.
-        assert_eq!(await_user_question(r#"{"question":"x"}"#), None);
     }
 }

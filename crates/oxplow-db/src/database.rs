@@ -1285,7 +1285,9 @@ mod tests {
              INSERT INTO claim (thread_id, effort_id, statement, kind, created_at)
                VALUES (1, 1, 's', 'other', '{now}');
              INSERT INTO decision (thread_id, effort_id, question, choice, confidence, created_at)
-               VALUES (1, 1, 'q', 'c', 'high', '{now}');"
+               VALUES (1, 1, 'q', 'c', 'high', '{now}');
+             INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('e0', 'config.changed', 1, '{now}', 'test', '[]', '{{}}');"
         ))
         .unwrap();
 
@@ -1315,10 +1317,8 @@ mod tests {
                 )),
                 if view == "v_agent_nudge" {
                     2
-                } else if view == "v_event" {
-                    count("SELECT count(*) FROM event_log")
                 } else {
-                    1
+                    1 // v_event: the row logged before V102 isn't expired
                 },
                 "{view}.{column}"
             );
@@ -1346,6 +1346,24 @@ mod tests {
                 [],
             )
             .is_err());
+        // Another kind for the same cause is its own nudge.
+        conn.execute(
+            &format!("INSERT INTO agent_nudge (thread_id, kind, message, created_at, cause, turn_id) VALUES (1, 'k2', 'm', '{now}', 'e1', 1)"),
+            [],
+        )
+        .unwrap();
+        // Deleting the turn keeps its rows, unanchored.
+        conn.execute("DELETE FROM agent_turn WHERE id = 1", [])
+            .unwrap();
+        assert_eq!(
+            count("SELECT count(*) FROM agent_tool_call WHERE event_id = 'e1' AND turn_id IS NULL"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM agent_nudge WHERE kind = 'k2' AND turn_id IS NULL"),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
         // Content is stored by hash; the view never exposes the bytes.
         conn.execute(
             &format!("INSERT INTO event_content (hash, namespace, bytes, size, created_at) VALUES ('h', 'agent', x'00', 1, '{now}')"),

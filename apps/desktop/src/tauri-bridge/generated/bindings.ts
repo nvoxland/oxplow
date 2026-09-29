@@ -2212,7 +2212,9 @@ export type EventBody = {
 };
 
 // Which body of the event.
-export type EventBodyKey = "input" | "output";
+export type EventBodyKey = "input" | "output" | 
+// An `agent.prompt.submitted`'s text.
+"prompt";
 
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so
@@ -2561,8 +2563,9 @@ export type HookEnvelope = {
 	session_id: string | null,
 	payload_json: string,
 	/**
-	 *  Optional client-supplied prompt body for UserPromptSubmit so
-	 *  the agent_turn row carries the visible prompt text.
+	 *  UserPromptSubmit: the text the person submitted — stored with its
+	 *  `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
+	 *  turn it opens.
 	 */
 	prompt: string | null,
 	// PreToolUse only: the policy's verdict (`None` reads as allowed).

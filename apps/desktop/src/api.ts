@@ -5,6 +5,7 @@ import { listen, onRemoteReconnect, triggerRemoteResync } from "./tauri-bridge/t
 export { onRemoteReconnect, triggerRemoteResync };
 import { EVENT_CHANNELS } from "./tauri-bridge/channels.js";
 import type { OxplowEvent } from "./api-types.js";
+import { latestWins } from "./latestWins.js";
 import { normalizeSnapshotId } from "./effort-snapshot.js";
 import { taskIdOfWorkItemRef, workItemRef } from "./workItemRef.js";
 import { ipcErrorMessage } from "./ipc-error.js";
@@ -2937,16 +2938,25 @@ export async function listAgentEvents(streamId?: string | null, limit = 200): Pr
   return unwrap(await commands.listAgentEvents(null, streamId ?? null, limit));
 }
 
-/** Refetch the activity log whenever the backend logs agent activity
- *  (`hookEventsChanged` is a payload-free "something landed" ping). */
+/** Load the activity log now and again whenever the backend logs agent
+ *  activity (`hookEventsChanged` is a payload-free "something landed"
+ *  ping). Only the newest load is delivered, so a slow older one never
+ *  overwrites it; a failed load goes to `onError`. */
 export function subscribeAgentEvents(
   streamId: string | null,
+  limit: number,
   onEvents: (events: AgentEvent[]) => void,
+  onError: (err: unknown) => void,
 ): () => void {
-  return subscribeOxplowEvents((event) => {
-    if (event.kind !== "hookEventsChanged") return;
-    void listAgentEvents(streamId).then(onEvents);
+  const load = latestWins(() => listAgentEvents(streamId, limit), onEvents, onError);
+  load.run();
+  const unsubscribe = subscribeOxplowEvents((event) => {
+    if (event.kind === "hookEventsChanged") load.run();
   });
+  return () => {
+    load.close();
+    unsubscribe();
+  };
 }
 
 /** A tool call's stored input or output (by the hash in its event

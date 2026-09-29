@@ -125,6 +125,30 @@ pub fn open_turn_tx(
     Ok(id)
 }
 
+/// How a turn ended.
+#[derive(Debug, Clone)]
+pub struct TurnEnd<'a> {
+    /// When: the time of the hook (or command) that ended it.
+    pub at: Timestamp,
+    pub outcome: TurnOutcome,
+    pub answer: Option<&'a str>,
+    pub transcript_path: Option<&'a str>,
+    /// Counts the harness reported with the turn (ACP).
+    pub usage: Option<oxplow_domain::events::schema::TurnUsage>,
+}
+
+impl TurnEnd<'_> {
+    pub fn new(at: Timestamp, outcome: TurnOutcome) -> Self {
+        Self {
+            at,
+            outcome,
+            answer: None,
+            transcript_path: None,
+            usage: None,
+        }
+    }
+}
+
 /// Close turn `id` and log `agent.turn.ended`, in the caller's
 /// transaction. Returns its thread, or `None` when it was already closed
 /// (nothing logged).
@@ -132,17 +156,14 @@ pub fn close_turn_tx(
     conn: &Connection,
     ev: &EventCtx<'_>,
     id: AgentTurnId,
-    answer: Option<&str>,
-    outcome: TurnOutcome,
-    transcript_path: Option<&str>,
-    usage: Option<oxplow_domain::events::schema::TurnUsage>,
+    end: &TurnEnd<'_>,
 ) -> Result<Option<ThreadId>, DomainError> {
     let thread: Option<i64> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer)
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id",
-            params![id.value(), ts_to_string(Timestamp::now()), answer],
+            params![id.value(), ts_to_string(end.at), end.answer],
             |r| r.get(0),
         )
         .optional()
@@ -154,9 +175,9 @@ pub fn close_turn_tx(
         .typed::<AgentTurnEnded>(&AgentTurnEndedV2 {
             turn: turn_ref(id),
             thread: thread_ref(thread),
-            outcome,
-            transcript_path: transcript_path.map(str::to_string),
-            usage,
+            outcome: end.outcome,
+            transcript_path: end.transcript_path.map(str::to_string),
+            usage: end.usage.clone(),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -358,7 +379,11 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     _ => "hook_ingest",
                 };
                 let ev = EventCtx::system(&schemas, component);
-                Ok(close_turn_tx(tx, &ev, id, answer.as_deref(), outcome, None, None)?.is_some())
+                let end = TurnEnd {
+                    answer: answer.as_deref(),
+                    ..TurnEnd::new(Timestamp::now(), outcome)
+                };
+                Ok(close_turn_tx(tx, &ev, id, &end)?.is_some())
             })
             .await
     }

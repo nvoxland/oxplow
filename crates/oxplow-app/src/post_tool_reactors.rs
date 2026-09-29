@@ -167,8 +167,7 @@ mod tests {
             .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
             .await
             .unwrap();
-        let tool = svc
-            .hook_ingest
+        svc.hook_ingest
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("cargo test")))
             .await
             .unwrap();
@@ -190,7 +189,8 @@ mod tests {
             .collect();
         assert_eq!(runs.len(), 1);
         let run = &runs[0].envelope;
-        assert_eq!(run.anchors.turn_id, tool.turn.map(|t| t.value()));
+        // The run carries the tool event's own anchors.
+        assert_eq!(run.anchors.turn_id, finished.envelope.anchors.turn_id);
         assert_eq!(run.anchors.effort_id, Some(f.effort));
         assert_eq!(run.cause.as_ref(), Some(&finished.envelope.id));
         assert_eq!(run.payload["command"], "cargo test");

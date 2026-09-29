@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { listAgentEvents, subscribeAgentEvents, type AgentEvent } from "../api.js";
+import { subscribeAgentEvents, type AgentEvent } from "../api.js";
 import { reportUiError } from "../ui-error.js";
 
 const MAX_ROWS = 200;
@@ -15,10 +15,9 @@ export function BottomPanel({ streamId }: { streamId: string | null }) {
     setEvents([]);
     // Newest first from the backend; shown oldest first, like a log.
     const show = (newest: AgentEvent[]) => setEvents(newest.slice(0, MAX_ROWS).reverse());
-    void listAgentEvents(streamId, MAX_ROWS)
-      .then(show)
-      .catch((err) => reportUiError("Load agent activity", err));
-    return subscribeAgentEvents(streamId, show);
+    return subscribeAgentEvents(streamId, MAX_ROWS, show, (err) =>
+      reportUiError("Load agent activity", err),
+    );
   }, [streamId]);
 
   useEffect(() => {

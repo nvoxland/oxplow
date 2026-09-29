@@ -548,15 +548,9 @@ async fn handle_hook_inner(
 
     // Stop — emit a directive after the turn closes when the
     // in_progress audit branch (or filed-but-didn't-ship advisory)
-    // fires. We mine per-turn activity by scanning hook events
-    // received since the open turn's started_at, BEFORE ingest
-    // closes the turn. The signals fed in here:
-    //   - turn_had_activity: any PreToolUse/PostToolUse fired
-    //   - turn_had_writes: any Edit/Write/MultiEdit/NotebookEdit fired
-    // Other signals (subagent-in-flight, turn_filed_ready_item)
-    // need cross-tool correlation we haven't wired yet — defaulting
-    // them to false is a soft-degrade that silences a few advisory
-    // branches but doesn't emit wrong directives.
+    // fires. The turn's signals (activity, writes, awaiting the person,
+    // a subagent still running) are read from the events anchored to the
+    // turn the Stop closed (`TurnSignals::of_turn`), after the ingest.
     if kind == HookKind::Stop {
         if let Some(directive) =
             stop_directive(&ctx, thread_id.as_ref(), turn_signals.as_ref()).await

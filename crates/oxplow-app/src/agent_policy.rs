@@ -733,6 +733,55 @@ mod tests {
         }
         assert_eq!(seen, vec![(true, false), (true, true), (false, false)]);
     }
+    /// A write the policy refused still counts as the turn trying to change
+    /// files.
+    #[tokio::test]
+    async fn a_denied_write_counts_as_a_write() {
+        use crate::{HookEnvelope, ToolDecision};
+        use oxplow_domain::HookKind;
+        let f = crate::test_fixtures::services_with_effort().await;
+        let hook = |kind: HookKind, body: serde_json::Value, decision| HookEnvelope {
+            kind,
+            thread_id: Some(f.thread),
+            stream_id: None,
+            session_id: Some("s".into()),
+            payload_json: body.to_string(),
+            prompt: Some("go".into()),
+            decision,
+        };
+        f.svc
+            .hook_ingest
+            .ingest(hook(
+                HookKind::UserPromptSubmit,
+                serde_json::json!({}),
+                None,
+            ))
+            .await
+            .unwrap();
+        f.svc
+            .hook_ingest
+            .ingest(hook(
+                HookKind::PreToolUse,
+                serde_json::json!({"tool_name": "Edit", "tool_input": {"file_path": "a.rs"}}),
+                Some(ToolDecision {
+                    allowed: false,
+                    reason: Some("no effort".into()),
+                }),
+            ))
+            .await
+            .unwrap();
+        let stop = f
+            .svc
+            .hook_ingest
+            .ingest(hook(HookKind::Stop, serde_json::json!({}), None))
+            .await
+            .unwrap();
+        let s = TurnSignals::of_turn(&f.svc.db, stop.closed_turn.unwrap())
+            .await
+            .unwrap();
+        assert!(s.had_activity && s.had_writes);
+    }
+
     /// The Stop gates read the turn from the log (tsk504): a turn that
     /// parked on the person, or left a subagent running, suppresses the
     /// Stop directives even with in_progress work open.

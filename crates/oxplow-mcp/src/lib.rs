@@ -4739,7 +4739,7 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Signal that the agent is awaiting user input. Persists a hook event so Stop suppression kicks in."
+        description = "Park this thread on the person: logs that the agent is awaiting their answer (the question shows on the rail), so the Stop that follows adds no directive."
     )]
     async fn await_user(
         &self,

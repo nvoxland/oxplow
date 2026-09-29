@@ -1,1 +1,7 @@
-{ "thread": "thread:thr3", "turn": "turn:trn12", "session": "0f3c9a2e-7b1d-4e8a-9c6f-2d1b3a4c5e6f", "reprompt": true }
+{
+  "thread": "thread:thr3",
+  "turn": "turn:trn12",
+  "session": "0f3c9a2e-7b1d-4e8a-9c6f-2d1b3a4c5e6f",
+  "reprompt": true,
+  "prompt": { "hash": "4c1e9b2a7d3f5e6081a2b3c4d5e6f708", "size": 64 }
+}

@@ -352,9 +352,9 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
 
 When the PostToolUse hook detects a test run but no configured report
 was refreshed by it (the agent ran `bun test` instead of the
-report-emitting `bun run test:collect`, for example), `on_post_tool_use`
-returns a one-shot nudge surfaced to the agent via
-`hookSpecificOutput.additionalContext`. The nudge names the project's
+report-emitting `bun run test:collect`, for example), the `collection`
+reactor persists a one-shot nudge, which the thread's next tool-hook
+response delivers (`take_undelivered`; see Nudge persistence). The nudge names the project's
 own `collection.testCommand` when set, points at the configured `reports`
 paths if a profile exists without a `testCommand`, or routes to
 `/oxplow:configure` when no profile is present at all.
@@ -362,14 +362,13 @@ paths if a profile exists without a `testCommand`, or routes to
 **Tool-agnostic design:** the hook never encodes tool→command knowledge.
 It keys only on (1) "was this a test run?" (substring match against
 built-in patterns + `testRunPatterns`) and (2) "did a configured report
-get refreshed?" (mtime vs effort start). The tool-specific command it
+get refreshed?" (its mtime inside the run's freshness window). The tool-specific command it
 names comes entirely from the project's config, so it works for any
 test tool, current or future.
 
-**Anti-nag:** the nudge fires at most once per effort. `CollectionService`
-tracks nudged effort ids in an in-memory `HashSet` (the *dedup* is not
-persisted — it clears on daemon restart, so the first run of a new session
-can nudge again). The *fired* nudge itself is persisted for review — see
+**Anti-nag:** the nudge fires at most once per effort — a durable one-shot
+mark (`effort_once_mark`, `claim_once`), so a daemon restart doesn't re-arm
+it. The *fired* nudge itself is persisted for review and delivery — see
 Nudge persistence below.
 
 ## Commits get no nudge of their own
@@ -395,14 +394,14 @@ general-purpose tool must not make (see also [[tsk251]]).
 PostToolUse nudges (report-less-run, and post-tool-use advisories such as
 oxplow-analytics' `coverage-target`) are **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
-agent this effort" after the fact — previously the nudge string was forwarded
-via `additionalContext` and then lost. When `on_post_tool_use` decides to
+agent this effort" after the fact, and the persisted row is what delivers it
+(the next tool-hook response takes the thread's undelivered nudges). When `on_post_tool_use` decides to
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`
 (`report-less-run` / `coverage-target`), the message, and the trigger (the
 bash command) and emits `AgentNudgesChanged`. Persistence sits **after** the
-in-memory dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
+durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store
 (`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
 `v_agent_nudge` view and the oxplow-analytics `effort-nudges` lens are
