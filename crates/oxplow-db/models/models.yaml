@@ -3,19 +3,755 @@
 # `ref('<model>')` and `source('<table>')`. `columns` is its contract: a
 # change to it needs a new `version`. See `.context/semantic-layer.md`
 # "Models".
+- name: agent_nudge
+  version: 1
+  description: "Guidance oxplow sent the coding agent mid-effort (e.g. coverage below target, a test run with no report)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort it was about, if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "kind", type: "TEXT", doc: "What kind of nudge, e.g. `coverage-target`, `report-less-run`." }
+    - { name: "message", type: "TEXT", doc: "The text the agent was given." }
+    - { name: "trigger", type: "TEXT", doc: "What prompted it, if recorded." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "delivered_at", type: "TEXT", doc: "When a hook response carried it to the agent; NULL while it waits for the thread's next hook." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: agent_turn
+  version: 1
+  description: "Agent turns: each human prompt and the agent's answer, per thread. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Turn id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread the turn ran in." }
+    - { name: "prompt", type: "TEXT", doc: "What the human typed." }
+    - { name: "answer", type: "TEXT", doc: "The agent's final answer, once the turn ended." }
+    - { name: "session_id", type: "TEXT", doc: "The harness session id, when it reported one." }
+    - { name: "started_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while running." }
+    - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: ai_call
+  version: 1
+  description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "role", type: "TEXT", doc: "Role used (`main`, `fast`, `summarize`, `embed`, `decide`, `review`)." }
+    - { name: "provider", type: "TEXT", doc: "Provider id from ai.yaml." }
+    - { name: "model", type: "TEXT", doc: "Model id." }
+    - { name: "caller", type: "TEXT", doc: "What asked, e.g. `mcp:ai_decide`, `inferred-decisions`." }
+    - { name: "input_tokens", type: "INTEGER", doc: "Input tokens." }
+    - { name: "output_tokens", type: "INTEGER", doc: "Output tokens." }
+    - { name: "latency_ms", type: "INTEGER", doc: "Round-trip time." }
+    - { name: "ok", type: "INTEGER", doc: "1 succeeded, 0 failed." }
+    - { name: "error", type: "TEXT", doc: "Error message when it failed." }
+    - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: branch
+  version: 1
+  description: "Local and remote-tracking branches, refreshed on boot and whenever refs move."
+  columns:
+    - { name: "name", type: "TEXT", doc: "Branch name (without the remote)." }
+    - { name: "kind", type: "TEXT", doc: "`local` or `remote`." }
+    - { name: "remote", type: "TEXT", doc: "Remote name for a remote-tracking branch." }
+    - { name: "head_sha", type: "TEXT", doc: "The commit it points at." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree has it checked out (v_stream.id), if any." }
+    - { name: "updated_at", type: "TEXT", doc: "When oxplow last read it (RFC 3339)." }
+- name: capture
+  version: 1
+  description: "Captures: one scan or run that produced facts, with its when/where/who context."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Capture id." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream captured in." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread, if known." }
+    - { name: "effort_id", type: "INTEGER", doc: "Producing effort, when unambiguous." }
+    - { name: "producer", type: "TEXT", doc: "What produced it (collector, gauge, hook…)." }
+    - { name: "status", type: "TEXT", doc: "`running`, `done` or `failed`." }
+    - { name: "trigger", type: "TEXT", doc: "What started it." }
+    - { name: "provenance", type: "TEXT", doc: "`observed` (measured) or `asserted` (an agent claimed it)." }
+    - { name: "source", type: "TEXT", doc: "Source identifier." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot it was taken against, if any." }
+    - { name: "branch", type: "TEXT", doc: "Git branch at capture." }
+    - { name: "closest_git_version", type: "TEXT", doc: "Nearest git commit." }
+    - { name: "captured_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ended_at", type: "TEXT", doc: "When the capture finished." }
+    - { name: "scan_kind", type: "TEXT", doc: "`delta` or `full`." }
+- name: change
+  version: 1
+  description: "Analyzed changes: a commit (vs its parent), an effort (start → end snapshot, or → working tree while open), an agent turn (start → end snapshot: what the turn changed) or a stream's working tree (vs HEAD). Created on demand by `ensure_change`; the v_change_* views hold its analysis."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Change id (the change_id in v_change_*)." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream whose repo it's in." }
+    - { name: "kind", type: "TEXT", doc: "`commit`, `effort`, `turn` or `working`." }
+    - { name: "target", type: "TEXT", doc: "The commit sha, the effort row id, the turn row id, or '' for the working tree." }
+    - { name: "base_label", type: "TEXT", doc: "What it's compared against (a sha, `HEAD`, `snapshot N`)." }
+    - { name: "head_label", type: "TEXT", doc: "The newer side." }
+    - { name: "status", type: "TEXT", doc: "`pending`, `running`, `done` or `failed`." }
+    - { name: "error", type: "TEXT", doc: "Why it failed, if it did." }
+    - { name: "computed_at", type: "TEXT", doc: "When the analysis last finished (RFC 3339)." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: change_co_change
+  version: 1
+  description: "Files in a change that history says are surprising: their usual co-changers aren't in this change, or they haven't been touched in a long time."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "The surprising file." }
+    - { name: "reason", type: "TEXT", doc: "`usual-co-changers-absent` or `dormant`." }
+    - { name: "expected", type: "TEXT", doc: "The files that usually change with it, `, `-separated." }
+    - { name: "dormant_days", type: "INTEGER", doc: "Days since it was last touched, for `dormant`." }
+- name: change_duplicate
+  version: 1
+  description: "Blocks in a change's files that duplicate code elsewhere in the tree. Arrives after the rest of the analysis (a whole-tree scan); none for closed efforts yet."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "The changed file." }
+    - { name: "start_line", type: "INTEGER", doc: "First line of the block." }
+    - { name: "end_line", type: "INTEGER", doc: "Last line of the block." }
+    - { name: "lines", type: "INTEGER", doc: "Block size in lines." }
+    - { name: "peer_path", type: "TEXT", doc: "Where the copy is." }
+    - { name: "peer_start_line", type: "INTEGER", doc: "First line of the copy." }
+    - { name: "peer_end_line", type: "INTEGER", doc: "Last line of the copy." }
+- name: change_file
+  version: 1
+  description: "Each file a change touched, with its zone, whether it's a test, and a \"look here first\" interest score (size × complexity spikes × parameter growth × long new functions)."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative path." }
+    - { name: "status", type: "TEXT", doc: "`added`, `modified` or `deleted`." }
+    - { name: "additions", type: "INTEGER", doc: "Lines added." }
+    - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
+    - { name: "zone", type: "TEXT", doc: "Architectural zone from the project's zone rules (`other` when none match)." }
+    - { name: "is_test", type: "INTEGER", doc: "1 if the path looks like a test file." }
+    - { name: "interest", type: "REAL", doc: "Review priority score; higher means look here first." }
+    - { name: "interest_reasons", type: "TEXT", doc: "Why the score is high, `; `-separated." }
+- name: change_function
+  version: 1
+  description: "Functions a change added, deleted or modified (signature and/or body), with metric deltas and per-function churn. Unchanged functions aren't listed."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "File." }
+    - { name: "container", type: "TEXT", doc: "Enclosing class/impl/module path, `::`-joined; '' at top level." }
+    - { name: "name", type: "TEXT", doc: "Function name." }
+    - { name: "status", type: "TEXT", doc: "`added`, `deleted` or `modified`." }
+    - { name: "signature_changed", type: "INTEGER", doc: "1 if its parameter count changed." }
+    - { name: "body_changed", type: "INTEGER", doc: "1 if its complexity or length changed." }
+    - { name: "start_line", type: "INTEGER", doc: "First line (head side, or base side if deleted)." }
+    - { name: "visibility", type: "TEXT", doc: "`public`, `private` or `unknown`." }
+    - { name: "is_test", type: "INTEGER", doc: "1 if it's a test (test file, test name or test container)." }
+    - { name: "complexity", type: "REAL", doc: "Cyclomatic complexity (head side, or base if deleted)." }
+    - { name: "length", type: "INTEGER", doc: "Length in lines." }
+    - { name: "params_before", type: "INTEGER", doc: "Parameter count before; NULL if added." }
+    - { name: "params_after", type: "INTEGER", doc: "Parameter count after; NULL if deleted." }
+    - { name: "complexity_delta", type: "REAL", doc: "Complexity change, for modified functions." }
+    - { name: "length_delta", type: "INTEGER", doc: "Length change, for modified functions." }
+    - { name: "added_lines", type: "INTEGER", doc: "Lines added inside it." }
+    - { name: "deleted_lines", type: "INTEGER", doc: "Lines deleted inside it." }
+    - { name: "modified_lines", type: "INTEGER", doc: "min(added, deleted): edited both ways." }
+    - { name: "churn_share", type: "REAL", doc: "Its share of the change's function churn (0–1)." }
+- name: change_import
+  version: 1
+  description: "Imports a change added or removed, with source and target zones. `cross_zone` flags a new import that crosses an architectural boundary."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "Importing file." }
+    - { name: "module", type: "TEXT", doc: "What's imported, as written." }
+    - { name: "direction", type: "TEXT", doc: "`added` or `removed`." }
+    - { name: "start_line", type: "INTEGER", doc: "Line of the import." }
+    - { name: "from_zone", type: "TEXT", doc: "The importing file's zone." }
+    - { name: "to_zone", type: "TEXT", doc: "The target's zone, if known (`external` for packages)." }
+    - { name: "cross_zone", type: "INTEGER", doc: "1 for an added import into a different known zone." }
+- name: change_test_file
+  version: 1
+  description: "How much each changed file's tests check, before and after the change: test functions, assertions and skip markers. Files that are tests or contain tests. The counts are a heuristic across languages (assert*/expect(/t.Error calls; #[ignore], .skip(, xit(, @Disabled, t.Skip markers), not a parse."
+  columns:
+    - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
+    - { name: "path", type: "TEXT", doc: "The file." }
+    - { name: "tests_before", type: "INTEGER", doc: "Test functions on the base side." }
+    - { name: "tests_after", type: "INTEGER", doc: "Test functions on the head side." }
+    - { name: "assertions_before", type: "INTEGER", doc: "Assertion calls on the base side." }
+    - { name: "assertions_after", type: "INTEGER", doc: "Assertion calls on the head side." }
+    - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
+    - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
+- name: claim
+  version: 1
+  description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\"), and whether anything backs them."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Claim id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
+    - { name: "task_id", type: "INTEGER", doc: "Task, if known." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
+    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "statement", type: "TEXT", doc: "The claim in words." }
+    - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
+    - { name: "evidence_ref", type: "TEXT", doc: "What backs it (`run:<id>`, a test, a file); NULL if nothing was cited." }
+    - { name: "verified", type: "", doc: "1 if it cites evidence, or is `tests_pass` and its effort's latest test run (in `v_test_run`) passed with at least one test; else 0." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: code_quality_finding
+  version: 1
+  description: "Findings from code-quality scans, e.g. duplicated blocks, each with its scan's tool and time."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Finding id." }
+    - { name: "scan_id", type: "INTEGER", doc: "The scan (v_code_quality_scan.id)." }
+    - { name: "tool", type: "TEXT", doc: "Scanner that found it." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative file." }
+    - { name: "start_line", type: "INTEGER", doc: "First line." }
+    - { name: "end_line", type: "INTEGER", doc: "Last line." }
+    - { name: "kind", type: "TEXT", doc: "Finding kind, e.g. `duplicate-block`." }
+    - { name: "metric_value", type: "REAL", doc: "Size or score (lines, for a duplicate)." }
+    - { name: "extra_json", type: "TEXT", doc: "Kind-specific JSON, e.g. the duplicate's peer path and lines." }
+    - { name: "scanned_at", type: "TEXT", doc: "When its scan started (RFC 3339)." }
+- name: code_quality_scan
+  version: 1
+  description: "Code-quality scans (duplication and similar): when each ran, over which tree version, and whether it finished."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Scan id." }
+    - { name: "tool", type: "TEXT", doc: "Scanner, e.g. `duplication`." }
+    - { name: "scope", type: "TEXT", doc: "What was scanned." }
+    - { name: "status", type: "TEXT", doc: "`pending`, `running`, `done` or `failed`." }
+    - { name: "started_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while running." }
+    - { name: "error", type: "TEXT", doc: "Failure message, if it failed." }
+    - { name: "tree_version_kind", type: "TEXT", doc: "Which tree: `disk`, `git`, …" }
+    - { name: "tree_version_value", type: "TEXT", doc: "The version (a sha, etc.)." }
+    - { name: "file_filter", type: "TEXT", doc: "Fingerprint of the file filter it ran with, if any." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: comment
+  version: 1
+  description: "Comment threads anchored to a page (file, wiki page, task…). `intent` says who should act."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Comment id." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream the comment was made in." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in, if any." }
+    - { name: "target_kind", type: "TEXT", doc: "Kind of page it is anchored to: `file`, `wiki`, `task`, …" }
+    - { name: "target_id", type: "TEXT", doc: "Id of that page (path, slug, task id…)." }
+    - { name: "quote", type: "TEXT", doc: "The selected text the comment is anchored to." }
+    - { name: "intent", type: "TEXT", doc: "`note` (for me) or `followup` (for the agent to act on)." }
+    - { name: "status", type: "TEXT", doc: "`open` or `resolved`." }
+    - { name: "orphaned", type: "INTEGER", doc: "1 when the quote can no longer be found in the page." }
+    - { name: "author", type: "TEXT", doc: "Who started it." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "last_activity_at", type: "TEXT", doc: "Time of the newest message." }
+    - { name: "resolved_at", type: "TEXT", doc: "Set when resolved." }
+    - { name: "body", type: "TEXT", doc: "Text of the first message." }
+    - { name: "message_count", type: "", doc: "Number of messages in the thread." }
+- name: commit
+  version: 1
+  description: "Git commits the indexer has read (the last 500 reachable from the primary worktree's HEAD, kept as it moves)."
+  columns:
+    - { name: "sha", type: "TEXT", doc: "Full commit sha." }
+    - { name: "author", type: "TEXT", doc: "Author name." }
+    - { name: "email", type: "TEXT", doc: "Author email." }
+    - { name: "committed_at", type: "TEXT", doc: "Commit time (RFC 3339)." }
+    - { name: "subject", type: "TEXT", doc: "First line of the message." }
+    - { name: "body", type: "TEXT", doc: "The rest of the message." }
+    - { name: "first_parent", type: "", doc: "First parent's sha; NULL for a root commit." }
+    - { name: "parent_count", type: "", doc: "Number of parents (2+ for a merge)." }
+- name: commit_file
+  version: 1
+  description: "Files each commit changed, against its first parent."
+  columns:
+    - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative path." }
+    - { name: "status", type: "TEXT", doc: "`added`, `modified`, `deleted` or `renamed`." }
+    - { name: "additions", type: "INTEGER", doc: "Lines added." }
+    - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
+- name: commit_task
+  version: 1
+  description: "Tasks a commit's message mentions (`tsk42`, `[[tsk42]]`)."
+  columns:
+    - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
+    - { name: "task_id", type: "INT", doc: "The task (v_task.id)." }
+- name: context_read
+  version: 1
+  description: "Which `.context/*.md` project docs the agent read, and when. Compare with the files it changed to spot work done without reading the relevant doc."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
+    - { name: "path", type: "TEXT", doc: "Doc path, e.g. `.context/usability.md`." }
+    - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: dashboard
+  version: 1
+  description: "User-created dashboards."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Dashboard id." }
+    - { name: "title", type: "TEXT", doc: "Title." }
+    - { name: "sort_index", type: "INTEGER", doc: "Order in the dashboards list." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: dashboard_item
+  version: 1
+  description: "Tiles on dashboards: a metric, a lens or a text note."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Tile id." }
+    - { name: "dashboard_id", type: "INTEGER", doc: "Its dashboard (v_dashboard.id)." }
+    - { name: "sort_index", type: "INTEGER", doc: "Position on the dashboard." }
+    - { name: "kind", type: "TEXT", doc: "`metric`, `lens` or `text`." }
+    - { name: "metric_key", type: "TEXT", doc: "The metric, for a `metric` tile." }
+    - { name: "options_json", type: "TEXT", doc: "Tile options (size, view, lens id, text), JSON." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: decision
+  version: 1
+  description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Decision id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
+    - { name: "task_id", type: "INTEGER", doc: "Task being worked on, if known." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort it was made during, if one was open." }
+    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "question", type: "TEXT", doc: "What had to be decided." }
+    - { name: "choice", type: "TEXT", doc: "What was chosen." }
+    - { name: "alternatives", type: "TEXT", doc: "Options not taken, as a JSON array of strings." }
+    - { name: "confidence", type: "TEXT", doc: "`low`, `medium` or `high`." }
+    - { name: "why", type: "TEXT", doc: "The reasoning." }
+    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it) or `inferred` (oxplow's summarize model proposed it from the effort's activity; unconfirmed)." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: diagnostic
+  version: 1
+  description: "Errors and warnings the language servers have published for open or indexed files, right now (cleared when a server restarts)."
+  columns:
+    - { name: "stream_id", type: "INTEGER", doc: "Stream whose worktree it's in (v_stream.id)." }
+    - { name: "language", type: "TEXT", doc: "The language server that reported it." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative file." }
+    - { name: "severity", type: "TEXT", doc: "`error`, `warning`, `information` or `hint`." }
+    - { name: "message", type: "TEXT", doc: "The diagnostic text." }
+    - { name: "source", type: "TEXT", doc: "The tool behind it (`rustc`, `ts`, `eslint`, …), if given." }
+    - { name: "code", type: "TEXT", doc: "Its code (`E0308`, `2304`, …), if given." }
+    - { name: "line", type: "INTEGER", doc: "Start line (1-based)." }
+    - { name: "col", type: "INTEGER", doc: "Start column (1-based)." }
+    - { name: "end_line", type: "INTEGER", doc: "End line (1-based)." }
+    - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
+    - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
+- name: effort
+  version: 1
+  description: "Efforts: one bracketed span of work on a work item (an oxplow task, or another provider's item), between a start and an end snapshot."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Effort id." }
+    - { name: "work_item", type: "TEXT", doc: "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`." }
+    - { name: "task_id", type: "", doc: "The oxplow task worked on (v_task.id); NULL for another provider's work item." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread that did the work." }
+    - { name: "stream_id", type: "INTEGER", doc: "That thread's stream." }
+    - { name: "started_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "ended_at", type: "TEXT", doc: "RFC 3339 timestamp; NULL while the effort is open." }
+    - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot at the start (v_snapshot.id)." }
+    - { name: "end_snapshot_id", type: "INTEGER", doc: "Snapshot at the end; NULL while open." }
+    - { name: "summary", type: "TEXT", doc: "Closing summary written when the effort closed." }
+- name: effort_file
+  version: 1
+  description: "Files each effort touched (as claimed or detected at close), with how they changed."
+  columns:
+    - { name: "effort_id", type: "INTEGER", doc: "The effort (v_effort.id)." }
+    - { name: "work_item", type: "TEXT", doc: "That effort's work item ref." }
+    - { name: "task_id", type: "", doc: "That effort's oxplow task (v_task.id); NULL for another provider's work item." }
+    - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
+    - { name: "change_kind", type: "TEXT", doc: "`created`, `updated` or `deleted`." }
+    - { name: "closest_git_version", type: "TEXT", doc: "Nearest git commit when recorded." }
+- name: effort_metric_delta
+  version: 1
+  description: "How each metric moved during an effort (before → after), computed by oxplow's metric engine and refreshed when the effort closes and as data arrives while it's open."
+  columns:
+    - { name: "effort_id", type: "INTEGER", doc: "Effort (v_effort.id)." }
+    - { name: "key", type: "TEXT", doc: "Metric key (v_metric_spec.key)." }
+    - { name: "title", type: "TEXT", doc: "Metric name." }
+    - { name: "unit", type: "TEXT", doc: "Unit, if any." }
+    - { name: "direction", type: "TEXT", doc: "`higher-better`, `lower-better` or `neutral`." }
+    - { name: "kind", type: "TEXT", doc: "`gauge`, `coverage`, `test`, `event`, …" }
+    - { name: "category", type: "TEXT", doc: "Metric category." }
+    - { name: "language", type: "TEXT", doc: "Language, if language-specific." }
+    - { name: "agg", type: "TEXT", doc: "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before→after)." }
+    - { name: "baseline", type: "REAL", doc: "Value as the effort began; NULL for `sum`." }
+    - { name: "current", type: "REAL", doc: "Value at the effort's end (or now, if open)." }
+    - { name: "delta", type: "REAL", doc: "current − baseline, or the total for `sum`." }
+    - { name: "changed", type: "INTEGER", doc: "1 if the value moved during the effort." }
+    - { name: "attributed_files", type: "INTEGER", doc: "For `files`: how many claimed files carry the metric." }
+    - { name: "sample_count", type: "INTEGER", doc: "Samples considered." }
+    - { name: "target", type: "REAL", doc: "Metric target." }
+    - { name: "warn_at", type: "REAL", doc: "Warning threshold." }
+    - { name: "fail_at", type: "REAL", doc: "Failure threshold." }
+    - { name: "crossing", type: "TEXT", doc: "`warn` or `fail` when the current value sits past that threshold; else NULL." }
+    - { name: "latest_capture_id", type: "INTEGER", doc: "The latest contributing capture (v_capture.id), for drill-in." }
+    - { name: "refreshed_at", type: "TEXT", doc: "When oxplow last recomputed it (RFC 3339)." }
+- name: effort_observation
+  version: 1
+  description: "Evidence gathered during an effort: test runs, diff coverage and analysis results, rebuilt from the captures the effort claimed."
+  columns:
+    - { name: "effort_id", type: "INTEGER", doc: "Effort (v_effort.id)." }
+    - { name: "seq", type: "INTEGER", doc: "Order within the effort." }
+    - { name: "kind", type: "TEXT", doc: "`test-run`, `diff-coverage`, `static-analysis`, …" }
+    - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow saw it) or `asserted` (the agent reported it)." }
+    - { name: "source", type: "TEXT", doc: "Where it came from, e.g. `post-tool-bash`." }
+    - { name: "metric_value", type: "REAL", doc: "Headline number, e.g. coverage %." }
+    - { name: "payload_json", type: "TEXT", doc: "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)." }
+    - { name: "local_snapshot_id", type: "INTEGER", doc: "Snapshot it was captured against." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: event
+  version: 1
+  description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
+  columns:
+    - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
+    - { name: "id", type: "TEXT", doc: "Public identity (UUIDv7; sorts by time)." }
+    - { name: "type", type: "TEXT", doc: "`namespace.name`, e.g. `work_item.transitioned`." }
+    - { name: "v", type: "INTEGER", doc: "Schema version of `type`." }
+    - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "source", type: "TEXT", doc: "What emitted it: `human`, `agent:thr3`, `task_service`, …" }
+    - { name: "stream_id", type: "INTEGER", doc: "Anchor, when known." }
+    - { name: "thread_id", type: "INTEGER", doc: "Anchor, when known." }
+    - { name: "effort_id", type: "INTEGER", doc: "Anchor, when known." }
+    - { name: "turn_id", type: "INTEGER", doc: "Anchor (agent_turn), when known." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "Anchor, when known." }
+    - { name: "subject", type: "TEXT", doc: "JSON array of the canonical refs the event is about." }
+    - { name: "payload", type: "TEXT", doc: "JSON, validated against `type@v`'s schema." }
+    - { name: "payload_hash", type: "TEXT", doc: "Content hash when the body lives in the content store." }
+    - { name: "payload_expired_at", type: "TEXT", doc: "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept." }
+    - { name: "cause", type: "TEXT", doc: "The event id that caused this one." }
+    - { name: "dedupe_key", type: "TEXT", doc: "Emitter-derived key; unique." }
+- name: event_checkpoint
+  version: 1
+  description: "How far each event consumer has read."
+  columns:
+    - { name: "consumer", type: "TEXT", doc: "Consumer name." }
+    - { name: "last_seq", type: "INTEGER", doc: "Last `v_event.seq` it handled or skipped." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: event_content
+  version: 1
+  description: "Large or sensitive event bodies (tool input and output, prompts), stored by content hash; an event payload's `{hash, size}` points here. Retention deletes a body after its namespace's window; the event stays. The bytes are read with `read_event_content` by event id, not through SQL."
+  columns:
+    - { name: "hash", type: "TEXT", doc: "xxh3-128 hex of the bytes." }
+    - { name: "namespace", type: "TEXT", doc: "The event namespace it belongs to (`agent`, `test`, …); sets its retention." }
+    - { name: "size", type: "INTEGER", doc: "Length in bytes." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: event_dead_letter
+  version: 1
+  description: "Events a consumer failed on, parked with the error. `pending` letters need a person's retry or discard."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Letter id (for `retry_dead_letter` / `discard_dead_letter`)." }
+    - { name: "consumer", type: "TEXT", doc: "The consumer that failed." }
+    - { name: "event_seq", type: "INTEGER", doc: "`v_event.seq`." }
+    - { name: "event_id", type: "TEXT", doc: "`v_event.id`." }
+    - { name: "event_type", type: "TEXT", doc: "`v_event.type`." }
+    - { name: "error", type: "TEXT", doc: "The last failure." }
+    - { name: "attempts", type: "INTEGER", doc: "How many times it has failed." }
+    - { name: "first_failed_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "last_failed_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "state", type: "TEXT", doc: "`pending`, `retried` or `discarded`." }
+- name: fact
+  version: 1
+  description: "Facts: atomic measurements (a function's complexity, a test's outcome, a token count), joined to their measure and capture context."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Fact id." }
+    - { name: "capture_id", type: "INTEGER", doc: "Producing capture (v_capture.id)." }
+    - { name: "measure_key", type: "TEXT", doc: "Measure this is a value of (v_measure.key)." }
+    - { name: "value", type: "REAL", doc: "The measured value." }
+    - { name: "numerator", type: "REAL", doc: "Ratio numerator, for ratio measures." }
+    - { name: "denominator", type: "REAL", doc: "Ratio denominator, for ratio measures." }
+    - { name: "subject_kind", type: "TEXT", doc: "What the fact is about." }
+    - { name: "subject_ref", type: "TEXT", doc: "Logical id of the subject." }
+    - { name: "path", type: "TEXT", doc: "File path, when the subject has one." }
+    - { name: "line", type: "INTEGER", doc: "Line number, when it has one." }
+    - { name: "severity", type: "TEXT", doc: "Finding severity, for lint-like facts." }
+    - { name: "rule", type: "TEXT", doc: "Rule id, for lint-like facts." }
+    - { name: "detail", type: "TEXT", doc: "Free-text detail." }
+    - { name: "dims_json", type: "TEXT", doc: "Extra dimensions as a JSON object." }
+    - { name: "stream_id", type: "INTEGER", doc: "From the capture." }
+    - { name: "thread_id", type: "INTEGER", doc: "From the capture." }
+    - { name: "effort_id", type: "INTEGER", doc: "From the capture." }
+    - { name: "captured_at", type: "TEXT", doc: "From the capture." }
+    - { name: "branch", type: "TEXT", doc: "From the capture." }
+- name: measure
+  version: 1
+  description: "Measures: the catalog of fact types (what a v_fact.value means)."
+  columns:
+    - { name: "key", type: "TEXT", doc: "Namespaced key, e.g. `oxplow.coverage`." }
+    - { name: "title", type: "TEXT", doc: "Display name." }
+    - { name: "unit", type: "TEXT", doc: "Unit of value, if any." }
+    - { name: "subject_kind", type: "TEXT", doc: "What a fact is about: `symbol`, `file`, `test`, `model`, …" }
+    - { name: "temporal_semantics", type: "TEXT", doc: "How values combine over time: `additive`, `semi-additive` or `non-additive`." }
+    - { name: "scope", type: "TEXT", doc: "`built-in`, `global` or `project`." }
+    - { name: "description", type: "TEXT", doc: "What the measure means." }
+- name: metric_spec
+  version: 1
+  description: "Metric definitions: what each metric aggregates, which direction is good, and its target / warn / fail thresholds. Whether a metric is enabled lives in project.yaml, not here."
+  columns:
+    - { name: "key", type: "TEXT", doc: "Metric key, e.g. `oxplow.coverage.abs_pct`." }
+    - { name: "title", type: "TEXT", doc: "Display name." }
+    - { name: "unit", type: "TEXT", doc: "Unit, e.g. `%`, `ms`; NULL for counts." }
+    - { name: "source_measure", type: "TEXT", doc: "Measure whose facts it aggregates; NULL for a formula metric." }
+    - { name: "aggregation", type: "TEXT", doc: "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …" }
+    - { name: "direction", type: "TEXT", doc: "`higher-better`, `lower-better` or `neutral`." }
+    - { name: "target", type: "REAL", doc: "Goal value, if any." }
+    - { name: "warn_at", type: "REAL", doc: "Warning threshold, if any (read with `direction`)." }
+    - { name: "fail_at", type: "REAL", doc: "Failure threshold, if any (read with `direction`)." }
+    - { name: "description", type: "TEXT", doc: "What it measures." }
+    - { name: "category", type: "TEXT", doc: "Grouping on the Metrics page." }
+    - { name: "language", type: "TEXT", doc: "Language it applies to, if language-specific." }
+    - { name: "scope", type: "", doc: "`built-in`, `global`, `project` or `extension`." }
+    - { name: "display_kind", type: "TEXT", doc: "`gauge`, `findings`, `test`, `coverage` or `event`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it, when `scope` is `extension`." }
+- name: page_visit
+  version: 1
+  description: "Pages the human opened in oxplow, and for how long — what they've been looking at."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Visit id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread the page was opened in." }
+    - { name: "page_kind", type: "TEXT", doc: "Page kind (`task`, `file`, `lens`, …)." }
+    - { name: "page_id", type: "TEXT", doc: "Page id (`task:42`, `file:src/a.rs`, …)." }
+    - { name: "label", type: "TEXT", doc: "Title shown at the time." }
+    - { name: "visited_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "duration_ms", type: "INTEGER", doc: "Time on the page, when known." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: snapshot
+  version: 1
+  description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Snapshot id." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream captured." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "git_commit", type: "TEXT", doc: "HEAD commit when captured, if known." }
+    - { name: "git_branch", type: "TEXT", doc: "Branch when captured, if known." }
+    - { name: "tree_hash", type: "TEXT", doc: "Whole-tree identity: two snapshots with the same tree_hash hold the same files. NULL before V96." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: snapshot_op
+  version: 1
+  description: "The snapshot operation log: one row per take (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A take that changed nothing points at its parent."
+  columns:
+    - { name: "seq", type: "INTEGER", doc: "Operation order within the project." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream (worktree) the take ran on." }
+    - { name: "snapshot_id", type: "INTEGER", doc: "Snapshot the worktree is at after the take (v_snapshot.id)." }
+    - { name: "parent_snapshot_id", type: "INTEGER", doc: "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)." }
+    - { name: "trigger", type: "TEXT", doc: "Why: turn_end, quiet, effort_start, effort_end, startup, manual, git_refs, head_moved, legacy." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread the take belongs to, if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "Agent turn the take belongs to, if any (v_agent_turn.id)." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort the take belongs to, if any (v_effort.id)." }
+    - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "elapsed_ms", type: "INTEGER", doc: "How long the take took." }
+    - { name: "budget_ms", type: "INTEGER", doc: "The caller's time budget, if it had one." }
+    - { name: "over_budget", type: "INTEGER", doc: "1 when elapsed_ms exceeded budget_ms." }
+    - { name: "file_count", type: "INTEGER", doc: "File rows recorded (0 when nothing changed)." }
 - name: stream
   version: 1
   description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."
   columns:
-    - { name: id, type: INTEGER, doc: "Stream id." }
-    - { name: kind, type: TEXT, doc: "`primary` (the repo) or `worktree`." }
-    - { name: title, type: TEXT, doc: "Display name." }
-    - { name: branch, type: TEXT, doc: "Git branch currently checked out in the worktree." }
-    - { name: worktree_path, type: TEXT, doc: "Absolute path of the stream's worktree." }
-    - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
-    - { name: updated_at, type: TEXT, doc: "RFC 3339 timestamp." }
-    - { name: archived_at, type: TEXT, doc: "Set when the stream was archived; NULL while live." }
+    - { name: "id", type: "INTEGER", doc: "Stream id." }
+    - { name: "kind", type: "TEXT", doc: "`primary` (the repo) or `worktree`." }
+    - { name: "title", type: "TEXT", doc: "Display name." }
+    - { name: "branch", type: "TEXT", doc: "Git branch currently checked out in the worktree." }
+    - { name: "worktree_path", type: "TEXT", doc: "Absolute path of the stream's worktree." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "archived_at", type: "TEXT", doc: "Set when the stream was archived; NULL while live." }
   tests:
     - { not_null: id }
     - { unique: id }
-    - { accepted_values: { column: kind, values: [primary, worktree] } }
+- name: struggle
+  version: 1
+  description: "Where the agent had trouble in an effort: a file edited 5+ times (`repeated_edits`) or 3+ failed commands (`failed_commands`). Likely places for mistakes."
+  columns:
+    - { name: "effort_id", type: "INTEGER", doc: "Effort." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "kind", type: "", doc: "`repeated_edits` or `failed_commands`." }
+    - { name: "subject", type: "TEXT", doc: "The file path, or `Bash`." }
+    - { name: "count", type: "", doc: "How many edits / failures." }
+- name: task
+  version: 1
+  description: "Tasks (work items), excluding deleted ones. `thread_id` NULL means the project-wide backlog."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Task id (shown as tsk<id>)." }
+    - { name: "thread_id", type: "INTEGER", doc: "Owning thread (v_thread.id); NULL = backlog." }
+    - { name: "stream_id", type: "INTEGER", doc: "The thread's stream; NULL for backlog tasks." }
+    - { name: "parent_id", type: "INTEGER", doc: "Parent task (an epic); NULL at top level." }
+    - { name: "title", type: "TEXT", doc: "Task title." }
+    - { name: "description", type: "TEXT", doc: "Markdown body." }
+    - { name: "status", type: "TEXT", doc: "`ready`, `in_progress`, `blocked`, `done`, `canceled` or `archived`." }
+    - { name: "priority", type: "TEXT", doc: "`low`, `medium`, `high` or `urgent`." }
+    - { name: "author", type: "TEXT", doc: "Who the task came from: `user` or `agent`." }
+    - { name: "sort_index", type: "INTEGER", doc: "Order within its list." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "completed_at", type: "TEXT", doc: "Set when the task reached `done`." }
+- name: task_link
+  version: 1
+  description: "Typed links between tasks (one blocks another, duplicates it, …)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Link id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread the link was made in." }
+    - { name: "from_task_id", type: "INTEGER", doc: "Source task (v_task.id)." }
+    - { name: "to_task_id", type: "INTEGER", doc: "Target task (v_task.id)." }
+    - { name: "link_type", type: "TEXT", doc: "`blocks`, `relates_to`, `discovered_from`, `duplicates`, `supersedes` or `replies_to`." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: task_note
+  version: 1
+  description: "Notes: progress notes attached to a task, or thread-level notes (exactly one of task_id / thread_id is set)."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Note id." }
+    - { name: "task_id", type: "INTEGER", doc: "Task it's attached to, if a task note." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread it's attached to, if a thread note." }
+    - { name: "body", type: "TEXT", doc: "Markdown body." }
+    - { name: "author", type: "TEXT", doc: "Who wrote it (`agent`, `user`, …)." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: test_case
+  version: 1
+  description: "Each test case in a run that produced a report (runs with only counts have none)."
+  columns:
+    - { name: "run_id", type: "INTEGER", doc: "The run (v_test_run.id)." }
+    - { name: "suite", type: "", doc: "Report suite name." }
+    - { name: "classname", type: "", doc: "Grouping path (module path, file·class, describe path)." }
+    - { name: "name", type: "", doc: "Test name." }
+    - { name: "status", type: "", doc: "`passed`, `failed` or `skipped`." }
+    - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
+- name: test_run
+  version: 1
+  description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Run id; `run:<id>` is how claims and decisions cite it." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream it ran in (v_stream.id)." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread whose agent ran it, if known." }
+    - { name: "effort_id", type: "", doc: "Effort it belongs to: the one that claimed it, else the one open when it ran." }
+    - { name: "command", type: "", doc: "The command that was run." }
+    - { name: "exit_code", type: "", doc: "Its exit code, if known." }
+    - { name: "passed", type: "", doc: "Tests passed (NULL when not reported)." }
+    - { name: "failed", type: "", doc: "Tests failed (NULL when not reported)." }
+    - { name: "skipped", type: "", doc: "Tests skipped (NULL when not reported)." }
+    - { name: "total", type: "", doc: "Tests run in total (NULL when not reported)." }
+    - { name: "duration_ms", type: "", doc: "Wall-clock duration, if known." }
+    - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)." }
+    - { name: "source", type: "TEXT", doc: "What recorded it (`hook`, `mcp`, …)." }
+    - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran." }
+    - { name: "closest_git_version", type: "TEXT", doc: "Commit the tested tree was at or nearest to." }
+    - { name: "captured_at", type: "TEXT", doc: "When it was recorded (RFC 3339)." }
+- name: thread
+  version: 1
+  description: "Threads: independent lines of thought inside a stream, each with its own agent session."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Thread id." }
+    - { name: "stream_id", type: "INTEGER", doc: "Owning stream (v_stream.id)." }
+    - { name: "title", type: "TEXT", doc: "Display name." }
+    - { name: "status", type: "TEXT", doc: "`active` (the stream's writer), `queued` (read-only) or `closed`." }
+    - { name: "agent", type: "TEXT", doc: "Agent harness: `claude`, `codex`, `opencode`, or `acp` (an Agent Client Protocol agent)." }
+    - { name: "sort_index", type: "INTEGER", doc: "Order within the stream." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "closed_at", type: "TEXT", doc: "Set when the thread was closed." }
+    - { name: "archived_at", type: "TEXT", doc: "Set when the thread was archived." }
+    - { name: "acp_agent", type: "TEXT", doc: "For an `acp` thread, which ACP agent it runs (`claude`, `gemini`, a project `acpAgents` name); NULL otherwise." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: token_usage
+  version: 1
+  description: "Model token usage recorded from agent sessions, per thread, effort and model."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "stream_id", type: "INTEGER", doc: "Stream." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort open at the time, if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "agent_kind", type: "TEXT", doc: "Harness (`claude`, `codex`, …)." }
+    - { name: "model", type: "TEXT", doc: "Model id, if reported." }
+    - { name: "prompt", type: "TEXT", doc: "The human prompt that opened this turn, if the transcript had one." }
+    - { name: "input_tokens", type: "INTEGER", doc: "Input tokens." }
+    - { name: "output_tokens", type: "INTEGER", doc: "Output tokens." }
+    - { name: "cache_creation_input_tokens", type: "INTEGER", doc: "Tokens written to the prompt cache." }
+    - { name: "cache_read_input_tokens", type: "INTEGER", doc: "Tokens read from the prompt cache." }
+    - { name: "message_count", type: "INTEGER", doc: "Messages in this record." }
+    - { name: "recorded_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: tool_call
+  version: 1
+  description: "Every tool call the agent made (from the PostToolUse hook): reads, edits, commands."
+  columns:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "thread_id", type: "INTEGER", doc: "Thread." }
+    - { name: "effort_id", type: "INTEGER", doc: "Effort open at the time, if any." }
+    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
+    - { name: "tool", type: "TEXT", doc: "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)." }
+    - { name: "path", type: "TEXT", doc: "File it touched, repo-relative when inside the project." }
+    - { name: "detail", type: "TEXT", doc: "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …" }
+    - { name: "ok", type: "INTEGER", doc: "1 succeeded, 0 failed, NULL unknown (Bash often reports no exit code)." }
+    - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "event_id", type: "TEXT", doc: "The `agent.tool.finished` event (v_event.id) this row records; NULL for rows written before the event log carried tool calls." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+- name: wiki_page
+  version: 1
+  description: "Wiki pages (project knowledge). The full body is on disk; this has the excerpt."
+  columns:
+    - { name: "slug", type: "TEXT", doc: "Page slug (link with [[slug]])." }
+    - { name: "title", type: "TEXT", doc: "Page title." }
+    - { name: "body_excerpt", type: "TEXT", doc: "Start of the body." }
+    - { name: "body_size_bytes", type: "INTEGER", doc: "Size of the full body." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
+- name: model
+  version: 1
+  description: "Models: every published view, as compiled at this open — core ones and each extension's. Read a model's columns in `v_model_column`, what it reads in `v_model_lineage` and its declared tests' results in `v_model_test`."
+  columns:
+    - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
+    - { name: name, type: TEXT, doc: "The model's name within its owner (`task`)." }
+    - { name: owner, type: TEXT, doc: "`core`, or the extension that declares it." }
+    - { name: version, type: INTEGER, doc: "Contract version: a change to the columns bumps it." }
+    - { name: description, type: TEXT, doc: "What the view holds." }
+    - { name: sql, type: TEXT, doc: "The SELECT the view was compiled from, references resolved." }
+    - { name: compiled_at, type: TEXT, doc: "RFC 3339 time of the open that compiled it." }
+  tests:
+    - { not_null: view }
+    - { unique: view }
+- name: model_column
+  version: 1
+  description: "Model columns: each model's contract at its current version, in column order."
+  columns:
+    - { name: view, type: TEXT, doc: "The model's view (`v_model.view`)." }
+    - { name: position, type: INT, doc: "0-based column position." }
+    - { name: name, type: "", doc: "Column name." }
+    - { name: sql_type, type: "", doc: "The column's SQLite declared type; empty for a computed column." }
+    - { name: doc, type: "", doc: "What the column holds." }
+- name: model_lineage
+  version: 1
+  description: "Model lineage: what each model reads directly — another model (`ref`, by view) or a table (`source`). Confirmed at compile against what SQLite reports the view reading."
+  columns:
+    - { name: view, type: TEXT, doc: "The reading model's view." }
+    - { name: input, type: TEXT, doc: "The view (`ref`) or table (`source`) it reads." }
+    - { name: kind, type: TEXT, doc: "`ref` or `source`." }
+- name: model_test
+  version: 1
+  description: "Model tests: the last result of each model's declared tests (`not_null`, `unique`, `accepted_values`, `relationships`, `sql`)."
+  columns:
+    - { name: view, type: TEXT, doc: "The tested model's view." }
+    - { name: test, type: TEXT, doc: "The test, e.g. `unique(id)`." }
+    - { name: state, type: TEXT, doc: "`passed`, `failed` (rows break it) or `error` (it didn't run)." }
+    - { name: detail, type: TEXT, doc: "How many rows broke it, or the error; NULL when passed." }
+    - { name: ran_at, type: TEXT, doc: "RFC 3339 time it ran." }

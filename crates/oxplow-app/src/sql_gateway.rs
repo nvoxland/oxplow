@@ -7,7 +7,7 @@
 //! app joins them — the metric function (P4.5) and model freshness
 //! (P4.6).
 
-use oxplow_db::{Database, Reads, SchemaEntity, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult};
+use oxplow_db::{Database, Reads, SemanticLayer, SqlCell, SqlQuery, SqlQueryResult};
 use oxplow_domain::DomainError;
 
 #[derive(Clone)]
@@ -44,13 +44,8 @@ impl SqlGateway {
         self.layer.check(sql).await
     }
 
-    /// The name of every view (until models replace the catalog, P4.2).
+    /// The name of every view in the database.
     pub async fn view_names(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.layer.view_names().await
-    }
-
-    /// The documented core views (until models replace the catalog, P4.2).
-    pub async fn describe_schema(&self) -> Result<Vec<SchemaEntity>, DomainError> {
-        self.layer.describe_schema().await
     }
 }

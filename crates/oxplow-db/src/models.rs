@@ -335,6 +335,37 @@ pub fn view_columns(conn: &Connection, view: &str) -> Result<Vec<(String, String
     Ok(cols)
 }
 
+/// Drop every model's view (before the migrations run). A database from
+/// before the registry has none recorded.
+pub fn drop_all(conn: &Connection) -> Result<(), DomainError> {
+    let has_registry: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(map_sql_err)?;
+    if !has_registry {
+        return Ok(());
+    }
+    let views: Vec<String> = {
+        let mut st = conn
+            .prepare("SELECT view FROM model")
+            .map_err(map_sql_err)?;
+        let rows = st
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(map_sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_sql_err)?;
+        rows
+    };
+    for view in views {
+        conn.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
+            .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Compile the core models on `conn` (after migrations, at every open).
 pub fn compile_core(conn: &mut Connection) -> Result<(), DomainError> {
     let sources = core_sources()?;

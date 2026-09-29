@@ -1,6 +1,7 @@
-//! The full semantic-layer catalog: core `v_*` views plus every entity
-//! extensions declare through sources. One place, so the IPC and MCP
-//! `describe_schema` can't disagree. See `.context/semantic-layer.md`.
+//! The full semantic-layer catalog: every model (`v_model` and
+//! `v_model_column`, P4.2) plus every entity extensions declare through
+//! sources. One place, so the IPC and MCP `describe_schema` can't
+//! disagree. See `.context/semantic-layer.md`.
 
 use std::path::Path;
 
@@ -9,14 +10,15 @@ use oxplow_db::{SchemaColumn, SchemaEntity, SchemaRelation, SqlCell};
 use crate::extension_sources::ColumnType;
 use oxplow_domain::DomainError;
 
-/// Core entities first, then extension entities (owner = extension
-/// name), read from `root/oxplow/extensions/`.
+/// The models first (the registry, with each one's contract), then
+/// extension entities (owner = extension name), read from
+/// `root/oxplow/extensions/`.
 pub async fn describe_schema(
     layer: &crate::sql_gateway::SqlGateway,
     catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<SchemaEntity>, DomainError> {
-    let mut all = layer.describe_schema().await?;
+    let mut all = models(layer).await?;
     let existing = layer.view_names().await?;
     for ext in catalog.get(root).iter() {
         for source in &ext.sources {
@@ -50,6 +52,47 @@ pub async fn describe_schema(
                         })
                         .collect(),
                     available: existing.contains(&e.view),
+                });
+            }
+        }
+    }
+    Ok(all)
+}
+
+/// Every compiled model with its columns, as the registry records them.
+async fn models(layer: &crate::sql_gateway::SqlGateway) -> Result<Vec<SchemaEntity>, DomainError> {
+    let out = layer
+        .query_sql(
+            "SELECT m.view, m.description, m.owner, c.name, c.sql_type, c.doc
+               FROM v_model m LEFT JOIN v_model_column c ON c.view = m.view
+              ORDER BY m.owner <> 'core', m.view, c.position",
+            vec![],
+            Some(oxplow_db::semantic_layer::MAX_ROW_LIMIT),
+        )
+        .await?;
+    let text = |c: &SqlCell| match c {
+        SqlCell::Text(t) => t.clone(),
+        _ => String::new(),
+    };
+    let mut all: Vec<SchemaEntity> = Vec::new();
+    for row in &out.rows {
+        let view = text(&row[0]);
+        if all.last().is_none_or(|e| e.name != view) {
+            all.push(SchemaEntity {
+                name: view,
+                description: text(&row[1]),
+                owner: text(&row[2]),
+                columns: Vec::new(),
+                relations: Vec::new(),
+                available: true,
+            });
+        }
+        if !matches!(row[3], SqlCell::Null(())) {
+            if let Some(e) = all.last_mut() {
+                e.columns.push(SchemaColumn {
+                    name: text(&row[3]),
+                    sql_type: text(&row[4]),
+                    doc: text(&row[5]),
                 });
             }
         }

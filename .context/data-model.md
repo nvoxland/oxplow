@@ -24,6 +24,15 @@ to preserve and only a single instance existed.)
 > new migration — tests stay green, the app runs, the schema change just never
 > happens. Don't remove that build script.
 
+**Migrations never create views (P4.2).** A published view is a model file
+(`crates/oxplow-db/models/`, see [semantic-layer.md](./semantic-layer.md)
+"Models"). `migrate_and_compile` drops every model's view, runs the
+migrations, then compiles the models — so a migration that alters or drops
+a column never has to work around a view that reads it; the model that
+reads it is fixed in the same change, and the compile at open says so if
+it isn't. The build script embeds `models/` the same way
+(`rerun-if-changed=models`).
+
 **DB dispatch is gated to the pool size (tsk131).** `Database::call`,
 `call_mut`, and `transaction` each take a `tokio::sync::Semaphore` permit —
 sized to the r2d2 pool (`max_size`) — *before* `spawn_blocking`, and hold it for

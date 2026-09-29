@@ -452,9 +452,12 @@ pub enum DbInitError {
     Models(String),
 }
 
-/// Bring a database to this build: apply the migrations, then compile the
-/// core models (their views are recreated at every open, P4.2).
+/// Bring a database to this build: drop the model views, apply the
+/// migrations, then compile the models (P4.2). The views are recreated at
+/// every open, so a migration never works around one — and never creates
+/// one: a published view is a model file.
 pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
+    crate::models::drop_all(conn).map_err(|e| DbInitError::Models(e.to_string()))?;
     embedded::migrations::runner()
         .run(conn)
         .map_err(|e| DbInitError::Migration(e.to_string()))?;
@@ -1265,6 +1268,44 @@ mod tests {
                 [],
             )
             .is_err());
+    }
+
+    /// P4.2 (tsk487): the core models reproduce, column for column and
+    /// type for type, every view the migrations made before models existed
+    /// (V104) — the sweep moved them without changing a contract. A model
+    /// past version 1 has moved on, so it is compared no more.
+    #[test]
+    fn the_core_models_reproduce_the_views_the_migrations_made() {
+        let mut old = rusqlite::Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(104))
+            .run(&mut old)
+            .unwrap();
+        let mut new = rusqlite::Connection::open_in_memory().unwrap();
+        migrate_and_compile(&mut new).unwrap();
+        let views: Vec<String> = old
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(views.len(), 49);
+        for view in views {
+            let version: i64 = new
+                .query_row("SELECT version FROM model WHERE view = ?1", [&view], |r| {
+                    r.get(0)
+                })
+                .unwrap_or_else(|_| panic!("{view} is not a model"));
+            if version > 1 {
+                continue;
+            }
+            assert_eq!(
+                crate::models::view_columns(&new, &view).unwrap(),
+                crate::models::view_columns(&old, &view).unwrap(),
+                "{view}"
+            );
+        }
     }
 
     /// P3.2 (tsk472): V102 only adds — every agent-activity row survives,

@@ -158,8 +158,13 @@ Declared tests (`not_null`, `unique`, `accepted_values`,
 `error`). A core model's failing test is recorded, never a boot failure: a
 data problem in someone's database mustn't make it unopenable
 (`every_core_model_passes_its_tests_on_an_empty_database` keeps the
-declarations honest). **Built so far (P4.2a):** the compiler and registry
-with `v_stream`; the other views move in P4.2b.
+declarations honest). **Built (P4.2, tsk487):** all 49 core views are
+models (`the_core_models_reproduce_the_views_the_migrations_made` proves
+each one's columns and types equal the migration view it replaced),
+`v_model*` are models over the registry, and `CATALOG` /
+`SemanticLayer::describe_schema` are gone. Views are dropped before the
+migrations and compiled after them at every writable open; a read-only
+open (`oxplow plugin check`) uses what the last open compiled.
 
 ## The `v_*` contract (current)
 
@@ -167,7 +172,10 @@ Every shipped entity is exposed as a stable **read-only SQL view**. They
 are the **versioned contract**: lenses, extensions and agents read these,
 never the physical tables, which stay internal and free to change.
 
-**Shipped today** (migrations `V73__semantic_layer_views.sql`, `V74__semantic_layer_activity_views.sql`):
+**Shipped today** — each a core model, `crates/oxplow-db/models/<name>.sql`
+(see "Models"); the version history in the parentheses is the migrations
+that made them before P4.2. `v_model`, `v_model_column`, `v_model_lineage`
+and `v_model_test` are the catalog of all of them:
 
 | View | What it is |
 |---|---|
@@ -211,15 +219,16 @@ never the physical tables, which stay internal and free to change.
 
 Still target: the rest of the shipped-sources table above (tsk327).
 
-**Column docs live in code, not here.** `CATALOG` in
-`crates/oxplow-db/src/semantic_layer.rs` documents every column, and
-`describe_schema` serves it. The test `schema_docs_match_the_views_exactly`
-fails if a view's columns and its docs disagree, in name or in order. So
-changing a view means:
+**Column docs live with the model, not here.** `models.yaml` documents
+every column, and `describe_schema` (IPC and MCP) serves the registry
+(`v_model` + `v_model_column`, plus extension entities). The compile at
+open fails if a view's columns and its declared ones disagree, in name,
+type or order. So changing a view means:
 
-1. a new migration that drops and recreates it;
-2. updating its `CATALOG` entry;
-3. noting the change here if it breaks readers (removed or renamed
+1. editing its `<name>.sql` and its `models.yaml` entry — and, when the
+   columns change, bumping its `version` (a changed contract at the same
+   version is refused);
+2. noting the change here if it breaks readers (removed or renamed
    columns).
 
 An extension entity `<entity>` owned by extension `<ext>` is exposed as
