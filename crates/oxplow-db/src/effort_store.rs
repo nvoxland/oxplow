@@ -1019,7 +1019,7 @@ impl EffortStore for SqliteEffortStore {
     ) -> Result<Option<Effort>, DomainError> {
         let thread = *thread;
         self.db
-            .transaction(move |tx| find_single_open_for_thread_tx(tx, thread))
+            .read(move |tx| find_single_open_for_thread_tx(tx, thread))
             .await
     }
 

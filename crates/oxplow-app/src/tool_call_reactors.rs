@@ -162,7 +162,7 @@ impl EffortClaimConsumer {
     async fn worktree(&self, thread: ThreadId) -> Result<PathBuf, DomainError> {
         let wt = self
             .db
-            .transaction(move |tx| {
+            .read(move |tx| {
                 use rusqlite::OptionalExtension as _;
                 let wt: Option<String> = tx
                     .query_row(

@@ -438,7 +438,7 @@ impl EventPump {
     ) -> Result<DeadLetter, DomainError> {
         let event = self
             .db
-            .transaction(move |tx| event_by_seq_tx(tx, seq))
+            .read(move |tx| event_by_seq_tx(tx, seq))
             .await?
             .ok_or(DomainError::NotFound)?;
         retryable(&event, id)?;

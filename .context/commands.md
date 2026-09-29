@@ -60,9 +60,10 @@ A command is a typed operation named `<capability|plugin>.<verb>`
    own.
 6. Post-commit: wake the event pump.
 
-A `Read` command stops after step 4: its handler runs on a connection
-and the outcome has `audit_id: None`, `event_id: None`. A `Read` must
-not write — nothing records it.
+A `Read` command stops after step 4: its handler runs in
+`Database::read` — a snapshot that is always rolled back, so a write it
+makes never lands (nothing would audit it; tsk513) — and the outcome has
+`audit_id: None`, `event_id: None`.
 
 `CommandBus::undo(actor, audit_id, confirmed)` loads the row, refuses a
 run that didn't complete, was already undone or has no inverse, runs the

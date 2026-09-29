@@ -492,8 +492,10 @@ impl CommandBus {
                 let schemas = self.log.schemas().clone();
                 let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let failed_c = failed.clone();
+                // A read snapshot, always rolled back: a Read handler's
+                // stray write can't land (it isn't audited).
                 self.db
-                    .transaction(move |tx| {
+                    .read(move |tx| {
                         let ctx = TxCtx {
                             conn: tx,
                             actor: &actor,
@@ -910,7 +912,7 @@ mod tests {
 
     async fn kv(db: &Database, k: &str) -> Option<String> {
         let k = k.to_string();
-        db.transaction(move |tx| {
+        db.read(move |tx| {
             Ok(tx
                 .query_row("SELECT v FROM kv WHERE k = ?1", [&k], |r| {
                     r.get::<_, String>(0)
@@ -926,6 +928,20 @@ mod tests {
             thread_id: Some(ThreadId::new(7)),
             stream_id: None,
         }
+    }
+
+    /// A `Read` handler runs in a snapshot that is always rolled back, so
+    /// a write it makes (by mistake) never lands — it isn't audited.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_commands_write_never_lands() {
+        let (db, bus) = bus();
+        let mut spec = kv_spec("kv.sneaky", Invokers::ALL, Confirm::Never);
+        spec.effect = CommandEffect::Read;
+        bus.register(Command::new(spec, kv_set()).unwrap()).unwrap();
+        bus.run(&agent(), "kv.sneaky", json!({"k": "a", "v": "1"}), false)
+            .await
+            .unwrap();
+        assert_eq!(kv(&db, "a").await, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -331,7 +331,9 @@ impl Database {
     /// back, so a stray write in `f` never lands.
     pub async fn read<R, F>(&self, f: F) -> Result<R, oxplow_domain::DomainError>
     where
-        F: FnOnce(&rusqlite::Connection) -> Result<R, oxplow_domain::DomainError> + Send + 'static,
+        F: FnOnce(&rusqlite::Transaction<'_>) -> Result<R, oxplow_domain::DomainError>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         self.call_mut(move |conn| {
