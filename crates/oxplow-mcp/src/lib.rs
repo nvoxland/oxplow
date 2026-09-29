@@ -1469,6 +1469,7 @@ impl OxplowMcp {
                     oxplow_app::extensions::lens_context(&self.services, None, Some(thread)).await;
                 lens_run = match oxplow_app::extensions::run_lens(
                     &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+                    &self.services.extension_catalog,
                     &root,
                     lens_id,
                     lens_params,
@@ -1816,6 +1817,7 @@ impl OxplowMcp {
             (Some(url), None) => {
                 oxplow_app::extensions::review_extension(
                     &layer,
+                    &self.services.extension_catalog,
                     &root,
                     url,
                     p.git_ref.as_deref(),
@@ -1823,7 +1825,15 @@ impl OxplowMcp {
                 )
                 .await
             }
-            (None, Some(name)) => oxplow_app::extensions::review_update(&layer, &root, name).await,
+            (None, Some(name)) => {
+                oxplow_app::extensions::review_update(
+                    &layer,
+                    &self.services.extension_catalog,
+                    &root,
+                    name,
+                )
+                .await
+            }
             _ => {
                 return Err(McpError::invalid_params(
                     "pass either git_url (install) or name (update)",
@@ -1923,7 +1933,7 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(params.0.stream_id.as_deref())
             .await;
-        json_result(&oxplow_app::extensions::load_extensions(&root))
+        json_result(&*self.services.extension_catalog.get(&root))
     }
 
     #[tool(
@@ -1941,11 +1951,13 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(params.0.stream_id.as_deref())
             .await;
-        let lenses: Vec<oxplow_app::extensions::Lens> =
-            oxplow_app::extensions::load_extensions(&root)
-                .into_iter()
-                .flat_map(|e| e.lenses)
-                .collect();
+        let lenses: Vec<oxplow_app::extensions::Lens> = self
+            .services
+            .extension_catalog
+            .get(&root)
+            .iter()
+            .flat_map(|e| e.lenses.clone())
+            .collect();
         json_result(&lenses)
     }
 
@@ -1961,8 +1973,11 @@ impl OxplowMcp {
             .git
             .resolve_repo_dir(p.stream_id.as_deref())
             .await;
-        let lens =
-            oxplow_app::extensions::find_lens(&root, &p.id).map_err(|e| lens_error(&p.id, e))?;
+        let lens = self
+            .services
+            .extension_catalog
+            .find_lens(&root, &p.id)
+            .map_err(|e| lens_error(&p.id, e))?;
         json_result(&lens)
     }
 
@@ -1992,6 +2007,7 @@ impl OxplowMcp {
             .await?;
         let run = oxplow_app::extensions::run_lens(
             &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &self.services.extension_catalog,
             &root,
             &p.id,
             overrides,
@@ -2060,6 +2076,7 @@ impl OxplowMcp {
             .await;
         let ext = oxplow_app::extensions::validate_extension(
             &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &self.services.extension_catalog,
             &root,
             &p.name,
         )
@@ -2088,6 +2105,7 @@ impl OxplowMcp {
         let root = self.services.git.resolve_repo_dir(None).await;
         let schema = oxplow_app::semantic_catalog::describe_schema(
             &oxplow_db::SemanticLayer::new(self.services.db.clone()),
+            &self.services.extension_catalog,
             &root,
         )
         .await

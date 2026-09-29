@@ -35,7 +35,7 @@ pub async fn run_lens_action(
     params: BTreeMap<String, SqlCell>,
     ctx: &extensions::LensContext,
 ) -> Result<LensActionResult, DomainError> {
-    let lens = extensions::find_lens(lens_root, lens_id)?;
+    let lens = svc.extension_catalog.find_lens(lens_root, lens_id)?;
     let action = lens
         .actions
         .iter()
@@ -50,7 +50,15 @@ pub async fn run_lens_action(
     match action.kind {
         LensActionKind::Copy => {
             let layer = SemanticLayer::new(svc.db.clone());
-            let run = extensions::run_lens(&layer, lens_root, lens_id, params, ctx).await?;
+            let run = extensions::run_lens(
+                &layer,
+                &svc.extension_catalog,
+                lens_root,
+                lens_id,
+                params,
+                ctx,
+            )
+            .await?;
             Ok(LensActionResult {
                 text: Some(extensions::lens_text(&run)),
                 report: None,

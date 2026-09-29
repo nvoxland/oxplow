@@ -87,6 +87,8 @@ pub struct Sources<'a> {
     pub secrets: &'a dyn SecretStore,
     /// What a derived source's `input` is read through.
     pub layer: SemanticLayer,
+    /// The loaded-extensions cache (`Services.extension_catalog`).
+    pub catalog: &'a crate::extension_catalog::ExtensionCatalog,
 }
 
 impl<'a> Sources<'a> {
@@ -98,6 +100,7 @@ impl<'a> Sources<'a> {
             store: &svc.ext_source_store,
             secrets: svc.secrets.as_ref(),
             layer: SemanticLayer::new(svc.db.clone()),
+            catalog: &svc.extension_catalog,
         }
     }
 }
@@ -128,9 +131,12 @@ pub fn set_source_credential(
     name: &str,
     value: Option<&str>,
 ) -> Result<(), DomainError> {
-    let ext = crate::extensions::load_extensions(ctx.root)
-        .into_iter()
+    let ext = ctx
+        .catalog
+        .get(ctx.root)
+        .iter()
         .find(|e| e.name == extension)
+        .cloned()
         .ok_or(DomainError::NotFound)?;
     if !ext
         .sources
@@ -153,7 +159,7 @@ pub fn set_source_credential(
 pub async fn list_sources(ctx: &Sources<'_>) -> Result<Vec<SourceListing>, DomainError> {
     let states = ctx.store.list_states().await?;
     let mut out = Vec::new();
-    for ext in crate::extensions::load_extensions(ctx.root) {
+    for ext in ctx.catalog.get(ctx.root).iter().cloned() {
         let ext_dir = ctx.root.join(&ext.path);
         for spec in ext.sources {
             // A derived source can't do anything an approval would guard.
@@ -696,9 +702,12 @@ async fn produce(
     reviewed: Option<&str>,
 ) -> Result<(SourceSpec, Result<SourceOutput, String>), RunSourceError> {
     let (root, approvals) = (ctx.root, ctx.approvals);
-    let ext = crate::extensions::load_extensions(root)
-        .into_iter()
+    let ext = ctx
+        .catalog
+        .get(root)
+        .iter()
         .find(|e| e.name == extension)
+        .cloned()
         .ok_or(RunSourceError::NotFound)?;
     let spec = ext
         .sources
@@ -1149,6 +1158,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
 
         let err = run_source(&ctx, "my-gh", "gh", None).await.unwrap_err();
@@ -1313,6 +1323,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
 
         let list = list_sources(&ctx).await.unwrap();
@@ -1339,6 +1350,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let other = list_sources(&elsewhere).await.unwrap();
         assert!(
@@ -1440,6 +1452,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         // No approval asked for, and the listing says it can run.
         assert!(list_sources(&ctx).await.unwrap().iter().all(|l| l.approved));
@@ -1492,6 +1505,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let preview = preview_source(&ctx, "work", "star").await.unwrap();
         assert_eq!(preview.entities.len(), 1);
@@ -1543,6 +1557,7 @@ mod tests {
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         script(
             &ext,
@@ -1638,6 +1653,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         assert!(list_sources(&ctx).await.unwrap()[0].network_enforced);
         run_source(&ctx, "net", "s", Some(&version_of(&ctx, "net", "s").await))
@@ -1732,6 +1748,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             store: &store,
             secrets: &secrets,
             layer: oxplow_db::SemanticLayer::new(db.clone()),
+            catalog: &crate::extension_catalog::ExtensionCatalog::new(),
         };
         let seen = list_sources(&ctx).await.unwrap()[0]
             .version

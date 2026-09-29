@@ -250,6 +250,7 @@ mod tests {
             .collect();
         let run = crate::extensions::run_lens(
             &layer,
+            &f.svc.extension_catalog,
             f._dir.path(),
             id,
             params,
@@ -605,10 +606,18 @@ mod tests {
         let first = |id: &'static str, ctx: crate::extensions::LensContext| {
             let layer = layer.clone();
             let root = f._dir.path().to_path_buf();
+            let catalog = f.svc.extension_catalog.clone();
             async move {
-                let run = crate::extensions::run_lens(&layer, &root, id, Default::default(), &ctx)
-                    .await
-                    .unwrap();
+                let run = crate::extensions::run_lens(
+                    &layer,
+                    &catalog,
+                    &root,
+                    id,
+                    Default::default(),
+                    &ctx,
+                )
+                .await
+                .unwrap();
                 serde_json::to_value(&run.result.rows).unwrap()
             }
         };
@@ -644,6 +653,7 @@ mod tests {
         let alert = |run: crate::extensions::LensRun| run.alert.unwrap();
         let run = crate::extensions::run_lens(
             &layer,
+            &f.svc.extension_catalog,
             f._dir.path(),
             "oxplow-review/waiting-on-me",
             Default::default(),
@@ -663,6 +673,7 @@ mod tests {
         }
         let run = crate::extensions::run_lens(
             &layer,
+            &f.svc.extension_catalog,
             f._dir.path(),
             "oxplow-review/waiting-on-me",
             Default::default(),

@@ -41,6 +41,7 @@ pub mod entity_metrics;
 pub mod event_pump;
 pub mod events;
 pub mod exec_consent;
+pub mod extension_catalog;
 pub mod extension_sources;
 pub mod extensions;
 pub mod file_ref_version;
@@ -405,6 +406,9 @@ pub struct Services {
     /// Delivers the log to its consumers (checkpoints, dead letters).
     /// Producers `wake()` it after they commit; `boot.rs` spawns the loop.
     pub event_pump: Arc<event_pump::EventPump>,
+    /// Loaded extensions per worktree root, reloaded when a file under
+    /// `oxplow/extensions/` or the project config changes.
+    pub extension_catalog: Arc<extension_catalog::ExtensionCatalog>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
@@ -757,6 +761,7 @@ impl Services {
         // The metric runner (config-declared gauges → substrate). Holds leaf
         // Arcs only (never `Arc<Services>`); injected into TaskService for the
         // on-effort-complete ride-along and spawned as a loop in `boot.rs`.
+        let extension_catalog = Arc::new(extension_catalog::ExtensionCatalog::new());
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
             thread_store.clone(),
@@ -768,7 +773,8 @@ impl Services {
         )
         .with_fact_store(fact_store.clone())
         .with_background_tasks(background_tasks.clone())
-        .with_approvals(approvals.clone());
+        .with_approvals(approvals.clone())
+        .with_extension_catalog(extension_catalog.clone());
         let tasks = tasks
             .with_effort_store(effort_store.clone())
             .with_snapshot_captures(snapshot_captures.clone())
@@ -834,6 +840,7 @@ impl Services {
             event_log_store,
             event_schemas,
             event_pump,
+            extension_catalog,
             commands,
             wiki_page_store,
             page_visit_store,

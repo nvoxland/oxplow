@@ -13,11 +13,12 @@ use oxplow_domain::DomainError;
 /// name), read from `root/oxplow/extensions/`.
 pub async fn describe_schema(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<SchemaEntity>, DomainError> {
     let mut all = layer.describe_schema().await?;
     let existing = existing_views(layer).await?;
-    for ext in crate::extensions::load_extensions(root) {
+    for ext in catalog.get(root).iter() {
         for source in &ext.sources {
             for e in &source.entities {
                 all.push(SchemaEntity {
@@ -98,10 +99,11 @@ pub struct EntityRowCount {
 /// Row counts for every entity in [`describe_schema`] (Settings → Data).
 pub async fn row_counts(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
 ) -> Result<Vec<EntityRowCount>, DomainError> {
     let mut out = Vec::new();
-    for e in describe_schema(layer, root).await? {
+    for e in describe_schema(layer, catalog, root).await? {
         let rows = if e.available {
             // Names come from the catalog (core views and validated
             // `v_<ext>_<entity>` names), never from user input.
@@ -137,7 +139,13 @@ mod tests {
         .unwrap();
         let db = Database::in_memory();
         let layer = SemanticLayer::new(db.clone());
-        let counts = row_counts(&layer, root.path()).await.unwrap();
+        let counts = row_counts(
+            &layer,
+            &crate::extension_catalog::ExtensionCatalog::new(),
+            root.path(),
+        )
+        .await
+        .unwrap();
         let get = |n: &str| counts.iter().find(|c| c.name == n).map(|c| c.rows);
         assert_eq!(get("v_task"), Some(Some(0)));
         assert_eq!(get("v_my_gh_pr"), Some(None), "not synced: no count");
@@ -154,7 +162,13 @@ mod tests {
             )])
             .await
             .unwrap();
-        let counts = row_counts(&layer, root.path()).await.unwrap();
+        let counts = row_counts(
+            &layer,
+            &crate::extension_catalog::ExtensionCatalog::new(),
+            root.path(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             counts.iter().find(|c| c.name == "v_my_gh_pr").unwrap().rows,
             Some(2)
@@ -174,7 +188,13 @@ mod tests {
         let db = Database::in_memory();
         let layer = SemanticLayer::new(db.clone());
 
-        let all = describe_schema(&layer, root.path()).await.unwrap();
+        let all = describe_schema(
+            &layer,
+            &crate::extension_catalog::ExtensionCatalog::new(),
+            root.path(),
+        )
+        .await
+        .unwrap();
         assert!(all
             .iter()
             .any(|e| e.name == "v_task" && e.owner == "core" && e.available));
@@ -206,7 +226,13 @@ mod tests {
             )])
             .await
             .unwrap();
-        let all = describe_schema(&layer, root.path()).await.unwrap();
+        let all = describe_schema(
+            &layer,
+            &crate::extension_catalog::ExtensionCatalog::new(),
+            root.path(),
+        )
+        .await
+        .unwrap();
         assert!(
             all.iter()
                 .find(|e| e.name == "v_my_gh_pr")

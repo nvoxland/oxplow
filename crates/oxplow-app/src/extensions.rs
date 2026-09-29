@@ -1240,46 +1240,19 @@ fn apply_disabled(mut ext: Extension, disabled: &[String]) -> Extension {
     ext
 }
 
-fn disabled_error(name: &str) -> DomainError {
+pub(crate) fn disabled_error(name: &str) -> DomainError {
     DomainError::Invalid(format!(
         "extension `{name}` is disabled in .oxplow/project.yaml (extensions.disabled); enable it in Settings → Extensions"
     ))
 }
 
-/// Load the extension named `name`, if its folder exists.
-fn load_named(root: &Path, name: &str) -> Result<Extension, DomainError> {
-    if oxplow_config::disabled_extensions(root)
-        .iter()
-        .any(|d| d == name)
-    {
-        return Err(disabled_error(name));
-    }
-    if let Some(b) = crate::bundled_extensions::find(name) {
-        return Ok(load_one(
-            &Embedded(b),
-            b.name,
-            &format!("bundled:{}", b.name),
-            "bundled",
-        ));
-    }
-    if name.is_empty()
-        || name.contains(['/', '\\', '.'])
-        || !root.join(EXTENSIONS_DIR).join(name).is_dir()
-    {
-        return Err(DomainError::NotFound);
-    }
-    let rel = format!("{EXTENSIONS_DIR}/{name}");
-    Ok(load_one(&Disk(root.join(&rel)), name, &rel, "project"))
-}
-
-/// Find one lens by `<extension>/<slug>`.
-pub fn find_lens(root: &Path, id: &str) -> Result<Lens, DomainError> {
-    let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
-    load_named(root, ext)?
-        .lenses
-        .into_iter()
-        .find(|l| l.slug == slug)
-        .ok_or(DomainError::NotFound)
+/// Find one lens by `<extension>/<slug>` through the catalog cache.
+pub fn find_lens(
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    id: &str,
+) -> Result<Lens, DomainError> {
+    catalog.find_lens(root, id)
 }
 
 /// Where a lens is being looked at from: the viewer's current stream and
@@ -1347,23 +1320,28 @@ pub async fn lens_context(
 /// so a typo doesn't silently fall back to a default.
 pub async fn run_lens(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     id: &str,
     params: BTreeMap<String, SqlCell>,
     ctx: &LensContext,
 ) -> Result<LensRun, DomainError> {
-    let lens = find_lens(root, id)?;
+    let lens = catalog.find_lens(root, id)?;
     execute(layer, lens, params, ctx)
         .await
         .map_err(|e| match e {
-            DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(root, &m)),
+            DomainError::Invalid(m) => DomainError::Invalid(explain_unsynced(catalog, root, &m)),
             other => other,
         })
 }
 
 /// A lens reading a source entity before its first sync fails with
 /// SQLite's bare "no such table: v_x". Say which source to run instead.
-fn explain_unsynced(root: &Path, message: &str) -> String {
+fn explain_unsynced(
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    message: &str,
+) -> String {
     let Some(rest) = message.split("no such table: ").nth(1) else {
         return message.to_string();
     };
@@ -1371,7 +1349,7 @@ fn explain_unsynced(root: &Path, message: &str) -> String {
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
-    for ext in load_extensions(root) {
+    for ext in catalog.get(root).iter() {
         for source in &ext.sources {
             if source.entities.iter().any(|e| e.view == view) {
                 let lens = message.split(':').next().unwrap_or("lens");
@@ -1440,17 +1418,23 @@ async fn execute(
 /// return as errors.
 pub async fn validate_extension(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
 ) -> Result<Extension, DomainError> {
-    let mut ext = load_named(root, name)?;
-    check_extension(layer, root, &mut ext).await;
+    let mut ext = catalog.named(root, name)?;
+    check_extension(layer, catalog, root, &mut ext).await;
     Ok(ext)
 }
 
 /// Dry-run a loaded extension's advisories and lenses, appending what's
 /// wrong to its `errors`. `root` names sources for an unsynced view.
-async fn check_extension(layer: &SemanticLayer, root: &Path, ext: &mut Extension) {
+async fn check_extension(
+    layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
+    root: &Path,
+    ext: &mut Extension,
+) {
     for a in ext.advisories.clone() {
         let run = layer
             .query_sql_named(
@@ -1486,6 +1470,7 @@ async fn check_extension(layer: &SemanticLayer, root: &Path, ext: &mut Extension
         let id = lens.id.clone();
         match execute(layer, lens, BTreeMap::new(), &LensContext::default()).await {
             Err(e) => ext.errors.push(explain_unsynced(
+                catalog,
                 root,
                 &e.to_string().replacen("invalid value: ", "", 1),
             )),
@@ -1549,6 +1534,7 @@ pub struct ExtensionReview {
 /// `replacing` names the installed extension an update must match.
 pub async fn review_extension(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     git_url: &str,
     git_ref: Option<&str>,
@@ -1567,7 +1553,7 @@ pub async fn review_extension(
     };
     let mut extension = fetched.load();
     let load_errors = extension.errors.len();
-    check_extension(layer, root, &mut extension).await;
+    check_extension(layer, catalog, root, &mut extension).await;
     let problems = extension.errors.split_off(load_errors);
     Ok(ExtensionReview {
         extension,
@@ -1582,12 +1568,14 @@ pub async fn review_extension(
 /// source.
 pub async fn review_update(
     layer: &SemanticLayer,
+    catalog: &crate::extension_catalog::ExtensionCatalog,
     root: &Path,
     name: &str,
 ) -> Result<ExtensionReview, DomainError> {
     let source = installed_source(root, name)?;
     review_extension(
         layer,
+        catalog,
         root,
         &source.git,
         source.git_ref.as_deref(),
@@ -1628,9 +1616,25 @@ pub fn update_extension(
     )
 }
 
+/// One extension by name, read from disk now — for the write paths
+/// (install, update, save), which must see their own result whatever a
+/// cache holds. Reads go through `extension_catalog::ExtensionCatalog`.
+fn load_fresh(root: &Path, name: &str) -> Result<Extension, DomainError> {
+    let all = load_extensions(root);
+    let ext = all
+        .iter()
+        .find(|e| e.name == name && e.origin == "bundled")
+        .or_else(|| all.iter().find(|e| e.name == name))
+        .ok_or(DomainError::NotFound)?;
+    if !ext.enabled {
+        return Err(disabled_error(name));
+    }
+    Ok(ext.clone())
+}
+
 /// Where an installed extension came from.
 fn installed_source(root: &Path, name: &str) -> Result<ExtensionSource, DomainError> {
-    load_named(root, name)?.source.ok_or_else(|| {
+    load_fresh(root, name)?.source.ok_or_else(|| {
         DomainError::Invalid(format!(
             "extension `{name}` wasn't installed from git (no {SOURCE_FILE}); edit it in place instead"
         ))
@@ -1800,7 +1804,7 @@ fn install_from_git(
     let yaml = serde_yaml::to_string(&source)
         .map_err(|e| DomainError::Storage(format!("extension install: {e}")))?;
     std::fs::write(target.join(SOURCE_FILE), yaml).map_err(storage)?;
-    Ok(load_named(root, &name)
+    Ok(load_fresh(root, &name)
         .unwrap_or_else(|_| empty_extension(&name, &format!("{EXTENSIONS_DIR}/{name}"), "project")))
 }
 
@@ -1890,7 +1894,11 @@ pub fn save_lens(
     })
     .map_err(|e| DomainError::Storage(format!("save lens: {e}")))?;
     std::fs::write(&file, body).map_err(storage)?;
-    find_lens(root, &format!("{extension}/{slug}"))
+    load_fresh(root, extension)?
+        .lenses
+        .into_iter()
+        .find(|l| l.slug == slug)
+        .ok_or(DomainError::NotFound)
 }
 
 /// The on-disk shape [`save_lens`] writes (a subset of [`LensFile`]).
@@ -1908,6 +1916,10 @@ mod tests {
     use super::*;
     use oxplow_db::Database;
     use std::fs;
+
+    fn cat() -> crate::extension_catalog::ExtensionCatalog {
+        crate::extension_catalog::ExtensionCatalog::new()
+    }
 
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
@@ -2057,15 +2069,17 @@ empty: No tasks.
             LENS,
         );
         assert_eq!(
-            find_lens(dir.path(), "review/by-status").unwrap().title,
+            find_lens(&cat(), dir.path(), "review/by-status")
+                .unwrap()
+                .title,
             "Tasks by status"
         );
         assert!(matches!(
-            find_lens(dir.path(), "review/nope"),
+            find_lens(&cat(), dir.path(), "review/nope"),
             Err(DomainError::NotFound)
         ));
         assert!(matches!(
-            find_lens(dir.path(), "nope"),
+            find_lens(&cat(), dir.path(), "nope"),
             Err(DomainError::NotFound)
         ));
     }
@@ -2083,6 +2097,7 @@ empty: No tasks.
 
         let run = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "review/echo",
             BTreeMap::new(),
@@ -2101,6 +2116,7 @@ empty: No tasks.
         over.insert("b".to_string(), SqlCell::Text("three".into()));
         let run = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "review/echo",
             over,
@@ -2132,14 +2148,21 @@ empty: No tasks.
             stream_id: Some(2),
             thread_id: Some(5),
         };
-        let run = run_lens(&sl, dir.path(), "review/mine", BTreeMap::new(), &here)
-            .await
-            .unwrap();
+        let run = run_lens(
+            &sl,
+            &cat(),
+            dir.path(),
+            "review/mine",
+            BTreeMap::new(),
+            &here,
+        )
+        .await
+        .unwrap();
         assert_eq!(rows(run), serde_json::json!([[2, 5]]));
 
         let mut over = BTreeMap::new();
         over.insert("thread_id".to_string(), SqlCell::Int(7));
-        let run = run_lens(&sl, dir.path(), "review/mine", over, &here)
+        let run = run_lens(&sl, &cat(), dir.path(), "review/mine", over, &here)
             .await
             .unwrap();
         assert_eq!(
@@ -2150,6 +2173,7 @@ empty: No tasks.
 
         let run = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "review/mine",
             BTreeMap::new(),
@@ -2203,6 +2227,7 @@ empty: No tasks.
         bad.insert("stauts".to_string(), SqlCell::Text("done".into()));
         let err = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "review/by-status",
             bad,
@@ -2217,6 +2242,7 @@ empty: No tasks.
 
         let err = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "review/broken",
             BTreeMap::new(),
@@ -2251,7 +2277,9 @@ empty: No tasks.
         );
         let sl = layer().await;
 
-        let e = validate_extension(&sl, dir.path(), "review").await.unwrap();
+        let e = validate_extension(&sl, &cat(), dir.path(), "review")
+            .await
+            .unwrap();
         assert_eq!(e.errors.len(), 2, "{:?}", e.errors);
         assert!(e.errors.iter().any(|m| m.contains("review/broken")));
         assert!(e
@@ -2260,7 +2288,7 @@ empty: No tasks.
             .any(|m| m.contains("review/badcol") && m.contains("missing")));
 
         assert!(matches!(
-            validate_extension(&sl, dir.path(), "nope").await,
+            validate_extension(&sl, &cat(), dir.path(), "nope").await,
             Err(DomainError::NotFound)
         ));
     }
@@ -2323,7 +2351,7 @@ empty: No tasks.
         let url = repo.path().to_string_lossy().to_string();
         let sl = layer().await;
 
-        let review = review_extension(&sl, project.path(), &url, None, None)
+        let review = review_extension(&sl, &cat(), project.path(), &url, None, None)
             .await
             .unwrap();
         assert_eq!(review.extension.name, "shared");
@@ -2591,6 +2619,7 @@ empty: No tasks.
         let sl = layer().await;
         let err = run_lens(
             &sl,
+            &cat(),
             dir.path(),
             "gh/all",
             BTreeMap::new(),
@@ -2603,7 +2632,9 @@ empty: No tasks.
             msg.contains("v_gh_pr") && msg.contains("prs") && msg.contains("hasn't synced"),
             "{msg}"
         );
-        let e = validate_extension(&sl, dir.path(), "gh").await.unwrap();
+        let e = validate_extension(&sl, &cat(), dir.path(), "gh")
+            .await
+            .unwrap();
         assert!(e.errors[0].contains("hasn't synced"), "{:?}", e.errors);
     }
 
@@ -2882,17 +2913,17 @@ empty: No tasks.
             .iter()
             .any(|s| s.slot == "effort-review" && s.lens_id == "oxplow-review/inferred-decisions"));
         // The analytics extension's advisory and lens SQL runs too.
-        let a = validate_extension(&layer().await, dir.path(), "oxplow-analytics")
+        let a = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-analytics")
             .await
             .unwrap();
         assert!(a.errors.is_empty(), "{:?}", a.errors);
         // Every bundled lens's SQL runs against a real schema.
-        let v = validate_extension(&layer().await, dir.path(), "oxplow-review")
+        let v = validate_extension(&layer().await, &cat(), dir.path(), "oxplow-review")
             .await
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
         assert_eq!(
-            find_lens(dir.path(), "oxplow-review/decisions")
+            find_lens(&cat(), dir.path(), "oxplow-review/decisions")
                 .unwrap()
                 .title,
             "Decisions Made"
@@ -2918,7 +2949,7 @@ empty: No tasks.
         );
         // The bundled one still wins lookups.
         assert_eq!(
-            find_lens(dir.path(), "oxplow-review/decisions")
+            find_lens(&cat(), dir.path(), "oxplow-review/decisions")
                 .unwrap()
                 .title,
             "Decisions Made"
@@ -3081,7 +3112,7 @@ empty: No tasks.
             ],
             "",
         );
-        let v = validate_extension(&layer().await, d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
             .await
             .unwrap();
         let errs = v.errors.join("\n");
@@ -3299,7 +3330,7 @@ empty: No tasks.
             async move {
                 let mut p = BTreeMap::new();
                 p.insert(k.to_string(), SqlCell::Int(v));
-                run_lens(sl, &root, id, p, &LensContext::default())
+                run_lens(sl, &cat(), &root, id, p, &LensContext::default())
                     .await
                     .unwrap()
                     .alert
@@ -3461,6 +3492,7 @@ empty: No tasks.
         }
         let err = run_lens(
             &layer().await,
+            &cat(),
             dir.path(),
             "review/by-status",
             BTreeMap::new(),
@@ -3487,7 +3519,7 @@ empty: No tasks.
         );
         assert!(ext.errors.join("\n").contains("Bad Id"), "{:?}", ext.errors);
 
-        let v = validate_extension(&layer().await, d.path(), "x")
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x")
             .await
             .unwrap();
         let errs = v.errors.join("\n");

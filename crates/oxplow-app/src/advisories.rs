@@ -144,7 +144,7 @@ pub async fn for_thread(
         _ => None,
     };
     let root = svc.git.resolve_repo_dir(stream_id.as_deref()).await;
-    let extensions = consented(&svc.approvals, crate::extensions::load_extensions(&root));
+    let extensions = consented(&svc.approvals, &svc.extension_catalog.get(&root));
     let layer = SemanticLayer::new(svc.db.clone());
     let hits = svc
         .advisories
@@ -165,10 +165,10 @@ pub async fn for_thread(
 /// git-installed extension can't speak into the agent's context unseen.
 pub fn consented(
     approvals: &crate::exec_consent::ApprovalStore,
-    extensions: Vec<Extension>,
+    extensions: &[Extension],
 ) -> Vec<Extension> {
     extensions
-        .into_iter()
+        .iter()
         .filter(|e| {
             if e.origin == "bundled" || e.advisories.is_empty() {
                 return true;
@@ -177,6 +177,7 @@ pub fn consented(
             p.hash(Path::new(""))
                 .is_ok_and(|h| approvals.is_approved(&p.key(), &h))
         })
+        .cloned()
         .collect()
 }
 
@@ -500,7 +501,7 @@ mod tests {
         let all = vec![shared.clone(), bundled.clone()];
 
         assert_eq!(
-            names(consented(&approvals, all.clone())),
+            names(consented(&approvals, &all)),
             vec![bundled.name.clone()]
         );
 
@@ -508,14 +509,14 @@ mod tests {
         let version = program.hash(dir.path()).unwrap();
         approvals.approve(&program.key(), &version).unwrap();
         assert_eq!(
-            names(consented(&approvals, all.clone())),
+            names(consented(&approvals, &all)),
             vec!["team".to_string(), bundled.name.clone()]
         );
 
         // Changing what it says needs approving again.
         shared.advisories[0].query = "SELECT 'rm -rf everything' AS message".into();
         assert_eq!(
-            names(consented(&approvals, vec![shared, bundled.clone()])),
+            names(consented(&approvals, &[shared, bundled.clone()])),
             vec![bundled.name]
         );
     }

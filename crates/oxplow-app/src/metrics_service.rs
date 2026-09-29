@@ -114,6 +114,9 @@ pub struct MetricsService {
     /// before, minus the per-event disk read). `Arc` so clones of the service
     /// share one cache (and its invalidations).
     global_catalog: Arc<std::sync::Mutex<Option<GlobalCatalog>>>,
+    /// The loaded-extensions cache shared with `Services`; a fresh one
+    /// for a bare `MetricsService` in tests.
+    extensions_cache: Arc<crate::extension_catalog::ExtensionCatalog>,
     /// Per state entity metric: when it was last captured and the value
     /// (tsk322), for the throttle and the unchanged-value skip.
     entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
@@ -213,6 +216,7 @@ impl MetricsService {
             fact_store: None,
             background_tasks: None,
             global_catalog: Arc::new(std::sync::Mutex::new(None)),
+            extensions_cache: Arc::new(crate::extension_catalog::ExtensionCatalog::new()),
             entity_captures: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
@@ -254,6 +258,15 @@ impl MetricsService {
         self.global_dir.clone().or_else(global_config_dir)
     }
 
+    /// Share the loaded-extensions cache with the rest of `Services`.
+    pub fn with_extension_catalog(
+        mut self,
+        catalog: Arc<crate::extension_catalog::ExtensionCatalog>,
+    ) -> Self {
+        self.extensions_cache = catalog;
+        self
+    }
+
     /// Run `f` against the cached global catalog, loading it from disk once on
     /// first use (tsk17). The hot read paths call this instead of re-reading the
     /// four global YAML dirs every time.
@@ -290,7 +303,7 @@ impl MetricsService {
     /// extension (read from the project's primary worktree).
     fn extension_catalog(&self) -> ExtensionCatalog {
         let mut out = ExtensionCatalog::default();
-        for e in crate::extensions::load_extensions(&self.project_dir) {
+        for e in self.extensions_cache.get(&self.project_dir).iter().cloned() {
             if !e.enabled {
                 continue;
             }

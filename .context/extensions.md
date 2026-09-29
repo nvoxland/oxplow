@@ -52,8 +52,15 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
     wiki | effort-diff, from}`) and `empty`.
   - Unknown keys are errors, so typos surface instead of being ignored.
 - **Ids.** A lens id is `<extension>/<slug>`.
-- **Reading.** Everything is read from the **stream's worktree** on every
-  call. There's no cache yet, so an edit shows up on the next call.
+- **Reading.** Everything is read from the **stream's worktree**, through
+  `Services.extension_catalog` (`crates/oxplow-app/src/extension_catalog.rs`):
+  a per-root cache behind a stat-only fingerprint of `oxplow/extensions/**`
+  and `.oxplow/project.yaml`, so a hit costs ~60 µs instead of the ~3 ms
+  parse and an edit still shows up on the very next call (see
+  [performance.md](./performance.md)). `find_lens`, `run_lens`,
+  `validate_extension`, `describe_schema` and the advisory/metric/source
+  readers all take the catalog; `load_extensions` itself is the cache's
+  loader and the write paths' direct read.
 - **Params.** Values are bound as `:name` (`SemanticLayer::query_sql_named`).
   Supplied values override defaults. An unknown param name is an `Invalid`
   error, so a typo can't silently fall back to a default. A param with no

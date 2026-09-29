@@ -67,7 +67,7 @@ pub async fn list_project_programs(
 /// The primary worktree's extensions, whose advisories are approved here.
 async fn shared_extensions(svc: &Services) -> Vec<oxplow_app::extensions::Extension> {
     let root = svc.git.resolve_repo_dir(None).await;
-    oxplow_app::extensions::load_extensions(&root)
+    svc.extension_catalog.get(&root).to_vec()
 }
 
 /// Approve one of the project's programs as it is now. UI only: consent to

@@ -24,10 +24,12 @@ pub async fn describe_schema(svc: &Services) -> Result<Vec<SchemaEntity>, IpcErr
     // Extension-declared entities come from the primary worktree (their
     // data is project-global).
     let root = svc.git.resolve_repo_dir(None).await;
-    Ok(
-        oxplow_app::semantic_catalog::describe_schema(&SemanticLayer::new(svc.db.clone()), &root)
-            .await?,
+    Ok(oxplow_app::semantic_catalog::describe_schema(
+        &SemanticLayer::new(svc.db.clone()),
+        &svc.extension_catalog,
+        &root,
     )
+    .await?)
 }
 
 /// Rows in every entity right now, for Settings → Data. UI-only: an agent
@@ -36,10 +38,12 @@ pub async fn semantic_row_counts(
     svc: &Services,
 ) -> Result<Vec<oxplow_app::semantic_catalog::EntityRowCount>, IpcError> {
     let root = svc.git.resolve_repo_dir(None).await;
-    Ok(
-        oxplow_app::semantic_catalog::row_counts(&SemanticLayer::new(svc.db.clone()), &root)
-            .await?,
+    Ok(oxplow_app::semantic_catalog::row_counts(
+        &SemanticLayer::new(svc.db.clone()),
+        &svc.extension_catalog,
+        &root,
     )
+    .await?)
 }
 
 #[cfg(test)]

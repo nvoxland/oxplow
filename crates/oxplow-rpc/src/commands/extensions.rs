@@ -27,7 +27,7 @@ pub async fn list_extensions(
     stream_id: Option<String>,
 ) -> Result<Vec<Extension>, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::load_extensions(&root))
+    Ok(svc.extension_catalog.get(&root).to_vec())
 }
 
 /// One lens by `<extension>/<slug>`.
@@ -37,7 +37,7 @@ pub async fn get_lens(
     stream_id: Option<String>,
 ) -> Result<Lens, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::find_lens(&root, &id)?)
+    Ok(svc.extension_catalog.find_lens(&root, &id)?)
 }
 
 /// Run a lens with optional param overrides; returns the rows the lens
@@ -50,7 +50,15 @@ pub async fn run_lens(
 ) -> Result<LensRun, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
     let ctx = context(svc, stream_id.as_deref()).await;
-    Ok(extensions::run_lens(&layer(svc), &root, &id, params.unwrap_or_default(), &ctx).await?)
+    Ok(extensions::run_lens(
+        &layer(svc),
+        &svc.extension_catalog,
+        &root,
+        &id,
+        params.unwrap_or_default(),
+        &ctx,
+    )
+    .await?)
 }
 
 /// The viewer's context: the stream (primary when omitted) and its
@@ -91,7 +99,7 @@ pub async fn validate_extension(
     stream_id: Option<String>,
 ) -> Result<Extension, IpcError> {
     let root = root(svc, stream_id.as_deref()).await;
-    Ok(extensions::validate_extension(&layer(svc), &root, &name).await?)
+    Ok(extensions::validate_extension(&layer(svc), &svc.extension_catalog, &root, &name).await?)
 }
 
 /// Turn an extension on or off for the project (`extensions.disabled` in
@@ -112,7 +120,7 @@ pub async fn set_extension_enabled(
     svc.events
         .emit(oxplow_app::events::OxplowEvent::ConfigChanged);
     let root = root(svc, None).await;
-    Ok(extensions::load_extensions(&root))
+    Ok(svc.extension_catalog.get(&root).to_vec())
 }
 
 /// What installing (`git_url`) or updating (`name`) an extension would
@@ -127,9 +135,19 @@ pub async fn review_extension(
     let root = root(svc, stream_id.as_deref()).await;
     Ok(match (git_url, name) {
         (Some(url), None) => {
-            extensions::review_extension(&layer(svc), &root, &url, git_ref.as_deref(), None).await?
+            extensions::review_extension(
+                &layer(svc),
+                &svc.extension_catalog,
+                &root,
+                &url,
+                git_ref.as_deref(),
+                None,
+            )
+            .await?
         }
-        (None, Some(name)) => extensions::review_update(&layer(svc), &root, &name).await?,
+        (None, Some(name)) => {
+            extensions::review_update(&layer(svc), &svc.extension_catalog, &root, &name).await?
+        }
         _ => {
             return Err(IpcError::invalid(
                 "pass either gitUrl (install) or name (update)",

@@ -237,6 +237,32 @@ WS constructor throws. Adding `http://127.0.0.1:* ws://127.0.0.1:*` to
 the page is served by vite over http, so Tauri never applies the configured CSP
 and the restriction is invisible — a dev-mode test of this proves nothing.
 
+## Extension catalog cache (tsk390 / P1.13, tsk415)
+
+`extensions::load_extensions(root)` parses every bundled lens file (about
+forty embedded YAML documents) plus the project's on each call, and it ran
+on every advisory check (each agent tool call and prompt), every
+`list_extensions` / `get_lens` / `run_lens`, `describe_schema` and metric
+catalog seed. Measured on the dev machine (release-less test build, 20
+calls averaged):
+
+| call | per call |
+|---|---|
+| `load_extensions`, bundled only | ~3.3 ms |
+| `load_extensions`, bundled + one project extension with 10 lenses | ~3.1 ms |
+| `ExtensionCatalog::get`, same root, cache hit | ~62 µs |
+
+`crates/oxplow-app/src/extension_catalog.rs` caches the loaded `Vec<Extension>`
+per worktree root behind a **stat-only fingerprint** of
+`root/oxplow/extensions/**` and `root/.oxplow/project.yaml` (path, size,
+mtime of every file). A hit walks the tree with `stat` and parses nothing;
+any edit, add or delete — or a config change that disables an extension —
+misses and reloads on the next call. No watcher and no explicit
+invalidation, so there is no window in which an agent's freshly written
+lens is invisible, and worktrees the watcher doesn't cover behave the
+same. Write paths (install, update, save_lens) read the disk directly, and
+consent hashing (`approval_hash`) always reads the bytes it approves.
+
 ## Related
 
 - [metrics.md](./metrics.md) — the metric substrate itself: the cube, its two
