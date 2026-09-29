@@ -633,7 +633,6 @@ mod tests {
             "snapshot",
             "task",
             "task_link",
-            "task_event",
             "task_commit",
             "task_effort",
             "task_effort_file",
@@ -659,10 +658,18 @@ mod tests {
             "metric_live_fact",
             "metric_cube_state",
             "metric_cube_epoch",
+            // V93 — the event log as an outbox, its checkpoints and dead
+            // letters, and the command audit (tsk406).
+            "event_log",
+            "event_consumer_checkpoint",
+            "event_dead_letter",
+            "command_audit",
         ];
         // `effort_observation` was dropped in V39 (tsk215); the V38
         // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
         let expected_absent = [
+            // V93 dropped the dead per-task audit table (tsk406).
+            "task_event",
             "hook_event",
             "agent_status",
             "effort_observation",

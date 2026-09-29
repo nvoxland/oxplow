@@ -644,9 +644,6 @@ async fn thread_note_round_trip() {
             .len(),
         1
     );
-    let _ = commands::generated::list_task_events(app.state(), None, Some(thread.id))
-        .await
-        .unwrap();
     let _ = note;
 }
 

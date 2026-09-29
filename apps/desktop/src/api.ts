@@ -342,8 +342,6 @@ export interface TaskNote {
   created_at: string;
 }
 
-import type { TaskEvent } from "./tauri-bridge/index.js";
-export type { TaskEvent };
 
 export type SnapshotSource =
   | "effort-start"
@@ -1784,16 +1782,6 @@ export async function listAllRefs(_streamId: string): Promise<import("./api-type
   return listGitRefs() as unknown as Promise<
     import("./api-types.js").RefOption[]
   >;
-}
-
-export async function listTaskEvents(
-  _streamId: string,
-  _threadId: string,
-  itemId?: string,
-): Promise<TaskEvent[]> {
-  return unwrap(
-    await commands.listTaskEvents(itemId ?? null, null),
-  ) as unknown as TaskEvent[];
 }
 
 export async function getBranchChanges(

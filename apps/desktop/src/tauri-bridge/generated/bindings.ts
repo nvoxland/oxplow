@@ -452,11 +452,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listTaskEvents: (itemId: string | null, threadId: string | null) => typedError<TaskEvent[], IpcError>(__TAURI_INVOKE("list_task_events", { itemId, threadId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	createComment: (req: CreateCommentRequest) => typedError<CommentThread, IpcError>(__TAURI_INVOKE("create_comment", { req })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -3992,18 +3987,6 @@ export type TaskEffort = {
 	end_snapshot_id: number | null,
 	// The effort's summary prose — the canonical text.
 	summary: string | null,
-};
-
-// Audit-log entry for state changes on a task.
-export type TaskEvent = {
-	id: string,
-	thread_id: ThreadId,
-	item_id: TaskId | null,
-	event_type: string,
-	actor_kind: TaskActorKind,
-	actor_id: string,
-	payload_json: string,
-	created_at: Timestamp,
 };
 
 export type TaskId = string;

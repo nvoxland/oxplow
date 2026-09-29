@@ -168,7 +168,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // notes (task / thread)
             commands::generated::add_thread_note,
             commands::generated::list_thread_notes,
-            commands::generated::list_task_events,
             // comments
             commands::generated::create_comment,
             commands::generated::add_comment_message,

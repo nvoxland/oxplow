@@ -19,9 +19,7 @@ use serde::{Deserialize, Serialize};
 use oxplow_app::ref_resolver::{self, RefSummary};
 use oxplow_app::{CreateTaskInput, OxplowEvent, Services, UpdateTaskChanges};
 use oxplow_domain::comment::CommentThread;
-use oxplow_domain::stores::{
-    CommentStore, TaskEventStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore,
-};
+use oxplow_domain::stores::{CommentStore, TaskLinkStore, TaskNoteStore, TaskStore, ThreadStore};
 use oxplow_domain::{
     CommentId, CommentStatus, EffortId, NoteId, StreamId, Task, TaskId, TaskLinkType, TaskPriority,
     TaskStatus, ThreadId,
@@ -4736,16 +4734,9 @@ impl OxplowMcp {
             .list_for_thread(&id)
             .await
             .map_err(internal)?;
-        let events = self
-            .services
-            .task_event_store
-            .list_for_thread(&id)
-            .await
-            .map_err(internal)?;
         let bundle = serde_json::json!({
             "thread": thread,
             "items": items,
-            "events": events,
         });
         Ok(CallToolResult::success(vec![ContentBlock::text(
             bundle.to_string(),

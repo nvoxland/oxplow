@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod comment;
 pub mod error;
+pub mod events;
 pub mod hook;
 pub mod ids;
 pub mod refs;
@@ -23,6 +24,7 @@ pub use comment::{
     Comment, CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread,
 };
 pub use error::DomainError;
+pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 pub use ids::{
     AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId, EffortId,
@@ -31,8 +33,8 @@ pub use ids::{
 };
 pub use stream::{Stream, StreamKind};
 pub use task::{
-    Task, TaskActorKind, TaskAuthor, TaskEvent, TaskImpact, TaskLink, TaskLinkType, TaskNote,
-    TaskPriority, TaskStatus,
+    Task, TaskActorKind, TaskAuthor, TaskImpact, TaskLink, TaskLinkType, TaskNote, TaskPriority,
+    TaskStatus,
 };
 pub use thread::{Thread, ThreadStatus};
 pub use time::Timestamp;

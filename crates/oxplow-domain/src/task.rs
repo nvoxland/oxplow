@@ -140,19 +140,6 @@ pub struct TaskImpact {
     pub action: Option<String>,
 }
 
-/// Audit-log entry for state changes on a task.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct TaskEvent {
-    pub id: String,
-    pub thread_id: ThreadId,
-    pub item_id: Option<TaskId>,
-    pub event_type: String,
-    pub actor_kind: TaskActorKind,
-    pub actor_id: String,
-    pub payload_json: String,
-    pub created_at: Timestamp,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,7 +13,7 @@ use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget
 use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
 use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
-use crate::task::{Task, TaskEvent, TaskLink, TaskLinkType, TaskNote, TaskStatus};
+use crate::task::{Task, TaskLink, TaskLinkType, TaskNote, TaskStatus};
 use crate::thread::Thread;
 use crate::DomainError;
 
@@ -115,13 +115,6 @@ pub trait TaskLinkStore: Send + Sync {
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
-}
-
-#[async_trait]
-pub trait TaskEventStore: Send + Sync {
-    async fn append(&self, event: &TaskEvent) -> Result<(), DomainError>;
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEvent>, DomainError>;
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError>;
 }
 
 #[async_trait]

@@ -123,9 +123,9 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentTurnStore, SqliteCodeQualityStore,
-    SqliteCommentStore, SqliteFactStore, SqlitePageRefStore, SqlitePageVisitStore,
-    SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore, SqliteTaskEffortStore,
-    SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
+    SqliteCommentStore, SqliteEventLogStore, SqliteFactStore, SqlitePageRefStore,
+    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
+    SqliteTaskEffortStore, SqliteTaskLinkStore, SqliteTaskNoteStore, SqliteTaskStore,
     SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
     SqliteWikiPageThreadUpdateStore,
 };
@@ -391,7 +391,10 @@ pub struct Services {
     pub task_store: Arc<SqliteTaskStore>,
     pub work_note_store: Arc<SqliteTaskNoteStore>,
     pub task_link_store: Arc<SqliteTaskLinkStore>,
-    pub task_event_store: Arc<SqliteTaskEventStore>,
+    /// The event log (`.context/data-model.md` "event_log"). Producers
+    /// append inside their own transaction via `event_log_store::append_tx`;
+    /// this handle is for reads and the pump.
+    pub event_log_store: Arc<SqliteEventLogStore>,
     pub wiki_page_store: Arc<SqliteWikiPageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
@@ -569,7 +572,7 @@ impl Services {
         let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
         let work_note_store = Arc::new(SqliteTaskNoteStore::new(db.clone()));
         let task_link_store = Arc::new(SqliteTaskLinkStore::new(db.clone()));
-        let task_event_store = Arc::new(SqliteTaskEventStore::new(db.clone()));
+        let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone()));
         let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
@@ -788,7 +791,7 @@ impl Services {
             task_store,
             work_note_store,
             task_link_store,
-            task_event_store,
+            event_log_store,
             wiki_page_store,
             page_visit_store,
             usage_store,

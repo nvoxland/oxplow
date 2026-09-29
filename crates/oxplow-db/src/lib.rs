@@ -16,6 +16,7 @@ mod database;
 pub mod diagnostic_store;
 pub mod effort_evidence_store;
 pub mod effort_store;
+pub mod event_log_store;
 pub mod ext_source_store;
 pub mod fact_store;
 pub mod git_store;
@@ -61,6 +62,7 @@ pub use effort_store::{
     EffortAtSnapshot, EffortChangedPaths, EffortFile, EffortFileChange, FileRefVersion,
     OwnedFileRefVersion, RecordEffortAtomic, SqliteTaskEffortStore, TaskEffort, TaskEffortStore,
 };
+pub use event_log_store::{DeadLetter, SqliteEventLogStore};
 pub use ext_source_store::{
     EntityTable, EntityWrite, SourceState, SqliteExtSourceStore, StoredType,
 };
@@ -78,7 +80,7 @@ pub use semantic_layer::{
     SchemaColumn, SchemaEntity, SchemaRelation, SemanticLayer, SqlCell, SqlQueryResult,
 };
 pub use stream_store::SqliteStreamStore;
-pub use task_satellite::{SqliteTaskEventStore, SqliteTaskLinkStore, SqliteTaskNoteStore};
+pub use task_satellite::{SqliteTaskLinkStore, SqliteTaskNoteStore};
 pub use task_store::{EffortTransition, SqliteTaskStore};
 pub use thread_store::SqliteThreadStore;
 pub use token_usage_store::{

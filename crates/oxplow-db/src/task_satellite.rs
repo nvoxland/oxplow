@@ -7,10 +7,9 @@
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::stores::{TaskEventStore, TaskLinkStore, TaskNoteStore};
+use oxplow_domain::stores::{TaskLinkStore, TaskNoteStore};
 use oxplow_domain::{
-    DomainError, NoteId, TaskActorKind, TaskEvent, TaskId, TaskLink, TaskLinkId, TaskLinkType,
-    TaskNote, ThreadId, Timestamp,
+    DomainError, NoteId, TaskId, TaskLink, TaskLinkId, TaskLinkType, TaskNote, ThreadId, Timestamp,
 };
 
 use crate::database::Database;
@@ -51,23 +50,6 @@ fn str_to_link_type(s: &str) -> Result<TaskLinkType, DomainError> {
         "supersedes" => Ok(TaskLinkType::Supersedes),
         "replies_to" => Ok(TaskLinkType::RepliesTo),
         other => Err(DomainError::Invalid(format!("unknown link type: {other}"))),
-    }
-}
-
-fn actor_to_str(a: TaskActorKind) -> &'static str {
-    match a {
-        TaskActorKind::User => "user",
-        TaskActorKind::Agent => "agent",
-        TaskActorKind::System => "system",
-    }
-}
-
-fn str_to_actor(s: &str) -> Result<TaskActorKind, DomainError> {
-    match s {
-        "user" => Ok(TaskActorKind::User),
-        "agent" => Ok(TaskActorKind::Agent),
-        "system" => Ok(TaskActorKind::System),
-        other => Err(DomainError::Invalid(format!("unknown actor kind: {other}"))),
     }
 }
 
@@ -420,95 +402,6 @@ impl TaskLinkStore for SqliteTaskLinkStore {
     }
 }
 
-// ---------------- Task events ----------------
-
-#[derive(Clone)]
-pub struct SqliteTaskEventStore {
-    db: Database,
-}
-
-impl SqliteTaskEventStore {
-    pub fn new(db: Database) -> Self {
-        Self { db }
-    }
-}
-
-fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
-    let id: String = row.get("id")?;
-    let thread_id: i64 = row.get("thread_id")?;
-    let item_id: Option<i64> = row.get("item_id")?;
-    let event_type: String = row.get("event_type")?;
-    let actor_kind: String = row.get("actor_kind")?;
-    let actor_id: String = row.get("actor_id")?;
-    let payload_json: String = row.get("payload_json")?;
-    let created_at: String = row.get("created_at")?;
-    let map_err = |e: DomainError| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-    };
-    Ok(TaskEvent {
-        id,
-        thread_id: ThreadId::new(thread_id),
-        item_id: item_id.map(TaskId::new),
-        event_type,
-        actor_kind: str_to_actor(&actor_kind).map_err(map_err)?,
-        actor_id,
-        payload_json,
-        created_at: string_to_ts(&created_at).map_err(map_err)?,
-    })
-}
-
-#[async_trait]
-impl TaskEventStore for SqliteTaskEventStore {
-    async fn append(&self, event: &TaskEvent) -> Result<(), DomainError> {
-        let event = event.clone();
-        self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO task_event
-                       (id, thread_id, item_id, event_type, actor_kind, actor_id, payload_json, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
-                        event.id,
-                        event.thread_id.value(),
-                        event.item_id.map(|i| i.value()),
-                        event.event_type,
-                        actor_to_str(event.actor_kind),
-                        event.actor_id,
-                        event.payload_json,
-                        ts_to_string(event.created_at),
-                    ],
-                )?;
-                Ok(())
-            })
-            .await
-    }
-
-    async fn list_for_item(&self, item: TaskId) -> Result<Vec<TaskEvent>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_event WHERE item_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![item.value()], row_to_event)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<TaskEvent>, DomainError> {
-        let thread = *thread;
-        self.db
-            .call(move |conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_event WHERE thread_id = ?1 ORDER BY created_at ASC",
-                )?;
-                let rows = stmt.query_map(params![thread.value()], row_to_event)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,8 +410,8 @@ mod tests {
     use crate::thread_store::SqliteThreadStore;
     use oxplow_domain::stores::{StreamStore, TaskStore, ThreadStore};
     use oxplow_domain::{
-        Stream, StreamId, StreamKind, Task, TaskAuthor, TaskPriority, TaskStatus, Thread,
-        ThreadStatus,
+        Stream, StreamId, StreamKind, Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus,
+        Thread, ThreadStatus,
     };
 
     fn now() -> Timestamp {
@@ -790,27 +683,5 @@ mod tests {
         assert_eq!(outgoing.len(), 1);
         assert_eq!(incoming.len(), 1);
         assert_eq!(outgoing[0].link_type, TaskLinkType::Blocks);
-    }
-
-    #[tokio::test]
-    async fn event_append_and_list() {
-        let (db, tid, item_id) = fixture().await;
-        let store = SqliteTaskEventStore::new(db);
-        let evt = TaskEvent {
-            id: "evt-1".into(),
-            thread_id: tid,
-            item_id: Some(item_id),
-            event_type: "transition".into(),
-            actor_kind: TaskActorKind::Agent,
-            actor_id: "claude".into(),
-            payload_json: "{\"to\":\"in_progress\"}".into(),
-            created_at: now(),
-        };
-        store.append(&evt).await.unwrap();
-        let item_events = store.list_for_item(item_id).await.unwrap();
-        let thread_events = store.list_for_thread(&tid).await.unwrap();
-        assert_eq!(item_events.len(), 1);
-        assert_eq!(thread_events.len(), 1);
-        assert_eq!(thread_events[0].event_type, "transition");
     }
 }

@@ -228,7 +228,6 @@ macro_rules! oxplow_command_table {
                 // notes
                 add_thread_note => $crate::commands::notes::add_thread_note { thread_id: ::oxplow_domain::ThreadId, body: String, author: String } -> ::oxplow_domain::TaskNote,
                 list_thread_notes => $crate::commands::notes::list_thread_notes { thread_id: ::oxplow_domain::ThreadId } -> Vec<::oxplow_domain::TaskNote>,
-                list_task_events => $crate::commands::notes::list_task_events { item_id: Option<::oxplow_domain::TaskId>, thread_id: Option<::oxplow_domain::ThreadId> } -> Vec<::oxplow_domain::TaskEvent>,
                 // tasks
                 get_task => $crate::commands::tasks::get_task { id: ::oxplow_domain::TaskId } -> Option<::oxplow_domain::Task>,
                 upsert_task => $crate::commands::tasks::upsert_task { item: ::oxplow_domain::Task } -> ::oxplow_domain::Task,

@@ -57,17 +57,6 @@ export interface TaskNote {
   created_at: string;
 }
 
-export interface TaskEvent {
-  id: string;
-  thread_id: string;
-  item_id: string | null;
-  event_type: string;
-  actor_kind: "user" | "agent" | "system";
-  actor_id: string;
-  payload_json: string;
-  created_at: string;
-}
-
 // ---- Snapshots ----
 
 // Snapshot interfaces (FileSnapshot, SnapshotSource, SnapshotEntry,

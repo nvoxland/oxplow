@@ -586,20 +586,6 @@ const CATALOG: &[CatalogView] = &[
         ],
     },
     CatalogView {
-        name: "v_task_event",
-        description: "Task history: every create / status change / edit, with who did it.",
-        columns: &[
-            ("id", "Event id."),
-            ("thread_id", "Thread it happened in."),
-            ("task_id", "Task it's about, if any."),
-            ("event_type", "What happened (e.g. `created`, `status_changed`)."),
-            ("actor_kind", "`user`, `agent` or `system`."),
-            ("actor_id", "Who, within that kind."),
-            ("payload_json", "Event details as JSON."),
-            ("created_at", "RFC 3339 timestamp."),
-        ],
-    },
-    CatalogView {
         name: "v_agent_turn",
         description: "Agent turns: each human prompt and the agent's answer, per thread (and task when known).",
         columns: &[
@@ -1332,7 +1318,6 @@ mod tests {
             "v_effort_file",
             "v_task_note",
             "v_task_link",
-            "v_task_event",
             "v_agent_turn",
             "v_token_usage",
             "v_page_visit",

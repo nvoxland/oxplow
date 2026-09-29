@@ -148,7 +148,6 @@ never the physical tables, which stay internal and free to change.
 | `v_effort_file` | files each effort touched, with change kind (V74) |
 | `v_task_note` | task / thread notes (V74) |
 | `v_task_link` | typed links between tasks (V74) |
-| `v_task_event` | task history log (V74) |
 | `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |

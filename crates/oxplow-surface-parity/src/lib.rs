@@ -364,8 +364,6 @@ pub const MANIFEST: &[Capability] = &[
     ui("update_dashboard_item"),
     ui("remove_dashboard_item"),
     ui("reorder_dashboard_items"),
-    // ---- ui-only: notes ----
-    ui("list_task_events"),
     // ---- ui-only: comments (anchor management / destructive) ----
     ui("list_comments_for_target"),
     ui("set_comment_anchor"),

@@ -48,12 +48,16 @@ thin `db.call` wrapper over its core; multi-write actions compose
 several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
-left no trace; that's why `f` is `Fn`). Event-bus emits, page_ref
-projections, and snapshot requests run AFTER commit, never inside the
-closure. Don't convert existing single-op methods preemptively —
-extract a `_tx` core the first time an op needs to join a
-transaction. Current users: `record_effort_atomic` and
-`update_with_effort_transition`.
+left no trace; that's why `f` is `Fn`). **The event-log row is the one
+write that belongs inside the closure**: a producer composes
+`event_log_store::append_tx(tx, &envelope)` next to its state change
+so the log and the state can never disagree (the outbox pattern; see
+"event_log" below). Everything downstream of the log — the in-memory
+`OxplowEvent` broadcast that wakes the UI, `page_ref` projections,
+snapshot requests — runs AFTER commit, never inside the closure. Don't
+convert existing single-op methods preemptively — extract a `_tx` core
+the first time an op needs to join a transaction. Current users:
+`record_effort_atomic` and `update_with_effort_transition`.
 
 **Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
 has exactly one open `task_effort` row. Enforced three ways: the
@@ -93,8 +97,8 @@ as the type-erased form for polymorphic boundaries (the ref graph, the MCP
 (insert allocates a real id and returns it; AUTOINCREMENT never issues 0).
 Two polymorphic TEXT columns stay TEXT and store the *prefixed string*
 form: `page_ref.source_id`/`target_id` and `search_entry.ref_id`/`stream_id`
-(`task_event.id` is an internal log id, also TEXT). Refs in prose/wiki use
-the bare self-typed form, e.g. `[[tsk42]]`.
+(`event_log.id` is a UUIDv7, also TEXT). Refs in prose/wiki use the bare
+self-typed form, e.g. `[[tsk42]]`.
 
 ## Global state (outside `.oxplow/`)
 
@@ -942,6 +946,52 @@ file/directory). The action verb (`created`, `updated`, `deleted`,
 `source_extra` as `{"action": "..."}` so the UI can render
 "created by task #42" without an extra query.
 
+### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
+
+The event log of [target-architecture.md](./target-architecture.md) §5,
+built in P1.4 (tsk406). **State tables hold current truth; the log
+records activity and state changes**, and it is written in the *same
+transaction* as the change — the outbox pattern — so the two never
+disagree. The envelope is `oxplow_domain::events::Envelope`
+(`crates/oxplow-domain/src/events/mod.rs`): `id` (UUIDv7 text, sorts by
+time), `type` (`namespace.name`, snake_case, validated on append), `v`
+(schema version), `at`, `source` (`agent:thr3`, `human`,
+`system:snapshot_capture`), `anchors` (nullable stream / thread / effort
+/ turn / snapshot columns, so per-anchor timelines are indexed range
+scans), `subject` (JSON array of canonical refs), `payload` (JSON;
+validated against `type@v` from P1.5), `payload_hash` (reserved for
+forgettable bodies stored by content hash), `cause`, `dedupe_key`
+(UNIQUE — the emitter derives it from the occurrence, so an at-least-once
+producer's second append fails with `Constraint` and writes nothing).
+`seq` (AUTOINCREMENT) is the delivery order; `id` is the public identity.
+
+These are the schema's first **STRICT** tables; every later spine table
+is STRICT too.
+
+**The contract is `append_tx(&Connection, &Envelope) -> seq`**, composed
+inside the producer's `Database::transaction` closure. The async
+`SqliteEventLogStore::append` opens a transaction of its own and is for
+activity with no state write (a tool call, a lens view). Reads:
+`read_after_tx(after_seq, limit)` (oldest first — the pump's cursor),
+`get_tx(id)`.
+
+**Delivery is at least once** (the pump lands in P1.7): a consumer reads
+`seq > checkpoint_tx(consumer)`, handles the batch, and commits its own
+writes plus `set_checkpoint_tx` in one transaction. A handler that fails
+parks the event with `dead_letter_tx(consumer, seq, error)` — a repeat
+failure of the same `(consumer, seq)` bumps `attempts` rather than adding
+a row, and reopens a `retried`/`discarded` letter — and the checkpoint
+still advances, so one poison event never stalls the pump. Letters are
+`pending | retried | discarded` (`set_dead_letter_state_tx`), listed by
+`list_dead_letters_tx(all)`. Nothing is skipped silently.
+
+`command_audit` (who ran which command, outcome, the undo as
+`inverse_json`) is created here and written by the command bus in P1.8.
+
+V93 also dropped `task_event` (a per-task audit table nothing had written
+since V1; task transitions log here from P1.6) and wiped `page_visit`
+(its rows carried pre-canonical tab ids).
+
 ### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_store.rs`)
 
 Per-thread attribution side table for wiki page edits. Notes themselves
@@ -1204,7 +1254,8 @@ Append-only event log of in-app page navigations. One row per visit
 recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 `new-task`).
 
-Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
+Rows carry canonical tab ids ([refs.md](./refs.md)); V93 wiped the
+pre-canonical ones. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
 boot-screen visits with no active thread still record). Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
