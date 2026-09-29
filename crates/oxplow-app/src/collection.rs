@@ -2330,7 +2330,7 @@ impl CollectionService {
     /// (which builds the agent-prompt text). Reads the spec catalog and, per
     /// family, aggregates the effort's own facts (epic tsk12, T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the effort's *claimed* files
-    ///   (`task_effort_file`) of `(current − baseline)` fact value — the slice this
+    ///   (`effort_file`) of `(current − baseline)` fact value — the slice this
     ///   effort actually moved, even on a branch shared with another effort. With
     ///   no claimed files it falls back to the repo-wide before→after.
     /// - **run + operational** (`Run`/`Window`): before→after (or `sum` flow) over

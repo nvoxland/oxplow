@@ -1172,7 +1172,7 @@ fn stamp_git_commit_tx(
         "UPDATE snapshot SET git_commit = ?1 WHERE id = ?2",
         params![sha, snapshot_id],
     )?;
-    for table in ["task_effort_file", "page_ref"] {
+    for table in ["effort_file", "page_ref"] {
         conn.execute(
             &format!(
                 "UPDATE {table} SET closest_git_version = ?1, git_version_exact = 1
@@ -3114,7 +3114,7 @@ mod tests {
     #[tokio::test]
     async fn set_snapshot_git_commit_cascades_to_file_refs() {
         // When `set_snapshot_git_commit` lands on a snapshot, every
-        // `task_effort_file` and `page_ref` row pointing at that
+        // `effort_file` and `page_ref` row pointing at that
         // snapshot must pick up the sha and flip
         // `git_version_exact` to 1. We bypass the domain stores
         // (FK setup noise) and seed the rows directly.
@@ -3142,8 +3142,8 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        // Seed one task_effort_file row pointing at this snapshot
-        // (skip the FK chain — fk on `task_effort` is enforced but
+        // Seed one effort_file row pointing at this snapshot
+        // (skip the FK chain — fk on `effort` is enforced but
         // we can disable it for the test by NOT joining via the
         // store and writing through the raw connection.)
         let db_for_seed = db.clone();
@@ -3151,12 +3151,12 @@ mod tests {
             db_for_seed.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 conn.execute(
-                    "INSERT INTO task_effort (task_id, thread_id, started_at)
-                     VALUES (1, 1, '2026-01-01T00:00:00Z')",
+                    "INSERT INTO effort (work_item, thread_id, started_at)
+                     VALUES ('work_item:oxplow:tsk1', 1, '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 conn.execute(
-                    "INSERT INTO task_effort_file
+                    "INSERT INTO effort_file
                        (effort_id, path, change_kind,
                         local_snapshot_id, closest_git_version, git_version_exact)
                      VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
@@ -3191,7 +3191,7 @@ mod tests {
         ) = tokio::task::spawn_blocking(move || {
             db_for_check.with_conn(|conn| {
                 let mut row = conn.query_row(
-                    "SELECT closest_git_version, git_version_exact FROM task_effort_file
+                    "SELECT closest_git_version, git_version_exact FROM effort_file
                          WHERE effort_id = 1 AND path = 'src/a.rs'",
                     [],
                     |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),

@@ -138,14 +138,14 @@ never the physical tables, which stay internal and free to change.
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
 | `v_task` | tasks, excluding deleted; carries the thread's `stream_id` |
-| `v_effort` | in_progress → done spans of work on a task |
+| `v_effort` | bracketed spans of work on a work item (`work_item` ref; `task_id` derived for oxplow tasks, V100) |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots |
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
-| `v_effort_file` | files each effort touched, with change kind (V74) |
+| `v_effort_file` | files each effort touched, with change kind and the effort's `work_item` (V74, V100) |
 | `v_task_note` | task / thread notes (V74) |
 | `v_task_link` | typed links between tasks (V74) |
 | `v_agent_turn` | human prompt → agent answer, per thread / task (V74) |

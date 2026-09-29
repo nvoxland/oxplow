@@ -433,17 +433,18 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_effort",
-        description: "Efforts: one in_progress → done/blocked span of work on a task, bracketed by snapshots.",
+        description: "Efforts: one bracketed span of work on a work item (an oxplow task, or another provider's item), between a start and an end snapshot.",
         columns: &[
             ("id", "Effort id."),
-            ("task_id", "The task worked on (v_task.id)."),
+            ("work_item", "The work item worked on, as a canonical ref: `work_item:oxplow:tsk42`, `work_item:linear:ENG-12`."),
+            ("task_id", "The oxplow task worked on (v_task.id); NULL for another provider's work item."),
             ("thread_id", "Thread that did the work."),
             ("stream_id", "That thread's stream."),
             ("started_at", "RFC 3339 timestamp."),
             ("ended_at", "RFC 3339 timestamp; NULL while the effort is open."),
             ("start_snapshot_id", "Snapshot at the start (v_snapshot.id)."),
             ("end_snapshot_id", "Snapshot at the end; NULL while open."),
-            ("summary", "Closing summary written when the task was completed."),
+            ("summary", "Closing summary written when the effort closed."),
         ],
     },
     CatalogView {
@@ -578,7 +579,8 @@ const CATALOG: &[CatalogView] = &[
         description: "Files each effort touched (as claimed or detected at close), with how they changed.",
         columns: &[
             ("effort_id", "The effort (v_effort.id)."),
-            ("task_id", "That effort's task (v_task.id)."),
+            ("work_item", "That effort's work item ref."),
+            ("task_id", "That effort's oxplow task (v_task.id); NULL for another provider's work item."),
             ("path", "Repo-relative file path."),
             ("change_kind", "`created`, `updated` or `deleted`."),
             ("closest_git_version", "Nearest git commit when recorded."),
@@ -1170,8 +1172,8 @@ mod tests {
         .to_string();
         db.call(move |c| {
             c.execute_batch(
-                "INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at) VALUES (7, 1, 1, '2026-01-01', '2026-01-02');
-                 INSERT INTO task_effort (id, task_id, thread_id, started_at) VALUES (8, 1, 1, '2026-01-01');
+                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (7, 'work_item:oxplow:tsk1', 1, '2026-01-01', '2026-01-02');
+                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (8, 'work_item:oxplow:tsk1', 1, '2026-01-01');
                  INSERT INTO metric_capture (id, stream_id, effort_id, producer, provenance, source, captured_at)
                    VALUES (40, 1, 7, 'coverage', 'observed', 'hook', '2026-01-01T00:00:00Z');",
             )?;

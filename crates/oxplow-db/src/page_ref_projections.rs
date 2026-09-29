@@ -46,7 +46,7 @@ pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
 
 // Ref-types written by the effort store from union of all
-// `task_effort.summary` bodies for a task. Distinct from
+// `effort.summary` bodies for a task. Distinct from
 // `task_body_*` so the body slice (task_store) and the summary
 // slice (effort_store) can coexist under the same `(task, id)`
 // source without clobbering each other.
@@ -112,7 +112,7 @@ pub fn task_link_ref_types() -> Vec<String> {
 
 /// Slice owned by the effort store: the union of touched-file
 /// edges across every effort on a task, the projection of every
-/// `task_effort.summary` body parsed for refs, and the declared
+/// `effort.summary` body parsed for refs, and the declared
 /// `TaskImpact` rows for each effort.
 pub fn effort_ref_types() -> Vec<String> {
     vec![
@@ -371,7 +371,7 @@ pub fn task_edges(item: &Task) -> Vec<PageRefEdge> {
 /// Touched-file edges for a task.
 ///
 /// `entries` is `(path, change_kind)` — the change_kind is one of
-/// the `task_effort_file.change_kind` values (`created` / `updated`
+/// the `effort_file.change_kind` values (`created` / `updated`
 /// / `deleted`) and is carried through `source_extra` as
 /// `{"change_kind":"..."}` so the renderer can display "created"
 /// / "modified" / "deleted" instead of a single "touched" label.
@@ -394,7 +394,7 @@ pub fn effort_touched_file_edges(task: &TaskId, entries: &[(String, String)]) ->
         .collect()
 }
 
-/// Edges contributed by the union of every `task_effort.summary`
+/// Edges contributed by the union of every `effort.summary`
 /// body for one task. Parsed via the shared ref extractor, so
 /// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
 /// mentions all flow through as outbound edges from `(task, id)`.

@@ -2069,7 +2069,7 @@ export type EffortAtSnapshot = {
 
 /**
  *  The snapshot-bracket changed paths for an effort, split by whether the
- *  effort CLAIMED each one (via `task_effort_file`). Mirrors the
+ *  effort CLAIMED each one (via `effort_file`). Mirrors the
  *  claimed/unclaimed attribution of the history view
  *  (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
  *  changed-during-the-bracket AND claimed by this effort; `unclaimed` =

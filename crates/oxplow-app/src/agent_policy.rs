@@ -189,7 +189,7 @@ impl AgentPolicy {
 
         // Drain any pending effort review ids the MCP `complete_task`
         // handler stashed for this thread. For each, recompute the
-        // review against the live `task_effort_file` rows so an agent
+        // review against the live `effort_file` rows so an agent
         // that already amended doesn't get a stale prompt. Drop the ones
         // that no longer carry a discrepancy. Title resolution joins
         // each effort's task title for the directive text.
@@ -202,7 +202,7 @@ impl AgentPolicy {
                 .collect();
             for eid in pending_ids {
                 // Two reconcilable kinds share this surface: files (recomputed
-                // against live `task_effort_file` rows) and test runs (the
+                // against live `effort_file` rows) and test runs (the
                 // `effort_attribution` ledger's unattributed residue). An effort
                 // is worth surfacing if EITHER still carries something to triage.
                 let file_review = crate::task_service::recompute_effort_file_review(

@@ -337,7 +337,7 @@ to `runtime.handleHookEnvelope`, which:
 3. Opens and closes `agent_turn` rows (UserPromptSubmit / Stop /
    interrupt, logging `agent.turn.*`), and a closed turn ends at a
    `turn_end` snapshot (see "Snapshot tracking" below). Per-effort
-   attribution stays anchored to `task_effort`.
+   attribution stays anchored to `effort`.
 4. For `PreToolUse`: asks the shared **`AgentPolicy`** (see "Agent
    policy" below). The write guard runs first (read-only thread; see
    Write guard below), then filing enforcement (Edit / Write /
@@ -873,7 +873,7 @@ that, the orchestrator has two modes:
    risky changes, the orchestrator calls `oxplow__read_work_options`,
    launches one `general-purpose` subagent with the brief, and
    closes the item via `complete_task` (whose `summary` lands on the
-   matching `task_effort.summary` row). Subagents run in isolated
+   matching `effort.summary` row). Subagents run in isolated
    context windows — their tokens don't count against the orchestrator,
    so main context stays flat regardless of queue depth.
 
@@ -1091,7 +1091,7 @@ intermediate `ready` step.
   what `update_task` / `amend_effort` parse; a bare `313` is rejected
   (tsk341; pinned by the `stop_effort_review_*` goldens). `amend_effort(effort_id, add_files,
   remove_files, claim_runs, disclaim_runs)` is the corrective tool —
-  adds/removes `task_effort_file` rows AND, for every path in
+  adds/removes `effort_file` rows AND, for every path in
   `remove_files`, records an acknowledgement row in
   `effort_acknowledged_path` so the Stop hook's recompute treats the
   discrepancy as resolved. Re-adding a previously-disclaimed path via
@@ -1177,7 +1177,7 @@ intermediate `ready` step.
   `ThreadRuntimeRegistry::pending_effort_reviews` on either a file
   discrepancy OR ledger run residue; the Stop hook drains it via
   `take_pending_effort_reviews`, recomputes the file diff fresh against
-  the current `task_effort_file` rows (minus `effort_acknowledged_path`)
+  the current `effort_file` rows (minus `effort_acknowledged_path`)
   AND re-reads the ledger's `unattributed` runs, and fires the
   directive only if something still remains. So a successful `amend_effort`
   (files or runs) reconciles in a single round-trip — the Stop hook won't
@@ -1896,7 +1896,7 @@ when takes happen.
   trigger runs beside the watcher (`spawn_watcher` starts both) and ends
   on `shutdown()`.
 - **Effort brackets.** Entering `in_progress` takes an `effort_start`
-  snapshot recorded on `task_effort.start_snapshot_id`; leaving it takes
+  snapshot recorded on `effort.start_snapshot_id`; leaving it takes
   an `effort_end` one on `end_snapshot_id` (both anchored to the effort).
   An unchanged tree records an op on the current snapshot rather than a
   new row, so `end_snapshot_id` is set whenever the stream has any
@@ -1917,7 +1917,7 @@ Snapshot pair-diffs over-report when two subagents edit the same worktree
 in parallel: both efforts share the same window, so each shows the
 union. To attribute writes correctly the agent declares its touched
 files on the status transition that closes the effort; the runtime
-stores them in `task_effort_file` (see data-model.md).
+stores them in `effort_file` (see data-model.md).
 
 **Claim-first auto-attribution (PostToolUse).** Every structured write
 tool — `Edit` / `Write` / `MultiEdit` / `NotebookEdit` — auto-claims the
@@ -1949,7 +1949,7 @@ during this effort. Because structured edits already auto-claimed in
 real time, this payload now merely confirms/amends rather than
 enumerating from scratch. `applyStatusTransition` (in `crates/oxplow-runtime/src/lib.rs`) captures
 the open effort id, flushes the task-end snapshot, closes the effort,
-and then inserts `task_effort_file` rows for each deduped path
+and then inserts `effort_file` rows for each deduped path
 via `INSERT OR IGNORE`. Payloads larger than `TOUCHED_FILES_CAP` (100
 paths) drop all rows, so the "assume all" fallback engages in
 `computeEffortFiles`.
@@ -2030,7 +2030,7 @@ snapshot `S`:
   the raw pair-diff.
 - ≥2 efforts end at S → one row per effort, each labelled with its
   task title; detail panes call `getEffortFiles(effortId)`. If
-  the effort has ≥1 `task_effort_file` row the pair-diff is
+  the effort has ≥1 `effort_file` row the pair-diff is
   filtered to those paths; if it has 0 rows (agent skipped the
   `touchedFiles` payload, or list exceeded the cap) we fall back to
   the raw pair-diff — better to over-report than silently show empty.
@@ -2046,7 +2046,7 @@ Tasks (`task` rows) are the user-visible primitive. The Work
 panel's in_progress bucket is driven purely by `task` rows —
 there are no synthesized "live turn" rows, no auto-file /
 auto-complete / adoption. Per-effort attribution and snapshots are
-anchored to `task_effort`, which the runtime opens/closes on
+anchored to `effort`, which the runtime opens/closes on
 status transitions.
 
 Agent rules (mirrored verbatim in the project root `CLAUDE.md`):

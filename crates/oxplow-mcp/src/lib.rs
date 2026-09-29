@@ -583,7 +583,7 @@ pub struct CompleteTaskParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AmendEffortParams {
-    /// Effort id (the `id` returned on `task_effort` rows). Find it
+    /// Effort id (the `id` returned on `effort` rows). Find it
     /// via `get_task` → `efforts[].id` or by inspecting the
     /// reconciliation payload returned from `complete_task`.
     pub effort_id: String,
@@ -2829,7 +2829,7 @@ impl OxplowMcp {
     // ---------- thread notes ----------
     //
     // Per-task notes (`add_work_note` / `list_work_notes`) were
-    // retired: `task_effort.summary` already carries "what
+    // retired: `effort.summary` already carries "what
     // shipped on this item", so a parallel note table for the same
     // purpose was duplicative. Thread-scoped notes stay — they back
     // the Explore-subagent findings flow.
@@ -6340,7 +6340,7 @@ fn compose_delegate_query_prompt(
 /// Sections: identity, description, AC, optional extra context, and
 /// the closing reminder pointing at the subagent-protocol skill.
 /// Per-item notes used to render here too but were retired —
-/// task_effort.summary already records what shipped on prior
+/// effort.summary already records what shipped on prior
 /// attempts; reviewers see it from the task activity timeline.
 fn compose_dispatch_brief(item: &oxplow_domain::Task, extra_context: &str) -> String {
     let mut out: Vec<String> = vec![

@@ -98,7 +98,7 @@ pub async fn list_efforts_overlapping_range(
 /// this effort's snapshot bracket — the "all changes during this
 /// effort" reference list. Returns empty when the effort has no
 /// start/end snapshot pin yet. Drives the reference view shown
-/// alongside the canonical `task_effort_file` list on
+/// alongside the canonical `effort_file` list on
 /// `SnapshotDetailPage`.
 pub async fn list_changed_paths_for_effort(
     svc: &Services,

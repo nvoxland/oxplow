@@ -68,7 +68,7 @@ mod tests {
                    VALUES (1, 1, 'T', 'active', '2026-01-01', '2026-01-01');
                  INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
                    VALUES (1, 1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO task_effort (id, task_id, thread_id, started_at) VALUES (1, 1, 1, '2026-01-01');",
+                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (1, 'work_item:oxplow:tsk1', 1, '2026-01-01');",
             )
         })
         .await

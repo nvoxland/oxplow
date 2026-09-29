@@ -310,7 +310,7 @@ welded to collection.
   (coverage) is *also* semi-additive — the headline is the latest capture's
   Σn/Σd, not a history blend (V50/tsk13 fixed coverage from V43's wrong
   `non-additive`); only the **accumulating** mean-across-closes ratios
-  (cycle_time, task_effort — one observation per close, Σ over all captures =
+  (cycle_time, effort — one observation per close, Σ over all captures =
   the mean) are `non-additive`),
   `scope`, `description`. (`component_role` is a **dead** V43 column, tsk15 —
   never read; ratio components ride per-fact num/den. Its Rust plumbing + config
@@ -717,7 +717,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   number the additivity-correct way. An `avg` point carries `(Σvalues, count)`
   as its ratio components so the non-additive collapse (Σn/Σd) yields the mean
   across ALL facts — the V47 mean-across-closes measures (cycle_time,
-  task_effort) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
+  effort) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
   current_caps)` → `RollupRow`s, additivity-aware like `range_value` (tsk41) and
   scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
@@ -806,7 +806,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
 - **Spine dimensions.** `oxplow.stream`, `oxplow.thread`, `oxplow.effort`,
   `oxplow.task` and `oxplow.git_version` read the fact's capture (arms in
   `dim_value_cached`; excluded in `dim_is_slice_key`, listed in `SPINE_DIMS`).
-  `task_id` is on `FactRow`: `fact_row_mapper(conn)` loads `task_effort`'s
+  `task_id` is on `FactRow`: `fact_row_mapper(conn)` loads `effort`'s
   effort→task map once per read and stamps each row. A per-row join would cost
   a lookup on every fact. They slice and filter (`dim_eq`) on the **fact path
   only**. The cube drops them from the promoted set: a capture's `effort_id`
@@ -1290,7 +1290,7 @@ store `crates/oxplow-db/src/metric_store.rs` (`SqliteMetricStore`):
 
 A sample carries **NO `effort_id` FK**. It's anchored by `captured_at` +
 `closest_git_version`. Efforts (and later commits/releases) are **time-range
-overlays** read from `task_effort` (`started_at`/`ended_at`) — so:
+overlays** read from `effort` (`started_at`/`ended_at`) — so:
 - efforts can be garbage-collected without touching a single sample,
 - a sample can fall in zero or many efforts,
 - a `diff-vs-effort-start` metric stays interpretable via its `basis_ref`
@@ -1319,7 +1319,7 @@ families:
 
 | family | how the delta is computed |
 |---|---|
-| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`task_effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
+| **File** — snapshot-scan gauge (`display_kind` ∈ {`gauge`, `findings`}, a source measure, no formula, non-producer, non-operational — includes the `static-quality` built-in code gauges, whose captures are never effort-stamped; tsk43) | Σ over the effort's **claimed files** (`effort_file`) of `(current − baseline)`, each fact contributing per the spec's **aggregation** (`count` ⇒ 1 per offender — matching the Metrics page — else the fact value); facts are scoped to the effort's **stream** (worktree). Baseline capture = latest before the effort start; current = latest at/before the effort end (newest when open; a capture STAMPED with this effort — an on-effort-complete gauge run — also counts). A CLOSED effort with no in-window capture yields no row (never a post-close capture, never a fabricated drop-to-zero). A claimed file absent from a capture = 0 (sparse emission → a drop-to-zero is seen), and the producers' EMPTY zero-hit captures are spliced into the timeline so a scan that found nothing is eligible as baseline/current (tsk44). **No claims, or repo-scalar facts with no path** → the repo-wide before→after fallback. `file_delta_from_facts` |
 | **Run** — tests (category `testing`) + the `oxplow.analysis.*` producer pair | before→after (or `sum` flow) over `aggregate_series` of the facts of the effort's OWN captures (`facts_for_captures(measure, captures_for_effort)`). Analysis is classified Run via the producer-key check (its facts arrive on effort-stamped run-ingest captures), so it never reaches the File branch (the tsk272 guard) |
 | **Window** — operational (`agent.*`/`effort.*`/`task.*`) + formula/event specs | identical read to Run now that captures carry `effort_id`; kept a distinct family only to document it has no run-claim write side. `effort_stamped_delta` serves both |
 | **Coverage** (category `coverage`) | effort-relative: for each coverage run CAPTURE this effort **claimed** (ledger — the capture is the run, T-E1), `coverage_delta_for_spec` derives the **diff-coverage** at read (`diff_coverage_for_effort`) from the capture's ABSOLUTE per-file **line-sets** (`metric_capture.detail_json`, the `coverage-detail` envelope), then before→after over the derived sequence. The coverage FACTS carry num/den counts; the line-sets live only in the detail envelope |
@@ -1391,7 +1391,7 @@ panel can reconstruct full detail via `effort_observations_from_metrics`:
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
 | otel-tokens | `crates/oxplow-app/src/token_usage.rs` (`ingest_otlp_tokens`, fed by the control-plane OTLP receiver — tsk22) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
-| effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `task_effort`; branch captured when the stream has a worktree |
+| effort-lifecycle | `crates/oxplow-app/src/task_service.rs` (`project_effort_lifecycle_metrics`, called when `update()` closes an effort on an `in_progress` exit) | derived `effort.cycle_time_ms` (close − start, subject=effort) + `task.efforts` (efforts-so-far, the redo-rate signal) from `effort`; branch captured when the stream has a worktree |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | config gauges | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the author-able runner. Seeds a `metric_spec` per resolved `metrics:` entry (+ a legacy `metric_definition` until the read-flip); runs each **gauge** (`resolved_gauges()` = config `gauges:` ∪ `use:`-enabled built-ins) on its trigger (`on-snapshot` via the snapshot-batch event in `run()`; `on-effort-complete` via the `EffortFinished` event in `run()` (TaskService no longer calls gauges); `manual` via `run_metric_by_key`) | one `fact` per `GaugeFact` the script emits (bound to a defined measure in the gauge's `emits`), version/branch/snapshot-stamped, under one `metric_capture`. Facts-only (T-C3b): `run_one_gauge` writes nothing but facts; any `samples`/`findings` a script still returns are ignored |
 

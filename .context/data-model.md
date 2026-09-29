@@ -60,10 +60,10 @@ the first time an op needs to join a transaction. Current users:
 `record_effort_atomic` and `update_with_effort_transition`.
 
 **Lifecycle invariant.** A thread-attached task is `in_progress` ⟺ it
-has exactly one open `task_effort` row. Enforced three ways: the
+has exactly one open `effort` row. Enforced three ways: the
 status flip and effort open/finish commit in one transaction
 (`SqliteTaskStore::update_with_effort_transition`); a V31 partial
-unique index on `task_effort(task_id) WHERE ended_at IS NULL` makes a
+unique index (V100: `effort(work_item) WHERE ended_at IS NULL`) makes a
 double-open a `Constraint` error; and boot recovery
 (`crates/oxplow-app/src/recovery.rs`) heals both orphan directions.
 Snapshot pins are backfilled after commit (`set_start_snapshot` /
@@ -339,7 +339,7 @@ continue to load under the narrowed enum.
 The `description` column is the task's single canonical prose body.
 (An earlier developer/executive/terse audience-variant feature added a
 `description_variants` column in V27; it was removed in V29 along with
-`task_effort.summary_variants` and `comment.section_anchor` — see the
+`effort.summary_variants` and `comment.section_anchor` — see the
 V29 migration. Tasks/efforts/wiki pages now carry one body each.)
 
 `note_count` is a computed column added to every `Task` returned by the
@@ -361,7 +361,7 @@ Structured per-thread notes. Each row has `id`, nullable
 "explore-subagent"), and `created_at`. A CHECK still enforces that
 **exactly one** of `task_id` / `thread_id` is non-NULL.
 
-**Item-scoped writes were retired** — `task_effort.summary` is
+**Item-scoped writes were retired** — `effort.summary` is
 the canonical record of what shipped on a task, so a parallel
 per-item note table for the same purpose was duplicative. The
 `add_work_note` MCP tool, the `add_work_note` / `list_work_notes`
@@ -369,7 +369,7 @@ IPC commands, and the task modal's "Notes" timeline section
 were removed alongside this. `complete_task` previously still
 shadow-wrote the summary into `task_note` to get its body
 projected into `page_ref`; that orphan write was removed once
-the effort store learned to project `task_effort.summary`
+the effort store learned to project `effort.summary`
 directly (see the `summary_*` ref_types in the `page_ref` section
 below). Pre-existing item-scoped rows stay in the table but no
 surface reads or writes them.
@@ -383,10 +383,21 @@ subagent fills the body by calling `oxplow__record_query_finding`
 back via `oxplow__list_thread_notes` / `listThreadNotes(threadId)` —
 reverse-chronological, capped at 100.
 
-### `task_effort` — `TaskEffortStore` (`crates/oxplow-db/src/effort_store.rs`)
+### `effort` — `TaskEffortStore` (`crates/oxplow-db/src/effort_store.rs`)
 
-An **effort** is one `in_progress → done` (or blocked/canceled) cycle
-of a task. Columns: `task_id`, `started_at`, `ended_at`,
+An **effort** is one bracketed span of work on a **work item**, today
+one `in_progress → done` (or blocked/canceled) cycle of a task. V100
+(P2.5a, tsk427) renamed `task_effort` → `effort` and `task_effort_file`
+→ `effort_file` in place (RENAME / ADD COLUMN / DROP COLUMN, never DROP
+TABLE, so every child row survived; see the migration's header) and
+replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
+ref (`work_item:oxplow:tsk42`, or another provider's
+`work_item:linear:ENG-12`; built with `refs::build::work_item_ref`).
+`v_effort` / `v_effort_file` derive `task_id` from it (NULL for other
+providers). Tasks are only soft-deleted, so the old FK's CASCADE never
+fired; an effort still goes with its thread. The Rust `TaskEffort` keeps
+`task_id` until P2.5b moves it to `work_item`. Columns: `work_item`,
+`thread_id`, `started_at`, `ended_at`,
 `start_snapshot_id`, `end_snapshot_id`, `summary` (v35 — free-form text
 written by `complete_task` describing what shipped in this effort; one
 summary per effort, replaces the old per-item note-history append),
@@ -414,7 +425,7 @@ V27–V28 for the audience-variant feature; dropped in V29.)
 
 Re-opening a task (done → in_progress) produces a second effort. At most one open effort per task at a time.
 
-`task_effort_file` (v22) records per-effort write paths so parallel
+`effort_file` (v22) records per-effort write paths so parallel
 subagents in one thread get distinct file lists instead of the union via
 the snapshot pair-diff. Columns: `effort_id`, `path`, `change_kind`,
 `local_snapshot_id`, `closest_git_version`, `git_version_exact`,
@@ -438,7 +449,7 @@ to those paths; 0 rows → fall back to raw pair-diff ("assume all");
 Read API: `listEffortsForTask(itemId)`, `listOpenEfforts()`,
 `listEffortsForSnapshot(snapshotId)`,
 `listEffortsForPath(path)` (closed
-efforts that touched `path` via `task_effort_file`, joined to the
+efforts that touched `path` via `effort_file`, joined to the
 owning task's title/status, newest-first by `ended_at` — drives
 the local-blame overlay described in `.context/editor-and-monaco.md`).
 `createTaskApi` exposes `listTaskEfforts(itemId)` which returns
@@ -448,18 +459,18 @@ list of changed paths (computed from the pair diff).
 `list_changed_paths_for_effort` returns a **claimed/unclaimed split**
 (`EffortChangedPaths { claimed, unclaimed }`) rather than a flat list:
 the snapshot-bracket changed paths partitioned by whether this effort
-claimed each one (`task_effort_file`), matching the history view's
+claimed each one (`effort_file`), matching the history view's
 attribution (`apps/desktop/src/snapshot-effort-grouping.ts`). Claim-first
 attribution, Child 3.
 
 **Commit↔item attribution is intentionally NOT tracked.** A
-`task_commit` junction existed briefly (migration v27) but was
-removed in v28. Users commit outside oxplow all the time (IDE buttons,
+`task_commit` junction (migration v27) was never written or read and
+was dropped in V100, with the equally dead `task_effort_turn`. Users commit outside oxplow all the time (IDE buttons,
 CLI, CI rebases, merges, squashes) and oxplow has no authoritative hook
 there. A blame-style feature built on that data would lie more often
 than it'd be useful. If a future feature wants "show me commits for
 this item," the answer is to scope `git log` by the files
-in `task_effort_file`.
+in `effort_file`.
 
 `effort_acknowledged_path` (V21) records the agent's explicit
 disclaim of a path that the auto-diff thought belonged to the
@@ -483,11 +494,11 @@ CASCADE on the effort. Written by `reconcile_unattributed_on_close`
 `update_task`, and the close half of `complete_task`), so an out-of-band
 close can't leave a parallel/external write looking like the agent's
 authored work (the bug that mis-attributed a navigator screenshot to an
-MCP-only effort). **Invariant: a path is CLAIMED (`task_effort_file`) or
+MCP-only effort). **Invariant: a path is CLAIMED (`effort_file`) or
 UNATTRIBUTED here, never both** — `record_file` deletes any matching
 residue row, so a later `complete_task` claim moves a path back into the
 claimed set. The existing agent nudge (`compute_effort_file_review`) reads
-`task_effort_file`, not this table, so it's unaffected. Restart-recovery
+`effort_file`, not this table, so it's unaffected. Restart-recovery
 orphan closes are also reconciled: `RecoveryService` (wired with the
 capture registry + thread store via `with_snapshot_reconcile`) brackets
 each orphaned effort that has a start snapshot by draining the worktree
@@ -533,7 +544,7 @@ own, so the wider effort drops it; truly-overlapping (non-nested) siblings
 have no dominant effort, so the run stays in both and the agent
 disambiguates by claiming. The ledger's `run:<id>` refs are `metric_capture`
 ids — the capture IS the run (T-E1, tsk48). The ledger row CASCADEs on
-`task_effort` while `metric_capture.effort_id` is SET NULL on effort GC, so
+`effort` while `metric_capture.effort_id` is SET NULL on effort GC, so
 attribution is exact while the effort is alive and degrades gracefully after —
 the capture rows outlive it. See `.context/metrics.md` for how reads join
 through this ledger and `.context/agent-model.md` for the
@@ -629,8 +640,8 @@ stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
 
 **Effort↔snapshot linkage lives on the effort row.** There is no
 `effort_id` or `source` column on `snapshot` / `file_snapshot`
-themselves — the bracket is recorded by `task_effort.start_snapshot_id`
-and `task_effort.end_snapshot_id`, each pointing at a `snapshot.id`.
+themselves — the bracket is recorded by `effort.start_snapshot_id`
+and `effort.end_snapshot_id`, each pointing at a `snapshot.id`.
 A closed effort's `end_snapshot_id` is non-null whenever the effort has
 a baseline — capture de-dupes an unchanged tree to the latest existing
 snapshot id rather than writing a near-identical row, and on a no-op
@@ -708,7 +719,7 @@ nothing meaningful to show. `listFileSnapshotsForStream` excludes it
 UI list skips it.
 
 **Rows come with pre-joined labels.** `listSnapshotsForStream` joins
-against `task_effort` to populate `label` + `label_kind` on each
+against `effort` to populate `label` + `label_kind` on each
 `FileSnapshot` (task title + " — start"/" — end"); effort-end wins
 over effort-start when the same snapshot is both. Unlinked snapshots
 get `label: null` and the UI falls back to a generic label.
@@ -900,7 +911,7 @@ is the closest known git commit at capture time
 that commit. Non-file edges leave all three columns NULL / 0. When
 `set_snapshot_git_commit` lands a commit on a snapshot later
 (e.g. the clean-restamp path in `SnapshotCaptureService`), the
-write cascades: both `task_effort_file` and `page_ref` rows
+write cascades: both `effort_file` and `page_ref` rows
 pointing at that snapshot get their `closest_git_version` set and
 `git_version_exact` flipped to 1. The capture-time resolver lives
 in `oxplow_app::file_ref_version`; callers don't pass any of these
@@ -1149,7 +1160,7 @@ Per-thread attribution side table for wiki page edits. Notes themselves
 are global (one body per slug, shared across all threads/streams), but
 the rail's "Finished" list filters by which thread last touched each
 note — mirrors how task efforts attribute via
-`task_effort.thread_id`.
+`effort.thread_id`.
 
 Columns: `slug, thread_id, updated_at`. PK `(slug, thread_id)` so
 repeated edits in the same thread upsert in place. Index on
@@ -1343,14 +1354,14 @@ tell the agent this effort." See `.context/agent-model.md` (Nudge
 persistence).
 
 Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
-(NULLABLE, FK task_effort ON DELETE CASCADE), kind, message, trigger
+(NULLABLE, FK effort ON DELETE CASCADE), kind, message, trigger
 (nullable), created_at`. Indexes on `(effort_id, created_at DESC)` and
 `(thread_id, created_at DESC)`.
 
 - **`thread_id` NOT NULL, `effort_id` nullable**: every nudge fires within a
   thread; today every kind fires against the open effort, but the column is
   nullable so a future thread-scoped nudge (no open effort) has a home. The
-  effort FK cascades with its `task_effort` when present.
+  effort FK cascades with its `effort` when present.
 - **`kind`** is open-ended (`report-less-run` | `coverage-target` |
   `configure`, …) — adding a kind needs no migration. Retired kinds keep
   their rows: `commit-hygiene` no longer fires (tsk250) but old rows still
@@ -1371,7 +1382,7 @@ flow.
 
 `agent_token_usage` columns: `id, stream_id (NOT NULL, FK streams ON
 DELETE CASCADE), thread_id (NOT NULL, FK threads ON DELETE CASCADE),
-effort_id (NULLABLE, FK task_effort ON DELETE CASCADE), session_id,
+effort_id (NULLABLE, FK effort ON DELETE CASCADE), session_id,
 agent_kind, model (nullable), prompt (nullable), input_tokens,
 output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
 message_count, provenance (CHECK `observed`), recorded_at`. Indexes on

@@ -3,9 +3,8 @@
 //! An "effort" is one continuous push of agent work on a single task,
 //! bounded by snapshots at start and end. This module owns:
 //!
-//! - `task_effort` (the effort row)
-//! - `task_effort_file` (per-effort file changes)
-//! - `task_effort_turn` (link to agent_turn rows)
+//! - `effort` (the effort row)
+//! - `effort_file` (per-effort file changes)
 
 use async_trait::async_trait;
 use rusqlite::params;
@@ -21,6 +20,7 @@ use crate::page_ref_projections::{
     work_item_id, KIND_WORK_ITEM,
 };
 use crate::page_ref_store::SqlitePageRefStore;
+use oxplow_domain::refs::build::{task_of_work_item_ref, work_item_ref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -63,7 +63,7 @@ pub struct EffortFile {
 }
 
 /// The snapshot-bracket changed paths for an effort, split by whether the
-/// effort CLAIMED each one (via `task_effort_file`). Mirrors the
+/// effort CLAIMED each one (via `effort_file`). Mirrors the
 /// claimed/unclaimed attribution of the history view
 /// (`apps/desktop/src/snapshot-effort-grouping.ts`): `claimed` =
 /// changed-during-the-bracket AND claimed by this effort; `unclaimed` =
@@ -150,13 +150,13 @@ pub(crate) fn start_tx(
     now: Timestamp,
 ) -> rusqlite::Result<EffortId> {
     conn.execute(
-        "INSERT INTO task_effort
-           (id, task_id, thread_id, started_at, ended_at,
+        "INSERT INTO effort
+           (id, work_item, thread_id, started_at, ended_at,
             start_snapshot_id, end_snapshot_id, summary)
          VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL)",
         params![
             None::<i64>,
-            task.value(),
+            work_item_ref(task),
             thread.value(),
             ts_to_string(now),
             start_snapshot_id,
@@ -173,7 +173,7 @@ pub(crate) fn finish_tx(
     now: &str,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE task_effort
+        "UPDATE effort
          SET ended_at = ?2, end_snapshot_id = ?3, summary = ?4
          WHERE id = ?1 AND ended_at IS NULL",
         params![id.value(), now, end_snapshot_id, summary],
@@ -187,7 +187,7 @@ fn set_summary_tx(
     summary: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE task_effort SET summary = ?2 WHERE id = ?1",
+        "UPDATE effort SET summary = ?2 WHERE id = ?1",
         params![id.value(), summary],
     )?;
     Ok(())
@@ -199,7 +199,7 @@ fn set_impacts_json_tx(
     json: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE task_effort SET impacts_json = ?2 WHERE id = ?1",
+        "UPDATE effort SET impacts_json = ?2 WHERE id = ?1",
         params![id.value(), json],
     )?;
     Ok(())
@@ -213,7 +213,7 @@ fn record_file_tx(
     version: FileRefVersion<'_>,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "INSERT OR REPLACE INTO task_effort_file
+        "INSERT OR REPLACE INTO effort_file
            (effort_id, path, change_kind,
             local_snapshot_id, closest_git_version, git_version_exact)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -240,11 +240,11 @@ pub(crate) fn find_open_for_task_tx(
     task: TaskId,
 ) -> rusqlite::Result<Option<TaskEffort>> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM task_effort
-         WHERE task_id = ?1 AND ended_at IS NULL
+        "SELECT * FROM effort
+         WHERE work_item = ?1 AND ended_at IS NULL
          ORDER BY started_at DESC LIMIT 1",
     )?;
-    let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+    let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
     rows.next().transpose()
 }
 
@@ -253,10 +253,10 @@ fn most_recent_for_task_tx(
     task: TaskId,
 ) -> rusqlite::Result<Option<TaskEffort>> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM task_effort WHERE task_id = ?1
+        "SELECT * FROM effort WHERE work_item = ?1
          ORDER BY started_at DESC LIMIT 1",
     )?;
-    let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+    let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
     rows.next().transpose()
 }
 
@@ -283,7 +283,7 @@ fn str_to_change(s: &str) -> Result<EffortFileChange, DomainError> {
 
 fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
     let id: i64 = row.get("id")?;
-    let task_id: i64 = row.get("task_id")?;
+    let work_item: String = row.get("work_item")?;
     let thread_id: i64 = row.get("thread_id")?;
     let started_at: String = row.get("started_at")?;
     let ended_at: Option<String> = row.get("ended_at")?;
@@ -295,7 +295,13 @@ fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEffort> {
     };
     Ok(TaskEffort {
         id: EffortId::new(id),
-        task_id: TaskId::new(task_id),
+        // Until the Rust shape moves to `work_item` (P2.5b), every effort
+        // is an oxplow task's.
+        task_id: task_of_work_item_ref(&work_item).ok_or_else(|| {
+            map_err(DomainError::Invalid(format!(
+                "effort {id} is on `{work_item}`, not an oxplow task"
+            )))
+        })?,
         thread_id: ThreadId::new(thread_id),
         started_at: string_to_ts(&started_at).map_err(map_err)?,
         ended_at: ended_at
@@ -417,7 +423,7 @@ pub trait TaskEffortStore: Send + Sync {
         &self,
         id: &EffortId,
     ) -> Result<EffortChangedPaths, DomainError>;
-    /// Remove specific `task_effort_file` rows. Companion to
+    /// Remove specific `effort_file` rows. Companion to
     /// `record_file`. Used by the `amend_effort` MCP tool when the
     /// agent disclaims a path that the auto-diff thought was theirs.
     async fn remove_file(&self, id: &EffortId, path: &str) -> Result<(), DomainError>;
@@ -437,7 +443,7 @@ pub trait TaskEffortStore: Send + Sync {
     /// All paths the agent has explicitly acknowledged as
     /// not-mine-but-in-the-diff for this effort.
     async fn list_acknowledged_paths(&self, id: &EffortId) -> Result<Vec<String>, DomainError>;
-    /// Paths claimed (via `task_effort_file`) by OTHER efforts whose
+    /// Paths claimed (via `effort_file`) by OTHER efforts whose
     /// snapshot window OVERLAPS this effort's window (not merely ends
     /// inside it): `other.start < self.end AND (other.end IS NULL OR
     /// other.end > self.start)`. Such a path changed during this
@@ -485,6 +491,7 @@ impl SqliteTaskEffortStore {
     async fn project_effort_slice(&self, task_id: TaskId) -> Result<(), DomainError> {
         let refs = &self.page_refs;
         type SliceRows = (Vec<(String, String)>, Vec<String>, Vec<String>);
+        let work_item = work_item_ref(task_id);
         let (paths, summaries, impact_jsons): SliceRows = self
             .db
             .call(move |conn| {
@@ -499,37 +506,37 @@ impl SqliteTaskEffortStore {
                                 PARTITION BY f.path
                                 ORDER BY e.started_at DESC
                               ) AS rn
-                       FROM task_effort_file f
-                       JOIN task_effort e ON e.id = f.effort_id
-                       WHERE e.task_id = ?1
+                       FROM effort_file f
+                       JOIN effort e ON e.id = f.effort_id
+                       WHERE e.work_item = ?1
                      )
                      WHERE rn = 1
                      ORDER BY path",
                 )?;
                 let paths: Vec<(String, String)> = path_stmt
-                    .query_map(params![task_id.value()], |r| {
+                    .query_map(params![work_item], |r| {
                         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 let mut sum_stmt = conn.prepare(
-                    "SELECT summary FROM task_effort
-                      WHERE task_id = ?1
+                    "SELECT summary FROM effort
+                      WHERE work_item = ?1
                         AND summary IS NOT NULL
                         AND summary <> ''
                       ORDER BY started_at",
                 )?;
                 let summaries: Vec<String> = sum_stmt
-                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                    .query_map(params![work_item], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 let mut imp_stmt = conn.prepare(
-                    "SELECT impacts_json FROM task_effort
-                      WHERE task_id = ?1
+                    "SELECT impacts_json FROM effort
+                      WHERE work_item = ?1
                         AND impacts_json IS NOT NULL
                         AND impacts_json <> ''
                       ORDER BY started_at",
                 )?;
                 let impact_jsons: Vec<String> = imp_stmt
-                    .query_map(params![task_id.value()], |r| r.get::<_, String>(0))?
+                    .query_map(params![work_item], |r| r.get::<_, String>(0))?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 Ok((paths, summaries, impact_jsons))
             })
@@ -568,8 +575,8 @@ impl SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT other.* FROM task_effort other
-                     JOIN task_effort self ON self.id = ?1
+                    "SELECT other.* FROM effort other
+                     JOIN effort self ON self.id = ?1
                      WHERE other.id != self.id
                        AND other.thread_id = self.thread_id
                        AND self.ended_at IS NOT NULL
@@ -650,9 +657,8 @@ impl SqliteTaskEffortStore {
     pub async fn list_all_open(&self) -> Result<Vec<TaskEffort>, DomainError> {
         self.db
             .call(|conn| {
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort WHERE ended_at IS NULL ORDER BY started_at",
-                )?;
+                let mut stmt = conn
+                    .prepare("SELECT * FROM effort WHERE ended_at IS NULL ORDER BY started_at")?;
                 let rows = stmt.query_map([], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -675,7 +681,7 @@ impl SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
+                    "SELECT * FROM effort
                       WHERE started_at <= ?2
                         AND (ended_at IS NULL OR ended_at >= ?1)
                       ORDER BY started_at ASC",
@@ -699,7 +705,7 @@ impl SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE task_effort SET start_snapshot_id = ?2 WHERE id = ?1",
+                    "UPDATE effort SET start_snapshot_id = ?2 WHERE id = ?1",
                     params![id.value(), snapshot_id],
                 )?;
                 Ok(())
@@ -717,7 +723,7 @@ impl SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "UPDATE task_effort SET end_snapshot_id = ?2 WHERE id = ?1",
+                    "UPDATE effort SET end_snapshot_id = ?2 WHERE id = ?1",
                     params![id.value(), snapshot_id],
                 )?;
                 Ok(())
@@ -729,9 +735,12 @@ impl SqliteTaskEffortStore {
         let id = *effort_id;
         self.db
             .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT task_id FROM task_effort WHERE id = ?1")?;
-                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, i64>(0))?;
-                Ok(rows.next().transpose()?.map(TaskId::new))
+                let mut stmt = conn.prepare("SELECT work_item FROM effort WHERE id = ?1")?;
+                let mut rows = stmt.query_map(params![id.value()], |r| r.get::<_, String>(0))?;
+                Ok(rows
+                    .next()
+                    .transpose()?
+                    .and_then(|w| task_of_work_item_ref(&w)))
             })
             .await
     }
@@ -792,11 +801,11 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
-                     WHERE task_id = ?1 AND ended_at IS NULL
+                    "SELECT * FROM effort
+                     WHERE work_item = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC LIMIT 1",
                 )?;
-                let mut rows = stmt.query_map(params![task.value()], row_to_effort)?;
+                let mut rows = stmt.query_map(params![work_item_ref(task)], row_to_effort)?;
                 rows.next().transpose()
             })
             .await
@@ -810,7 +819,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
+                    "SELECT * FROM effort
                      WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC LIMIT 1",
                 )?;
@@ -829,7 +838,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| {
                 // LIMIT 2 distinguishes "exactly one" from "two-or-more" cheaply.
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
+                    "SELECT * FROM effort
                      WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC LIMIT 2",
                 )?;
@@ -853,7 +862,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort
+                    "SELECT * FROM effort
                      WHERE thread_id = ?1 AND ended_at IS NULL
                      ORDER BY started_at DESC",
                 )?;
@@ -886,10 +895,10 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT * FROM task_effort WHERE task_id = ?1
+                    "SELECT * FROM effort WHERE work_item = ?1
                      ORDER BY started_at DESC",
                 )?;
-                let rows = stmt.query_map(params![item.value()], row_to_effort)?;
+                let rows = stmt.query_map(params![work_item_ref(item)], row_to_effort)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -899,7 +908,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         let id = *id;
         self.db
             .call(move |conn| {
-                let mut stmt = conn.prepare("SELECT * FROM task_effort WHERE id = ?1")?;
+                let mut stmt = conn.prepare("SELECT * FROM effort WHERE id = ?1")?;
                 let mut rows = stmt.query_map(params![id.value()], row_to_effort)?;
                 rows.next().transpose()
             })
@@ -913,7 +922,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 let mut stmt = conn.prepare(
                     "SELECT effort_id, path, change_kind,
                             local_snapshot_id, closest_git_version, git_version_exact
-                     FROM task_effort_file
+                     FROM effort_file
                      WHERE effort_id = ?1 ORDER BY path ASC",
                 )?;
                 let rows = stmt.query_map(params![id.value()], |r| {
@@ -970,8 +979,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         let raw: Option<String> = self
             .db
             .call(move |conn| {
-                let mut stmt =
-                    conn.prepare("SELECT impacts_json FROM task_effort WHERE id = ?1")?;
+                let mut stmt = conn.prepare("SELECT impacts_json FROM effort WHERE id = ?1")?;
                 let mut rows =
                     stmt.query_map(params![id.value()], |r| r.get::<_, Option<String>>(0))?;
                 Ok(rows.next().transpose()?.flatten())
@@ -1020,7 +1028,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT DISTINCT fs.path
-                     FROM task_effort e
+                     FROM effort e
                      JOIN snapshot s_start ON s_start.id = e.start_snapshot_id
                      JOIN file_snapshot fs ON fs.stream_id = s_start.stream_id
                      WHERE e.id = ?1
@@ -1053,7 +1061,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
         self.db
             .call(move |conn| {
                 conn.execute(
-                    "DELETE FROM task_effort_file WHERE effort_id = ?1 AND path = ?2",
+                    "DELETE FROM effort_file WHERE effort_id = ?1 AND path = ?2",
                     params![id_clone.value(), path_clone],
                 )?;
                 Ok(())
@@ -1135,13 +1143,13 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                     // still suppresses the nag, regardless of the order
                     // the efforts were completed in.
                     "SELECT DISTINCT tef.path
-                     FROM task_effort self
-                     JOIN task_effort other
+                     FROM effort self
+                     JOIN effort other
                        ON other.id != self.id
                       AND other.start_snapshot_id < self.end_snapshot_id
                       AND (other.end_snapshot_id IS NULL
                            OR other.end_snapshot_id > self.start_snapshot_id)
-                     JOIN task_effort_file tef ON tef.effort_id = other.id
+                     JOIN effort_file tef ON tef.effort_id = other.id
                      WHERE self.id = ?1
                        AND self.start_snapshot_id IS NOT NULL
                        AND self.end_snapshot_id IS NOT NULL
@@ -1224,7 +1232,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 let sql = format!(
                     "SELECT s.snapshot_id, e.* \
                      FROM ({}) s \
-                     JOIN task_effort e \
+                     JOIN effort e \
                        ON e.start_snapshot_id IS NOT NULL \
                       AND e.start_snapshot_id <= s.snapshot_id \
                       AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id >= s.snapshot_id) \
@@ -1272,7 +1280,7 @@ impl TaskEffortStore for SqliteTaskEffortStore {
                 // and nothing matches (empty roster) — safer than leaking
                 // cross-stream efforts.
                 let mut stmt = conn.prepare(
-                    "SELECT e.* FROM task_effort e
+                    "SELECT e.* FROM effort e
                      JOIN threads t ON t.id = e.thread_id
                      WHERE e.start_snapshot_id IS NOT NULL
                        AND e.start_snapshot_id < ?2
@@ -1328,10 +1336,10 @@ mod tests {
                     (5, 35, 50), // ef-later
                 ] {
                     conn.execute(
-                        "INSERT INTO task_effort
-                           (id, task_id, thread_id, started_at, ended_at,
+                        "INSERT INTO effort
+                           (id, work_item, thread_id, started_at, ended_at,
                             start_snapshot_id, end_snapshot_id)
-                         VALUES (?1, 1, 1, '2026-01-01T00:00:00Z',
+                         VALUES (?1, 'work_item:oxplow:tsk1', 1, '2026-01-01T00:00:00Z',
                                  '2026-01-01T00:01:00Z', ?2, ?3)",
                         params![id, start, end],
                     )?;
@@ -1343,7 +1351,7 @@ mod tests {
                     (5, "later.rs"),  // ef-later
                 ] {
                     conn.execute(
-                        "INSERT INTO task_effort_file
+                        "INSERT INTO effort_file
                            (effort_id, path, change_kind, local_snapshot_id,
                             closest_git_version, git_version_exact)
                          VALUES (?1, ?2, 'updated', 1, NULL, 0)",
@@ -1384,10 +1392,10 @@ mod tests {
                     (6, "2026-01-01T10:15:00Z", None::<&str>), // still open — not nested
                 ] {
                     conn.execute(
-                        "INSERT INTO task_effort
-                           (id, task_id, thread_id, started_at, ended_at,
+                        "INSERT INTO effort
+                           (id, work_item, thread_id, started_at, ended_at,
                             start_snapshot_id, end_snapshot_id)
-                         VALUES (?1, 1, 1, ?2, ?3, NULL, NULL)",
+                         VALUES (?1, 'work_item:oxplow:tsk1', 1, ?2, ?3, NULL, NULL)",
                         params![id, start, end],
                     )?;
                 }
@@ -1420,9 +1428,9 @@ mod tests {
                     (4, "2026-01-20T00:00:00Z", Some("2026-01-21T00:00:00Z")), // after
                 ] {
                     conn.execute(
-                        "INSERT INTO task_effort
-                           (id, task_id, thread_id, started_at, ended_at)
-                         VALUES (?1, 1, 1, ?2, ?3)",
+                        "INSERT INTO effort
+                           (id, work_item, thread_id, started_at, ended_at)
+                         VALUES (?1, 'work_item:oxplow:tsk1', 1, ?2, ?3)",
                         params![id, start, end],
                     )?;
                 }
@@ -2094,7 +2102,7 @@ mod tests {
             })
             .await
             .unwrap();
-        // task_effort.end_snapshot_id references snapshot(id), not
+        // effort.end_snapshot_id references snapshot(id), not
         // file_snapshot(id). Build real snapshot grouping rows so the
         // FK validates.
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());

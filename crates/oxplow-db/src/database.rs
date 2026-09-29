@@ -650,10 +650,8 @@ mod tests {
             "snapshot",
             "task",
             "task_link",
-            "task_commit",
-            "task_effort",
-            "task_effort_file",
-            "task_effort_turn",
+            "effort",
+            "effort_file",
             "wiki_page_thread_update",
             "page_ref",
             "comment",
@@ -1051,13 +1049,144 @@ mod tests {
             .is_err());
     }
 
+    /// V100 (tsk427) turns `task_effort` into `effort` in place. Every
+    /// child of an effort — CASCADE and SET NULL alike — must survive
+    /// (a DROP TABLE on a `foreign_keys=ON` connection would have wiped
+    /// or orphaned them, the V18 incident), the task FK becomes a
+    /// `work_item` ref, and the two dead tables go.
+    #[test]
+    fn v100_renames_effort_in_place_and_keeps_every_child() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(99))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-09-29T00:00:00.000000Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (1, 1, 't', 'active', '{now}', '{now}');
+             INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
+               VALUES (1, 1, 't', 'done', 'medium', 'user', '{now}', '{now}');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES (1, 1, '{now}'), (2, 1, '{now}');
+             INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at, start_snapshot_id, end_snapshot_id, summary)
+               VALUES (1, 1, 1, '{now}', '{now}', 1, 2, 'did it');
+             INSERT INTO task_effort_file (effort_id, path, change_kind, local_snapshot_id)
+               VALUES (1, 'a.rs', 'updated', 2);
+             INSERT INTO task_effort_turn (effort_id, turn_id)
+               SELECT 1, id FROM agent_turn WHERE 0;
+             INSERT INTO effort_acknowledged_path (effort_id, path) VALUES (1, 'b.rs');
+             INSERT INTO effort_attribution (effort_id, kind, ref, state, recorded_at)
+               VALUES (1, 'file', 'c.rs', 'claimed', '{now}');
+             INSERT INTO effort_metric_delta (effort_id, key, title, direction, kind, agg, current, changed, sample_count, refreshed_at)
+               VALUES (1, 'k', 'K', 'up', 'gauge', 'level', 1.0, 0, 1, '{now}');
+             INSERT INTO effort_observation_row (effort_id, seq, kind, provenance, source, created_at)
+               VALUES (1, 1, 'test_run', 'observed', 's', '{now}');
+             INSERT INTO effort_unattributed_file (effort_id, path, recorded_at) VALUES (1, 'd.rs', '{now}');
+             INSERT INTO agent_nudge (thread_id, effort_id, kind, message, created_at)
+               VALUES (1, 1, 'k', 'm', '{now}');
+             INSERT INTO agent_token_usage (stream_id, thread_id, effort_id, session_id, agent_kind, provenance, recorded_at)
+               VALUES (1, 1, 1, 's', 'claude', 'observed', '{now}');
+             INSERT INTO agent_tool_call (thread_id, effort_id, tool, at) VALUES (1, 1, 'Edit', '{now}');
+             INSERT INTO claim (thread_id, task_id, effort_id, statement, kind, created_at)
+               VALUES (1, 1, 1, 's', 'other', '{now}');
+             INSERT INTO decision (thread_id, task_id, effort_id, question, choice, confidence, created_at)
+               VALUES (1, 1, 1, 'q', 'c', 'high', '{now}');
+             INSERT INTO metric_capture (stream_id, thread_id, effort_id, producer, provenance, source, captured_at)
+               VALUES (1, 1, 1, 'p', 'observed', 's', '{now}');
+             INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, thread_id, effort_id, at, elapsed_ms, file_count)
+               VALUES (1, 2, 'effort_end', 1, 1, '{now}', 1, 1);"
+        ))
+        .unwrap();
+
+        embedded::migrations::runner().run(&mut conn).unwrap();
+
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        for child in [
+            "effort_file",
+            "effort_acknowledged_path",
+            "effort_attribution",
+            "effort_metric_delta",
+            "effort_observation_row",
+            "effort_unattributed_file",
+            "agent_nudge",
+            "agent_token_usage",
+            "agent_tool_call",
+            "claim",
+            "decision",
+            "metric_capture",
+            "snapshot_op",
+        ] {
+            assert_eq!(
+                count(&format!("SELECT count(*) FROM {child} WHERE effort_id = 1")),
+                1,
+                "{child} kept its effort"
+            );
+        }
+        let (work_item, summary, end): (String, String, i64) = conn
+            .query_row(
+                "SELECT work_item, summary, end_snapshot_id FROM effort WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (work_item.as_str(), summary.as_str(), end),
+            ("work_item:oxplow:tsk1", "did it", 2)
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM pragma_table_info('effort') WHERE name = 'task_id'"),
+            0
+        );
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM sqlite_master WHERE name IN
+                   ('task_effort', 'task_effort_file', 'task_effort_turn', 'task_commit')"
+            ),
+            0
+        );
+        assert_eq!(count("SELECT task_id FROM v_effort WHERE id = 1"), 1);
+        assert_eq!(
+            count("SELECT task_id FROM v_effort_file WHERE effort_id = 1"),
+            1
+        );
+
+        // Another provider's work item: no derived task.
+        conn.execute(
+            &format!(
+                "INSERT INTO effort (id, work_item, thread_id, started_at)
+                   VALUES (2, 'work_item:linear:ENG-1', 1, '{now}')"
+            ),
+            [],
+        )
+        .unwrap();
+        let foreign: Option<i64> = conn
+            .query_row("SELECT task_id FROM v_effort WHERE id = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign, None);
+        // One open effort per work item.
+        assert!(conn
+            .execute(
+                &format!(
+                    "INSERT INTO effort (work_item, thread_id, started_at)
+                       VALUES ('work_item:linear:ENG-1', 1, '{now}')"
+                ),
+                [],
+            )
+            .is_err());
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every
     /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
     /// ON DELETE CASCADE`). The fixed migration uses
     /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
-    /// untouched. This test asserts a `task_effort` row created
+    /// untouched. This test asserts an `effort` row created
     /// AFTER all migrations have run (including V18) coexists with
     /// its parent and the `acceptance_criteria` column is gone.
     #[test]
@@ -1085,21 +1214,21 @@ mod tests {
         .unwrap();
         let task_id: i64 = conn.last_insert_rowid();
         conn.execute(
-            "INSERT INTO task_effort (task_id, thread_id, started_at)
-             VALUES (?1, 1, ?2)",
+            "INSERT INTO effort (work_item, thread_id, started_at)
+             VALUES ('work_item:oxplow:tsk' || ?1, 1, ?2)",
             (task_id, now),
         )
         .unwrap();
 
-        // task_effort row survives alongside its parent.
+        // effort row survives alongside its parent.
         let n: i64 = conn
             .query_row(
-                "SELECT count(*) FROM task_effort WHERE task_id = ?1",
+                "SELECT count(*) FROM v_effort WHERE task_id = ?1",
                 [task_id],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(n, 1, "task_effort row must coexist with its parent task");
+        assert_eq!(n, 1, "effort row must coexist with its parent task");
 
         // acceptance_criteria column is gone.
         let cols: Vec<String> = conn

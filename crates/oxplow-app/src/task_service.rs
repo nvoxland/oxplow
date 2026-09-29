@@ -520,7 +520,7 @@ impl TaskService {
     /// Project derived process metrics into the unified substrate when an
     /// effort closes (tsk216): `effort.cycle_time_ms` (how long the effort
     /// was open) and `task.efforts` (efforts-so-far for this task — the
-    /// redo-rate signal). Reads `task_effort` as the source of truth; the
+    /// redo-rate signal). Reads `effort` as the source of truth; the
     /// table is untouched. Best-effort — a metric write error is logged and
     /// never blocks the status transition.
     /// `synthesized` marks an effort that `record_effort` created and closed in
@@ -1856,7 +1856,7 @@ mod tests {
             .get_measure("oxplow.task_effort")
             .await
             .unwrap()
-            .expect("task_effort measure seeded by V43");
+            .expect("effort measure seeded by V43");
         let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
         assert_eq!(
             effort_facts.len(),
@@ -1887,7 +1887,7 @@ mod tests {
     async fn closing_an_effort_projects_lifecycle_metrics() {
         // tsk216: leaving in_progress closes the effort and projects
         // `effort.cycle_time_ms` + `task.efforts` into the metric substrate,
-        // reading `task_effort` as the source of truth.
+        // reading `effort` as the source of truth.
         let (svc, tid, _effort_store, _project, _captures) = fixture_with_lifecycle().await;
         let item = svc
             .create(
@@ -1961,9 +1961,9 @@ mod tests {
             .get_measure("oxplow.task_effort")
             .await
             .unwrap()
-            .expect("task_effort measure seeded by V46");
+            .expect("effort measure seeded by V46");
         let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
-        assert_eq!(effort_facts.len(), 1, "one task_effort fact per close");
+        assert_eq!(effort_facts.len(), 1, "one effort fact per close");
         assert_eq!(effort_facts[0].value, 1.0, "first effort for the task");
         assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("task"));
         assert_eq!(
@@ -2586,7 +2586,7 @@ mod tests {
 
     #[tokio::test]
     async fn claim_open_effort_file_claims_on_open_effort_and_is_idempotent() {
-        // Auto-claim (PostToolUse path) records a task_effort_file on the
+        // Auto-claim (PostToolUse path) records a effort_file on the
         // thread's open effort, and a repeat claim of the same path is
         // idempotent (INSERT OR REPLACE → still one row).
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;

@@ -261,7 +261,7 @@ function refFor(kind: string, id: string): TabRef | null {
  *  - **action verb** (`created` / `modified` / `deleted` /
  *    `referenced` / `resolved` / `completed` / `reopened`, …) —
  *    rendered for any edge that represents a change. `touched_file`
- *    edges carry the `task_effort_file.change_kind` through
+ *    edges carry the `effort_file.change_kind` through
  *    `source_extra.change_kind`; `impact` edges carry the declared
  *    action through `source_extra.action`. Both paths normalize
  *    `updated` to `modified` for display.
@@ -317,7 +317,7 @@ function parseExtraField(sourceExtra: string | null, field: string): string | nu
 
 /**
  * Normalize the action vocabulary the backend stores
- * (`created`/`updated`/`deleted` from `task_effort_file`, plus the
+ * (`created`/`updated`/`deleted` from `effort_file`, plus the
  * looser impact verbs the agent declares) into the labels the
  * renderer surfaces. Notably: `updated` → "modified" everywhere so
  * a file-change row and a wiki-page-change row read the same way.

@@ -711,7 +711,7 @@ pub struct FactRow {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
     pub effort_id: Option<i64>,
-    /// The task `effort_id` belongs to (resolved per read from `task_effort`).
+    /// The task `effort_id` belongs to (resolved per read from `effort`).
     pub task_id: Option<i64>,
     pub provenance: String,
     pub source: String,
@@ -755,10 +755,10 @@ const FACT_ROW_COLS: &str = "f.id, f.capture_id, f.measure_id, f.value, f.numera
 fn fact_row_mapper(
     conn: &rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow>> {
-    // Effort → task, loaded once per read: `task_effort` is small next to the
+    // Effort → task, loaded once per read: `effort` is small next to the
     // facts, and a per-row join would cost a lookup on every fact.
     let tasks: std::collections::HashMap<i64, i64> = conn
-        .prepare_cached("SELECT id, task_id FROM task_effort")?
+        .prepare_cached("SELECT id, task_id FROM v_effort WHERE task_id IS NOT NULL")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut last: Option<(i64, Timestamp)> = None;
@@ -2969,8 +2969,8 @@ mod tests {
                 )?;
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
-                    "INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at)
-                     VALUES (1, ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
+                    "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
+                     VALUES (1, 'work_item:oxplow:tsk' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
                     params![task_id],
                 )?;
                 Ok(())
@@ -4784,7 +4784,7 @@ mod tests {
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
         // The migrations seed 24 built-in measures (10 in V43 + oxplow.ast_hit in
-        // V45 + turn/task_effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
+        // V45 + turn/effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
         // oxplow.test_duration in V57 + cache_tokens/cache_usage/effort_tokens in
         // V59 + effort_steering/effort_time_to_green in V60 + oxplow.token_waste
         // in V61 + coverage.branch/coverage.function in V68 + doc_coverage in
@@ -5169,7 +5169,7 @@ mod tests {
         // Delete the effort — the capture and its fact must survive.
         store
             .db
-            .call(|conn| conn.execute("DELETE FROM task_effort WHERE id = 1", []))
+            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
             .await
             .unwrap();
 

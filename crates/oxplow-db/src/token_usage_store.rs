@@ -1,5 +1,5 @@
 //! Agent token-usage store (tsk104): per-turn token accounting parsed from
-//! the agent session transcript, attributed to a `task_effort` + thread,
+//! the agent session transcript, attributed to a `effort` + thread,
 //! plus a per-session read cursor so successive Stops only sum the new tail
 //! of the transcript.
 //!
@@ -332,8 +332,8 @@ mod tests {
                 )?;
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
-                    "INSERT INTO task_effort (task_id, thread_id, started_at)
-                     VALUES (?1, 1, ?2)",
+                    "INSERT INTO effort (work_item, thread_id, started_at)
+                     VALUES ('work_item:oxplow:tsk' || ?1, 1, ?2)",
                     params![task_id, now],
                 )?;
                 Ok(())
@@ -439,7 +439,7 @@ mod tests {
         store.record(sample(Some("eff1"))).await.unwrap();
         store
             .db
-            .call(|conn| conn.execute("DELETE FROM task_effort WHERE id = 1", []))
+            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
             .await
             .unwrap();
         // The row referenced the effort, so it cascades away entirely.

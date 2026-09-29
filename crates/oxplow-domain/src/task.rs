@@ -119,7 +119,7 @@ pub struct TaskNote {
 
 /// One declared cross-page outcome of an effort — the LLM asserts
 /// "this effort created/updated/deleted/referenced/resolved <kind>:<id>".
-/// Stored as a JSON list on `task_effort.impacts_json` and projected
+/// Stored as a JSON list on `effort.impacts_json` and projected
 /// into the unified `page_ref` graph as outbound edges from the
 /// owning task. Distinct from `touched_files` (which only covers
 /// the file kind) — impacts cover wiki pages, tasks, commits,

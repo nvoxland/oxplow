@@ -38,7 +38,7 @@ pub const MAX_UNCLAIMED_FOR_REVIEW: usize = 10;
 /// mis-routing bug, tsk272/tsk274).
 ///
 /// Family ↔ the write-side [`AttributionKind`] it reads:
-/// - [`File`](Self::File) ↔ [`FileKind`] — the effort's `task_effort_file` claims
+/// - [`File`](Self::File) ↔ [`FileKind`] — the effort's `effort_file` claims
 /// - [`Coverage`](Self::Coverage) / [`Run`](Self::Run) ↔ [`RunKind`] — the
 ///   effort's `effort_attribution` ledger `"run"` claims
 /// - [`Window`](Self::Window) ↔ no claim — operational thread+time facts
@@ -225,7 +225,7 @@ pub async fn reconcile_close(kind: &dyn AttributionKind, effort_id: &EffortId) -
 }
 
 /// Reference kind: files, over the EXISTING claim-first storage
-/// (`task_effort_file`, `effort_unattributed_file`, acknowledged, intervening,
+/// (`effort_file`, `effort_unattributed_file`, acknowledged, intervening,
 /// and the snapshot-bracket diff). No data migration — behavior-identical to
 /// the pre-generalization path.
 pub struct FileKind<'a> {

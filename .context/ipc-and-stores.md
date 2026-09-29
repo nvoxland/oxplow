@@ -252,10 +252,10 @@ SQLite-indexed table (`file_snapshot`) plus an on-disk content-
 addressed blob store at `.oxplow/snapshots/objects/xx/yyyy…`. Snapshots
 are time-ordered and deduplicated on a `version_hash` (no parent
 chain). Rows returned by `listSnapshotsForStream` are pre-enriched
-with `label` + `label_kind` joined from `task_effort`, and
+with `label` + `label_kind` joined from `effort`, and
 exclude the first-ever baseline (nothing to diff against). Snapshots
 anchor to efforts via `file_snapshot.effort_id` (and the mirror
-columns `task_effort.start_snapshot_id` /
+columns `effort.start_snapshot_id` /
 `end_snapshot_id`). Unlike other stores it doesn't expose a `subscribe()`; the
 runtime publishes `file-snapshot.created` on the EventBus after each
 successful flush that actually inserted a row.

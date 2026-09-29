@@ -578,7 +578,7 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
             // Carry (Σvalues, count) as ratio components so the non-additive
             // cross-time collapse (Σn/Σd in `range_value`) yields the mean
             // across ALL facts — the V47 mean-across-closes measures
-            // (cycle_time, task_effort) die to a den=0 → 0.0 otherwise.
+            // (cycle_time, effort) die to a den=0 → 0.0 otherwise.
             (sum / count, Some(sum), Some(count))
         }
         Aggregation::Min => (
@@ -3533,8 +3533,8 @@ mod tests {
                  INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
                    VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
                           (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO task_effort (id, task_id, thread_id, started_at, ended_at)
-                   VALUES (7, 1, 1, '2026-01-01', '2026-01-02'), (8, 2, 1, '2026-01-01', '2026-01-02');",
+                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
+                   VALUES (7, 'work_item:oxplow:tsk1', 1, '2026-01-01', '2026-01-02'), (8, 'work_item:oxplow:tsk2', 1, '2026-01-01', '2026-01-02');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

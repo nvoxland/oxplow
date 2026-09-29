@@ -1820,7 +1820,7 @@ export async function listTaskEfforts(itemId: string): Promise<EffortDetail[]> {
   // The Tauri command returns flat `TaskEffort` rows. Consumers
   // (TaskPage activity timeline, useBacklinks, TaskDetail) expect
   // the richer `EffortDetail` shape with changed paths + counts.
-  // Pull the per-effort `task_effort_file` rows in parallel —
+  // Pull the per-effort `effort_file` rows in parallel —
   // that's the canonical authorship list (what the agent declared
   // via `complete_task` / `amend_effort`). start_snapshot and
   // end_snapshot are still null until a "snapshot by id" IPC
@@ -2229,7 +2229,7 @@ export async function listWikiSlugsForSnapshots(
 export type { EffortChangedPaths } from "./tauri-bridge/index.js";
 
 /** Snapshot-bracket changed paths for an effort, split into the paths the
- *  effort CLAIMED (task_effort_file) vs the `unclaimed` rest (parallel/
+ *  effort CLAIMED (effort_file) vs the `unclaimed` rest (parallel/
  *  external writes, formatters, capture gaps) — the claim-aware view that
  *  matches the history grouping. Both empty when the effort has no
  *  start/end snapshot pin yet. */

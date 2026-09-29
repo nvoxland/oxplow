@@ -182,8 +182,8 @@ mod tests {
                     [now],
                 )?;
                 conn.execute(
-                    "INSERT INTO task_effort (id, task_id, thread_id, started_at)
-                     VALUES (1, 1, 1, ?1), (2, 2, 1, ?1)",
+                    "INSERT INTO effort (id, work_item, thread_id, started_at)
+                     VALUES (1, 'work_item:oxplow:tsk1', 1, ?1), (2, 'work_item:oxplow:tsk2', 1, ?1)",
                     [now],
                 )?;
                 Ok(())
