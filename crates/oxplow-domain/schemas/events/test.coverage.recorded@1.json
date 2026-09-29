@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`test.coverage.recorded@1`: a coverage report was captured.",
+  "properties": {
+    "branches_pct": {
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "capture": {
+      "description": "The `metric_capture` id.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "lines_pct": {
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "capture",
+    "source"
+  ],
+  "title": "TestCoverageRecordedV1",
+  "type": "object"
+}

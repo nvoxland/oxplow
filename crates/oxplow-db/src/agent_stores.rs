@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use rusqlite::{params, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentTurnEnded, AgentTurnEndedV1, AgentTurnStarted, AgentTurnStartedV1, EventSchemaRegistry,
+    AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1, EventSchemaRegistry,
 };
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::hook::TurnOutcome;
@@ -197,10 +197,12 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 };
                 let env = Envelope::typed::<AgentTurnEnded>(
                     system_source("hook_ingest"),
-                    &AgentTurnEndedV1 {
+                    &AgentTurnEndedV2 {
                         turn: turn_ref(id),
                         thread: thread_ref(thread),
                         outcome,
+                        transcript_path: None,
+                        usage: None,
                     },
                 )
                 .with_anchors(turn_anchors(tx, thread, id)?)

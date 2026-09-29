@@ -1,0 +1,10 @@
+{
+  "run": "run:30256",
+  "command": "OXPLOW_TASK=tsk42 bun run test:collect",
+  "exit_code": 0,
+  "passed": 2291,
+  "failed": 0,
+  "skipped": 1,
+  "report_parsed": true,
+  "source": "post-tool-bash"
+}

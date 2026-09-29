@@ -105,7 +105,27 @@ impl EventSchemaRegistry {
         r.register::<VcsHeadMoved>().expect("core type registers");
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
+        r.register::<AgentTurnEndedAtV1>()
+            .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
+        r.register::<AgentSessionStarted>()
+            .expect("core type registers");
+        r.register::<AgentSessionEnded>()
+            .expect("core type registers");
+        r.register::<AgentPromptSubmitted>()
+            .expect("core type registers");
+        r.register::<AgentToolRequested>()
+            .expect("core type registers");
+        r.register::<AgentToolFinished>()
+            .expect("core type registers");
+        r.register::<AgentStatusChanged>()
+            .expect("core type registers");
+        r.register::<TestRunRecorded>()
+            .expect("core type registers");
+        r.register::<TestCoverageRecorded>()
+            .expect("core type registers");
+        r.register::<WorkItemDeleted>()
+            .expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
@@ -467,6 +487,8 @@ impl EventType for AgentTurnStarted {
     type Payload = AgentTurnStartedV1;
 }
 
+// Superseded by v2; kept registered so rows logged at v1 still validate
+// and upcast. (Its doc comment is part of the published schema.)
 /// `agent.turn.ended@1`: a turn closed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -476,11 +498,254 @@ pub struct AgentTurnEndedV1 {
     pub outcome: crate::hook::TurnOutcome,
 }
 
-pub struct AgentTurnEnded;
-impl EventType for AgentTurnEnded {
+/// The v1 shape of `agent.turn.ended`, as a registry entry.
+pub struct AgentTurnEndedAtV1;
+impl EventType for AgentTurnEndedAtV1 {
     const TYPE: &'static str = "agent.turn.ended";
     const V: u32 = 1;
     type Payload = AgentTurnEndedV1;
+}
+
+/// A turn's token counts, when the harness reported them with the turn
+/// (ACP's prompt response). Claude's come from the transcript instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TurnUsage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// `agent.turn.ended@2`: a turn closed, with what the token-usage reactor
+/// needs to count it — the transcript to read, or the counts themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentTurnEndedV2 {
+    pub turn: String,
+    pub thread: String,
+    pub outcome: crate::hook::TurnOutcome,
+    /// The harness's session transcript (Claude's `transcript_path`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript_path: Option<String>,
+    /// Counts reported with the turn (ACP).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TurnUsage>,
+}
+
+pub struct AgentTurnEnded;
+impl EventType for AgentTurnEnded {
+    const TYPE: &'static str = "agent.turn.ended";
+    const V: u32 = 2;
+    type Payload = AgentTurnEndedV2;
+
+    /// v1 → v2 adds two optional fields: a v1 payload is a valid v2 one.
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "agent.turn.ended@{from_v} cannot be upcast to v2"
+            ))),
+        }
+    }
+}
+
+/// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
+/// hex) and its length. Retention may delete the body; the ref stays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ContentRef {
+    pub hash: String,
+    pub size: u64,
+}
+
+/// `agent.session.started@1`: a harness session began on a thread — first
+/// seen by id (hooks) or announced (ACP).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSessionStartedV1 {
+    pub session: String,
+    pub thread: String,
+    pub harness: crate::agent::AgentKind,
+    /// The session is the thread's resume session (a reattach), not new.
+    pub resumed: bool,
+}
+
+pub struct AgentSessionStarted;
+impl EventType for AgentSessionStarted {
+    const TYPE: &'static str = "agent.session.started";
+    const V: u32 = 1;
+    type Payload = AgentSessionStartedV1;
+}
+
+/// `agent.session.ended@1`: the harness ended a session (`/clear`, exit).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSessionEndedV1 {
+    pub session: String,
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+pub struct AgentSessionEnded;
+impl EventType for AgentSessionEnded {
+    const TYPE: &'static str = "agent.session.ended";
+    const V: u32 = 1;
+    type Payload = AgentSessionEndedV1;
+}
+
+/// `agent.prompt.submitted@1`: a person sent the agent a prompt. Every
+/// prompt logs one; only a prompt with no turn open also opens a turn
+/// (`reprompt` says it landed inside an open one).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentPromptSubmittedV1 {
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    pub reprompt: bool,
+}
+
+pub struct AgentPromptSubmitted;
+impl EventType for AgentPromptSubmitted {
+    const TYPE: &'static str = "agent.prompt.submitted";
+    const V: u32 = 1;
+    type Payload = AgentPromptSubmittedV1;
+}
+
+/// What oxplow's agent policy said about a tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDecision {
+    Allowed,
+    Denied,
+}
+
+/// `agent.tool.requested@1`: the agent asked to run a tool (PreToolUse),
+/// and whether the policy let it. Tool names are the canonical
+/// (Claude-shaped) vocabulary every transport maps onto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolRequestedV1 {
+    pub tool: String,
+    /// Repo-relative path the tool targets, when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// A short summary (a truncated command, a search pattern).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    pub decision: ToolDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+pub struct AgentToolRequested;
+impl EventType for AgentToolRequested {
+    const TYPE: &'static str = "agent.tool.requested";
+    const V: u32 = 1;
+    type Payload = AgentToolRequestedV1;
+}
+
+/// `agent.tool.finished@1`: a tool call returned (PostToolUse). The
+/// recorders — tool-call rows, effort claims, collection — react to this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentToolFinishedV1 {
+    pub tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Whether it succeeded, when the harness said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// A shell command's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ContentRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentRef>,
+}
+
+pub struct AgentToolFinished;
+impl EventType for AgentToolFinished {
+    const TYPE: &'static str = "agent.tool.finished";
+    const V: u32 = 1;
+    type Payload = AgentToolFinishedV1;
+}
+
+/// `agent.status.changed@1`: a thread's agent moved to another state.
+/// Logged on a transition only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AgentStatusChangedV1 {
+    pub thread: String,
+    pub state: crate::hook::AgentStatusState,
+    /// The `await_user` question, or why it stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+pub struct AgentStatusChanged;
+impl EventType for AgentStatusChanged {
+    const TYPE: &'static str = "agent.status.changed";
+    const V: u32 = 1;
+    type Payload = AgentStatusChangedV1;
+}
+
+/// `test.run.recorded@1`: a test run was captured (`run:<capture>`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TestRunRecordedV1 {
+    pub run: String,
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<u64>,
+    /// A test report was found and parsed (else the run is command-only).
+    pub report_parsed: bool,
+    /// Who produced it: `post-tool-bash`, `plugin-exec:<name>`, `mcp`.
+    pub source: String,
+}
+
+pub struct TestRunRecorded;
+impl EventType for TestRunRecorded {
+    const TYPE: &'static str = "test.run.recorded";
+    const V: u32 = 1;
+    type Payload = TestRunRecordedV1;
+}
+
+/// `test.coverage.recorded@1`: a coverage report was captured.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TestCoverageRecordedV1 {
+    /// The `metric_capture` id.
+    pub capture: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branches_pct: Option<f64>,
+    pub source: String,
+}
+
+pub struct TestCoverageRecorded;
+impl EventType for TestCoverageRecorded {
+    const TYPE: &'static str = "test.coverage.recorded";
+    const V: u32 = 1;
+    type Payload = TestCoverageRecordedV1;
 }
 
 /// `effort.opened@1`: a bracket of work on a work item began.
@@ -551,6 +816,20 @@ impl EventType for WorkItemCreated {
     type Payload = WorkItemCreatedV1;
 }
 
+/// `work_item.deleted@1`: a task was deleted (soft: its row stays, hidden).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemDeletedV1 {
+    pub work_item: String,
+}
+
+pub struct WorkItemDeleted;
+impl EventType for WorkItemDeleted {
+    const TYPE: &'static str = "work_item.deleted";
+    const V: u32 = 1;
+    type Payload = WorkItemDeletedV1;
+}
+
 /// `work_item.edited@1`: a task's own fields changed (not its status —
 /// that is `work_item.transitioned`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -599,28 +878,78 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn core_registry_knows_every_core_type_at_v1() {
+    fn core_registry_knows_every_core_type_and_version() {
         let r = EventSchemaRegistry::core();
+        let all = r.versions();
+        let versions: Vec<(&str, u32)> = all.iter().map(|(t, v)| (t.as_str(), *v)).collect();
         assert_eq!(
-            r.versions(),
+            versions,
             vec![
-                ("agent.turn.ended".to_string(), 1),
-                ("agent.turn.started".to_string(), 1),
-                ("command.executed".to_string(), 1),
-                ("config.changed".to_string(), 1),
-                ("effect.result".to_string(), 1),
-                ("effort.closed".to_string(), 1),
-                ("effort.finished".to_string(), 1),
-                ("effort.opened".to_string(), 1),
-                ("snapshot.taken".to_string(), 1),
-                ("vcs.head.moved".to_string(), 1),
-                ("work_item.created".to_string(), 1),
-                ("work_item.edited".to_string(), 1),
-                ("work_item.transitioned".to_string(), 1),
+                ("agent.prompt.submitted", 1),
+                ("agent.session.ended", 1),
+                ("agent.session.started", 1),
+                ("agent.status.changed", 1),
+                ("agent.tool.finished", 1),
+                ("agent.tool.requested", 1),
+                ("agent.turn.ended", 1),
+                ("agent.turn.ended", 2),
+                ("agent.turn.started", 1),
+                ("command.executed", 1),
+                ("config.changed", 1),
+                ("effect.result", 1),
+                ("effort.closed", 1),
+                ("effort.finished", 1),
+                ("effort.opened", 1),
+                ("snapshot.taken", 1),
+                ("test.coverage.recorded", 1),
+                ("test.run.recorded", 1),
+                ("vcs.head.moved", 1),
+                ("work_item.created", 1),
+                ("work_item.deleted", 1),
+                ("work_item.edited", 1),
+                ("work_item.transitioned", 1),
             ]
         );
         assert_eq!(r.latest("work_item.transitioned"), Some(1));
+        assert_eq!(r.latest("agent.turn.ended"), Some(2));
         assert_eq!(r.owner("config.changed", 1), Some(None));
+    }
+
+    /// P3.1 (tsk471): the first versioned type. A `turn.ended` written at
+    /// v1 reads at v2 with no transcript and no usage; the v2 producer's
+    /// shape is what `Envelope::typed` emits.
+    #[test]
+    fn turn_ended_v1_upcasts_to_v2_with_nothing_added() {
+        let r = EventSchemaRegistry::core();
+        let v1 = json!({ "turn": "turn:trn12", "thread": "thread:thr3", "outcome": "completed" });
+        let (v, up) = r
+            .upcast_to_latest("agent.turn.ended", 1, v1.clone())
+            .unwrap();
+        assert_eq!(v, 2);
+        assert_eq!(up, v1, "optional fields are absent, not null");
+        let typed: AgentTurnEndedV2 = serde_json::from_value(up).unwrap();
+        assert_eq!(typed.transcript_path, None);
+        assert_eq!(typed.usage, None);
+        let env = Envelope::typed::<AgentTurnEnded>(
+            "test",
+            &AgentTurnEndedV2 {
+                turn: "turn:trn12".into(),
+                thread: "thread:thr3".into(),
+                outcome: crate::hook::TurnOutcome::Completed,
+                transcript_path: Some("/tmp/t.jsonl".into()),
+                usage: Some(TurnUsage {
+                    input: 10,
+                    output: 4,
+                    cache_write: 0,
+                    cache_read: 6,
+                    model: Some("claude".into()),
+                }),
+            },
+        );
+        assert_eq!(env.v, 2);
+        r.validate_envelope(&env).unwrap();
+        // v1 stays a registered, validating shape for the rows already written.
+        r.validate("agent.turn.ended", 1, &v1).unwrap();
     }
 
     #[test]

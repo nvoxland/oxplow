@@ -1,0 +1,7 @@
+{
+  "turn": "turn:trn12",
+  "thread": "thread:thr3",
+  "outcome": "completed",
+  "transcript_path": "/Users/me/.claude/projects/p/0f3c9a2e.jsonl",
+  "usage": { "input": 1200, "output": 340, "cache_write": 0, "cache_read": 900, "model": "claude-fable-5-1" }
+}

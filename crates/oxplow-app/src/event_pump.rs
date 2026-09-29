@@ -39,7 +39,7 @@ use oxplow_db::event_log_store::{
     SqliteEventLogStore,
 };
 use oxplow_db::Database;
-use oxplow_domain::{DomainError, StoredEvent};
+use oxplow_domain::{DomainError, EventSchemaRegistry, StoredEvent};
 use tokio::sync::Notify;
 
 /// A consumer whose work runs outside the pump's transaction (see the
@@ -286,7 +286,7 @@ impl EventPump {
         let name = consumer.name();
         let seq = event.seq;
         let outcome = if consumer.handles(&event.envelope.event_type) {
-            match run_async_handler(consumer, event).await {
+            match run_async_handler(self.log.schemas().clone(), consumer, event).await {
                 Ok(()) => Delivery::Handled,
                 Err(err) if err.is_retryable() => return Ok(Delivery::Deferred),
                 Err(err) => {
@@ -317,10 +317,11 @@ impl EventPump {
         consumer: Arc<dyn EventConsumer>,
         event: Arc<StoredEvent>,
     ) -> Result<Delivery, DomainError> {
+        let schemas = self.log.schemas().clone();
         self.db
             .transaction(move |tx| {
                 let outcome = if consumer.handles(&event.envelope.event_type) {
-                    match run_handler(consumer.as_ref(), tx, &event) {
+                    match run_handler(&schemas, consumer.as_ref(), tx, &event) {
                         Ok(()) => Delivery::Handled,
                         // A lock blip isn't a poison event: fail the whole
                         // delivery so the transaction retries it, and if it
@@ -376,12 +377,13 @@ impl EventPump {
                 ))
             })?;
         let seq = letter.event_seq;
+        let schemas = self.log.schemas().clone();
         self.db
             .transaction(move |tx| {
                 let Some(event) = event_by_seq_tx(tx, seq)? else {
                     return Err(DomainError::NotFound);
                 };
-                match run_handler(consumer.as_ref(), tx, &event) {
+                match run_handler(&schemas, consumer.as_ref(), tx, &event) {
                     Ok(()) => set_dead_letter_state_tx(tx, id, "retried"),
                     Err(err) => dead_letter_tx(tx, consumer.name(), seq, &err.to_string()),
                 }
@@ -402,7 +404,7 @@ impl EventPump {
             .await?
             .ok_or(DomainError::NotFound)?;
         let name = consumer.name();
-        let result = run_async_handler(consumer, Arc::new(event)).await;
+        let result = run_async_handler(self.log.schemas().clone(), consumer, Arc::new(event)).await;
         self.db
             .transaction(move |tx| match &result {
                 Ok(()) => set_dead_letter_state_tx(tx, id, "retried"),
@@ -509,10 +511,31 @@ enum Delivery {
 
 /// An async handler on its own task, so a panic is a failure the pump
 /// parks rather than one that takes the loop down.
+/// The event as a consumer reads it: carried to the newest registered
+/// version of its type (P3.1), so a consumer is written against one shape
+/// and rows logged at an older version still reach it. A row that can't
+/// be upcast fails the delivery, which parks it as a dead letter.
+fn at_latest(
+    schemas: &EventSchemaRegistry,
+    event: &StoredEvent,
+) -> Result<StoredEvent, DomainError> {
+    let env = &event.envelope;
+    if schemas.latest(&env.event_type) == Some(env.v) {
+        return Ok(event.clone());
+    }
+    let (v, payload) = schemas.upcast_to_latest(&env.event_type, env.v, env.payload.clone())?;
+    let mut out = event.clone();
+    out.envelope.v = v;
+    out.envelope.payload = payload;
+    Ok(out)
+}
+
 async fn run_async_handler(
+    schemas: Arc<EventSchemaRegistry>,
     consumer: Arc<dyn AsyncEventConsumer>,
     event: Arc<StoredEvent>,
 ) -> Result<(), DomainError> {
+    let event = at_latest(&schemas, &event)?;
     match tokio::spawn(async move { consumer.handle(&event).await }).await {
         Ok(result) => result,
         Err(join) => {
@@ -534,10 +557,12 @@ async fn run_async_handler(
 /// the same transaction commit. A panicking handler is a failure too:
 /// the pump must never stall on one.
 fn run_handler(
+    schemas: &EventSchemaRegistry,
     consumer: &dyn EventConsumer,
     conn: &rusqlite::Connection,
     event: &StoredEvent,
 ) -> Result<(), DomainError> {
+    let event = &at_latest(schemas, event)?;
     conn.execute_batch("SAVEPOINT handler")
         .map_err(|e| DomainError::Storage(format!("savepoint: {e}")))?;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -577,7 +602,7 @@ mod tests {
     use super::*;
     use oxplow_db::event_log_store::SqliteEventLogStore;
     use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV1};
-    use oxplow_domain::{Envelope, EventSchemaRegistry};
+    use oxplow_domain::Envelope;
     use parking_lot::Mutex;
     use serde_json::{json, Value};
 
@@ -843,6 +868,53 @@ mod tests {
         assert_eq!(store.checkpoint("rec".into()).await.unwrap(), 3);
         // Nothing left to do.
         assert_eq!(pump.run_once().await.unwrap(), PumpReport::default());
+    }
+
+    /// Records the schema version each event was delivered at.
+    struct VersionRecorder;
+    impl EventConsumer for VersionRecorder {
+        fn name(&self) -> &'static str {
+            "versions"
+        }
+        fn handles(&self, event_type: &str) -> bool {
+            event_type == "agent.turn.ended"
+        }
+        fn handle(
+            &self,
+            conn: &rusqlite::Connection,
+            event: &StoredEvent,
+        ) -> Result<(), DomainError> {
+            conn.execute(
+                "INSERT INTO seen (consumer, key) VALUES ('versions', ?1)",
+                [format!(
+                    "v{} transcript={}",
+                    event.envelope.v,
+                    event.envelope.payload.get("transcript_path").is_some()
+                )],
+            )
+            .map_err(|e| DomainError::Storage(e.to_string()))?;
+            Ok(())
+        }
+    }
+
+    /// P3.1 (tsk471): a consumer reads only the newest shape of a type. A
+    /// row written at `agent.turn.ended@1` is delivered upcast to v2.
+    #[tokio::test]
+    async fn consumers_receive_the_newest_version_of_a_type() {
+        let (db, store) = setup().await;
+        let v1 = Envelope::new(
+            "agent.turn.ended",
+            1,
+            "test",
+            json!({ "turn": "turn:trn1", "thread": "thread:thr1", "outcome": "completed" }),
+        )
+        .unwrap();
+        store.append(v1).await.unwrap();
+        pump(&db, &store, vec![Arc::new(VersionRecorder)])
+            .run_once()
+            .await
+            .unwrap();
+        assert_eq!(seen(&db, "versions").await, vec!["v2 transcript=false"]);
     }
 
     #[tokio::test]

@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ToolDecision": {
+      "description": "What oxplow's agent policy said about a tool call.",
+      "enum": [
+        "allowed",
+        "denied"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.tool.requested@1`: the agent asked to run a tool (PreToolUse),\nand whether the policy let it. Tool names are the canonical\n(Claude-shaped) vocabulary every transport maps onto.",
+  "properties": {
+    "decision": {
+      "$ref": "#/$defs/ToolDecision"
+    },
+    "detail": {
+      "description": "A short summary (a truncated command, a search pattern).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "path": {
+      "description": "Repo-relative path the tool targets, when it names one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tool",
+    "decision"
+  ],
+  "title": "AgentToolRequestedV1",
+  "type": "object"
+}

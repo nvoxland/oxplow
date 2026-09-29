@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.prompt.submitted@1`: a person sent the agent a prompt. Every\nprompt logs one; only a prompt with no turn open also opens a turn\n(`reprompt` says it landed inside an open one).",
+  "properties": {
+    "reprompt": {
+      "type": "boolean"
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "thread": {
+      "type": "string"
+    },
+    "turn": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "reprompt"
+  ],
+  "title": "AgentPromptSubmittedV1",
+  "type": "object"
+}

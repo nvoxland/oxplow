@@ -1105,9 +1105,10 @@ is STRICT too.
 **Schemas (P1.5, tsk407).** `oxplow_domain::events::schema` has one
 Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
-accepts. `Services.event_schemas` is `EventSchemaRegistry::core()`
-(`work_item.transitioned@1`, `command.executed@1`, `config.changed@1`,
-`effect.result@1`); plugin types will join it via `register_plugin(plugin)`
+accepts. `Services.event_schemas` is `EventSchemaRegistry::core()` —
+every core type; the golden files under `schemas/events/` are the
+authoritative list (the `core_registry_knows_every_core_type_and_version`
+test pins it). Plugin types will join it via `register_plugin(plugin)`
 once plugin `event_types` run (today the manifest parses and
 lifecycle-checks them only) and may only use the plugin's own name as
 namespace — never a core namespace (`CORE_NAMESPACES`, §5.3). `append_tx`
@@ -1125,7 +1126,16 @@ of the old file. `OXPLOW_BLESS=1` writes a golden for a type that has
 never shipped. Every `type@v` also has an example payload at
 `tests/fixtures/events/<type>@<v>.json`; the test validates each at its
 own version and, upcast through the chain (`upcast_to_latest`), at the
-newest, so a consumer only ever reads the newest shape.
+newest, so a consumer only ever reads the newest shape. **The pump
+delivers the newest shape** (P3.1): `at_latest` in
+`crates/oxplow-app/src/event_pump.rs` upcasts each row before any
+handler, sync or async, and before a dead-letter retry, so a row logged
+at an older version still reaches a consumer written against the current
+one; a row that can't be upcast dead-letters. The first versioned type is
+`agent.turn.ended@2` (adds `transcript_path?`, `usage?`); its v1 stays
+registered (`AgentTurnEndedAtV1`) and upcasts unchanged. A superseded
+version's Rust doc comment is part of its published schema — don't edit
+it.
 
 **The contract is `append_tx(&Connection, &EventSchemaRegistry, &Envelope)
 -> seq`**, composed inside the producer's `Database::transaction` closure. The async

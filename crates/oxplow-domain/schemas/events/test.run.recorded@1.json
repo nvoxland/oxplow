@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`test.run.recorded@1`: a test run was captured (`run:<capture>`).",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "exit_code": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "failed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "passed": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "report_parsed": {
+      "description": "A test report was found and parsed (else the run is command-only).",
+      "type": "boolean"
+    },
+    "run": {
+      "type": "string"
+    },
+    "skipped": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "source": {
+      "description": "Who produced it: `post-tool-bash`, `plugin-exec:<name>`, `mcp`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run",
+    "command",
+    "report_parsed",
+    "source"
+  ],
+  "title": "TestRunRecordedV1",
+  "type": "object"
+}

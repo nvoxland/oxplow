@@ -41,7 +41,9 @@ pub struct HookEvent {
     pub received_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatusState {
     Idle,

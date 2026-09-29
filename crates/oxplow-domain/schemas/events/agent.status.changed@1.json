@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "AgentStatusState": {
+      "oneOf": [
+        {
+          "enum": [
+            "idle",
+            "running",
+            "awaiting_user",
+            "stopped",
+            "error"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "stalled",
+          "description": "Derived-only: the hook log says Running but no event has\narrived for longer than the stall threshold. Claude Code emits\nno hook when a turn dies on an API error and the process drops\nback to its prompt, so a wall-clock check is the only way to\nnotice. Never persisted to the agent_status table.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.status.changed@1`: a thread's agent moved to another state.\nLogged on a transition only.",
+  "properties": {
+    "detail": {
+      "description": "The `await_user` question, or why it stopped.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "$ref": "#/$defs/AgentStatusState"
+    },
+    "thread": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "thread",
+    "state"
+  ],
+  "title": "AgentStatusChangedV1",
+  "type": "object"
+}

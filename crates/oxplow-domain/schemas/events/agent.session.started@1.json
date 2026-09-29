@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "AgentKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "claude",
+            "codex",
+            "opencode"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "acp",
+          "description": "An agent spoken to over the Agent Client Protocol (tsk335); which one\nis the thread's `acp_agent`.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.session.started@1`: a harness session began on a thread — first\nseen by id (hooks) or announced (ACP).",
+  "properties": {
+    "harness": {
+      "$ref": "#/$defs/AgentKind"
+    },
+    "resumed": {
+      "description": "The session is the thread's resume session (a reattach), not new.",
+      "type": "boolean"
+    },
+    "session": {
+      "type": "string"
+    },
+    "thread": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session",
+    "thread",
+    "harness",
+    "resumed"
+  ],
+  "title": "AgentSessionStartedV1",
+  "type": "object"
+}

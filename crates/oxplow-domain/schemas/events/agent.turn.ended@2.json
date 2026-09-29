@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "TurnOutcome": {
+      "description": "How a turn ended (`agent.turn.ended`).",
+      "oneOf": [
+        {
+          "const": "completed",
+          "description": "The agent finished (Stop).",
+          "type": "string"
+        },
+        {
+          "const": "interrupted",
+          "description": "The person interrupted it.",
+          "type": "string"
+        },
+        {
+          "const": "restart",
+          "description": "oxplow restarted with the turn still open; recovery closed it.",
+          "type": "string"
+        }
+      ]
+    },
+    "TurnUsage": {
+      "additionalProperties": false,
+      "description": "A turn's token counts, when the harness reported them with the turn\n(ACP's prompt response). Claude's come from the transcript instead.",
+      "properties": {
+        "cache_read": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_write": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cache_write",
+        "cache_read"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.turn.ended@2`: a turn closed, with what the token-usage reactor\nneeds to count it — the transcript to read, or the counts themselves.",
+  "properties": {
+    "outcome": {
+      "$ref": "#/$defs/TurnOutcome"
+    },
+    "thread": {
+      "type": "string"
+    },
+    "transcript_path": {
+      "description": "The harness's session transcript (Claude's `transcript_path`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turn": {
+      "type": "string"
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TurnUsage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Counts reported with the turn (ACP)."
+    }
+  },
+  "required": [
+    "turn",
+    "thread",
+    "outcome"
+  ],
+  "title": "AgentTurnEndedV2",
+  "type": "object"
+}
