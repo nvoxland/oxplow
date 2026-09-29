@@ -31,6 +31,7 @@ fn cause_of(event: &StoredEvent) -> RunCause {
     RunCause {
         event_id: event.envelope.id.as_str().to_string(),
         anchors: event.envelope.anchors.clone(),
+        at: event.envelope.at,
     }
 }
 

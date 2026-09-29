@@ -270,8 +270,13 @@ unified `"run"` ledger, never a precondition for recording. `on_post_tool_use`
 resolves a single open effort only for the effort-RELATIVE *advisories*
 (the report-less / coverage-target nudges), which legitimately
 no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
-is gated by a **time-window floor** (`report_fresh_floor`, ~10 min) instead of the
-old effort-start floor, so it works with no open effort. **Coverage** is
+is a **window around the run** (`FreshWindow`): a report counts when its mtime is
+within 10 minutes before the run's event and at most a minute after it. It is
+judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
+(a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
+the first delivery saw; a run delivered more than 10 minutes late is recorded
+but gets no nudges (tsk505). The explicit MCP ingest uses a window ending now.
+It needs no open effort. **Coverage** is
 effort-relative (diff vs the effort's start snapshot), so it can't store the diff
 at record: `observe_coverage` stores the **absolute** whole-report coverage
 (per-file coverage facts + the instrumented/covered line-sets in the capture's

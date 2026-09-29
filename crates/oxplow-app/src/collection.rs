@@ -380,6 +380,9 @@ pub struct CollectionService {
 pub struct RunCause {
     pub event_id: String,
     pub anchors: oxplow_domain::Anchors,
+    /// When the run finished (the event's time): what report freshness is
+    /// judged against, however late the event is delivered.
+    pub at: oxplow_domain::Timestamp,
 }
 
 impl CollectionService {
@@ -967,7 +970,7 @@ impl CollectionService {
         };
         // Stale guard for the ride-along (skip_if_stale); the explicit
         // MCP path passes false — the caller asked for it.
-        if skip_if_stale && report_is_stale(&abs, report_fresh_floor()) {
+        if skip_if_stale && !FreshWindow::ending_now().holds(&abs) {
             return Ok(CoverageIngest::StaleReport(report_path));
         }
         let report = match collector.run(&content) {
@@ -1036,7 +1039,7 @@ impl CollectionService {
         };
         // Stale guard for the ride-along (skip_if_stale); the explicit MCP
         // path passes false — the caller asked for it.
-        if skip_if_stale && report_is_stale(&abs, report_fresh_floor()) {
+        if skip_if_stale && !FreshWindow::ending_now().holds(&abs) {
             return Ok(AnalysisIngest::StaleReport(report_path));
         }
         // No baseline gate: findings are ABSOLUTE (current-file), not
@@ -1817,7 +1820,10 @@ impl CollectionService {
             return Ok(None);
         }
         let registry = self.registry(&cfg);
-        let floor = report_fresh_floor();
+        // Reports this run could have written: judged at the run's own
+        // time, so a redelivery (a crash before the checkpoint, a retried
+        // dead letter, a pump backlog) sees what the first delivery saw.
+        let window = cause.map_or_else(FreshWindow::ending_now, |c| FreshWindow::around(c.at));
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
         // record a static-analysis observation — command-only (the ran-record)
@@ -1825,7 +1831,7 @@ impl CollectionService {
         // one does. Classification is by collector kind, not a format heuristic.
         if is_analysis {
             let (report, source, analyzers) =
-                match self.merge_fresh_analysis(floor, &cfg, &registry) {
+                match self.merge_fresh_analysis(window, &cfg, &registry) {
                     Some((r, source, analyzers)) => (Some(r), source, analyzers),
                     None => (None, "analysis-report".to_string(), Vec::new()),
                 };
@@ -1855,7 +1861,7 @@ impl CollectionService {
         // Merge every fresh test report into one per-test tree (each test stack
         // regenerates its own report; the freshness window excludes stale ones
         // from prior runs/other stacks).
-        let report = self.merge_fresh_test_reports(floor, &cfg, &registry);
+        let report = self.merge_fresh_test_reports(window, &cfg, &registry);
         // Trust tier rides in `source`: "post-tool-bash" for the plain hook /
         // in-process collectors, "plugin-exec:<name>" when a lower-trust exec
         // plugin produced the suites (mirrors the coverage path).
@@ -1892,7 +1898,7 @@ impl CollectionService {
         // A transient error here used to silently drop the run's coverage
         // (tsk79) — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
-        let (coverage, coverage_errors) = self.merge_fresh_coverage(floor, &cfg, &registry);
+        let (coverage, coverage_errors) = self.merge_fresh_coverage(window, &cfg, &registry);
         if let Some((merged, source)) = &coverage {
             // The label says whether a lower-trust exec plugin produced it.
             self.coverage_ride_along_with_retry(thread, merged, source, cause)
@@ -1900,6 +1906,14 @@ impl CollectionService {
         } else if !coverage_errors.is_empty() {
             self.record_coverage_failure(thread, &coverage_errors.join("; "), cause)
                 .await;
+        }
+        // A run delivered after its freshness window can't be judged: the
+        // agent has moved on, and its reports may since have been rewritten.
+        // Record it (above), advise nothing.
+        if cause.is_some_and(|c| {
+            oxplow_domain::Timestamp::now().unix_ms() - c.at.unix_ms() > REPORT_FRESH_WINDOW_MS
+        }) {
+            return Ok(None);
         }
         // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
         // run with a single open effort. The runs above are already recorded.
@@ -2082,7 +2096,7 @@ impl CollectionService {
     /// when nothing fresh/non-empty.
     fn merge_fresh_test_reports(
         &self,
-        floor: oxplow_domain::Timestamp,
+        window: FreshWindow,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> Option<(oxplow_coverage::TestReport, String)> {
@@ -2097,7 +2111,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, floor) {
+            if !window.holds(&abs) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -2138,7 +2152,7 @@ impl CollectionService {
     /// instead of the miss living only in a tty warn.
     fn merge_fresh_coverage(
         &self,
-        floor: oxplow_domain::Timestamp,
+        window: FreshWindow,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> (
@@ -2158,7 +2172,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, floor) {
+            if !window.holds(&abs) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -2214,7 +2228,7 @@ impl CollectionService {
     /// for the UI's "which analyzer ran" label. `None` when none contributed.
     fn merge_fresh_analysis(
         &self,
-        floor: oxplow_domain::Timestamp,
+        window: FreshWindow,
         cfg: &oxplow_config::CollectionConfig,
         registry: &CollectorRegistry,
     ) -> Option<(oxplow_coverage::AnalysisReport, String, Vec<String>)> {
@@ -2231,7 +2245,7 @@ impl CollectionService {
                 continue;
             }
             let abs = self.project_dir.join(&r.path);
-            if report_is_stale(&abs, floor) {
+            if !window.holds(&abs) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(&abs) else {
@@ -3348,23 +3362,44 @@ fn anchored_effort(cause: Option<&RunCause>) -> Option<EffortId> {
     cause.and_then(|c| c.anchors.effort_id)
 }
 
-/// The freshness floor: reports touched at/before this are stale. `now` minus
-/// the window. (Passed where the effort-start `Timestamp` used to be.)
-fn report_fresh_floor() -> oxplow_domain::Timestamp {
-    oxplow_domain::Timestamp::from_unix_ms(
-        oxplow_domain::Timestamp::now().unix_ms() - REPORT_FRESH_WINDOW_MS,
-    )
+/// How far past a run's event a report's mtime may be and still be its
+/// report: filesystem timestamp granularity and clock skew.
+const REPORT_FRESH_SLACK_MS: i64 = 60 * 1000;
+
+/// The report mtimes a run could have produced: after `from`, no later than
+/// `to`. A report outside it belongs to an earlier run (or a later one).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FreshWindow {
+    from_ms: i64,
+    to_ms: i64,
 }
 
-/// True when `path`'s mtime is at/before `floor` — i.e. NOT freshly regenerated.
-fn report_is_stale(path: &std::path::Path, floor: oxplow_domain::Timestamp) -> bool {
-    let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else {
-        return false;
-    };
-    let Ok(since) = mtime.duration_since(std::time::UNIX_EPOCH) else {
-        return false;
-    };
-    (since.as_millis() as i64) <= floor.unix_ms()
+impl FreshWindow {
+    /// Around a run that finished at `at`.
+    fn around(at: oxplow_domain::Timestamp) -> Self {
+        Self {
+            from_ms: at.unix_ms() - REPORT_FRESH_WINDOW_MS,
+            to_ms: at.unix_ms() + REPORT_FRESH_SLACK_MS,
+        }
+    }
+
+    /// Around a run that finished just now (an explicit ingest).
+    fn ending_now() -> Self {
+        Self::around(oxplow_domain::Timestamp::now())
+    }
+
+    /// Whether `path` was written inside the window. An unreadable mtime
+    /// counts as fresh: the parse decides.
+    fn holds(&self, path: &std::path::Path) -> bool {
+        let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) else {
+            return true;
+        };
+        let Ok(since) = mtime.duration_since(std::time::UNIX_EPOCH) else {
+            return true;
+        };
+        let ms = since.as_millis() as i64;
+        ms > self.from_ms && ms <= self.to_ms
+    }
 }
 
 /// 1-based line numbers on the NEW side that were inserted or replaced.
@@ -3841,22 +3876,21 @@ mod tests {
     }
 
     #[test]
-    fn report_is_stale_compares_mtime_to_effort_start() {
+    fn a_report_is_fresh_only_inside_its_runs_window() {
         use oxplow_domain::Timestamp;
         let f = tempfile::NamedTempFile::new().unwrap();
-        let now_ms = Timestamp::now().unix_ms();
-        // Effort started well before the file was written → report is
-        // fresh (produced during the effort).
-        assert!(!report_is_stale(
-            f.path(),
-            Timestamp::from_unix_ms(now_ms - 60_000)
-        ));
-        // Effort started after the file's mtime → the report predates the
-        // effort → stale.
-        assert!(report_is_stale(
-            f.path(),
-            Timestamp::from_unix_ms(now_ms + 60_000)
-        ));
+        let hour = 60 * 60 * 1000;
+        let written = Timestamp::now().unix_ms() - hour;
+        f.as_file()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_millis(written as u64))
+            .unwrap();
+        // A run that finished just after the report was written, judged an
+        // hour later (a redelivery): still its report.
+        assert!(FreshWindow::around(Timestamp::from_unix_ms(written + 1_000)).holds(f.path()));
+        // A run long after it: an old report.
+        assert!(!FreshWindow::ending_now().holds(f.path()));
+        // A run long before it: a later run's report.
+        assert!(!FreshWindow::around(Timestamp::from_unix_ms(written - hour)).holds(f.path()));
     }
 
     /// End-to-end exercises of the orchestration: a real in-memory DB +
@@ -4324,7 +4358,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, _errors) =
                 h.service
-                    .merge_fresh_coverage(Timestamp::from_unix_ms(0), &cfg, &registry);
+                    .merge_fresh_coverage(FreshWindow::ending_now(), &cfg, &registry);
             let (report, _source) = merged.expect("fresh cobertura report should merge");
             let fc = report
                 .files
@@ -4381,7 +4415,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, _errors) =
                 h.service
-                    .merge_fresh_coverage(Timestamp::from_unix_ms(0), &cfg, &registry);
+                    .merge_fresh_coverage(FreshWindow::ending_now(), &cfg, &registry);
             let (report, _source) = merged.expect("both reports should merge");
             let fc = report.files.get("src/foo.rs").expect("merged file");
 
@@ -6709,11 +6743,9 @@ mod tests {
         #[tokio::test]
         async fn on_post_tool_use_no_nudge_when_report_produced() {
             // A detected test command that regenerated a fresh JUnit report →
-            // no nudge. We use merge_fresh_test_reports directly to sidestep
-            // the wall-clock/fs-mtime sensitivity of on_post_tool_use (the
-            // staleness guard compares file mtime to effort.started_at, and
-            // both happen in the same second in a test). This exercises exactly
-            // the branch that suppresses the nudge: produced_report is true.
+            // no nudge. We use merge_fresh_test_reports directly: this
+            // exercises exactly the branch that suppresses the nudge
+            // (produced_report is true).
             let h = build(None).await;
             std::fs::write(
                 h.tmp.path().join("tests.xml"),
@@ -6728,22 +6760,11 @@ mod tests {
                 test_command: Some("bun run test:collect".into()),
                 ..Default::default()
             };
-            // Synthetic effort started at the epoch so the just-written file
-            // is always fresh (same approach as merge_fresh_test_reports test).
-            let effort = Effort {
-                id: EffortId::new(901),
-                work_item: "work_item:oxplow:tsk999".into(),
-                thread_id: h.thread,
-                started_at: Timestamp::from_unix_ms(0),
-                ended_at: None,
-                start_snapshot_id: None,
-                end_snapshot_id: None,
-                summary: None,
-            };
+            // Just written, so inside a window ending now.
             let registry = h.service.registry(&cfg);
-            let report = h
-                .service
-                .merge_fresh_test_reports(effort.started_at, &cfg, &registry);
+            let report =
+                h.service
+                    .merge_fresh_test_reports(FreshWindow::ending_now(), &cfg, &registry);
             assert!(
                 report.is_some(),
                 "fresh JUnit report should be merged (effort start = epoch)"
@@ -6761,6 +6782,41 @@ mod tests {
                 !nudged,
                 "nudge should not have fired when a report was produced"
             );
+        }
+
+        #[tokio::test]
+        async fn a_run_delivered_after_its_window_fires_no_nudge() {
+            // A redelivery (crash before the checkpoint, a retried dead
+            // letter, a backlog) of a report-less test run judged now would
+            // nudge; judged at its own time it can't be judged at all.
+            let h = build(None).await;
+            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
+            let old =
+                Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 2 * REPORT_FRESH_WINDOW_MS);
+            let cause = RunCause {
+                event_id: "evt-late".into(),
+                anchors: oxplow_domain::Anchors {
+                    effort_id: Some(eid),
+                    ..Default::default()
+                },
+                at: old,
+            };
+            let result = h
+                .service
+                .on_post_tool_use_caused(
+                    &h.thread,
+                    &bash_payload("bun test --watch false", 0),
+                    Some(&cause),
+                )
+                .await
+                .unwrap();
+            assert_eq!(result, None);
+            assert!(!h
+                .service
+                .nudges
+                .has_fired(eid.value(), "report-less-run")
+                .await
+                .unwrap());
         }
 
         #[tokio::test]
@@ -6890,18 +6946,7 @@ mod tests {
                 r#"<testsuites><testsuite name="frontend"><testcase classname="d" name="t2"/></testsuite></testsuites>"#,
             )
             .unwrap();
-            // Synthetic effort started at the epoch → both files are fresh
-            // (deterministic, no wall-clock/fs-granularity dependence).
-            let effort = Effort {
-                id: EffortId::new(902),
-                work_item: "work_item:oxplow:tsk999".into(),
-                thread_id: ThreadId::new(1),
-                started_at: Timestamp::from_unix_ms(0),
-                ended_at: None,
-                start_snapshot_id: None,
-                end_snapshot_id: None,
-                summary: None,
-            };
+            // Just written, so inside a window ending now.
             let cfg = oxplow_config::CollectionConfig {
                 reports: vec![
                     oxplow_config::ReportConfig {
@@ -6918,7 +6963,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, source) = h
                 .service
-                .merge_fresh_test_reports(effort.started_at, &cfg, &registry)
+                .merge_fresh_test_reports(FreshWindow::ending_now(), &cfg, &registry)
                 .expect("both fresh reports merged");
             let names: Vec<&str> = merged.suites.iter().map(|s| s.name.as_str()).collect();
             assert!(
@@ -7087,17 +7132,7 @@ mod tests {
         async fn merge_fresh_analysis_unions_findings_from_reports() {
             let h = build(None).await;
             std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
-            // Synthetic effort started at the epoch → the report is fresh.
-            let effort = Effort {
-                id: EffortId::new(903),
-                work_item: "work_item:oxplow:tsk999".into(),
-                thread_id: h.thread,
-                started_at: Timestamp::from_unix_ms(0),
-                ended_at: None,
-                start_snapshot_id: None,
-                end_snapshot_id: None,
-                summary: None,
-            };
+            // Just written, so inside a window ending now.
             let cfg = oxplow_config::CollectionConfig {
                 reports: vec![oxplow_config::ReportConfig {
                     path: "clippy.json".into(),
@@ -7108,7 +7143,7 @@ mod tests {
             let registry = h.service.registry(&cfg);
             let (merged, source, analyzers) = h
                 .service
-                .merge_fresh_analysis(effort.started_at, &cfg, &registry)
+                .merge_fresh_analysis(FreshWindow::ending_now(), &cfg, &registry)
                 .expect("fresh clippy report merged");
             assert_eq!(merged.findings.len(), 2);
             assert_eq!(source, "analysis-report");
