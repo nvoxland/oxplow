@@ -8,7 +8,7 @@
 //! dedup (so a nudge fires at most once per effort) lives in the
 //! service, so the store only ever records nudges that actually fired.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -32,20 +32,29 @@ pub struct AgentNudge {
     /// What caused it — the bash command (or commit sha).
     pub trigger: Option<String>,
     pub created_at: Timestamp,
+    /// The turn it fired in (`agent_turn.id`), when known.
+    pub turn_id: Option<i64>,
+    /// When a hook response carried it to the agent; `None` until then.
+    pub delivered_at: Option<Timestamp>,
 }
 
 /// Write-side input — `id` and `created_at` are assigned by the store.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NewAgentNudge {
     pub thread_id: String,
     pub effort_id: Option<String>,
     pub kind: String,
     pub message: String,
     pub trigger: Option<String>,
+    pub turn_id: Option<i64>,
+    /// The event that fired it; a second nudge of the same kind for the
+    /// same cause (a redelivered event) is not written.
+    pub cause: Option<String>,
 }
 
 fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
     let created_at: String = row.get(6)?;
+    let delivered_at: Option<String> = row.get(8)?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -59,10 +68,17 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
         message: row.get(4)?,
         trigger: row.get(5)?,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
+        turn_id: row.get(7)?,
+        delivered_at: delivered_at
+            .as_deref()
+            .map(string_to_ts)
+            .transpose()
+            .map_err(map_err)?,
     })
 }
 
-const SELECT_COLS: &str = "id, thread_id, effort_id, kind, message, trigger, created_at";
+const SELECT_COLS: &str =
+    "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at";
 
 #[derive(Clone)]
 pub struct SqliteAgentNudgeStore {
@@ -74,40 +90,61 @@ impl SqliteAgentNudgeStore {
         Self { db }
     }
 
-    /// Insert a nudge row. Returns the new row id.
-    pub async fn record(&self, nudge: NewAgentNudge) -> Result<i64, DomainError> {
+    /// Insert a nudge row. Returns the new row id, or `None` when a nudge
+    /// of this kind was already recorded for the same cause.
+    pub async fn record(&self, nudge: NewAgentNudge) -> Result<Option<i64>, DomainError> {
+        self.db.transaction(move |tx| record_tx(tx, &nudge)).await
+    }
+
+    /// The thread's nudges no hook response has carried yet, oldest first,
+    /// marked delivered in the same transaction — so each reaches the agent
+    /// once, on whichever of the thread's hooks comes first.
+    pub async fn take_undelivered(&self, thread_id: &str) -> Result<Vec<AgentNudge>, DomainError> {
+        let thread_val = ThreadId::try_from_str(thread_id)
+            .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {thread_id}")))?
+            .value();
         self.db
-            .call_mut(move |conn| {
-                let sql_err = crate::database::map_sql_err;
-                let thread_val = ThreadId::try_from_str(&nudge.thread_id)
-                    .ok_or_else(|| {
-                        DomainError::Invalid(format!("bad thread id: {}", nudge.thread_id))
-                    })?
-                    .value();
-                let effort_val = match &nudge.effort_id {
-                    Some(e) => Some(
-                        EffortId::try_from_str(e)
-                            .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
-                            .value(),
-                    ),
-                    None => None,
-                };
+            .transaction(move |tx| {
                 let now = ts_to_string(Timestamp::now());
-                conn.execute(
-                    "INSERT INTO agent_nudge
-                       (thread_id, effort_id, kind, message, trigger, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        thread_val,
-                        effort_val,
-                        nudge.kind,
-                        nudge.message,
-                        nudge.trigger,
-                        now,
-                    ],
+                let mut stmt = tx
+                    .prepare(&format!(
+                        "UPDATE agent_nudge SET delivered_at = ?2
+                          WHERE thread_id = ?1 AND delivered_at IS NULL
+                          RETURNING {SELECT_COLS}"
+                    ))
+                    .map_err(crate::database::map_sql_err)?;
+                let mut rows = stmt
+                    .query_map(params![thread_val, now], row_to_nudge)
+                    .map_err(crate::database::map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(crate::database::map_sql_err)?;
+                // RETURNING's order is unspecified.
+                rows.sort_by_key(|n| n.id);
+                Ok(rows)
+            })
+            .await
+    }
+
+    /// Claim the one-shot `mark` for `effort_id` (`report-less-run`,
+    /// `<extension>/<advisory>`, …). `true` the first time, `false` once
+    /// it has fired — durably, across restarts.
+    pub async fn claim_once(&self, effort_id: i64, mark: &str) -> Result<bool, DomainError> {
+        let mark = mark.to_string();
+        self.db
+            .transaction(move |tx| claim_once_tx(tx, effort_id, &mark))
+            .await
+    }
+
+    /// Whether `mark` has fired for `effort_id`.
+    pub async fn has_fired(&self, effort_id: i64, mark: &str) -> Result<bool, DomainError> {
+        let mark = mark.to_string();
+        self.db
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM effort_once_mark WHERE effort_id = ?1 AND mark = ?2)",
+                    params![effort_id, mark],
+                    |r| r.get(0),
                 )
-                .map_err(sql_err)?;
-                Ok(conn.last_insert_rowid())
             })
             .await
     }
@@ -145,6 +182,64 @@ impl SqliteAgentNudgeStore {
             })
             .await
     }
+}
+
+/// Write `nudge` in the caller's transaction; `None` when this kind was
+/// already recorded for its cause.
+pub fn record_tx(
+    conn: &rusqlite::Connection,
+    nudge: &NewAgentNudge,
+) -> Result<Option<i64>, DomainError> {
+    let sql_err = crate::database::map_sql_err;
+    let thread_val = ThreadId::try_from_str(&nudge.thread_id)
+        .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {}", nudge.thread_id)))?
+        .value();
+    let effort_val = match &nudge.effort_id {
+        Some(e) => Some(
+            EffortId::try_from_str(e)
+                .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
+                .value(),
+        ),
+        None => None,
+    };
+    let now = ts_to_string(Timestamp::now());
+    conn.query_row(
+        "INSERT INTO agent_nudge
+           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (cause, kind) WHERE cause IS NOT NULL DO NOTHING
+         RETURNING id",
+        params![
+            thread_val,
+            effort_val,
+            nudge.kind,
+            nudge.message,
+            nudge.trigger,
+            now,
+            nudge.turn_id,
+            nudge.cause,
+        ],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(sql_err)
+}
+
+/// Claim `mark` for `effort_id` in the caller's transaction: `true` the
+/// first time, `false` when it has already fired.
+pub fn claim_once_tx(
+    conn: &rusqlite::Connection,
+    effort_id: i64,
+    mark: &str,
+) -> Result<bool, DomainError> {
+    let n = conn
+        .execute(
+            "INSERT INTO effort_once_mark (effort_id, mark, fired_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (effort_id, mark) DO NOTHING",
+            params![effort_id, mark, ts_to_string(Timestamp::now())],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
 }
 
 #[cfg(test)]
@@ -200,7 +295,54 @@ mod tests {
             kind: kind.into(),
             message: format!("a {kind} nudge"),
             trigger: Some("cargo test".into()),
+            ..Default::default()
         }
+    }
+
+    /// P3.2 (tsk472): a nudge reaches the agent exactly once, whichever hook
+    /// response picks it up; a redelivered cause fires nothing new.
+    #[tokio::test]
+    async fn undelivered_nudges_are_taken_once_and_causes_dedupe() {
+        let (store, thread, _effort) = fixture().await;
+        let caused = |kind: &str| NewAgentNudge {
+            cause: Some("evt-1".into()),
+            ..sample(kind, Some("eff1"))
+        };
+        assert!(store
+            .record(caused("report-less-run"))
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .record(caused("report-less-run"))
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .record(caused("coverage-target"))
+            .await
+            .unwrap()
+            .is_some());
+        let taken = store.take_undelivered(&thread).await.unwrap();
+        assert_eq!(
+            taken.iter().map(|n| n.kind.as_str()).collect::<Vec<_>>(),
+            vec!["report-less-run", "coverage-target"],
+            "oldest first"
+        );
+        assert!(taken.iter().all(|n| n.delivered_at.is_some()));
+        assert!(store.take_undelivered(&thread).await.unwrap().is_empty());
+    }
+
+    /// A one-shot mark is durable: a new store over the same database (a
+    /// restart) sees it, and claiming it again says so.
+    #[tokio::test]
+    async fn once_marks_survive_a_restart() {
+        let (store, _thread, _effort) = fixture().await;
+        assert!(store.claim_once(1, "report-less-run").await.unwrap());
+        assert!(!store.claim_once(1, "report-less-run").await.unwrap());
+        let restarted = SqliteAgentNudgeStore::new(store.db.clone());
+        assert!(restarted.has_fired(1, "report-less-run").await.unwrap());
+        assert!(!restarted.has_fired(1, "acme/other").await.unwrap());
     }
 
     #[tokio::test]
@@ -209,7 +351,8 @@ mod tests {
         let id = store
             .record(sample("report-less-run", Some("eff1")))
             .await
-            .unwrap();
+            .unwrap()
+            .expect("a new nudge is written");
         let got = store.list_for_effort(&effort).await.unwrap();
         assert_eq!(got.len(), 1);
         let n = &got[0];

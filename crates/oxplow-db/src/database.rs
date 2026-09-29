@@ -1180,6 +1180,106 @@ mod tests {
             .is_err());
     }
 
+    /// P3.2 (tsk472): V102 only adds — every agent-activity row survives,
+    /// nudges written before it count as delivered, and the new anchors
+    /// and uniqueness are in place.
+    #[test]
+    fn v102_adds_turn_anchors_and_keeps_every_row() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(101))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-09-29T00:00:00.000000Z";
+        conn.execute_batch(&format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{now}', '{now}');
+             INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+               VALUES (1, 1, 't', 'active', '{now}', '{now}');
+             INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (1, 'work_item:oxplow:tsk1', 1, '{now}');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (1, 1, 'p', '{now}');
+             INSERT INTO agent_nudge (thread_id, effort_id, kind, message, created_at)
+               VALUES (1, 1, 'report-less-run', 'm', '{now}'), (1, 1, 'report-less-run', 'm', '{now}');
+             INSERT INTO agent_token_usage (stream_id, thread_id, effort_id, session_id, agent_kind, provenance, recorded_at)
+               VALUES (1, 1, 1, 's', 'claude', 'observed', '{now}');
+             INSERT INTO agent_tool_call (thread_id, effort_id, tool, at) VALUES (1, 1, 'Edit', '{now}');
+             INSERT INTO claim (thread_id, effort_id, statement, kind, created_at)
+               VALUES (1, 1, 's', 'other', '{now}');
+             INSERT INTO decision (thread_id, effort_id, question, choice, confidence, created_at)
+               VALUES (1, 1, 'q', 'c', 'high', '{now}');"
+        ))
+        .unwrap();
+
+        embedded::migrations::runner().run(&mut conn).unwrap();
+
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT count(*) FROM agent_nudge WHERE delivered_at IS NULL"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM v_agent_nudge"),
+            2,
+            "old duplicates kept"
+        );
+        for (view, column) in [
+            ("v_tool_call", "turn_id"),
+            ("v_token_usage", "turn_id"),
+            ("v_agent_nudge", "turn_id"),
+            ("v_decision", "turn_id"),
+            ("v_claim", "turn_id"),
+            ("v_event", "payload_expired_at"),
+        ] {
+            assert_eq!(
+                count(&format!(
+                    "SELECT count(*) FROM {view} WHERE {column} IS NULL"
+                )),
+                if view == "v_agent_nudge" {
+                    2
+                } else if view == "v_event" {
+                    count("SELECT count(*) FROM event_log")
+                } else {
+                    1
+                },
+                "{view}.{column}"
+            );
+        }
+        // A tool call projects once per event; a nudge fires once per cause.
+        conn.execute(
+            &format!("INSERT INTO agent_tool_call (thread_id, tool, at, turn_id, event_id) VALUES (1, 'Read', '{now}', 1, 'e1')"),
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                &format!("INSERT INTO agent_tool_call (thread_id, tool, at, event_id) VALUES (1, 'Read', '{now}', 'e1')"),
+                [],
+            )
+            .is_err());
+        conn.execute(
+            &format!("INSERT INTO agent_nudge (thread_id, kind, message, created_at, cause) VALUES (1, 'k', 'm', '{now}', 'e1')"),
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                &format!("INSERT INTO agent_nudge (thread_id, kind, message, created_at, cause) VALUES (1, 'k', 'm', '{now}', 'e1')"),
+                [],
+            )
+            .is_err());
+        // Content is stored by hash; the view never exposes the bytes.
+        conn.execute(
+            &format!("INSERT INTO event_content (hash, namespace, bytes, size, created_at) VALUES ('h', 'agent', x'00', 1, '{now}')"),
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            count("SELECT count(*) FROM pragma_table_info('v_event_content') WHERE name = 'bytes'"),
+            0
+        );
+    }
+
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every

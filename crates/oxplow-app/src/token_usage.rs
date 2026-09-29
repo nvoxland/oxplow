@@ -489,9 +489,10 @@ impl TokenUsageService {
                     cache_creation_input_tokens: cc,
                     cache_read_input_tokens: cr,
                     message_count: turn.usage.message_count,
+                    ..Default::default()
                 })
                 .await?;
-            last_id = Some(id);
+            last_id = id.or(last_id);
             by_model.entry(model_key).or_default().turns += 1;
         }
         Ok(RecordedTurns {

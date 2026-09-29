@@ -7,7 +7,7 @@
 //! `db.call`/`db.call_mut`, `map_sql_err`). See migration
 //! `V35__agent_token_usage.sql` and `.context/data-model.md`.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -46,7 +46,7 @@ pub struct AgentTokenUsage {
 }
 
 /// Write-side input — `id` and `recorded_at` are assigned by the store.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NewAgentTokenUsage {
     pub stream_id: String,
     pub thread_id: String,
@@ -60,6 +60,11 @@ pub struct NewAgentTokenUsage {
     pub cache_creation_input_tokens: i64,
     pub cache_read_input_tokens: i64,
     pub message_count: i64,
+    /// The turn it was spent in (`agent_turn.id`).
+    pub turn_id: Option<i64>,
+    /// The `agent.turn.ended` event whose own report these counts came
+    /// from (ACP); a second row for the same cause is not written.
+    pub cause: Option<String>,
 }
 
 /// Aggregated totals across a set of usage rows (per effort or per thread).
@@ -116,54 +121,31 @@ impl SqliteTokenUsageStore {
         Self { db }
     }
 
-    /// Insert one usage row. Returns the new row id.
-    pub async fn record(&self, usage: NewAgentTokenUsage) -> Result<i64, DomainError> {
+    /// Insert one usage row. Returns the new row id, or `None` when a
+    /// row for its `cause` exists already.
+    pub async fn record(&self, usage: NewAgentTokenUsage) -> Result<Option<i64>, DomainError> {
+        self.db.transaction(move |tx| insert_tx(tx, &usage)).await
+    }
+
+    /// Insert `rows` and, when given, advance `(session, offset)`'s cursor —
+    /// one transaction, so the bytes a cursor has passed are always the
+    /// bytes whose rows exist. Returns the ids written (a deduped row is
+    /// left out).
+    pub async fn record_batch(
+        &self,
+        rows: Vec<NewAgentTokenUsage>,
+        cursor: Option<(String, u64)>,
+    ) -> Result<Vec<i64>, DomainError> {
         self.db
-            .call_mut(move |conn| {
-                let sql_err = crate::database::map_sql_err;
-                let stream_val = StreamId::try_from_str(&usage.stream_id)
-                    .ok_or_else(|| {
-                        DomainError::Invalid(format!("bad stream id: {}", usage.stream_id))
-                    })?
-                    .value();
-                let thread_val = ThreadId::try_from_str(&usage.thread_id)
-                    .ok_or_else(|| {
-                        DomainError::Invalid(format!("bad thread id: {}", usage.thread_id))
-                    })?
-                    .value();
-                let effort_val = match usage.effort_id.as_deref() {
-                    Some(e) => Some(
-                        EffortId::try_from_str(e)
-                            .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
-                            .value(),
-                    ),
-                    None => None,
-                };
-                let now = ts_to_string(Timestamp::now());
-                conn.execute(
-                    "INSERT INTO agent_token_usage
-                       (stream_id, thread_id, effort_id, session_id, agent_kind, model, prompt,
-                        input_tokens, output_tokens, cache_creation_input_tokens,
-                        cache_read_input_tokens, message_count, provenance, recorded_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'observed', ?13)",
-                    params![
-                        stream_val,
-                        thread_val,
-                        effort_val,
-                        usage.session_id,
-                        usage.agent_kind,
-                        usage.model,
-                        usage.prompt,
-                        usage.input_tokens,
-                        usage.output_tokens,
-                        usage.cache_creation_input_tokens,
-                        usage.cache_read_input_tokens,
-                        usage.message_count,
-                        now,
-                    ],
-                )
-                .map_err(sql_err)?;
-                Ok(conn.last_insert_rowid())
+            .transaction(move |tx| {
+                let mut ids = Vec::new();
+                for row in &rows {
+                    ids.extend(insert_tx(tx, row)?);
+                }
+                if let Some((session, offset)) = &cursor {
+                    set_cursor_tx(tx, session, *offset)?;
+                }
+                Ok(ids)
             })
             .await
     }
@@ -248,22 +230,80 @@ impl SqliteTokenUsageStore {
     pub async fn set_cursor(&self, session_id: &str, offset: u64) -> Result<(), DomainError> {
         let session_id = session_id.to_string();
         self.db
-            .call_mut(move |conn| {
-                let sql_err = crate::database::map_sql_err;
-                let now = ts_to_string(Timestamp::now());
-                conn.execute(
-                    "INSERT INTO agent_token_cursor (session_id, byte_offset, updated_at)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(session_id) DO UPDATE SET
-                       byte_offset = excluded.byte_offset,
-                       updated_at = excluded.updated_at",
-                    params![session_id, offset as i64, now],
-                )
-                .map_err(sql_err)?;
-                Ok(())
-            })
+            .transaction(move |tx| set_cursor_tx(tx, &session_id, offset))
             .await
     }
+}
+
+/// Insert one usage row in the caller's transaction; `None` when a row
+/// for its `cause` exists already.
+pub fn insert_tx(
+    conn: &rusqlite::Connection,
+    usage: &NewAgentTokenUsage,
+) -> Result<Option<i64>, DomainError> {
+    let sql_err = crate::database::map_sql_err;
+    let stream_val = StreamId::try_from_str(&usage.stream_id)
+        .ok_or_else(|| DomainError::Invalid(format!("bad stream id: {}", usage.stream_id)))?
+        .value();
+    let thread_val = ThreadId::try_from_str(&usage.thread_id)
+        .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {}", usage.thread_id)))?
+        .value();
+    let effort_val = match usage.effort_id.as_deref() {
+        Some(e) => Some(
+            EffortId::try_from_str(e)
+                .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
+                .value(),
+        ),
+        None => None,
+    };
+    let now = ts_to_string(Timestamp::now());
+    conn.query_row(
+        "INSERT INTO agent_token_usage
+           (stream_id, thread_id, effort_id, session_id, agent_kind, model, prompt,
+            input_tokens, output_tokens, cache_creation_input_tokens,
+            cache_read_input_tokens, message_count, provenance, recorded_at, turn_id, cause)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'observed', ?13, ?14, ?15)
+         ON CONFLICT (cause) WHERE cause IS NOT NULL DO NOTHING
+         RETURNING id",
+        params![
+            stream_val,
+            thread_val,
+            effort_val,
+            usage.session_id,
+            usage.agent_kind,
+            usage.model,
+            usage.prompt,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_creation_input_tokens,
+            usage.cache_read_input_tokens,
+            usage.message_count,
+            now,
+            usage.turn_id,
+            usage.cause,
+        ],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(sql_err)
+}
+
+/// Upsert a session's read offset in the caller's transaction.
+pub fn set_cursor_tx(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    offset: u64,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "INSERT INTO agent_token_cursor (session_id, byte_offset, updated_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(session_id) DO UPDATE SET
+           byte_offset = excluded.byte_offset,
+           updated_at = excluded.updated_at",
+        params![session_id, offset as i64, ts_to_string(Timestamp::now())],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    Ok(())
 }
 
 fn totals_sql(predicate: &str) -> String {
@@ -359,13 +399,44 @@ mod tests {
             cache_creation_input_tokens: 50,
             cache_read_input_tokens: 200,
             message_count: 2,
+            ..Default::default()
         }
+    }
+
+    /// P3.2 (tsk472): the rows and the cursor that consumed their bytes
+    /// commit together, and a turn's own report counts once.
+    #[tokio::test]
+    async fn rows_and_cursor_commit_together_and_causes_dedupe() {
+        let (store, effort) = fixture().await;
+        let ids = store
+            .record_batch(
+                vec![sample(Some(&effort)), sample(None)],
+                Some(("sess-9".into(), 4096)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(store.cursor("sess-9").await.unwrap(), Some(4096));
+        let caused = NewAgentTokenUsage {
+            cause: Some("evt-7".into()),
+            ..sample(Some(&effort))
+        };
+        let first = store
+            .record_batch(vec![caused.clone()], None)
+            .await
+            .unwrap();
+        let again = store.record_batch(vec![caused], None).await.unwrap();
+        assert_eq!((first.len(), again.len()), (1, 0));
     }
 
     #[tokio::test]
     async fn record_then_list_round_trips_fields() {
         let (store, effort) = fixture().await;
-        let id = store.record(sample(Some("eff1"))).await.unwrap();
+        let id = store
+            .record(sample(Some("eff1")))
+            .await
+            .unwrap()
+            .expect("written");
         let got = store.list_for_effort(&effort).await.unwrap();
         assert_eq!(got.len(), 1);
         let u = &got[0];

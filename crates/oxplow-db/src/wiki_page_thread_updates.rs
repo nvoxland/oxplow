@@ -39,16 +39,7 @@ impl SqliteWikiPageThreadUpdateStore {
         let thread = *thread;
         let slug = slug.to_string();
         self.db
-            .call(move |conn| {
-                conn.execute(
-                    "INSERT INTO wiki_page_thread_update (thread_id, slug, last_seen_at)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(thread_id, slug) DO UPDATE SET
-                       last_seen_at = excluded.last_seen_at",
-                    params![thread.value(), slug, ts_to_string(at),],
-                )?;
-                Ok(())
-            })
+            .transaction(move |tx| touch_tx(tx, thread, &slug, at))
             .await
     }
 
@@ -94,6 +85,24 @@ impl SqliteWikiPageThreadUpdateStore {
             })
             .await
     }
+}
+
+/// [`SqliteWikiPageThreadUpdateStore::touch`] in the caller's transaction.
+pub fn touch_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+    slug: &str,
+    at: Timestamp,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "INSERT INTO wiki_page_thread_update (thread_id, slug, last_seen_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(thread_id, slug) DO UPDATE SET
+           last_seen_at = excluded.last_seen_at",
+        params![thread.value(), slug, ts_to_string(at)],
+    )
+    .map_err(crate::database::map_sql_err)?;
+    Ok(())
 }
 
 #[cfg(test)]

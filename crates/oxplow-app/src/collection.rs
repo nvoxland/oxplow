@@ -1810,6 +1810,7 @@ impl CollectionService {
             kind: kind.to_string(),
             message: message.to_string(),
             trigger: Some(trigger.to_string()),
+            ..Default::default()
         };
         match self.nudges.record(new).await {
             Ok(_) => {

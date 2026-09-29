@@ -352,6 +352,31 @@ fn str_to_change(s: &str) -> Result<EffortFileChange, DomainError> {
     })
 }
 
+/// The thread's open effort when exactly one is open (in the caller's
+/// transaction); `None` for zero or two-plus, so attribution never guesses.
+pub fn find_single_open_for_thread_tx(
+    conn: &rusqlite::Connection,
+    thread: ThreadId,
+) -> Result<Option<Effort>, DomainError> {
+    // LIMIT 2 distinguishes "exactly one" from "two-or-more" cheaply.
+    let mut stmt = conn
+        .prepare(
+            "SELECT * FROM effort
+             WHERE thread_id = ?1 AND ended_at IS NULL
+             ORDER BY started_at DESC LIMIT 2",
+        )
+        .map_err(map_sql_err)?;
+    let mut rows = stmt
+        .query_map(params![thread.value()], row_to_effort)
+        .map_err(map_sql_err)?;
+    let first = rows.next().transpose().map_err(map_sql_err)?;
+    let second = rows.next().transpose().map_err(map_sql_err)?;
+    Ok(match (first, second) {
+        (Some(e), None) => Some(e),
+        _ => None,
+    })
+}
+
 fn row_to_effort(row: &rusqlite::Row<'_>) -> rusqlite::Result<Effort> {
     let id: i64 = row.get("id")?;
     let work_item: String = row.get("work_item")?;
@@ -994,22 +1019,7 @@ impl EffortStore for SqliteEffortStore {
     ) -> Result<Option<Effort>, DomainError> {
         let thread = *thread;
         self.db
-            .call(move |conn| {
-                // LIMIT 2 distinguishes "exactly one" from "two-or-more" cheaply.
-                let mut stmt = conn.prepare(
-                    "SELECT * FROM effort
-                     WHERE thread_id = ?1 AND ended_at IS NULL
-                     ORDER BY started_at DESC LIMIT 2",
-                )?;
-                let mut rows = stmt.query_map(params![thread.value()], row_to_effort)?;
-                let first = rows.next().transpose()?;
-                let second = rows.next().transpose()?;
-                // Some only when unambiguous; None for zero or two-plus open.
-                Ok(match (first, second) {
-                    (Some(e), None) => Some(e),
-                    _ => None,
-                })
-            })
+            .transaction(move |tx| find_single_open_for_thread_tx(tx, thread))
             .await
     }
 

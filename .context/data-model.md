@@ -1137,6 +1137,25 @@ registered (`AgentTurnEndedAtV1`) and upcasts unchanged. A superseded
 version's Rust doc comment is part of its published schema — don't edit
 it.
 
+**`event_content` (V102, P3.2)** holds large or sensitive event bodies —
+tool input and output, prompts — by the xxh3-128 hex of their bytes (the
+blob store's hash, so refs are uniform): `hash PK, namespace, bytes BLOB,
+size, created_at`, STRICT. A payload carries `ContentRef { hash, size }`;
+the retention sweep deletes a body after its namespace's window and the
+event stays. It is separate from the snapshot blob store because the
+retention differs (and the blob store's GC only knows snapshot rows).
+`v_event_content` exposes everything but the bytes. `event_log` gained
+`payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
+and stamps it.
+
+**Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
+and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one
+`agent.tool.finished`, written with `tool_call_store::record_tx` (`ON
+CONFLICT DO NOTHING` — a redelivered event writes nothing). `decision` and
+`claim` gained `turn_id`. Every view over these (`v_tool_call`,
+`v_token_usage`, `v_agent_nudge`, `v_decision`, `v_claim`) exposes
+`turn_id`.
+
 **The contract is `append_tx(&Connection, &EventSchemaRegistry, &Envelope)
 -> seq`**, composed inside the producer's `Database::transaction` closure. The async
 `SqliteEventLogStore::append` opens a transaction of its own and is for
@@ -1510,9 +1529,23 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   their rows: `commit-hygiene` no longer fires (tsk250) but old rows still
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
-- **One-shot dedup lives in the service** (in-memory, keyed by effort), so
-  the table only ever sees
-  nudges that *actually fired* — a deduped nudge is never stored. No
+- **V102 (P3.2, tsk472)** adds `turn_id` (FK agent_turn SET NULL), `cause`
+  (the event that fired it) and `delivered_at`. `UNIQUE(cause, kind) WHERE
+  cause IS NOT NULL` makes a redelivered event unable to fire the same
+  nudge twice (`record_tx` → `None`). **Delivery is by thread, not by
+  cause:** `take_undelivered(thread)` returns the thread's nudges with no
+  `delivered_at`, oldest first, and stamps them in the same transaction —
+  so a nudge whose reactor finishes after its hook's response went out
+  reaches the agent on the thread's next hook instead of being lost. Rows
+  from before V102 were stamped delivered.
+- **One-shot marks are durable** (V102): `effort_once_mark(effort_id FK
+  effort CASCADE, mark, fired_at, PK(effort_id, mark))` holds
+  `report-less-run`, `<extension>/<advisory>` and
+  `<extension>/<advisory>#<row key>`. `claim_once_tx` is the insert (`true`
+  the first time); `has_fired` reads it. It replaces the in-memory sets
+  (`CollectionService::nudged_efforts`, `AdvisoryRunner.fired`), so a
+  restart no longer repeats guidance. A mark is separate from the nudge row
+  because prompt advisories fire once-per without writing a nudge. No
   store-side retention prune (nudge volume per effort is tiny).
 
 ### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migrations `V35__agent_token_usage.sql`, `V36__agent_token_usage_prompt.sql`)
@@ -1528,8 +1561,14 @@ DELETE CASCADE), thread_id (NOT NULL, FK threads ON DELETE CASCADE),
 effort_id (NULLABLE, FK effort ON DELETE CASCADE), session_id,
 agent_kind, model (nullable), prompt (nullable), input_tokens,
 output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
-message_count, provenance (CHECK `observed`), recorded_at`. Indexes on
-`(effort_id, recorded_at DESC)` and `(thread_id, recorded_at DESC)`.
+message_count, provenance (CHECK `observed`), recorded_at, turn_id, cause`.
+Indexes on `(effort_id, recorded_at DESC)` and `(thread_id, recorded_at
+DESC)`. V102 (P3.2) added `turn_id` (the turn the tokens were spent in) and
+`cause` (`UNIQUE WHERE NOT NULL`: the `agent.turn.ended` event whose own
+report — ACP — carried the counts, so a redelivered event counts once).
+`record_batch(rows, cursor)` writes the rows and advances the session's
+cursor in **one transaction**, so the cursor never passes bytes whose rows
+are missing (or vice versa); `insert_tx` / `set_cursor_tx` are the cores.
 
 - **`effort_id` nullable** for the same reason as `agent_nudge`: a Stop
   can land with no open effort, so the turn is still attributed to the

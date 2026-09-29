@@ -490,6 +490,7 @@ mod tests {
                 path: Some("src/report.rs".into()),
                 detail: None,
                 ok: Some(true),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -573,6 +574,7 @@ mod tests {
                 path: Some("a.rs".into()),
                 detail: None,
                 ok: Some(true),
+                ..Default::default()
             })
             .await
             .unwrap();

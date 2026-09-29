@@ -279,6 +279,7 @@ mod tests {
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
                 message_count: 1,
+                ..Default::default()
             };
         let store = &f.svc.token_usage_store;
         store
@@ -390,6 +391,7 @@ mod tests {
                 path: None,
                 detail: Some("Pick A or B?".into()),
                 ok: Some(true),
+                ..Default::default()
             })
             .await
             .unwrap();

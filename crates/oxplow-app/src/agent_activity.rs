@@ -503,6 +503,7 @@ async fn record_tool_call(
         path: parts.path,
         detail: parts.detail,
         ok: parts.ok,
+        ..Default::default()
     };
     if let Err(err) = svc.tool_call_store.record(call).await {
         warn!(?err, "tool-call record failed");

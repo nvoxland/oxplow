@@ -6,14 +6,21 @@ use oxplow_domain::DomainError;
 
 use crate::Database;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewToolCall {
     pub thread_id: i64,
     pub effort_id: Option<i64>,
+    /// The turn it ran in (`agent_turn.id`).
+    pub turn_id: Option<i64>,
     pub tool: String,
     pub path: Option<String>,
     pub detail: Option<String>,
     pub ok: Option<bool>,
+    /// The `agent.tool.finished` event this row projects; a second row for
+    /// the same event is not written.
+    pub event_id: Option<String>,
+    /// When it ran; now when absent.
+    pub at: Option<oxplow_domain::Timestamp>,
 }
 
 #[derive(Clone)]
@@ -27,29 +34,36 @@ impl SqliteToolCallStore {
     }
 
     pub async fn record(&self, call: NewToolCall) -> Result<(), DomainError> {
-        let at = serde_json::to_value(oxplow_domain::Timestamp::now())
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default();
         self.db
-            .call(move |c| {
-                c.execute(
-                    "INSERT INTO agent_tool_call (thread_id, effort_id, tool, path, detail, ok, at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![
-                        call.thread_id,
-                        call.effort_id,
-                        call.tool,
-                        call.path,
-                        call.detail,
-                        call.ok.map(i64::from),
-                        at
-                    ],
-                )
-                .map(|_| ())
-            })
+            .transaction(move |tx| record_tx(tx, &call).map(|_| ()))
             .await
     }
+}
+
+/// Write `call` in the caller's transaction. `false` when a row for its
+/// `event_id` already exists (a redelivered event).
+pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool, DomainError> {
+    let at = crate::database::ts_to_string(call.at.unwrap_or_else(oxplow_domain::Timestamp::now));
+    let n = conn
+        .execute(
+            "INSERT INTO agent_tool_call
+               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
+            rusqlite::params![
+                call.thread_id,
+                call.effort_id,
+                call.turn_id,
+                call.tool,
+                call.path,
+                call.detail,
+                call.ok.map(i64::from),
+                at,
+                call.event_id,
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
 }
 
 #[cfg(test)]
@@ -84,7 +98,43 @@ mod tests {
             path: path.map(str::to_string),
             detail: None,
             ok,
+            ..Default::default()
         }
+    }
+
+    /// P3.2 (tsk472): the row is a projection of `agent.tool.finished`, so
+    /// a redelivered event writes nothing.
+    #[tokio::test]
+    async fn record_tx_projects_each_event_once() {
+        let (store, sl) = seeded().await;
+        let call = NewToolCall {
+            event_id: Some("evt-1".into()),
+            turn_id: None,
+            ..call("Read", Some("src/a.rs"), Some(true))
+        };
+        let first = store
+            .db
+            .transaction({
+                let call = call.clone();
+                move |tx| record_tx(tx, &call)
+            })
+            .await
+            .unwrap();
+        let again = store
+            .db
+            .transaction(move |tx| record_tx(tx, &call))
+            .await
+            .unwrap();
+        assert_eq!((first, again), (true, false));
+        let rows = sl
+            .query_sql("SELECT event_id, turn_id FROM v_tool_call", vec![], None)
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            serde_json::to_value(rows).unwrap(),
+            json!([["evt-1", null]])
+        );
     }
 
     #[tokio::test]
