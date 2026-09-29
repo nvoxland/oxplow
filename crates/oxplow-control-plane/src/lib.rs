@@ -480,26 +480,8 @@ async fn handle_hook_inner(
         None => None,
     };
 
-    // Token usage (tsk104): on Stop, parse the transcript tail referenced
-    // by the hook payload and record this turn's token delta against the
-    // thread's open effort. Best-effort — never fail the hook on a parse
-    // or IO error. See `.context/agent-model.md` (Token usage capture).
-    if kind == HookKind::Stop {
-        if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
-            if let Err(err) = ctx
-                .services
-                .token_usage
-                .on_stop(
-                    thread_id,
-                    envelope_for_resume.session_id.as_deref(),
-                    &envelope_for_resume.payload_json,
-                )
-                .await
-            {
-                warn!(?err, "token-usage capture failed");
-            }
-        }
-    }
+    // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
+    // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
     // PostToolUse: record the call (wiki attribution, effort claim, tool
     // call, collection — pump reactors on the event the ingest logged) and

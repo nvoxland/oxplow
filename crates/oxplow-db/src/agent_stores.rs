@@ -134,6 +134,7 @@ pub fn close_turn_tx(
     answer: Option<&str>,
     outcome: TurnOutcome,
     transcript_path: Option<&str>,
+    usage: Option<oxplow_domain::events::schema::TurnUsage>,
 ) -> Result<Option<ThreadId>, DomainError> {
     let thread: Option<i64> = conn
         .query_row(
@@ -154,7 +155,7 @@ pub fn close_turn_tx(
             thread: thread_ref(thread),
             outcome,
             transcript_path: transcript_path.map(str::to_string),
-            usage: None,
+            usage,
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -257,7 +258,7 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                     _ => "hook_ingest",
                 };
                 let ev = EventCtx::system(&schemas, component);
-                Ok(close_turn_tx(tx, &ev, id, answer.as_deref(), outcome, None)?.is_some())
+                Ok(close_turn_tx(tx, &ev, id, answer.as_deref(), outcome, None, None)?.is_some())
             })
             .await
     }

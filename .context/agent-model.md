@@ -488,7 +488,7 @@ the same JSON.
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
 - `PostToolUse` plus `AgentActivity::on_post_tool` on each finished tool call (per canonical event);
-- `Stop` (its closed turn's signals read from the log), then per-turn tokens via `TokenUsageService::record_turn` and `AgentPolicy::on_turn_end` for the directive;
+- `Stop` with the turn's reported counts on its body (counted by the `token_usage.turns` reactor), then the closed turn's signals read from the log and `AgentPolicy::on_turn_end` for the directive;
 - `Interrupt` when the agent goes away.
 
 **Starting.**
@@ -1485,8 +1485,15 @@ For Claude, each `type=="assistant"` line carries
 cache_creation_input_tokens, cache_read_input_tokens}` and
 `message.model`.
 
-**Flow (`TokenUsageService::on_stop`, called from the control-plane Stop
-branch after ingest, best-effort).**
+**Flow (the `token_usage.turns` pump reactor, P3.7).** Nothing is parsed in
+the Stop hook. The ingest logs `agent.turn.ended@2` with Claude's
+`transcript_path`; `TurnTokensConsumer` (`crates/oxplow-app/src/token_usage.rs`)
+reacts to it with `TokenUsageService::on_stop_for`, carrying a `TurnRecord`
+(the turn, the effort it ran in, the event id). An ACP agent reports its
+counts with the turn instead: the host puts them on the Stop body
+(`TURN_USAGE_KEY`), they ride the event's `usage`, and the reactor records
+one row keyed by the event (`agent_token_usage.cause`), so a redelivery
+counts it once. The transcript path:
 1. Pull `transcript_path` from the payload; resolve the thread's
    `AgentKind` + stream.
 2. Read the persisted per-session cursor (`agent_token_cursor`), seek to
@@ -1502,17 +1509,20 @@ branch after ingest, best-effort).**
    transcript formats differ — opencode surfaces its own `$cost` — and are
    wired later). (`parse_usage_delta` still exists as the whole-chunk sum,
    but `on_stop` records per-turn.)
-4. Attribute each turn to the thread's open effort
-   (`find_single_open_for_thread`, nullable — a Stop can land with no open
-   effort, or with two-plus open, in which case the turn is left
-   unattributed rather than mis-assigned) and persist one
+4. Attribute each turn to the effort the oxplow turn ran in (the event's
+   effort anchor; without one, `find_single_open_for_thread` — nullable: a
+   Stop can land with no open effort, or with two-plus open, in which case
+   the turn is left unattributed rather than mis-assigned) and persist one
    `agent_token_usage` row per turn (provenance `observed`, with the actual
    per-turn `model` and `prompt`). A chunk spanning several prompts (a brief
    plus follow-up nudges, or an interrupt-and-re-prompt) yields one row per
    prompt — so an effort review shows *every* thing that was asked, not just
    the first.
-5. Advance the cursor to the new offset (once, after all turns are written)
-   and emit `AgentTokenUsageChanged { thread_id, effort_id }`.
+5. Advance the cursor to the new offset **in the same transaction as the
+   rows** (`SqliteTokenUsageStore::record_batch`), so a redelivered turn
+   never reads the same bytes twice; rows carry `turn_id`. Then emit
+   `AgentTokenUsageChanged { thread_id, effort_id }`. The `oxplow.turn`
+   facts capture is keyed by the event (`turn-tokens:<event id>`).
 
 **Prompt capture is pure OBSERVATION (tsk143).** The prompt text is read
 out of the same transcript walk oxplow already does — it is the exact thing

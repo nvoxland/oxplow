@@ -60,6 +60,10 @@ use oxplow_domain::{
 use crate::events::{EventBus, OxplowEvent};
 use oxplow_domain::hook::TurnOutcome;
 
+/// The Stop-body key a transport puts a turn's own token counts under
+/// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
+pub const TURN_USAGE_KEY: &str = "oxplow_turn_usage";
+
 /// What the agent policy decided about a tool call (PreToolUse), carried
 /// on the envelope so the log records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -435,9 +439,14 @@ fn record_tx(
                 (Some("interrupted"), TurnOutcome::Interrupted)
             };
             let transcript = body.get("transcript_path").and_then(|p| p.as_str());
+            // Counts a harness reported with the turn itself (ACP).
+            let usage: Option<oxplow_domain::events::schema::TurnUsage> = body
+                .get(TURN_USAGE_KEY)
+                .and_then(|u| serde_json::from_value(u.clone()).ok());
             // Newest first: the newest closed turn owns the turn-end snapshot.
             for id in open_turn_ids_tx(conn, thread)? {
-                if close_turn_tx(conn, ev, id, answer, outcome, transcript)?.is_some()
+                if close_turn_tx(conn, ev, id, answer, outcome, transcript, usage.clone())?
+                    .is_some()
                     && applied.closed_turn.is_none()
                 {
                     applied.closed_turn = Some(id);

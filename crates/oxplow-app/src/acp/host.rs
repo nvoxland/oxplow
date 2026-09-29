@@ -40,13 +40,13 @@ pub trait AcpHost: Send + Sync + 'static {
         session_id: &str,
         event: &CanonicalToolEvent,
     ) -> Option<String>;
-    /// The turn ended: record it and return the Stop directive, if any.
-    /// The directive is shown to the person; it is never sent.
+    /// The turn ended: record it (with the counts the agent reported) and
+    /// return the Stop directive, if any. The directive is shown to the
+    /// person; it is never sent.
     async fn turn_ended(
         &self,
         thread: &ThreadId,
         session_id: &str,
-        prompt: &str,
         tokens: Option<&TurnTokens>,
     ) -> Option<String>;
     /// A permission card is (or no longer is) waiting on the person.
@@ -197,17 +197,21 @@ impl AcpHost for ServicesAcpHost {
         &self,
         thread: &ThreadId,
         session_id: &str,
-        prompt: &str,
         tokens: Option<&TurnTokens>,
     ) -> Option<String> {
         let svc = self.svc.upgrade()?;
-        let env = self.envelope(
-            HookKind::Stop,
-            thread,
-            session_id,
-            serde_json::json!({ "session_id": session_id }),
-            None,
-        );
+        // The turn's own counts ride its `agent.turn.ended`; the
+        // `token_usage.turns` reactor records them (P3.7).
+        let mut body = serde_json::json!({ "session_id": session_id });
+        if let Some(t) = tokens {
+            body[crate::hook_ingest::TURN_USAGE_KEY] = serde_json::json!({
+                "input": t.input,
+                "output": t.output,
+                "cache_write": t.cache_write,
+                "cache_read": t.cache_read,
+            });
+        }
+        let env = self.envelope(HookKind::Stop, thread, session_id, body, None);
         // What the turn this Stop closed did; none when no turn was open.
         let signals = match svc.hook_ingest.ingest(env).await {
             Ok(outcome) => match outcome.closed_turn {
@@ -221,22 +225,6 @@ impl AcpHost for ServicesAcpHost {
                 None
             }
         };
-        if let Some(t) = tokens {
-            let turn = crate::token_usage::Turn {
-                prompt: Some(prompt.to_string()),
-                usage: crate::token_usage::UsageDelta {
-                    input_tokens: t.input as i64,
-                    output_tokens: t.output as i64,
-                    cache_creation_input_tokens: t.cache_write as i64,
-                    cache_read_input_tokens: t.cache_read as i64,
-                    message_count: 1,
-                    model: None,
-                },
-            };
-            if let Err(err) = svc.token_usage.record_turn(thread, session_id, turn).await {
-                warn!(?err, "acp: token usage failed");
-            }
-        }
         svc.agent_policy
             .on_turn_end(&svc, thread, signals.as_ref())
             .await

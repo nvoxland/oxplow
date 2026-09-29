@@ -931,6 +931,14 @@ impl Services {
         );
 
         let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
+        // A turn's tokens are counted when it ends (P3.7).
+        event_pump.register_async(Arc::new(token_usage::TurnTokensConsumer {
+            tokens: token_usage.clone(),
+            turns: oxplow_db::SqliteAgentTurnStore::with_event_schemas(
+                db.clone(),
+                event_schemas.clone(),
+            ),
+        }));
         // Collection and post-tool advisories react to finished tool calls
         // on the pump (P3.6).
         event_pump.register_async(Arc::new(post_tool_reactors::CollectionConsumer {

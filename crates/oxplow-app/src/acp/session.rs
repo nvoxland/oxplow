@@ -772,7 +772,8 @@ impl Actor {
     }
 
     async fn on_turn_end(&mut self, result: Result<TurnEnd, String>) {
-        let prompt = self.turn.take().unwrap_or_default();
+        // The turn is over (its prompt is on the `agent_turn` row).
+        self.turn.take();
         // Clear "awaiting you" BEFORE the Stop is ingested: Stop keeps an
         // AwaitingUser status (for `await_user`), which would strand it.
         if !self.pending.is_empty() {
@@ -790,7 +791,7 @@ impl Actor {
         };
         let directive = self
             .host
-            .turn_ended(self.thread(), &self.session_id, &prompt, tokens.as_ref())
+            .turn_ended(self.thread(), &self.session_id, tokens.as_ref())
             .await;
         if let Some(text) = directive {
             self.view.lock().directive = Some(text.clone());

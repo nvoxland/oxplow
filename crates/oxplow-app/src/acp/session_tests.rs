@@ -83,7 +83,6 @@ impl AcpHost for Host {
         &self,
         _t: &ThreadId,
         _s: &str,
-        _prompt: &str,
         tokens: Option<&TurnTokens>,
     ) -> Option<String> {
         self.log.lock().push(format!(
