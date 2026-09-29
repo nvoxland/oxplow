@@ -14,13 +14,13 @@ use oxplow_db::page_ref_projections::{
 use oxplow_db::page_ref_store::replace_source_for_ref_types_tx;
 use oxplow_db::task_store::get_task_tx;
 use oxplow_domain::events::schema::EventType;
-use oxplow_domain::events::schema::WorkItemEdited;
+use oxplow_domain::events::schema::{WorkItemCreated, WorkItemEdited};
 use oxplow_domain::{DomainError, StoredEvent, TaskId};
 
 use crate::event_pump::EventConsumer;
 
-/// Re-projects a task's body-mention `page_ref` edges on
-/// `work_item.edited`.
+/// Projects a task's body-mention `page_ref` edges on `work_item.created`
+/// and re-projects them on `work_item.edited`.
 pub struct PageRefWorkItemConsumer;
 
 impl PageRefWorkItemConsumer {
@@ -50,7 +50,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == WorkItemEdited::TYPE
+        event_type == WorkItemEdited::TYPE || event_type == WorkItemCreated::TYPE
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {

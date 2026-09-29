@@ -110,6 +110,8 @@ impl EventSchemaRegistry {
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<WorkItemEdited>().expect("core type registers");
+        r.register::<WorkItemCreated>()
+            .expect("core type registers");
         r
     }
 
@@ -529,6 +531,26 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV1;
 }
 
+/// `work_item.created@1`: a task was filed, in `status` (filing straight
+/// into `in_progress` opens its effort in the same transaction).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCreatedV1 {
+    /// `work_item:oxplow:tsk42`.
+    pub work_item: String,
+    pub status: TaskStatus,
+    /// The effort filing it opened, when it was filed `in_progress`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
+pub struct WorkItemCreated;
+impl EventType for WorkItemCreated {
+    const TYPE: &'static str = "work_item.created";
+    const V: u32 = 1;
+    type Payload = WorkItemCreatedV1;
+}
+
 /// `work_item.edited@1`: a task's own fields changed (not its status —
 /// that is `work_item.transitioned`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -592,6 +614,7 @@ mod tests {
                 ("effort.opened".to_string(), 1),
                 ("snapshot.taken".to_string(), 1),
                 ("vcs.head.moved".to_string(), 1),
+                ("work_item.created".to_string(), 1),
                 ("work_item.edited".to_string(), 1),
                 ("work_item.transitioned".to_string(), 1),
             ]

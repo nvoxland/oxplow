@@ -44,7 +44,14 @@ pub struct CreateTaskRequest {
 }
 
 pub async fn create_task(svc: &Services, req: CreateTaskRequest) -> Result<Task, IpcError> {
-    let item = svc.tasks.create(req.thread_id, req.input).await?;
+    // Filed by the person (`work_item.create`), audited.
+    let item = oxplow_app::task_writes::create(
+        svc,
+        &oxplow_domain::Actor::Human,
+        req.thread_id,
+        req.input,
+    )
+    .await?;
     svc.events.emit(OxplowEvent::TasksChanged {
         thread_id: req.thread_id,
     });

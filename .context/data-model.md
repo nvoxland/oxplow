@@ -1219,10 +1219,15 @@ copy read before a concurrent status change can't revert it (review of
 P2.6, tsk460). `update_with_status_tx` writes fields, logs
 `work_item.edited@1 { work_item, fields }` when title / description /
 priority / parent changed, then moves the status — the core of
-`work_item.update` and `TaskService::update`. The `page_ref.work_item`
-pump consumer re-projects a task's body-mention edges on
-`work_item.edited` (it used to follow `work_item.transitioned`, whose
-status change moves no body edge).
+`work_item.update` and `TaskService::update`. Filing a task
+(`insert_logged_tx`, the core of `work_item.create` and
+`TaskService::create`) logs **`work_item.created@1 { work_item, status,
+effort? }`** — filing straight into `in_progress` on a thread opens the
+effort in the same transaction; filing into a status is a creation with
+that status, not a `ready →` transition (tsk463). The `page_ref.work_item`
+pump consumer projects a task's body-mention edges on `work_item.created`
+and re-projects them on `work_item.edited` (it used to follow
+`work_item.transitioned`, whose status change moves no body edge).
 
 **Producers so far.** Every task status change (P2.6.3, tsk455 — not
 only in_progress crossings, thread-less tasks too) goes through one

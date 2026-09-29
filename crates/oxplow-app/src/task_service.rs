@@ -314,11 +314,12 @@ impl TaskService {
         // the same call") it opens the effort in the insert's transaction,
         // and any status but `ready` logs `work_item.transitioned`. The
         // start snapshot comes from the effort-lifecycle consumer.
-        if item.status == TaskStatus::Ready {
-            item.id = self.store.insert(&item).await?;
-        } else {
-            let (id, _effort) = self.store.insert_logged(&item).await?;
-            item.id = id;
+        if item.status == TaskStatus::Done {
+            item.completed_at = Some(now);
+        }
+        let (id, _effort) = self.store.insert_logged(&item).await?;
+        item.id = id;
+        if item.status != TaskStatus::Ready {
             self.settle_lifecycle().await;
         }
         Ok(item)

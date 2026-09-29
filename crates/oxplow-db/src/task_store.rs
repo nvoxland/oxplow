@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use rusqlite::params;
 
 use oxplow_domain::events::schema::{
-    WorkItemEdited, WorkItemEditedV1, WorkItemTransitioned, WorkItemTransitionedV1,
+    WorkItemCreated, WorkItemCreatedV1, WorkItemEdited, WorkItemEditedV1, WorkItemTransitioned,
+    WorkItemTransitionedV1,
 };
 use oxplow_domain::refs::build::{effort_ref, work_item_ref};
 use oxplow_domain::stores::TaskStore;
@@ -171,12 +172,51 @@ fn apply_status_tx(
     item: &Task,
     from: TaskStatus,
 ) -> Result<EffortTransition, DomainError> {
-    use crate::database::map_sql_err;
     write_status_tx(conn, item)?;
+    let transition = effort_for_status_tx(conn, ev, item, from)?;
+    let work_item = work_item_ref(item.id);
+    if from != item.status {
+        let effort = match transition {
+            EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
+            EffortTransition::NoOpenEffort | EffortTransition::Untouched => None,
+        };
+        let mut subject = vec![work_item.clone()];
+        subject.extend(effort.map(effort_ref));
+        let anchors = match item.thread_id {
+            Some(thread) => anchors_for_thread_tx(conn, thread)?,
+            None => Anchors::default(),
+        };
+        let env = ev
+            .typed::<WorkItemTransitioned>(&WorkItemTransitionedV1 {
+                work_item,
+                from,
+                to: item.status,
+                effort: effort.map(effort_ref),
+            })
+            .with_anchors(Anchors {
+                effort_id: effort,
+                ..anchors
+            })
+            .with_subject(subject);
+        ev.append(conn, &env)?;
+    }
+    Ok(transition)
+}
+
+/// The effort a status change implies: open (or adopt) one when a
+/// thread-attached task enters `in_progress` from `from`, close the open
+/// one when it leaves. Logs the effort's own events, not the transition.
+fn effort_for_status_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    item: &Task,
+    from: TaskStatus,
+) -> Result<EffortTransition, DomainError> {
+    use crate::database::map_sql_err;
     let work_item = work_item_ref(item.id);
     let crossed_in = from != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
     let crossed_out = from == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
-    let transition = match item.thread_id {
+    Ok(match item.thread_id {
         Some(thread) if crossed_in => {
             match crate::effort_store::find_open_for_work_item_tx(conn, &work_item)
                 .map_err(map_sql_err)?
@@ -215,33 +255,7 @@ fn apply_status_tx(
             }
         }
         _ => EffortTransition::Untouched,
-    };
-    if from != item.status {
-        let effort = match transition {
-            EffortTransition::Opened(e) | EffortTransition::Finished(e) => Some(e),
-            EffortTransition::NoOpenEffort | EffortTransition::Untouched => None,
-        };
-        let mut subject = vec![work_item.clone()];
-        subject.extend(effort.map(effort_ref));
-        let anchors = match item.thread_id {
-            Some(thread) => anchors_for_thread_tx(conn, thread)?,
-            None => Anchors::default(),
-        };
-        let env = ev
-            .typed::<WorkItemTransitioned>(&WorkItemTransitionedV1 {
-                work_item,
-                from,
-                to: item.status,
-                effort: effort.map(effort_ref),
-            })
-            .with_anchors(Anchors {
-                effort_id: effort,
-                ..anchors
-            })
-            .with_subject(subject);
-        ev.append(conn, &env)?;
-    }
-    Ok(transition)
+    })
 }
 
 /// The only writer of a task's `status` / `completed_at` (with
@@ -321,9 +335,9 @@ pub fn update_with_status_tx(
     get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)
 }
 
-/// Insert `item` and apply its initial status as a change from `ready`
-/// (filing straight into `in_progress` opens the effort; any status but
-/// `ready` logs `ready → status`). Returns the id and any effort opened.
+/// Insert `item` and log `work_item.created@1` with its initial status;
+/// filed straight into `in_progress` on a thread, it opens the effort in
+/// the same transaction. Returns the id and any effort opened.
 pub fn insert_logged_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
@@ -331,11 +345,45 @@ pub fn insert_logged_tx(
 ) -> Result<(TaskId, Option<EffortId>), DomainError> {
     let id = insert_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
     let placed = Task { id, ..item.clone() };
-    let effort = match apply_status_tx(conn, ev, &placed, TaskStatus::Ready)? {
+    let effort = match effort_for_status_tx(conn, ev, &placed, TaskStatus::Ready)? {
         EffortTransition::Opened(e) => Some(e),
         _ => None,
     };
+    let work_item = work_item_ref(id);
+    let mut subject = vec![work_item.clone()];
+    subject.extend(effort.map(effort_ref));
+    let anchors = match placed.thread_id {
+        Some(thread) => anchors_for_thread_tx(conn, thread)?,
+        None => Anchors::default(),
+    };
+    let env = ev
+        .typed::<WorkItemCreated>(&WorkItemCreatedV1 {
+            work_item,
+            status: placed.status,
+            effort: effort.map(effort_ref),
+        })
+        .with_anchors(Anchors {
+            effort_id: effort,
+            ..anchors
+        })
+        .with_subject(subject);
+    ev.append(conn, &env)?;
     Ok((id, effort))
+}
+
+/// The next `sort_index` at the end of `thread`'s list (or the backlog's),
+/// read in the caller's transaction.
+pub fn next_sort_index_tx(
+    conn: &rusqlite::Connection,
+    thread: Option<ThreadId>,
+) -> Result<i64, DomainError> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM task
+         WHERE thread_id IS ?1 AND deleted_at IS NULL",
+        params![thread.map(|t| t.value())],
+        |r| r.get(0),
+    )
+    .map_err(crate::database::map_sql_err)
 }
 
 /// Move task `id` to `to` at `now`, reading the row in the same
@@ -862,8 +910,8 @@ mod tests {
 
     /// P2.6.3 (tsk455): every status change logs exactly one
     /// `work_item.transitioned` — not only in_progress crossings, and for
-    /// thread-less tasks too. Filing straight into a status other than
-    /// `ready` logs as `ready → status`.
+    /// thread-less tasks too. Filing a task logs `work_item.created` with
+    /// its status instead (tsk463).
     #[tokio::test]
     async fn every_status_change_logs_one_transition() {
         let (store, tid) = fixture().await;
@@ -885,8 +933,19 @@ mod tests {
             .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 20))
             .await
             .unwrap();
+        let created: Vec<_> = events
+            .iter()
+            .filter(|e| e.envelope.event_type == "work_item.created")
+            .collect();
+        assert_eq!(created.len(), 1, "filing is a creation, not a transition");
+        assert_eq!(
+            created[0].envelope.payload["work_item"],
+            work_item_ref(born)
+        );
+        assert_eq!(created[0].envelope.payload["status"], "blocked");
         let seen: Vec<(String, String, String, bool)> = events
             .iter()
+            .filter(|e| e.envelope.event_type == "work_item.transitioned")
             .map(|e| {
                 let p = &e.envelope.payload;
                 (
@@ -907,7 +966,6 @@ mod tests {
                     false
                 ),
                 (work_item_ref(attached), "ready".into(), "done".into(), true),
-                (work_item_ref(born), "ready".into(), "blocked".into(), true),
             ]
         );
     }
@@ -1015,7 +1073,7 @@ mod tests {
             .collect();
         assert_eq!(
             logged,
-            vec!["effort.opened", "work_item.transitioned"],
+            vec!["effort.opened", "work_item.created"],
             "only the first insert's"
         );
     }

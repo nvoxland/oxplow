@@ -141,23 +141,25 @@ spec's `atomicity` is refused, as is a second command of the same name.
 | Command | Handler | Notes |
 |---|---|---|
 | `work_item.transition { id, to }` | `Tx` over `oxplow_db::task_store::set_status_tx` (`commands/work_item.rs`, P2.6.3) | all invokers; undoable (inverse restores the prior status). The row, the effort open/close, `work_item.transitioned` and `effort.*` commit with the audit, all caused by `command.executed`; the effort's snapshot pin is the effort-lifecycle pump consumer's. |
+| `work_item.create { title, description?, parent_id?, status?, priority?, thread? }` | `Tx` over `task_store::insert_logged_tx` (`commands/work_item.rs`, tsk463) | all invokers; not undoable (that would be deleting a task). The row at the end of its list (`next_sort_index_tx`), `work_item.created@1 { work_item, status, effort? }`, and — filed `in_progress` on a thread — the effort, all caused by the run; an agent's task is authored `agent`. Absent `thread` files onto the backlog. |
 | `work_item.update { id, title?, description?, priority?, parent_id?, status? }` | `Tx` over `task_store::update_with_status_tx` (`commands/work_item.rs`) | all invokers; undoable (the inverse restores exactly the fields and status given). Fields and status commit together: `work_item.edited@1 { work_item, fields }` for the fields, then the status move with everything `work_item.transition` implies. A refused run writes nothing. |
 | `effort.open { work_item, thread? }` / `effort.close { effort, summary? }` | `Tx` over `effort_store::start_tx` / `finish_tx` (`commands/effort.rs`, P2.6.4) | all invokers; not undoable. For a work item that isn't an oxplow task (`work_item:linear:ENG-12`) — an oxplow task's effort follows its status, so its refs are refused. `thread` defaults to the caller's and must be its stream's working (active) thread; an agent may name only a thread in its own stream (and close only its stream's efforts). A second open on the same item is refused naming the open effort. Logs `effort.opened` / `effort.closed` caused by the run; the snapshot pin is the effort-lifecycle pump consumer's. |
 | `config.list_keys {}` / `config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value, `human_only` |
 | `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`); after commit, write the file and swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `lsp`, `collection`, `extensions`, `gauges`, `agentPromptAppend` — each runs a program, picks the model, enables code, or steers every agent; a test fails if a key documented as running programs or steering agents isn't listed) needs a person's confirmation per input |
 
 **Callers.** Every task edit or status change made for someone is a
-command, through `oxplow_app::task_writes`: `update` runs
-`work_item.update` (fields + status, atomic), `set_status` runs
-`work_item.transition`, both settling the effort-lifecycle consumer after
-a status move; `upsert` inserts a new row through the create path
+command, through `oxplow_app::task_writes`: `create` runs
+`work_item.create`, `update` runs `work_item.update` (fields + status,
+atomic), `set_status` runs `work_item.transition`, each settling the
+effort-lifecycle consumer after a status move; `upsert` inserts a new row through the create path
 (`insert_logged`) and edits an existing one with `update` (title,
 description, priority, parent, status — not its thread or position). MCP
-`update_task`, `complete_task`, `dispatch_task`, `upsert_task` and
-`transition_tasks` run them as `Actor::Agent` with the caller's verified
+`create_task`, `file_epic_with_children`, `update_task`, `complete_task`,
+`dispatch_task`, `upsert_task` and `transition_tasks` run them as `Actor::Agent` with the caller's verified
 thread and stream (`McpCaller` — see "MCP identity"), so an anonymous
-connection can't change a task; RPC `update_task` / `upsert_task` run
-them as `Actor::Human`. `TaskService::update`
+connection (or a queued thread) can't file or change a task; RPC
+`create_task` / `update_task` / `upsert_task` run them as
+`Actor::Human`. `TaskService::update`
 (no actor) still logs every status change, with source
 `system:task_service`, but isn't audited.
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):

@@ -87,6 +87,119 @@ pub fn command() -> Command {
     Command::new(spec(), handler).expect("work_item.transition registers")
 }
 
+pub const CREATE: &str = "work_item.create";
+
+/// File a task on a thread (or the backlog), optionally straight into a
+/// status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemCreateInput {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The parent task (`tsk7`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// `ready` when absent; `in_progress` opens the effort in the same run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<TaskStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<TaskPriority>,
+    /// The thread (`thr3`); absent files onto the project-wide backlog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+}
+
+pub fn create_spec() -> CommandSpec {
+    CommandSpec {
+        name: CREATE.into(),
+        summary: "File a task on a thread or the backlog, optionally straight into a status \
+                  (in_progress opens its effort in the same transaction)."
+            .into(),
+        input_schema: serde_json::to_value(schemars::schema_for!(WorkItemCreateInput))
+            .expect("schema serializes"),
+        invokers: Invokers::ALL,
+        confirm: Confirm::Never,
+        // Undoing a filing would be deleting a task — not what undo is for.
+        undoable: false,
+        lifecycle: Lifecycle::Stable,
+        atomicity: Atomicity::Tx,
+        effect: oxplow_domain::CommandEffect::Write,
+    }
+}
+
+/// `oxplow_db::task_store::insert_logged_tx` as a `Tx` run: the row (at
+/// the end of its list), `work_item.created`, and the effort when filed
+/// `in_progress`, caused by the run. An agent's task is authored `agent`.
+pub fn create_command() -> Command {
+    let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: WorkItemCreateInput =
+            serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                field: None,
+                message: e.to_string(),
+            })?;
+        let parent_id = input
+            .parent_id
+            .as_deref()
+            .map(|raw| {
+                raw.parse::<TaskId>().map_err(|e| CommandError::Invalid {
+                    field: Some("/parent_id".into()),
+                    message: format!("{e}"),
+                })
+            })
+            .transpose()?;
+        let thread = input
+            .thread
+            .as_deref()
+            .map(|raw| {
+                raw.parse::<oxplow_domain::ThreadId>()
+                    .map_err(|e| CommandError::Invalid {
+                        field: Some("/thread".into()),
+                        message: format!("{e}"),
+                    })
+            })
+            .transpose()?;
+        let now = Timestamp::now();
+        let status = input.status.unwrap_or(TaskStatus::Ready);
+        let item = oxplow_domain::Task {
+            id: TaskId::placeholder(),
+            thread_id: thread,
+            parent_id,
+            title: input.title,
+            description: input.description.unwrap_or_default(),
+            status,
+            priority: input.priority.unwrap_or(TaskPriority::Medium),
+            sort_index: oxplow_db::task_store::next_sort_index_tx(ctx.conn, thread)
+                .map_err(CommandError::from)?,
+            created_by: oxplow_domain::TaskActorKind::User,
+            created_at: now,
+            updated_at: now,
+            completed_at: (status == TaskStatus::Done).then_some(now),
+            deleted_at: None,
+            note_count: 0,
+            author: Some(if ctx.actor.is_agent_driven() {
+                oxplow_domain::TaskAuthor::Agent
+            } else {
+                oxplow_domain::TaskAuthor::User
+            }),
+        };
+        let (id, _effort) = oxplow_db::task_store::insert_logged_tx(ctx.conn, &ctx.events, &item)
+            .map_err(CommandError::from)?;
+        let row = oxplow_db::task_store::get_task_tx(ctx.conn, id)
+            .map_err(CommandError::from)?
+            .ok_or_else(|| CommandError::Failed {
+                message: format!("task {id} vanished"),
+            })?;
+        Ok(HandlerOutput {
+            result: serde_json::to_value(&row).expect("Task serializes"),
+            inverse: None,
+            events: Vec::new(),
+            after_commit: None,
+        })
+    }));
+    Command::new(create_spec(), handler).expect("work_item.create registers")
+}
+
 pub const UPDATE: &str = "work_item.update";
 
 /// Edit a task's fields and, optionally, its status — one transaction.
@@ -355,6 +468,94 @@ mod tests {
             (row.title.as_str(), row.status),
             ("t", oxplow_domain::TaskStatus::InProgress)
         );
+    }
+
+    /// `work_item.create` (tsk463): filing a task is audited to the actor;
+    /// filed straight into `in_progress` it opens the effort in the same
+    /// run, and the body's mentions are projected by the pump.
+    #[tokio::test]
+    async fn a_create_is_audited_and_opens_its_effort() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let agent = Actor::Agent {
+            thread_id: Some(fx.thread),
+            stream_id: Some(StreamId::new(1)),
+        };
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                CREATE,
+                json!({
+                    "title": "filed",
+                    "description": "see [[tsk1]]",
+                    "status": "in_progress",
+                    "thread": fx.thread.to_string(),
+                }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["status"], "in_progress");
+        assert_eq!(out.result["author"], "agent");
+        let id: TaskId = out.result["id"].as_str().unwrap().parse().unwrap();
+        let executed = out.event_id.clone().unwrap();
+        let events = fx.svc.event_log_store.read_after(0, 100).await.unwrap();
+        let caused: Vec<&str> = events
+            .iter()
+            .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
+            .map(|e| e.envelope.event_type.as_str())
+            .collect();
+        assert_eq!(caused, vec!["effort.opened", "work_item.created"]);
+        use oxplow_db::EffortStore as _;
+        assert!(fx
+            .svc
+            .effort_store
+            .find_open_for_work_item(&oxplow_domain::refs::build::work_item_ref(id))
+            .await
+            .unwrap()
+            .is_some());
+        fx.svc.event_pump.run_once().await.unwrap();
+        let out_refs = fx
+            .svc
+            .page_ref_store
+            .list_outbound(
+                oxplow_db::page_ref_projections::KIND_WORK_ITEM,
+                &oxplow_db::page_ref_projections::work_item_id(id),
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!out_refs.is_empty(), "the body mention was projected");
+    }
+
+    /// A thread that isn't its stream's working thread can't file tasks.
+    #[tokio::test]
+    async fn a_queued_thread_cannot_create() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        fx.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                       VALUES (9, 1, 'q', 'queued',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
+                )
+                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
+            })
+            .await
+            .unwrap();
+        let queued = Actor::Agent {
+            thread_id: Some(oxplow_domain::ThreadId::new(9)),
+            stream_id: Some(StreamId::new(1)),
+        };
+        let err = fx
+            .svc
+            .commands
+            .run(&queued, CREATE, json!({ "title": "nope" }), false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
     }
 
     /// An unknown task fails the run and writes nothing but the error audit.

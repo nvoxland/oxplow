@@ -4108,6 +4108,7 @@ impl OxplowMcp {
     )]
     async fn create_task(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CreateTaskMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
@@ -4143,22 +4144,24 @@ impl OxplowMcp {
             Some(s) => Some(parse_status(s)?),
             None => None,
         };
-        let item = self
-            .services
-            .tasks
-            .create(
-                thread,
-                CreateTaskInput {
-                    title: p.title,
-                    description: Some(p.description),
-                    parent_id: parent_task_id,
-                    status,
-                    priority,
-                    author: Some(oxplow_domain::TaskAuthor::Agent),
-                },
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
+        // Filed as the calling agent (`work_item.create`): audited, and
+        // filed `in_progress` it opens the effort in the same run.
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let item = oxplow_app::task_writes::create(
+            &self.services,
+            &actor,
+            thread,
+            CreateTaskInput {
+                title: p.title,
+                description: Some(p.description),
+                parent_id: parent_task_id,
+                status,
+                priority,
+                author: Some(oxplow_domain::TaskAuthor::Agent),
+            },
+        )
+        .await
+        .map_err(command_error)?;
 
         // Synthesize the in_progress→target effort when the row was
         // filed directly into a closing state with touched files.
@@ -4766,6 +4769,7 @@ impl OxplowMcp {
     #[tool(description = "Atomic: create an epic plus a list of children attached to it.")]
     async fn file_epic_with_children(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<FileEpicWithChildrenParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
@@ -4773,37 +4777,37 @@ impl OxplowMcp {
             expect_id_kind("file_epic_with_children", "thread_id", t, ID_THREAD)?;
         }
         let thread = p.thread_id.as_deref().map(parse_thread_id).transpose()?;
-        let epic = self
-            .services
-            .tasks
-            .create(
+        // Each row is a `work_item.create` run as the calling agent.
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let epic = oxplow_app::task_writes::create(
+            &self.services,
+            &actor,
+            thread,
+            CreateTaskInput {
+                title: p.epic_title,
+                description: Some(p.epic_description),
+                author: Some(oxplow_domain::TaskAuthor::Agent),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(command_error)?;
+        let mut children_out = Vec::with_capacity(p.children.len());
+        for child in p.children {
+            let row = oxplow_app::task_writes::create(
+                &self.services,
+                &actor,
                 thread,
                 CreateTaskInput {
-                    title: p.epic_title,
-                    description: Some(p.epic_description),
+                    title: child.title,
+                    description: Some(child.description),
+                    parent_id: Some(epic.id),
                     author: Some(oxplow_domain::TaskAuthor::Agent),
                     ..Default::default()
                 },
             )
             .await
-            .map_err(|e| internal(e.to_string()))?;
-        let mut children_out = Vec::with_capacity(p.children.len());
-        for child in p.children {
-            let row = self
-                .services
-                .tasks
-                .create(
-                    thread,
-                    CreateTaskInput {
-                        title: child.title,
-                        description: Some(child.description),
-                        parent_id: Some(epic.id),
-                        author: Some(oxplow_domain::TaskAuthor::Agent),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .map_err(|e| internal(e.to_string()))?;
+            .map_err(command_error)?;
             children_out.push(row);
         }
         self.emit_tasks_changed(thread);
@@ -8785,19 +8789,22 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_rejects_stream_id_passed_as_thread_id() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, services, server) = boot();
         let err = server
-            .create_task(Parameters(CreateTaskMcpParams {
-                thread_id: Some("str999".into()),
-                backlog: false,
-                title: "x".into(),
-                description: "dev".into(),
-                kind: None,
-                priority: None,
-                status: None,
-                parent_id: None,
-                touched_files: None,
-            }))
+            .create_task(
+                as_writer(&services).await,
+                Parameters(CreateTaskMcpParams {
+                    thread_id: Some("str999".into()),
+                    backlog: false,
+                    title: "x".into(),
+                    description: "dev".into(),
+                    kind: None,
+                    priority: None,
+                    status: None,
+                    parent_id: None,
+                    touched_files: None,
+                }),
+            )
             .await
             .expect_err("should reject stream id passed as thread_id");
         let msg = err.message.to_string();
@@ -8810,19 +8817,22 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_rejects_unrecognised_thread_id() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, services, server) = boot();
         let err = server
-            .create_task(Parameters(CreateTaskMcpParams {
-                thread_id: Some("nonsense".into()),
-                backlog: false,
-                title: "x".into(),
-                description: "dev".into(),
-                kind: None,
-                priority: None,
-                status: None,
-                parent_id: None,
-                touched_files: None,
-            }))
+            .create_task(
+                as_writer(&services).await,
+                Parameters(CreateTaskMcpParams {
+                    thread_id: Some("nonsense".into()),
+                    backlog: false,
+                    title: "x".into(),
+                    description: "dev".into(),
+                    kind: None,
+                    priority: None,
+                    status: None,
+                    parent_id: None,
+                    touched_files: None,
+                }),
+            )
             .await
             .expect_err("should reject unprefixed value");
         let msg = err.message.to_string();
@@ -8879,19 +8889,22 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_reports_invalid_wikilink() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, services, server) = boot();
         let r = server
-            .create_task(Parameters(CreateTaskMcpParams {
-                thread_id: None,
-                backlog: true,
-                title: "t".into(),
-                description: "Follow-up in [[#13]].".into(),
-                kind: None,
-                priority: None,
-                status: None,
-                parent_id: None,
-                touched_files: None,
-            }))
+            .create_task(
+                as_writer(&services).await,
+                Parameters(CreateTaskMcpParams {
+                    thread_id: None,
+                    backlog: true,
+                    title: "t".into(),
+                    description: "Follow-up in [[#13]].".into(),
+                    kind: None,
+                    priority: None,
+                    status: None,
+                    parent_id: None,
+                    touched_files: None,
+                }),
+            )
             .await
             .unwrap();
         let body = text_payload(r);
@@ -8905,19 +8918,22 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_omits_link_warnings_when_clean() {
-        let (_proj, _svc, server) = boot();
+        let (_proj, services, server) = boot();
         let r = server
-            .create_task(Parameters(CreateTaskMcpParams {
-                thread_id: None,
-                backlog: true,
-                title: "t".into(),
-                description: "A clean body with no wikilinks at all.".into(),
-                kind: None,
-                priority: None,
-                status: None,
-                parent_id: None,
-                touched_files: None,
-            }))
+            .create_task(
+                as_writer(&services).await,
+                Parameters(CreateTaskMcpParams {
+                    thread_id: None,
+                    backlog: true,
+                    title: "t".into(),
+                    description: "A clean body with no wikilinks at all.".into(),
+                    kind: None,
+                    priority: None,
+                    status: None,
+                    parent_id: None,
+                    touched_files: None,
+                }),
+            )
             .await
             .unwrap();
         let body = text_payload(r);

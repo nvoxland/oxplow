@@ -34,6 +34,41 @@ pub async fn set_status(
     })
 }
 
+/// File a task as `actor` (`work_item.create`): audited, and filed
+/// straight into `in_progress` it opens the effort in the same run —
+/// then settles the pump so the effort's start snapshot is pinned.
+pub async fn create(
+    svc: &Services,
+    actor: &Actor,
+    thread: Option<oxplow_domain::ThreadId>,
+    input: crate::task_service::CreateTaskInput,
+) -> Result<Task, CommandError> {
+    let moves_status = input.status.is_some_and(|s| s != TaskStatus::Ready);
+    let args = crate::commands::work_item::WorkItemCreateInput {
+        title: input.title,
+        description: input.description,
+        parent_id: input.parent_id.map(|p| p.to_string()),
+        status: input.status,
+        priority: input.priority,
+        thread: thread.map(|t| t.to_string()),
+    };
+    let outcome = svc
+        .commands
+        .run(
+            actor,
+            crate::commands::work_item::CREATE,
+            serde_json::to_value(args).expect("input serializes"),
+            false,
+        )
+        .await?;
+    if moves_status {
+        svc.tasks.settle_lifecycle().await;
+    }
+    serde_json::from_value(outcome.result).map_err(|e| CommandError::Failed {
+        message: format!("work_item.create result: {e}"),
+    })
+}
+
 /// Edit `id`'s fields and move its status, as `actor`, in one audited
 /// transaction (`work_item.update`); settles the pump when the status
 /// changed so the effort's snapshot pin is in place.
