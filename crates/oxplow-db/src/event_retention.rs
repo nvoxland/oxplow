@@ -32,30 +32,73 @@ pub struct SweepReport {
     pub payloads_expired: usize,
 }
 
-/// Apply [`POLICY`] as of `now`. Idempotent: an already-expired payload
-/// or an already-deleted body is not counted again.
+/// Rows one sweep transaction touches: small enough that a hook waiting on
+/// the writer lock waits milliseconds, not the whole backlog.
+pub const BATCH: i64 = 5000;
+
+/// Apply [`POLICY`] as of `now`, in transactions of at most [`BATCH`]
+/// rows, so the first sweep over a large old log never holds the writer
+/// lock for long. Idempotent: an already-expired payload or an
+/// already-deleted body is not counted again.
 pub async fn sweep(db: &Database, now: Timestamp) -> Result<SweepReport, DomainError> {
-    db.transaction(move |tx| {
-        let mut report = SweepReport::default();
-        let stamp = ts_to_string(now);
-        for (ns, payload_days, content_days) in POLICY {
-            let before =
-                |days: i64| ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS));
-            report.content_deleted += tx
-                .execute(
-                    "DELETE FROM event_content WHERE namespace = ?1 AND created_at < ?2",
-                    params![ns, before(*content_days)],
-                )
-                .map_err(map_sql_err)?;
-            report.payloads_expired += tx
-                .execute(
-                    "UPDATE event_log SET payload = '{}', payload_expired_at = ?3
-                      WHERE type LIKE ?1 AND at < ?2 AND payload_expired_at IS NULL",
-                    params![format!("{ns}.%"), before(*payload_days), stamp],
-                )
-                .map_err(map_sql_err)?;
+    sweep_in_batches(db, now, BATCH).await
+}
+
+async fn sweep_in_batches(
+    db: &Database,
+    now: Timestamp,
+    batch: i64,
+) -> Result<SweepReport, DomainError> {
+    let mut report = SweepReport::default();
+    let stamp = ts_to_string(now);
+    let before = |days: i64| ts_to_string(Timestamp::from_unix_ms(now.unix_ms() - days * DAY_MS));
+    for (ns, payload_days, content_days) in POLICY {
+        let (ns, cutoff) = (ns.to_string(), before(*content_days));
+        loop {
+            let (ns, cutoff) = (ns.clone(), cutoff.clone());
+            let n = db
+                .transaction(move |tx| {
+                    tx.execute(
+                        "DELETE FROM event_content WHERE hash IN (
+                           SELECT hash FROM event_content
+                            WHERE namespace = ?1 AND created_at < ?2 LIMIT ?3)",
+                        params![ns, cutoff, batch],
+                    )
+                    .map_err(map_sql_err)
+                })
+                .await?;
+            report.content_deleted += n;
+            if (n as i64) < batch {
+                break;
+            }
         }
-        // A parked event whose payload expired can never be retried.
+        // `<ns>.` up to `<ns>/` (the next byte after `.`) is exactly the
+        // namespace's types, as an index range.
+        let (lo, hi, cutoff) = (format!("{ns}."), format!("{ns}/"), before(*payload_days));
+        loop {
+            let (lo, hi, cutoff, stamp) = (lo.clone(), hi.clone(), cutoff.clone(), stamp.clone());
+            let n = db
+                .transaction(move |tx| {
+                    tx.execute(
+                        "UPDATE event_log SET payload = '{}', payload_expired_at = ?4
+                          WHERE seq IN (
+                            SELECT seq FROM event_log INDEXED BY event_log_live_payload
+                             WHERE payload_expired_at IS NULL
+                               AND type >= ?1 AND type < ?2 AND at < ?3
+                             LIMIT ?5)",
+                        params![lo, hi, cutoff, stamp, batch],
+                    )
+                    .map_err(map_sql_err)
+                })
+                .await?;
+            report.payloads_expired += n;
+            if (n as i64) < batch {
+                break;
+            }
+        }
+    }
+    // A parked event whose payload expired can never be retried.
+    db.transaction(|tx| {
         tx.execute(
             "UPDATE event_dead_letter SET state = 'discarded'
               WHERE state = 'pending'
@@ -63,16 +106,71 @@ pub async fn sweep(db: &Database, now: Timestamp) -> Result<SweepReport, DomainE
                              WHERE e.seq = event_seq AND e.payload_expired_at IS NOT NULL)",
             [],
         )
-        .map_err(map_sql_err)?;
-        Ok(report)
+        .map_err(map_sql_err)
     })
-    .await
+    .await?;
+    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Database;
+
+    /// A backlog larger than one batch is swept in several transactions,
+    /// all of it, and nothing outside the namespace's type range moves.
+    #[tokio::test]
+    async fn a_backlog_is_swept_in_batches() {
+        let db = Database::in_memory();
+        let now = oxplow_domain::Timestamp::from_unix_ms(100 * DAY_MS);
+        let old = crate::database::ts_to_string(oxplow_domain::Timestamp::from_unix_ms(
+            now.unix_ms() - 31 * DAY_MS,
+        ));
+        db.transaction(move |tx| {
+            for i in 0..5 {
+                tx.execute(
+                    "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                       VALUES (?1, 'agent.tool.finished', 1, ?2, 'test', '[]', '{\"tool\":\"Bash\"}')",
+                    rusqlite::params![format!("e{i}"), old],
+                )
+                .map_err(crate::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO event_content (hash, namespace, bytes, size, created_at)
+                       VALUES (?1, 'agent', x'00', 1, ?2)",
+                    rusqlite::params![format!("h{i}"), old],
+                )
+                .map_err(crate::map_sql_err)?;
+            }
+            // `agentx.` sorts inside `agent%` but is another namespace.
+            tx.execute(
+                "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                   VALUES ('x', 'agentx.thing', 1, ?1, 'test', '[]', '{\"a\":1}')",
+                [&old],
+            )
+            .map_err(crate::map_sql_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let report = sweep_in_batches(&db, now, 2).await.unwrap();
+        assert_eq!(
+            report,
+            SweepReport {
+                content_deleted: 5,
+                payloads_expired: 5
+            }
+        );
+        let kept: String = db
+            .transaction(|tx| {
+                tx.query_row("SELECT payload FROM event_log WHERE id = 'x'", [], |r| {
+                    r.get(0)
+                })
+                .map_err(crate::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(kept, "{\"a\":1}");
+    }
 
     /// A parked event whose payload expires can never be retried, so its
     /// pending dead letter is discarded with it.

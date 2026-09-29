@@ -341,10 +341,13 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     .spawn();
 
     // Event retention (P3.11): expire old agent/test payloads and bodies
-    // per `.context/target-architecture.md` §5.4 — at boot, then daily.
+    // per `.context/target-architecture.md` §5.4 — a while after boot (the
+    // first sweep after an upgrade may have a large backlog, and hooks
+    // shouldn't meet it while the app is starting), then daily.
     {
         let db = state.db.clone();
         tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(10 * 60)).await;
             loop {
                 match oxplow_db::event_retention::sweep(&db, oxplow_domain::Timestamp::now()).await
                 {

@@ -1147,7 +1147,10 @@ retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`
 and stamps it. The sweep is `oxplow_db::event_retention::sweep` (P3.11,
-boot + daily; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
+ten minutes after boot, then daily; batches of 5,000 rows per transaction
+through the partial index `event_log_live_payload (type, at) WHERE
+payload_expired_at IS NULL`, V103, read as a `type` range because a `LIKE`
+can't use a BINARY index; windows in its `POLICY`: `agent` 30 d payload / 14 d body,
 `test` and `code` 90 / 30, everything else kept). **An expired event is
 history only** (tsk501): `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
