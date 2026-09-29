@@ -124,7 +124,6 @@ pub enum OxplowEvent {
     /// re-derive) compute it inline before emitting.
     AgentStatusChanged {
         thread_id: ThreadId,
-        pane_target: String,
         state: AgentStatusState,
         /// The status detail, when meaningful to the renderer. Carries
         /// the `await_user` question text when `state` is

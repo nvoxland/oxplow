@@ -5,8 +5,9 @@
 //! and the row would otherwise pin the work panel to a phantom
 //! in-progress entry.
 //!
-//! agent_status used to live here too; it's now an in-memory registry
-//! that boots empty, so nothing to reset. hook_event likewise.
+//! Agent status needs no reset: it is the newest logged
+//! `agent.status.changed`, and what the rail shows is derived from the
+//! logged activity, so a turn this closes reads as ended.
 //!
 //! Called once from `Services::boot` after the DB is open. Idempotent.
 

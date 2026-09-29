@@ -81,16 +81,19 @@ pub async fn archive_stream(
     id: StreamId,
     delete_worktree: bool,
 ) -> Result<(), IpcError> {
-    use oxplow_domain::stores::{AgentStatusStore, ThreadStore};
+    use oxplow_app::agent_status_derive::{derive_thread_status, recent_activity};
+    use oxplow_domain::stores::ThreadStore;
     use oxplow_domain::AgentStatusState;
     let thread_store = oxplow_db::SqliteThreadStore::new(svc.db.clone());
     let threads = thread_store.list_for_stream(&id).await?;
-    let statuses = svc.thread_runtime.list_all().await?;
-    let busy = threads.iter().any(|t| {
-        statuses
-            .iter()
-            .any(|s| s.thread_id == t.id && s.state == AgentStatusState::Running)
-    });
+    // Running as the rail shows it: derived from the logged activity, so
+    // an agent that died mid-turn (stalled) doesn't pin the stream.
+    let now = oxplow_domain::Timestamp::now();
+    let mut busy = false;
+    for t in &threads {
+        let activity = recent_activity(&svc.event_log_store, t.id).await?;
+        busy |= derive_thread_status(&activity, now) == AgentStatusState::Running;
+    }
     if busy {
         return Err(IpcError::invalid(
             "cannot archive: an agent is still running in one of this stream's threads",

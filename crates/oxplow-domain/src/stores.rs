@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 
 use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread};
-use crate::hook::{AgentStatus, AgentStatusState, AgentTurn};
+use crate::hook::{AgentStatus, AgentTurn};
 use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
 use crate::task::{Task, TaskLink, TaskLinkType, TaskNote, TaskStatus};
@@ -118,19 +118,11 @@ pub trait TaskLinkStore: Send + Sync {
 }
 
 #[async_trait]
+/// A thread's agent status is its newest logged `agent.status.changed`;
+/// the log is the only record (writes go through the hook ingest).
 pub trait AgentStatusStore: Send + Sync {
-    async fn upsert(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-        state: AgentStatusState,
-        detail: Option<String>,
-    ) -> Result<AgentStatus, DomainError>;
-    async fn get(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-    ) -> Result<Option<AgentStatus>, DomainError>;
+    async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError>;
+    /// The status of every thread that has logged one.
     async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError>;
 }
 

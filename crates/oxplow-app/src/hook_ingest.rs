@@ -24,9 +24,11 @@
 //!   `agent.session.started`; `SessionEnd{reason: clear}` of the resume
 //!   session clears it; `agent.session.ended`.
 //!
-//! Agent status stays in memory (`AgentStatusStore`); a transition is
-//! logged as `agent.status.changed`, compared against it outside the
-//! transaction.
+//! Agent status is the log: a thread's status is its newest
+//! `agent.status.changed`, read and compared inside the same transaction
+//! that logs a change. Announcements (`AgentStatusChanged`) go out under
+//! one lock held from the transaction to the emit, so they reach the UI
+//! in commit order.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,7 +37,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
-use oxplow_db::agent_stores::{activity_anchors_tx, close_turn_tx, open_turn_ids_tx, open_turn_tx};
+use oxplow_db::agent_stores::{
+    activity_anchors_tx, close_turn_tx, last_status_tx, open_turn_ids_tx, open_turn_tx,
+};
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
 use oxplow_domain::events::schema::{
@@ -45,7 +49,6 @@ use oxplow_domain::events::schema::{
     ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
-use oxplow_domain::stores::AgentStatusStore;
 use oxplow_domain::{
     AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, EventSchemaRegistry,
     HookKind, StreamId, ThreadId, Timestamp,
@@ -119,7 +122,9 @@ pub struct HookIngestService {
     project_dir: PathBuf,
     /// Reads recent activity to derive a thread's status.
     log: oxplow_db::SqliteEventLogStore,
-    statuses: Arc<dyn AgentStatusStore>,
+    /// Held from a status-deciding transaction to its announcement, so
+    /// `AgentStatusChanged` reaches the UI in commit order.
+    status_order: Arc<tokio::sync::Mutex<()>>,
     events: EventBus,
     pump: Option<Arc<crate::event_pump::EventPump>>,
     /// Snapshots the worktree when a turn ends (P2.3); `None` in bare tests.
@@ -131,7 +136,6 @@ impl HookIngestService {
         db: Database,
         schemas: Arc<EventSchemaRegistry>,
         project_dir: PathBuf,
-        statuses: Arc<dyn AgentStatusStore>,
         events: EventBus,
     ) -> Self {
         Self {
@@ -139,7 +143,7 @@ impl HookIngestService {
             db,
             schemas,
             project_dir,
-            statuses,
+            status_order: Arc::new(tokio::sync::Mutex::new(())),
             events,
             pump: None,
             turn_snapshots: None,
@@ -170,14 +174,14 @@ impl HookIngestService {
             return Ok(outcome); // no thread: nothing to anchor a record to
         };
 
-        let current = self.current_status(&thread).await;
+        let order = self.status_order.lock().await;
         let schemas = self.schemas.clone();
         let project_dir = self.project_dir.clone();
         let applied = self
             .db
             .transaction(move |tx| {
                 let ev = EventCtx::system(&schemas, "hook_ingest");
-                record_tx(tx, &ev, &project_dir, thread, &env, current.as_ref(), now)
+                record_tx(tx, &ev, &project_dir, thread, &env, now)
             })
             .await?;
 
@@ -190,9 +194,10 @@ impl HookIngestService {
                 .emit(OxplowEvent::AgentTurnsChanged { thread_id: thread });
         }
         match applied.status {
-            Some((state, detail)) => self.publish_status(&thread, state, detail).await?,
+            Some((state, detail)) => self.announce(thread, state, detail),
             None => self.announce_derived_status(&thread, kind).await,
         }
+        drop(order);
         if let Some(pump) = &self.pump {
             pump.wake();
         }
@@ -204,47 +209,43 @@ impl HookIngestService {
         Ok(outcome)
     }
 
-    /// Set, log and announce a thread's status outside a hook (the ACP
-    /// session's awaiting-permission state).
+    /// Log and announce a thread's status outside a hook (`await_user`,
+    /// the ACP session's permission cards).
     pub async fn set_status(
         &self,
         thread: &ThreadId,
         state: AgentStatusState,
         detail: Option<String>,
     ) -> Result<(), HookIngestError> {
-        let current = self.current_status(thread).await;
-        if changed(current.as_ref(), state, detail.as_deref()) {
-            let schemas = self.schemas.clone();
-            let (thread_c, detail_c) = (*thread, detail.clone());
-            self.db
-                .transaction(move |tx| {
-                    let ev = EventCtx::system(&schemas, "hook_ingest");
-                    log_status_tx(tx, &ev, thread_c, state, detail_c.clone())
-                })
-                .await?;
+        let _order = self.status_order.lock().await;
+        let schemas = self.schemas.clone();
+        let (thread_c, detail_c) = (*thread, detail.clone());
+        let logged = self
+            .db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "hook_ingest");
+                let current = last_status_tx(tx, &schemas, thread_c)?;
+                if !changed(current.as_ref(), state, detail_c.as_deref()) {
+                    return Ok(false);
+                }
+                log_status_tx(tx, &ev, thread_c, state, detail_c.clone())?;
+                Ok(true)
+            })
+            .await?;
+        if logged {
+            // The activity log shows the status change.
+            self.events.emit(OxplowEvent::HookEventsChanged);
         }
-        self.publish_status(thread, state, detail).await
+        self.announce(*thread, state, detail);
+        Ok(())
     }
 
-    /// Write the status to the in-memory store and announce it.
-    async fn publish_status(
-        &self,
-        thread: &ThreadId,
-        state: AgentStatusState,
-        detail: Option<String>,
-    ) -> Result<(), HookIngestError> {
-        let pane_target = self.thread_pane(thread).await;
-        let status = self
-            .statuses
-            .upsert(thread, &pane_target, state, detail)
-            .await?;
+    fn announce(&self, thread: ThreadId, state: AgentStatusState, detail: Option<String>) {
         self.events.emit(OxplowEvent::AgentStatusChanged {
-            thread_id: status.thread_id,
-            pane_target: status.pane_target,
-            state: status.state,
-            detail: status.detail,
+            thread_id: thread,
+            state,
+            detail,
         });
-        Ok(())
     }
 
     /// Tool hooks set no status of their own, but they change what the
@@ -255,7 +256,15 @@ impl HookIngestService {
         if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
             return;
         }
-        let (state, detail) = match self.current_status(thread).await {
+        let current = {
+            let (schemas, thread) = (self.schemas.clone(), *thread);
+            self.db
+                .transaction(move |tx| last_status_tx(tx, &schemas, thread))
+                .await
+                .ok()
+                .flatten()
+        };
+        let (state, detail) = match current {
             Some(s) if s.state == AgentStatusState::AwaitingUser => {
                 (AgentStatusState::AwaitingUser, s.detail)
             }
@@ -268,23 +277,7 @@ impl HookIngestService {
                 (derived, None)
             }
         };
-        self.events.emit(OxplowEvent::AgentStatusChanged {
-            thread_id: *thread,
-            pane_target: self.thread_pane(thread).await,
-            state,
-            detail,
-        });
-    }
-
-    /// Read the current agent status for a thread's working pane, if any.
-    async fn current_status(&self, thread: &ThreadId) -> Option<AgentStatus> {
-        let pane = self.thread_pane(thread).await;
-        self.statuses.get(thread, &pane).await.ok().flatten()
-    }
-
-    /// The pane a thread's status is kept under.
-    async fn thread_pane(&self, _thread: &ThreadId) -> String {
-        "working".to_string()
+        self.announce(*thread, state, detail);
     }
 }
 
@@ -366,7 +359,6 @@ fn record_tx(
     project_dir: &Path,
     thread: ThreadId,
     env: &HookEnvelope,
-    current: Option<&AgentStatus>,
     now: Timestamp,
 ) -> Result<Applied, DomainError> {
     let Some(row) = thread_row_tx(conn, thread, project_dir)? else {
@@ -435,7 +427,10 @@ fn record_tx(
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
             } else {
-                stop_status(&env.payload_json, current)
+                stop_status(
+                    &env.payload_json,
+                    last_status_tx(conn, ev.schemas, thread)?.as_ref(),
+                )
             });
         }
         HookKind::AgentBoot => status = Some((AgentStatusState::Idle, Some("boot".to_string()))),
@@ -447,7 +442,11 @@ fn record_tx(
         HookKind::SubagentStop | HookKind::SessionStart => {}
     }
     if let Some((state, detail)) = &status {
-        if changed(current, *state, detail.as_deref()) {
+        if changed(
+            last_status_tx(conn, ev.schemas, thread)?.as_ref(),
+            *state,
+            detail.as_deref(),
+        ) {
             log_status_tx(conn, ev, thread, *state, detail.clone())?;
         }
     }
@@ -635,7 +634,6 @@ fn await_user_question(payload: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::thread_runtime::ThreadRuntimeRegistry;
     use oxplow_db::{Database, SqliteStreamStore, SqliteThreadStore};
     use oxplow_domain::stores::AgentTurnStore as _;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
@@ -684,15 +682,53 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        let registry = Arc::new(ThreadRuntimeRegistry::new());
         let svc = HookIngestService::new(
             db,
             Arc::new(oxplow_domain::EventSchemaRegistry::core()),
             std::path::PathBuf::from("/p"),
-            registry,
             EventBus::new(),
         );
         (svc, t.id)
+    }
+
+    /// A new service over the same database: a restarted daemon.
+    fn restarted(svc: &HookIngestService) -> HookIngestService {
+        HookIngestService::new(
+            svc.db.clone(),
+            svc.schemas.clone(),
+            svc.project_dir.clone(),
+            EventBus::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn set_status_logs_once_and_refreshes_the_activity_log() {
+        let (svc, tid) = fixture().await;
+        let mut rx = svc.events.subscribe();
+        for _ in 0..2 {
+            svc.set_status(&tid, AgentStatusState::AwaitingUser, Some("A?".into()))
+                .await
+                .unwrap();
+        }
+        let mut refreshes = 0;
+        while let Ok(ev) = rx.try_recv() {
+            if matches!(ev, OxplowEvent::HookEventsChanged) {
+                refreshes += 1;
+            }
+        }
+        // The second call changed nothing: no second event, no refetch.
+        assert_eq!(refreshes, 1);
+        let events = logged(&svc).await;
+        assert_eq!(of_type(&events, "agent.status.changed").len(), 1);
+    }
+
+    /// The thread's status as a freshly started daemon would read it.
+    async fn status(svc: &HookIngestService, tid: ThreadId) -> Option<AgentStatus> {
+        use oxplow_domain::stores::AgentStatusStore as _;
+        oxplow_db::SqliteAgentStatusStore::new(svc.db.clone(), svc.schemas.clone())
+            .get(&tid)
+            .await
+            .unwrap()
     }
 
     fn turns(svc: &HookIngestService) -> oxplow_db::SqliteAgentTurnStore {
@@ -1034,7 +1070,7 @@ mod tests {
         // Spot-check via stores.
         let turns = turns(&svc).list_open(&tid).await.unwrap();
         assert_eq!(turns.len(), 1);
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Running);
     }
 
@@ -1063,7 +1099,7 @@ mod tests {
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
     }
 
@@ -1092,7 +1128,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::AwaitingUser);
     }
 
@@ -1121,7 +1157,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Stopped);
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
     }
@@ -1153,7 +1189,7 @@ mod tests {
         .unwrap();
         // Parent turn must still be open and status still Running.
         assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Running);
     }
 
@@ -1175,7 +1211,7 @@ mod tests {
         .await
         .unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
     }
 
@@ -1196,7 +1232,7 @@ mod tests {
         // No turn opened, no status row created — the thread-scoped
         // state machine never ran.
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
-        assert!(svc.statuses.get(&tid, "working").await.unwrap().is_none());
+        assert!(status(&svc, tid).await.is_none());
     }
 
     #[tokio::test]
@@ -1248,7 +1284,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::Idle);
         assert_eq!(status.detail.as_deref(), Some("boot"));
     }
@@ -1272,16 +1308,16 @@ mod tests {
         })
         .await
         .unwrap();
-        // Simulate the MCP await_user call landing on the shared store.
-        svc.statuses
-            .upsert(
-                &tid,
-                "working",
-                AgentStatusState::AwaitingUser,
-                Some("Ship A or B?".into()),
-            )
-            .await
-            .unwrap();
+        // The MCP await_user call parks the thread; then the daemon
+        // restarts before the Stop lands — nothing held in memory survives.
+        svc.set_status(
+            &tid,
+            AgentStatusState::AwaitingUser,
+            Some("Ship A or B?".into()),
+        )
+        .await
+        .unwrap();
+        let svc = restarted(&svc);
         svc.ingest(HookEnvelope {
             kind: HookKind::Stop,
             thread_id: Some(tid),
@@ -1293,7 +1329,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::AwaitingUser);
         assert_eq!(status.detail.as_deref(), Some("Ship A or B?"));
     }
@@ -1316,15 +1352,13 @@ mod tests {
         })
         .await
         .unwrap();
-        svc.statuses
-            .upsert(
-                &tid,
-                "working",
-                AgentStatusState::AwaitingUser,
-                Some("Pick A or B?".into()),
-            )
-            .await
-            .unwrap();
+        svc.set_status(
+            &tid,
+            AgentStatusState::AwaitingUser,
+            Some("Pick A or B?".into()),
+        )
+        .await
+        .unwrap();
         let mut rx = svc.events.subscribe();
         svc.ingest(HookEnvelope {
             kind: HookKind::PostToolUse,
@@ -1364,7 +1398,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let status = svc.statuses.get(&tid, "working").await.unwrap().unwrap();
+        let status = status(&svc, tid).await.unwrap();
         assert_eq!(status.state, AgentStatusState::AwaitingUser);
         assert_eq!(status.detail.as_deref(), Some("Pick A or B"));
     }

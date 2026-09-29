@@ -364,12 +364,7 @@ async fn the_agent_process_runs_and_a_crash_stops_the_thread() {
         .unwrap();
     wait_for(&mut rx, |b| matches!(b, AcpEventBody::Closed { .. })).await;
     assert!(!svc.acp.is_open(&thread));
-    let status = svc
-        .agent_status_store
-        .get(&thread, "working")
-        .await
-        .unwrap()
-        .unwrap();
+    let status = svc.agent_status_store.get(&thread).await.unwrap().unwrap();
     assert_eq!(status.state, oxplow_domain::AgentStatusState::Stopped);
     assert!(svc
         .agent_turn_store
@@ -402,12 +397,7 @@ async fn a_permission_card_restores_the_status_it_interrupted() {
     let thread = seed(&svc, &root, ThreadStatus::Active).await;
     let host = ServicesAcpHost::new(&svc, Some(StreamId::new(1)));
     let status = || async {
-        let s = svc
-            .agent_status_store
-            .get(&thread, "working")
-            .await
-            .unwrap()
-            .unwrap();
+        let s = svc.agent_status_store.get(&thread).await.unwrap().unwrap();
         (s.state, s.detail)
     };
     // The agent already parked on the person (`await_user`).

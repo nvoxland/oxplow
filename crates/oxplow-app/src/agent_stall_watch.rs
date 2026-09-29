@@ -118,7 +118,6 @@ impl AgentStallWatch {
             // ever arrive to trigger this through the normal path.
             self.events.emit(OxplowEvent::AgentStatusChanged {
                 thread_id,
-                pane_target: status.pane_target.clone(),
                 state: derived,
                 detail: None,
             });
@@ -182,7 +181,6 @@ impl AgentStallWatch {
 mod tests {
     use super::*;
     use crate::agent_status_derive::AGENT_DEAD_AFTER_MS;
-    use crate::thread_runtime::ThreadRuntimeRegistry;
     use oxplow_db::{Database, SqliteStreamStore, SqliteTaskStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
@@ -192,7 +190,6 @@ mod tests {
 
     struct Fixture {
         watch: AgentStallWatch,
-        registry: Arc<ThreadRuntimeRegistry>,
         log: oxplow_db::SqliteEventLogStore,
         tasks: Arc<SqliteTaskStore>,
         activity: OutputActivity,
@@ -242,16 +239,17 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        let registry = Arc::new(ThreadRuntimeRegistry::new());
-        let log = oxplow_db::SqliteEventLogStore::new(
+        let schemas = Arc::new(oxplow_domain::EventSchemaRegistry::core());
+        let statuses = Arc::new(oxplow_db::SqliteAgentStatusStore::new(
             db.clone(),
-            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
-        );
+            schemas.clone(),
+        ));
+        let log = oxplow_db::SqliteEventLogStore::new(db.clone(), schemas);
         let tasks = Arc::new(SqliteTaskStore::new(db));
         let bus = EventBus::new();
         let activity = OutputActivity::new();
         let watch = AgentStallWatch::new(
-            registry.clone(),
+            statuses,
             log.clone(),
             tasks.clone(),
             activity.clone(),
@@ -259,7 +257,6 @@ mod tests {
         );
         Fixture {
             watch,
-            registry,
             log,
             tasks,
             activity,
@@ -303,12 +300,17 @@ mod tests {
         f.log.append(env).await.unwrap();
     }
 
+    /// Log the thread's status before any of the test's activity.
     async fn seed_status(f: &Fixture, state: AgentStatusState) {
-        let statuses: Arc<dyn AgentStatusStore> = f.registry.clone();
-        statuses
-            .upsert(&f.thread, "working", state, None)
-            .await
-            .unwrap();
+        let body = serde_json::json!({"thread": "thread:thr1", "state": state});
+        let mut env = oxplow_domain::Envelope::new("agent.status.changed", 1, "test", body)
+            .unwrap()
+            .with_anchors(oxplow_domain::Anchors {
+                thread_id: Some(f.thread),
+                ..Default::default()
+            });
+        env.at = Timestamp::from_unix_ms(0);
+        f.log.append(env).await.unwrap();
     }
 
     async fn seed_in_progress_task(f: &Fixture) {

@@ -242,7 +242,7 @@ impl AcpHost for ServicesAcpHost {
                 if self.before_card.lock().is_none() {
                     let now = svc
                         .agent_status_store
-                        .get(thread, "working")
+                        .get(thread)
                         .await
                         .ok()
                         .flatten()

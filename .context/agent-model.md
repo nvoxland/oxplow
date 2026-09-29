@@ -323,8 +323,17 @@ to `runtime.handleHookEnvelope`, which:
      Claude's `transcript_path`);
    - a status the hook sets (Running, Idle / AwaitingUser, Stopped, boot
      Idle) is logged as `agent.status.changed` when it differs from the
-     in-memory `AgentStatusStore` — compared outside the transaction,
-     since status itself stays in memory.
+     thread's newest logged one, read in the same transaction
+     (`last_status_tx`). **The log is the status** (tsk499): there is no
+     in-memory copy, so a restarted daemon still knows a thread was parked
+     on `await_user` when its Stop lands. `SqliteAgentStatusStore` is the
+     read side (`get`, `list_all` = every thread that has logged one);
+     `HookIngestService::set_status` (`await_user`, ACP permission cards)
+     is the only other writer and logs through the same compare. One lock
+     spans each status-deciding transaction and its `AgentStatusChanged`
+     emit, so announcements reach the UI in commit order. What the rail
+     *shows* is still derived from activity (`list_agent_statuses`), so a
+     dead agent reads as stalled rather than its last announced status.
    **Session tracking is part of it.** A session id seen for the first time
    on a thread (on any hook — Claude posts no HTTP SessionStart) logs
    `agent.session.started` once (dedupe key `session:<id>:started`) and

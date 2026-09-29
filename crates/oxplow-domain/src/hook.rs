@@ -53,12 +53,6 @@ pub enum AgentStatusState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct AgentStatus {
     pub thread_id: ThreadId,
-    /// Pane NAME, not a status: "working" or "talking" — the tmux
-    /// window the agent lives in (`threads.pane_target` defaults to
-    /// 'working'). A row reading `pane_target: "working", state:
-    /// "idle"` is correct ("the working pane's agent is idle"), not a
-    /// field swap — it has been misread as one during a live audit.
-    pub pane_target: String,
     pub state: AgentStatusState,
     pub detail: Option<String>,
     pub updated_at: Timestamp,
@@ -110,7 +104,6 @@ mod tests {
     fn agent_status_round_trips() {
         let s = AgentStatus {
             thread_id: ThreadId::new(1),
-            pane_target: "working".into(),
             state: AgentStatusState::Running,
             detail: Some("typing".into()),
             updated_at: Timestamp::from_unix_ms(1),

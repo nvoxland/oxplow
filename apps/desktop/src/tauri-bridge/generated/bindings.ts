@@ -1454,14 +1454,6 @@ export type AgentKind = "claude" | "codex" | "opencode" |
 
 export type AgentStatus = {
 	thread_id: ThreadId,
-	/**
-	 *  Pane NAME, not a status: "working" or "talking" — the tmux
-	 *  window the agent lives in (`threads.pane_target` defaults to
-	 *  'working'). A row reading `pane_target: "working", state:
-	 *  "idle"` is correct ("the working pane's agent is idle"), not a
-	 *  field swap — it has been misread as one during a live audit.
-	 */
-	pane_target: string,
 	state: AgentStatusState,
 	detail: string | null,
 	updated_at: Timestamp,
@@ -3356,7 +3348,7 @@ export type OxplowEvent =
  *  PreToolUse/PostToolUse, where the renderer used to refetch and
  *  re-derive) compute it inline before emitting.
  */
-{ kind: "agentStatusChanged"; threadId: ThreadId; paneTarget: string; state: AgentStatusState; 
+{ kind: "agentStatusChanged"; threadId: ThreadId; state: AgentStatusState; 
 /**
  *  The status detail, when meaningful to the renderer. Carries
  *  the `await_user` question text when `state` is

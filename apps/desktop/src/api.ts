@@ -2618,7 +2618,7 @@ export async function recordUserInterrupt(threadId: string, streamId: string | n
 
 export async function listAgentStatuses(_streamId?: string): Promise<AgentStatusEntry[]> {
   // The Rust binding returns the raw `AgentStatus` row
-  // ({ thread_id, pane_target, state: "idle"|"running"|... }). The
+  // ({ thread_id, state: "idle"|"running"|..., detail }). The
   // renderer only cares about the dot's narrow alphabet, so collapse
   // the AgentStatusState enum here (see collapseAgentStatusState).
   // Without this transform the consumer reads `entry.threadId` and

@@ -43,10 +43,10 @@ pub async fn read_event_content(svc: &Services, hash: String) -> Result<Option<S
 }
 
 pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, IpcError> {
-    // Derive each thread's working/waiting state by replaying its logged
-    // activity instead of trusting the in-memory status row, which can
-    // drift (a missed Stop, a stale boot row) — the log is what the agent
-    // actually did, so deriving from it self-heals.
+    // Every thread that has logged a status, with its working/waiting
+    // state derived by replaying its activity: a missed Stop or a dead
+    // agent shows as what the log says happened (stalled), not as the
+    // last status it announced.
     let now = oxplow_domain::Timestamp::now();
     let mut statuses = svc.agent_status_store.list_all().await?;
     for s in &mut statuses {
@@ -98,14 +98,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_status_row_keeps_pane_and_state_semantics() {
-        // Pins the DTO field semantics (audited after a live reading of
-        // `{"pane_target":"working","state":"idle"}` looked like a
-        // swap): `pane_target` is a pane NAME — "working" or "talking",
-        // the tmux window the agent lives in (threads.pane_target
-        // defaults to 'working' in the schema) — while `state` carries
-        // the AgentStatusState enum. The two are never cross-assigned;
-        // "the working pane's agent is idle" is a correct row.
+    async fn a_thread_with_a_logged_status_is_listed_with_its_derived_state() {
+        // The row list is every thread that has logged a status; the
+        // state shown is derived from its activity.
         let (svc, _dir) = crate::test_support::services();
         crate::dispatch(
             "ingest_hook_event",
@@ -128,7 +123,7 @@ mod tests {
             .unwrap();
         let rows = out.as_array().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0]["pane_target"], "working");
+        assert_eq!(rows[0]["thread_id"], "thr1");
         assert_eq!(rows[0]["state"], "running");
     }
 }

@@ -1,31 +1,15 @@
-//! Per-thread transient runtime state.
-//!
-//! Holds state that doesn't deserve persistence (the in-memory hook ring
-//! that used to live here is gone: agent activity is on the event log,
-//! P3.9):
-//! - The agent_status snapshot (one row per pane_target). This used
-//!   to live in SQLite but recovery reset it to "stopped" on every
-//!   boot anyway, so persistence bought nothing but a sync surface
-//!   to drift from.
-//!
-//! `agent_turn` is *not* held here — it's the durable record of
-//! turns and stays in SQLite for historical reporting.
-//!
-//! The registry implements `AgentStatusStore`; the open page and pending
-//! effort reviews ride along per thread.
+//! Per-thread transient runtime state: the page the person has open on a
+//! thread and the effort reviews waiting for its next Stop. Nothing here
+//! outlives the process; agent status is on the event log
+//! (`oxplow_db::SqliteAgentStatusStore`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
-
-use oxplow_domain::stores::AgentStatusStore;
-use oxplow_domain::{AgentStatus, AgentStatusState, DomainError, EffortId, ThreadId, Timestamp};
+use oxplow_domain::{EffortId, ThreadId, Timestamp};
 
 #[derive(Default)]
 struct ThreadRuntime {
-    /// Keyed by pane_target.
-    statuses: HashMap<String, AgentStatus>,
     /// Effort ids whose touched_files claim disagreed with the auto-
     /// diff at complete_task time. Drained by the Stop hook to fire
     /// a one-shot directive prompting the agent to call
@@ -102,48 +86,6 @@ impl ThreadRuntimeRegistry {
     }
 }
 
-#[async_trait]
-impl AgentStatusStore for ThreadRuntimeRegistry {
-    async fn upsert(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-        state: AgentStatusState,
-        detail: Option<String>,
-    ) -> Result<AgentStatus, DomainError> {
-        let status = AgentStatus {
-            thread_id: *thread,
-            pane_target: pane_target.to_string(),
-            state,
-            detail,
-            updated_at: Timestamp::now(),
-        };
-        let mut m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let runtime = m.entry(*thread).or_default();
-        runtime
-            .statuses
-            .insert(pane_target.to_string(), status.clone());
-        Ok(status)
-    }
-
-    async fn get(
-        &self,
-        thread: &ThreadId,
-        pane_target: &str,
-    ) -> Result<Option<AgentStatus>, DomainError> {
-        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(m.get(thread)
-            .and_then(|r| r.statuses.get(pane_target).cloned()))
-    }
-
-    async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
-        let m = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        Ok(m.values()
-            .flat_map(|r| r.statuses.values().cloned())
-            .collect())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,20 +107,5 @@ mod tests {
         assert_eq!(r.open_page(&t2), None);
         r.set_open_page(&t1, None);
         assert_eq!(r.open_page(&t1), None);
-    }
-
-    #[tokio::test]
-    async fn agent_status_upsert_get_list() {
-        let r = ThreadRuntimeRegistry::new();
-        let tid = ThreadId::new(1);
-        let s = r
-            .upsert(&tid, "working", AgentStatusState::Running, None)
-            .await
-            .unwrap();
-        assert_eq!(s.state, AgentStatusState::Running);
-        let got = r.get(&tid, "working").await.unwrap().unwrap();
-        assert_eq!(got.state, AgentStatusState::Running);
-        let all = r.list_all().await.unwrap();
-        assert_eq!(all.len(), 1);
     }
 }

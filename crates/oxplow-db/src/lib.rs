@@ -40,7 +40,7 @@ pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
 
 pub use agent_nudge_store::{AgentNudge, NewAgentNudge, SqliteAgentNudgeStore};
-pub use agent_stores::SqliteAgentTurnStore;
+pub use agent_stores::{SqliteAgentStatusStore, SqliteAgentTurnStore};
 pub use ai_call_store::{NewAiCall, SqliteAiCallStore};
 pub use analytics_stores::{
     CodeQualityFinding, CodeQualityScan, CodeQualityScanStatus, FileSnapshot, PageVisit,

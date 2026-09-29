@@ -645,7 +645,9 @@ impl Services {
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
         let thread_runtime = Arc::new(thread_runtime::ThreadRuntimeRegistry::new());
-        let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
+        let agent_status_store: Arc<dyn AgentStatusStore> = Arc::new(
+            oxplow_db::SqliteAgentStatusStore::new(db.clone(), event_schemas.clone()),
+        );
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::with_event_schemas(
             db.clone(),
             event_schemas.clone(),
@@ -683,7 +685,6 @@ impl Services {
             db.clone(),
             event_schemas.clone(),
             layout.project_dir.clone(),
-            agent_status_store.clone(),
             event_bus.clone(),
         )
         .with_event_pump(event_pump.clone());

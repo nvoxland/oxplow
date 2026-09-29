@@ -1,8 +1,6 @@
-//! Sqlite-backed `AgentTurnStore`. (hook_event and agent_status used
-//! to live here too; they're now in-memory in
-//! `oxplow_app::thread_runtime::ThreadRuntimeRegistry` since the data
-//! is per-instance transient and was being reset on every boot
-//! anyway.)
+//! Agent turns (`agent_turn` rows and their `agent.turn.*` events) and
+//! agent status, which is read from the log: a thread's status is its
+//! newest `agent.status.changed`.
 
 use std::sync::Arc;
 
@@ -10,13 +8,16 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1, EventSchemaRegistry,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV2, AgentTurnStarted, AgentTurnStartedV1,
+    EventSchemaRegistry, EventType,
 };
 use oxplow_domain::events::Anchors;
 use oxplow_domain::hook::TurnOutcome;
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
-use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp};
+use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore};
+use oxplow_domain::{
+    AgentStatus, AgentTurn, AgentTurnId, DomainError, StreamId, ThreadId, Timestamp,
+};
 
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
@@ -164,6 +165,105 @@ pub fn close_turn_tx(
         .with_subject([turn_ref(id), thread_ref(thread)]);
     ev.append(conn, &env)?;
     Ok(Some(thread))
+}
+
+// -- Agent status ------------------------------------------------------
+
+/// One `agent.status.changed` row as the thread's status, read at the
+/// type's newest version.
+fn row_to_status(
+    schemas: &EventSchemaRegistry,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<AgentStatus> {
+    let thread: i64 = row.get(0)?;
+    let v: u32 = row.get(1)?;
+    let payload: String = row.get(2)?;
+    let at: String = row.get(3)?;
+    let decode = || -> Result<AgentStatus, DomainError> {
+        let value = serde_json::from_str(&payload)
+            .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
+        let (_, value) = schemas.upcast_to_latest(AgentStatusChanged::TYPE, v, value)?;
+        let p: <AgentStatusChanged as EventType>::Payload = serde_json::from_value(value)
+            .map_err(|e| DomainError::Invalid(format!("agent.status.changed payload: {e}")))?;
+        Ok(AgentStatus {
+            thread_id: ThreadId::new(thread),
+            state: p.state,
+            detail: p.detail,
+            updated_at: string_to_ts(&at)?,
+        })
+    };
+    decode().map_err(map_err_text)
+}
+
+/// The thread's current status: its newest `agent.status.changed`.
+pub fn last_status_tx(
+    conn: &Connection,
+    schemas: &EventSchemaRegistry,
+    thread: ThreadId,
+) -> Result<Option<AgentStatus>, DomainError> {
+    conn.query_row(
+        "SELECT thread_id, v, payload, at FROM event_log
+          WHERE thread_id = ?1 AND type = ?2
+          ORDER BY seq DESC LIMIT 1",
+        params![thread.value(), AgentStatusChanged::TYPE],
+        |r| row_to_status(schemas, r),
+    )
+    .optional()
+    .map_err(map_sql_err)
+}
+
+/// Every existing thread's current status.
+fn all_statuses_tx(
+    conn: &Connection,
+    schemas: &EventSchemaRegistry,
+) -> Result<Vec<AgentStatus>, DomainError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.thread_id, e.v, e.payload, e.at
+               FROM event_log e JOIN threads th ON th.id = e.thread_id
+              WHERE e.seq IN (SELECT MAX(seq) FROM event_log
+                               WHERE type = ?1 AND thread_id IS NOT NULL
+                               GROUP BY thread_id)
+              ORDER BY e.thread_id",
+        )
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map([AgentStatusChanged::TYPE], |r| row_to_status(schemas, r))
+        .map_err(map_sql_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)?;
+    Ok(rows)
+}
+
+/// Agent status read from the event log. There is no write side: the
+/// hook ingest logs `agent.status.changed` and that is the record.
+#[derive(Clone)]
+pub struct SqliteAgentStatusStore {
+    db: Database,
+    schemas: Arc<EventSchemaRegistry>,
+}
+
+impl SqliteAgentStatusStore {
+    pub fn new(db: Database, schemas: Arc<EventSchemaRegistry>) -> Self {
+        Self { db, schemas }
+    }
+}
+
+#[async_trait]
+impl AgentStatusStore for SqliteAgentStatusStore {
+    async fn get(&self, thread: &ThreadId) -> Result<Option<AgentStatus>, DomainError> {
+        let (schemas, thread) = (self.schemas.clone(), *thread);
+        self.db
+            .call_mut(move |c| last_status_tx(c, &schemas, thread))
+            .await
+    }
+
+    async fn list_all(&self) -> Result<Vec<AgentStatus>, DomainError> {
+        let schemas = self.schemas.clone();
+        self.db
+            .call_mut(move |c| all_statuses_tx(c, &schemas))
+            .await
+    }
 }
 
 /// `agent_turn` rows, and the `agent.turn.started` / `agent.turn.ended`
@@ -371,6 +471,49 @@ mod tests {
         };
         threads.upsert(&t).await.unwrap();
         (db, t.id)
+    }
+
+    fn log_status(
+        db: &Database,
+        schemas: &EventSchemaRegistry,
+        thread: ThreadId,
+        state: oxplow_domain::AgentStatusState,
+        detail: Option<&str>,
+    ) {
+        use oxplow_domain::events::schema::AgentStatusChangedV1;
+        let conn = db.conn().unwrap();
+        let ev = EventCtx::system(schemas, "test");
+        let env = ev
+            .typed::<AgentStatusChanged>(&AgentStatusChangedV1 {
+                thread: thread_ref(thread),
+                state,
+                detail: detail.map(str::to_string),
+            })
+            .with_anchors(anchors_for_thread_tx(&conn, thread).unwrap())
+            .with_subject([thread_ref(thread)]);
+        ev.append(&conn, &env).unwrap();
+    }
+
+    #[tokio::test]
+    async fn status_is_the_newest_logged_status_change() {
+        use oxplow_domain::AgentStatusState as S;
+        let (db, tid) = fixture().await;
+        let schemas = Arc::new(EventSchemaRegistry::core());
+        let store = SqliteAgentStatusStore::new(db.clone(), schemas.clone());
+        assert!(store.get(&tid).await.unwrap().is_none());
+        assert!(store.list_all().await.unwrap().is_empty());
+
+        log_status(&db, &schemas, tid, S::Running, None);
+        log_status(&db, &schemas, tid, S::AwaitingUser, Some("A or B?"));
+
+        // A fresh store over the same database (a restarted daemon) reads it.
+        let store = SqliteAgentStatusStore::new(db.clone(), schemas);
+        let got = store.get(&tid).await.unwrap().unwrap();
+        assert_eq!(got.state, S::AwaitingUser);
+        assert_eq!(got.detail.as_deref(), Some("A or B?"));
+        let all = store.list_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0], got);
     }
 
     #[tokio::test]
