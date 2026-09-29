@@ -52,6 +52,9 @@ pub struct SqlQuery {
     /// Row cap: default [`DEFAULT_ROW_LIMIT`], at most [`MAX_ROW_LIMIT`].
     pub limit: Option<usize>,
     pub timeout: Duration,
+    /// Read physical tables too (the person's explorer, never an agent or
+    /// a lens): the reads are still recorded, none is refused.
+    pub raw: bool,
 }
 
 /// A query's parameters.
@@ -71,7 +74,14 @@ impl SqlQuery {
             params: SqlParams::Positional(Vec::new()),
             limit: None,
             timeout: DEFAULT_TIMEOUT,
+            raw: false,
         }
+    }
+
+    /// Read physical tables too (see [`SqlQuery::raw`]).
+    pub fn raw(mut self, raw: bool) -> Self {
+        self.raw = raw;
+        self
     }
 
     pub fn positional(mut self, params: Vec<SqlCell>) -> Self {
@@ -213,9 +223,11 @@ impl SemanticLayer {
         self.db
             .call(move |conn| {
                 Ok((|| {
-                    let session = ReadSession::open(conn)?;
+                    let session = ReadSession::open(conn, Access::Enforce)?;
                     {
-                        let stmt = conn.prepare(&sql).map_err(invalid)?;
+                        let stmt = conn
+                            .prepare(&sql)
+                            .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
                         if !stmt.readonly() {
                             return Err(read_only_only());
                         }
@@ -290,6 +302,35 @@ fn view_names(
         .collect())
 }
 
+/// Table → the models whose view reads it (`model_input`, sources). Empty
+/// before the registry exists.
+fn source_readers(
+    conn: &rusqlite::Connection,
+) -> Result<std::collections::HashMap<String, Vec<String>>, DomainError> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let has: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_input')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(crate::database::map_sql_err)?;
+    if !has {
+        return Ok(out);
+    }
+    let mut st = conn
+        .prepare("SELECT input, view FROM model_input WHERE kind = 'source' ORDER BY view")
+        .map_err(crate::database::map_sql_err)?;
+    let rows = st
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(crate::database::map_sql_err)?;
+    for row in rows {
+        let (table, view) = row.map_err(crate::database::map_sql_err)?;
+        out.entry(table).or_default().push(view);
+    }
+    Ok(out)
+}
+
 /// Every name of `kind` (`table` or `view`) in main and temp; a temp
 /// one as `temp.<name>`.
 fn schema_names(
@@ -315,6 +356,26 @@ fn schema_names(
 struct Seen {
     /// `(table, column, reached through a view?)`, as reported.
     reads: Vec<(String, String, Option<String>)>,
+    /// What the authorizer refused, in words.
+    denied: Vec<Denied>,
+}
+
+enum Denied {
+    /// A physical table read by the query's own SQL.
+    Table(String),
+    /// Anything but a read (`ATTACH`, a pragma, …).
+    Action(String),
+}
+
+/// What the authorizer does with what it sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Access {
+    /// The read contract (P4.3): the query's own SQL reads only models
+    /// (views) and temp tables; a view reads what it reads.
+    Enforce,
+    /// Record every read, refuse none (the explorer's raw mode; a model's
+    /// compile, which reads tables through `source()`).
+    Record,
 }
 
 /// One read on a pooled connection: the authorizer installed (recording
@@ -329,10 +390,15 @@ pub(crate) struct ReadSession<'c> {
     /// Every stored table (and the schema tables), to tell a table read
     /// from a table-valued function's (`json_each`).
     tables: std::collections::HashSet<String>,
+    /// Table → the models that read it, to point a refused read at them.
+    readers: std::collections::HashMap<String, Vec<String>>,
 }
 
 impl<'c> ReadSession<'c> {
-    pub(crate) fn open(conn: &'c rusqlite::Connection) -> Result<Self, DomainError> {
+    pub(crate) fn open(
+        conn: &'c rusqlite::Connection,
+        access: Access,
+    ) -> Result<Self, DomainError> {
         let views = view_names(conn)?;
         let mut tables = schema_names(conn, "table")?;
         tables.extend(
@@ -344,26 +410,57 @@ impl<'c> ReadSession<'c> {
             ]
             .map(String::from),
         );
+        let readers = source_readers(conn)?;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Seen::default()));
         let sink = seen.clone();
+        let (views_c, tables_c) = (views.clone(), tables.clone());
+        // Tables read inside a view so far (SQLite reports a view's own
+        // reads before a `count(*)`'s empty-column read of its base table).
+        let mut under: std::collections::HashSet<String> = std::collections::HashSet::new();
         conn.authorizer(Some(
             move |ctx: rusqlite::hooks::AuthContext<'_>| -> rusqlite::hooks::Authorization {
-                if let rusqlite::hooks::AuthAction::Read {
-                    table_name,
-                    column_name,
-                } = ctx.action
-                {
-                    let table = match ctx.database_name {
-                        Some("temp") => format!("temp.{table_name}"),
-                        _ => table_name.to_string(),
-                    };
-                    sink.lock().unwrap_or_else(|e| e.into_inner()).reads.push((
-                        table,
-                        column_name.to_string(),
-                        ctx.accessor.map(str::to_string),
-                    ));
+                use rusqlite::hooks::{AuthAction as A, Authorization};
+                let mut seen = sink.lock().unwrap_or_else(|e| e.into_inner());
+                match ctx.action {
+                    A::Read {
+                        table_name,
+                        column_name,
+                    } => {
+                        let table = match ctx.database_name {
+                            Some("temp") => format!("temp.{table_name}"),
+                            _ => table_name.to_string(),
+                        };
+                        let in_view = ctx.accessor.is_some_and(|a| views_c.contains(a));
+                        if in_view {
+                            under.insert(table.clone());
+                        }
+                        let own_table_read = !in_view
+                            && tables_c.contains(&table)
+                            && !table.starts_with("temp.")
+                            && !(column_name.is_empty() && under.contains(&table));
+                        seen.reads.push((
+                            table.clone(),
+                            column_name.to_string(),
+                            ctx.accessor.map(str::to_string),
+                        ));
+                        if access == Access::Enforce && own_table_read {
+                            seen.denied.push(Denied::Table(table));
+                            return Authorization::Deny;
+                        }
+                        Authorization::Allow
+                    }
+                    A::Select | A::Function { .. } | A::Recursive => Authorization::Allow,
+                    A::Pragma { pragma_name, .. }
+                        if pragma_name.eq_ignore_ascii_case("query_only") =>
+                    {
+                        Authorization::Allow
+                    }
+                    other if access == Access::Enforce => {
+                        seen.denied.push(Denied::Action(format!("{other:?}")));
+                        Authorization::Deny
+                    }
+                    _ => Authorization::Allow,
                 }
-                rusqlite::hooks::Authorization::Allow
             },
         ))
         .map_err(crate::database::map_sql_err)?;
@@ -372,7 +469,27 @@ impl<'c> ReadSession<'c> {
             seen,
             views,
             tables,
+            readers,
         })
+    }
+
+    /// Why the authorizer refused the statement, if it did: the read
+    /// contract in words, pointing a table at the models that read it.
+    fn refusal(&self) -> Option<DomainError> {
+        let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let first = seen.denied.first()?;
+        Some(DomainError::Invalid(match first {
+            Denied::Table(table) => {
+                let hint = match self.readers.get(table) {
+                    Some(views) if !views.is_empty() => format!("read {}", views.join(" or ")),
+                    _ => "read a published model (see `v_model`)".to_string(),
+                };
+                format!("query_sql: `{table}` is a physical table, not a published model; {hint}")
+            }
+            Denied::Action(action) => {
+                format!("query_sql: only reads of published models are allowed, not {action}")
+            }
+        }))
     }
 
     /// Refuse writes on this connection until the session ends.
@@ -500,8 +617,15 @@ fn run_read_only(
         .unwrap_or(DEFAULT_ROW_LIMIT)
         .clamp(1, MAX_ROW_LIMIT);
     let timeout = query.timeout;
-    let session = ReadSession::open(conn)?;
-    let mut stmt = conn.prepare(&query.sql).map_err(invalid)?;
+    let access = if query.raw {
+        Access::Record
+    } else {
+        Access::Enforce
+    };
+    let session = ReadSession::open(conn, access)?;
+    let mut stmt = conn
+        .prepare(&query.sql)
+        .map_err(|e| session.refusal().unwrap_or_else(|| invalid(e)))?;
     if !stmt.readonly() {
         return Err(read_only_only());
     }
@@ -724,9 +848,10 @@ mod tests {
     #[tokio::test]
     async fn a_query_reports_what_it_read() {
         let (_db, sl) = seeded().await;
+        // Raw, so the physical-table reads are recorded rather than refused.
         let reads = |sql: &'static str| {
             let sl = sl.clone();
-            async move { sl.query_sql(sql, vec![], None).await.unwrap().reads }
+            async move { sl.run(SqlQuery::new(sql).raw(true)).await.unwrap().reads }
         };
         let r = reads("SELECT count(*) FROM v_task").await;
         assert_eq!((r.models, r.tables), (vec!["v_task".to_string()], vec![]));
@@ -755,6 +880,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(checked.models, vec!["v_task".to_string()]);
+    }
+
+    /// P4.3 (tsk488): the read contract is enforced — a query's own SQL
+    /// reads only models, and a refused table points at the models over
+    /// it; the explorer's raw mode reads anything, still recorded.
+    #[tokio::test]
+    async fn a_physical_table_is_refused_naming_its_models() {
+        let (db, sl) = seeded().await;
+        let refused = |sql: &'static str| {
+            let sl = sl.clone();
+            async move {
+                sl.query_sql(sql, vec![], None)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+            }
+        };
+        let msg = refused("SELECT * FROM task").await;
+        assert!(
+            msg.contains("`task` is a physical table, not a published model; read v_task"),
+            "{msg}"
+        );
+        assert!(!msg.contains("no such table"), "{msg}");
+        assert!(
+            refused("WITH c AS (SELECT title FROM task) SELECT * FROM c")
+                .await
+                .contains("`task` is a physical table")
+        );
+        assert!(refused("SELECT name FROM sqlite_master")
+            .await
+            .contains("`sqlite_master` is a physical table"));
+        assert!(sl.check("SELECT id FROM task").await.is_err());
+        // Models, counts over them, table-valued functions and temp tables
+        // are all fine.
+        for ok in [
+            "SELECT count(*) FROM v_task",
+            "SELECT t.id FROM v_task t JOIN v_thread th ON th.id = t.thread_id",
+            "SELECT j.value FROM v_task t, json_each('[1]') j",
+        ] {
+            sl.query_sql(ok, vec![], None)
+                .await
+                .unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        db.call(|c| {
+            c.execute_batch("CREATE TEMP TABLE scratch (x); INSERT INTO scratch VALUES (1)")
+        })
+        .await
+        .unwrap();
+        sl.query_sql("SELECT x FROM scratch", vec![], None)
+            .await
+            .unwrap();
+        // Raw reads the table, and says so.
+        let out = sl
+            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
+            .await
+            .unwrap();
+        assert_eq!(out.reads.tables, vec!["task".to_string()]);
+        // A refusal leaves the connection writable.
+        db.call(|c| c.execute("UPDATE task SET title = 'x' WHERE id = 1", []))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -815,7 +1001,7 @@ mod tests {
         }
         // Nothing was deleted.
         let out = sl
-            .query_sql("SELECT count(*) FROM task", vec![], None)
+            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([[2]]));

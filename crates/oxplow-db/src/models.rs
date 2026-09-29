@@ -439,7 +439,8 @@ pub fn compile(
 
 /// What SQLite reports the view reading is what it declared.
 fn check_lineage(conn: &Connection, m: &Resolved<'_>) -> Result<(), DomainError> {
-    let session = crate::semantic_layer::ReadSession::open(conn)?;
+    let session =
+        crate::semantic_layer::ReadSession::open(conn, crate::semantic_layer::Access::Record)?;
     conn.prepare(&m.sql)
         .map_err(|e| invalid(format!("{}: {e}", m.source.file)))?;
     let (views, tables) = session.direct_inputs();

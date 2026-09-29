@@ -290,7 +290,7 @@ macro_rules! oxplow_command_table {
                 mark_all_wiki_refs_verified => $crate::commands::wiki_freshness::mark_all_wiki_refs_verified { slug: String } -> usize,
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, kinds: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
-                query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32> } -> ::oxplow_db::SqlQueryResult,
+                query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
                 describe_schema => $crate::commands::semantic::describe_schema {} -> Vec<::oxplow_db::SchemaEntity>,
                 semantic_row_counts => $crate::commands::semantic::semantic_row_counts {} -> Vec<::oxplow_app::semantic_catalog::EntityRowCount>,
                 list_extensions => $crate::commands::extensions::list_extensions { stream_id: Option<String> } -> Vec<::oxplow_app::extensions::Extension>,

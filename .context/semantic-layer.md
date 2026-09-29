@@ -249,8 +249,20 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     calls) — exactly one `SELECT` or `WITH`, a trailing `;` aside.
   - Real gate: `Statement::readonly()` rejects anything that writes
     (including `WITH … DELETE`).
-  - **The authorizer records what it reads** (record-only in P4.1;
-    enforcement is P4.3). Installed before `prepare` in a `ReadSession`
+  - **The authorizer enforces the read contract** (P4.3, tsk488; it only
+    recorded in P4.1). The query's own SQL — a CTE body included — may
+    read models (views) and `temp.*` tables; a stored table is refused as
+    "`task` is a physical table, not a published model; read v_task",
+    naming the models whose `source()` it is (from `model_input`), and
+    never with SQLite's "no such table" (which `explain_unsynced` reads as
+    an unsynced source). `count(*)` over a view is allowed (SQLite reports
+    its base table at top level after the view's own reads). Anything but
+    a read, select, function or recursion is refused, save the
+    `query_only` pragma the session itself runs. `SqlQuery::raw` switches
+    to recording only: the person's explorer, through IPC `query_sql
+    { raw: true }` — the MCP tool has no such switch — and `save_lens`
+    checks its query through the enforced path, so a raw query can't
+    become a lens. A model's compile reads its sources in record mode. Installed before `prepare` in a `ReadSession`
     that, when dropped — on every path, a panic included — clears it and
     `PRAGMA query_only`, so the pooled connection comes back writable. The
     result's `reads` is `{ models, tables }`: every view read, directly or
@@ -269,12 +281,11 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     `truncated: true` means more rows existed.
   - Caller mistakes (bad SQL, writes, timeouts) are `Invalid` errors: the
     IPC `INVALID` code, and MCP `invalid_params`.
-  - Physical tables are still readable until P4.3 enforces the contract;
-    `reads.tables` names them. Every bundled lens, advisory, source input
-    and built-in entity metric reads only views — audit tests
-    (`bundled_queries_read_only_published_views`,
+  - `reads.tables` is empty except in a raw read. Every bundled lens,
+    advisory, source input and built-in entity metric reads only views —
+    audit tests (`bundled_queries_read_only_published_views`,
     `builtin_entity_metrics_read_only_views`) keep it so. A missing column
-    is a reason to extend a view, not to reach around it.
+    is a reason to extend a model, not to reach around it.
 - Values are `SqlCell`: an untagged `null | boolean | number | string`,
   so the TS binding is a plain scalar union. Blobs come back as
   `"<blob N bytes>"`.

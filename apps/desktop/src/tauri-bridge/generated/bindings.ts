@@ -313,7 +313,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	querySql: (sql: string, params: SqlCell[] | null, limit: number | null) => typedError<SqlQueryResult, IpcError>(__TAURI_INVOKE("query_sql", { sql, params, limit })),
+	querySql: (sql: string, params: SqlCell[] | null, limit: number | null, raw: boolean | null) => typedError<SqlQueryResult, IpcError>(__TAURI_INVOKE("query_sql", { sql, params, limit, raw })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

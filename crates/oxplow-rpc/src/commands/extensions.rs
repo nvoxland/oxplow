@@ -210,6 +210,9 @@ pub async fn save_lens(
     lens: NewLens,
     stream_id: Option<String>,
 ) -> Result<Lens, IpcError> {
+    // A lens reads published models only: the explorer's raw mode can
+    // run a physical-table query, but it can't be saved as one.
+    svc.sql.check(&lens.query).await?;
     let root = root(svc, stream_id.as_deref()).await;
     Ok(extensions::save_lens(&root, &extension, &slug, lens)?)
 }
@@ -377,6 +380,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(run["result"]["rows"], json!([["primary"]]));
+        // A query over a physical table (the explorer's raw mode) can't be
+        // saved as a lens.
+        let err = crate::dispatch(
+            "save_lens",
+            json!({
+                "extension": "mine",
+                "slug": "raw",
+                "lens": { "title": "Raw", "query": "SELECT kind FROM streams", "viz": "table" }
+            }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID");
+        assert!(
+            err.message.contains("`streams` is a physical table"),
+            "{}",
+            err.message
+        );
     }
 
     #[tokio::test]

@@ -7,17 +7,24 @@ use oxplow_db::{SchemaEntity, SqlCell, SqlQueryResult};
 use crate::error::IpcError;
 
 /// Run one read-only `SELECT`/`WITH` over the semantic layer, with
-/// positional `params` (`?1`, `?2`, …) and a row cap.
+/// positional `params` (`?1`, `?2`, …) and a row cap. `raw` is the
+/// person's explorer reading physical tables too — this IPC read only;
+/// the MCP tool has no such switch (P4.3).
 pub async fn query_sql(
     svc: &Services,
     sql: String,
     params: Option<Vec<SqlCell>>,
     limit: Option<u32>,
+    raw: Option<bool>,
 ) -> Result<SqlQueryResult, IpcError> {
     Ok(svc
         .sql
-        .clone()
-        .query_sql(&sql, params.unwrap_or_default(), limit.map(|l| l as usize))
+        .run(
+            oxplow_db::SqlQuery::new(sql)
+                .positional(params.unwrap_or_default())
+                .limit(limit.map(|l| l as usize))
+                .raw(raw.unwrap_or(false)),
+        )
         .await?)
 }
 
@@ -82,6 +89,29 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code, "INVALID");
+    }
+
+    /// P4.3 (tsk488): a physical table is refused unless the person's
+    /// explorer asks for a raw read.
+    #[tokio::test]
+    async fn query_sql_reads_tables_only_when_raw() {
+        let (svc, _dir) = crate::test_support::services();
+        let err = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT count(*) FROM task" }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.message.contains("read v_task"), "{}", err.message);
+        let out = crate::dispatch(
+            "query_sql",
+            json!({ "sql": "SELECT count(*) FROM task", "raw": true }),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["reads"]["tables"], json!(["task"]));
     }
 
     #[tokio::test]

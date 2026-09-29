@@ -490,12 +490,15 @@ export async function searchSite(
 /// Run one read-only `SELECT`/`WITH` over the semantic layer's `v_*`
 /// views (see `.context/semantic-layer.md`). Positional `params` bind
 /// `?1`, `?2`, …; `limit` caps rows (default 500).
+/** One read over the published models. `raw` (the explorer only) reads
+ *  physical tables too; the result's `reads` says what it read. */
 export async function querySql(
   sql: string,
   params: SqlCell[] = [],
   limit: number | null = null,
+  raw = false,
 ): Promise<SqlQueryResult> {
-  return unwrap(await commands.querySql(sql, params, limit));
+  return unwrap(await commands.querySql(sql, params, limit, raw));
 }
 
 /// Project extensions (and their lenses) in the stream's worktree, with
