@@ -965,7 +965,7 @@ struct RawConfig {
     /// Extra language servers: `{ servers: [{ languageId, extensions, command, args }] }`. Runs programs.
     #[serde(default)]
     lsp: Option<RawLspBlock>,
-    /// Text appended verbatim to every agent's system prompt.
+    /// Text appended verbatim to every agent's system prompt. Steers every agent.
     #[serde(rename = "agentPromptAppend", default)]
     agent_prompt_append: Option<String>,
     /// File-snapshot retention in days; 0 disables pruning.
@@ -1001,7 +1001,7 @@ struct RawConfig {
     /// Metric specs: enable a catalog metric (`use`) or define one (`key`) over a measure.
     #[serde(default)]
     metrics: Option<Vec<MetricEntry>>,
-    /// Fact producers: each runs its `compute` collector on its trigger and emits facts.
+    /// Fact producers: each runs its `compute` collector on its trigger and emits facts. Runs programs (`runtime: exec`).
     #[serde(default)]
     gauges: Option<Vec<GaugeEntry>>,
     /// Custom fact types collectors may emit.

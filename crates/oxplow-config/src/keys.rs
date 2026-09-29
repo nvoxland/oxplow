@@ -14,10 +14,13 @@ use crate::{
 };
 
 /// Keys only a person may set. Each either runs a program (`lsp`,
-/// `collection`, `acpAgents`, `agents`), chooses the model that reads the
-/// project (`ai`, `agentModels`), or enables code (`extensions`): an
-/// agent asking to change one gets `NeedsConfirmation` and the person
-/// decides. Everything else is the agent's to set through `config.set`.
+/// `collection`, `acpAgents`, `agents`, `gauges`), chooses the model that
+/// reads the project (`ai`, `agentModels`), enables code (`extensions`),
+/// or steers every agent (`agentPromptAppend` — an agent setting it could
+/// persist instructions into all threads): an agent asking to change one
+/// gets `NeedsConfirmation` and the person decides. Everything else is the
+/// agent's to set through `config.set`. A key whose doc says it runs
+/// programs or steers agents must be listed here (a test enforces it).
 pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "agents",
     "agent",
@@ -27,6 +30,8 @@ pub const HUMAN_ONLY_KEYS: &[&str] = &[
     "lsp",
     "collection",
     "extensions",
+    "gauges",
+    "agentPromptAppend",
 ];
 
 /// One key of `.oxplow/project.yaml`.
@@ -176,6 +181,22 @@ mod tests {
         assert!(config_key("ai").unwrap().human_only);
         assert!(!config_key("zones").unwrap().human_only);
         assert!(!is_config_key("nope"));
+    }
+
+    #[test]
+    fn every_key_that_runs_programs_or_steers_agents_is_human_only() {
+        for k in config_keys() {
+            let dangerous = k.doc.contains("Runs programs") || k.doc.contains("Steers every agent");
+            if dangerous {
+                assert!(
+                    k.human_only,
+                    "`{}` runs programs or steers agents: {}",
+                    k.key, k.doc
+                );
+            }
+        }
+        assert!(config_key("gauges").unwrap().human_only);
+        assert!(config_key("agentPromptAppend").unwrap().human_only);
     }
 
     #[test]
