@@ -4234,38 +4234,23 @@ impl OxplowMcp {
             Some(s) => Some(Some(parse_task_id("update_task", "parent_id", &s)?)),
             None => None,
         };
-        // Field edits, then the status change as the calling agent's
-        // `work_item.transition` (audited, logged with its cause).
-        let edits_fields = p.title.is_some()
-            || p.description.is_some()
-            || parent_id.is_some()
-            || priority.is_some();
-        let mut updated = if edits_fields {
-            self.services
-                .tasks
-                .update(
-                    id,
-                    UpdateTaskChanges {
-                        title: p.title,
-                        description: p.description,
-                        parent_id,
-                        status: None,
-                        priority,
-                    },
-                )
-                .await
-                .map_err(|e| internal(e.to_string()))?
-        } else {
-            self.services
-                .task_store
-                .get(id)
-                .await
-                .map_err(internal)?
-                .ok_or_else(|| McpError::invalid_params(format!("task {id} not found"), None))?
-        };
-        if let Some(to) = status {
-            updated = self.transition_as(&extensions, id, to).await?;
-        }
+        // Fields and status in one audited transaction, as the calling
+        // agent (`work_item.update`).
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        let updated = oxplow_app::task_writes::update(
+            &self.services,
+            &actor,
+            id,
+            UpdateTaskChanges {
+                title: p.title,
+                description: p.description,
+                parent_id,
+                status,
+                priority,
+            },
+        )
+        .await
+        .map_err(command_error)?;
 
         let touched = p.touched_files.unwrap_or_default();
         let claim_runs = p.claim_runs.unwrap_or_default();
@@ -8253,9 +8238,9 @@ mod tests {
         );
     }
 
-    /// P2.6.3 (tsk455): an agent's status change is the
-    /// `work_item.transition` command, audited to its thread; a connection
-    /// with no identity can't change status.
+    /// P2.6.3 (tsk455): an agent's task edit is the `work_item.update`
+    /// command, audited to its thread; a connection with no identity can't
+    /// change a task.
     #[tokio::test]
     async fn status_changes_are_audited_to_the_calling_agent() {
         let (_proj, services, server) = boot();
@@ -8290,8 +8275,8 @@ mod tests {
             .unwrap();
         let row = audit
             .iter()
-            .find(|r| r.command == oxplow_app::commands::work_item::NAME)
-            .expect("the transition is audited");
+            .find(|r| r.command == oxplow_app::commands::work_item::UPDATE)
+            .expect("the update is audited");
         assert_eq!(
             row.actor_kind,
             oxplow_domain::events::schema::ActorKind::Agent

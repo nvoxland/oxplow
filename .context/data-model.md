@@ -1200,6 +1200,19 @@ events of their own.
 inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 [commands.md](./commands.md).
 
+**Status is written only by the status core.** `update_task_tx` writes
+a task's fields, never `status` / `completed_at`; `write_status_tx`
+(inside `apply_status_tx`) is their only writer, and a status change
+reads the committed status inside its transaction (`set_status_tx`), so a
+copy read before a concurrent status change can't revert it (review of
+P2.6, tsk460). `update_with_status_tx` writes fields, logs
+`work_item.edited@1 { work_item, fields }` when title / description /
+priority / parent changed, then moves the status — the core of
+`work_item.update` and `TaskService::update`. The `page_ref.work_item`
+pump consumer re-projects a task's body-mention edges on
+`work_item.edited` (it used to follow `work_item.transitioned`, whose
+status change moves no body edge).
+
 **Producers so far.** Every task status change (P2.6.3, tsk455 — not
 only in_progress crossings, thread-less tasks too) goes through one
 core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited

@@ -851,6 +851,7 @@ impl Services {
             .register(commands::work_item::command())
             .expect("core commands register");
         for command in [
+            commands::work_item::update_command(),
             commands::effort::open_command(),
             commands::effort::close_command(),
         ] {

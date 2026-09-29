@@ -58,41 +58,11 @@ pub struct UpdateTaskRequest {
 }
 
 pub async fn update_task(svc: &Services, req: UpdateTaskRequest) -> Result<Task, IpcError> {
-    // Field edits go through the service; a status change is the
-    // `work_item.transition` command, so the person's transition is audited
-    // and `command.executed` is logged like an agent's would be.
-    let UpdateTaskChanges {
-        title,
-        description,
-        parent_id,
-        status,
-        priority,
-    } = req.changes;
-    let edits_fields =
-        title.is_some() || description.is_some() || parent_id.is_some() || priority.is_some();
-    let mut item = if edits_fields {
-        svc.tasks
-            .update(
-                req.id,
-                UpdateTaskChanges {
-                    title,
-                    description,
-                    parent_id,
-                    status: None,
-                    priority,
-                },
-            )
-            .await?
-    } else {
-        svc.task_store
-            .get(req.id)
-            .await?
-            .ok_or_else(|| IpcError::from(oxplow_domain::DomainError::NotFound))?
-    };
-    if let Some(to) = status {
-        item = oxplow_app::task_writes::set_status(svc, &oxplow_domain::Actor::Human, req.id, to)
+    // Fields and status in one audited transaction, as the person
+    // (`work_item.update`).
+    let item =
+        oxplow_app::task_writes::update(svc, &oxplow_domain::Actor::Human, req.id, req.changes)
             .await?;
-    }
     svc.events.emit(OxplowEvent::TasksChanged {
         thread_id: item.thread_id,
     });

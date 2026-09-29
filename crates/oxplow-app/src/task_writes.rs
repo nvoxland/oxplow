@@ -34,35 +34,74 @@ pub async fn set_status(
     })
 }
 
-/// Insert (id 0) or overwrite a task row; its status only through
-/// [`set_status`]. A new row is inserted `ready` first.
-pub async fn upsert(svc: &Services, actor: &Actor, mut item: Task) -> Result<Task, CommandError> {
-    let wanted = item.status;
-    let stored = if item.id.is_placeholder() {
-        item.status = TaskStatus::Ready;
-        item.completed_at = None;
-        item.id = svc.task_store.insert(&item).await?;
-        TaskStatus::Ready
-    } else {
-        let current = svc
+/// Edit `id`'s fields and move its status, as `actor`, in one audited
+/// transaction (`work_item.update`); settles the pump when the status
+/// changed so the effort's snapshot pin is in place.
+pub async fn update(
+    svc: &Services,
+    actor: &Actor,
+    id: TaskId,
+    changes: crate::task_service::UpdateTaskChanges,
+) -> Result<Task, CommandError> {
+    let input = crate::commands::work_item::WorkItemUpdateInput {
+        id: id.to_string(),
+        title: changes.title,
+        description: changes.description,
+        priority: changes.priority,
+        parent_id: changes
+            .parent_id
+            .map(|p| p.map(|p| p.to_string()).unwrap_or_default()),
+        status: changes.status,
+    };
+    let moves_status = input.status.is_some();
+    let outcome = svc
+        .commands
+        .run(
+            actor,
+            crate::commands::work_item::UPDATE,
+            serde_json::to_value(input).expect("input serializes"),
+            false,
+        )
+        .await?;
+    if moves_status {
+        svc.tasks.settle_lifecycle().await;
+    }
+    serde_json::from_value(outcome.result).map_err(|e| CommandError::Failed {
+        message: format!("work_item.update result: {e}"),
+    })
+}
+
+/// Insert (id 0) or edit a task. A new row goes through the create path
+/// (`insert_logged`: filing straight into a status opens its effort and
+/// logs it, in the insert's transaction). An existing row's title,
+/// description, priority, parent and status change through
+/// `work_item.update`, as `actor`, atomically; its other columns (thread,
+/// sort position, authorship) aren't upsert's to change.
+pub async fn upsert(svc: &Services, actor: &Actor, item: Task) -> Result<Task, CommandError> {
+    if item.id.is_placeholder() {
+        let (id, _effort) = svc.task_store.insert_logged(&item).await?;
+        if item.status != TaskStatus::Ready {
+            svc.tasks.settle_lifecycle().await;
+        }
+        return svc
             .task_store
-            .get(item.id)
+            .get(id)
             .await?
             .ok_or_else(|| CommandError::Failed {
-                message: format!("task {} not found", item.id),
-            })?;
-        item.status = current.status;
-        item.completed_at = current.completed_at;
-        svc.task_store.update(&item).await?;
-        current.status
-    };
-    if wanted != stored {
-        return set_status(svc, actor, item.id, wanted).await;
+                message: format!("task {id} not found"),
+            });
     }
-    svc.task_store
-        .get(item.id)
-        .await?
-        .ok_or_else(|| CommandError::Failed {
-            message: format!("task {} not found", item.id),
-        })
+    update(
+        svc,
+        actor,
+        item.id,
+        crate::task_service::UpdateTaskChanges {
+            title: Some(item.title),
+            description: Some(item.description),
+            parent_id: Some(item.parent_id),
+            status: Some(item.status),
+            priority: Some(item.priority),
+        },
+    )
+    .await
 }

@@ -3,7 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use rusqlite::params;
 
-use oxplow_domain::events::schema::{WorkItemTransitioned, WorkItemTransitionedV1};
+use oxplow_domain::events::schema::{
+    WorkItemEdited, WorkItemEditedV1, WorkItemTransitioned, WorkItemTransitionedV1,
+};
 use oxplow_domain::refs::build::{effort_ref, work_item_ref};
 use oxplow_domain::stores::TaskStore;
 use oxplow_domain::{
@@ -118,24 +120,40 @@ impl SqliteTaskStore {
             .await
     }
 
-    /// Persist an edited row whose status was `from` and apply what the
-    /// change implies, in one transaction (see [`update_logged_tx`]).
-    pub async fn update_logged(
+    /// Move task `id` to `to` in its own transaction ([`set_status_tx`]).
+    pub async fn set_status(
+        &self,
+        id: TaskId,
+        to: TaskStatus,
+    ) -> Result<StatusChange, DomainError> {
+        let schemas = self.event_schemas.clone();
+        self.db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "task_service");
+                set_status_tx(tx, &ev, id, to, Timestamp::now())
+            })
+            .await
+    }
+
+    /// Write an edited row's fields and, when `status` is given, move it
+    /// there — one transaction (see [`update_with_status_tx`]). Returns the
+    /// row as committed.
+    pub async fn update_with_status(
         &self,
         item: &Task,
-        from: TaskStatus,
-    ) -> Result<EffortTransition, DomainError> {
+        status: Option<TaskStatus>,
+    ) -> Result<Task, DomainError> {
         let owned = Arc::new(item.clone());
         let schemas = self.event_schemas.clone();
-        let outcome = self
+        let after = self
             .db
             .transaction(move |tx| {
                 let ev = EventCtx::system(&schemas, "task_service");
-                update_logged_tx(tx, &ev, &owned, from)
+                update_with_status_tx(tx, &ev, &owned, status, Timestamp::now())
             })
             .await?;
-        self.project_body_refs(item, item.id).await?;
-        Ok(outcome)
+        self.project_body_refs(&after, after.id).await?;
+        Ok(after)
     }
 }
 
@@ -154,6 +172,7 @@ fn apply_status_tx(
     from: TaskStatus,
 ) -> Result<EffortTransition, DomainError> {
     use crate::database::map_sql_err;
+    write_status_tx(conn, item)?;
     let work_item = work_item_ref(item.id);
     let crossed_in = from != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
     let crossed_out = from == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
@@ -225,20 +244,81 @@ fn apply_status_tx(
     Ok(transition)
 }
 
-/// Persist `item` (an edited row whose status was `from`) and apply its
-/// status change ([`apply_status_tx`]). `NotFound` for a missing or
-/// deleted row.
-pub fn update_logged_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    item: &Task,
-    from: TaskStatus,
-) -> Result<EffortTransition, DomainError> {
-    let rows = update_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
+/// The only writer of a task's `status` / `completed_at` (with
+/// `updated_at`): everything else writes fields ([`update_task_tx`]), so a
+/// copy read before a concurrent status change can never revert it.
+fn write_status_tx(conn: &rusqlite::Connection, item: &Task) -> Result<(), DomainError> {
+    let rows = conn
+        .execute(
+            "UPDATE task SET status = ?2, completed_at = ?3, updated_at = ?4
+             WHERE id = ?1 AND deleted_at IS NULL",
+            params![
+                item.id.value(),
+                status_to_str(item.status),
+                item.completed_at.map(ts_to_string),
+                ts_to_string(item.updated_at),
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
     if rows == 0 {
         return Err(DomainError::NotFound);
     }
-    apply_status_tx(conn, ev, item, from)
+    Ok(())
+}
+
+/// Which of a task's own fields differ between `before` and `after`, by
+/// the names `work_item.edited` uses.
+fn edited_fields(before: &Task, after: &Task) -> Vec<String> {
+    let mut fields = Vec::new();
+    if before.title != after.title {
+        fields.push("title".to_string());
+    }
+    if before.description != after.description {
+        fields.push("description".to_string());
+    }
+    if before.priority != after.priority {
+        fields.push("priority".to_string());
+    }
+    if before.parent_id != after.parent_id {
+        fields.push("parent".to_string());
+    }
+    fields
+}
+
+/// Write `item`'s fields (never its status) and, when `status` is given,
+/// move the task there ([`set_status_tx`], which reads the committed
+/// status inside this transaction). An edit of the task's own fields logs
+/// `work_item.edited@1`. `NotFound` for a missing or deleted row. Returns
+/// the row as committed.
+pub fn update_with_status_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    item: &Task,
+    status: Option<TaskStatus>,
+    now: Timestamp,
+) -> Result<Task, DomainError> {
+    let before = get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)?;
+    update_task_tx(conn, item).map_err(crate::database::map_sql_err)?;
+    let fields = edited_fields(&before, item);
+    if !fields.is_empty() {
+        let work_item = work_item_ref(item.id);
+        let anchors = match item.thread_id {
+            Some(thread) => anchors_for_thread_tx(conn, thread)?,
+            None => Anchors::default(),
+        };
+        let env = ev
+            .typed::<WorkItemEdited>(&WorkItemEditedV1 {
+                work_item: work_item.clone(),
+                fields,
+            })
+            .with_anchors(anchors)
+            .with_subject([work_item]);
+        ev.append(conn, &env)?;
+    }
+    if let Some(to) = status {
+        set_status_tx(conn, ev, item.id, to, now)?;
+    }
+    get_task_tx(conn, item.id)?.ok_or(DomainError::NotFound)
 }
 
 /// Insert `item` and apply its initial status as a change from `ready`
@@ -270,7 +350,7 @@ pub fn set_status_tx(
     let before = get_task_tx(conn, id)?.ok_or(DomainError::NotFound)?;
     let mut after = before.clone();
     after.set_status(to, now);
-    let effort = update_logged_tx(conn, ev, &after, before.status)?;
+    let effort = apply_status_tx(conn, ev, &after, before.status)?;
     Ok(StatusChange {
         before,
         after,
@@ -315,10 +395,11 @@ pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Tas
         .map_err(crate::database::map_sql_err)
 }
 
-/// Sync core for the task-row UPDATE — connection-parameterized so it
-/// composes inside a `Database::transaction` closure (the lifecycle
-/// transition pairs it with effort open/finish). Returns affected-row
-/// count; callers map 0 to `NotFound`.
+/// Sync core for the task-row UPDATE of everything but the status:
+/// `status` / `completed_at` are written only by the status core
+/// (`write_status_tx`, via [`set_status_tx`]), so a stale copy can't
+/// revert a status change. Returns affected-row count; callers map 0 to
+/// `NotFound`.
 pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<usize> {
     conn.execute(
         "UPDATE task SET
@@ -326,13 +407,11 @@ pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
             parent_id = ?3,
             title = ?4,
             description = ?5,
-            status = ?6,
-            priority = ?7,
-            sort_index = ?8,
-            updated_at = ?9,
-            completed_at = ?10,
-            deleted_at = ?11,
-            author = ?12
+            priority = ?6,
+            sort_index = ?7,
+            updated_at = ?8,
+            deleted_at = ?9,
+            author = ?10
          WHERE id = ?1 AND deleted_at IS NULL",
         params![
             item.id.value(),
@@ -340,11 +419,9 @@ pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
             item.parent_id.map(|p| p.value()),
             item.title,
             item.description,
-            status_to_str(item.status),
             priority_to_str(item.priority),
             item.sort_index,
             ts_to_string(item.updated_at),
-            item.completed_at.map(ts_to_string),
             item.deleted_at.map(ts_to_string),
             item.author.map(author_to_str),
         ],
@@ -719,6 +796,70 @@ mod tests {
         }
     }
 
+    /// A field write never touches status (review of P2.6): a copy read
+    /// before a concurrent status change can't revert it.
+    #[tokio::test]
+    async fn a_stale_field_write_keeps_the_committed_status() {
+        let (store, tid) = fixture().await;
+        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let stale = store.get(id).await.unwrap().unwrap();
+        let schemas = store.event_schemas.clone();
+        store
+            .db
+            .transaction(move |tx| {
+                let ev = EventCtx::system(&schemas, "test");
+                set_status_tx(tx, &ev, id, TaskStatus::Done, Timestamp::from_unix_ms(7))
+            })
+            .await
+            .unwrap();
+        let mut edit = stale;
+        edit.title = "renamed".into();
+        store.update(&edit).await.unwrap();
+        let now = store.get(id).await.unwrap().unwrap();
+        assert_eq!(now.title, "renamed");
+        assert_eq!(now.status, TaskStatus::Done);
+        assert_eq!(now.completed_at, Some(Timestamp::from_unix_ms(7)));
+    }
+
+    /// Field edits and a status change commit together; the edit logs
+    /// `work_item.edited@1` naming what changed.
+    #[tokio::test]
+    async fn an_edit_with_a_status_change_logs_both() {
+        let (store, tid) = fixture().await;
+        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let mut row = store.get(id).await.unwrap().unwrap();
+        row.title = "renamed".into();
+        row.priority = TaskPriority::High;
+        let after = store
+            .update_with_status(&row, Some(TaskStatus::Blocked))
+            .await
+            .unwrap();
+        assert_eq!(after.title, "renamed");
+        assert_eq!(after.status, TaskStatus::Blocked);
+        let events = store
+            .db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap();
+        let seen: Vec<&str> = events
+            .iter()
+            .map(|e| e.envelope.event_type.as_str())
+            .collect();
+        assert_eq!(seen, vec!["work_item.edited", "work_item.transitioned"]);
+        assert_eq!(
+            events[0].envelope.payload["fields"],
+            serde_json::json!(["title", "priority"])
+        );
+        // Nothing changed: nothing logged.
+        store.update_with_status(&after, None).await.unwrap();
+        let again = store
+            .db
+            .call_mut(|c| crate::event_log_store::read_after_tx(c, 0, 10))
+            .await
+            .unwrap();
+        assert_eq!(again.len(), 2);
+    }
+
     /// P2.6.3 (tsk455): every status change logs exactly one
     /// `work_item.transitioned` — not only in_progress crossings, and for
     /// thread-less tasks too. Filing straight into a status other than
@@ -727,19 +868,12 @@ mod tests {
     async fn every_status_change_logs_one_transition() {
         let (store, tid) = fixture().await;
         let loose = store.insert(&item(None)).await.unwrap();
-        let mut row = store.get(loose).await.unwrap().unwrap();
-        row.status = TaskStatus::Blocked;
-        store.update_logged(&row, TaskStatus::Ready).await.unwrap();
+        store.set_status(loose, TaskStatus::Blocked).await.unwrap();
         // Same status again: nothing to log.
-        store
-            .update_logged(&row, TaskStatus::Blocked)
-            .await
-            .unwrap();
+        store.set_status(loose, TaskStatus::Blocked).await.unwrap();
 
         let attached = store.insert(&item(Some(tid))).await.unwrap();
-        let mut row = store.get(attached).await.unwrap().unwrap();
-        row.status = TaskStatus::Done;
-        store.update_logged(&row, TaskStatus::Ready).await.unwrap();
+        store.set_status(attached, TaskStatus::Done).await.unwrap();
 
         let mut filed = item(Some(tid));
         filed.status = TaskStatus::Blocked;
@@ -959,7 +1093,9 @@ mod tests {
         store.update(&latest).await.unwrap();
         let got = store.get(id).await.unwrap().unwrap();
         assert_eq!(got.title, "renamed");
-        assert_eq!(got.status, TaskStatus::InProgress);
+        // A plain update writes fields only; status moves through the
+        // status core (`set_status_tx`).
+        assert_eq!(got.status, TaskStatus::Ready);
     }
 
     /// Updating a row that was never inserted (or one whose id never

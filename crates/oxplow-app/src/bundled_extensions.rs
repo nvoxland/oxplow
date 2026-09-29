@@ -663,15 +663,11 @@ mod tests {
         .await
         .unwrap();
         assert!(!alert(run).firing);
-        let mut t = {
-            use oxplow_domain::stores::TaskStore as _;
-            f.svc.task_store.get(f.task).await.unwrap().unwrap()
-        };
-        t.status = oxplow_domain::TaskStatus::Blocked;
-        {
-            use oxplow_domain::stores::TaskStore as _;
-            f.svc.task_store.update(&t).await.unwrap();
-        }
+        f.svc
+            .task_store
+            .set_status(f.task, oxplow_domain::TaskStatus::Blocked)
+            .await
+            .unwrap();
         let run = crate::extensions::run_lens(
             &layer,
             &f.svc.extension_catalog,

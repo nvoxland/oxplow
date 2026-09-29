@@ -1780,27 +1780,6 @@ mod tests {
         assert_eq!(row.summary.as_deref(), Some("late summary"));
     }
 
-    fn task_row(id: TaskId, thread: ThreadId, status: TaskStatus) -> Task {
-        let now = Timestamp::from_unix_ms(2);
-        Task {
-            id,
-            thread_id: Some(thread),
-            parent_id: None,
-            title: "x".into(),
-            description: String::new(),
-            status,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        }
-    }
-
     #[tokio::test]
     async fn transition_opens_and_finishes_effort_with_status_flip() {
         use crate::task_store::EffortTransition;
@@ -1808,9 +1787,10 @@ mod tests {
         let tasks = SqliteTaskStore::new(db.clone());
 
         let entering = tasks
-            .update_logged(&task_row(tid, t, TaskStatus::InProgress), TaskStatus::Ready)
+            .set_status(tid, TaskStatus::InProgress)
             .await
-            .unwrap();
+            .unwrap()
+            .effort;
         let EffortTransition::Opened(eff) = entering else {
             panic!("expected Opened, got {entering:?}");
         };
@@ -1825,18 +1805,17 @@ mod tests {
         // Re-issuing the same status changes nothing: the open effort
         // stays and nothing is logged.
         let again = tasks
-            .update_logged(
-                &task_row(tid, t, TaskStatus::InProgress),
-                TaskStatus::InProgress,
-            )
+            .set_status(tid, TaskStatus::InProgress)
             .await
-            .unwrap();
+            .unwrap()
+            .effort;
         assert_eq!(again, EffortTransition::Untouched);
 
         let leaving = tasks
-            .update_logged(&task_row(tid, t, TaskStatus::Done), TaskStatus::InProgress)
+            .set_status(tid, TaskStatus::Done)
             .await
-            .unwrap();
+            .unwrap()
+            .effort;
         assert_eq!(leaving, EffortTransition::Finished(eff));
         assert!(store
             .find_open_for_work_item(&work_item_ref(tid))
@@ -1977,14 +1956,11 @@ mod tests {
 
     #[tokio::test]
     async fn transition_on_missing_task_rolls_back_effort_open() {
-        let (store, db, _tid, t) = fixture_with_db().await;
+        let (store, db, _tid, _t) = fixture_with_db().await;
         let tasks = SqliteTaskStore::new(db.clone());
         let ghost = TaskId::new(9999);
         let err = tasks
-            .update_logged(
-                &task_row(ghost, t, TaskStatus::InProgress),
-                TaskStatus::Ready,
-            )
+            .set_status(ghost, TaskStatus::InProgress)
             .await
             .unwrap_err();
         assert!(matches!(err, DomainError::NotFound), "got {err:?}");

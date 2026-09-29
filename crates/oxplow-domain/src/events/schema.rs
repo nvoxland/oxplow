@@ -109,6 +109,7 @@ impl EventSchemaRegistry {
         r.register::<EffortOpened>().expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
+        r.register::<WorkItemEdited>().expect("core type registers");
         r
     }
 
@@ -528,6 +529,24 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV1;
 }
 
+/// `work_item.edited@1`: a task's own fields changed (not its status —
+/// that is `work_item.transitioned`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemEditedV1 {
+    /// `work_item:oxplow:tsk42`.
+    pub work_item: String,
+    /// What changed: `title`, `description`, `priority`, `parent`.
+    pub fields: Vec<String>,
+}
+
+pub struct WorkItemEdited;
+impl EventType for WorkItemEdited {
+    const TYPE: &'static str = "work_item.edited";
+    const V: u32 = 1;
+    type Payload = WorkItemEditedV1;
+}
+
 /// `effort.finished@1`: an effort's close is fully handled — its end
 /// snapshot pinned, unclaimed work reconciled, lifecycle metrics projected.
 /// Logged once per effort by the effort-lifecycle consumer (dedupe key
@@ -573,6 +592,7 @@ mod tests {
                 ("effort.opened".to_string(), 1),
                 ("snapshot.taken".to_string(), 1),
                 ("vcs.head.moved".to_string(), 1),
+                ("work_item.edited".to_string(), 1),
                 ("work_item.transitioned".to_string(), 1),
             ]
         );

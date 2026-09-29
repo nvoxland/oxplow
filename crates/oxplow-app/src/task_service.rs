@@ -326,7 +326,6 @@ impl TaskService {
         changes: UpdateTaskChanges,
     ) -> Result<Task, TaskServiceError> {
         let mut item = self.load(id).await?;
-        let prior_status = item.status;
         if let Some(t) = changes.title {
             item.title = t;
         }
@@ -336,30 +335,23 @@ impl TaskService {
         if let Some(p) = changes.parent_id {
             item.parent_id = p;
         }
-        let now = Timestamp::now();
-        if let Some(s) = changes.status {
-            item.set_status(s, now);
-        }
         if let Some(p) = changes.priority {
             item.priority = p;
         }
-        item.updated_at = now;
-
-        // A status change commits with what it implies — the effort
-        // open/close when a thread-attached task crosses in_progress, and
-        // the `work_item.transitioned` log entry — in one transaction. The
-        // effort's snapshot pin, reconciliation, lifecycle metrics and
-        // `EffortFinished` are the effort-lifecycle consumer's; settle so
-        // they're done when this returns. Status changes made for someone
-        // (MCP, RPC) run the `work_item.transition` command instead, which
-        // audits the actor.
-        if item.status != prior_status {
-            self.store.update_logged(&item, prior_status).await?;
+        item.updated_at = Timestamp::now();
+        // Fields and any status change commit together; the status moves
+        // from what's committed (read in the transaction), with what it
+        // implies — the effort open/close and `work_item.transitioned`. The
+        // effort's snapshot pin, reconciliation and lifecycle metrics are
+        // the effort-lifecycle consumer's; settle so they're done when this
+        // returns. Changes made for someone (MCP, RPC) run the
+        // `work_item.update` command instead, which audits the actor.
+        let prior_status = item.status;
+        let after = self.store.update_with_status(&item, changes.status).await?;
+        if after.status != prior_status {
             self.settle_lifecycle().await;
-        } else {
-            self.store.update(&item).await?;
         }
-        Ok(item)
+        Ok(after)
     }
 
     /// Run the event pump now and wait (bounded) for the effort-lifecycle

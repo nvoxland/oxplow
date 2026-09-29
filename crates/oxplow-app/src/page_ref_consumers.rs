@@ -1,12 +1,12 @@
 //! Event consumers that keep the `page_ref` graph current
 //! (`.context/data-model.md` "page_ref", "event_log").
 //!
-//! The first consumer on the pump: when a task transitions, re-project
-//! its body-mention edges. Before the event log, the store did this
-//! post-commit inside `update_with_effort_transition`; now the log is the
-//! trigger, so the projection is checkpointed, retried and dead-lettered
-//! like any other consumer, and a crash between the commit and the
-//! projection can no longer leave the graph stale.
+//! When a task's own fields are edited (`work_item.edited`), re-project
+//! its body-mention edges in the pump's transaction — checkpointed,
+//! retried and dead-lettered like any other consumer, so a crash between
+//! the edit and the projection can't leave the graph stale. (It used to
+//! follow `work_item.transitioned`, whose status change moves no body
+//! edge.)
 
 use oxplow_db::page_ref_projections::{
     task_body_ref_types, task_edges, work_item_id, KIND_WORK_ITEM,
@@ -14,13 +14,13 @@ use oxplow_db::page_ref_projections::{
 use oxplow_db::page_ref_store::replace_source_for_ref_types_tx;
 use oxplow_db::task_store::get_task_tx;
 use oxplow_domain::events::schema::EventType;
-use oxplow_domain::events::schema::WorkItemTransitioned;
+use oxplow_domain::events::schema::WorkItemEdited;
 use oxplow_domain::{DomainError, StoredEvent, TaskId};
 
 use crate::event_pump::EventConsumer;
 
 /// Re-projects a task's body-mention `page_ref` edges on
-/// `work_item.transitioned`.
+/// `work_item.edited`.
 pub struct PageRefWorkItemConsumer;
 
 impl PageRefWorkItemConsumer {
@@ -50,7 +50,7 @@ impl EventConsumer for PageRefWorkItemConsumer {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == WorkItemTransitioned::TYPE
+        event_type == WorkItemEdited::TYPE
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
