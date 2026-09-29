@@ -1,0 +1,21 @@
+# The core models: each one a published view `v_<name>`, compiled from
+# `<name>.sql` at every open (`crate::models`). A model reads only through
+# `ref('<model>')` and `source('<table>')`. `columns` is its contract: a
+# change to it needs a new `version`. See `.context/semantic-layer.md`
+# "Models".
+- name: stream
+  version: 1
+  description: "Streams: parallel lines of work, each its own git worktree. Exactly one is `primary` (the repo itself)."
+  columns:
+    - { name: id, type: INTEGER, doc: "Stream id." }
+    - { name: kind, type: TEXT, doc: "`primary` (the repo) or `worktree`." }
+    - { name: title, type: TEXT, doc: "Display name." }
+    - { name: branch, type: TEXT, doc: "Git branch currently checked out in the worktree." }
+    - { name: worktree_path, type: TEXT, doc: "Absolute path of the stream's worktree." }
+    - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
+    - { name: updated_at, type: TEXT, doc: "RFC 3339 timestamp." }
+    - { name: archived_at, type: TEXT, doc: "Set when the stream was archived; NULL while live." }
+  tests:
+    - { not_null: id }
+    - { unique: id }
+    - { accepted_values: { column: kind, values: [primary, worktree] } }

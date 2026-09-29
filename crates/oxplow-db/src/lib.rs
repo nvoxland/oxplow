@@ -23,6 +23,7 @@ pub mod event_retention;
 pub mod ext_source_store;
 pub mod fact_store;
 pub mod git_store;
+pub mod models;
 pub mod observation_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;

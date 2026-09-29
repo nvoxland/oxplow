@@ -175,9 +175,7 @@ impl Database {
             .map_err(DbInitError::Pool)?;
 
         let mut conn = pool.get().map_err(DbInitError::Pool)?;
-        embedded::migrations::runner()
-            .run(&mut *conn)
-            .map_err(|e| DbInitError::Migration(e.to_string()))?;
+        migrate_and_compile(&mut conn)?;
         info!("oxplow db opened at {}", path.as_ref().display());
 
         let permits = pool.max_size() as usize;
@@ -202,9 +200,7 @@ impl Database {
             .build(manager)
             .expect("in-memory sqlite pool builds");
         let mut conn = pool.get().expect("in-memory sqlite connection");
-        embedded::migrations::runner()
-            .run(&mut *conn)
-            .expect("in-memory migrations run");
+        migrate_and_compile(&mut conn).expect("in-memory migrations and models");
         let permits = pool.max_size() as usize;
         Self {
             pool: Arc::new(pool),
@@ -452,6 +448,17 @@ pub enum DbInitError {
     Migration(String),
     #[error("sqlite: {0}")]
     Sqlite(rusqlite::Error),
+    #[error("models: {0}")]
+    Models(String),
+}
+
+/// Bring a database to this build: apply the migrations, then compile the
+/// core models (their views are recreated at every open, P4.2).
+pub(crate) fn migrate_and_compile(conn: &mut Connection) -> Result<(), DbInitError> {
+    embedded::migrations::runner()
+        .run(conn)
+        .map_err(|e| DbInitError::Migration(e.to_string()))?;
+    crate::models::compile_core(conn).map_err(|e| DbInitError::Models(e.to_string()))
 }
 
 #[cfg(test)]

@@ -359,7 +359,7 @@ struct Seen {
 /// every read) and, once asked, `PRAGMA query_only`. Dropping it — on
 /// every path, an error or a panic included — clears both, so the next
 /// user of the connection gets it back as it was.
-struct ReadSession<'c> {
+pub(crate) struct ReadSession<'c> {
     conn: &'c rusqlite::Connection,
     seen: std::sync::Arc<std::sync::Mutex<Seen>>,
     /// Every view in the database, to tell a model read from a table read.
@@ -370,7 +370,7 @@ struct ReadSession<'c> {
 }
 
 impl<'c> ReadSession<'c> {
-    fn open(conn: &'c rusqlite::Connection) -> Result<Self, DomainError> {
+    pub(crate) fn open(conn: &'c rusqlite::Connection) -> Result<Self, DomainError> {
         let views = view_names(conn)?;
         let mut tables = schema_names(conn, "table")?;
         tables.extend(
@@ -455,6 +455,52 @@ impl<'c> ReadSession<'c> {
             models: models.into_iter().collect(),
             tables: tables.into_iter().collect(),
         }
+    }
+
+    /// What the statement read itself, not through a view: `(views,
+    /// tables)` — a model's derived inputs. A view is direct when it was
+    /// read at top level, or read something (`count(*)`) without any read
+    /// placing it inside another view.
+    pub(crate) fn direct_inputs(
+        &self,
+    ) -> (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    ) {
+        let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        let is_view = |a: &Option<String>| a.as_ref().is_some_and(|a| self.views.contains(a));
+        let mut views = std::collections::BTreeSet::new();
+        let mut nested = std::collections::HashSet::new();
+        let mut under = std::collections::HashSet::new();
+        for (table, _, accessor) in &seen.reads {
+            if is_view(accessor) {
+                under.insert(table.clone());
+                if self.views.contains(table) {
+                    nested.insert(table.clone());
+                }
+            }
+        }
+        for (table, _, accessor) in &seen.reads {
+            if self.views.contains(table) && !is_view(accessor) {
+                views.insert(table.clone());
+            }
+            if let Some(v) = accessor.as_ref().filter(|a| self.views.contains(*a)) {
+                if !nested.contains(v) {
+                    views.insert(v.clone());
+                }
+            }
+        }
+        let tables = seen
+            .reads
+            .iter()
+            .filter(|(table, column, accessor)| {
+                self.tables.contains(table)
+                    && !is_view(accessor)
+                    && !(column.is_empty() && under.contains(table))
+            })
+            .map(|(table, _, _)| table.clone())
+            .collect();
+        (views, tables)
     }
 }
 

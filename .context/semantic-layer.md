@@ -125,6 +125,42 @@ New primitives that don't exist yet:
 These exist because what a human reviewing agent work needs most is
 **exceptions and decisions**, not trends and totals.
 
+## Models (P4.2)
+
+A published view is a **model**: one `SELECT` in a file, reading only
+through `ref('<model>')` and `source('<table>')`, compiled to a view at
+every open (`crates/oxplow-db/src/models.rs`, called from
+`migrate_and_compile` after the migrations). Core models live in
+`crates/oxplow-db/models/`: `<name>.sql` plus an entry in `models.yaml`
+(`name`, `version`, `description`, `columns` — the contract, with each
+column's SQLite type and doc — and `tests`); the build script embeds every
+file there, and view `v_<name>` publishes it. The compiler, per owner, in
+one transaction:
+
+- resolves `ref()` / `source()` with the tokenizer — an unknown model or
+  table, or a non-literal argument, is an error at `file:line:col`;
+- orders the models so each is created after what it reads (a cycle is an
+  error naming each model and where it wrote its first `ref()`);
+- drops the owner's previous views and creates the new ones;
+- checks **lineage**: what the authorizer reports the view reading
+  directly (`ReadSession::direct_inputs`) must be exactly its declared
+  `ref()`s and `source()`s — reading a table without `source()` fails;
+- checks the **contract**: the view's `PRAGMA table_info` must equal the
+  declared columns, and `model_contract` holds what each `(view, version)`
+  promised — a changed contract at the same version fails naming the
+  column ("bump its version");
+- records `model` (view, name, owner, version, description, compiled
+  SQL), `model_input` (`ref` | `source`) — V105.
+
+Declared tests (`not_null`, `unique`, `accepted_values`,
+`relationships`, `sql` returning failing rows) run through
+`models::run_tests` and record `model_test` (`passed` / `failed` /
+`error`). A core model's failing test is recorded, never a boot failure: a
+data problem in someone's database mustn't make it unopenable
+(`every_core_model_passes_its_tests_on_an_empty_database` keeps the
+declarations honest). **Built so far (P4.2a):** the compiler and registry
+with `v_stream`; the other views move in P4.2b.
+
 ## The `v_*` contract (current)
 
 Every shipped entity is exposed as a stable **read-only SQL view**. They
