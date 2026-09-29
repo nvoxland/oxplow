@@ -17,12 +17,14 @@
 //!   `tool_use_id` so a re-posted hook logs once.
 //! - `Stop` / `Interrupt`: closes the open turns (`agent.turn.ended`);
 //!   status Idle / AwaitingUser / Stopped; then the turn-end snapshot.
-//! - `SubagentStop`: nothing — the parent turn is still in flight.
-//! - `AgentBoot`: status Idle.
-//! - `SessionStart` / `SessionEnd`: a session id seen for the first time on
-//!   a thread (on any kind) becomes its resume id and logs
-//!   `agent.session.started`; `SessionEnd{reason: clear}` of the resume
-//!   session clears it; `agent.session.ended`.
+//! - `SessionStart` (a harness process starting or resuming a session —
+//!   Claude's command hook, Codex's hook, the ACP client; not a `compact`):
+//!   closes the turns the previous process left open (interrupted), logs
+//!   `agent.session.started`, status Idle.
+//! - A session id seen for the first time on a thread (on any kind)
+//!   becomes its resume id and logs `agent.session.started` once.
+//! - `SessionEnd`: `agent.session.ended`; `reason: clear` of the resume
+//!   session clears the resume id.
 //!
 //! Agent status is the log: a thread's status is its newest
 //! `agent.status.changed`, read and compared inside the same transaction
@@ -366,16 +368,29 @@ fn record_tx(
     };
     let body: serde_json::Value = serde_json::from_str(&env.payload_json).unwrap_or_default();
     let session = env.session_id.as_deref().filter(|s| !s.is_empty());
+    let mut applied = Applied::default();
+    let mut status = None;
+    let starts = starts_session(env.kind, &body);
+    if starts {
+        // The process that owned any open turn is gone: they end
+        // interrupted, before the session start that resets the thread.
+        applied.closed_turn = close_open_turns_tx(
+            conn,
+            ev,
+            thread,
+            Some("session restarted"),
+            TurnOutcome::Interrupted,
+            None,
+            None,
+        )?;
+        status = Some((AgentStatusState::Idle, None));
+    }
     if env.kind != HookKind::SessionEnd {
         if let Some(sid) = session {
-            track_session_tx(conn, ev, thread, &row, sid, now)?;
+            track_session_tx(conn, ev, thread, &row, sid, starts, now)?;
         }
     }
-    let mut applied = Applied {
-        turn: open_turn_ids_tx(conn, thread)?.first().copied(),
-        ..Applied::default()
-    };
-    let mut status = None;
+    applied.turn = open_turn_ids_tx(conn, thread)?.first().copied();
     match env.kind {
         HookKind::UserPromptSubmit => {
             let reprompt = applied.turn.is_some();
@@ -414,15 +429,8 @@ fn record_tx(
             let usage: Option<oxplow_domain::events::schema::TurnUsage> = body
                 .get(TURN_USAGE_KEY)
                 .and_then(|u| serde_json::from_value(u.clone()).ok());
-            // Newest first: the newest closed turn owns the turn-end snapshot.
-            for id in open_turn_ids_tx(conn, thread)? {
-                if close_turn_tx(conn, ev, id, answer, outcome, transcript, usage.clone())?
-                    .is_some()
-                    && applied.closed_turn.is_none()
-                {
-                    applied.closed_turn = Some(id);
-                }
-            }
+            applied.closed_turn =
+                close_open_turns_tx(conn, ev, thread, answer, outcome, transcript, usage)?;
             applied.turn = None;
             status = Some(if env.kind == HookKind::Interrupt {
                 (AgentStatusState::Stopped, Some("interrupt".to_string()))
@@ -433,13 +441,12 @@ fn record_tx(
                 )
             });
         }
-        HookKind::AgentBoot => status = Some((AgentStatusState::Idle, Some("boot".to_string()))),
         HookKind::SessionEnd => {
             if let Some(sid) = session {
                 end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
             }
         }
-        HookKind::SubagentStop | HookKind::SessionStart => {}
+        HookKind::SessionStart => {} // handled above
     }
     if let Some((state, detail)) = &status {
         if changed(
@@ -469,15 +476,48 @@ fn stop_status(payload: &str, current: Option<&AgentStatus>) -> (AgentStatusStat
     }
 }
 
-/// A session id seen for the first time on this thread: log
-/// `agent.session.started` (once per id, ever) and make it the resume id,
-/// so the next spawn passes `--resume <id>`.
+/// Whether this hook is a harness process starting (or resuming) a
+/// session: a `SessionStart`, except the one a context compaction posts
+/// mid-turn (Claude's `source: "compact"` keeps the same process and turn).
+fn starts_session(kind: HookKind, body: &serde_json::Value) -> bool {
+    kind == HookKind::SessionStart && body.get("source").and_then(|s| s.as_str()) != Some("compact")
+}
+
+/// Close every open turn on the thread; returns the newest one closed,
+/// which owns the turn-end snapshot.
+fn close_open_turns_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    answer: Option<&str>,
+    outcome: TurnOutcome,
+    transcript: Option<&str>,
+    usage: Option<oxplow_domain::events::schema::TurnUsage>,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    let mut newest = None;
+    // Newest first.
+    for id in open_turn_ids_tx(conn, thread)? {
+        if close_turn_tx(conn, ev, id, answer, outcome, transcript, usage.clone())?.is_some()
+            && newest.is_none()
+        {
+            newest = Some(id);
+        }
+    }
+    Ok(newest)
+}
+
+/// Log `agent.session.started` and make the id the thread's resume id, so
+/// the next spawn passes `--resume <id>`. It is logged the first time any
+/// hook carries the id (Claude posts no HTTP SessionStart for a fresh
+/// session), and again on every process start (`starts`) after that — a
+/// resume is a start, and it resets the thread's derived status.
 fn track_session_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
     row: &ThreadRow,
     session: &str,
+    starts: bool,
     now: Timestamp,
 ) -> Result<(), DomainError> {
     let env = ev
@@ -488,9 +528,13 @@ fn track_session_tx(
             resumed: row.resume_session_id == session,
         })
         .with_anchors(activity_anchors_tx(conn, thread)?)
-        .with_subject([thread_ref(thread)])
+        .with_subject([thread_ref(thread)]);
+    let first = env
+        .clone()
         .with_dedupe_key(format!("session:{session}:started"));
-    append_unique_tx(conn, ev.schemas, &env)?;
+    if !append_unique_tx(conn, ev.schemas, &first)? && starts {
+        ev.append(conn, &env)?;
+    }
     if row.resume_session_id != session {
         conn.execute(
             "UPDATE threads SET resume_session_id = ?2, updated_at = ?3 WHERE id = ?1",
@@ -523,9 +567,8 @@ fn end_session_tx(
             reason: reason.map(str::to_string),
         })
         .with_anchors(activity_anchors_tx(conn, thread)?)
-        .with_subject([thread_ref(thread)])
-        .with_dedupe_key(format!("session:{session}:ended"));
-    append_unique_tx(conn, ev.schemas, &env)?;
+        .with_subject([thread_ref(thread)]);
+    ev.append(conn, &env)?;
     if reason == Some("clear") && row.resume_session_id == session {
         conn.execute(
             "UPDATE threads SET resume_session_id = '', updated_at = ?2 WHERE id = ?1",
@@ -948,7 +991,7 @@ mod tests {
         .unwrap();
         assert_eq!(resume().await, "");
         let ended = of_type(&logged(&svc).await, "agent.session.ended").len();
-        assert_eq!(ended, 2, "one per session id that ended");
+        assert_eq!(ended, 3, "every end is logged, s1's exit and its clear");
     }
 
     /// Every prompt is logged — one inside an open turn is a re-prompt —
@@ -1163,37 +1206,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subagent_stop_does_not_close_parent_turn_or_flip_status() {
-        let (svc, tid) = fixture().await;
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: Some("p".into()),
-            decision: None,
-        })
-        .await
-        .unwrap();
-        svc.ingest(HookEnvelope {
-            kind: HookKind::SubagentStop,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
-        .await
-        .unwrap();
-        // Parent turn must still be open and status still Running.
-        assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
-        let status = status(&svc, tid).await.unwrap();
-        assert_eq!(status.state, AgentStatusState::Running);
-    }
-
-    #[tokio::test]
     async fn stop_without_open_turn_still_marks_idle() {
         // Out-of-order: a Stop arriving with no open turn (e.g. after
         // a daemon restart dropped the in-memory turn, or a duplicate
@@ -1256,37 +1268,145 @@ mod tests {
         assert_eq!(open[0].prompt, "first");
     }
 
+    /// The derived status the rail would show for the thread now.
+    async fn derived(svc: &HookIngestService, tid: ThreadId) -> AgentStatusState {
+        let recent = crate::agent_status_derive::recent_activity(&svc.log, tid)
+            .await
+            .unwrap();
+        crate::agent_status_derive::derive_thread_status(&recent, Timestamp::now())
+    }
+
     #[tokio::test]
-    async fn agent_boot_marks_idle_without_touching_turns() {
+    async fn a_resumed_session_resets_a_turn_that_died_without_a_stop() {
+        // A turn dies on an API error (no Stop); the pane restarts with
+        // `--resume s1`. The session start closes the dead process's turn
+        // and the thread reads idle, not running-then-stalled.
         let (svc, tid) = fixture().await;
-        // Open a turn, then boot — the status flips but the turn
-        // survives (a pane restart mid-turn shouldn't lose the turn).
-        svc.ingest(HookEnvelope {
-            kind: HookKind::UserPromptSubmit,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: Some("p".into()),
-            decision: None,
-        })
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("s1"),
+            json!({"prompt": "p"}),
+        ))
         .await
         .unwrap();
-        svc.ingest(HookEnvelope {
-            kind: HookKind::AgentBoot,
-            thread_id: Some(tid),
-            stream_id: None,
-            session_id: None,
-            payload_json: "{}".into(),
-            prompt: None,
-            decision: None,
-        })
+        svc.ingest(hook(
+            HookKind::PreToolUse,
+            tid,
+            Some("s1"),
+            json!({"tool_name": "Bash", "tool_use_id": "u1"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(derived(&svc, tid).await, AgentStatusState::Running);
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s1"),
+            json!({"source": "resume"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(derived(&svc, tid).await, AgentStatusState::Idle);
+        assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
+        assert_eq!(
+            status(&svc, tid).await.unwrap().state,
+            AgentStatusState::Idle
+        );
+        let events = logged(&svc).await;
+        let started = of_type(&events, "agent.session.started");
+        assert_eq!(started.len(), 2, "first sighting, then the resume");
+        assert_eq!(started[1].envelope.payload["resumed"], true);
+
+        // A second restart of the same session logs again.
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s1"),
+            json!({"source": "resume"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(
+            of_type(&logged(&svc).await, "agent.session.started").len(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn a_compaction_mid_turn_is_not_a_session_start() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("s1"),
+            json!({"prompt": "p"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s1"),
+            json!({"source": "compact"}),
+        ))
         .await
         .unwrap();
         assert_eq!(turns(&svc).list_open(&tid).await.unwrap().len(), 1);
-        let status = status(&svc, tid).await.unwrap();
-        assert_eq!(status.state, AgentStatusState::Idle);
-        assert_eq!(status.detail.as_deref(), Some("boot"));
+        assert_eq!(derived(&svc, tid).await, AgentStatusState::Running);
+        assert_eq!(
+            of_type(&logged(&svc).await, "agent.session.started").len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_start_for_a_new_id_logs_it_once() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("s2"),
+            json!({"source": "startup"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("s2"),
+            json!({"prompt": "p"}),
+        ))
+        .await
+        .unwrap();
+        let events = logged(&svc).await;
+        let started = of_type(&events, "agent.session.started");
+        assert_eq!(started.len(), 1, "the prompt is not a second sighting");
+        assert_eq!(started[0].envelope.payload["resumed"], false);
+    }
+
+    #[tokio::test]
+    async fn each_end_of_a_resumed_session_is_logged() {
+        let (svc, tid) = fixture().await;
+        for _ in 0..2 {
+            svc.ingest(hook(
+                HookKind::SessionStart,
+                tid,
+                Some("s1"),
+                json!({"source": "resume"}),
+            ))
+            .await
+            .unwrap();
+            svc.ingest(hook(
+                HookKind::SessionEnd,
+                tid,
+                Some("s1"),
+                json!({"reason": "exit"}),
+            ))
+            .await
+            .unwrap();
+        }
+        assert_eq!(of_type(&logged(&svc).await, "agent.session.ended").len(), 2);
     }
 
     #[tokio::test]

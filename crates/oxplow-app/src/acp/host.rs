@@ -141,7 +141,7 @@ impl AcpHost for ServicesAcpHost {
             return;
         };
         let env = self.envelope(
-            HookKind::AgentBoot,
+            HookKind::SessionStart,
             thread,
             session_id,
             serde_json::json!({ "session_id": session_id }),

@@ -8,14 +8,12 @@
 //! drive other UI surfaces. Mapping at the IPC boundary collapses
 //! `Running` → working and everything else → waiting.
 //!
-//! ## Why derive instead of read agent_status
+//! ## Why derive instead of reading the last logged status
 //!
-//! The agent_status row is updated by `HookIngestService` on every
-//! state-changing hook. Bugs in that pipeline (a missed Stop, a
-//! mis-routed SubagentStop, a stale row from a previous boot) make
-//! the indicator drift from reality. The event log is the authoritative
-//! record of what the agent did; deriving status from it matches the
-//! source of truth and self-heals when the sidecar table goes wrong.
+//! The logged `agent.status.changed` is what the ingest last announced.
+//! A missed Stop or an agent that died mid-turn leaves it saying
+//! "running"; the activity says what actually happened (and silence past
+//! a threshold reads as stalled), so the indicator self-heals.
 
 use oxplow_domain::{AgentStatusState, StoredEvent, ThreadId, Timestamp};
 
@@ -316,7 +314,7 @@ mod tests {
             HookKind::PostToolUse => ActivityKind::ToolFinished,
             HookKind::Stop => ActivityKind::TurnCompleted,
             HookKind::Interrupt => ActivityKind::TurnInterrupted,
-            HookKind::AgentBoot | HookKind::SessionStart => ActivityKind::SessionStarted,
+            HookKind::SessionStart => ActivityKind::SessionStarted,
             other => panic!("{other:?} logs no activity"),
         };
         Activity {

@@ -251,7 +251,7 @@ details.
   `client.session.prompt` — Stop-hook steering parity, pending live
   verification. Subagent sessions (`parentID` set) are filtered out of
   UserPromptSubmit/Stop so child activity doesn't flip the thread's
-  turn lifecycle (the Claude analogue is SubagentStop handling).
+  turn lifecycle.
   Skills + slash commands ship too: opencode only discovers SKILL.md
   from fixed locations (no config key), so `write_opencode_runtime`
   materializes the five oxplow skills into `<project>/.opencode/skills/
@@ -321,8 +321,8 @@ to `runtime.handleHookEnvelope`, which:
      so a re-posted hook logs once;
    - Stop / Interrupt close the open turns (`agent.turn.ended@2`, with
      Claude's `transcript_path`);
-   - a status the hook sets (Running, Idle / AwaitingUser, Stopped, boot
-     Idle) is logged as `agent.status.changed` when it differs from the
+   - a status the hook sets (Running, Idle / AwaitingUser, Stopped,
+     session-start Idle) is logged as `agent.status.changed` when it differs from the
      thread's newest logged one, read in the same transaction
      (`last_status_tx`). **The log is the status** (tsk499): there is no
      in-memory copy, so a restarted daemon still knows a thread was parked
@@ -338,7 +338,14 @@ to `runtime.handleHookEnvelope`, which:
    on a thread (on any hook — Claude posts no HTTP SessionStart) logs
    `agent.session.started` once (dedupe key `session:<id>:started`) and
    becomes `thread.resume_session_id`, so a later restart relaunches with
-   `--resume <id>`. `SessionEnd` logs `agent.session.ended`, and when
+   `--resume <id>`. **A `SessionStart` is a process start** (tsk500):
+   every one except `source: "compact"` (a compaction inside a running
+   turn) closes the turns the previous process left open as interrupted,
+   logs `agent.session.started` again (`resumed: true` for the resume id)
+   and sets the status Idle — so a turn that died without a Stop reads idle
+   after the restart instead of running, then stalled. The ACP client posts
+   the same `SessionStart`; there is no separate boot kind.
+   `SessionEnd` logs `agent.session.ended` every time, and when
    `reason` is `clear` and the id is the resume id it blanks it: `/clear`
    starts a fresh session with no HTTP hook, so until its first prompt the
    token would still point at the cleared one. Other end reasons keep it so
@@ -495,7 +502,7 @@ the same JSON.
 - The agent runs via `tokio::process` with `kill_on_drop` and an augmented `PATH`; its stderr's last lines are kept for a failed start.
 
 **Host.** `acp/host.rs` `AcpHost` is the seam (tests use a recording double). `ServicesAcpHost` holds `Weak<Services>` (sessions live in Services) and records exactly what a hooked turn records:
-- `AgentBoot` plus the resume id on start;
+- `SessionStart` plus the resume id on start (a start closes turns a previous process left open and resets the thread to idle);
 - `UserPromptSubmit` on the person's prompt;
 - `PreToolUse` on every policy check;
 - `PostToolUse` plus `AgentContext::post_tool_context` on each finished tool call (per canonical event);

@@ -10,8 +10,8 @@ use specta::Type;
 use crate::ids::{AgentTurnId, ThreadId};
 use crate::time::Timestamp;
 
-/// Discriminant for hook events. Matches the kinds Claude Code emits
-/// plus a few oxplow-internal synthetic kinds (Interrupt, AgentBoot).
+/// Discriminant for hook events: the kinds the harnesses post, plus
+/// `Interrupt`, which oxplow synthesizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum HookKind {
@@ -20,13 +20,11 @@ pub enum HookKind {
     PreToolUse,
     PostToolUse,
     Stop,
-    SubagentStop,
     /// Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane.
     Interrupt,
-    /// Agent boot sentinel — fires once per session_id when oxplow first
-    /// observes traffic for it.
-    AgentBoot,
-    /// A harness session began (Codex posts it; Claude's is command-only).
+    /// A harness process started or resumed a session (Claude's command
+    /// hook, Codex's hook, the ACP client). `source: "compact"` is a
+    /// compaction inside a running session, not a start.
     SessionStart,
     /// A harness session ended — `reason: "clear"` for `/clear`.
     SessionEnd,

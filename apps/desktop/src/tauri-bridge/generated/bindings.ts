@@ -2553,20 +2553,19 @@ export type HookEnvelope = {
 };
 
 /**
- *  Discriminant for hook events. Matches the kinds Claude Code emits
- *  plus a few oxplow-internal synthetic kinds (Interrupt, AgentBoot).
+ *  Discriminant for hook events: the kinds the harnesses post, plus
+ *  `Interrupt`, which oxplow synthesizes.
  */
 export type HookKind = 
 // Renderer/agent paste, run-command, etc.
-"user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" | "subagent_stop" | 
+"user_prompt_submit" | "pre_tool_use" | "post_tool_use" | "stop" | 
 // Synthesized by oxplow when the user hits Ctrl-C / Esc in a pane.
 "interrupt" | 
 /**
- *  Agent boot sentinel — fires once per session_id when oxplow first
- *  observes traffic for it.
+ *  A harness process started or resumed a session (Claude's command
+ *  hook, Codex's hook, the ACP client). `source: "compact"` is a
+ *  compaction inside a running session, not a start.
  */
-"agent_boot" | 
-// A harness session began (Codex posts it; Claude's is command-only).
 "session_start" | 
 // A harness session ended — `reason: "clear"` for `/clear`.
 "session_end";

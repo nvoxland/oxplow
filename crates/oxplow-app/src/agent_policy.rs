@@ -285,7 +285,7 @@ impl AgentPolicy {
             // Not yet wired (default false ⇒ branches stay silent rather
             // than emit wrong directives):
             // - subagent_in_flight: would need PreToolUse(Task) /
-            //   SubagentStop correlation
+            //   PostToolUse(Task) correlation
             // - turn_had_filing / turn_filed_ready_item: would need MCP
             //   call attribution back to this thread/turn
             // - awaiting_user: only set when await_user MCP tool fires,

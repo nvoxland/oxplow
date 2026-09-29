@@ -639,11 +639,8 @@ fn parse_hook_kind(event: &str) -> Option<HookKind> {
         "PostToolUse" => Some(HookKind::PostToolUse),
         "UserPromptSubmit" => Some(HookKind::UserPromptSubmit),
         "Stop" => Some(HookKind::Stop),
-        // SessionStart / SessionEnd / Notification aren't on the
-        // HookKind enum yet — they're informational from oxplow's
-        // perspective. Returning None routes them to the 200 ack above
-        // without persisting. AgentBoot, SubagentStop, Interrupt are
-        // synthetic / not posted by the plugin.
+        // SessionStart / SessionEnd are routed before this (they carry
+        // no policy); anything else (Notification, …) is acked unread.
         _ => None,
     }
 }
