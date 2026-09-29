@@ -8,9 +8,14 @@
           "type": "string"
         },
         "size": {
+          "description": "The whole body's length, stored or not.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
         }
       },
       "required": [

@@ -1149,9 +1149,17 @@ it.
 **`event_content` (V102, P3.2)** holds large or sensitive event bodies —
 tool input and output, prompts — by the xxh3-128 hex of their bytes (the
 blob store's hash, so refs are uniform): `hash PK, namespace, bytes BLOB,
-size, created_at`, STRICT. A payload carries `ContentRef { hash, size }`;
-the retention sweep deletes a body after its namespace's window and the
-event stays. It is separate from the snapshot blob store because the
+size, created_at`, STRICT. A payload carries `ContentRef { hash, size,
+truncated }`. A JSON body is stored by `put_json_tx` (tsk509): serialized
+canonically (object keys sorted at every depth, so equal bodies share a
+hash whatever order their keys arrived in) and cut to 256 KiB on a
+character boundary — `size` is the whole body's, `truncated` says only the
+first part was kept. It is read through `oxplow_app::event_bodies::read`,
+by **event id and body** (`input` / `output`), never by bare hash: the
+person's IPC read sees any stream, the MCP `read_event_content` only the
+caller's own stream's events, and both return at most 64 KiB of text with
+`truncated`. `list_agent_events` returns at most 1,000 rows. The retention
+sweep deletes a body after its namespace's window and the event stays. It is separate from the snapshot blob store because the
 retention differs (and the blob store's GC only knows snapshot rows).
 `v_event_content` exposes everything but the bytes. `event_log` gained
 `payload_expired_at`: `payload` is NOT NULL, so payload expiry writes `'{}'`

@@ -2951,8 +2951,11 @@ export function subscribeAgentEvents(
 
 /** A tool call's stored input or output (by the hash in its event
  *  payload), or null once retention removed it. */
-export async function readEventContent(hash: string): Promise<string | null> {
-  return unwrap(await commands.readEventContent(hash));
+export async function readEventContent(
+  eventId: string,
+  body: "input" | "output",
+): Promise<import("./tauri-bridge/generated/bindings.js").EventBody | null> {
+  return unwrap(await commands.readEventContent(eventId, body));
 }
 
 /**

@@ -610,11 +610,7 @@ fn log_tool_tx(
     };
     let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
         match body.get(key) {
-            Some(v) if !v.is_null() => {
-                let bytes =
-                    serde_json::to_vec(v).map_err(|e| DomainError::Invalid(e.to_string()))?;
-                event_content_store::put_tx(conn, "agent", &bytes).map(Some)
-            }
+            Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
     };

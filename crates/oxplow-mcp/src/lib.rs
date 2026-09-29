@@ -1162,9 +1162,10 @@ pub struct FileSnapshotIdParams {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EventContentParams {
-    /// A content hash from an event payload's `{hash, size}` (e.g. an
-    /// `agent.tool.finished` event's `input` or `output`).
-    pub hash: String,
+    /// The event's id (`v_event.id`), e.g. an `agent.tool.finished`.
+    pub event_id: String,
+    /// Which body: `input` or `output`.
+    pub body: oxplow_app::event_bodies::EventBodyKey,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -2422,20 +2423,35 @@ impl OxplowMcp {
     }
 
     #[tool(
-        description = "Read a stored event body — a tool call's input or output — by the hash \
-                          in its event payload (`{hash, size}` on `agent.tool.*` events in \
-                          v_event), as a (UTF-8 lossy) string. Null when it was never stored or \
-                          retention has removed it."
+        description = "Read a stored event body — an `agent.tool.*` event's `input` or \
+                          `output` — by the event's id (`v_event.id`) in this connection's \
+                          stream: `{text, size, truncated}`, the text capped at 64 KiB \
+                          (`truncated` when less than the whole). Null when the event has no \
+                          such body or retention removed it."
     )]
     async fn read_event_content(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<EventContentParams>,
     ) -> Result<CallToolResult, McpError> {
-        let content = oxplow_db::event_content_store::read(&self.services.db, &params.0.hash)
+        use oxplow_app::event_bodies::{read, EventBodyError};
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        // An agent reads its own stream's bodies only.
+        let oxplow_domain::Actor::Agent {
+            stream_id: Some(stream),
+            ..
+        } = actor
+        else {
+            return Err(internal("a verified caller is an agent with a stream"));
+        };
+        let p = params.0;
+        let body = read(&self.services, &p.event_id, p.body, Some(stream))
             .await
-            .map_err(internal)?
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-        json_result(&content)
+            .map_err(|e| match e {
+                EventBodyError::Storage(e) => internal(e),
+                other => McpError::invalid_params(other.to_string(), None),
+            })?;
+        json_result(&body)
     }
 
     #[tool(

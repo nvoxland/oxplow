@@ -18,6 +18,9 @@ pub async fn ingest_hook_event(svc: &Services, envelope: HookEnvelope) -> Result
     Ok(())
 }
 
+/// The most `list_agent_events` returns in one call.
+const MAX_AGENT_EVENTS: usize = 1000;
+
 /// The newest agent activity (`agent.*` events), newest first — on a
 /// thread when given, else a stream, else everywhere. The activity log's
 /// source (P3.9; it used to read an in-memory hook ring a restart
@@ -30,16 +33,27 @@ pub async fn list_agent_events(
 ) -> Result<Vec<StoredEvent>, IpcError> {
     Ok(svc
         .event_log_store
-        .recent("agent", thread_id, stream_id, limit.unwrap_or(200))
+        .recent(
+            "agent",
+            thread_id,
+            stream_id,
+            limit.unwrap_or(200).min(MAX_AGENT_EVENTS),
+        )
         .await?)
 }
 
-/// A stored event body (a tool's input or output), as text; `None` when
-/// it was never stored or retention removed it.
-pub async fn read_event_content(svc: &Services, hash: String) -> Result<Option<String>, IpcError> {
-    Ok(oxplow_db::event_content_store::read(&svc.db, &hash)
-        .await?
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+/// One body of an event (a tool's input or output), capped; `None` when it
+/// was never stored or retention removed it. The person's read: any stream.
+pub async fn read_event_content(
+    svc: &Services,
+    event_id: String,
+    body: oxplow_app::event_bodies::EventBodyKey,
+) -> Result<Option<oxplow_app::event_bodies::EventBody>, IpcError> {
+    use oxplow_app::event_bodies::{read, EventBodyError};
+    read(svc, &event_id, body, None).await.map_err(|e| match e {
+        EventBodyError::Storage(e) => e.into(),
+        other => IpcError::invalid(other.to_string()),
+    })
 }
 
 pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, IpcError> {

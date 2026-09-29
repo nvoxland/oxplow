@@ -867,7 +867,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	readEventContent: (hash: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_event_content", { hash })),
+	readEventContent: (eventId: string, body: EventBodyKey) => typedError<{
+	text: string,
+	size: number,
+	truncated: boolean,
+} | null, IpcError>(__TAURI_INVOKE("read_event_content", { eventId, body })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -2196,6 +2200,19 @@ export type Envelope = {
 	 */
 	dedupe_key: string | null,
 };
+
+/**
+ *  A body as read: UTF-8 (lossy) text, its full size, and whether what is
+ *  returned is less than the whole (capped at store or at read).
+ */
+export type EventBody = {
+	text: string,
+	size: number,
+	truncated: boolean,
+};
+
+// Which body of the event.
+export type EventBodyKey = "input" | "output";
 
 /**
  *  An event's public identity: a UUIDv7 in its canonical text form, so

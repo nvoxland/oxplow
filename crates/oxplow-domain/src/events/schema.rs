@@ -558,7 +558,11 @@ impl EventType for AgentTurnEnded {
 #[serde(deny_unknown_fields)]
 pub struct ContentRef {
     pub hash: String,
+    /// The whole body's length, stored or not.
     pub size: u64,
+    /// Only the first part was stored (bodies are capped).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 /// `agent.session.started@1`: a harness session began on a thread — first

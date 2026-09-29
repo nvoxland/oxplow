@@ -670,7 +670,7 @@ const CATALOG: &[CatalogView] = &[
     },
     CatalogView {
         name: "v_event_content",
-        description: "Large or sensitive event bodies (tool input and output, prompts), stored by content hash; an event payload's `{hash, size}` points here. Retention deletes a body after its namespace's window; the event stays. The bytes are read with `read_event_content`, not through SQL.",
+        description: "Large or sensitive event bodies (tool input and output, prompts), stored by content hash; an event payload's `{hash, size}` points here. Retention deletes a body after its namespace's window; the event stays. The bytes are read with `read_event_content` by event id, not through SQL.",
         columns: &[
             ("hash", "xxh3-128 hex of the bytes."),
             ("namespace", "The event namespace it belongs to (`agent`, `test`, …); sets its retention."),
