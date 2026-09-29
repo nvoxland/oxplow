@@ -12,7 +12,6 @@
 //! See `.context/agent-model.md`.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use oxplow_domain::stores::{StreamStore, ThreadStore};
 use oxplow_domain::ThreadId;
@@ -62,6 +61,9 @@ struct RoleState {
     last_context_by_session_id: HashMap<String, String>,
 }
 
+/// How long a tool call's hook waits for the reactors that write nudges.
+const POST_TOOL_SETTLE: std::time::Duration = std::time::Duration::from_millis(2500);
+
 /// Dedupe key suffix for the decisions block, beside the session-context
 /// block's plain session-id key.
 const DECISIONS_KEY_SUFFIX: &str = "#decisions";
@@ -88,71 +90,54 @@ impl AgentActivity {
             .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
     }
 
-    /// Record a finished tool call: wiki attribution, the effort-file
-    /// claim, the tool-call row, and collection (test runs, coverage,
-    /// analysis) plus post-tool advisories. `payload_json` is `body` as
-    /// received (collection reads Bash output from it). Returns context
-    /// for the agent: the ROLE CHANGE banner after `ExitPlanMode`, else a
-    /// collection nudge or advisory.
-    ///
-    /// Collection runs DETACHED (tsk62): a test run's recording can outlast
-    /// a transport's budget, so it always completes on its own task and
-    /// this waits up to 2.5 s for its message (a late one is still
-    /// persisted as a nudge by the task).
+    /// What the agent hears after a tool call: the ROLE CHANGE banner after
+    /// `ExitPlanMode`, else the thread's undelivered nudges (collection and
+    /// post-tool advisories). The recording itself is the pump's
+    /// (`tool_call_reactors`, `post_tool_reactors`, P3.5–P3.6): this waits
+    /// up to [`POST_TOOL_SETTLE`] for the two reactors that write nudges,
+    /// then takes whatever is undelivered — a nudge that lands after the
+    /// window goes out on the thread's next tool call instead of being lost.
+    /// Collection nudges come before advisories.
     pub async fn on_post_tool(
         &self,
-        svc: &Arc<Services>,
+        svc: &Services,
         thread_id: &ThreadId,
         session_id: Option<&str>,
         body: &serde_json::Value,
-        payload_json: &str,
     ) -> Option<String> {
-        // The tool-call row, the effort claim and wiki attribution are pump
-        // reactors on `agent.tool.finished` (`tool_call_reactors`, P3.5).
-        let services = svc.clone();
-        let collection_thread = *thread_id;
-        let payload = payload_json.to_string();
-        let (nudge_tx, nudge_rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let nudge = match services
-                .collection
-                .on_post_tool_use(&collection_thread, &payload)
-                .await
-            {
-                Ok(nudge) => nudge,
-                Err(err) => {
-                    warn!(?err, "collection post-tool-use failed");
-                    None
-                }
-            };
-            let advisories = crate::advisories::for_thread(
-                &services,
-                &collection_thread,
-                crate::extensions::AdvisoryOn::PostToolUse,
-            )
-            .await;
-            let combined: Vec<String> = nudge
-                .into_iter()
-                .chain(advisories.into_iter().map(|h| h.text))
-                .collect();
-            let _ = nudge_tx.send((!combined.is_empty()).then(|| combined.join("\n\n")));
-        });
-        let collection_nudge =
-            match tokio::time::timeout(std::time::Duration::from_millis(2500), nudge_rx).await {
-                Ok(Ok(nudge)) => nudge,
-                _ => None,
-            };
-
         // ExitPlanMode just settled: a promotion or demotion while the
         // plan-mode prompt was up gets no prompt event before the agent
-        // resumes, so the banner rides this call's context. (ExitPlanMode
-        // is never a test-run command, so it never races the nudge.)
+        // resumes, so the banner rides this call's context. (ExitPlanMode is
+        // never a test-run command; any nudges wait for the next call.)
         if body.get("tool_name").and_then(|v| v.as_str()) == Some("ExitPlanMode") {
             if let Some(banner) = self.role_change_banner(svc, thread_id, session_id).await {
                 return Some(banner);
             }
         }
-        collection_nudge
+        svc.event_pump
+            .settle(
+                &[
+                    crate::post_tool_reactors::COLLECTION,
+                    crate::post_tool_reactors::POST_TOOL_ADVISORIES,
+                ],
+                POST_TOOL_SETTLE,
+            )
+            .await;
+        let mut nudges = match svc
+            .nudge_store
+            .take_undelivered(&thread_id.to_string())
+            .await
+        {
+            Ok(n) => n,
+            Err(err) => {
+                warn!(?err, "reading undelivered nudges failed");
+                return None;
+            }
+        };
+        // Advisory kinds are `<extension>/<id>`; oxplow's own come first.
+        nudges.sort_by_key(|n| (n.kind.contains('/'), n.id));
+        let text: Vec<String> = nudges.into_iter().map(|n| n.message).collect();
+        (!text.is_empty()).then(|| text.join("\n\n"))
     }
 
     /// Context for a human's prompt: the `<session-context>` block (only
@@ -167,9 +152,13 @@ impl AgentActivity {
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id)
             .await;
-        let advisory_hits =
-            crate::advisories::for_thread(svc, thread_id, crate::extensions::AdvisoryOn::Prompt)
-                .await;
+        let advisory_hits = crate::advisories::for_thread(
+            &svc.advisory_deps(),
+            thread_id,
+            crate::extensions::AdvisoryOn::Prompt,
+            None,
+        )
+        .await;
         let advisory_block = (!advisory_hits.is_empty()).then(|| {
             advisory_hits
                 .into_iter()

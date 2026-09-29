@@ -1446,17 +1446,23 @@ nudge" section in `.context/collection.md`.
 
 The PostToolUse nudges — the report-less-run nudge above and any
 post-tool-use **advisory** that fires (e.g. oxplow-analytics'
-`coverage-target`, kind `oxplow-analytics/coverage-target`) — are
-**persisted** as well as returned. The service
-(`CollectionService::on_post_tool_use`, and `advisories::for_thread` for
-advisories) writes each fired nudge to the
-`agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
-`.context/data-model.md`) tagged with kind (`report-less-run` /
-`coverage-target`), the message it surfaced, and the trigger (bash command).
-This is best-effort — a persistence error is logged and swallowed, never
-failing the hook. Persistence happens **after** the existing in-memory
-per-effort one-shot dedup gate, so a deduped/non-fired nudge is never
-stored.
+`coverage-target`, kind `oxplow-analytics/coverage-target`) — are written by
+the pump reactors (`collection`, `advisories.post_tool` —
+`crates/oxplow-app/src/post_tool_reactors.rs`, P3.6) to the `agent_nudge`
+table (`crates/oxplow-db/src/agent_nudge_store.rs`, see
+`.context/data-model.md`) tagged with kind, the message, the trigger (bash
+command), the turn and the **cause** (the `agent.tool.finished` event — a
+redelivered event can't fire the same kind twice). **The persisted nudge is
+the delivery:** `AgentActivity::on_post_tool` settles the two reactors (≤2.5
+s) and returns the thread's nudges with no `delivered_at`
+(`take_undelivered`, which stamps them) — oxplow's own kinds first, then
+advisories — so one that finishes after its hook answered reaches the agent
+on the thread's next tool call. The ExitPlanMode ROLE CHANGE banner still
+wins its call; nudges wait for the next. **One-shot marks are durable**
+(`effort_once_mark`): the report-less-run nudge fires once per effort and a
+`once_per: effort` / `row` advisory once per effort (and row key) across
+restarts — the in-memory sets (`nudged_efforts`, `AdvisoryRunner.fired`)
+are gone. Prompt advisories use the same marks.
 
 These are surfaced UI-side only (the agent never reads them back): an
 "Agent Nudges" H2 section on the task page (after each effort's Metrics)

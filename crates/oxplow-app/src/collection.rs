@@ -339,52 +339,6 @@ pub enum AnalysisIngest {
     },
 }
 
-/// Cap on each in-memory nudge-dedup set. These are keyed by effort (or commit
-/// sha) and only ever grew before — a slow but unbounded leak in a long-lived
-/// daemon, since efforts are never explicitly forgotten (and the substrate may
-/// age-sweep them away entirely). Insertion-ordered eviction past the cap keeps
-/// memory bounded while preserving the one-shot guarantee for every recently
-/// active effort; only entries older than `NUDGE_DEDUP_CAP` distinct keys ago
-/// (long-closed efforts) can re-arm, which is harmless.
-const NUDGE_DEDUP_CAP: usize = 1024;
-
-/// A `HashSet` with a bounded size and oldest-first eviction. Used for the
-/// ephemeral in-memory nudge-dedup sets so they can't grow without limit.
-pub(crate) struct BoundedSet<T> {
-    set: std::collections::HashSet<T>,
-    order: std::collections::VecDeque<T>,
-    cap: usize,
-}
-
-impl<T: std::hash::Hash + Eq + Clone> BoundedSet<T> {
-    pub(crate) fn new(cap: usize) -> Self {
-        Self {
-            set: std::collections::HashSet::new(),
-            order: std::collections::VecDeque::new(),
-            cap,
-        }
-    }
-
-    /// Insert `v`; return `true` the first time it's seen, `false` if already
-    /// present. Evicts the oldest entry once over capacity.
-    pub(crate) fn insert(&mut self, v: T) -> bool {
-        if !self.set.insert(v.clone()) {
-            return false;
-        }
-        self.order.push_back(v);
-        while self.order.len() > self.cap {
-            if let Some(old) = self.order.pop_front() {
-                self.set.remove(&old);
-            }
-        }
-        true
-    }
-
-    pub(crate) fn contains(&self, v: &T) -> bool {
-        self.set.contains(v)
-    }
-}
-
 #[derive(Clone)]
 pub struct CollectionService {
     /// Durable fact layer (epic tsk12): coverage/test/analysis producers
@@ -414,10 +368,18 @@ pub struct CollectionService {
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
     /// same answers as the engine's resolver (both are pure over the same DB).
     metric_visibility: Arc<crate::metric_visibility::VisibilityResolver>,
-    /// Efforts already nudged about a report-less test run. In-memory:
-    /// ephemeral guidance that shouldn't be persisted or survive a restart.
-    /// Bounded (see [`BoundedSet`]) so it can't leak in a long-lived daemon.
-    nudged_efforts: Arc<std::sync::Mutex<BoundedSet<EffortId>>>,
+    /// Validates the `test.*` events a capture logs with it.
+    event_schemas: Arc<oxplow_domain::EventSchemaRegistry>,
+}
+
+/// The `agent.tool.finished` event a collection reacts to (P3.6): its id
+/// keys every capture and nudge the reaction writes, so a redelivered
+/// event records nothing twice, and its anchors (turn, and the effort open
+/// when the command ran) carry into what it records.
+#[derive(Debug, Clone)]
+pub struct RunCause {
+    pub event_id: String,
+    pub anchors: oxplow_domain::Anchors,
 }
 
 impl CollectionService {
@@ -453,8 +415,14 @@ impl CollectionService {
             events,
             attribution,
             metric_visibility,
-            nudged_efforts: Arc::new(std::sync::Mutex::new(BoundedSet::new(NUDGE_DEDUP_CAP))),
+            event_schemas: Arc::new(oxplow_domain::EventSchemaRegistry::core()),
         }
+    }
+
+    /// The registry the `test.*` events are validated against.
+    pub fn with_event_schemas(mut self, schemas: Arc<oxplow_domain::EventSchemaRegistry>) -> Self {
+        self.event_schemas = schemas;
+        self
     }
 
     /// The program approvals project exec plugins are checked against.
@@ -516,6 +484,37 @@ impl CollectionService {
         report: Option<&oxplow_coverage::TestReport>,
         task: Option<TaskId>,
     ) -> Result<Option<i64>, DomainError> {
+        self.record_test_run_caused(
+            thread,
+            command,
+            exit_code,
+            (duration_ms, passed, failed, total),
+            provenance,
+            source,
+            report,
+            task,
+            None,
+        )
+        .await
+    }
+
+    /// [`Self::record_test_run`] for a run the collection reactor saw
+    /// (`cause`): the capture is keyed by the event, so a redelivery records
+    /// nothing new, and the effort the command ran in owns it. Every run
+    /// logs `test.run.recorded` in the capture's transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_test_run_caused(
+        &self,
+        thread: &ThreadId,
+        command: &str,
+        exit_code: Option<i64>,
+        (duration_ms, passed, failed, total): (Option<i64>, Option<i64>, Option<i64>, Option<i64>),
+        provenance: &str,
+        source: &str,
+        report: Option<&oxplow_coverage::TestReport>,
+        task: Option<TaskId>,
+        cause: Option<&RunCause>,
+    ) -> Result<Option<i64>, DomainError> {
         // OBSERVE: record the run regardless of effort; attribution is separate
         // (tsk263). We only need the stream to record into the substrate.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
@@ -568,7 +567,7 @@ impl CollectionService {
         // (so `captures_for_effort` attributes it, tsk37) and to claim the run in
         // the ledger at the tail. Same resolution the auto-claim uses.
         let owning = self
-            .resolve_owning_effort_for_command(thread, task, Some(command))
+            .resolve_owner(thread, task, anchored_effort(cause), Some(command))
             .await;
         let owning_val = owning.as_ref().map(|e| e.id.value());
 
@@ -725,7 +724,27 @@ impl CollectionService {
                     "test-detail",
                     &serde_json::Value::Object(payload.clone()),
                 );
-                let id = self.facts.record_facts(capture, facts).await?;
+                capture.idempotency_key = cause.map(|c| format!("test-run:{}", c.event_id));
+                let log = self.test_run_event(
+                    thread,
+                    stream_val,
+                    owning_val,
+                    cause,
+                    oxplow_domain::events::schema::TestRunRecordedV1 {
+                        run: String::new(), // filled with the capture id
+                        command: command.to_string(),
+                        exit_code,
+                        passed: passed.map(|v| v.max(0) as u64),
+                        failed: failed.map(|v| v.max(0) as u64),
+                        skipped: skipped.map(|v| v.max(0) as u64),
+                        report_parsed: report.is_some(),
+                        source: source.to_string(),
+                    },
+                );
+                let id = self
+                    .facts
+                    .record_facts_logged(capture, facts, Some(log))
+                    .await?;
                 Ok(Some(id))
             }
             .await;
@@ -754,39 +773,57 @@ impl CollectionService {
         Ok(capture_id)
     }
 
-    /// Attribute a just-recorded run (`run:<id>`) to an effort via the unified
-    /// `"run"` ledger (tsk269), riding only oxplow's MCP contract + effort state,
-    /// never any agent internals.
-    ///
-    /// Naming a `task` is **EXACT-or-nothing** (tsk271): resolve that task's open
-    /// effort via `find_open_for_task` and claim the run for it, even under
-    /// concurrency — a dispatched sub-agent self-attributes by naming its own
-    /// task, with oxplow never seeing "which sub-agent". When the named task has
-    /// NO open effort, the run is **left unclaimed** — it is NOT auto-attributed
-    /// to whatever single effort happens to be open, since that effort belongs to
-    /// a different task and claiming it would be a *wrong-exact* mis-attribution
-    /// (the design otherwise guarantees "less exact, never wrong-exact"). An
-    /// UNNAMED run uses the AUTO optimization — claim only when exactly one effort
-    /// is open (`find_single_open_for_thread`). Either way the unclaimed case
-    /// defers to the close reconcile + window-dominance + the agent's claim, and
-    /// the run is always recorded (observe-always), never dropped.
-    ///
-    /// Returns the effort it attributed to (for a panel refresh). Best-effort: a
-    /// ledger write error never fails the host path.
-    async fn auto_attribute_run(
+    /// The `test.run.recorded` a run capture logs with it: anchored to the
+    /// cause's turn and effort when the reactor saw the command, else to the
+    /// thread, its stream and the owning effort.
+    fn test_run_event(
         &self,
         thread: &ThreadId,
-        run_id: i64,
-        task: Option<TaskId>,
-        command: Option<&str>,
-    ) -> Option<Effort> {
-        let attribute_to = self
-            .resolve_owning_effort_for_command(thread, task, command)
-            .await;
-        if let Some(effort) = attribute_to.as_ref() {
-            self.claim_run(effort, run_id).await;
+        stream_val: i64,
+        owning: Option<i64>,
+        cause: Option<&RunCause>,
+        payload: oxplow_domain::events::schema::TestRunRecordedV1,
+    ) -> oxplow_db::fact_store::CaptureEvent {
+        use oxplow_domain::events::schema::TestRunRecorded;
+        let anchors = match cause {
+            Some(c) => oxplow_domain::Anchors {
+                effort_id: owning.map(EffortId::new).or(c.anchors.effort_id),
+                ..c.anchors.clone()
+            },
+            None => oxplow_domain::Anchors {
+                stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
+                thread_id: Some(*thread),
+                effort_id: owning.map(EffortId::new),
+                ..oxplow_domain::Anchors::default()
+            },
+        };
+        let (cause_id, dedupe) = match cause {
+            Some(c) => (
+                Some(oxplow_domain::EventId(c.event_id.clone())),
+                Some(format!("test-run:{}", c.event_id)),
+            ),
+            None => (None, None),
+        };
+        oxplow_db::fact_store::CaptureEvent {
+            schemas: self.event_schemas.clone(),
+            build: Box::new(move |capture_id| {
+                let run = format!("run:{capture_id}");
+                let env = oxplow_domain::Envelope::typed::<TestRunRecorded>(
+                    oxplow_domain::refs::build::system_source("collection"),
+                    &oxplow_domain::events::schema::TestRunRecordedV1 {
+                        run: run.clone(),
+                        ..payload.clone()
+                    },
+                )
+                .with_anchors(anchors.clone())
+                .with_subject([run])
+                .with_dedupe_key_opt(dedupe.clone());
+                match &cause_id {
+                    Some(c) => env.with_cause(c.clone()),
+                    None => env,
+                }
+            }),
         }
-        attribute_to
     }
 
     /// The effort a just-produced run/capture belongs to, by the SAME
@@ -826,6 +863,28 @@ impl CollectionService {
         task: Option<TaskId>,
         command: Option<&str>,
     ) -> Option<Effort> {
+        self.resolve_owner(thread, task, None, command).await
+    }
+
+    /// [`Self::resolve_owning_effort_for_command`] with the effort the
+    /// command ran in (`anchored`, the tool event's effort anchor — the
+    /// thread's single open effort then). It ranks after a named task and
+    /// before the thread's open efforts now, so a run the reactor records
+    /// after the effort closed still belongs to it.
+    async fn resolve_owner(
+        &self,
+        thread: &ThreadId,
+        task: Option<TaskId>,
+        anchored: Option<EffortId>,
+        command: Option<&str>,
+    ) -> Option<Effort> {
+        if task.is_none() {
+            if let Some(id) = anchored {
+                if let Ok(Some(e)) = self.efforts.get_effort(&id).await {
+                    return Some(e);
+                }
+            }
+        }
         if let Some(tid) = task {
             return self
                 .efforts
@@ -920,8 +979,14 @@ impl CollectionService {
             }
             Err(e) => return Ok(CoverageIngest::ParseError(e.to_string())),
         };
-        self.observe_coverage(thread, &stream_id, &report, &coverage_source(collector))
-            .await
+        self.observe_coverage(
+            thread,
+            &stream_id,
+            &report,
+            &coverage_source(collector),
+            None,
+        )
+        .await
     }
 
     /// Ingest a SINGLE analysis report (the explicit MCP path) — the on-demand
@@ -1201,6 +1266,7 @@ impl CollectionService {
         stream_id: &str,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
+        cause: Option<&RunCause>,
     ) -> Result<CoverageIngest, DomainError> {
         // Stop-collecting gate (tsk31): with the coverage metric disabled, no
         // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
@@ -1238,7 +1304,9 @@ impl CollectionService {
         };
         // The owning effort stamps the coverage capture AND receives the ledger
         // claim below — the capture IS the run now (T-E1, tsk48).
-        let attribute_to = self.resolve_owning_effort(thread, None).await;
+        let attribute_to = self
+            .resolve_owner(thread, None, anchored_effort(cause), None)
+            .await;
         let owning_val = attribute_to.as_ref().map(|e| e.id.value());
 
         // The run CAPTURE (epic tsk12): one fact on `oxplow.coverage` per file,
@@ -1319,7 +1387,12 @@ impl CollectionService {
                     snapshot_id,
                     capture.detail_json.as_deref(),
                 );
-                let id = self.facts.record_facts(capture, facts).await?;
+                let log =
+                    self.coverage_event(thread, stream_val, owning_val, cause, abs_pct, source);
+                let id = self
+                    .facts
+                    .record_facts_logged(capture, facts, Some(log))
+                    .await?;
                 Ok(Some(id))
             }
             .await;
@@ -1428,12 +1501,67 @@ impl CollectionService {
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
+        cause: Option<&RunCause>,
     ) -> Result<(), DomainError> {
         if let Some(stream_id) = self.stream_id_for(thread).await? {
-            self.observe_coverage(thread, &stream_id, report, source)
+            self.observe_coverage(thread, &stream_id, report, source, cause)
                 .await?;
         }
         Ok(())
+    }
+
+    /// The `test.coverage.recorded` a coverage capture logs with it.
+    fn coverage_event(
+        &self,
+        thread: &ThreadId,
+        stream_val: i64,
+        owning: Option<i64>,
+        cause: Option<&RunCause>,
+        lines_pct: f64,
+        source: &str,
+    ) -> oxplow_db::fact_store::CaptureEvent {
+        use oxplow_domain::events::schema::{TestCoverageRecorded, TestCoverageRecordedV1};
+        let anchors = match cause {
+            Some(c) => oxplow_domain::Anchors {
+                effort_id: owning.map(EffortId::new).or(c.anchors.effort_id),
+                ..c.anchors.clone()
+            },
+            None => oxplow_domain::Anchors {
+                stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
+                thread_id: Some(*thread),
+                effort_id: owning.map(EffortId::new),
+                ..oxplow_domain::Anchors::default()
+            },
+        };
+        let subject: Vec<String> = anchors
+            .effort_id
+            .map(oxplow_domain::refs::build::effort_ref)
+            .into_iter()
+            .collect();
+        let cause_id = cause.map(|c| oxplow_domain::EventId(c.event_id.clone()));
+        let dedupe = cause.map(|c| format!("coverage:{}", c.event_id));
+        let source = source.to_string();
+        oxplow_db::fact_store::CaptureEvent {
+            schemas: self.event_schemas.clone(),
+            build: Box::new(move |capture_id| {
+                let env = oxplow_domain::Envelope::typed::<TestCoverageRecorded>(
+                    oxplow_domain::refs::build::system_source("collection"),
+                    &TestCoverageRecordedV1 {
+                        capture: capture_id,
+                        lines_pct: Some(lines_pct),
+                        branches_pct: None,
+                        source: source.clone(),
+                    },
+                )
+                .with_anchors(anchors.clone())
+                .with_subject(subject.clone())
+                .with_dedupe_key_opt(dedupe.clone());
+                match &cause_id {
+                    Some(c) => env.with_cause(c.clone()),
+                    None => env,
+                }
+            }),
+        }
     }
 
     /// The coverage leg with one retry (tsk79). The detached collection task
@@ -1447,16 +1575,23 @@ impl CollectionService {
         thread: &ThreadId,
         report: &oxplow_coverage::CoverageReport,
         source: &str,
+        cause: Option<&RunCause>,
     ) {
-        let first = match self.try_observe_coverage(thread, report, source).await {
+        let first = match self
+            .try_observe_coverage(thread, report, source, cause)
+            .await
+        {
             Ok(()) => return,
             Err(e) => e,
         };
         tracing::warn!(error = %first, "coverage ride-along failed; retrying once");
         tokio::time::sleep(COVERAGE_RETRY_DELAY).await;
-        if let Err(e) = self.try_observe_coverage(thread, report, source).await {
+        if let Err(e) = self
+            .try_observe_coverage(thread, report, source, cause)
+            .await
+        {
             tracing::warn!(error = %e, "coverage ride-along failed after retry");
-            self.record_coverage_failure(thread, &format!("{first}; retry: {e}"))
+            self.record_coverage_failure(thread, &format!("{first}; retry: {e}"), cause)
                 .await;
         }
     }
@@ -1465,7 +1600,12 @@ impl CollectionService {
     /// `status = failed` coverage capture carrying the error — the same
     /// convention as gauge failures — so the miss is queryable in the
     /// substrate instead of living only in a tty warn. Best-effort.
-    async fn record_coverage_failure(&self, thread: &ThreadId, error: &str) {
+    async fn record_coverage_failure(
+        &self,
+        thread: &ThreadId,
+        error: &str,
+        cause: Option<&RunCause>,
+    ) {
         let stream_val = match self.stream_id_for(thread).await {
             Ok(Some(sid)) => match oxplow_domain::StreamId::try_from_str(&sid) {
                 Some(s) => s.value(),
@@ -1479,6 +1619,7 @@ impl CollectionService {
         capture.error = Some(error.to_string());
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("on-report".into());
+        capture.idempotency_key = cause.map(|c| format!("coverage-failure:{}", c.event_id));
         if let Err(e) = self.facts.record_facts(capture, Vec::new()).await {
             tracing::warn!(error = %e, "coverage failure record write failed");
         }
@@ -1613,6 +1754,21 @@ impl CollectionService {
         thread: &ThreadId,
         payload_json: &str,
     ) -> Result<Option<String>, DomainError> {
+        self.on_post_tool_use_caused(thread, payload_json, None)
+            .await
+    }
+
+    /// [`Self::on_post_tool_use`] as the collection reactor runs it (P3.6):
+    /// `cause` is the `agent.tool.finished` event — every capture and nudge
+    /// is keyed by it and anchored to its turn, and the effort the command
+    /// ran in owns what it records. The nudge is persisted (the hook
+    /// response picks it up); the returned text is for callers that want it.
+    pub async fn on_post_tool_use_caused(
+        &self,
+        thread: &ThreadId,
+        payload_json: &str,
+        cause: Option<&RunCause>,
+    ) -> Result<Option<String>, DomainError> {
         let Some(bash) = parse_bash_post_tool(payload_json) else {
             return Ok(None);
         };
@@ -1637,7 +1793,10 @@ impl CollectionService {
         // precondition for recording. The single open effort (if any) is resolved
         // here only for the effort-RELATIVE advisories (coverage, nudges),
         // which legitimately no-op when ambiguous.
-        let effort_opt = self.efforts.find_single_open_for_thread(thread).await?;
+        let effort_opt = match anchored_effort(cause) {
+            Some(id) => self.efforts.get_effort(&id).await?,
+            None => self.efforts.find_single_open_for_thread(thread).await?,
+        };
 
         // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
         // which never says "commit" — may carry "This reverts commit <sha>"
@@ -1674,7 +1833,14 @@ impl CollectionService {
             // the legs after it — the test-run + coverage recording below is
             // independent of whether this analysis write landed.
             if let Err(e) = self
-                .record_static_analysis(thread, &bash.command, report.as_ref(), &analyzers, &source)
+                .record_static_analysis_caused(
+                    thread,
+                    &bash.command,
+                    report.as_ref(),
+                    &analyzers,
+                    &source,
+                    cause,
+                )
                 .await
             {
                 tracing::warn!(error = %e, "analysis ride-along failed");
@@ -1700,21 +1866,20 @@ impl CollectionService {
         // Leg isolation (tsk79): a failed test-run write still lets the
         // coverage below record — the report on disk is real either way.
         if let Err(e) = self
-            .record_test_run(
+            .record_test_run_caused(
                 thread,
                 &bash.command,
                 bash.exit_code,
-                None,
-                None,
-                None,
-                None,
+                (None, None, None, None),
                 "observed",
                 &source,
                 report.as_ref(),
                 // Exact attribution when the agent prefixed `OXPLOW_TASK=<id>`
-                // (find_open_for_task — survives concurrent efforts); otherwise the
-                // single-open auto rule attributes it (tsk265/tsk271).
+                // (find_open_for_task — survives concurrent efforts); then the
+                // effort the command ran in; otherwise the single-open auto
+                // rule attributes it (tsk265/tsk271).
                 parse_task_token(&bash.command),
+                cause,
             )
             .await
         {
@@ -1730,10 +1895,10 @@ impl CollectionService {
         let (coverage, coverage_errors) = self.merge_fresh_coverage(floor, &cfg, &registry);
         if let Some((merged, source)) = &coverage {
             // The label says whether a lower-trust exec plugin produced it.
-            self.coverage_ride_along_with_retry(thread, merged, source)
+            self.coverage_ride_along_with_retry(thread, merged, source, cause)
                 .await;
         } else if !coverage_errors.is_empty() {
-            self.record_coverage_failure(thread, &coverage_errors.join("; "))
+            self.record_coverage_failure(thread, &coverage_errors.join("; "), cause)
                 .await;
         }
         // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
@@ -1750,7 +1915,7 @@ impl CollectionService {
             // the agent to ignore the nudge.
             if is_test && parse_task_token(&bash.command).is_none() {
                 let resolved = self
-                    .resolve_owning_effort_for_command(thread, None, Some(&bash.command))
+                    .resolve_owner(thread, None, anchored_effort(cause), Some(&bash.command))
                     .await;
                 if resolved.is_none() {
                     let open = self
@@ -1760,8 +1925,15 @@ impl CollectionService {
                         .unwrap_or_default();
                     if open.len() > 1 {
                         let msg = unattributed_run_message(&bash.command, &open);
-                        self.persist_nudge(thread, None, "unattributed-run", &msg, &bash.command)
-                            .await;
+                        self.persist_nudge(
+                            thread,
+                            None,
+                            "unattributed-run",
+                            &msg,
+                            &bash.command,
+                            cause,
+                        )
+                        .await;
                         return Ok(Some(msg));
                     }
                 }
@@ -1776,7 +1948,7 @@ impl CollectionService {
         // report", never on which tool ran; the command it names comes
         // from the project's own config.
         let produced_report = report.is_some() || coverage.is_some();
-        if !produced_report && self.mark_nudged(&effort.id) {
+        if !produced_report && self.mark_nudged(&effort.id).await {
             let msg = report_nudge_message(&cfg, &bash.command);
             self.persist_nudge(
                 thread,
@@ -1784,6 +1956,7 @@ impl CollectionService {
                 "report-less-run",
                 &msg,
                 &bash.command,
+                cause,
             )
             .await;
             return Ok(Some(msg));
@@ -1803,6 +1976,7 @@ impl CollectionService {
         kind: &str,
         message: &str,
         trigger: &str,
+        cause: Option<&RunCause>,
     ) {
         let new = NewAgentNudge {
             thread_id: thread.to_string(),
@@ -1810,10 +1984,13 @@ impl CollectionService {
             kind: kind.to_string(),
             message: message.to_string(),
             trigger: Some(trigger.to_string()),
-            ..Default::default()
+            turn_id: cause.and_then(|c| c.anchors.turn_id),
+            cause: cause.map(|c| c.event_id.clone()),
         };
         match self.nudges.record(new).await {
-            Ok(_) => {
+            // Already fired for this cause (a redelivered event).
+            Ok(None) => {}
+            Ok(Some(_)) => {
                 self.events.emit(OxplowEvent::AgentNudgesChanged {
                     thread_id: *thread,
                     effort_id: effort.map(|e| e.id.to_string()),
@@ -1889,15 +2066,15 @@ impl CollectionService {
         }
     }
 
-    /// Record that `effort` has been nudged. Returns `true` the first
-    /// time (caller should nudge), `false` afterwards.
-    fn mark_nudged(&self, effort: &EffortId) -> bool {
-        match self.nudged_efforts.lock() {
-            Ok(mut set) => set.insert(*effort),
-            // Poisoned lock: don't nudge rather than risk a panic in a
-            // best-effort hook.
-            Err(_) => false,
-        }
+    /// Record that `effort` has been nudged about a report-less run.
+    /// `true` the first time (caller should nudge), `false` afterwards —
+    /// durably (`effort_once_mark`), so a restart doesn't repeat it. A
+    /// failed write reads as "already nudged": don't nag on an error.
+    async fn mark_nudged(&self, effort: &EffortId) -> bool {
+        self.nudges
+            .claim_once(effort.value(), "report-less-run")
+            .await
+            .unwrap_or(false)
     }
 
     /// Merge every configured test report that exists and is fresher than
@@ -2109,6 +2286,22 @@ impl CollectionService {
         analyzers: &[String],
         source: &str,
     ) -> Result<Option<i64>, DomainError> {
+        self.record_static_analysis_caused(thread, command, report, analyzers, source, None)
+            .await
+    }
+
+    /// [`Self::record_static_analysis`] for a run the reactor saw: the effort
+    /// the command ran in owns it. (A redelivery is already safe: only a
+    /// parsed report writes a capture, keyed by its content.)
+    async fn record_static_analysis_caused(
+        &self,
+        thread: &ThreadId,
+        command: &str,
+        report: Option<&oxplow_coverage::AnalysisReport>,
+        analyzers: &[String],
+        source: &str,
+        cause: Option<&RunCause>,
+    ) -> Result<Option<i64>, DomainError> {
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
@@ -2200,8 +2393,13 @@ impl CollectionService {
         // open effort if any).
         let attribute_to = match run_id {
             Some(rid) => {
-                self.auto_attribute_run(thread, rid, None, Some(command))
-                    .await
+                let owner = self
+                    .resolve_owner(thread, None, anchored_effort(cause), Some(command))
+                    .await;
+                if let Some(effort) = owner.as_ref() {
+                    self.claim_run(effort, rid).await;
+                }
+                owner
             }
             None => effort,
         };
@@ -3144,6 +3342,12 @@ fn coverage_abs_payload(
     ))
 }
 
+/// The effort a tool event was anchored to (the thread's single open effort
+/// when the command ran).
+fn anchored_effort(cause: Option<&RunCause>) -> Option<EffortId> {
+    cause.and_then(|c| c.anchors.effort_id)
+}
+
 /// The freshness floor: reports touched at/before this are stale. `now` minus
 /// the window. (Passed where the effort-start `Timestamp` used to be.)
 fn report_fresh_floor() -> oxplow_domain::Timestamp {
@@ -3298,21 +3502,6 @@ fn analysis_source(collector: &Collector) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bounded_set_dedups_and_evicts_oldest() {
-        let mut s = BoundedSet::new(2);
-        assert!(s.insert(1)); // new
-        assert!(!s.insert(1)); // already present
-        assert!(s.insert(2));
-        assert!(s.contains(&1) && s.contains(&2));
-        // Inserting a third evicts the oldest (1).
-        assert!(s.insert(3));
-        assert!(!s.contains(&1), "oldest entry evicted past cap");
-        assert!(s.contains(&2) && s.contains(&3));
-        // 1 is forgotten, so it inserts fresh again (re-arms).
-        assert!(s.insert(1));
-    }
 
     #[test]
     fn threshold_state_respects_direction() {
@@ -6564,10 +6753,10 @@ mod tests {
             // only set once the test asks for it (i.e. nudge didn't fire).
             let nudged = h
                 .service
-                .nudged_efforts
-                .lock()
-                .unwrap()
-                .contains(&EffortId::new(901));
+                .nudges
+                .has_fired(901, "report-less-run")
+                .await
+                .unwrap();
             assert!(
                 !nudged,
                 "nudge should not have fired when a report was produced"

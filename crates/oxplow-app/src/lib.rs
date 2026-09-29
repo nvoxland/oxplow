@@ -67,6 +67,7 @@ pub mod otlp_tokens;
 pub mod output_activity;
 pub mod page_ref_backfill;
 pub mod page_ref_consumers;
+pub mod post_tool_reactors;
 pub mod producer_metrics;
 pub mod reasoning;
 pub mod recovery;
@@ -541,6 +542,20 @@ impl Services {
     /// The tree a thread works in: its stream's worktree (a sibling
     /// directory for a worktree stream), else the project dir. What its
     /// tool paths are relative to (tsk350 policy, tsk386 claims).
+    /// What running a thread's advisories needs.
+    pub fn advisory_deps(&self) -> advisories::AdvisoryDeps {
+        advisories::AdvisoryDeps {
+            advisories: self.advisories.clone(),
+            effort_store: self.effort_store.clone(),
+            thread_store: self.thread_store.clone(),
+            git: self.git.clone(),
+            approvals: self.approvals.clone(),
+            extension_catalog: self.extension_catalog.clone(),
+            db: self.db.clone(),
+            collection: self.collection.clone(),
+        }
+    }
+
     pub async fn thread_worktree(&self, thread: &oxplow_domain::ThreadId) -> PathBuf {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let project = self.layout.project_dir.clone();
@@ -904,7 +919,8 @@ impl Services {
             event_bus.clone(),
             attribution_store.clone(),
         )
-        .with_approvals(approvals.clone());
+        .with_approvals(approvals.clone())
+        .with_event_schemas(event_schemas.clone());
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
@@ -914,6 +930,25 @@ impl Services {
             event_bus.clone(),
         );
 
+        let advisories = Arc::new(advisories::AdvisoryRunner::new((*nudge_store).clone()));
+        // Collection and post-tool advisories react to finished tool calls
+        // on the pump (P3.6).
+        event_pump.register_async(Arc::new(post_tool_reactors::CollectionConsumer {
+            collection: collection.clone(),
+            db: db.clone(),
+        }));
+        event_pump.register_async(Arc::new(post_tool_reactors::PostToolAdvisories {
+            deps: advisories::AdvisoryDeps {
+                advisories: advisories.clone(),
+                effort_store: effort_store.clone(),
+                thread_store: thread_store.clone(),
+                git: git.clone(),
+                approvals: approvals.clone(),
+                extension_catalog: extension_catalog.clone(),
+                db: db.clone(),
+                collection: collection.clone(),
+            },
+        }));
         Ok(Self {
             config: config_arc,
             db,
@@ -958,7 +993,7 @@ impl Services {
             ai,
             secrets: ai_env.secrets,
             effort_evidence_store,
-            advisories: Arc::new(advisories::AdvisoryRunner::default()),
+            advisories,
             change_store,
             change_analyzer: Arc::new(change_analysis::ChangeAnalyzer::default()),
             collection,

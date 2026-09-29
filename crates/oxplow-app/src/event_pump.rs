@@ -165,10 +165,12 @@ impl EventPump {
             .into_iter()
             .filter(|s| consumers.contains(&s.consumer.name()))
             .collect();
+        // Side by side: the wait is the slowest consumer's, not the sum.
         let run = tokio::spawn(async move {
+            let runs = slots.iter().map(|slot| pump.run_slot(slot));
             let mut report = PumpReport::default();
-            for slot in slots {
-                report.add(pump.run_slot(&slot).await?);
+            for ran in futures::future::join_all(runs).await {
+                report.add(ran?);
             }
             Ok::<_, DomainError>(report)
         });
@@ -837,6 +839,38 @@ mod tests {
                 .await
         );
         assert_eq!(rec.seen(), vec!["a"]);
+    }
+
+    /// A consumer that takes a while over each event.
+    struct Slow(&'static str);
+    #[async_trait::async_trait]
+    impl AsyncEventConsumer for Slow {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn handles(&self, _: &str) -> bool {
+            true
+        }
+        async fn handle(&self, _: &StoredEvent) -> Result<(), DomainError> {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            Ok(())
+        }
+    }
+
+    /// P3.6 (tsk476): the consumers a settle names catch up side by side —
+    /// the hook's wait is the slowest one's, not their sum.
+    #[tokio::test]
+    async fn settle_runs_the_named_consumers_concurrently() {
+        let (db, store) = setup().await;
+        let pump = Arc::new(EventPump::new(db.clone(), store.clone(), Vec::new()));
+        pump.register_async(Arc::new(Slow("slow_a")));
+        pump.register_async(Arc::new(Slow("slow_b")));
+        store.append(config_changed("a")).await.unwrap();
+        assert!(
+            pump.settle(&["slow_a", "slow_b"], std::time::Duration::from_millis(700))
+                .await,
+            "400 ms each, side by side, fits in 700 ms"
+        );
     }
 
     #[tokio::test]

@@ -180,7 +180,6 @@ impl AcpHost for ServicesAcpHost {
     ) -> Option<String> {
         let svc = self.svc.upgrade()?;
         let body = event.to_payload();
-        let payload_json = body.to_string();
         let env = self.envelope(
             HookKind::PostToolUse,
             thread,
@@ -190,7 +189,7 @@ impl AcpHost for ServicesAcpHost {
         );
         self.ingest(&svc, env).await;
         svc.agent_activity
-            .on_post_tool(&svc, thread, Some(session_id), &body, &payload_json)
+            .on_post_tool(&svc, thread, Some(session_id), &body)
             .await
     }
 

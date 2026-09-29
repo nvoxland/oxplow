@@ -6,15 +6,10 @@
 //! (`v_agent_nudge`). See `.context/extensions.md` → "Advisories".
 
 use std::path::Path;
-use std::sync::Mutex;
 
-use oxplow_db::{SemanticLayer, SqlCell};
+use oxplow_db::{SemanticLayer, SqlCell, SqliteAgentNudgeStore};
 
-use crate::collection::BoundedSet;
 use crate::extensions::{AdvisoryOn, AdvisoryOncePer, Extension};
-
-/// How many fired (effort, advisory[, key]) marks to remember.
-const FIRED_CAP: usize = 10_000;
 
 /// One advisory that fired: its id (`<extension>/<advisory>`) and the text
 /// for the agent (heading, then one message per line).
@@ -24,21 +19,17 @@ pub struct AdvisoryHit {
     pub text: String,
 }
 
-/// Runs advisories and remembers which have fired, in memory: like the
-/// nudges it replaces, a restart may repeat one.
+/// Runs advisories and remembers which have fired — durably, in
+/// `effort_once_mark` (P3.6), so a restart doesn't repeat one.
 pub struct AdvisoryRunner {
-    fired: Mutex<BoundedSet<(i64, String)>>,
-}
-
-impl Default for AdvisoryRunner {
-    fn default() -> Self {
-        Self {
-            fired: Mutex::new(BoundedSet::new(FIRED_CAP)),
-        }
-    }
+    marks: SqliteAgentNudgeStore,
 }
 
 impl AdvisoryRunner {
+    pub fn new(marks: SqliteAgentNudgeStore) -> Self {
+        Self { marks }
+    }
+
     /// Run every `on` advisory of the enabled `extensions` for `effort_id`
     /// and return the ones that fire. A failing query is logged and skipped.
     pub async fn run(
@@ -55,7 +46,7 @@ impl AdvisoryRunner {
         for ext in extensions.iter().filter(|e| e.enabled) {
             for a in ext.advisories.iter().filter(|a| a.on == on) {
                 let id = format!("{}/{}", ext.name, a.id);
-                if a.once_per == AdvisoryOncePer::Effort && self.has_fired(effort_id, &id) {
+                if a.once_per == AdvisoryOncePer::Effort && self.has_fired(effort_id, &id).await {
                     continue;
                 }
                 let result = match layer
@@ -87,7 +78,7 @@ impl AdvisoryRunner {
                     if a.once_per == AdvisoryOncePer::Row {
                         let key = key_i.map(|i| cell_text(&row[i])).unwrap_or_default();
                         let mark = format!("{id}#{key}");
-                        if self.has_fired(effort_id, &mark) || marks.contains(&mark) {
+                        if self.has_fired(effort_id, &mark).await || marks.contains(&mark) {
                             continue;
                         }
                         marks.push(mark);
@@ -108,35 +99,52 @@ impl AdvisoryRunner {
                 });
             }
         }
-        if let Ok(mut fired) = self.fired.lock() {
-            for m in marks {
-                fired.insert((effort_id, m));
+        for m in marks {
+            if let Err(error) = self.marks.claim_once(effort_id, &m).await {
+                tracing::warn!(mark = %m, %error, "recording an advisory mark failed");
             }
         }
         hits
     }
 
-    fn has_fired(&self, effort_id: i64, mark: &str) -> bool {
-        match self.fired.lock() {
-            Ok(set) => set.contains(&(effort_id, mark.to_string())),
-            // A poisoned lock reads as "already fired": suppress rather than nag.
-            Err(_) => true,
-        }
+    /// A failed read reads as "already fired": suppress rather than nag.
+    async fn has_fired(&self, effort_id: i64, mark: &str) -> bool {
+        self.marks.has_fired(effort_id, mark).await.unwrap_or(true)
     }
 }
 
+/// What running a thread's advisories needs (a pump reactor holds its own
+/// copy; `Services::advisory_deps` builds one).
+#[derive(Clone)]
+pub struct AdvisoryDeps {
+    pub advisories: std::sync::Arc<AdvisoryRunner>,
+    pub effort_store: std::sync::Arc<oxplow_db::SqliteEffortStore>,
+    pub thread_store: std::sync::Arc<oxplow_db::SqliteThreadStore>,
+    pub git: std::sync::Arc<crate::git_service::GitService>,
+    pub approvals: std::sync::Arc<crate::exec_consent::ApprovalStore>,
+    pub extension_catalog: std::sync::Arc<crate::extension_catalog::ExtensionCatalog>,
+    pub db: oxplow_db::Database,
+    pub collection: crate::collection::CollectionService,
+}
+
 /// Run the `on` advisories for `thread`'s open effort (only when exactly one
-/// is open: under parallel sub-agents we can't say whose effort it is),
-/// reading extensions from the thread's stream worktree. Post-tool-use hits
-/// are recorded as nudges.
+/// is open: under parallel sub-agents we can't say whose effort it is) —
+/// or, for a tool event (`cause`), the effort it was anchored to — reading
+/// extensions from the thread's stream worktree. Post-tool-use hits are
+/// recorded as nudges, keyed by the cause.
 pub async fn for_thread(
-    svc: &crate::Services,
+    svc: &AdvisoryDeps,
     thread: &oxplow_domain::ThreadId,
     on: AdvisoryOn,
+    cause: Option<&crate::collection::RunCause>,
 ) -> Vec<AdvisoryHit> {
     use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::ThreadStore as _;
-    let Ok(Some(effort)) = svc.effort_store.find_single_open_for_thread(thread).await else {
+    let effort = match cause.and_then(|c| c.anchors.effort_id) {
+        Some(id) => svc.effort_store.get_effort(&id).await,
+        None => svc.effort_store.find_single_open_for_thread(thread).await,
+    };
+    let Ok(Some(effort)) = effort else {
         return Vec::new();
     };
     let stream_id = match svc.thread_store.get(thread).await {
@@ -153,7 +161,7 @@ pub async fn for_thread(
     if on == AdvisoryOn::PostToolUse {
         for hit in &hits {
             svc.collection
-                .persist_nudge(thread, Some(&effort), &hit.id, &hit.text, "advisory")
+                .persist_nudge(thread, Some(&effort), &hit.id, &hit.text, "advisory", cause)
                 .await;
         }
     }
@@ -216,20 +224,42 @@ mod tests {
         }
     }
 
-    fn layer() -> SemanticLayer {
-        SemanticLayer::new(oxplow_db::Database::in_memory())
+    /// A layer and a runner over one database holding efforts 1–5 (a
+    /// once-mark references its effort).
+    async fn setup() -> (SemanticLayer, AdvisoryRunner) {
+        let db = oxplow_db::Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                   VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
+                 INSERT INTO threads (id, stream_id, title, status, created_at, updated_at)
+                   VALUES (1, 1, 't', 'active', '2026-01-01', '2026-01-01');
+                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES
+                   (1, 'work_item:linear:A-1', 1, '2026-01-01', '2026-01-01'),
+                   (2, 'work_item:linear:A-2', 1, '2026-01-01', '2026-01-01'),
+                   (3, 'work_item:linear:A-3', 1, '2026-01-01', '2026-01-01'),
+                   (4, 'work_item:linear:A-4', 1, '2026-01-01', '2026-01-01'),
+                   (5, 'work_item:linear:A-5', 1, '2026-01-01', '2026-01-01');",
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        (
+            SemanticLayer::new(db.clone()),
+            AdvisoryRunner::new(SqliteAgentNudgeStore::new(db)),
+        )
     }
 
     #[tokio::test]
     async fn once_per_effort_fires_once_per_effort_and_only_with_rows() {
-        let runner = AdvisoryRunner::default();
+        let (l, runner) = setup().await;
         let e = vec![ext(vec![adv(
             "low",
             AdvisoryOn::PostToolUse,
             AdvisoryOncePer::Effort,
             "SELECT 'add tests (' || :effort_id || ')' AS message WHERE :effort_id <> 3",
         )])];
-        let l = layer();
         let run = |id: i64| runner.run(&l, &e, AdvisoryOn::PostToolUse, id);
         assert_eq!(
             run(1).await,
@@ -242,17 +272,20 @@ mod tests {
         assert!(run(3).await.is_empty(), "no rows, no hit");
         assert_eq!(run(2).await.len(), 1, "another effort fires again");
         assert!(
-            runner
-                .run(&layer(), &e, AdvisoryOn::Prompt, 5)
-                .await
-                .is_empty(),
+            runner.run(&l, &e, AdvisoryOn::Prompt, 5).await.is_empty(),
             "only advisories for this hook point run"
         );
+        // Durable: a runner over the same database after a restart agrees.
+        let again = AdvisoryRunner::new(runner.marks.clone());
+        assert!(again
+            .run(&l, &e, AdvisoryOn::PostToolUse, 1)
+            .await
+            .is_empty());
     }
 
     #[tokio::test]
     async fn once_per_row_fires_each_key_once_and_turn_always() {
-        let runner = AdvisoryRunner::default();
+        let (l, runner) = setup().await;
         let mut rows = adv(
             "cross",
             AdvisoryOn::Prompt,
@@ -267,7 +300,7 @@ mod tests {
             "SELECT '- x: 1 → 2' AS message",
         );
         let e = vec![ext(vec![rows, every])];
-        let first = runner.run(&layer(), &e, AdvisoryOn::Prompt, 1).await;
+        let first = runner.run(&l, &e, AdvisoryOn::Prompt, 1).await;
         assert_eq!(
             first,
             vec![
@@ -281,7 +314,7 @@ mod tests {
                 },
             ]
         );
-        let second = runner.run(&layer(), &e, AdvisoryOn::Prompt, 1).await;
+        let second = runner.run(&l, &e, AdvisoryOn::Prompt, 1).await;
         assert_eq!(
             second,
             vec![AdvisoryHit {
@@ -293,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn disabled_extensions_and_bad_queries_contribute_nothing() {
-        let runner = AdvisoryRunner::default();
+        let (l, runner) = setup().await;
         let mut off = ext(vec![adv(
             "a",
             AdvisoryOn::Prompt,
@@ -308,7 +341,7 @@ mod tests {
             "SELECT nope FROM nowhere",
         )]);
         assert!(runner
-            .run(&layer(), &[off, bad], AdvisoryOn::Prompt, 1)
+            .run(&l, &[off, bad], AdvisoryOn::Prompt, 1)
             .await
             .is_empty());
     }
@@ -325,9 +358,14 @@ mod tests {
         .unwrap();
         // A project extension's advisories are silent until a person
         // approves them (tsk352).
-        assert!(for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse)
-            .await
-            .is_empty());
+        assert!(for_thread(
+            &f.svc.advisory_deps(),
+            &f.thread,
+            AdvisoryOn::PostToolUse,
+            None
+        )
+        .await
+        .is_empty());
         let exts = crate::extensions::load_extensions(&f.svc.layout.project_dir);
         let program =
             crate::exec_consent::advisory_program(exts.iter().find(|e| e.name == "guide").unwrap());
@@ -335,7 +373,13 @@ mod tests {
             .approvals
             .approve(&program.key(), &program.hash(Path::new("")).unwrap())
             .unwrap();
-        let hits = for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse).await;
+        let hits = for_thread(
+            &f.svc.advisory_deps(),
+            &f.thread,
+            AdvisoryOn::PostToolUse,
+            None,
+        )
+        .await;
         assert_eq!(
             hits,
             vec![AdvisoryHit {
@@ -351,9 +395,11 @@ mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             serde_json::json!([["guide/hello", format!("effort {}", f.effort.value())]])
         );
-        assert!(for_thread(&f.svc, &f.thread, AdvisoryOn::Prompt)
-            .await
-            .is_empty());
+        assert!(
+            for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None)
+                .await
+                .is_empty()
+        );
     }
 
     fn delta(
@@ -409,7 +455,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let first = for_thread(&f.svc, &f.thread, AdvisoryOn::Prompt).await;
+        let first = for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None).await;
         assert_eq!(
             first,
             vec![
@@ -423,7 +469,7 @@ mod tests {
                 },
             ]
         );
-        let second = for_thread(&f.svc, &f.thread, AdvisoryOn::Prompt).await;
+        let second = for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None).await;
         assert_eq!(
             second.len(),
             1,
@@ -454,15 +500,26 @@ mod tests {
             .replace_observations(f.effort.value(), vec![obs(91.0)])
             .await
             .unwrap();
-        assert!(for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse)
-            .await
-            .is_empty());
+        assert!(for_thread(
+            &f.svc.advisory_deps(),
+            &f.thread,
+            AdvisoryOn::PostToolUse,
+            None
+        )
+        .await
+        .is_empty());
         f.svc
             .effort_evidence_store
             .replace_observations(f.effort.value(), vec![obs(42.4)])
             .await
             .unwrap();
-        let hits = for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse).await;
+        let hits = for_thread(
+            &f.svc.advisory_deps(),
+            &f.thread,
+            AdvisoryOn::PostToolUse,
+            None,
+        )
+        .await;
         assert_eq!(
             hits,
             vec![AdvisoryHit {
@@ -471,9 +528,14 @@ mod tests {
             }]
         );
         assert!(
-            for_thread(&f.svc, &f.thread, AdvisoryOn::PostToolUse)
-                .await
-                .is_empty(),
+            for_thread(
+                &f.svc.advisory_deps(),
+                &f.thread,
+                AdvisoryOn::PostToolUse,
+                None
+            )
+            .await
+            .is_empty(),
             "once per effort"
         );
     }

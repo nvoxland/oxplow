@@ -502,8 +502,9 @@ async fn handle_hook_inner(
     }
 
     // PostToolUse: record the call (wiki attribution, effort claim, tool
-    // call, collection) and hand back any context for the agent (the ROLE
-    // CHANGE banner after ExitPlanMode, else a collection nudge/advisory).
+    // call, collection — pump reactors on the event the ingest logged) and
+    // hand back any context for the agent (the ROLE CHANGE banner after
+    // ExitPlanMode, else the thread's undelivered nudges).
     if kind == HookKind::PostToolUse {
         if let (Some(thread_id), Some(body)) =
             (envelope_for_resume.thread_id.as_ref(), body_value.as_ref())
@@ -516,7 +517,6 @@ async fn handle_hook_inner(
                     thread_id,
                     envelope_for_resume.session_id.as_deref(),
                     body,
-                    &envelope_for_resume.payload_json,
                 )
                 .await
             {

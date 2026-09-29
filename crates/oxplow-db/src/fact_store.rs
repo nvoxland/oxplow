@@ -898,6 +898,13 @@ impl CubeRowsCache {
     }
 }
 
+/// The event a capture write logs with it: built from the new capture's id
+/// and validated against `schemas` on append.
+pub struct CaptureEvent {
+    pub schemas: Arc<oxplow_domain::EventSchemaRegistry>,
+    pub build: Box<dyn Fn(i64) -> oxplow_domain::Envelope + Send + Sync>,
+}
+
 #[derive(Clone)]
 pub struct SqliteFactStore {
     db: Database,
@@ -1212,6 +1219,20 @@ impl SqliteFactStore {
         capture: NewMetricCapture,
         facts: Vec<NewFact>,
     ) -> Result<i64, DomainError> {
+        self.record_facts_logged(capture, facts, None).await
+    }
+
+    /// [`Self::record_facts`], and when `log` is given, the event it builds
+    /// from the new capture's id appended in the same transaction (P3.6:
+    /// `test.run.recorded` commits with the run). A capture already recorded
+    /// under its idempotency key writes nothing — no event either, the first
+    /// write logged it.
+    pub async fn record_facts_logged(
+        &self,
+        capture: NewMetricCapture,
+        facts: Vec<NewFact>,
+        log: Option<CaptureEvent>,
+    ) -> Result<i64, DomainError> {
         let result = self
             .db
             .call_mut(move |conn| {
@@ -1239,6 +1260,10 @@ impl SqliteFactStore {
                 for mut f in facts {
                     f.capture_id = Some(capture_id);
                     insert_fact(&tx, f).map_err(map_sql_err)?;
+                }
+                if let Some(log) = &log {
+                    let env = (log.build)(capture_id);
+                    crate::event_log_store::append_unique_tx(&tx, &log.schemas, &env)?;
                 }
                 tx.commit().map_err(map_sql_err)?;
                 Ok(capture_id)

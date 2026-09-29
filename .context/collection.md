@@ -176,14 +176,29 @@ hook + MCP wiring):
   exec. **Background caveat:** the PostToolUse hook fires when the Bash call
   *returns*; a **backgrounded** `test:collect` returns at launch (before its
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
-  **The recording runs DETACHED from the hook response (tsk62):**
-  `bounded_hook_response` drops the handler future at its 5s budget, and a
-  test-run's recording can legitimately outlive it (a debug-build junit ingest
-  + a multi-MB lcov parse) — run inline, the coverage step after the junit was
-  silently cancelled on EVERY run, so `oxplow.coverage` never got a fact. The
-  control plane now spawns `on_post_tool_use` on its own task (always
-  completes) and waits ≤2.5s for the nudge message; a slow run's nudge is
-  still persisted (`persist_nudge`), only the immediate injection is skipped.
+  **The recording is a pump reactor, not part of the hook (P3.6, tsk476).**
+  The ingest logs `agent.tool.finished` (the command and its output in
+  `event_content`); the `collection` async consumer
+  (`crates/oxplow-app/src/post_tool_reactors.rs`) rebuilds the Bash payload
+  from it and runs `CollectionService::on_post_tool_use_caused`. A run's
+  recording can outlive the hook's 5 s budget (a debug-build junit ingest +
+  a multi-MB lcov parse) and always completes; a crash re-delivers the
+  event. **Redelivery records nothing twice:** the test-run capture's
+  `idempotency_key` is `test-run:<event id>` (coverage and analysis captures
+  were already keyed by their report's content, a coverage failure by
+  `coverage-failure:<event id>`), and nudges are unique by `(cause, kind)`.
+  **The effort the command ran in owns the run** — the event's effort
+  anchor ranks after an `OXPLOW_TASK=` token and before the thread's open
+  efforts (`resolve_owner`) — so a run the reactor records after `Stop` +
+  `complete_task` closed the effort still lands on it. Each run capture logs
+  `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
+  caused by the tool event) and each coverage capture `test.coverage.recorded`
+  in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
+  MCP `record_test_run` / `ingest_coverage` paths log them too, anchored to
+  the thread. The hook waits ≤2.5 s for the `collection` and
+  `advisories.post_tool` consumers (`EventPump::settle`, which runs them side
+  by side) and then returns the thread's **undelivered** nudges; one that
+  lands later goes out on the thread's next tool call.
   **Landed commits also feed the wasted-token leg (tsk77):** any detected
   commit — including `git revert`, which needs its own `detect_git_revert`
   since the command never says "commit" — has HEAD's `This reverts commit`
