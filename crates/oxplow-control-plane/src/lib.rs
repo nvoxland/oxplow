@@ -442,7 +442,9 @@ async fn handle_hook_inner(
                     reason: Some(reason.clone()),
                 }),
             };
-            let _ = ctx.services.hook_ingest.ingest(envelope).await;
+            if let Err(err) = ctx.services.hook_ingest.ingest(envelope).await {
+                warn!(?err, "hook ingest failed for a denied tool call");
+            }
             return (StatusCode::OK, Json(pre_tool_deny(reason))).into_response();
         }
     }

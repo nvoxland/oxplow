@@ -360,7 +360,13 @@ impl Database {
                 let mut conn = db
                     .conn()
                     .map_err(|e| oxplow_domain::DomainError::Storage(format!("pool: {e}")))?;
-                let tx = conn.transaction().map_err(map_sql_err)?;
+                // IMMEDIATE: take the write lock at BEGIN (waiting under
+                // `busy_timeout`). A deferred read-then-write transaction
+                // fails with SQLITE_BUSY_SNAPSHOT when another commits
+                // between its read and its first write, which no wait fixes.
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(map_sql_err)?;
                 let outcome = f(&tx).and_then(|value| {
                     tx.commit().map_err(map_sql_err)?;
                     Ok(value)
@@ -517,6 +523,58 @@ mod tests {
         assert_eq!(string_to_ts(&text).unwrap(), half);
         let err = string_to_ts("nope").unwrap_err();
         assert!(matches!(err, DomainError::Invalid(_)), "{err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_read_then_write_transactions_all_commit() {
+        // Each transaction reads, pauses, then writes — the shape of the
+        // hook ingest. Deferred BEGIN would let a reader's snapshot go stale
+        // under another's commit (SQLITE_BUSY_SNAPSHOT, which no busy wait
+        // can fix); IMMEDIATE takes the write lock up front and waits.
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(dir.path().join("c.db")).unwrap();
+        db.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE n (v INTEGER NOT NULL)")
+                .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+        let tasks: Vec<_> = (0..16)
+            .map(|_| {
+                let db = db.clone();
+                tokio::spawn(async move {
+                    db.transaction(|tx| {
+                        let count: i64 = tx
+                            .query_row("SELECT COUNT(*) FROM n", [], |r| r.get(0))
+                            .map_err(map_sql_err)?;
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        tx.execute("INSERT INTO n (v) VALUES (?1)", [count])
+                            .map_err(map_sql_err)?;
+                        Ok(())
+                    })
+                    .await
+                })
+            })
+            .collect();
+        for t in tasks {
+            t.await.unwrap().unwrap();
+        }
+        let values: Vec<i64> = db
+            .transaction(|tx| {
+                let mut s = tx
+                    .prepare("SELECT v FROM n ORDER BY v")
+                    .map_err(map_sql_err)?;
+                let r = s
+                    .query_map([], |r| r.get(0))
+                    .map_err(map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_sql_err)?;
+                Ok(r)
+            })
+            .await
+            .unwrap();
+        // Serialized: every transaction saw the ones before it.
+        assert_eq!(values, (0..16).collect::<Vec<_>>());
     }
 
     #[tokio::test]

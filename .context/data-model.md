@@ -48,7 +48,12 @@ thin `db.call` wrapper over its core; multi-write actions compose
 several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
-left no trace; that's why `f` is `Fn`). **The event-log row is the one
+left no trace; that's why `f` is `Fn`). It begins **IMMEDIATE** (tsk503):
+the write lock is taken at BEGIN and waited for under `busy_timeout`, so
+a read-then-write closure (the hook ingest, most `_tx` cores) can't fail
+with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
+and its first write. A pure read therefore uses `db.call`, not
+`transaction`. **The event-log row is the one
 write that belongs inside the closure**: a producer composes
 `event_log_store::append_tx(tx, &envelope)` next to its state change
 so the log and the state can never disagree (the outbox pattern; see
@@ -1096,7 +1101,10 @@ kind registry on append, see [refs.md](./refs.md)), `payload` (JSON;
 validated against `type@v`'s schema on append), `payload_hash` (reserved for
 forgettable bodies stored by content hash), `cause`, `dedupe_key`
 (UNIQUE — the emitter derives it from the occurrence, so an at-least-once
-producer's second append fails with `Constraint` and writes nothing).
+producer's second `append_tx` fails with `Constraint` and writes nothing;
+`append_unique_tx` instead inserts with `ON CONFLICT (dedupe_key) DO
+NOTHING` and reports whether it landed, so a concurrent twin is skipped by
+the insert itself rather than a check before it).
 `seq` (AUTOINCREMENT) is the delivery order; `id` is the public identity.
 
 These are the schema's first **STRICT** tables; every later spine table

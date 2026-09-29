@@ -259,9 +259,9 @@ impl HookIngestService {
             return;
         }
         let current = {
-            let (schemas, thread) = (self.schemas.clone(), *thread);
-            self.db
-                .transaction(move |tx| last_status_tx(tx, &schemas, thread))
+            use oxplow_domain::stores::AgentStatusStore as _;
+            oxplow_db::SqliteAgentStatusStore::new(self.db.clone(), self.schemas.clone())
+                .get(thread)
                 .await
                 .ok()
                 .flatten()

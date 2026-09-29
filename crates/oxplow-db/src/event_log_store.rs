@@ -97,20 +97,7 @@ pub fn append_unique_tx(
     schemas: &EventSchemaRegistry,
     env: &Envelope,
 ) -> Result<bool, DomainError> {
-    if let Some(key) = &env.dedupe_key {
-        let seen: bool = conn
-            .query_row(
-                "SELECT EXISTS (SELECT 1 FROM event_log WHERE dedupe_key = ?1)",
-                [key],
-                |r| r.get(0),
-            )
-            .map_err(map_sql_err)?;
-        if seen {
-            return Ok(false);
-        }
-    }
-    append_tx(conn, schemas, env)?;
-    Ok(true)
+    Ok(insert_tx(conn, schemas, env, true)?.is_some())
 }
 
 /// Append one envelope. Returns its `seq`. The payload must validate
@@ -123,36 +110,56 @@ pub fn append_tx(
     schemas: &EventSchemaRegistry,
     env: &Envelope,
 ) -> Result<i64, DomainError> {
+    Ok(insert_tx(conn, schemas, env, false)?.expect("a plain insert inserts or fails"))
+}
+
+/// The one insert. `skip_duplicate` makes a `dedupe_key` collision a
+/// no-op (`None`) decided by the insert itself, so a concurrent twin can't
+/// slip between a check and the insert; otherwise it is a `Constraint`.
+fn insert_tx(
+    conn: &Connection,
+    schemas: &EventSchemaRegistry,
+    env: &Envelope,
+    skip_duplicate: bool,
+) -> Result<Option<i64>, DomainError> {
     schemas.validate_envelope(env)?;
     let subject = serde_json::to_string(&env.subject)
         .map_err(|e| DomainError::Invalid(format!("subject: {e}")))?;
     let payload = serde_json::to_string(&env.payload)
         .map_err(|e| DomainError::Invalid(format!("payload: {e}")))?;
-    conn.execute(
-        "INSERT INTO event_log
-           (id, type, v, at, source, stream_id, thread_id, effort_id, turn_id, snapshot_id,
-            subject, payload, payload_hash, cause, dedupe_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-        params![
-            env.id.as_str(),
-            env.event_type,
-            env.v,
-            ts_to_string(env.at),
-            env.source,
-            env.anchors.stream_id.map(|i| i.value()),
-            env.anchors.thread_id.map(|i| i.value()),
-            env.anchors.effort_id.map(|i| i.value()),
-            env.anchors.turn_id,
-            env.anchors.snapshot_id,
-            subject,
-            payload,
-            env.payload_hash,
-            env.cause.as_ref().map(|c| c.as_str()),
-            env.dedupe_key,
-        ],
-    )
-    .map_err(map_sql_err)?;
-    Ok(conn.last_insert_rowid())
+    let on_conflict = if skip_duplicate {
+        " ON CONFLICT (dedupe_key) DO NOTHING"
+    } else {
+        ""
+    };
+    let inserted = conn
+        .execute(
+            &format!(
+            "INSERT INTO event_log
+               (id, type, v, at, source, stream_id, thread_id, effort_id, turn_id, snapshot_id,
+                subject, payload, payload_hash, cause, dedupe_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15){on_conflict}"
+        ),
+            params![
+                env.id.as_str(),
+                env.event_type,
+                env.v,
+                ts_to_string(env.at),
+                env.source,
+                env.anchors.stream_id.map(|i| i.value()),
+                env.anchors.thread_id.map(|i| i.value()),
+                env.anchors.effort_id.map(|i| i.value()),
+                env.anchors.turn_id,
+                env.anchors.snapshot_id,
+                subject,
+                payload,
+                env.payload_hash,
+                env.cause.as_ref().map(|c| c.as_str()),
+                env.dedupe_key,
+            ],
+        )
+        .map_err(map_sql_err)?;
+    Ok((inserted == 1).then(|| conn.last_insert_rowid()))
 }
 
 fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
@@ -576,6 +583,42 @@ mod tests {
             at.ends_with('Z') && at.len() == "2026-09-28T00:00:00.000000Z".len(),
             "{at}"
         );
+    }
+
+    #[tokio::test]
+    async fn append_unique_skips_a_duplicate_key_by_the_insert_itself() {
+        // The duplicate is caught by the insert (ON CONFLICT), not by a
+        // read first, so a concurrent twin can't turn into a Constraint.
+        let db = Database::in_memory();
+        let schemas = Arc::new(EventSchemaRegistry::core());
+        let s2 = schemas.clone();
+        let landed = db
+            .transaction(move |tx| {
+                let env = |key: &str| {
+                    Envelope::new(
+                        "config.changed",
+                        1,
+                        "test",
+                        serde_json::json!({"key": "k", "before": null, "after": 1}),
+                    )
+                    .unwrap()
+                    .with_dedupe_key(key)
+                };
+                Ok((
+                    append_unique_tx(tx, &s2, &env("once"))?,
+                    append_unique_tx(tx, &s2, &env("once"))?,
+                    append_unique_tx(tx, &s2, &env("other"))?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(landed, (true, false, true));
+        let n = SqliteEventLogStore::new(db, schemas)
+            .read_after(0, 10)
+            .await
+            .unwrap()
+            .len();
+        assert_eq!(n, 2);
     }
 
     #[tokio::test]
