@@ -83,6 +83,20 @@ pub struct Task {
     pub author: Option<TaskAuthor>,
 }
 
+impl Task {
+    /// Move to `to` at `now`: `completed_at` is set on entering `done` and
+    /// cleared on leaving it; `updated_at` moves.
+    pub fn set_status(&mut self, to: TaskStatus, now: Timestamp) {
+        if to == TaskStatus::Done && self.status != TaskStatus::Done {
+            self.completed_at = Some(now);
+        } else if self.status == TaskStatus::Done && to != TaskStatus::Done {
+            self.completed_at = None;
+        }
+        self.status = to;
+        self.updated_at = now;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct TaskLink {
     pub id: TaskLinkId,

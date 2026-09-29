@@ -1184,15 +1184,20 @@ events of their own.
 inside the run's transaction; `SqliteCommandAuditStore` reads it. See
 [commands.md](./commands.md).
 
-**Producers so far.** `SqliteTaskStore::update_with_effort_transition`
-(P1.6, tsk408) appends `work_item.transitioned@1` in the same transaction
-as the status flip and the effort open/finish — subject
+**Producers so far.** Every task status change (P2.6.3, tsk455 — not
+only in_progress crossings, thread-less tasks too) goes through one
+core, `task_store::apply_status_tx`, via `update_logged_tx` (an edited
+row), `insert_logged_tx` (filing straight into a status logs it as a
+change from `ready`) or `set_status_tx` (read-modify-write, the core of
+the `work_item.transition` command). It appends `work_item.transitioned@1`
+in the same transaction as the status flip and the effort open/finish —
+subject
 `work_item:oxplow:tskN` (+ `effort:effN`), anchors `stream` (looked up
-from the thread inside the transaction) / `thread` / `effort`, payload
-`{ work_item, from, to, effort? }`, source `system:task_service` (the
-actor is on the `command.executed` event and the `command_audit` row the
-bus writes alongside; the domain event's `source` names the actor once
-`work_item.transition` becomes a `Tx` handler). A same-status re-issue logs
+from the thread inside the transaction; none for a backlog task) /
+`thread` / `effort`, payload `{ work_item, from, to, effort? }`. Run as
+`work_item.transition`, its source is the actor and its cause the run's
+`command.executed`; from `TaskService` directly it is
+`system:task_service`. A same-status re-issue logs
 nothing; a failed transition rolls the row back with the rest. It sets
 no dedupe key: a transactional producer's retry has already rolled back,
 so keys are for at-least-once producers. `TaskService` keeps its

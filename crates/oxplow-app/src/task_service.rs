@@ -303,19 +303,17 @@ impl TaskService {
             note_count: 0,
             author: input.author.or(Some(TaskAuthor::User)),
         };
-        // Filing directly in `in_progress` (the path CLAUDE.md recommends to
-        // "start the work in the same call") opens its effort in the insert's
-        // transaction, so the invariant "in_progress ⟺ one open effort" holds
-        // from the first commit. The start snapshot is backfilled after.
-        let opens_effort =
-            matches!(item.status, TaskStatus::InProgress) && self.effort_store.is_some();
-        match (opens_effort, item.thread_id) {
-            (true, Some(thread_id)) => {
-                let (id, _effort) = self.store.insert_with_effort(&item, thread_id).await?;
-                item.id = id;
-                self.settle_lifecycle().await;
-            }
-            _ => item.id = self.store.insert(&item).await?,
+        // Filing straight into a status is that change from `ready`: into
+        // `in_progress` (the path CLAUDE.md recommends to "start the work in
+        // the same call") it opens the effort in the insert's transaction,
+        // and any status but `ready` logs `work_item.transitioned`. The
+        // start snapshot comes from the effort-lifecycle consumer.
+        if item.status == TaskStatus::Ready {
+            item.id = self.store.insert(&item).await?;
+        } else {
+            let (id, _effort) = self.store.insert_logged(&item).await?;
+            item.id = id;
+            self.settle_lifecycle().await;
         }
         Ok(item)
     }
@@ -338,50 +336,28 @@ impl TaskService {
         if let Some(p) = changes.parent_id {
             item.parent_id = p;
         }
+        let now = Timestamp::now();
         if let Some(s) = changes.status {
-            // Transitioning to/from `done` flips completed_at.
-            if matches!(s, TaskStatus::Done) && item.status != TaskStatus::Done {
-                item.completed_at = Some(Timestamp::now());
-            } else if matches!(item.status, TaskStatus::Done) && !matches!(s, TaskStatus::Done) {
-                item.completed_at = None;
-            }
-            item.status = s;
+            item.set_status(s, now);
         }
         if let Some(p) = changes.priority {
             item.priority = p;
         }
-        item.updated_at = Timestamp::now();
+        item.updated_at = now;
 
-        // Effort lifecycle: when a thread-attached task crosses the
-        // `in_progress` boundary, the status flip and the effort
-        // open/finish commit as ONE transaction (the invariant
-        // "in_progress ⟺ one open effort" can't be torn by a crash),
-        // and the snapshot pin is backfilled after commit. The
-        // effort-store hook is optional so bare TaskService tests
-        // (no Services boot) take the plain-update path.
-        let crossed_in =
-            prior_status != TaskStatus::InProgress && item.status == TaskStatus::InProgress;
-        let crossed_out =
-            prior_status == TaskStatus::InProgress && item.status != TaskStatus::InProgress;
-        match (
-            crossed_in || crossed_out,
-            self.effort_store.is_some(),
-            item.thread_id,
-        ) {
-            (true, true, Some(thread_id)) => {
-                // The effort's snapshot pin, reconciliation, lifecycle
-                // metrics and `EffortFinished` are the effort-lifecycle
-                // consumer's (it reacts to the `effort.opened` / `closed`
-                // this transaction logged); settle so they're done when
-                // this returns.
-                self.store
-                    .update_with_effort_transition(&item, thread_id, prior_status)
-                    .await?;
-                self.settle_lifecycle().await;
-            }
-            _ => {
-                self.store.update(&item).await?;
-            }
+        // A status change commits with what it implies — the effort
+        // open/close when a thread-attached task crosses in_progress, and
+        // the `work_item.transitioned` log entry — in one transaction. The
+        // effort's snapshot pin, reconciliation, lifecycle metrics and
+        // `EffortFinished` are the effort-lifecycle consumer's; settle so
+        // they're done when this returns. Status changes made for someone
+        // (MCP, RPC) run the `work_item.transition` command instead, which
+        // audits the actor.
+        if item.status != prior_status {
+            self.store.update_logged(&item, prior_status).await?;
+            self.settle_lifecycle().await;
+        } else {
+            self.store.update(&item).await?;
         }
         Ok(item)
     }
@@ -391,7 +367,7 @@ impl TaskService {
     /// logged, so a caller that reads the effort next (`complete_task`'s
     /// file review) sees its bracket. On timeout the work finishes on a
     /// later run; nothing is lost.
-    async fn settle_lifecycle(&self) {
+    pub async fn settle_lifecycle(&self) {
         if let Some(pump) = self.event_pump.as_ref() {
             if !pump.settle(LIFECYCLE_SETTLE).await {
                 tracing::debug!("effort lifecycle: pump didn't settle in time; continuing");

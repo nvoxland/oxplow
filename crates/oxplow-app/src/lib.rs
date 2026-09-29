@@ -77,6 +77,7 @@ pub mod snapshot_capture_registry;
 pub mod snapshot_content;
 pub mod source_runner;
 pub mod task_service;
+pub mod task_writes;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -845,7 +846,7 @@ impl Services {
             }),
         );
         commands
-            .register(commands::work_item::command(tasks.clone()))
+            .register(commands::work_item::command())
             .expect("core commands register");
         for command in
             commands::config_commands::commands(commands::config_commands::ConfigTarget {

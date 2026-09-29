@@ -115,11 +115,18 @@ to `RawConfig` makes it managed, documented and settable at once.
 
 ## `Tx` vs `BestEffort`
 
-A `Tx` handler is `Fn(&Connection, &Actor, Value) -> HandlerOutput` and
-composes into the bus's transaction, so its writes, the audit and the
-events commit or roll back together — the target shape. A `BestEffort`
-handler is an async call into a pre-existing service that owns its own
-transactions (`TaskService::update`), audited after it returns; it
+A `Tx` handler is `Fn(&TxCtx, Value) -> HandlerOutput` and composes
+into the bus's transaction, so its writes, the audit and the events
+commit or roll back together — the target shape. `TxCtx { conn, actor,
+events }` carries an `EventCtx` whose `source` is the actor's and whose
+`cause` is the run's `command.executed` id — fixed before the handler
+runs — so store cores the handler calls (`set_status_tx`,
+`effort_store::start_tx`) log their own events as this run's. Those
+events precede `command.executed` in `seq` (it's appended after the
+handler, with the audit); `HandlerOutput.events` follow it. A handler
+must stay pure: `Database::transaction` retries it on SQLITE_BUSY. A
+`BestEffort` handler is an async call into a pre-existing service that
+owns its own transactions, audited after it returns; it
 exists only for handlers that predate the bus, and
 `CommandBus::best_effort_count()` is asserted by a test so the number
 trends to zero. Registering a handler whose kind disagrees with the
@@ -129,15 +136,21 @@ spec's `atomicity` is refused, as is a second command of the same name.
 
 | Command | Handler | Notes |
 |---|---|---|
-| `work_item.transition { id, to }` | `BestEffort` over `TaskService::update` (`commands/work_item.rs`) | all invokers; undoable (inverse restores the prior status). The service logs `work_item.transitioned` itself. |
+| `work_item.transition { id, to }` | `Tx` over `oxplow_db::task_store::set_status_tx` (`commands/work_item.rs`, P2.6.3) | all invokers; undoable (inverse restores the prior status). The row, the effort open/close, `work_item.transitioned` and `effort.*` commit with the audit, all caused by `command.executed`; the effort's snapshot pin is the effort-lifecycle pump consumer's. |
 | `config.list_keys {}` / `config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value, `human_only` |
 | `config.set { key, value }` / `config.unset { key }` | `Tx`: validate against the key's schema, take the new document through the loader's own validation (`oxplow_config::keys::with_key`); after commit, write the file and swap the in-memory config | undoable (inverse restores the prior value or unsets); logs `config.changed@1 { key, before, after }`; `after_commit` broadcasts `ConfigChanged`; a **human-only key** (`HUMAN_ONLY_KEYS`: `ai`, `agents`, `agent`, `agentModels`, `acpAgents`, `lsp`, `collection`, `extensions`, `gauges`, `agentPromptAppend` — each runs a program, picks the model, enables code, or steers every agent; a test fails if a key documented as running programs or steering agents isn't listed) needs a person's confirmation per input |
 
-**Callers.** MCP `transition_tasks` runs one `work_item.transition` per
-id as `Actor::Agent` with the caller's thread and stream (`McpCaller`,
-read from the request headers or query — see "MCP identity"); RPC
-`update_task` routes a status-only change through the bus as
-`Actor::Human` and applies any other field change directly.
+**Callers.** Every status change made for someone is
+`work_item.transition`, through `oxplow_app::task_writes` (`set_status`,
+which settles the pump after; `upsert`, which writes the other fields
+and moves the status only through `set_status`). MCP `update_task`,
+`complete_task`, `dispatch_task`, `upsert_task` and `transition_tasks`
+run it as `Actor::Agent` with the caller's verified thread and stream
+(`McpCaller` — see "MCP identity"), so an anonymous connection can't
+change status; RPC `update_task` / `upsert_task` run it as
+`Actor::Human`, after applying any other field edits. `TaskService::update`
+(no actor) still logs every status change, with source
+`system:task_service`, but isn't audited.
 `CommandError` → `McpError` mapping lives in `command_error` (oxplow-mcp):
 invalid/denied/unknown are the caller's to fix, `NeedsConfirmation` tells
 the agent to ask the person, `Failed` is internal.

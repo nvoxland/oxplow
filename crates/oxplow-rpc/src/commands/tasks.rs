@@ -21,22 +21,12 @@ pub async fn get_task(svc: &Services, id: TaskId) -> Result<Option<Task>, IpcErr
 /// server-side side effects (e.g. `completed_at` flips, sort_index
 /// rewrites a future change might add) appear in the returned shape.
 pub async fn upsert_task(svc: &Services, item: Task) -> Result<Task, IpcError> {
-    let thread_id = item.thread_id;
-    let result = if item.id.is_placeholder() {
-        let mut new_item = item;
-        let id = svc.task_store.insert(&new_item).await?;
-        new_item.id = id;
-        new_item
-    } else {
-        let id = item.id;
-        svc.task_store.update(&item).await?;
-        svc.task_store
-            .get(id)
-            .await?
-            .ok_or_else(IpcError::not_found)?
-    };
-    svc.events.emit(OxplowEvent::TasksChanged { thread_id });
-    Ok(result)
+    // A status change goes through `work_item.transition` as the person.
+    let item = oxplow_app::task_writes::upsert(svc, &oxplow_domain::Actor::Human, item).await?;
+    svc.events.emit(OxplowEvent::TasksChanged {
+        thread_id: item.thread_id,
+    });
+    Ok(item)
 }
 
 pub async fn delete_task(svc: &Services, id: TaskId) -> Result<(), IpcError> {
@@ -68,40 +58,41 @@ pub struct UpdateTaskRequest {
 }
 
 pub async fn update_task(svc: &Services, req: UpdateTaskRequest) -> Result<Task, IpcError> {
-    // A status change on its own is the `work_item.transition` command:
-    // it runs through the bus so the human's transition is audited and
-    // `command.executed` is logged like an agent's would be.
-    let status_only = matches!(
-        &req.changes,
-        UpdateTaskChanges {
-            title: None,
-            description: None,
-            parent_id: None,
-            status: Some(_),
-            priority: None,
-        }
-    );
-    if let (true, Some(to)) = (status_only, req.changes.status) {
-        let outcome = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                oxplow_app::commands::work_item::NAME,
-                serde_json::json!({ "id": req.id.to_string(), "to": to }),
-                // Not pre-confirmed: if a transition ever needs a person's
-                // confirmation, the UI gets NEEDS_CONFIRMATION and asks.
-                false,
+    // Field edits go through the service; a status change is the
+    // `work_item.transition` command, so the person's transition is audited
+    // and `command.executed` is logged like an agent's would be.
+    let UpdateTaskChanges {
+        title,
+        description,
+        parent_id,
+        status,
+        priority,
+    } = req.changes;
+    let edits_fields =
+        title.is_some() || description.is_some() || parent_id.is_some() || priority.is_some();
+    let mut item = if edits_fields {
+        svc.tasks
+            .update(
+                req.id,
+                UpdateTaskChanges {
+                    title,
+                    description,
+                    parent_id,
+                    status: None,
+                    priority,
+                },
             )
-            .await
-            .map_err(IpcError::from)?;
-        let item: Task = serde_json::from_value(outcome.result)
-            .map_err(|e| IpcError::internal(format!("command result: {e}")))?;
-        svc.events.emit(OxplowEvent::TasksChanged {
-            thread_id: item.thread_id,
-        });
-        return Ok(item);
+            .await?
+    } else {
+        svc.task_store
+            .get(req.id)
+            .await?
+            .ok_or_else(|| IpcError::from(oxplow_domain::DomainError::NotFound))?
+    };
+    if let Some(to) = status {
+        item = oxplow_app::task_writes::set_status(svc, &oxplow_domain::Actor::Human, req.id, to)
+            .await?;
     }
-    let item = svc.tasks.update(req.id, req.changes).await?;
     svc.events.emit(OxplowEvent::TasksChanged {
         thread_id: item.thread_id,
     });

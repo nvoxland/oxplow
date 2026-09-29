@@ -2788,25 +2788,18 @@ impl OxplowMcp {
     )]
     async fn upsert_task(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<UpsertTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         let mut item: Task = serde_json::from_str(&params.0.item_json)
             .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
-        if item.id.value() == 0 {
-            let new_id = self
-                .services
-                .task_store
-                .insert(&item)
-                .await
-                .map_err(internal)?;
-            item.id = new_id;
-        } else {
-            self.services
-                .task_store
-                .update(&item)
-                .await
-                .map_err(internal)?;
-        }
+        // The row is written as-is except its status, which changes only
+        // through `work_item.transition` (the effort lifecycle, the log,
+        // the audit) — a raw status write would skip all three.
+        let actor = self.verified_actor(&caller_of(&extensions)).await?;
+        item = oxplow_app::task_writes::upsert(&self.services, &actor, item)
+            .await
+            .map_err(command_error)?;
         self.emit_tasks_changed(item.thread_id);
         json_result(&item)
     }
@@ -4212,6 +4205,7 @@ impl OxplowMcp {
     )]
     async fn update_task(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<UpdateTaskMcpParams>,
     ) -> Result<CallToolResult, McpError> {
         let p = params.0;
@@ -4240,21 +4234,38 @@ impl OxplowMcp {
             Some(s) => Some(Some(parse_task_id("update_task", "parent_id", &s)?)),
             None => None,
         };
-        let updated = self
-            .services
-            .tasks
-            .update(
-                id,
-                UpdateTaskChanges {
-                    title: p.title,
-                    description: p.description,
-                    parent_id,
-                    status,
-                    priority,
-                },
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
+        // Field edits, then the status change as the calling agent's
+        // `work_item.transition` (audited, logged with its cause).
+        let edits_fields = p.title.is_some()
+            || p.description.is_some()
+            || parent_id.is_some()
+            || priority.is_some();
+        let mut updated = if edits_fields {
+            self.services
+                .tasks
+                .update(
+                    id,
+                    UpdateTaskChanges {
+                        title: p.title,
+                        description: p.description,
+                        parent_id,
+                        status: None,
+                        priority,
+                    },
+                )
+                .await
+                .map_err(|e| internal(e.to_string()))?
+        } else {
+            self.services
+                .task_store
+                .get(id)
+                .await
+                .map_err(internal)?
+                .ok_or_else(|| McpError::invalid_params(format!("task {id} not found"), None))?
+        };
+        if let Some(to) = status {
+            updated = self.transition_as(&extensions, id, to).await?;
+        }
 
         let touched = p.touched_files.unwrap_or_default();
         let claim_runs = p.claim_runs.unwrap_or_default();
@@ -4320,6 +4331,7 @@ impl OxplowMcp {
     )]
     async fn complete_task(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<CompleteTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         use oxplow_db::EffortStore as _;
@@ -4327,17 +4339,8 @@ impl OxplowMcp {
         let id = parse_task_id("complete_task", "id", &p.id)?;
         let _ = p.author; // legacy field — kept on the wire, no longer attributed
         let item = self
-            .services
-            .tasks
-            .update(
-                id,
-                UpdateTaskChanges {
-                    status: Some(TaskStatus::Done),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
+            .transition_as(&extensions, id, TaskStatus::Done)
+            .await?;
 
         let touched = p.touched_files.unwrap_or_default();
         let claim_runs = p.claim_runs.unwrap_or_default();
@@ -4843,6 +4846,7 @@ impl OxplowMcp {
     )]
     async fn dispatch_task(
         &self,
+        extensions: rmcp::model::Extensions,
         params: Parameters<DispatchTaskParams>,
     ) -> Result<CallToolResult, McpError> {
         let parsed_item_id = match params.0.item_id.as_deref() {
@@ -4908,17 +4912,12 @@ impl OxplowMcp {
         };
 
         let updated = self
-            .services
-            .tasks
-            .update(
+            .transition_as(
+                &extensions,
                 target.id,
-                oxplow_app::UpdateTaskChanges {
-                    status: Some(oxplow_domain::TaskStatus::InProgress),
-                    ..Default::default()
-                },
+                oxplow_domain::TaskStatus::InProgress,
             )
-            .await
-            .map_err(|e| internal(e.to_string()))?;
+            .await?;
 
         let prompt =
             compose_dispatch_brief(&updated, params.0.extra_context.as_deref().unwrap_or(""));
@@ -6436,6 +6435,22 @@ impl OxplowMcp {
     /// that thread's stream (the actor then carries the thread's stream).
     /// An anonymous connection is refused — a run with no actor behind it
     /// is audited to no one.
+    /// Move a task to `to` as the calling agent: the `work_item.transition`
+    /// command (audited to the agent's thread, the transition and effort
+    /// events caused by its `command.executed`), then settle the pump so the
+    /// effort's snapshot pin is in place for whatever this tool reads next.
+    async fn transition_as(
+        &self,
+        extensions: &rmcp::model::Extensions,
+        id: TaskId,
+        to: TaskStatus,
+    ) -> Result<oxplow_domain::Task, McpError> {
+        let actor = self.verified_actor(&caller_of(extensions)).await?;
+        oxplow_app::task_writes::set_status(&self.services, &actor, id, to)
+            .await
+            .map_err(command_error)
+    }
+
     async fn verified_actor(&self, caller: &McpCaller) -> Result<oxplow_domain::Actor, McpError> {
         use oxplow_domain::stores::ThreadStore as _;
         let Some(thread_id) = caller.thread_id else {
@@ -7701,11 +7716,14 @@ mod tests {
         // Only item_id — thread_id is inferred from the task, so a
         // weak model that omits it still succeeds (no -32602).
         let r = server
-            .dispatch_task(Parameters(DispatchTaskParams {
-                thread_id: None,
-                item_id: Some(id.to_string()),
-                extra_context: None,
-            }))
+            .dispatch_task(
+                as_writer(&services).await,
+                Parameters(DispatchTaskParams {
+                    thread_id: None,
+                    item_id: Some(id.to_string()),
+                    extra_context: None,
+                }),
+            )
             .await
             .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&text_payload(r)).unwrap();
@@ -7718,13 +7736,16 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_task_requires_thread_or_item() {
-        let (_proj, _services, server) = boot();
+        let (_proj, services, server) = boot();
         let err = server
-            .dispatch_task(Parameters(DispatchTaskParams {
-                thread_id: None,
-                item_id: None,
-                extra_context: None,
-            }))
+            .dispatch_task(
+                as_writer(&services).await,
+                Parameters(DispatchTaskParams {
+                    thread_id: None,
+                    item_id: None,
+                    extra_context: None,
+                }),
+            )
             .await
             .unwrap_err();
         let msg = err.to_string();
@@ -7740,6 +7761,25 @@ mod tests {
             b = b.header(*k, *v);
         }
         b.body(()).unwrap().into_parts().0
+    }
+
+    /// The identity of the primary stream's writer thread — what oxplow's
+    /// harness configs send, and what a status-changing tool needs.
+    async fn as_writer(services: &oxplow_app::Services) -> rmcp::model::Extensions {
+        use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
+        let stream = services.stream_store.list().await.unwrap().pop().unwrap();
+        let thread = services
+            .thread_store
+            .list_for_stream(&stream.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("primary stream must have a writer thread");
+        extensions_for(parts_with(
+            &[("x-oxplow-thread", &thread.id.to_string())],
+            "http://h/mcp",
+        ))
     }
 
     fn extensions_for(parts: http::request::Parts) -> rmcp::model::Extensions {
@@ -8057,15 +8097,20 @@ mod tests {
                     .await
                     .unwrap();
                 let r = server
-                    .complete_task(Parameters(CompleteTaskParams {
-                        id: task_id.to_string(),
-                        summary: "done".into(),
-                        author: None,
-                        touched_files: Some((0..files).map(|i| format!("src/f{i}.rs")).collect()),
-                        impacts: None,
-                        claim_runs: None,
-                        disclaim_runs: None,
-                    }))
+                    .complete_task(
+                        as_writer(&services).await,
+                        Parameters(CompleteTaskParams {
+                            id: task_id.to_string(),
+                            summary: "done".into(),
+                            author: None,
+                            touched_files: Some(
+                                (0..files).map(|i| format!("src/f{i}.rs")).collect(),
+                            ),
+                            impacts: None,
+                            claim_runs: None,
+                            disclaim_runs: None,
+                        }),
+                    )
                     .await
                     .unwrap();
                 serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap()
@@ -8103,18 +8148,21 @@ mod tests {
         item.id = task_id;
 
         server
-            .complete_task(Parameters(CompleteTaskParams {
-                id: task_id.to_string(),
-                summary: "regenerated the bindings".into(),
-                author: None,
-                touched_files: Some(vec![
-                    "src/authored.rs".into(),
-                    "apps/desktop/src/generated/bindings.ts".into(),
-                ]),
-                impacts: None,
-                claim_runs: None,
-                disclaim_runs: None,
-            }))
+            .complete_task(
+                as_writer(&services).await,
+                Parameters(CompleteTaskParams {
+                    id: task_id.to_string(),
+                    summary: "regenerated the bindings".into(),
+                    author: None,
+                    touched_files: Some(vec![
+                        "src/authored.rs".into(),
+                        "apps/desktop/src/generated/bindings.ts".into(),
+                    ]),
+                    impacts: None,
+                    claim_runs: None,
+                    disclaim_runs: None,
+                }),
+            )
             .await
             .unwrap();
 
@@ -8205,6 +8253,56 @@ mod tests {
         );
     }
 
+    /// P2.6.3 (tsk455): an agent's status change is the
+    /// `work_item.transition` command, audited to its thread; a connection
+    /// with no identity can't change status.
+    #[tokio::test]
+    async fn status_changes_are_audited_to_the_calling_agent() {
+        let (_proj, services, server) = boot();
+        let item = make_task(None, "audited");
+        let id = services.task_store.insert(&item).await.unwrap();
+        let params = |status: &str| {
+            Parameters(UpdateTaskMcpParams {
+                id: id.to_string(),
+                title: None,
+                description: None,
+                parent_id: None,
+                status: Some(status.into()),
+                priority: None,
+                touched_files: None,
+                claim_runs: None,
+                disclaim_runs: None,
+            })
+        };
+        let err = server
+            .update_task(rmcp::model::Extensions::new(), params("blocked"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("thread identity"), "{err}");
+
+        server
+            .update_task(as_writer(&services).await, params("blocked"))
+            .await
+            .unwrap();
+        let audit = oxplow_db::SqliteCommandAuditStore::new(services.db.clone())
+            .list_recent(5)
+            .await
+            .unwrap();
+        let row = audit
+            .iter()
+            .find(|r| r.command == oxplow_app::commands::work_item::NAME)
+            .expect("the transition is audited");
+        assert_eq!(
+            row.actor_kind,
+            oxplow_domain::events::schema::ActorKind::Agent
+        );
+        assert!(row.thread_id.is_some());
+        assert_eq!(
+            services.task_store.get(id).await.unwrap().unwrap().status,
+            TaskStatus::Blocked
+        );
+    }
+
     #[tokio::test]
     async fn update_task_claims_runs_at_close_boundary() {
         // tsk268: the agent claims its runs at the natural close point (no
@@ -8239,17 +8337,20 @@ mod tests {
             .unwrap();
 
         server
-            .update_task(Parameters(UpdateTaskMcpParams {
-                id: task_id.to_string(),
-                title: None,
-                description: None,
-                parent_id: None,
-                status: Some("done".into()),
-                priority: None,
-                touched_files: None,
-                claim_runs: Some(vec!["run:7".into()]),
-                disclaim_runs: None,
-            }))
+            .update_task(
+                as_writer(&services).await,
+                Parameters(UpdateTaskMcpParams {
+                    id: task_id.to_string(),
+                    title: None,
+                    description: None,
+                    parent_id: None,
+                    status: Some("done".into()),
+                    priority: None,
+                    touched_files: None,
+                    claim_runs: Some(vec!["run:7".into()]),
+                    disclaim_runs: None,
+                }),
+            )
             .await
             .unwrap();
 
@@ -8748,12 +8849,15 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_task_round_trips() {
-        let (_proj, _services, server) = boot();
+        let (_proj, services, server) = boot();
         let item = make_task(None, "via mcp");
         let json = serde_json::to_string(&item).unwrap();
 
         let r = server
-            .upsert_task(Parameters(UpsertTaskParams { item_json: json }))
+            .upsert_task(
+                as_writer(&services).await,
+                Parameters(UpsertTaskParams { item_json: json }),
+            )
             .await
             .unwrap();
         let body = text_payload(r);

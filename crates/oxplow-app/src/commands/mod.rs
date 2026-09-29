@@ -61,9 +61,18 @@ pub struct HandlerOutput {
     pub after_commit: Option<Box<dyn FnOnce() + Send + Sync>>,
 }
 
-type TxHandler = dyn Fn(&rusqlite::Connection, &Actor, Value) -> Result<HandlerOutput, CommandError>
-    + Send
-    + Sync;
+/// What a `Tx` handler runs with: the run's transaction, the actor, and
+/// the context its store cores log events through — the actor's `source`,
+/// caused by this run's `command.executed` (whose id is fixed before the
+/// handler runs, so the cause can be named; `command.executed` itself is
+/// appended after the handler, so a core's events precede it in `seq`).
+pub struct TxCtx<'a> {
+    pub conn: &'a rusqlite::Connection,
+    pub actor: &'a Actor,
+    pub events: oxplow_db::EventCtx<'a>,
+}
+
+type TxHandler = dyn Fn(&TxCtx<'_>, Value) -> Result<HandlerOutput, CommandError> + Send + Sync;
 type BestEffortFuture = Pin<Box<dyn Future<Output = Result<HandlerOutput, CommandError>> + Send>>;
 type BestEffortHandler = dyn Fn(Actor, Value) -> BestEffortFuture + Send + Sync;
 
@@ -314,7 +323,17 @@ impl CommandBus {
                 let ran = self
                     .db
                     .transaction(move |tx| {
-                        let out = match handler(tx, &actor_c, input_c.clone()) {
+                        let executed_id = oxplow_domain::EventId::generate();
+                        let ctx = TxCtx {
+                            conn: tx,
+                            actor: &actor_c,
+                            events: oxplow_db::EventCtx {
+                                schemas: &schemas,
+                                source: actor_c.source(),
+                                cause: Some(executed_id.clone()),
+                            },
+                        };
+                        let out = match handler(&ctx, input_c.clone()) {
                             Ok(out) => out,
                             Err(err) => {
                                 *failed_c.lock() = Some(err);
@@ -323,7 +342,15 @@ impl CommandBus {
                                 ));
                             }
                         };
-                        let recorded = record_tx(tx, &schemas, &actor_c, &spec_c, &input_c, &out)?;
+                        let recorded = record_tx(
+                            tx,
+                            &schemas,
+                            &actor_c,
+                            &spec_c,
+                            &input_c,
+                            &out,
+                            executed_id,
+                        )?;
                         if let Some(original) = undo_of {
                             // Fails (and rolls the whole run back) when the
                             // row was undone meanwhile.
@@ -419,11 +446,21 @@ impl CommandBus {
             Handler::Tx(handler) => {
                 let handler = handler.clone();
                 let actor = actor.clone();
+                let schemas = self.log.schemas().clone();
                 let failed: Arc<parking_lot::Mutex<Option<CommandError>>> = Arc::default();
                 let failed_c = failed.clone();
                 self.db
                     .transaction(move |tx| {
-                        handler(tx, &actor, input.clone()).map_err(|err| {
+                        let ctx = TxCtx {
+                            conn: tx,
+                            actor: &actor,
+                            events: oxplow_db::EventCtx {
+                                schemas: &schemas,
+                                source: actor.source(),
+                                cause: None,
+                            },
+                        };
+                        handler(&ctx, input.clone()).map_err(|err| {
                             *failed_c.lock() = Some(err);
                             oxplow_domain::DomainError::Invariant("read command failed".into())
                         })
@@ -500,7 +537,15 @@ impl CommandBus {
         let recorded = self
             .db
             .transaction(move |tx| {
-                let recorded = record_tx(tx, &schemas, &actor_c, &spec_c, &input_c, &shadow)?;
+                let recorded = record_tx(
+                    tx,
+                    &schemas,
+                    &actor_c,
+                    &spec_c,
+                    &input_c,
+                    &shadow,
+                    oxplow_domain::EventId::generate(),
+                )?;
                 if let Some(original) = undo_of {
                     finish_undo_claim_tx(tx, original, recorded.audit_id)?;
                 }
@@ -601,6 +646,7 @@ fn record_tx(
     spec: &CommandSpec,
     input: &Value,
     out: &HandlerOutput,
+    executed_id: oxplow_domain::EventId,
 ) -> Result<Recorded, oxplow_domain::DomainError> {
     let inverse = if spec.undoable {
         out.inverse.clone()
@@ -620,7 +666,7 @@ fn record_tx(
             inverse: inverse.clone(),
         },
     )?;
-    let executed = Envelope::typed::<CommandExecuted>(
+    let mut executed = Envelope::typed::<CommandExecuted>(
         actor.source(),
         &CommandExecutedV1 {
             command: spec.name.clone(),
@@ -633,6 +679,7 @@ fn record_tx(
     )
     .with_anchors(actor.anchors())
     .with_subject([oxplow_domain::refs::build::command_ref(&spec.name)]);
+    executed.id = executed_id;
     append_tx(tx, schemas, &executed)?;
     // A handler's own events carry the actor's thread and stream unless
     // it anchored them itself.
@@ -722,7 +769,8 @@ mod tests {
     /// A `Tx` handler: writes `k = v`, returns the inverse (restore the
     /// prior value) and a `config.changed` domain event.
     fn kv_set() -> Handler {
-        Handler::Tx(Arc::new(|conn, _actor, input| {
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            let conn = ctx.conn;
             let k = input["k"].as_str().unwrap_or_default().to_string();
             let v = input["v"].as_str().unwrap_or_default().to_string();
             if v == "boom" {
@@ -793,7 +841,7 @@ mod tests {
         bus.register(
             Command::new(
                 spec,
-                Handler::Tx(Arc::new(|_conn, _actor, input| {
+                Handler::Tx(Arc::new(|_ctx: &TxCtx<'_>, input| {
                     Ok(HandlerOutput {
                         result: input,
                         ..HandlerOutput::default()

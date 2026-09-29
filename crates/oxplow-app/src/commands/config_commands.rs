@@ -245,7 +245,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 schema_of::<NoInput>(),
                 CommandEffect::Read,
             ),
-            Handler::Tx(Arc::new(move |_conn, _actor, input| {
+            Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 parse::<NoInput>(input)?;
                 let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
                 let keys: Vec<KeyReport> = config_keys()
@@ -269,7 +269,7 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 schema_of::<KeyInput>(),
                 CommandEffect::Read,
             ),
-            Handler::Tx(Arc::new(move |_conn, _actor, input| {
+            Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
                 let input: KeyInput = parse(input)?;
                 let key = known_key(&input.key)?;
                 let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -293,7 +293,8 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 schema_of::<SetInput>(),
                 CommandEffect::Write,
             ),
-            Handler::Tx(Arc::new(move |_conn, actor, input| {
+            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+                let actor = ctx.actor;
                 let input: SetInput = parse(input)?;
                 change(&t, actor, &input.key, Some(input.value))
             })),
@@ -311,7 +312,8 @@ pub fn commands(target: ConfigTarget) -> Vec<Command> {
                 schema_of::<KeyInput>(),
                 CommandEffect::Write,
             ),
-            Handler::Tx(Arc::new(move |_conn, actor, input| {
+            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+                let actor = ctx.actor;
                 let input: KeyInput = parse(input)?;
                 change(&t, actor, &input.key, None)
             })),
@@ -381,14 +383,21 @@ mod tests {
             panic!("config.set is a Tx handler")
         };
         let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let schemas = oxplow_domain::EventSchemaRegistry::core();
+        let actor = agent();
+        let ctx = super::super::TxCtx {
+            conn: &conn,
+            actor: &actor,
+            events: oxplow_db::EventCtx::system(&schemas, "test"),
+        };
         let input = json!({ "key": "metricRetentionDays", "value": 30 });
-        let first = handler(&conn, &agent(), input.clone()).unwrap();
+        let first = handler(&ctx, input.clone()).unwrap();
         assert_eq!(first.result["changed"], true);
         // Attempt one rolled back: no file, config untouched.
         assert_eq!(file(&dir), "");
         assert_ne!(target.config.read().unwrap().metric_retention_days, 30);
         drop(first);
-        let second = handler(&conn, &agent(), input).unwrap();
+        let second = handler(&ctx, input).unwrap();
         assert_eq!(
             second.result["changed"], true,
             "the retry still sees the change"

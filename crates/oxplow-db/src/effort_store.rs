@@ -1808,11 +1808,7 @@ mod tests {
         let tasks = SqliteTaskStore::new(db.clone());
 
         let entering = tasks
-            .update_with_effort_transition(
-                &task_row(tid, t, TaskStatus::InProgress),
-                t,
-                TaskStatus::Ready,
-            )
+            .update_logged(&task_row(tid, t, TaskStatus::InProgress), TaskStatus::Ready)
             .await
             .unwrap();
         let EffortTransition::Opened(eff) = entering else {
@@ -1826,24 +1822,19 @@ mod tests {
         assert_eq!(open.id, eff);
         assert!(open.start_snapshot_id.is_none(), "pin backfills later");
 
-        // Entering again (e.g. Busy retry / re-issued transition)
-        // adopts the open row instead of tripping the V31 index.
+        // Re-issuing the same status changes nothing: the open effort
+        // stays and nothing is logged.
         let again = tasks
-            .update_with_effort_transition(
+            .update_logged(
                 &task_row(tid, t, TaskStatus::InProgress),
-                t,
                 TaskStatus::InProgress,
             )
             .await
             .unwrap();
-        assert_eq!(again, EffortTransition::Opened(eff));
+        assert_eq!(again, EffortTransition::Untouched);
 
         let leaving = tasks
-            .update_with_effort_transition(
-                &task_row(tid, t, TaskStatus::Done),
-                t,
-                TaskStatus::InProgress,
-            )
+            .update_logged(&task_row(tid, t, TaskStatus::Done), TaskStatus::InProgress)
             .await
             .unwrap();
         assert_eq!(leaving, EffortTransition::Finished(eff));
@@ -1990,9 +1981,8 @@ mod tests {
         let tasks = SqliteTaskStore::new(db.clone());
         let ghost = TaskId::new(9999);
         let err = tasks
-            .update_with_effort_transition(
+            .update_logged(
                 &task_row(ghost, t, TaskStatus::InProgress),
-                t,
                 TaskStatus::Ready,
             )
             .await
