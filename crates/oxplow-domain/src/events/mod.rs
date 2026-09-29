@@ -74,6 +74,7 @@ pub struct Envelope {
     /// Validated against the type's JSON Schema on append (P1.5). Large or
     /// sensitive content is never inline: it is stored by content hash and
     /// the payload carries the hash.
+    #[specta(type = specta_typescript::Unknown)]
     pub payload: Value,
     pub payload_hash: Option<String>,
     /// The event that caused this one.

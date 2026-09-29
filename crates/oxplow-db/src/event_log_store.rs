@@ -317,6 +317,37 @@ fn row_to_dead_letter(row: &rusqlite::Row<'_>) -> rusqlite::Result<DeadLetter> {
     })
 }
 
+/// Events whose type matches `pattern` (a `LIKE` pattern), newest first,
+/// narrowed to a thread or a stream anchor when given.
+pub fn recent_tx(
+    conn: &Connection,
+    pattern: &str,
+    thread: Option<ThreadId>,
+    stream: Option<StreamId>,
+    limit: usize,
+) -> Result<Vec<StoredEvent>, DomainError> {
+    let (sql, anchor) = match (thread, stream) {
+        (Some(t), _) => (
+            "SELECT * FROM event_log WHERE thread_id = ?1 AND type LIKE ?2 ORDER BY seq DESC LIMIT ?3",
+            Some(t.value()),
+        ),
+        (None, Some(s)) => (
+            "SELECT * FROM event_log WHERE stream_id = ?1 AND type LIKE ?2 ORDER BY seq DESC LIMIT ?3",
+            Some(s.value()),
+        ),
+        (None, None) => (
+            "SELECT * FROM event_log WHERE ?1 IS NULL AND type LIKE ?2 ORDER BY seq DESC LIMIT ?3",
+            None,
+        ),
+    };
+    let mut stmt = conn.prepare(sql).map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map(params![anchor, pattern, limit as i64], row_to_event)
+        .map_err(map_sql_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_sql_err)
+}
+
 /// Dead letters, `pending` only unless `all`, oldest first.
 pub fn list_dead_letters_tx(conn: &Connection, all: bool) -> Result<Vec<DeadLetter>, DomainError> {
     let sql = if all {
@@ -368,6 +399,22 @@ impl SqliteEventLogStore {
     ) -> Result<Vec<StoredEvent>, DomainError> {
         self.db
             .call_mut(move |conn| read_after_tx(conn, after, limit))
+            .await
+    }
+
+    /// The newest `limit` events of `namespace` (`agent`, …), newest first:
+    /// on `thread`'s anchor when given, else on `stream`'s, else all. What
+    /// a thread's status is derived from and the activity log lists.
+    pub async fn recent(
+        &self,
+        namespace: &str,
+        thread: Option<ThreadId>,
+        stream: Option<StreamId>,
+        limit: usize,
+    ) -> Result<Vec<StoredEvent>, DomainError> {
+        let pattern = format!("{namespace}.%");
+        self.db
+            .call_mut(move |conn| recent_tx(conn, &pattern, thread, stream, limit))
             .await
     }
 

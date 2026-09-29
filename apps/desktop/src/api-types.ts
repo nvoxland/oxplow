@@ -251,18 +251,9 @@ export interface WorkspaceWatchEvent {
   path: string;
 }
 
-// ---- Hook events / agent statuses ----
+// ---- Agent statuses ----
 
 export type AgentStatus = "running" | "idle" | "stopped" | "error";
-
-export interface StoredEvent {
-  id: string;
-  kind: string;
-  streamId: string;
-  threadId: string | null;
-  payload: unknown;
-  createdAt: string;
-}
 
 // ---- MenuGroupSnapshot / CommandId placeholders ----
 

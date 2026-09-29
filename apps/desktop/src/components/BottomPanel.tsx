@@ -1,25 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { listHookEvents, subscribeHookEvents, type StoredEvent, type NormalizedEvent } from "../api.js";
+import { listAgentEvents, subscribeAgentEvents, type AgentEvent } from "../api.js";
 import { reportUiError } from "../ui-error.js";
 
 const MAX_ROWS = 200;
 
+/** The agent activity log: the stream's logged `agent.*` events (P3.9 —
+ *  it survives a restart; it used to read an in-memory hook ring). */
 export function BottomPanel({ streamId }: { streamId: string | null }) {
-  const [events, setEvents] = useState<StoredEvent[]>([]);
+  const [events, setEvents] = useState<AgentEvent[]>([]);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!streamId) return;
     setEvents([]);
-    void listHookEvents(streamId).then((initial) => {
-      setEvents(initial.slice(-MAX_ROWS));
-    }).catch((err) => reportUiError("Load hook events", err));
-    return subscribeHookEvents(streamId, (evt) => {
-      setEvents((prev) => {
-        const next = [...prev, evt];
-        return next.length > MAX_ROWS ? next.slice(next.length - MAX_ROWS) : next;
-      });
-    });
+    // Newest first from the backend; shown oldest first, like a log.
+    const show = (newest: AgentEvent[]) => setEvents(newest.slice(0, MAX_ROWS).reverse());
+    void listAgentEvents(streamId, MAX_ROWS)
+      .then(show)
+      .catch((err) => reportUiError("Load agent activity", err));
+    return subscribeAgentEvents(streamId, show);
   }, [streamId]);
 
   useEffect(() => {
@@ -47,76 +46,91 @@ export function BottomPanel({ streamId }: { streamId: string | null }) {
           justifyContent: "space-between",
         }}
       >
-        <span>hook events</span>
+        <span>agent activity</span>
         <span>{events.length} / {MAX_ROWS}</span>
       </div>
       <div ref={scrollerRef} style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}>
         {events.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>waiting for events…</div>
+          <div style={{ color: "var(--muted)" }}>waiting for activity…</div>
         ) : (
-          events.map((e) => <EventRow key={e.id} evt={e} />)
+          events.map((e) => <EventRow key={e.seq} evt={e} />)
         )}
       </div>
     </div>
   );
 }
 
-function EventRow({ evt }: { evt: StoredEvent }) {
-  const { normalized: n } = evt;
-  const time = formatTime(n.t);
+function EventRow({ evt }: { evt: AgentEvent }) {
+  const kind = evt.type.replace(/^agent\./, "");
   return (
     <div style={{ display: "flex", gap: 8, whiteSpace: "nowrap" }}>
-      <span style={{ color: "var(--muted)" }}>{time}</span>
-      <span style={{ color: kindColor(n.kind), width: 110, flexShrink: 0 }}>{n.kind}</span>
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{detail(n)}</span>
+      <span style={{ color: "var(--muted)" }}>{formatTime(evt.at)}</span>
+      <span style={{ color: kindColor(kind), width: 130, flexShrink: 0 }}>{kind}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{detail(kind, evt.payload)}</span>
     </div>
   );
 }
 
-function detail(n: NormalizedEvent): string {
-  switch (n.kind) {
-    case "session-start":
-      return n.cwd ?? "";
-    case "session-end":
-      return n.reason ?? "";
-    case "user-prompt":
-      return truncate(n.prompt, 120);
-    case "tool-use-start":
-      return `${n.toolName}${n.target ? " · " + n.target : ""}`;
-    case "tool-use-end":
-      return `${n.toolName} · ${n.status}`;
-    case "stop":
+type Payload = Record<string, unknown>;
+
+function str(p: Payload, key: string): string {
+  const v = p[key];
+  return typeof v === "string" ? v : "";
+}
+
+/** What a row says about its event, from the payload. */
+export function detail(kind: string, raw: unknown): string {
+  const p = (raw && typeof raw === "object" ? raw : {}) as Payload;
+  switch (kind) {
+    case "tool.requested": {
+      const target = str(p, "path") || str(p, "detail");
+      const denied = p.decision === "denied" ? ` · denied: ${str(p, "reason")}` : "";
+      return `${str(p, "tool")}${target ? " · " + truncate(target, 80) : ""}${denied}`;
+    }
+    case "tool.finished": {
+      const target = str(p, "path") || str(p, "detail");
+      const outcome = p.ok === false ? " · failed" : p.ok === true ? " · ok" : "";
+      return `${str(p, "tool")}${target ? " · " + truncate(target, 80) : ""}${outcome}`;
+    }
+    case "turn.ended":
+      return str(p, "outcome");
+    case "prompt.submitted":
+      return p.reprompt ? "re-prompt" : "";
+    case "status.changed":
+      return `${str(p, "state")}${str(p, "detail") ? " · " + truncate(str(p, "detail"), 80) : ""}`;
+    case "session.started":
+      return `${str(p, "harness")}${p.resumed ? " (resumed)" : ""}`;
+    case "session.ended":
+      return str(p, "reason");
+    default:
       return "";
-    case "notification":
-      return n.message;
-    case "meta":
-      return n.hookEventName;
   }
 }
 
 function kindColor(kind: string): string {
   switch (kind) {
-    case "user-prompt":
+    case "prompt.submitted":
+    case "turn.started":
       return "#7dd3fc";
-    case "tool-use-start":
+    case "tool.requested":
       return "#a5b4fc";
-    case "tool-use-end":
+    case "tool.finished":
       return "#86efac";
-    case "session-start":
+    case "session.started":
       return "#fcd34d";
-    case "session-end":
+    case "session.ended":
       return "#fca5a5";
-    case "stop":
+    case "turn.ended":
       return "#fda4af";
-    case "notification":
+    case "status.changed":
       return "#e0e7ff";
     default:
       return "var(--muted)";
   }
 }
 
-function formatTime(t: number): string {
-  const d = new Date(t);
+function formatTime(at: string): string {
+  const d = new Date(at);
   return (
     String(d.getHours()).padStart(2, "0") +
     ":" +

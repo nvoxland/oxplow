@@ -106,8 +106,9 @@ oxplow agent:
   `selectedBatch.pane_target`; UI-side, it's an xterm.js inside
   `.xterm`. Click that element to focus, type with regular keystrokes;
   xterm pipes them through the PTY to the thread's assigned agent.
-- **When a turn is done.** `deriveThreadAgentStatus`
-  (`crates/oxplow-domain/src/hook.rs`) reduces hook events to two states:
+- **When a turn is done.** `derive_thread_status`
+  (`crates/oxplow-app/src/agent_status_derive.rs`) reduces the thread's
+  logged `agent.*` activity to two states:
   `working` (agent is actively burning cycles) or `waiting` (agent
   isn't doing anything; user owes the next move). Brand-new threads,
   finished turns, exited processes, and permission prompts all
@@ -300,8 +301,9 @@ env-var-interpolated `OXPLOW_HOOK_TOKEN` header, plus `X-Oxplow-Stream`,
 `X-Oxplow-Thread`, `X-Oxplow-Pane`. The MCP server's `onHook` callback dispatches
 to `runtime.handleHookEnvelope`, which:
 
-1. Stores the event in `HookEventStore` (a ring buffer, also fed to the UI's
-   Hook Events tool window via the `hook.recorded` EventBus event).
+1. (There is no in-memory hook ring any more — P3.9. What a hook did is its
+   `agent.*` events in the log; the Hook events page lists them through
+   `list_agent_events` and refetches on `HookEventsChanged`.)
 2. Runs `HookIngestService::ingest` (`crates/oxplow-app/src/hook_ingest.rs`,
    P3.3): **one transaction per envelope** writes the state the hook changes
    and the `agent.*` events that record it, anchored to the thread's stream,
@@ -1784,10 +1786,19 @@ provide finer-grained overrides without displacing earlier context.
 
 ## Agent status
 
-`deriveThreadAgentStatus` (`crates/oxplow-domain/src/hook.rs`) reduces a stream
-of hook events into one of two states: `working` or `waiting`. The
-runtime recomputes on every hook arrival and emits
-`agent-status.changed`. The UI shows it as a colored dot on each thread
+`derive_thread_status` (`crates/oxplow-app/src/agent_status_derive.rs`)
+reduces a thread's recent activity into one of two states: `working` or
+`waiting`. **The input is the event log** (P3.9): the thread's newest 200
+`agent.*` events (`recent_activity`, via `SqliteEventLogStore::recent`),
+each read as an `Activity` (`activity_of`) — `prompt.submitted` (every
+prompt, re-prompts too), `tool.requested{allowed}` (a refused request never
+runs, so it opens no tool), `tool.finished`, `turn.ended` (completed vs
+interrupted/restart), `session.started`, and `status.changed`
+(`awaiting_user` parks the thread until a prompt or another status moves
+it; `await_user` logs it through `HookIngestService::set_status`). It
+survives a restart, unlike the in-memory ring it replaced. The stall watch
+and `list_agent_statuses` derive from the same reads. The runtime
+recomputes on every tool hook and emits `agent-status.changed`. The UI shows it as a colored dot on each thread
 tab — yellow pulsing for `working`, red for `waiting`. The two states
 encode the only signal a tab indicator actually needs: is the agent
 burning cycles, or does the user owe the next move? Brand-new threads,

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ids::{AgentTurnId, HookEventId, StreamId, ThreadId};
+use crate::ids::{AgentTurnId, ThreadId};
 use crate::time::Timestamp;
 
 /// Discriminant for hook events. Matches the kinds Claude Code emits
@@ -30,19 +30,6 @@ pub enum HookKind {
     SessionStart,
     /// A harness session ended — `reason: "clear"` for `/clear`.
     SessionEnd,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct HookEvent {
-    pub id: HookEventId,
-    pub thread_id: Option<ThreadId>,
-    pub stream_id: Option<StreamId>,
-    pub kind: HookKind,
-    pub session_id: Option<String>,
-    /// Raw envelope from the hook subprocess, JSON-encoded. The
-    /// pipeline parses this lazily — the persisted form is verbatim.
-    pub payload_json: String,
-    pub received_at: Timestamp,
 }
 
 #[derive(

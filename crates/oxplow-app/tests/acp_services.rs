@@ -18,8 +18,8 @@ use oxplow_app::Services;
 use oxplow_db::semantic_layer::SqlCell;
 use oxplow_domain::stores::{AgentTurnStore, StreamStore, TaskStore, ThreadStore};
 use oxplow_domain::{
-    AgentKind, HookKind, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority,
-    TaskStatus, Thread, ThreadId, ThreadStatus, Timestamp,
+    AgentKind, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, TaskStatus,
+    Thread, ThreadId, ThreadStatus, Timestamp,
 };
 
 async fn boot() -> (Arc<Services>, std::path::PathBuf, tempfile::TempDir) {
@@ -232,23 +232,23 @@ async fn an_acp_edit_is_recorded_like_a_hooked_one() {
         files.contains(&vec![SqlCell::Text("src/x.rs".into())]),
         "{files:?}"
     );
-    // The hook log saw the whole turn, and the turn is closed.
-    let kinds: Vec<HookKind> = svc
-        .hook_event_store
-        .list_recent(Some(&thread), 50)
+    // The log saw the whole turn, and the turn is closed.
+    let kinds: Vec<String> = svc
+        .event_log_store
+        .recent("agent", Some(thread), None, 50)
         .await
         .unwrap()
         .into_iter()
-        .map(|e| e.kind)
+        .map(|e| e.envelope.event_type)
         .collect();
     for k in [
-        HookKind::AgentBoot,
-        HookKind::UserPromptSubmit,
-        HookKind::PreToolUse,
-        HookKind::PostToolUse,
-        HookKind::Stop,
+        "agent.session.started",
+        "agent.prompt.submitted",
+        "agent.tool.requested",
+        "agent.tool.finished",
+        "agent.turn.ended",
     ] {
-        assert!(kinds.contains(&k), "{k:?} missing from {kinds:?}");
+        assert!(kinds.iter().any(|t| t == k), "{k} missing from {kinds:?}");
     }
     assert!(svc
         .agent_turn_store

@@ -32,11 +32,11 @@ pub use comment::{
 pub use error::DomainError;
 pub use events::schema::{EventSchemaRegistry, EventType};
 pub use events::{Anchors, Envelope, EventId, StoredEvent};
-pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
+pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
     AgentTurnId, AnyId, CommentId, CommentMessageId, DashboardId, DashboardItemId, EffortId,
-    EntityKind, FollowupId, HookEventId, IdParseError, NoteId, PageVisitId, StreamId, TaskId,
-    TaskLinkId, ThreadId, UsageEventId,
+    EntityKind, FollowupId, IdParseError, NoteId, PageVisitId, StreamId, TaskId, TaskLinkId,
+    ThreadId, UsageEventId,
 };
 pub use stream::{Stream, StreamKind};
 pub use task::{

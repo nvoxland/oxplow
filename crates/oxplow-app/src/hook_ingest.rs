@@ -29,17 +29,11 @@
 //! transaction.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
-
-/// Process-local counter for the in-memory hook-event log (the
-/// `hook_event` table was dropped in V2 — these rows live only in the
-/// `ThreadRuntimeRegistry` ring buffer, so there's no rowid to allocate).
-static NEXT_HOOK_EVENT_ID: AtomicI64 = AtomicI64::new(1);
 
 use oxplow_db::agent_stores::{activity_anchors_tx, close_turn_tx, open_turn_ids_tx, open_turn_tx};
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
@@ -51,10 +45,10 @@ use oxplow_domain::events::schema::{
     ToolDecision as Decision,
 };
 use oxplow_domain::refs::build::{thread_ref, turn_ref};
-use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
+use oxplow_domain::stores::AgentStatusStore;
 use oxplow_domain::{
     AgentKind, AgentStatus, AgentStatusState, AgentTurnId, DomainError, EventSchemaRegistry,
-    HookEvent, HookEventId, HookKind, StreamId, ThreadId, Timestamp,
+    HookKind, StreamId, ThreadId, Timestamp,
 };
 
 use crate::events::{EventBus, OxplowEvent};
@@ -101,8 +95,6 @@ pub enum HookIngestError {
 /// What one ingest did, for the request path that follows it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct IngestOutcome {
-    /// The in-memory hook-log row.
-    pub hook_event: Option<HookEventId>,
     /// The thread's open turn after the ingest (the one a prompt opened).
     pub turn: Option<AgentTurnId>,
     /// The turn a Stop / Interrupt closed.
@@ -125,7 +117,8 @@ pub struct HookIngestService {
     /// Paths the tools name are made relative to the thread's worktree; a
     /// stream with none recorded works in the project directory.
     project_dir: PathBuf,
-    hooks: Arc<dyn HookEventStore>,
+    /// Reads recent activity to derive a thread's status.
+    log: oxplow_db::SqliteEventLogStore,
     statuses: Arc<dyn AgentStatusStore>,
     events: EventBus,
     pump: Option<Arc<crate::event_pump::EventPump>>,
@@ -138,15 +131,14 @@ impl HookIngestService {
         db: Database,
         schemas: Arc<EventSchemaRegistry>,
         project_dir: PathBuf,
-        hooks: Arc<dyn HookEventStore>,
         statuses: Arc<dyn AgentStatusStore>,
         events: EventBus,
     ) -> Self {
         Self {
+            log: oxplow_db::SqliteEventLogStore::new(db.clone(), schemas.clone()),
             db,
             schemas,
             project_dir,
-            hooks,
             statuses,
             events,
             pump: None,
@@ -172,23 +164,10 @@ impl HookIngestService {
     /// Record the envelope and drive the turn / status state machine.
     pub async fn ingest(&self, env: HookEnvelope) -> Result<IngestOutcome, HookIngestError> {
         let now = Timestamp::now();
-        let stored = HookEvent {
-            id: HookEventId::new(NEXT_HOOK_EVENT_ID.fetch_add(1, Ordering::Relaxed)),
-            thread_id: env.thread_id,
-            stream_id: env.stream_id,
-            kind: env.kind,
-            session_id: env.session_id.clone(),
-            payload_json: env.payload_json.clone(),
-            received_at: now,
-        };
-        self.hooks.append(&stored).await?;
-        self.events.emit(OxplowEvent::HookEventsChanged);
-        let mut outcome = IngestOutcome {
-            hook_event: Some(stored.id),
-            ..IngestOutcome::default()
-        };
+        let mut outcome = IngestOutcome::default();
+        let kind = env.kind;
         let Some(thread) = env.thread_id else {
-            return Ok(outcome);
+            return Ok(outcome); // no thread: nothing to anchor a record to
         };
 
         let current = self.current_status(&thread).await;
@@ -202,6 +181,8 @@ impl HookIngestService {
             })
             .await?;
 
+        // The activity log (the Hook events page) refetches on this.
+        self.events.emit(OxplowEvent::HookEventsChanged);
         outcome.turn = applied.turn;
         outcome.closed_turn = applied.closed_turn;
         if applied.opened_turn || applied.closed_turn.is_some() {
@@ -210,7 +191,7 @@ impl HookIngestService {
         }
         match applied.status {
             Some((state, detail)) => self.publish_status(&thread, state, detail).await?,
-            None => self.announce_derived_status(&thread, stored.kind).await,
+            None => self.announce_derived_status(&thread, kind).await,
         }
         if let Some(pump) = &self.pump {
             pump.wake();
@@ -268,8 +249,8 @@ impl HookIngestService {
 
     /// Tool hooks set no status of their own, but they change what the
     /// renderer derives (an open `Task` keeps a thread working). Re-derive
-    /// from the hook log and announce it, keeping an `await_user` that
-    /// parked the thread this turn (the derive can't see its marker).
+    /// from the thread's logged activity and announce it, keeping an
+    /// `await_user` that parked the thread this turn.
     async fn announce_derived_status(&self, thread: &ThreadId, kind: HookKind) {
         if !matches!(kind, HookKind::PreToolUse | HookKind::PostToolUse) {
             return;
@@ -279,9 +260,7 @@ impl HookIngestService {
                 (AgentStatusState::AwaitingUser, s.detail)
             }
             _ => {
-                let recent = self
-                    .hooks
-                    .list_recent(Some(thread), 200)
+                let recent = crate::agent_status_derive::recent_activity(&self.log, *thread)
                     .await
                     .unwrap_or_default();
                 let derived =
@@ -705,12 +684,11 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
+        let registry = Arc::new(ThreadRuntimeRegistry::new());
         let svc = HookIngestService::new(
             db,
             Arc::new(oxplow_domain::EventSchemaRegistry::core()),
             std::path::PathBuf::from("/p"),
-            registry.clone(),
             registry,
             EventBus::new(),
         );

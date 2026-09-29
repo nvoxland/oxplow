@@ -30,7 +30,6 @@ pub enum EntityKind {
     Note,
     Effort,
     AgentTurn,
-    HookEvent,
     Comment,
     CommentMessage,
     Followup,
@@ -42,7 +41,7 @@ pub enum EntityKind {
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 15] = [
+    pub const ALL: [EntityKind; 14] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Task,
@@ -50,7 +49,6 @@ impl EntityKind {
         EntityKind::Note,
         EntityKind::Effort,
         EntityKind::AgentTurn,
-        EntityKind::HookEvent,
         EntityKind::Comment,
         EntityKind::CommentMessage,
         EntityKind::Followup,
@@ -70,7 +68,6 @@ impl EntityKind {
             EntityKind::Note => "not",
             EntityKind::Effort => "eff",
             EntityKind::AgentTurn => "trn",
-            EntityKind::HookEvent => "hke",
             EntityKind::Comment => "cmt",
             EntityKind::CommentMessage => "cmg",
             EntityKind::Followup => "fup",
@@ -92,7 +89,6 @@ impl EntityKind {
             EntityKind::Note => "note id (not…)",
             EntityKind::Effort => "effort id (eff…)",
             EntityKind::AgentTurn => "agent-turn id (trn…)",
-            EntityKind::HookEvent => "hook-event id (hke…)",
             EntityKind::Comment => "comment id (cmt…)",
             EntityKind::CommentMessage => "comment-message id (cmg…)",
             EntityKind::Followup => "follow-up id (fup…)",
@@ -308,7 +304,6 @@ id_type!(TaskLinkId, TaskLink);
 id_type!(NoteId, Note);
 id_type!(EffortId, Effort);
 id_type!(AgentTurnId, AgentTurn);
-id_type!(HookEventId, HookEvent);
 id_type!(CommentId, Comment);
 id_type!(CommentMessageId, CommentMessage);
 id_type!(FollowupId, Followup);

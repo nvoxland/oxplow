@@ -862,7 +862,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listHookEvents: (threadId: string | null, limit: number | null) => typedError<HookEvent[], IpcError>(__TAURI_INVOKE("list_hook_events", { threadId, limit })),
+	listAgentEvents: (threadId: string | null, streamId: string | null, limit: number | null) => typedError<StoredEvent[], IpcError>(__TAURI_INVOKE("list_agent_events", { threadId, streamId, limit })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	readEventContent: (hash: string) => typedError<string | null, IpcError>(__TAURI_INVOKE("read_event_content", { hash })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1527,6 +1532,21 @@ export type AlertState = {
 	message: string,
 };
 
+/**
+ *  Where an event sits in oxplow's timeline. The engine fills these
+ *  from context; every field is optional because not every event has a
+ *  thread (a snapshot) or an effort (a stream-level config change).
+ */
+export type Anchors = {
+	stream_id: StreamId | null,
+	thread_id: ThreadId | null,
+	effort_id: EffortId | null,
+	// `agent_turn.id`.
+	turn_id: number | null,
+	// `snapshot.id`.
+	snapshot_id: number | null,
+};
+
 export type AppVersion = {
 	version: string,
 };
@@ -2149,6 +2169,49 @@ export type EntityRowCount = {
 	rows: number | null,
 };
 
+// One event as written to the log.
+export type Envelope = {
+	id: EventId,
+	/**
+	 *  The event's name, `namespace.name[.name]` (`work_item.transitioned`,
+	 *  `agent.tool.finished`). Plugins emit only under their own namespace.
+	 */
+	type: string,
+	/**
+	 *  The schema version of `event_type`; the payload validates against
+	 *  `type@v`.
+	 */
+	v: number,
+	at: Timestamp,
+	// What emitted it: `agent:thr3`, `human`, `system:snapshot_capture`.
+	source: string,
+	anchors: Anchors,
+	// The canonical refs (`.context/refs.md`) the event is about.
+	subject: string[],
+	/**
+	 *  Validated against the type's JSON Schema on append (P1.5). Large or
+	 *  sensitive content is never inline: it is stored by content hash and
+	 *  the payload carries the hash.
+	 */
+	payload: unknown,
+	payload_hash: string | null,
+	// The event that caused this one.
+	cause: EventId | null,
+	/**
+	 *  A stable key the emitter derives from the action (`work_item:tsk4:
+	 *  transition:eff9`), so an at-least-once producer can't log the same
+	 *  occurrence twice: the second append fails with `Constraint`.
+	 */
+	dedupe_key: string | null,
+};
+
+/**
+ *  An event's public identity: a UUIDv7 in its canonical text form, so
+ *  ids sort by creation time. `seq` (the log's insert order) is the
+ *  delivery order; `id` is what other events and the audit log point at.
+ */
+export type EventId = string;
+
 // A loaded extension and anything wrong with it.
 export type Extension = {
 	name: string,
@@ -2496,22 +2559,6 @@ export type HookEnvelope = {
 	// PreToolUse only: the policy's verdict (`None` reads as allowed).
 	decision?: ToolDecision | null,
 };
-
-export type HookEvent = {
-	id: HookEventId,
-	thread_id: ThreadId | null,
-	stream_id: StreamId | null,
-	kind: HookKind,
-	session_id: string | null,
-	/**
-	 *  Raw envelope from the hook subprocess, JSON-encoded. The
-	 *  pipeline parses this lazily — the persisted form is verbatim.
-	 */
-	payload_json: string,
-	received_at: Timestamp,
-};
-
-export type HookEventId = string;
 
 /**
  *  Discriminant for hook events. Matches the kinds Claude Code emits
@@ -4044,6 +4091,12 @@ export type SqlQueryResult = {
 	rows: SqlCell[][],
 	truncated: boolean,
 };
+
+// An envelope as read back from the log, with its position.
+export type StoredEvent = {
+	// Global insert order; the delivery order and what checkpoints hold.
+	seq: number,
+} & (Envelope);
 
 export type Stream = {
 	id: StreamId,

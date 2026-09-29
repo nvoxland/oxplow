@@ -39,9 +39,9 @@ again on a fresh launch:
   `subagent_in_flight`, `turn_had_writes`, `turn_had_filing`, and
   `turn_filed_ready_item` to false/unknown. Wiring those in would
   light up the filed-but-didn't-ship advisory and the Q&A-turn /
-  subagent-suppress carve-outs. Mining the signals from
-  `hook_event_store` queries scoped to the open `agent_turn` row is
-  the ~obvious approach.
+  subagent-suppress carve-outs. `turn_had_writes` is wired now
+  (`TurnSignals::of_turn` reads the closed turn's `agent.tool.*` events,
+  P3.4); the others would read the same events.
 - The `write_guard` / `filing_enforcement` deny payloads now flow
   through `serde_json::to_value(deny)`. They serialize fine but the
   `Type` derives mean specta will eventually want to surface them in

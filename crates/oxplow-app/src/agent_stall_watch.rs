@@ -25,10 +25,12 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use oxplow_domain::stores::{AgentStatusStore, HookEventStore, TaskStore};
+use oxplow_domain::stores::{AgentStatusStore, TaskStore};
 use oxplow_domain::{AgentStatusState, TaskStatus, ThreadId, Timestamp};
 
-use crate::agent_status_derive::{derive_thread_status_with_activity, AGENT_STALL_AFTER_MS};
+use crate::agent_status_derive::{
+    derive_thread_status_with_activity, recent_activity, AGENT_STALL_AFTER_MS,
+};
 use crate::events::{EventBus, OxplowEvent};
 use crate::output_activity::OutputActivity;
 
@@ -45,7 +47,8 @@ pub const AGENT_STALL_ALERT_AFTER_MS: i64 = AGENT_STALL_AFTER_MS;
 #[derive(Clone)]
 pub struct AgentStallWatch {
     statuses: Arc<dyn AgentStatusStore>,
-    hooks: Arc<dyn HookEventStore>,
+    /// The threads' logged `agent.*` activity.
+    log: oxplow_db::SqliteEventLogStore,
     tasks: Arc<dyn TaskStore>,
     events: EventBus,
     /// Per-thread PTY liveness. Folded into the derive so a long turn
@@ -58,14 +61,14 @@ pub struct AgentStallWatch {
 impl AgentStallWatch {
     pub fn new(
         statuses: Arc<dyn AgentStatusStore>,
-        hooks: Arc<dyn HookEventStore>,
+        log: oxplow_db::SqliteEventLogStore,
         tasks: Arc<dyn TaskStore>,
         activity: OutputActivity,
         events: EventBus,
     ) -> Self {
         Self {
             statuses,
-            hooks,
+            log,
             tasks,
             events,
             activity,
@@ -106,7 +109,7 @@ impl AgentStallWatch {
         now: Timestamp,
     ) -> Result<(), oxplow_domain::DomainError> {
         let thread_id = status.thread_id;
-        let events = self.hooks.list_recent(Some(&thread_id), 200).await?;
+        let events = recent_activity(&self.log, thread_id).await?;
         let last_output = self.activity.last(&thread_id);
         let derived = derive_thread_status_with_activity(&events, last_output, now);
 
@@ -143,11 +146,11 @@ impl AgentStallWatch {
             return Ok(());
         }
 
-        // Waiting since the last sign of life: newest hook event, or
-        // the status row's own update time if the log is empty.
+        // Waiting since the last sign of life: newest logged activity, or
+        // the status row's own update time if there is none.
         let waiting_since = events
             .iter()
-            .map(|e| e.received_at)
+            .map(|e| e.at)
             .max()
             .unwrap_or(status.updated_at);
         let waiting_ms = now.unix_ms() - waiting_since.unix_ms();
@@ -183,13 +186,14 @@ mod tests {
     use oxplow_db::{Database, SqliteStreamStore, SqliteTaskStore, SqliteThreadStore};
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{
-        HookEvent, HookEventId, HookKind, Stream, StreamId, StreamKind, Task, TaskActorKind,
-        TaskId, TaskPriority, Thread, ThreadStatus,
+        HookKind, Stream, StreamId, StreamKind, Task, TaskActorKind, TaskId, TaskPriority, Thread,
+        ThreadStatus,
     };
 
     struct Fixture {
         watch: AgentStallWatch,
         registry: Arc<ThreadRuntimeRegistry>,
+        log: oxplow_db::SqliteEventLogStore,
         tasks: Arc<SqliteTaskStore>,
         activity: OutputActivity,
         bus: EventBus,
@@ -238,13 +242,17 @@ mod tests {
             archived_at: None,
         };
         threads.upsert(&t).await.unwrap();
-        let registry = Arc::new(ThreadRuntimeRegistry::with_default_capacity());
+        let registry = Arc::new(ThreadRuntimeRegistry::new());
+        let log = oxplow_db::SqliteEventLogStore::new(
+            db.clone(),
+            Arc::new(oxplow_domain::EventSchemaRegistry::core()),
+        );
         let tasks = Arc::new(SqliteTaskStore::new(db));
         let bus = EventBus::new();
         let activity = OutputActivity::new();
         let watch = AgentStallWatch::new(
             registry.clone(),
-            registry.clone(),
+            log.clone(),
             tasks.clone(),
             activity.clone(),
             bus.clone(),
@@ -252,6 +260,7 @@ mod tests {
         Fixture {
             watch,
             registry,
+            log,
             tasks,
             activity,
             bus,
@@ -259,18 +268,39 @@ mod tests {
         }
     }
 
+    /// Log the `agent.*` event a hook of `kind` records, at `ms`.
     async fn append(f: &Fixture, kind: HookKind, ms: i64, payload: &str) {
-        let ev = HookEvent {
-            id: HookEventId::new(ms),
-            thread_id: Some(f.thread),
-            stream_id: None,
-            kind,
-            session_id: None,
-            payload_json: payload.to_string(),
-            received_at: Timestamp::from_unix_ms(ms),
+        let tool = serde_json::from_str::<serde_json::Value>(payload)
+            .ok()
+            .and_then(|v| v["tool_name"].as_str().map(str::to_string))
+            .unwrap_or_else(|| "Bash".into());
+        let (ty, v, body) = match kind {
+            HookKind::UserPromptSubmit => (
+                "agent.prompt.submitted",
+                1,
+                serde_json::json!({"thread": "thread:thr1", "reprompt": false}),
+            ),
+            HookKind::PreToolUse => (
+                "agent.tool.requested",
+                1,
+                serde_json::json!({"tool": tool, "decision": "allowed"}),
+            ),
+            HookKind::PostToolUse => ("agent.tool.finished", 1, serde_json::json!({"tool": tool})),
+            HookKind::Stop => (
+                "agent.turn.ended",
+                2,
+                serde_json::json!({"turn": "turn:trn1", "thread": "thread:thr1", "outcome": "completed"}),
+            ),
+            other => panic!("{other:?} is not logged in these tests"),
         };
-        let hooks: Arc<dyn HookEventStore> = f.registry.clone();
-        hooks.append(&ev).await.unwrap();
+        let mut env = oxplow_domain::Envelope::new(ty, v, "test", body)
+            .unwrap()
+            .with_anchors(oxplow_domain::Anchors {
+                thread_id: Some(f.thread),
+                ..Default::default()
+            });
+        env.at = Timestamp::from_unix_ms(ms);
+        f.log.append(env).await.unwrap();
     }
 
     async fn seed_status(f: &Fixture, state: AgentStatusState) {

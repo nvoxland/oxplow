@@ -142,7 +142,7 @@ use oxplow_db::{
     SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore, SqliteWikiPageStore,
     SqliteWikiPageThreadUpdateStore,
 };
-use oxplow_domain::stores::{AgentStatusStore, HookEventStore};
+use oxplow_domain::stores::AgentStatusStore;
 use oxplow_domain::EventSchemaRegistry;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
 
@@ -435,7 +435,6 @@ pub struct Services {
     /// here; legacy callers that need "the primary" use
     /// `snapshot_captures.primary()` (or the `snapshot_capture` alias).
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
-    pub hook_event_store: Arc<dyn HookEventStore>,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// Backing in-memory state for hook events + agent status. Both
@@ -645,9 +644,7 @@ impl Services {
                 }))
         });
         let search_store = Arc::new(SqliteSearchStore::new(db.clone()));
-        let thread_runtime =
-            Arc::new(thread_runtime::ThreadRuntimeRegistry::with_default_capacity());
-        let hook_event_store: Arc<dyn HookEventStore> = thread_runtime.clone();
+        let thread_runtime = Arc::new(thread_runtime::ThreadRuntimeRegistry::new());
         let agent_status_store: Arc<dyn AgentStatusStore> = thread_runtime.clone();
         let agent_turn_store = Arc::new(SqliteAgentTurnStore::with_event_schemas(
             db.clone(),
@@ -686,7 +683,6 @@ impl Services {
             db.clone(),
             event_schemas.clone(),
             layout.project_dir.clone(),
-            hook_event_store.clone(),
             agent_status_store.clone(),
             event_bus.clone(),
         )
@@ -981,7 +977,6 @@ impl Services {
             code_quality_store,
             snapshot_store,
             search_store,
-            hook_event_store,
             agent_status_store,
             agent_turn_store,
             thread_runtime,

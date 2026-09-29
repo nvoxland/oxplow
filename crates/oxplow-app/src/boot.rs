@@ -332,7 +332,7 @@ pub async fn run_boot_orchestration(state: &Arc<Services>) {
     // sits on a non-running agent. See agent_stall_watch.rs.
     crate::agent_stall_watch::AgentStallWatch::new(
         state.agent_status_store.clone(),
-        state.hook_event_store.clone(),
+        (*state.event_log_store).clone(),
         state.task_store.clone(),
         state.output_activity.clone(),
         event_bus.clone(),

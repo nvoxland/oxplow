@@ -10,7 +10,7 @@
 use async_trait::async_trait;
 
 use crate::comment::{CommentIntent, CommentMessage, CommentStatus, CommentTarget, CommentThread};
-use crate::hook::{AgentStatus, AgentStatusState, AgentTurn, HookEvent, HookKind};
+use crate::hook::{AgentStatus, AgentStatusState, AgentTurn};
 use crate::ids::{AgentTurnId, CommentId, NoteId, StreamId, TaskId, TaskLinkId, ThreadId};
 use crate::stream::Stream;
 use crate::task::{Task, TaskLink, TaskLinkType, TaskNote, TaskStatus};
@@ -115,22 +115,6 @@ pub trait TaskLinkStore: Send + Sync {
     async fn list_outgoing(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn list_incoming(&self, item: TaskId) -> Result<Vec<TaskLink>, DomainError>;
     async fn delete(&self, id: TaskLinkId) -> Result<(), DomainError>;
-}
-
-#[async_trait]
-pub trait HookEventStore: Send + Sync {
-    async fn append(&self, event: &HookEvent) -> Result<(), DomainError>;
-    /// Most recent first, capped at `limit` (default 200).
-    async fn list_recent(
-        &self,
-        thread: Option<&ThreadId>,
-        limit: usize,
-    ) -> Result<Vec<HookEvent>, DomainError>;
-    async fn list_by_kind(
-        &self,
-        kind: HookKind,
-        limit: usize,
-    ) -> Result<Vec<HookEvent>, DomainError>;
 }
 
 #[async_trait]

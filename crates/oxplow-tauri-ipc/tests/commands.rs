@@ -227,9 +227,9 @@ async fn get_file_snapshot_missing_returns_none() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn list_hook_events_empty_for_fresh_project() {
+async fn list_agent_events_empty_for_fresh_project() {
     let app = TestApp::build();
-    let v = commands::generated::list_hook_events(app.state(), None, Some(10))
+    let v = commands::generated::list_agent_events(app.state(), None, None, Some(10))
         .await
         .unwrap();
     assert!(v.is_empty());

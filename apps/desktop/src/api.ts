@@ -2611,6 +2611,7 @@ export async function recordUserInterrupt(threadId: string, streamId: string | n
       session_id: null,
       payload_json: JSON.stringify({ source: "user-escape" }),
       prompt: null,
+      decision: null,
     }),
   );
 }
@@ -2926,63 +2927,32 @@ export async function probeDaemon(): Promise<boolean> {
   }
 }
 
-export type NormalizedEvent =
-  | { kind: "session-start"; t: number; sessionId?: string; cwd?: string }
-  | { kind: "session-end"; t: number; sessionId?: string; reason?: string }
-  | { kind: "user-prompt"; t: number; sessionId?: string; prompt: string }
-  | {
-      kind: "tool-use-start";
-      t: number;
-      sessionId?: string;
-      toolName: string;
-      target?: string;
-      input?: unknown;
-    }
-  | {
-      kind: "tool-use-end";
-      t: number;
-      sessionId?: string;
-      toolName: string;
-      status: "ok" | "error";
-    }
-  | { kind: "stop"; t: number; sessionId?: string }
-  | { kind: "notification"; t: number; sessionId?: string; message: string }
-  | { kind: "meta"; t: number; sessionId?: string; hookEventName: string; raw: unknown };
+/** One logged agent event (`agent.*` in the event log): a prompt, a tool
+ *  request or finish, a turn's end, a session, a status change. */
+export type AgentEvent = import("./tauri-bridge/generated/bindings.js").StoredEvent;
 
-export interface StoredEvent {
-  id: number;
-  streamId: string;
-  threadId?: string;
-  pane?: "working" | "talking";
-  normalized: NormalizedEvent;
+/** The newest agent activity, newest first — for a stream when given
+ *  (the activity log page), else everywhere. */
+export async function listAgentEvents(streamId?: string | null, limit = 200): Promise<AgentEvent[]> {
+  return unwrap(await commands.listAgentEvents(null, streamId ?? null, limit));
 }
 
-export async function listHookEvents(_streamId?: string): Promise<StoredEvent[]> {
-  return unwrap(
-    await commands.listHookEvents(null, null),
-  ) as unknown as StoredEvent[];
-}
-
-export function subscribeHookEvents(
-  streamId: string | "all",
-  onEvent: (event: StoredEvent) => void,
+/** Refetch the activity log whenever the backend logs agent activity
+ *  (`hookEventsChanged` is a payload-free "something landed" ping). */
+export function subscribeAgentEvents(
+  streamId: string | null,
+  onEvents: (events: AgentEvent[]) => void,
 ): () => void {
-  // Backend `HookEventsChanged` is a coarse "something landed" ping —
-  // no payload. Refetch the latest hook event and forward it; this
-  // misses bursts but matches the renderer's "refetch on signal" model.
-  let lastSeenId = -1;
   return subscribeOxplowEvents((event) => {
     if (event.kind !== "hookEventsChanged") return;
-    void listHookEvents().then((events) => {
-      if (events.length === 0) return;
-      // Events are returned newest-first by listHookEvents.
-      const next = events[0];
-      if (typeof next.id === "number" && next.id <= lastSeenId) return;
-      if (typeof next.id === "number") lastSeenId = next.id;
-      if (streamId !== "all" && next.streamId !== streamId) return;
-      onEvent(next);
-    });
+    void listAgentEvents(streamId).then(onEvents);
   });
+}
+
+/** A tool call's stored input or output (by the hash in its event
+ *  payload), or null once retention removed it. */
+export async function readEventContent(hash: string): Promise<string | null> {
+  return unwrap(await commands.readEventContent(hash));
 }
 
 /**

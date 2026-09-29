@@ -1,10 +1,10 @@
 //! Cores for the `hooks` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use oxplow_app::agent_status_derive::derive_thread_status;
+use oxplow_app::agent_status_derive::{derive_thread_status, recent_activity};
 use oxplow_app::{HookEnvelope, Services};
 use oxplow_domain::stores::AgentTurnStore;
-use oxplow_domain::{AgentStatus, AgentTurn, HookEvent, ThreadId};
+use oxplow_domain::{AgentStatus, AgentTurn, StoredEvent, ThreadId};
 
 use crate::error::IpcError;
 
@@ -18,33 +18,39 @@ pub async fn ingest_hook_event(svc: &Services, envelope: HookEnvelope) -> Result
     Ok(())
 }
 
-pub async fn list_hook_events(
+/// The newest agent activity (`agent.*` events), newest first — on a
+/// thread when given, else a stream, else everywhere. The activity log's
+/// source (P3.9; it used to read an in-memory hook ring a restart
+/// emptied). Bodies are behind [`read_event_content`].
+pub async fn list_agent_events(
     svc: &Services,
     thread_id: Option<ThreadId>,
+    stream_id: Option<oxplow_domain::StreamId>,
     limit: Option<usize>,
-) -> Result<Vec<HookEvent>, IpcError> {
-    let limit = limit.unwrap_or(200);
+) -> Result<Vec<StoredEvent>, IpcError> {
     Ok(svc
-        .hook_event_store
-        .list_recent(thread_id.as_ref(), limit)
+        .event_log_store
+        .recent("agent", thread_id, stream_id, limit.unwrap_or(200))
         .await?)
 }
 
+/// A stored event body (a tool's input or output), as text; `None` when
+/// it was never stored or retention removed it.
+pub async fn read_event_content(svc: &Services, hash: String) -> Result<Option<String>, IpcError> {
+    Ok(oxplow_db::event_content_store::read(&svc.db, &hash)
+        .await?
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))
+}
+
 pub async fn list_agent_statuses(svc: &Services) -> Result<Vec<AgentStatus>, IpcError> {
-    // Derive each thread's working/waiting state by replaying its
-    // hook event log instead of trusting the agent_status row. The
-    // sidecar table can drift (a missed Stop, a mis-routed Subagent
-    // Stop, a stale boot row) — the hook log is what Claude Code
-    // actually emitted, so deriving from it self-heals against
-    // ingest-pipeline bugs. Mirrors `src/session/agent-status.ts`
-    // on main, which has the proven state machine for this.
+    // Derive each thread's working/waiting state by replaying its logged
+    // activity instead of trusting the in-memory status row, which can
+    // drift (a missed Stop, a stale boot row) — the log is what the agent
+    // actually did, so deriving from it self-heals.
     let now = oxplow_domain::Timestamp::now();
     let mut statuses = svc.agent_status_store.list_all().await?;
     for s in &mut statuses {
-        let events = svc
-            .hook_event_store
-            .list_recent(Some(&s.thread_id), 200)
-            .await?;
+        let events = recent_activity(&svc.event_log_store, s.thread_id).await?;
         s.state = derive_thread_status(&events, now);
     }
     Ok(statuses)
@@ -74,9 +80,9 @@ pub async fn get_agent_turn(
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn list_hook_events_dispatches_with_all_optionals_absent() {
+    async fn list_agent_events_dispatches_with_all_optionals_absent() {
         let (svc, _dir) = crate::test_support::services();
-        let out = crate::dispatch("list_hook_events", serde_json::json!({}), &svc)
+        let out = crate::dispatch("list_agent_events", serde_json::json!({}), &svc)
             .await
             .unwrap();
         assert!(out.is_array());

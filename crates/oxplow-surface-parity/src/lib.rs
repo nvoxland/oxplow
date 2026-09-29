@@ -307,6 +307,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("list_snapshot_change_entries"),
     agent("read_file_snapshot"),
     agent("read_file_at_snapshot"),
+    both("read_event_content"),
     both("restore_file_snapshot"),
     // Endpoint diff for the diff view page (effort / local-history) — UI-only.
     ui("diff_endpoints"),
@@ -413,7 +414,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("local_blame"),
     // ---- ui-only: hooks / agent lifecycle ----
     ui("ingest_hook_event"),
-    ui("list_hook_events"),
+    ui("list_agent_events"),
     ui("list_agent_statuses"),
     ui("list_open_agent_turns"),
     ui("get_agent_turn"),

@@ -1161,6 +1161,13 @@ pub struct FileSnapshotIdParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventContentParams {
+    /// A content hash from an event payload's `{hash, size}` (e.g. an
+    /// `agent.tool.finished` event's `input` or `output`).
+    pub hash: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FileAtSnapshotParams {
     /// A `snapshot` id — one whole capture.
     pub snapshot_id: i64,
@@ -2411,6 +2418,23 @@ impl OxplowMcp {
         .await
         .ok()
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        json_result(&content)
+    }
+
+    #[tool(
+        description = "Read a stored event body — a tool call's input or output — by the hash \
+                          in its event payload (`{hash, size}` on `agent.tool.*` events in \
+                          v_event), as a (UTF-8 lossy) string. Null when it was never stored or \
+                          retention has removed it."
+    )]
+    async fn read_event_content(
+        &self,
+        params: Parameters<EventContentParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let content = oxplow_db::event_content_store::read(&self.services.db, &params.0.hash)
+            .await
+            .map_err(internal)?
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         json_result(&content)
     }
 
@@ -4709,53 +4733,20 @@ impl OxplowMcp {
         expect_id_kind("await_user", "thread_id", &p.thread_id, ID_THREAD)?;
         let tid = parse_thread_id(&p.thread_id)?;
         let question = p.question.trim().to_string();
-        let payload = serde_json::json!({
-            "await_user": true,
-            "question": question,
-        })
-        .to_string();
         // Detail carries the question text (not a bare marker) so the
         // rail agent-status dot can show it in a tooltip. Empty questions
         // fall back to None — the dot still flips to "awaiting you",
         // just without tooltip text.
         let detail = (!question.is_empty()).then(|| question.clone());
-        let event = oxplow_domain::HookEvent {
-            id: oxplow_domain::HookEventId::new(next_synthetic_hook_id()),
-            thread_id: Some(tid),
-            stream_id: None,
-            kind: oxplow_domain::HookKind::Stop,
-            session_id: None,
-            payload_json: payload,
-            received_at: oxplow_domain::Timestamp::now(),
-        };
+        // Park the thread on the person: the status is logged as
+        // `agent.status.changed{awaiting_user}` (what the derived status and
+        // the Stop pipeline read — P3.9), stored, and announced, so the rail
+        // dot turns "awaiting you" (with the question tooltip) immediately.
         self.services
-            .hook_event_store
-            .append(&event)
+            .hook_ingest
+            .set_status(&tid, oxplow_domain::AgentStatusState::AwaitingUser, detail)
             .await
-            .map_err(internal)?;
-        // Flip the agent_status to AwaitingUser directly so the
-        // renderer reflects the state without needing a Stop hook.
-        let status = self
-            .services
-            .agent_status_store
-            .upsert(
-                &tid,
-                "working",
-                oxplow_domain::AgentStatusState::AwaitingUser,
-                detail,
-            )
-            .await
-            .map_err(internal)?;
-        // Emit AgentStatusChanged so the rail dot turns "awaiting you"
-        // (with the question tooltip) immediately on the await_user call
-        // — the upsert alone is silent, leaving the live dot to lag until
-        // the turn's Stop hook re-emits from the store.
-        self.services.events.emit(OxplowEvent::AgentStatusChanged {
-            thread_id: status.thread_id,
-            pane_target: status.pane_target,
-            state: status.state,
-            detail: status.detail,
-        });
+            .map_err(|e| internal(e.to_string()))?;
         Ok(CallToolResult::success(vec![ContentBlock::text(
             "awaiting",
         )]))
@@ -5687,6 +5678,7 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "list_snapshot_change_entries",
     "read_file_snapshot",
     "read_file_at_snapshot",
+    "read_event_content",
     "list_code_quality_findings",
     "list_thread_work",
     "list_tasks",
@@ -6185,16 +6177,6 @@ fn parse_task_id(tool: &str, param: &str, value: &str) -> Result<oxplow_domain::
         format!("{tool}: `{param}` expects a task id (e.g. `tsk42` or `42`), got `{value}`"),
         None,
     ))
-}
-
-/// Monotonic id for synthetic in-memory hook events the MCP layer emits
-/// (e.g. the `await_user` Stop sentinel). The `hook_event` table was
-/// dropped in V2 — these live only in the in-memory ring buffer, so
-/// there's no rowid to allocate.
-fn next_synthetic_hook_id() -> i64 {
-    use std::sync::atomic::{AtomicI64, Ordering};
-    static NEXT: AtomicI64 = AtomicI64::new(1);
-    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// Parse a comment id from its string form. Accepts the prefixed form

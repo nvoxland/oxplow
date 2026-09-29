@@ -1,7 +1,7 @@
-//! Derive a thread's working/waiting status by replaying its hook
-//! event log. Mirrors the proven state machine from
-//! `src/session/agent-status.ts` on main, ported to operate over
-//! `oxplow_domain::HookEvent` rows.
+//! Derive a thread's working/waiting status by replaying its agent
+//! activity — the `agent.*` events the hook ingest logs (P3.9; it used to
+//! replay an in-memory hook ring that a restart emptied). Mirrors the
+//! proven state machine from `src/session/agent-status.ts` on main.
 //!
 //! The renderer's dot only distinguishes "working" vs "waiting", but
 //! we return the richer `AgentStatusState` so the same derivation can
@@ -13,12 +13,85 @@
 //! The agent_status row is updated by `HookIngestService` on every
 //! state-changing hook. Bugs in that pipeline (a missed Stop, a
 //! mis-routed SubagentStop, a stale row from a previous boot) make
-//! the indicator drift from reality. The hook event log is the
-//! authoritative record of what Claude Code emitted; deriving status
-//! from it matches the source of truth and self-heals when the
-//! sidecar table goes wrong.
+//! the indicator drift from reality. The event log is the authoritative
+//! record of what the agent did; deriving status from it matches the
+//! source of truth and self-heals when the sidecar table goes wrong.
 
-use oxplow_domain::{AgentStatusState, HookEvent, HookKind, Timestamp};
+use oxplow_domain::{AgentStatusState, StoredEvent, ThreadId, Timestamp};
+
+/// One step of a thread's activity, as the status reducer reads it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Activity {
+    pub kind: ActivityKind,
+    /// Log order — breaks ties between events logged in the same instant.
+    pub seq: i64,
+    pub at: Timestamp,
+    /// The tool, for tool steps (canonical names: `Task`, `ExitPlanMode`, …).
+    pub tool: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityKind {
+    /// A person's prompt (`agent.prompt.submitted`) — every prompt,
+    /// including a re-prompt inside an open turn.
+    Prompt,
+    /// A tool the policy let run (`agent.tool.requested{allowed}`). A
+    /// refused one never runs, so it isn't an open tool.
+    ToolStarted,
+    /// `agent.tool.finished`.
+    ToolFinished,
+    /// The turn ended normally (`agent.turn.ended{completed}`).
+    TurnCompleted,
+    /// The turn was cut off (`{interrupted}` / `{restart}`).
+    TurnInterrupted,
+    /// A harness session began (`agent.session.started`).
+    SessionStarted,
+    /// The agent parked on the person (`agent.status.changed{awaiting_user}`,
+    /// e.g. `await_user`, an ACP permission card).
+    AwaitingUser,
+    /// A status that ends such a wait (`agent.status.changed`, other states).
+    StatusOther,
+}
+
+/// The reducer's view of a logged event; `None` for events it ignores.
+pub fn activity_of(event: &StoredEvent) -> Option<Activity> {
+    let env = &event.envelope;
+    let p = &env.payload;
+    let tool = p.get("tool").and_then(|t| t.as_str()).map(str::to_string);
+    let kind = match env.event_type.as_str() {
+        "agent.prompt.submitted" => ActivityKind::Prompt,
+        "agent.tool.requested" if p["decision"] == "allowed" => ActivityKind::ToolStarted,
+        "agent.tool.finished" => ActivityKind::ToolFinished,
+        "agent.turn.ended" if p["outcome"] == "completed" => ActivityKind::TurnCompleted,
+        "agent.turn.ended" => ActivityKind::TurnInterrupted,
+        "agent.session.started" => ActivityKind::SessionStarted,
+        "agent.status.changed" if p["state"] == "awaiting_user" => ActivityKind::AwaitingUser,
+        "agent.status.changed" => ActivityKind::StatusOther,
+        _ => return None,
+    };
+    Some(Activity {
+        kind,
+        seq: event.seq,
+        at: env.at,
+        tool,
+    })
+}
+
+/// How far back a status derivation reads.
+pub const RECENT_ACTIVITY: usize = 200;
+
+/// `thread`'s recent activity from the event log, for [`derive_thread_status`].
+pub async fn recent_activity(
+    log: &oxplow_db::SqliteEventLogStore,
+    thread: ThreadId,
+) -> Result<Vec<Activity>, oxplow_domain::DomainError> {
+    Ok(log
+        .recent("agent", Some(thread), None, RECENT_ACTIVITY)
+        .await?
+        .iter()
+        .filter_map(activity_of)
+        .collect())
+}
 
 /// How long a `Running` thread may go without emitting any hook event
 /// before the derivation declares it `Stalled`. Claude Code emits no
@@ -62,7 +135,7 @@ pub const AGENT_DEAD_AFTER_MS: i64 = 5 * 60 * 1000;
 /// streaming tokens) would wrongly degrade to `Stalled`. Callers that
 /// can observe terminal liveness should prefer
 /// [`derive_thread_status_with_activity`].
-pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatusState {
+pub fn derive_thread_status(events: &[Activity], now: Timestamp) -> AgentStatusState {
     derive_thread_status_with_activity(events, None, now)
 }
 
@@ -85,12 +158,12 @@ pub fn derive_thread_status(events: &[HookEvent], now: Timestamp) -> AgentStatus
 /// (tsk130 intact). `last_output_at = None` reproduces the old
 /// hook-only behavior.
 pub fn derive_thread_status_with_activity(
-    events: &[HookEvent],
+    events: &[Activity],
     last_output_at: Option<Timestamp>,
     now: Timestamp,
 ) -> AgentStatusState {
-    let mut sorted: Vec<&HookEvent> = events.iter().collect();
-    sorted.sort_by_key(|e| e.received_at);
+    let mut sorted: Vec<&Activity> = events.iter().collect();
+    sorted.sort_by_key(|e| (e.at, e.seq));
 
     let mut state = AgentStatusState::Idle;
     // Subagent-in-flight count: while a `Task` tool dispatched by the
@@ -116,9 +189,12 @@ pub fn derive_thread_status_with_activity(
     // silence thresholds below (tsk130).
     let mut open_tools: i32 = 0;
 
+    // Parked on the person by `await_user` / a permission card, until a
+    // prompt or another status moves it on.
+    let mut awaiting = false;
     for ev in &sorted {
         match ev.kind {
-            HookKind::UserPromptSubmit => {
+            ActivityKind::Prompt => {
                 // A fresh user prompt begins a new turn, so any counters
                 // left open by a prior turn are stale and must not leak
                 // forward. The common case: a rejected / cancelled
@@ -127,27 +203,29 @@ pub fn derive_thread_status_with_activity(
                 // at ≥1 — which the final check turns into a permanent
                 // `AwaitingUser` (red "waiting") dot even as the thread
                 // resumes working. Resetting here self-heals it, the same
-                // way Interrupt / AgentBoot do.
+                // way an interrupt or a new session do. Every prompt is
+                // logged, a re-prompt inside an open turn too.
                 state = AgentStatusState::Running;
                 pending_tasks = 0;
                 pending_user_input = 0;
                 open_tools = 0;
+                awaiting = false;
             }
-            HookKind::PreToolUse => {
+            ActivityKind::ToolStarted => {
                 state = AgentStatusState::Running;
                 open_tools += 1;
-                match payload_tool_name(&ev.payload_json).as_deref() {
+                match ev.tool.as_deref() {
                     Some("Task") => pending_tasks += 1,
                     Some(t) if is_user_input_tool(t) => pending_user_input += 1,
                     _ => {}
                 }
             }
-            HookKind::PostToolUse => {
+            ActivityKind::ToolFinished => {
                 state = AgentStatusState::Running;
                 if open_tools > 0 {
                     open_tools -= 1;
                 }
-                match payload_tool_name(&ev.payload_json).as_deref() {
+                match ev.tool.as_deref() {
                     Some("Task") if pending_tasks > 0 => pending_tasks -= 1,
                     Some(t) if is_user_input_tool(t) && pending_user_input > 0 => {
                         pending_user_input -= 1;
@@ -155,40 +233,27 @@ pub fn derive_thread_status_with_activity(
                     _ => {}
                 }
             }
-            HookKind::Stop => {
+            ActivityKind::TurnCompleted => {
                 state = if pending_tasks > 0 {
                     AgentStatusState::Running
                 } else {
                     AgentStatusState::Idle
                 };
             }
-            HookKind::SubagentStop => {
-                // SubagentStop itself doesn't change the parent's
-                // status; the matching PostToolUse for the Task tool
-                // is what decrements pending_tasks. Defensive
-                // decrement anyway so a missing PostToolUse doesn't
-                // strand the count and pin status to working forever.
-                if pending_tasks > 0 {
-                    pending_tasks -= 1;
-                }
-            }
-            HookKind::Interrupt => {
+            ActivityKind::TurnInterrupted | ActivityKind::SessionStarted => {
                 state = AgentStatusState::Idle;
                 pending_tasks = 0;
                 pending_user_input = 0;
                 open_tools = 0;
             }
-            HookKind::AgentBoot => {
-                state = AgentStatusState::Idle;
-                pending_tasks = 0;
-                pending_user_input = 0;
-                open_tools = 0;
-            }
-            // Informational: a session starting or ending isn't a status.
-            HookKind::SessionStart | HookKind::SessionEnd => {}
+            ActivityKind::AwaitingUser => awaiting = true,
+            ActivityKind::StatusOther => awaiting = false,
         }
     }
 
+    if awaiting {
+        return AgentStatusState::AwaitingUser;
+    }
     if pending_user_input > 0 {
         return AgentStatusState::AwaitingUser;
     }
@@ -208,7 +273,7 @@ pub fn derive_thread_status_with_activity(
             // intervening hook is alive (tsk141), while a genuinely-dead
             // turn goes quiet on both signals and still degrades (tsk130).
             let last_activity_ms = last
-                .received_at
+                .at
                 .unix_ms()
                 .max(last_output_at.map(|t| t.unix_ms()).unwrap_or(i64::MIN));
             if now.unix_ms() - last_activity_ms > threshold {
@@ -226,31 +291,39 @@ fn is_user_input_tool(tool_name: &str) -> bool {
     matches!(tool_name, "ExitPlanMode" | "AskUserQuestion")
 }
 
-fn payload_tool_name(payload: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
-    v.get("tool_name")
-        .and_then(|s| s.as_str())
-        .map(|s| s.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::{HookEventId, ThreadId, Timestamp};
+    use oxplow_domain::{HookKind, Timestamp};
 
     fn at(ms: i64) -> Timestamp {
         Timestamp::from_unix_ms(ms)
     }
 
-    fn ev(kind: HookKind, ms: i64, payload: &str) -> HookEvent {
-        HookEvent {
-            id: HookEventId::new(ms),
-            thread_id: Some(ThreadId::new(1)),
-            stream_id: None,
+    /// The activity a hook of `kind` logs, at `ms` (the reducer's cases
+    /// read best in hook terms).
+    fn ev(kind: HookKind, ms: i64, payload: &str) -> Activity {
+        let tool = serde_json::from_str::<serde_json::Value>(payload)
+            .ok()
+            .and_then(|v| {
+                v.get("tool_name")
+                    .and_then(|t| t.as_str())
+                    .map(str::to_string)
+            });
+        let kind = match kind {
+            HookKind::UserPromptSubmit => ActivityKind::Prompt,
+            HookKind::PreToolUse => ActivityKind::ToolStarted,
+            HookKind::PostToolUse => ActivityKind::ToolFinished,
+            HookKind::Stop => ActivityKind::TurnCompleted,
+            HookKind::Interrupt => ActivityKind::TurnInterrupted,
+            HookKind::AgentBoot | HookKind::SessionStart => ActivityKind::SessionStarted,
+            other => panic!("{other:?} logs no activity"),
+        };
+        Activity {
             kind,
-            session_id: None,
-            payload_json: payload.to_string(),
-            received_at: Timestamp::from_unix_ms(ms),
+            seq: ms,
+            at: Timestamp::from_unix_ms(ms),
+            tool,
         }
     }
 
@@ -649,20 +722,66 @@ mod tests {
         );
     }
 
+    fn activity(kind: ActivityKind, ms: i64) -> Activity {
+        Activity {
+            kind,
+            seq: ms,
+            at: at(ms),
+            tool: None,
+        }
+    }
+
+    /// P3.9 (tsk479): `await_user` parks the thread on the person through
+    /// the turn's Stop, and only the next prompt moves it on.
     #[test]
-    fn subagent_stop_decrements_pending_when_post_tool_use_missing() {
-        // Defensive: if SubagentStop arrives without a matching
-        // Task PostToolUse, decrement so the parent's Stop can idle
-        // out instead of being stuck at Running forever.
-        let events = [
+    fn awaiting_user_holds_until_the_next_prompt() {
+        let parked = [
             ev(HookKind::UserPromptSubmit, 1, "{}"),
-            ev(HookKind::PreToolUse, 2, r#"{"tool_name":"Task"}"#),
-            ev(HookKind::SubagentStop, 3, "{}"),
-            ev(HookKind::Stop, 4, "{}"),
+            activity(ActivityKind::AwaitingUser, 2),
+            ev(HookKind::Stop, 3, "{}"),
         ];
         assert_eq!(
-            derive_thread_status(&events, at(10)),
-            AgentStatusState::Idle
+            derive_thread_status(&parked, at(10_000_000)),
+            AgentStatusState::AwaitingUser,
+            "never stalls while waiting on the person"
+        );
+        let mut answered = parked.to_vec();
+        answered.push(ev(HookKind::UserPromptSubmit, 4, "{}"));
+        assert_eq!(
+            derive_thread_status(&answered, at(5)),
+            AgentStatusState::Running
+        );
+    }
+
+    /// A tool the policy refused never runs, so it opens nothing: a turn
+    /// that stops after a denied request is idle, not waiting on a tool.
+    #[test]
+    fn a_denied_request_opens_no_tool() {
+        use oxplow_domain::{Envelope, StoredEvent};
+        let denied = StoredEvent {
+            seq: 2,
+            envelope: Envelope::new(
+                "agent.tool.requested",
+                1,
+                "test",
+                serde_json::json!({"tool": "AskUserQuestion", "decision": "denied"}),
+            )
+            .unwrap(),
+        };
+        assert_eq!(activity_of(&denied), None);
+        let allowed = StoredEvent {
+            seq: 3,
+            envelope: Envelope::new(
+                "agent.tool.requested",
+                1,
+                "test",
+                serde_json::json!({"tool": "AskUserQuestion", "decision": "allowed"}),
+            )
+            .unwrap(),
+        };
+        assert_eq!(
+            activity_of(&allowed).unwrap().kind,
+            ActivityKind::ToolStarted
         );
     }
 }
