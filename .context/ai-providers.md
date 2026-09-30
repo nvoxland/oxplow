@@ -154,7 +154,7 @@ or unusable answer is never recorded. Tokens only; no cost.
 |---|---|---|---|
 | `classify(caller, text, labels)` | `decide` (a `choice` question) | `{ label, probabilities }` | `classify@1` |
 | `score(caller, text, levels)` | `decide` (a `score` question, levels lowest first) | `{ level, score, probabilities }` | `score@1` |
-| `summarize(caller, text, focus?)` | `summarize` (the same prompt as `AiService::summarize`, `summarize_system`) | the summary | `summarize@1` |
+| `summarize(caller, text, focus?)` | `summarize` (`summarize_system`) — the one summarize path: MCP `ai_summarize` asks it too | the summary | `summarize@1` |
 | `extract(caller, instructions, text, schema)` | `main`, JSON mode; the schema is in the system prompt | JSON matching `schema` (checked with `InputValidator`; a mismatch is refused, naming the pointer) | `extract@1` |
 
 Changing an op's prompt means bumping its version constant: old results
@@ -197,7 +197,9 @@ turn's prompt (`turn_kind`).
   binding.
 - `ai_decide`: typed questions (`noul` / `choice` / `score`) about some
   text, on the `decide` role unless another is named.
-- `ai_summarize`: text through the `summarize` role, with an optional focus.
+- `ai_summarize`: text through the `summarize` role, with an optional focus
+  — a recorded computation (`AiCompute::summarize`, tsk571), so the same
+  text and focus is one call.
 
 Agents can't change providers, roles or keys: those IPC commands are
 UI-only in the surface-parity manifest. Calls record caller `mcp:<tool>`.

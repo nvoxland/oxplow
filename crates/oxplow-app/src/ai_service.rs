@@ -263,26 +263,6 @@ impl AiService {
         Ok(c.text.trim().chars().take(200).collect())
     }
 
-    /// Summarize `text` with the `summarize` role. `instructions` say what
-    /// to focus on.
-    pub async fn summarize(
-        &self,
-        caller: &str,
-        text: &str,
-        instructions: Option<&str>,
-    ) -> Result<String, AiServiceError> {
-        let c = self
-            .complete(
-                Role::Summarize,
-                caller,
-                Some(&summarize_system(instructions)),
-                text,
-                false,
-            )
-            .await?;
-        Ok(c.text.trim().to_string())
-    }
-
     /// The effective configuration: global `ai.yaml` plus project overrides.
     pub fn config(&self) -> Result<AiConfig, AiServiceError> {
         let global = match &self.config_dir {
@@ -859,28 +839,6 @@ mod tests {
         assert_eq!(
             svc.test_provider("ts", "jev").await.unwrap(),
             "Answered (yes: 93%)"
-        );
-    }
-
-    #[tokio::test]
-    async fn summarize_uses_the_summarize_role_with_instructions() {
-        let (base, seen) = mock("/chat/completions", 200, chat_reply()).await;
-        let dir = tempfile::tempdir().unwrap();
-        let (svc, db) = service(&base, &dir);
-        let out = svc
-            .summarize("mcp:ai_summarize", "long text", Some("focus on risks"))
-            .await
-            .unwrap();
-        assert_eq!(out, "hello");
-        let body = seen.lock().unwrap()[0].2.clone();
-        let messages = body["messages"].to_string();
-        assert!(
-            messages.contains("long text") && messages.contains("focus on risks"),
-            "{messages}"
-        );
-        assert_eq!(
-            recorded(&db).await,
-            json!([["summarize", "mcp:ai_summarize", 1, 0, 10]])
         );
     }
 

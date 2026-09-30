@@ -126,13 +126,30 @@ pub async fn apply(svc: &Services, event: LspSessionEvent) -> Option<(i64, Vec<S
     }
 }
 
+/// No server runs yet, so what the last process's servers said no longer
+/// holds: clear it, and log each cleared file at zero (as a crash does).
+pub async fn clear_at_boot(svc: &Services) {
+    let cleared = match svc.diagnostic_store.clear_all().await {
+        Ok(cleared) => cleared,
+        Err(e) => {
+            tracing::warn!(error = %e, "clearing LSP diagnostics at boot failed");
+            return;
+        }
+    };
+    let mut by_stream: std::collections::BTreeMap<i64, BTreeSet<String>> = Default::default();
+    for (stream_id, path) in cleared {
+        by_stream.entry(stream_id).or_default().insert(path);
+    }
+    for (stream_id, paths) in by_stream {
+        announce(svc, stream_id, paths).await;
+    }
+}
+
 /// Clear stale rows, then persist publishes for the life of the process.
 pub fn spawn(svc: std::sync::Arc<Services>) {
     let mut rx = svc.lsp_sessions.subscribe();
     tokio::spawn(async move {
-        if let Err(e) = svc.diagnostic_store.clear_all().await {
-            tracing::warn!(error = %e, "clearing LSP diagnostics at boot failed");
-        }
+        clear_at_boot(&svc).await;
         // The stream with unannounced changes, when to announce them, and
         // the files that changed. The deadline is fixed by the first
         // change, so a server that publishes continuously can't starve the
@@ -276,6 +293,52 @@ mod tests {
         )
         .unwrap();
         assert_eq!((path.as_str(), rows.len()), ("a.rs", 0));
+    }
+
+    /// tsk571: the boot clear logs each cleared file at zero, like a
+    /// crash does — the log never keeps counts the rows no longer hold.
+    #[tokio::test]
+    async fn the_boot_clear_logs_each_cleared_file_at_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let svc = Services::in_memory(dir.path()).unwrap();
+        let stream = svc.streams.ensure_primary().await.unwrap();
+        for path in ["a.rs", "b.rs"] {
+            svc.diagnostic_store
+                .replace_file(
+                    stream.id.value(),
+                    "rust".into(),
+                    path.into(),
+                    vec![oxplow_db::DiagnosticRow {
+                        severity: "error".into(),
+                        message: "bad".into(),
+                        line: 1,
+                        col: 1,
+                        end_line: 1,
+                        end_col: 2,
+                        ..Default::default()
+                    }],
+                )
+                .await
+                .unwrap();
+        }
+        clear_at_boot(&svc).await;
+        let logged: Vec<Value> = svc
+            .event_log_store
+            .read_after(0, 1000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "code.diagnostics.changed")
+            .map(|e| e.envelope.payload)
+            .collect();
+        assert_eq!(logged.len(), 2, "{logged:?}");
+        assert_eq!(logged[0]["path"], "a.rs");
+        assert_eq!(logged[1]["path"], "b.rs");
+        assert!(
+            logged.iter().all(|e| e["counts"]["error"] == 0),
+            "{logged:?}"
+        );
     }
 
     #[tokio::test]

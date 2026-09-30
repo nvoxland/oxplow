@@ -124,15 +124,17 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
 }
 
 fn row(s: oxplow_domain::code_intel::Symbol) -> SymbolRow {
-    let r = s.location.range;
+    let (at, extent) = (s.location.range.start, s.extent);
     SymbolRow {
         name: s.name,
         kind: s.kind,
         container: s.container,
-        line: r.start.line.into(),
-        col: r.start.col.into(),
-        end_line: r.end.line.into(),
-        end_col: r.end.col.into(),
+        line: at.line.into(),
+        col: at.col.into(),
+        start_line: extent.start.line.into(),
+        start_col: extent.start.col.into(),
+        end_line: extent.end.line.into(),
+        end_col: extent.end.col.into(),
     }
 }
 

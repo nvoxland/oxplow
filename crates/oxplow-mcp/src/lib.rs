@@ -1500,11 +1500,13 @@ impl OxplowMcp {
         let p = params.0;
         let summary = self
             .services
-            .ai
+            .ai_compute
             .summarize("mcp:ai_summarize", &p.text, p.focus.as_deref())
             .await
-            .map_err(ai_error)?;
-        Ok(CallToolResult::success(vec![ContentBlock::text(summary)]))
+            .map_err(compute_error)?;
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            summary.value,
+        )]))
     }
 
     #[tool(
@@ -4642,6 +4644,17 @@ fn ai_error(e: oxplow_app::ai_service::AiServiceError) -> McpError {
     }
 }
 
+/// A recorded computation's failure: the model's, as [`ai_error`]; an
+/// unusable answer the agent can retry; storing it is internal.
+fn compute_error(e: oxplow_app::ai_compute::AiComputeError) -> McpError {
+    use oxplow_app::ai_compute::AiComputeError;
+    match e {
+        AiComputeError::Ai(e) => ai_error(e),
+        e @ AiComputeError::BadOutput(_) => McpError::invalid_params(e.to_string(), None),
+        e @ AiComputeError::Storage(_) => internal(e),
+    }
+}
+
 fn internal<E: std::fmt::Display>(e: E) -> McpError {
     McpError::internal_error(e.to_string(), None)
 }
@@ -7721,23 +7734,30 @@ mod tests {
             .unwrap_err();
         assert!(err.message.contains("maybe"), "{}", err.message);
 
-        let (base, _) = oxplow_ai::testing::mock(
+        let (base, seen) = oxplow_ai::testing::mock(
             "/chat/completions",
             200,
             serde_json::json!({"choices": [{"message": {"content": " short "}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
         )
         .await;
         assign_mock_role(&services, base, "summarize");
-        let out = text_payload(
-            server
-                .ai_summarize(Parameters(AiSummarizeParams {
-                    text: "long".into(),
-                    focus: Some("risks".into()),
-                }))
-                .await
-                .unwrap(),
-        );
-        assert_eq!(out, "short");
+        // A recorded computation (tsk571): asking twice calls once.
+        for _ in 0..2 {
+            let out = text_payload(
+                server
+                    .ai_summarize(Parameters(AiSummarizeParams {
+                        text: "long".into(),
+                        focus: Some("risks".into()),
+                    }))
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(out, "short");
+        }
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(seen.lock().unwrap()[0].2["messages"]
+            .to_string()
+            .contains("risks"));
     }
 
     #[tokio::test]

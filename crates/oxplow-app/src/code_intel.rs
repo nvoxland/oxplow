@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use oxplow_domain::code_intel::{
-    Call, CallDirection, CodeIntelError, CodeIntelligence, Diagnostic, FileEdit, Hover, Location,
-    Point, Position, Range, Symbol, TextEdit, WorkspaceEdit,
+    Call, CallDirection, CodeIntelError, CodeIntelligence, Diagnostic, FileEdit, FileOperation,
+    Hover, Location, Point, Position, Range, Symbol, TextEdit, WorkspaceEdit,
 };
 use oxplow_domain::StreamId;
 use serde_json::{json, Value};
@@ -230,7 +230,8 @@ fn symbols(
             continue;
         };
         let kind = symbol_kind(item.get("kind").and_then(Value::as_u64).unwrap_or(0));
-        // SymbolInformation / WorkspaceSymbol carry a location.
+        // SymbolInformation / WorkspaceSymbol carry a location: the whole
+        // symbol, which is also where it is.
         if let Some(loc) = item.get("location").and_then(|l| location(ws, l)) {
             out.push(Symbol {
                 name: name.to_string(),
@@ -240,17 +241,18 @@ fn symbols(
                     .and_then(Value::as_str)
                     .filter(|c| !c.is_empty())
                     .map(str::to_string),
+                extent: loc.range,
                 location: loc,
             });
             continue;
         }
-        // DocumentSymbol: in `path`, nested through `children`.
-        let (Some(path), Some(r)) = (
-            path,
-            item.get("selectionRange")
-                .or_else(|| item.get("range"))
-                .and_then(range),
-        ) else {
+        // DocumentSymbol: in `path`, nested through `children`; its name
+        // is `selectionRange`, the whole of it `range`.
+        let Some(path) = path else {
+            continue;
+        };
+        let extent = item.get("range").and_then(range);
+        let Some(name_at) = item.get("selectionRange").and_then(range).or(extent) else {
             continue;
         };
         out.push(Symbol {
@@ -259,8 +261,9 @@ fn symbols(
             container: container.map(str::to_string),
             location: Location {
                 path: path.to_string(),
-                range: r,
+                range: name_at,
             },
+            extent: extent.unwrap_or(name_at),
         });
         if let Some(children) = item.get("children") {
             let nested = match container {
@@ -294,14 +297,17 @@ fn hover_text(v: &Value) -> String {
 
 /// A `CallHierarchyItem` as a symbol.
 fn call_item(ws: &Path, v: &Value) -> Option<Symbol> {
+    let extent = v.get("range").and_then(range);
+    let name_at = v.get("selectionRange").and_then(range).or(extent)?;
     Some(Symbol {
         name: v.get("name")?.as_str()?.to_string(),
         kind: symbol_kind(v.get("kind").and_then(Value::as_u64).unwrap_or(0)).to_string(),
         container: v.get("detail").and_then(Value::as_str).map(str::to_string),
         location: Location {
             path: path_of(ws, v.get("uri")?.as_str()?),
-            range: range(v.get("selectionRange").or_else(|| v.get("range"))?)?,
+            range: name_at,
         },
+        extent: extent.unwrap_or(name_at),
     })
 }
 
@@ -465,47 +471,60 @@ impl CodeIntelligence for LspProvider {
         let (v, ws) = self
             .at(at, "textDocument/rename", json!({ "newName": new_name }))
             .await?;
-        let text_edits = |edits: &Value| -> Vec<TextEdit> {
-            edits
-                .as_array()
-                .map(|es| {
-                    es.iter()
-                        .filter_map(|e| {
-                            Some(TextEdit {
-                                range: range(e.get("range")?)?,
-                                new_text: e.get("newText")?.as_str()?.to_string(),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let mut files: Vec<FileEdit> = Vec::new();
-        if let Some(changes) = v.get("changes").and_then(Value::as_object) {
-            for (uri, edits) in changes {
-                files.push(FileEdit {
-                    path: path_of(&ws, uri),
-                    edits: text_edits(edits),
-                });
-            }
-        }
-        if let Some(doc_changes) = v.get("documentChanges").and_then(Value::as_array) {
-            for change in doc_changes {
-                if let Some(uri) = change
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(Value::as_str)
-                {
-                    files.push(FileEdit {
-                        path: path_of(&ws, uri),
-                        edits: text_edits(change.get("edits").unwrap_or(&Value::Null)),
-                    });
-                }
-            }
-        }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(WorkspaceEdit { files })
+        Ok(workspace_edit(&ws, &v))
     }
+}
+
+/// An LSP `WorkspaceEdit` as ours: `documentChanges` when the server
+/// sends it (text edits and file operations, in order), else `changes`.
+fn workspace_edit(ws: &Path, v: &Value) -> WorkspaceEdit {
+    let text_edits = |edits: &Value| -> Vec<TextEdit> {
+        edits
+            .as_array()
+            .map(|es| {
+                es.iter()
+                    .filter_map(|e| {
+                        Some(TextEdit {
+                            range: range(e.get("range")?)?,
+                            new_text: e.get("newText")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let uri = |c: &Value, key: &str| c.get(key).and_then(Value::as_str).map(|u| path_of(ws, u));
+    let mut out = WorkspaceEdit::default();
+    if let Some(doc_changes) = v.get("documentChanges").and_then(Value::as_array) {
+        for change in doc_changes {
+            let op = match change.get("kind").and_then(Value::as_str) {
+                Some("create") => uri(change, "uri").map(|path| FileOperation::Create { path }),
+                Some("delete") => uri(change, "uri").map(|path| FileOperation::Delete { path }),
+                Some("rename") => uri(change, "oldUri")
+                    .zip(uri(change, "newUri"))
+                    .map(|(from, to)| FileOperation::Rename { from, to }),
+                _ => {
+                    if let Some(path) = change.get("textDocument").and_then(|d| uri(d, "uri")) {
+                        out.files.push(FileEdit {
+                            path,
+                            edits: text_edits(change.get("edits").unwrap_or(&Value::Null)),
+                        });
+                    }
+                    None
+                }
+            };
+            out.operations.extend(op);
+        }
+    } else if let Some(changes) = v.get("changes").and_then(Value::as_object) {
+        for (uri, edits) in changes {
+            out.files.push(FileEdit {
+                path: path_of(ws, uri),
+                edits: text_edits(edits),
+            });
+        }
+    }
+    out.files.sort_by(|a, b| a.path.cmp(&b.path));
+    out
 }
 
 #[cfg(test)]
@@ -602,6 +621,72 @@ mod tests {
                 }]
             }]
         );
+    }
+
+    /// tsk571: a rename answer's `documentChanges` wins over `changes`,
+    /// and its file operations come through in order.
+    #[test]
+    fn a_rename_prefers_document_changes_and_keeps_file_operations() {
+        let ws = Path::new("/repo");
+        let edit = |l: u32| json!({ "range": { "start": { "line": l, "character": 0 }, "end": { "line": l, "character": 3 } }, "newText": "New" });
+        let v = json!({
+            "changes": { "file:///repo/stale.py": [edit(0)] },
+            "documentChanges": [
+                { "kind": "rename", "oldUri": "file:///repo/old.py", "newUri": "file:///repo/new.py" },
+                { "textDocument": { "uri": "file:///repo/new.py", "version": 1 }, "edits": [edit(2)] },
+                { "kind": "create", "uri": "file:///repo/made.py" },
+                { "kind": "delete", "uri": "file:///repo/gone.py" }
+            ]
+        });
+        let got = workspace_edit(ws, &v);
+        assert_eq!(
+            got.files,
+            vec![FileEdit {
+                path: "new.py".into(),
+                edits: vec![TextEdit {
+                    range: r(3, 1, 3, 4),
+                    new_text: "New".into()
+                }]
+            }]
+        );
+        assert_eq!(
+            got.operations,
+            vec![
+                FileOperation::Rename {
+                    from: "old.py".into(),
+                    to: "new.py".into()
+                },
+                FileOperation::Create {
+                    path: "made.py".into()
+                },
+                FileOperation::Delete {
+                    path: "gone.py".into()
+                },
+            ]
+        );
+        // Without documentChanges, changes are the answer.
+        let plain = workspace_edit(
+            ws,
+            &json!({ "changes": { "file:///repo/a.py": [edit(0)] } }),
+        );
+        assert_eq!(plain.files[0].path, "a.py");
+        assert!(plain.operations.is_empty());
+    }
+
+    /// tsk571: a document symbol's location is its name; its extent is
+    /// the whole symbol.
+    #[test]
+    fn a_symbol_has_its_name_and_its_extent() {
+        let pos = |l: u32, c: u32| json!({ "line": l, "character": c });
+        let v = json!([{
+            "name": "spin", "kind": 6,
+            "range": { "start": pos(3, 4), "end": pos(9, 0) },
+            "selectionRange": { "start": pos(4, 8), "end": pos(4, 12) }
+        }]);
+        let mut out = Vec::new();
+        symbols(Path::new("/repo"), Some("w.py"), &v, None, &mut out);
+        assert_eq!(out[0].location.range, r(5, 9, 5, 13));
+        assert_eq!(out[0].extent, r(4, 5, 10, 1));
     }
 
     /// A file no configured server covers says which server to install.

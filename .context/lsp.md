@@ -99,7 +99,8 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   restart/crash/stop. Debounced per stream, it emits `DiagnosticsChanged`
   and logs **`code.diagnostics.changed@1 { stream, path, counts }`** once
   per changed file with its counts after the burst (a crash logs the
-  files it cleared, at zero) — the durable record, on the event log.
+  files it cleared, at zero, and so does the boot clear, `clear_at_boot`;
+  tsk571) — the durable record, on the event log.
 - **Code intelligence (P5.C5)**: `oxplow_domain::code_intel::CodeIntelligence`
   — `definition`, `references`, `hover`, `document_symbols`,
   `workspace_symbols`, `call_hierarchy`, `diagnostics`, `rename` — over
@@ -124,7 +125,11 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   app, 2 s in tests): a server that never answers is a
   `CodeIntelError::Failed` naming the language and method, not a hung
   caller (tsk557). `rename`
-  returns the edits; nothing applies them. Subscribing to diagnostics is
+  returns the edits — from `documentChanges` when the server sends it,
+  with its file creates / renames / deletes as `WorkspaceEdit.operations`
+  in order, else from `changes` (tsk571) — and nothing applies them. A
+  `Symbol` carries `location` (its name: `selectionRange`, what to jump
+  to) and `extent` (the whole symbol: `range`). Subscribing to diagnostics is
   the event log's `code.diagnostics.changed`.
 - **MCP**: `code_definition`, `code_references`, `code_hover`,
   `code_symbols`, `code_workspace_symbols`, `code_call_hierarchy`,
@@ -143,7 +148,11 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   (`crates/oxplow-app/src/symbol_collector.rs`, after `search.index`) turns
   each `snapshot.taken` into `symbol` rows (`v_symbol`): for each changed
   file a configured server covers, `document_symbols` restates the file
-  (a deleted one drops out), refs `symbol:<path>/<name>@snap:<id>`. It is
+  (a deleted one drops out), refs `symbol:<path>/<name>@snap:<id>` —
+  unique: a name path's later symbols in a file (an overload, a setter
+  after its getter) are numbered in position order, `Widget::value~2` —
+  with the name's position (`line`, `col`) and the whole extent
+  (`start_*`..`end_*`, V123). It is
   bounded by config `symbolsMaxFilesPerSnapshot` (default 50; 0 turns it
   off) — the bound counts **attempts** (collected + failed), so a
   snapshot of files that all error or time out can't cost more than the

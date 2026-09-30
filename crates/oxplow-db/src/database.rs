@@ -1438,6 +1438,48 @@ mod tests {
         );
     }
 
+    /// tsk571: V123 keeps each symbol's name position as its extent start
+    /// until it restates, and numbers existing duplicate refs so they can
+    /// be unique.
+    #[test]
+    fn v123_numbers_duplicate_symbol_refs_and_seeds_the_extent() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(122))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
+                                  worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 's', 'main', 'r', 'r', '/r', 'now', 'now');
+             INSERT INTO symbol (ref, snapshot_id, stream_id, path, name, kind, language,
+                                 line, col, end_line, end_col)
+               VALUES ('symbol:w.py/value@snap:7', 7, 1, 'w.py', 'value', 'method', 'python', 20, 5, 20, 10),
+                      ('symbol:w.py/value@snap:7', 7, 1, 'w.py', 'value', 'method', 'python', 10, 5, 10, 10),
+                      ('symbol:w.py/spin@snap:7', 7, 1, 'w.py', 'spin', 'method', 'python', 30, 5, 30, 9);",
+        )
+        .unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(123))
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<(String, i64, i64)> = conn
+            .prepare("SELECT ref, line, start_line FROM symbol ORDER BY line")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("symbol:w.py/value@snap:7".into(), 10, 10),
+                ("symbol:w.py/value~2@snap:7".into(), 20, 20),
+                ("symbol:w.py/spin@snap:7".into(), 30, 30),
+            ]
+        );
+    }
+
     /// P3.2 (tsk472): V102 only adds — every agent-activity row survives,
     /// nudges written before it count as delivered, and the new anchors
     /// and uniqueness are in place.

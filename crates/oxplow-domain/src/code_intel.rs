@@ -61,7 +61,10 @@ pub struct Symbol {
     pub kind: String,
     /// The enclosing symbol's name path (`Widget`), when nested.
     pub container: Option<String>,
+    /// Where its name is (what to jump to).
     pub location: Location,
+    /// The whole symbol, body included (in `location.path`).
+    pub extent: Range,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -93,10 +96,21 @@ pub struct Diagnostic {
     pub range: Range,
 }
 
-/// Text edits a rename would make, per file. Not applied.
+/// What a rename would do: text edits per file, and the files it would
+/// create, rename or delete (in order). Not applied.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceEdit {
     pub files: Vec<FileEdit>,
+    pub operations: Vec<FileOperation>,
+}
+
+/// A file a workspace edit creates, renames or deletes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FileOperation {
+    Create { path: String },
+    Rename { from: String, to: String },
+    Delete { path: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

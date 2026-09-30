@@ -345,7 +345,7 @@
     - { name: "alternatives", type: "TEXT", doc: "Options not taken, as a JSON array of strings." }
     - { name: "confidence", type: "TEXT", doc: "`low`, `medium` or `high`." }
     - { name: "why", type: "TEXT", doc: "The reasoning." }
-    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it) or `inferred` (oxplow's summarize model proposed it from the effort's activity; unconfirmed)." }
+    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it) or `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed)." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: id }
@@ -601,10 +601,10 @@
     - { name: "subject", type: "TEXT", doc: "The file path, or `Bash`." }
     - { name: "count", type: "", doc: "How many edits / failures." }
 - name: symbol
-  version: 1
+  version: 2
   description: "The symbols (functions, classes, methods, …) the running language servers report for each stream's files — the current tree, restated per changed file at each snapshot (P5.C6). Only files whose language has a running server are covered; `v_symbol_capture` says what each snapshot's collection covered."
   columns:
-    - { name: "ref", type: "TEXT", doc: "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`)." }
+    - { name: "ref", type: "TEXT", doc: "`symbol:<path>/<name>@snap:<id>`; a nested symbol's name is its container path (`Widget::spin`), and a name path's later symbols in a file (an overload, a setter after its getter) are numbered in position order (`Widget::value~2`). Unique." }
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot the file's symbols were read at." }
     - { name: "stream_id", type: "INTEGER", doc: "The stream (v_stream.id)." }
     - { name: "path", type: "TEXT", doc: "Workspace-relative file." }
@@ -612,12 +612,15 @@
     - { name: "kind", type: "TEXT", doc: "`function`, `class`, `method`, `module`, … (the LSP symbol kinds)." }
     - { name: "container", type: "TEXT", doc: "The enclosing symbol path (`Widget`); NULL at top level." }
     - { name: "language", type: "TEXT", doc: "The language server that reported it (`rust`, `python`, …)." }
-    - { name: "line", type: "INTEGER", doc: "1-based." }
+    - { name: "line", type: "INTEGER", doc: "Where its name is (what to jump to), 1-based." }
     - { name: "col", type: "INTEGER", doc: "1-based." }
-    - { name: "end_line", type: "INTEGER", doc: "1-based." }
+    - { name: "start_line", type: "INTEGER", doc: "Where the whole symbol starts (a decorator or doc comment included, as the server reports it), 1-based." }
+    - { name: "start_col", type: "INTEGER", doc: "1-based." }
+    - { name: "end_line", type: "INTEGER", doc: "Where the whole symbol ends (its body included), 1-based: the lines `start_line`..`end_line` are the symbol." }
     - { name: "end_col", type: "INTEGER", doc: "1-based." }
   tests:
     - { not_null: ref }
+    - { unique: ref }
     - { not_null: name }
 - name: symbol_capture
   version: 2

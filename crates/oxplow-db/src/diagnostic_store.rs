@@ -164,10 +164,22 @@ impl SqliteDiagnosticStore {
             .await
     }
 
-    /// Drop everything (at boot: no server is running yet).
-    pub async fn clear_all(&self) -> Result<(), DomainError> {
+    /// Drop everything (at boot: no server is running yet); the
+    /// `(stream, path)` of each file cleared.
+    pub async fn clear_all(&self) -> Result<Vec<(i64, String)>, DomainError> {
         self.db
-            .call(|c| c.execute("DELETE FROM lsp_diagnostic", []).map(|_| ()))
+            .transaction(|tx| {
+                let mut stmt = tx
+                    .prepare("DELETE FROM lsp_diagnostic RETURNING stream_id, path")
+                    .map_err(map_sql_err)?;
+                let mut cleared = stmt
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                    .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                    .map_err(map_sql_err)?;
+                cleared.sort();
+                cleared.dedup();
+                Ok(cleared)
+            })
             .await
     }
 }
