@@ -112,9 +112,11 @@ or — for `work_items` — lack `create` / `update` / `transition` (and
 
 **Consent precedes execution** (`exec_consent`, `ProgramKind::Provider`,
 key `provider:<ext>/<id>`): the approval hash covers every file in the
-extension folder but the manifest and `lenses/` — the entry and the
-declarations file among them — plus the entry path, `args`, `env` names,
-`credentials` and `network`. So a changed declaration is a new version,
+extension folder but the manifest and `lenses/` — dot-files, the entry
+and the declarations file among them; a symlink anywhere makes it
+unapprovable — plus the entry path, `args` (hashed relative to the
+folder, where it runs; an arg path leaving the folder is refused at
+load), `env` names, `credentials` and `network`. So a changed declaration is a new version,
 shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.

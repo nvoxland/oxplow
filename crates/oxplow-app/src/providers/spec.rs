@@ -80,6 +80,21 @@ fn inside(path: &str) -> bool {
         && !p.starts_with("lenses")
 }
 
+/// An arg that names a path (it has a `/`, or is `.`/`..`; a flag's
+/// `=value` counts) must stay inside the extension folder, since the
+/// approval hashes that folder.
+fn arg_inside(arg: &str) -> bool {
+    let value = match arg.strip_prefix('-') {
+        Some(flag) => match flag.split_once('=') {
+            Some((_, v)) => v,
+            None => return true,
+        },
+        None => arg,
+    };
+    let names_path = value.contains('/') || value == "." || value == "..";
+    !names_path || inside(value)
+}
+
 /// Read and check the declarations a spec points at.
 pub fn read_declarations(
     spec: &ProviderSpec,
@@ -196,6 +211,11 @@ pub fn parse_providers(
             Some(format!(
                 "provider `{id}`: entry `{}` must be a path inside the extension folder",
                 spec.entry
+            ))
+        } else if let Some(bad) = spec.args.iter().find(|a| !arg_inside(a)) {
+            Some(format!(
+                "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
+                 manifest or lenses); a provider runs only what its approval covers"
             ))
         } else if !inside(&spec.declarations) {
             Some(format!(

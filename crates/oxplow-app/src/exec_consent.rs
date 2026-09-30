@@ -283,6 +283,12 @@ impl ProjectProgram {
     /// agent's command may be a program on PATH, covered by its name.
     pub fn hash_at(&self, project_dir: &Path, cwd: &Path) -> std::io::Result<String> {
         use sha2::{Digest, Sha256};
+        // A provider runs in its extension folder: its args name files there.
+        let tree_dir = self.tree.as_deref().map(|t| project_dir.join(t));
+        let cwd = match (self.kind, &tree_dir) {
+            (ProgramKind::Provider, Some(dir)) => dir.as_path(),
+            _ => cwd,
+        };
         let mut h = Sha256::new();
         let file = project_dir.join(&self.program);
         match self.kind {
@@ -353,8 +359,10 @@ const TREE_MAX_FILES: usize = 500;
 const TREE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 /// SHA-256 over every file under `dir` (relative path + content, sorted),
-/// skipping dot-directories. What an approval of a script's directory
-/// covers: change any helper and it needs approving again.
+/// dot-files included (only macOS's `.DS_Store` noise is left out). A
+/// symlink anywhere in it is an error: its target isn't what was
+/// approved. What an approval of a script's directory covers: change any
+/// helper and it needs approving again.
 pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
     tree_hash_except(dir, &|_| false)
 }
@@ -363,15 +371,23 @@ pub fn tree_hash(dir: &Path) -> std::io::Result<String> {
 /// accepts.
 pub fn tree_hash_except(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> std::io::Result<String> {
     use sha2::{Digest, Sha256};
-    let mut files: Vec<std::path::PathBuf> = walkdir::WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'))
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
-        .filter(|p| !skip(p.strip_prefix(dir).unwrap_or(p)))
-        .collect();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for entry in walkdir::WalkDir::new(dir).follow_links(false) {
+        let entry = entry.map_err(std::io::Error::other)?;
+        let rel = entry.path().strip_prefix(dir).unwrap_or(entry.path());
+        if entry.path_is_symlink() {
+            // Its target isn't in what was approved, and can change freely.
+            return Err(std::io::Error::other(format!(
+                "{} is a symlink; a program's folder can't contain symlinks to be approved \
+                 (copy the file in instead)",
+                entry.path().display()
+            )));
+        }
+        let noise = entry.file_name() == ".DS_Store";
+        if entry.file_type().is_file() && !noise && !skip(rel) {
+            files.push(entry.into_path());
+        }
+    }
     files.sort();
     if files.len() > TREE_MAX_FILES {
         return Err(std::io::Error::other(format!(
@@ -1059,5 +1075,33 @@ mod tests {
         )
         .unwrap();
         assert!(list(&st, dir.path(), &cfg, &[])[0].approved);
+    }
+
+    /// tsk546: an approval covers every file of the folder — dot-files
+    /// included — and a symlink (whose target isn't what was approved)
+    /// can't be approved at all.
+    #[test]
+    fn the_tree_hash_covers_dot_files_and_refuses_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".impl")).unwrap();
+        std::fs::write(dir.path().join("run.sh"), "exec node .impl/main.js").unwrap();
+        std::fs::write(dir.path().join(".impl/main.js"), "good()").unwrap();
+        let before = tree_hash(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".impl/main.js"), "evil()").unwrap();
+        assert_ne!(
+            tree_hash(dir.path()).unwrap(),
+            before,
+            "a hidden file is code too"
+        );
+
+        // OS noise isn't.
+        let settled = tree_hash(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".DS_Store"), "finder").unwrap();
+        assert_eq!(tree_hash(dir.path()).unwrap(), settled);
+
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("lib")).unwrap();
+        let err = tree_hash(dir.path()).unwrap_err().to_string();
+        assert!(err.contains("symlink") && err.contains("lib"), "{err}");
     }
 }

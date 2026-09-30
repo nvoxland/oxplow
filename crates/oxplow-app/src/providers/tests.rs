@@ -378,3 +378,54 @@ async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
     assert_eq!(health.state, InstanceState::Ready);
     assert!(health.mean_invoke_ms.is_some() && health.last_ok_at.is_some());
 }
+
+/// tsk546: a provider's args are hashed where it runs (its extension
+/// folder), and an arg reaching outside the folder is refused, so no file
+/// it runs escapes the approval.
+#[tokio::test]
+async fn provider_args_stay_inside_the_approved_folder() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "");
+    let manifest = project.join("oxplow/extensions/tracker/extension.yaml");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(
+        &manifest,
+        text.replace(
+            "    entry: bin/provider\n",
+            "    entry: bin/provider\n    args: [../../../tools/tracker.py]\n",
+        ),
+    )
+    .unwrap();
+    let loaded = crate::extensions::load_extensions(&project)
+        .into_iter()
+        .find(|e| e.name == EXT)
+        .unwrap();
+    assert!(loaded.providers.is_empty());
+    assert!(
+        loaded
+            .errors
+            .iter()
+            .any(|e| e.contains("../../../tools/tracker.py")),
+        "{:?}",
+        loaded.errors
+    );
+
+    // An arg inside the folder is part of the approval.
+    std::fs::write(
+        &manifest,
+        text.replace(
+            "    entry: bin/provider\n",
+            "    entry: bin/provider\n    args: [lib/main.py]\n",
+        ),
+    )
+    .unwrap();
+    let dir = project.join("oxplow/extensions/tracker");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib/main.py"), "good()").unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    assert!(program(&fx, &ext).approved);
+    std::fs::write(dir.join("lib/main.py"), "evil()").unwrap();
+    assert!(!program(&fx, &ext).approved);
+}

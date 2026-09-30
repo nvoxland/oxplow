@@ -93,7 +93,11 @@ None of these run until a person approves that program on their machine.
 
   Any change needs approving again. A directory of more than 500 files
   or 16 MB can't be approved as a whole: give the program its own
-  directory.
+  directory. The tree hash covers dot-files too (only `.DS_Store` is
+  skipped), and a folder containing a symlink can't be approved at all —
+  its target isn't what the person saw (tsk546). A provider's `args` are
+  hashed where it runs (its extension folder), and an arg naming a path
+  outside the folder is refused when the manifest loads.
 - **Where it lives.** Outside every repo (tsk344): `exec_consent::ApprovalStore`
   keeps them in `<oxplow home>/approvals/<sha256 of the project path>.json`.
   Each entry carries an HMAC under a random key kept in the OS keychain
