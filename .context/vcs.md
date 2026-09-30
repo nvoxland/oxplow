@@ -76,7 +76,12 @@ that runs each call under `spawn_blocking`. `Services.vcs` holds it as
 - **`WorkspaceFiles`** (`Services.workspace_files`): list, read, write,
   create, rename and delete under a stream's workspace, with
   path-traversal protection, annotated with `vcs.status`. Writes
-  announce `WorkspaceChanged`. `WorkspaceEntry` and
+  announce `WorkspaceChanged`. Every change (write, create, rename,
+  delete) resolves its stream with `resolve_strict` — no stream, a bad
+  id or an unknown stream is refused (`NoStream`, IPC `INVALID`), never
+  sent to the primary — and a path naming the workspace itself (`""`,
+  `.`, `/`) is refused (`WholeWorkspace`), so an empty path can't delete
+  the worktree (tsk551). Reads still default to the primary. `WorkspaceEntry` and
   `WorkspaceIndexedFile` serialize camelCase (`status`, `hasChanges`),
   and the desktop uses the generated types directly. The hand-written
   TS copies went: `listWorkspaceEntries` had never mapped the

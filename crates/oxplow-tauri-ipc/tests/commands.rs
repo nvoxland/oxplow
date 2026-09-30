@@ -732,10 +732,26 @@ async fn workspace_reads_and_file_round_trip() {
     let _ = commands::generated::files_at(app.state(), None, oxplow_domain::vcs::Revision::Working)
         .await
         .unwrap();
-    // Create → read → rename → delete a file inside the worktree.
-    commands::generated::write_workspace_file(
+    // Create → read → rename → delete a file inside the primary's
+    // worktree; a change names its stream (tsk551).
+    let primary = commands::generated::get_primary_stream(app.state())
+        .await
+        .unwrap()
+        .expect("a primary stream")
+        .id
+        .to_string();
+    let refused = commands::generated::write_workspace_file(
         app.state(),
         None,
+        "scratch.txt".into(),
+        "hello".into(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(refused.code, "INVALID", "{}", refused.message);
+    commands::generated::write_workspace_file(
+        app.state(),
+        Some(primary.clone()),
         "scratch.txt".into(),
         "hello".into(),
     )
@@ -745,17 +761,24 @@ async fn workspace_reads_and_file_round_trip() {
         .await
         .unwrap();
     assert!(f.content.contains("hello"));
-    let _ =
-        commands::generated::create_workspace_directory(app.state(), None, "subdir".into()).await;
-    let _ = commands::generated::rename_workspace_path(
+    commands::generated::create_workspace_directory(
         app.state(),
-        None,
+        Some(primary.clone()),
+        "subdir".into(),
+    )
+    .await
+    .unwrap();
+    commands::generated::rename_workspace_path(
+        app.state(),
+        Some(primary.clone()),
         "scratch.txt".into(),
         "scratch2.txt".into(),
     )
-    .await;
-    let _ =
-        commands::generated::delete_workspace_path(app.state(), None, "scratch2.txt".into()).await;
+    .await
+    .unwrap();
+    commands::generated::delete_workspace_path(app.state(), Some(primary), "scratch2.txt".into())
+        .await
+        .unwrap();
 }
 
 // ---- lsp list reads ----

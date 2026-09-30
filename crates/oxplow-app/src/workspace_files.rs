@@ -61,6 +61,13 @@ pub enum WorkspaceError {
     NotFound,
     #[error("path already exists")]
     AlreadyExists,
+    /// A change names no stream, or one that doesn't exist: refused
+    /// rather than landing in the primary worktree.
+    #[error("{0}")]
+    NoStream(String),
+    /// The path is the workspace itself.
+    #[error("the path names the whole workspace")]
+    WholeWorkspace,
 }
 
 /// A stream's files. Held in `Services` as `workspace_files`.
@@ -97,6 +104,15 @@ impl WorkspaceFiles {
                 path: String::new(),
             });
         }
+    }
+
+    /// Where a change to `stream_id`'s files goes: its own worktree,
+    /// never the primary's by default ([`WorktreeRouter::resolve_strict`]).
+    async fn root_for_change(&self, stream_id: Option<&str>) -> Result<PathBuf, WorkspaceError> {
+        self.router
+            .resolve_strict(stream_id)
+            .await
+            .map_err(|e| WorkspaceError::NoStream(e.to_string()))
     }
 
     async fn blocking<R: Send + 'static>(
@@ -167,7 +183,7 @@ impl WorkspaceFiles {
         relative_path: String,
         content: String,
     ) -> Result<WorkspaceFile, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.root_for_change(stream_id).await?;
         let out =
             Self::blocking(move || write_workspace_file(&root, &relative_path, &content)).await?;
         self.announce(stream_id);
@@ -180,7 +196,7 @@ impl WorkspaceFiles {
         relative_path: String,
         content: String,
     ) -> Result<WorkspaceFile, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.root_for_change(stream_id).await?;
         let out =
             Self::blocking(move || create_workspace_file(&root, &relative_path, &content)).await?;
         self.announce(stream_id);
@@ -192,7 +208,7 @@ impl WorkspaceFiles {
         stream_id: Option<&str>,
         relative_path: String,
     ) -> Result<String, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.root_for_change(stream_id).await?;
         Self::blocking(move || create_workspace_directory(&root, &relative_path)).await
     }
 
@@ -202,7 +218,7 @@ impl WorkspaceFiles {
         from_path: String,
         to_path: String,
     ) -> Result<(String, String), WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.root_for_change(stream_id).await?;
         let out =
             Self::blocking(move || rename_workspace_path(&root, &from_path, &to_path)).await?;
         self.announce(stream_id);
@@ -214,7 +230,7 @@ impl WorkspaceFiles {
         stream_id: Option<&str>,
         relative_path: String,
     ) -> Result<String, WorkspaceError> {
-        let root = self.router.resolve(stream_id).await;
+        let root = self.root_for_change(stream_id).await?;
         let out = Self::blocking(move || delete_workspace_path(&root, &relative_path)).await?;
         self.announce(stream_id);
         Ok(out)
@@ -388,7 +404,7 @@ pub fn write_workspace_file(
     content: &str,
 ) -> Result<WorkspaceFile, WorkspaceError> {
     let path = clean_relative_path(relative_path);
-    let abs = resolve_workspace_path(root_dir, &path)?;
+    let abs = resolve_target_path(root_dir, &path)?;
     std::fs::write(abs, content.as_bytes())?;
     Ok(WorkspaceFile {
         path,
@@ -402,7 +418,7 @@ pub fn create_workspace_file(
     content: &str,
 ) -> Result<WorkspaceFile, WorkspaceError> {
     let path = clean_relative_path(relative_path);
-    let abs = resolve_workspace_path(root_dir, &path)?;
+    let abs = resolve_target_path(root_dir, &path)?;
     if abs.exists() {
         return Err(WorkspaceError::AlreadyExists);
     }
@@ -421,7 +437,7 @@ pub fn create_workspace_directory(
     relative_path: &str,
 ) -> Result<String, WorkspaceError> {
     let path = clean_relative_path(relative_path);
-    let abs = resolve_workspace_path(root_dir, &path)?;
+    let abs = resolve_target_path(root_dir, &path)?;
     if abs.exists() {
         return Err(WorkspaceError::AlreadyExists);
     }
@@ -436,8 +452,8 @@ pub fn rename_workspace_path(
 ) -> Result<(String, String), WorkspaceError> {
     let from = clean_relative_path(from_path);
     let to = clean_relative_path(to_path);
-    let from_abs = resolve_workspace_path(root_dir, &from)?;
-    let to_abs = resolve_workspace_path(root_dir, &to)?;
+    let from_abs = resolve_target_path(root_dir, &from)?;
+    let to_abs = resolve_target_path(root_dir, &to)?;
     if !from_abs.exists() {
         return Err(WorkspaceError::NotFound);
     }
@@ -456,7 +472,7 @@ pub fn delete_workspace_path(
     relative_path: &str,
 ) -> Result<String, WorkspaceError> {
     let path = clean_relative_path(relative_path);
-    let abs = resolve_workspace_path(root_dir, &path)?;
+    let abs = resolve_target_path(root_dir, &path)?;
     if !abs.exists() {
         return Err(WorkspaceError::NotFound);
     }
@@ -483,6 +499,24 @@ fn normalize_relative_path(base: &str, name: &str) -> String {
 
 fn clean_relative_path(relative_path: &str) -> String {
     relative_path.trim_start_matches('/').to_string()
+}
+
+/// [`resolve_workspace_path`] for something a change acts on: never the
+/// workspace root itself (an empty, `.`, `/` or `./` path would otherwise
+/// delete, move or overwrite the whole worktree).
+fn resolve_target_path(root_dir: &Path, relative_path: &str) -> Result<PathBuf, WorkspaceError> {
+    let names_root = Path::new(&clean_relative_path(relative_path))
+        .components()
+        .all(|c| {
+            matches!(
+                c,
+                std::path::Component::CurDir | std::path::Component::RootDir
+            )
+        });
+    if names_root {
+        return Err(WorkspaceError::WholeWorkspace);
+    }
+    resolve_workspace_path(root_dir, relative_path)
 }
 
 /// Resolve `root + relative` and reject anything that escapes the
@@ -542,6 +576,47 @@ fn normalize_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// tsk551: a path that is the workspace itself is never deleted,
+    /// renamed or written.
+    #[test]
+    fn the_workspace_root_itself_is_never_a_target() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("keep.txt"), "x").unwrap();
+        for root_path in ["", ".", "/", "./"] {
+            assert!(
+                matches!(
+                    delete_workspace_path(dir.path(), root_path),
+                    Err(WorkspaceError::WholeWorkspace)
+                ),
+                "{root_path:?}"
+            );
+            assert!(matches!(
+                rename_workspace_path(dir.path(), root_path, "moved"),
+                Err(WorkspaceError::WholeWorkspace)
+            ));
+        }
+        assert!(dir.path().join("keep.txt").exists());
+    }
+
+    /// tsk551: a write names its stream, and an unknown or missing one is
+    /// refused rather than landing in the primary worktree.
+    #[tokio::test]
+    async fn writes_refuse_an_unknown_stream_instead_of_the_primary() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let files = &fx.svc.workspace_files;
+        let primary = fx.svc.layout.project_dir.clone();
+        for stream in [None, Some("str999"), Some("junk")] {
+            let r = files.write(stream, "leak.txt".into(), "x".into()).await;
+            assert!(
+                matches!(r, Err(WorkspaceError::NoStream(_))),
+                "{stream:?}: {r:?}"
+            );
+            let r = files.delete(stream, "keep".into()).await;
+            assert!(matches!(r, Err(WorkspaceError::NoStream(_))), "{stream:?}");
+        }
+        assert!(!primary.join("leak.txt").exists());
+    }
 
     #[test]
     fn text_search_finds_fixed_strings_in_the_files_the_filter_keeps() {

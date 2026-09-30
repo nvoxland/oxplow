@@ -1,7 +1,9 @@
 //! Cores for the `workspace` command module. Populated by the
 //! oxplow-tauri-ipc -> oxplow-rpc migration; see crate docs.
 
-use oxplow_app::workspace_files::{WorkspaceEntry, WorkspaceFile, WorkspaceIndexedFile};
+use oxplow_app::workspace_files::{
+    WorkspaceEntry, WorkspaceError, WorkspaceFile, WorkspaceIndexedFile,
+};
 use oxplow_app::Services;
 
 use crate::error::IpcError;
@@ -74,6 +76,16 @@ pub async fn read_workspace_file(
         .map_err(|e| IpcError::internal(e.to_string()))
 }
 
+/// A refused change (no stream, an escaping or whole-workspace path, a
+/// missing or existing path) is the caller's `INVALID`; anything else is
+/// `INTERNAL`.
+fn change_error(e: WorkspaceError) -> IpcError {
+    match e {
+        WorkspaceError::Io(_) => IpcError::internal(e.to_string()),
+        _ => IpcError::invalid(e.to_string()),
+    }
+}
+
 pub async fn write_workspace_file(
     svc: &Services,
     stream_id: Option<String>,
@@ -83,7 +95,7 @@ pub async fn write_workspace_file(
     svc.workspace_files
         .write(stream_id.as_deref(), relative_path, content)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .map_err(change_error)
 }
 
 pub async fn create_workspace_file(
@@ -95,7 +107,7 @@ pub async fn create_workspace_file(
     svc.workspace_files
         .create_file(stream_id.as_deref(), relative_path, content)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .map_err(change_error)
 }
 
 pub async fn create_workspace_directory(
@@ -106,7 +118,7 @@ pub async fn create_workspace_directory(
     svc.workspace_files
         .create_directory(stream_id.as_deref(), relative_path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .map_err(change_error)
 }
 
 pub async fn rename_workspace_path(
@@ -118,7 +130,7 @@ pub async fn rename_workspace_path(
     svc.workspace_files
         .rename(stream_id.as_deref(), from_path, to_path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .map_err(change_error)
 }
 
 pub async fn delete_workspace_path(
@@ -129,7 +141,7 @@ pub async fn delete_workspace_path(
     svc.workspace_files
         .delete(stream_id.as_deref(), relative_path)
         .await
-        .map_err(|e| IpcError::internal(e.to_string()))
+        .map_err(change_error)
 }
 
 #[cfg(test)]
