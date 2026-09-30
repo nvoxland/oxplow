@@ -73,6 +73,9 @@ pub struct HostDeps {
     /// The first restart's wait; each failure doubles it, up to
     /// [`MAX_BACKOFF`].
     pub backoff: Duration,
+    /// Where approved copies of providers are kept and run from, outside
+    /// the repo (`host::approved_copy`).
+    pub copies: PathBuf,
 }
 
 /// A config problem `check` reported.
@@ -178,34 +181,17 @@ pub struct Instance {
 }
 
 impl Instance {
-    fn ext_dir(&self) -> PathBuf {
-        host::ext_dir(&self.deps.project_dir, &self.ext)
-    }
-
-    /// Consent, spawn, handshake, check.
+    /// Consent (a verified copy of the approved folder), spawn from that
+    /// copy, handshake, check.
     async fn start(&self) -> Result<Live, HostError> {
-        if !crate::exec_consent::may_run_provider(
-            &self.deps.approvals,
-            &self.deps.project_dir,
-            &self.ext,
-            &self.spec,
-        ) {
-            return Err(HostError::Unapproved(self.name.clone()));
-        }
-        let dir = self.ext_dir();
-        let declared = spec::read_declarations(&self.spec, &|rel| {
-            std::fs::read_to_string(dir.join(rel)).ok()
-        })
-        .map_err(|message| HostError::Failed {
-            name: self.name.clone(),
-            message,
-        })?;
-        if declared != self.declared {
+        let copy = copy_approved(&self.deps, &self.ext, &self.spec).await?;
+        if copy.declared != self.declared {
             return Err(HostError::DeclarationsChanged {
                 name: self.name.clone(),
-                detail: "its declarations file changed since it was enabled".into(),
+                detail: "its declarations changed since it was enabled".into(),
             });
         }
+        let (dir, declared) = (copy.ext_dir, copy.declared);
         let mut credentials = BTreeMap::new();
         for name in &self.spec.credentials {
             let account =
@@ -588,24 +574,18 @@ impl ProviderRegistry {
         spec: &ProviderSpec,
         config: Value,
     ) -> Result<(), HostError> {
-        let instance = self.instance(ext, spec, config)?;
+        let instance = self.instance(ext, spec, config).await?;
         instance.start().await.map(|_| ())
     }
 
-    fn instance(
+    async fn instance(
         &self,
         ext: &Extension,
         spec: &ProviderSpec,
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
         let name = spec.approval_name(&ext.name);
-        let dir = host::ext_dir(&self.deps.project_dir, ext);
-        let declared =
-            spec::read_declarations(spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok())
-                .map_err(|message| HostError::Failed {
-                    name: name.clone(),
-                    message,
-                })?;
+        let declared = copy_approved(&self.deps, ext, spec).await?.declared;
         Ok(Arc::new(Instance {
             name,
             ext: ext.clone(),
@@ -647,7 +627,13 @@ impl ProviderRegistry {
                 spec.id
             )));
         }
-        let instance = self.instance(ext, spec, config)?;
+        let instance = match self.instance(ext, spec, config).await {
+            Ok(i) => i,
+            Err(e) => {
+                self.start_failed(&name, e.clone()).await;
+                return Err(e);
+            }
+        };
         let schemas = bus.event_schemas();
         for t in &instance.declared.event_types {
             if schemas.schema(&t.event_type, t.v) != Some(&t.schema) {
@@ -950,6 +936,29 @@ impl ProviderRegistry {
 /// The ref of an instance's extension (`plugin:<extension>`).
 fn plugin_ref(instance: &str) -> String {
     format!("plugin:{}", instance.split('/').next().unwrap_or_default())
+}
+
+/// [`host::approved_copy`] off the runtime (it copies and hashes files).
+async fn copy_approved(
+    deps: &HostDeps,
+    ext: &Extension,
+    spec: &ProviderSpec,
+) -> Result<host::ApprovedCopy, HostError> {
+    let (project, copies, approvals) = (
+        deps.project_dir.clone(),
+        deps.copies.clone(),
+        deps.approvals.clone(),
+    );
+    let (ext, spec) = (ext.clone(), spec.clone());
+    let name = spec.approval_name(&ext.name);
+    tokio::task::spawn_blocking(move || {
+        host::approved_copy(&project, &copies, &approvals, &ext, &spec)
+    })
+    .await
+    .map_err(|e| HostError::Failed {
+        name,
+        message: format!("copying it to run: {e}"),
+    })?
 }
 
 fn now() -> String {

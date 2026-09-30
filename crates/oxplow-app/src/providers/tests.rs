@@ -429,3 +429,64 @@ async fn provider_args_stay_inside_the_approved_folder() {
     std::fs::write(dir.join("lib/main.py"), "evil()").unwrap();
     assert!(!program(&fx, &ext).approved);
 }
+
+/// tsk547: a provider runs from a verified copy of its approved folder,
+/// outside the repo — not from the live tree — and a tampered copy is
+/// replaced before it runs.
+#[tokio::test]
+async fn a_provider_runs_from_its_verified_copy() {
+    let fx = services_with_effort().await;
+    let project = fx.svc.layout.project_dir.clone();
+    write_extension(&project, "");
+    let script = project.join("oxplow/extensions/tracker/bin/provider");
+    let seen = tempfile::tempdir().unwrap();
+    let cwd_file = seen.path().join("cwd");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\npwd > '{}'\nexec '{}' \"$@\"\n",
+            cwd_file.display(),
+            fake_bin().display()
+        ),
+    )
+    .unwrap();
+    let ext = extension(&project);
+    approve(&fx, &ext);
+    let providers = &fx.svc.providers;
+    providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    let copies = fx
+        .svc
+        .layout
+        .state_dir
+        .join("global-config/provider-copies");
+    let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim());
+    let copies = copies.canonicalize().unwrap();
+    assert!(
+        ran_in.starts_with(&copies),
+        "{} not under {}",
+        ran_in.display(),
+        copies.display()
+    );
+    assert!(
+        ran_in.ends_with("oxplow/extensions/tracker"),
+        "{}",
+        ran_in.display()
+    );
+
+    // Someone edits the copy: the next start replaces it from the
+    // approved tree before running.
+    assert!(providers.stop(INSTANCE).await);
+    let copied = ran_in.join("bin/provider");
+    std::fs::write(&copied, "#!/bin/sh\necho tampered\nexit 1\n").unwrap();
+    providers
+        .enable(&ext, &ext.providers[0], json!({ "team": "core" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&copied).unwrap(),
+        std::fs::read_to_string(&script).unwrap()
+    );
+}

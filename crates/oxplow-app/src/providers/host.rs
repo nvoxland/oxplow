@@ -295,6 +295,96 @@ pub fn first_difference(approved: &InitializeResult, live: &InitializeResult) ->
     walk("", &a, &b).unwrap_or_else(|| "they differ".into())
 }
 
+/// A verified copy of an approved provider's extension folder: what a
+/// start runs, so the bytes that run are the bytes whose hash was
+/// approved — not the live tree, which a checkout or an edit can change
+/// between the check and the exec (or under a provider that loads its
+/// modules lazily).
+pub struct ApprovedCopy {
+    /// The provider's folder inside the copy.
+    pub ext_dir: PathBuf,
+    /// Its declarations, read from the copy.
+    pub declared: InitializeResult,
+}
+
+/// Copy `ext`'s folder into `copies/<ext>/<id>/<hash>` and check that the
+/// copy's hash is approved on this machine. An existing copy is re-hashed
+/// (it lives outside the repo, but a process running as the person can
+/// still write there), and older copies of the provider are removed.
+pub fn approved_copy(
+    project_dir: &Path,
+    copies: &Path,
+    approvals: &crate::exec_consent::ApprovalStore,
+    ext: &crate::extensions::Extension,
+    spec: &ProviderSpec,
+) -> Result<ApprovedCopy, HostError> {
+    let name = spec.approval_name(&ext.name);
+    let failed = |message: String| HostError::Failed {
+        name: name.clone(),
+        message,
+    };
+    let program = crate::exec_consent::provider_program(ext, spec);
+    let rel = ext.path.trim_end_matches('/');
+    let base = copies.join(&ext.name).join(&spec.id);
+    let tmp = base.join(format!(".tmp-{}", uuid::Uuid::new_v4()));
+    let copied =
+        copy_tree(&project_dir.join(rel), &tmp.join(rel)).and_then(|()| program.hash(&tmp));
+    let hash = match copied {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(failed(format!("copying it to run: {e}")));
+        }
+    };
+    if !approvals.is_approved(&program.key(), &hash) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(HostError::Unapproved(name));
+    }
+    let root = base.join(&hash);
+    let intact = root.is_dir() && program.hash(&root).is_ok_and(|h| h == hash);
+    if intact {
+        let _ = std::fs::remove_dir_all(&tmp);
+    } else {
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::rename(&tmp, &root).map_err(|e| failed(format!("keeping its copy: {e}")))?;
+    }
+    // Older versions (and abandoned temp copies) go.
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for entry in entries.flatten() {
+            if entry.file_name() != hash.as_str() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    let ext_dir = root.join(rel);
+    let declared =
+        super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
+            .map_err(&failed)?;
+    Ok(ApprovedCopy { ext_dir, declared })
+}
+
+/// Copy the regular files and directories under `from` to `to`
+/// (permissions kept); a symlink is refused, as the approval refuses it.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_symlink() {
+            return Err(std::io::Error::other(format!(
+                "{} is a symlink",
+                entry.path().display()
+            )));
+        } else if kind.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// The provider's extension folder under `root`.
 pub fn ext_dir(root: &Path, ext: &crate::extensions::Extension) -> PathBuf {
     root.join(&ext.path)

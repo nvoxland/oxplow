@@ -121,6 +121,18 @@ shown unapproved in Settings → Data → Programs (with its grants listed)
 until a person approves it again. Every start re-checks it, restarts
 included.
 
+**What runs is a verified copy** (`host::approved_copy`, tsk547). Each
+start copies the extension folder into `<oxplow home>/provider-copies/
+<project>/<ext>/<id>/<hash>/` (in-memory services: under the state
+dir), hashes the copy, and runs only if that hash is approved — then
+spawns the entry from the copy and reads the declarations from it. So
+what runs is exactly what was approved: a checkout or an edit to the
+live tree between the check and the exec, or under a provider that
+loads its modules lazily, can't slip in. An existing copy is re-hashed
+before each run (a process running as the person can still write
+there) and replaced if it changed; older copies go. The provider's
+working directory and `OXPLOW_EXTENSION_DIR` are the copy.
+
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the
 credentials from the keychain account `source:<project>:<ext>:<name>`,

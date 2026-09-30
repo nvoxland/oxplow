@@ -412,6 +412,8 @@ struct MachineEnv {
     approvals_file: Option<PathBuf>,
     /// A failed provider's first restart wait (doubling from there).
     provider_backoff: std::time::Duration,
+    /// Where approved provider copies run from, outside the repo.
+    provider_copies: PathBuf,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -652,6 +654,10 @@ impl Services {
             config_dir: oxplow_config::global_config_dir(),
             approvals_file: None,
             provider_backoff: std::time::Duration::from_secs(1),
+            provider_copies: oxplow_config::global_config_dir()
+                .unwrap_or_else(|| layout.state_dir.join("global-config"))
+                .join("provider-copies")
+                .join(source_runner::project_key(&layout.project_dir)),
         };
         Self::build(layout, config, db, machine)
     }
@@ -1028,6 +1034,7 @@ impl Services {
                 log: (*event_log_store).clone(),
                 host_env: Arc::new(|name| std::env::var(name).ok()),
                 backoff: machine.provider_backoff,
+                copies: machine.provider_copies.clone(),
             },
             &commands,
             work_items.clone(),
@@ -1230,6 +1237,7 @@ impl Services {
             approvals_file: Some(state_dir.join("global-config/approvals.json")),
             // A test's failing provider restarts at once.
             provider_backoff: std::time::Duration::ZERO,
+            provider_copies: state_dir.join("global-config/provider-copies"),
         };
         Self::build(layout, config, Database::in_memory(), machine)
     }
