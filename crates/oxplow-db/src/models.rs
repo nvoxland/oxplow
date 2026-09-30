@@ -18,7 +18,7 @@
 //! `relationships`, `sql`) run on demand ([`run_tests`]) and record their
 //! result in `model_test`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use oxplow_domain::DomainError;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -229,53 +229,67 @@ fn resolve<'a>(
 ) -> Result<Vec<Resolved<'a>>, DomainError> {
     let names: BTreeSet<&str> = sources.iter().map(|s| s.decl.name.as_str()).collect();
     let tables = stored_tables(conn)?;
-    let mut out = Vec::with_capacity(sources.len());
-    for src in sources {
-        crate::sql_tokens::check_single_read(&src.sql)
-            .map_err(|e| invalid(format!("{}: {e}", src.file)))?;
-        let mut edits: Vec<(usize, usize, String)> = Vec::new();
-        let mut refs = BTreeSet::new();
-        let mut first_ref_at = None;
-        for call in calls(&src.sql, "ref").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
-            let target = only_name(src, &call, "ref")?;
-            if !names.contains(target.as_str()) {
-                return Err(invalid(format!(
-                    "{}: ref('{target}') names no model",
-                    at(src, call.start)
-                )));
-            }
-            let view = view_of(&target);
-            edits.push((call.start, call.end, quote(&view)));
-            refs.insert(view);
-            first_ref_at.get_or_insert_with(|| at(src, call.start));
+    let ref_view = |target: &str| names.contains(target).then(|| view_of(target));
+    let source_ok = |table: &str| {
+        if tables.contains(table) {
+            Ok(())
+        } else {
+            Err("names no table".to_string())
         }
-        let mut read_tables = BTreeSet::new();
-        for call in calls(&src.sql, "source").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
-            let table = only_name(src, &call, "source")?;
-            if !tables.contains(&table) {
-                return Err(invalid(format!(
-                    "{}: source('{table}') names no table",
-                    at(src, call.start)
-                )));
-            }
-            edits.push((call.start, call.end, quote(&table)));
-            read_tables.insert(table);
-        }
-        edits.sort_by_key(|e| std::cmp::Reverse(e.0));
-        let mut sql = src.sql.clone();
-        for (start, end, with) in edits {
-            sql.replace_range(start..end, &with);
-        }
-        out.push(Resolved {
-            source: src,
-            view: view_of(&src.decl.name),
-            sql: sql.trim().trim_end_matches(';').trim_end().to_string(),
-            refs,
-            sources: read_tables,
-            first_ref_at,
-        });
+    };
+    sources
+        .iter()
+        .map(|src| resolve_one(src, view_of(&src.decl.name), &ref_view, &source_ok))
+        .collect()
+}
+
+/// Resolve one model's `ref()`s (through `ref_view`: a name → its view,
+/// `None` when it names nothing) and `source()`s (`source_ok` says why a
+/// table can't be read, if it can't).
+fn resolve_one<'a>(
+    src: &'a ModelSource,
+    view: String,
+    ref_view: &dyn Fn(&str) -> Option<String>,
+    source_ok: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<Resolved<'a>, DomainError> {
+    crate::sql_tokens::check_single_read(&src.sql)
+        .map_err(|e| invalid(format!("{}: {e}", src.file)))?;
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut refs = BTreeSet::new();
+    let mut first_ref_at = None;
+    for call in calls(&src.sql, "ref").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
+        let target = only_name(src, &call, "ref")?;
+        let Some(to) = ref_view(&target) else {
+            return Err(invalid(format!(
+                "{}: ref('{target}') names no model",
+                at(src, call.start)
+            )));
+        };
+        edits.push((call.start, call.end, quote(&to)));
+        refs.insert(to);
+        first_ref_at.get_or_insert_with(|| at(src, call.start));
     }
-    Ok(out)
+    let mut read_tables = BTreeSet::new();
+    for call in calls(&src.sql, "source").map_err(|e| invalid(format!("{}: {e}", src.file)))? {
+        let table = only_name(src, &call, "source")?;
+        source_ok(&table)
+            .map_err(|why| invalid(format!("{}: source('{table}') {why}", at(src, call.start))))?;
+        edits.push((call.start, call.end, quote(&table)));
+        read_tables.insert(table);
+    }
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut sql = src.sql.clone();
+    for (start, end, with) in edits {
+        sql.replace_range(start..end, &with);
+    }
+    Ok(Resolved {
+        source: src,
+        view,
+        sql: sql.trim().trim_end_matches(';').trim_end().to_string(),
+        refs,
+        sources: read_tables,
+        first_ref_at,
+    })
 }
 
 fn stored_tables(conn: &Connection) -> Result<BTreeSet<String>, DomainError> {
@@ -418,39 +432,46 @@ pub fn compile(
     .map_err(map_sql_err)?;
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     for m in &models {
-        let decl = &m.source.decl;
-        tx.execute_batch(&format!("CREATE VIEW {} AS {}", quote(&m.view), m.sql))
-            .map_err(|e| invalid(format!("{}: {e}", m.source.file)))?;
-        check_lineage(&tx, m)?;
-        check_contract(&tx, m, &now)?;
-        tx.execute(
-            "INSERT INTO model (view, name, owner, version, description, sql, compiled_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                m.view,
-                decl.name,
-                owner,
-                decl.version,
-                decl.description,
-                m.sql,
-                now
-            ],
-        )
-        .map_err(map_sql_err)?;
-        for (input, kind) in m
-            .refs
-            .iter()
-            .map(|r| (r, "ref"))
-            .chain(m.sources.iter().map(|s| (s, "source")))
-        {
-            tx.execute(
-                "INSERT INTO model_input (view, input, kind) VALUES (?1, ?2, ?3)",
-                params![m.view, input, kind],
-            )
-            .map_err(map_sql_err)?;
-        }
+        publish(&tx, m, owner, &now)?;
     }
     tx.commit().map_err(map_sql_err)
+}
+
+/// Create one resolved model's view, check its lineage and contract, and
+/// record it.
+fn publish(conn: &Connection, m: &Resolved<'_>, owner: &str, now: &str) -> Result<(), DomainError> {
+    let decl = &m.source.decl;
+    conn.execute_batch(&format!("CREATE VIEW {} AS {}", quote(&m.view), m.sql))
+        .map_err(|e| invalid(format!("{}: {e}", m.source.file)))?;
+    check_lineage(conn, m)?;
+    check_contract(conn, m, now)?;
+    conn.execute(
+        "INSERT INTO model (view, name, owner, version, description, sql, compiled_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            m.view,
+            decl.name,
+            owner,
+            decl.version,
+            decl.description,
+            m.sql,
+            now
+        ],
+    )
+    .map_err(map_sql_err)?;
+    for (input, kind) in m
+        .refs
+        .iter()
+        .map(|r| (r, "ref"))
+        .chain(m.sources.iter().map(|s| (s, "source")))
+    {
+        conn.execute(
+            "INSERT INTO model_input (view, input, kind) VALUES (?1, ?2, ?3)",
+            params![m.view, input, kind],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
 }
 
 /// What SQLite reports the view reading is what it declared.
@@ -690,6 +711,218 @@ fn test_sql(
         let q = t.sql.clone().unwrap_or_default();
         (format!("sql({})", q.trim()), q)
     })
+}
+
+/// One extension's models, as its manifest declares them.
+#[derive(Debug, Clone)]
+pub struct ExtensionModels {
+    pub extension: String,
+    pub sources: Vec<ModelSource>,
+}
+
+/// The view an extension's model (or entity) publishes:
+/// `v_<extension>_<name>`, dashes as underscores.
+pub fn extension_view(extension: &str, name: &str) -> String {
+    format!("v_{}_{}", extension.replace('-', "_"), name)
+}
+
+/// Compile every enabled extension's models in one pass (P4.9), after the
+/// core models: returns each extension's errors, empty when all of its
+/// models compiled. A model that fails — and every model reading it —
+/// is left out and reported; the others are published.
+pub fn compile_extensions(
+    conn: &mut Connection,
+    extensions: &[ExtensionModels],
+) -> Result<BTreeMap<String, Vec<String>>, DomainError> {
+    let tx = conn.transaction().map_err(map_sql_err)?;
+    let mut errors: BTreeMap<String, Vec<String>> = extensions
+        .iter()
+        .map(|e| (e.extension.clone(), Vec::new()))
+        .collect();
+    // The last pass's views go first: the set is recompiled whole.
+    let previous: Vec<String> = {
+        let mut st = tx
+            .prepare("SELECT view FROM model WHERE kind = 'sql' AND owner <> ?1")
+            .map_err(map_sql_err)?;
+        let rows = st
+            .query_map([CORE], |r| r.get::<_, String>(0))
+            .map_err(map_sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_sql_err)?;
+        rows
+    };
+    for view in &previous {
+        tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(view)))
+            .map_err(map_sql_err)?;
+    }
+    tx.execute(
+        "DELETE FROM model WHERE kind = 'sql' AND owner <> ?1",
+        [CORE],
+    )
+    .map_err(map_sql_err)?;
+    // What a ref() can name: core models, extensions' entities, and the
+    // models declared in this pass.
+    let registered: Vec<(String, String, String)> = {
+        let mut st = tx
+            .prepare("SELECT owner, name, view FROM model")
+            .map_err(map_sql_err)?;
+        let rows = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(map_sql_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_sql_err)?;
+        rows
+    };
+    let mut known: HashMap<(String, String), String> = registered
+        .iter()
+        .map(|(o, n, v)| ((o.clone(), n.clone()), v.clone()))
+        .collect();
+    let existing: BTreeSet<String> = registered.into_iter().map(|(_, _, v)| v).collect();
+    let mut declared: BTreeMap<String, String> = BTreeMap::new();
+    for e in extensions {
+        for src in &e.sources {
+            let view = extension_view(&e.extension, &src.decl.name);
+            let owner_of = |v: &str| {
+                known
+                    .iter()
+                    .find(|(_, view)| view.as_str() == v)
+                    .map(|((o, _), _)| o.clone())
+            };
+            if let Some(owner) = owner_of(&view) {
+                push(
+                    &mut errors,
+                    &e.extension,
+                    format!(
+                        "{}: `{view}` already belongs to `{owner}`; rename the model",
+                        src.file
+                    ),
+                );
+                continue;
+            }
+            if let Some(other) = declared.insert(view.clone(), e.extension.clone()) {
+                push(
+                    &mut errors,
+                    &e.extension,
+                    format!(
+                        "{}: `{view}` is also `{other}`'s model; rename one",
+                        src.file
+                    ),
+                );
+            }
+        }
+        for src in &e.sources {
+            known
+                .entry((e.extension.clone(), src.decl.name.clone()))
+                .or_insert_with(|| extension_view(&e.extension, &src.decl.name));
+        }
+    }
+    let tables = stored_tables(&tx)?;
+    let mut resolved: Vec<(String, Resolved<'_>)> = Vec::new();
+    for e in extensions {
+        let own_prefix = format!("ext__{}__", e.extension.replace('-', "_"));
+        let ref_view = |target: &str| match target.split_once('/') {
+            Some((ext, name)) => known.get(&(ext.to_string(), name.to_string())).cloned(),
+            None => known
+                .get(&(e.extension.clone(), target.to_string()))
+                .or_else(|| known.get(&(CORE.to_string(), target.to_string())))
+                .cloned(),
+        };
+        let source_ok = |table: &str| {
+            if !table.starts_with(&own_prefix) {
+                Err(format!(
+                    "is not this extension's: a plugin model reads only its own extension's tables \
+                     (`{own_prefix}*`); read oxplow's data through ref()"
+                ))
+            } else if !tables.contains(table) {
+                Err("names no table (has its source synced?)".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        for src in &e.sources {
+            let view = extension_view(&e.extension, &src.decl.name);
+            if declared.get(&view) != Some(&e.extension) || existing.contains(&view) {
+                continue; // reported above
+            }
+            match resolve_one(src, view, &ref_view, &source_ok) {
+                Ok(m) => resolved.push((e.extension.clone(), m)),
+                Err(err) => push(&mut errors, &e.extension, err.to_string()),
+            }
+        }
+    }
+    // Publish in dependency order; a model reading one that didn't compile
+    // doesn't either.
+    let now = ts_to_string(oxplow_domain::Timestamp::now());
+    let in_pass: BTreeSet<String> = resolved.iter().map(|(_, m)| m.view.clone()).collect();
+    let mut failed: BTreeSet<String> = declared
+        .keys()
+        .filter(|v| !in_pass.contains(*v))
+        .cloned()
+        .collect();
+    let mut done: BTreeSet<String> = BTreeSet::new();
+    let mut pending = resolved;
+    while !pending.is_empty() {
+        let mut progressed = false;
+        let mut waiting = Vec::new();
+        for (ext, m) in pending {
+            if let Some(bad) = m.refs.iter().find(|r| failed.contains(*r)) {
+                push(
+                    &mut errors,
+                    &ext,
+                    format!("{}: reads `{bad}`, which didn't compile", m.source.file),
+                );
+                failed.insert(m.view.clone());
+                progressed = true;
+            } else if m
+                .refs
+                .iter()
+                .all(|r| !in_pass.contains(r) || done.contains(r))
+            {
+                tx.execute_batch("SAVEPOINT extension_model")
+                    .map_err(map_sql_err)?;
+                match publish(&tx, &m, &ext, &now) {
+                    Ok(()) => {
+                        tx.execute_batch("RELEASE extension_model")
+                            .map_err(map_sql_err)?;
+                        done.insert(m.view.clone());
+                    }
+                    Err(err) => {
+                        tx.execute_batch("ROLLBACK TO extension_model; RELEASE extension_model")
+                            .map_err(map_sql_err)?;
+                        push(&mut errors, &ext, err.to_string());
+                        failed.insert(m.view.clone());
+                    }
+                }
+                progressed = true;
+            } else {
+                waiting.push((ext, m));
+            }
+        }
+        if !progressed {
+            for (ext, m) in &waiting {
+                push(
+                    &mut errors,
+                    ext,
+                    format!(
+                        "{}: models read each other in a cycle ({})",
+                        m.source.file,
+                        m.first_ref_at.clone().unwrap_or_default()
+                    ),
+                );
+            }
+            break;
+        }
+        pending = waiting;
+    }
+    tx.commit().map_err(map_sql_err)?;
+    Ok(errors)
+}
+
+fn push(errors: &mut BTreeMap<String, Vec<String>>, extension: &str, message: String) {
+    errors
+        .entry(extension.to_string())
+        .or_default()
+        .push(message);
 }
 
 #[cfg(test)]
@@ -958,5 +1191,178 @@ mod tests {
         for r in run_tests(&conn, &sources, &core_view).unwrap() {
             assert_eq!(r.state, "passed", "{} {}: {:?}", r.view, r.test, r.detail);
         }
+    }
+
+    fn ext(extension: &str, models: Vec<ModelSource>) -> ExtensionModels {
+        ExtensionModels {
+            extension: extension.into(),
+            sources: models
+                .into_iter()
+                .map(|mut m| {
+                    m.file = format!("oxplow/extensions/{extension}/{}", m.file);
+                    m
+                })
+                .collect(),
+        }
+    }
+
+    fn published(conn: &Connection) -> Vec<(String, String, String)> {
+        let mut st = conn
+            .prepare(
+                "SELECT m.view, m.owner, group_concat(i.input) FROM model m
+                 LEFT JOIN model_input i USING (view)
+                 WHERE m.owner <> 'core' GROUP BY m.view ORDER BY m.view",
+            )
+            .unwrap();
+        st.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+    }
+
+    /// P4.9 (tsk494): an extension's model reads core models through
+    /// `ref()`, its own by bare name and another extension's as
+    /// `ref('<ext>/<name>')`; each publishes `v_<ext>_<name>` in the
+    /// registry. A recompile replaces the set.
+    #[test]
+    fn extension_models_publish_views_over_core_and_each_other() {
+        let mut conn = fresh();
+        let errors = compile_extensions(
+            &mut conn,
+            &[
+                ext(
+                    "late-work",
+                    vec![
+                        source(
+                            "late",
+                            "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
+                            &["id INTEGER", "title TEXT"],
+                        ),
+                        source(
+                            "late_count",
+                            "SELECT count(*) AS n FROM ref('late')",
+                            &["n"],
+                        ),
+                    ],
+                ),
+                ext(
+                    "digest",
+                    vec![source(
+                        "late_titles",
+                        "SELECT title FROM ref('late-work/late')",
+                        &["title TEXT"],
+                    )],
+                ),
+            ],
+        )
+        .unwrap();
+        assert!(errors.values().all(Vec::is_empty), "{errors:?}");
+        assert_eq!(
+            published(&conn),
+            vec![
+                (
+                    "v_digest_late_titles".into(),
+                    "digest".into(),
+                    "v_late_work_late".into()
+                ),
+                (
+                    "v_late_work_late".into(),
+                    "late-work".into(),
+                    "v_task".into()
+                ),
+                (
+                    "v_late_work_late_count".into(),
+                    "late-work".into(),
+                    "v_late_work_late".into()
+                ),
+            ]
+        );
+        conn.query_row("SELECT count(*) FROM v_digest_late_titles", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap();
+        // Recompiled without `digest`: its view goes.
+        compile_extensions(
+            &mut conn,
+            &[ext(
+                "late-work",
+                vec![source(
+                    "late",
+                    "SELECT id, title FROM ref('task') WHERE status = 'blocked'",
+                    &["id INTEGER", "title TEXT"],
+                )],
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            published(&conn),
+            vec![(
+                "v_late_work_late".into(),
+                "late-work".into(),
+                "v_task".into()
+            )]
+        );
+        assert!(conn.prepare("SELECT * FROM v_digest_late_titles").is_err());
+    }
+
+    /// A broken model fails alone — with every model reading it — and its
+    /// extension's errors say where; a plugin reads only its own tables.
+    #[test]
+    fn a_broken_extension_model_fails_alone() {
+        let mut conn = fresh();
+        let errors = compile_extensions(
+            &mut conn,
+            &[
+                ext(
+                    "raw",
+                    vec![source(
+                        "tasks",
+                        "SELECT id FROM\n  source('task')",
+                        &["id INTEGER"],
+                    )],
+                ),
+                ext(
+                    "shaky",
+                    vec![
+                        source("bad", "SELECT nope FROM ref('task')", &["nope"]),
+                        source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
+                        source("fine", "SELECT id FROM ref('task')", &["id INTEGER"]),
+                        source("lost", "SELECT * FROM ref('missing')", &["x"]),
+                    ],
+                ),
+                ext(
+                    "loop",
+                    vec![
+                        source("a", "SELECT * FROM ref('b')", &["x"]),
+                        source("b", "SELECT * FROM ref('a')", &["x"]),
+                    ],
+                ),
+            ],
+        )
+        .unwrap();
+        let raw = errors["raw"].join("\n");
+        assert!(
+            raw.contains("oxplow/extensions/raw/models/tasks.sql:2:3"),
+            "{raw}"
+        );
+        assert!(raw.contains("only its own extension's tables"), "{raw}");
+        let shaky = errors["shaky"].join("\n");
+        assert!(shaky.contains("models/bad.sql"), "{shaky}");
+        assert!(
+            shaky.contains("reads `v_shaky_bad`, which didn't compile"),
+            "{shaky}"
+        );
+        assert!(shaky.contains("ref('missing') names no model"), "{shaky}");
+        assert!(errors["loop"].join("\n").contains("cycle"), "{errors:?}");
+        assert_eq!(
+            published(&conn),
+            vec![("v_shaky_fine".into(), "shaky".into(), "v_task".into())]
+        );
     }
 }
