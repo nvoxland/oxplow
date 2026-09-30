@@ -27,6 +27,8 @@ pub struct LspProvider {
     sessions: LspSessionManager,
     worktrees: Arc<WorktreeRouter>,
     diagnostics: oxplow_db::SqliteDiagnosticStore,
+    /// How long a request may wait for its server's answer.
+    request_timeout: std::time::Duration,
 }
 
 impl LspProvider {
@@ -34,11 +36,13 @@ impl LspProvider {
         sessions: LspSessionManager,
         worktrees: Arc<WorktreeRouter>,
         diagnostics: oxplow_db::SqliteDiagnosticStore,
+        request_timeout: std::time::Duration,
     ) -> Self {
         Self {
             sessions,
             worktrees,
             diagnostics,
+            request_timeout,
         }
     }
 
@@ -84,9 +88,14 @@ impl LspProvider {
                 e @ LspSessionError::NoConfig(_) => CodeIntelError::NoProvider(e.to_string()),
                 e => CodeIntelError::Failed(e.to_string()),
             })?;
-        let result = proxy
-            .request(method, params)
+        let result = tokio::time::timeout(self.request_timeout, proxy.request(method, params))
             .await
+            .map_err(|_| {
+                CodeIntelError::Failed(format!(
+                    "the {language} server didn't answer `{method}` in {}s",
+                    self.request_timeout.as_secs_f32()
+                ))
+            })?
             .map_err(|e| CodeIntelError::Failed(e.to_string()))?;
         Ok((result, ws))
     }

@@ -93,7 +93,8 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
             capture.files_without_server += 1;
             continue;
         }
-        if capture.files_collected as usize >= bound {
+        // Every file asked about counts, answered or not.
+        if (capture.files_collected + capture.files_failed) as usize >= bound {
             capture.files_over_budget += 1;
             continue;
         }
@@ -108,7 +109,8 @@ pub async fn collect(svc: &Services, stream: StreamId, snapshot: i64) -> Result<
             }
             Err(e) => {
                 // A server that can't answer for one file leaves it as it
-                // was; the rest go on.
+                // was; the rest go on, and the capture records it.
+                capture.files_failed += 1;
                 tracing::warn!(path = file.path, error = %e, "document symbols failed");
             }
         }
@@ -298,6 +300,44 @@ mod tests {
             )
             .await,
             serde_json::json!([[0, 0, 2]])
+        );
+    }
+
+    /// tsk557: every file asked about counts against the bound, and one
+    /// the server fails on (an error, or no answer in time) is recorded
+    /// as failed — never asked about past the bound, never invisible.
+    #[tokio::test]
+    async fn failures_count_against_the_bound_and_are_recorded() {
+        let (svc, dir, stream) = fixture(3).await;
+        for f in ["broken.py", "hang.py"] {
+            std::fs::write(dir.path().join(f), "x = 1\n").unwrap();
+        }
+        svc.lsp_sessions
+            .ensure(&stream.to_string(), "python", dir.path().to_path_buf())
+            .await
+            .unwrap();
+        // Sorted: a, b, broken (fails), c (over the bound of 3 attempts).
+        snapshot(&svc, stream, &["a.py", "b.py", "broken.py", "c.py"], &[]).await;
+        assert_eq!(
+            rows(
+                &svc,
+                "SELECT files_collected, files_over_budget, files_without_server, files_failed \
+                 FROM v_symbol_capture"
+            )
+            .await,
+            serde_json::json!([[2, 1, 0, 1]])
+        );
+        // A server that never answers times out and is counted.
+        let started = std::time::Instant::now();
+        snapshot(&svc, stream, &["hang.py"], &[]).await;
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(
+            rows(
+                &svc,
+                "SELECT files_failed FROM v_symbol_capture ORDER BY snapshot_id DESC LIMIT 1"
+            )
+            .await,
+            serde_json::json!([[1]])
         );
     }
 }

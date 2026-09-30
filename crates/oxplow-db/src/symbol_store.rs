@@ -36,6 +36,9 @@ pub struct SymbolCapture {
     pub files_collected: i64,
     pub files_over_budget: i64,
     pub files_without_server: i64,
+    /// Asked about, but the server failed (an error, or no answer in
+    /// time).
+    pub files_failed: i64,
 }
 
 #[derive(Clone)]
@@ -95,14 +98,16 @@ impl SqliteSymbolStore {
                 }
                 tx.execute(
                     "INSERT OR REPLACE INTO symbol_capture (snapshot_id, stream_id,
-                       files_collected, files_over_budget, files_without_server, captured_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                       files_collected, files_over_budget, files_without_server, files_failed,
+                       captured_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     rusqlite::params![
                         snapshot_id,
                         stream_id,
                         capture.files_collected,
                         capture.files_over_budget,
                         capture.files_without_server,
+                        capture.files_failed,
                         at
                     ],
                 )

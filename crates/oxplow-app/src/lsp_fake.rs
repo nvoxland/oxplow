@@ -78,6 +78,10 @@ while True:
         write_message({"jsonrpc": "2.0", "id": msg["id"], "result": {
             "contents": {"kind": "markdown", "value": "**class** Widget"},
             "range": rng(2, 4, 2, 9)}})
+    elif "id" in msg and method == "textDocument/documentSymbol" and "hang" in msg["params"]["textDocument"]["uri"]:
+        pass
+    elif "id" in msg and method == "textDocument/documentSymbol" and "broken" in msg["params"]["textDocument"]["uri"]:
+        write_message({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32603, "message": "can't read it"}})
     elif "id" in msg and method == "textDocument/documentSymbol":
         write_message({"jsonrpc": "2.0", "id": msg["id"], "result": [
             {"name": "Widget", "kind": 5, "range": rng(2, 0, 6, 0), "selectionRange": rng(2, 6, 2, 12),

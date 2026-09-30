@@ -619,7 +619,7 @@
     - { not_null: ref }
     - { not_null: name }
 - name: symbol_capture
-  version: 1
+  version: 2
   description: "One row per snapshot the symbol collector handled (P5.C6): how many changed files it asked the language servers about, how many went over the `symbolsMaxFilesPerSnapshot` bound, and how many had no running server."
   columns:
     - { name: "snapshot_id", type: "INTEGER", doc: "The snapshot (v_snapshot.id)." }
@@ -627,6 +627,7 @@
     - { name: "files_collected", type: "INTEGER", doc: "Changed files whose symbols were read." }
     - { name: "files_over_budget", type: "INTEGER", doc: "Changed files skipped for the bound." }
     - { name: "files_without_server", type: "INTEGER", doc: "Changed files whose language had no running server (the collector never starts one)." }
+    - { name: "files_failed", type: "INTEGER", doc: "Changed files the server was asked about but failed on (an error, or no answer in time); they count against the bound." }
     - { name: "captured_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: snapshot_id }

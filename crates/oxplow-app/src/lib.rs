@@ -416,6 +416,8 @@ struct MachineEnv {
     provider_copies: PathBuf,
     /// How long a provider's `check` or `invoke` may take.
     provider_call_timeout: std::time::Duration,
+    /// How long a code-intelligence request waits for its language server.
+    lsp_request_timeout: std::time::Duration,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -661,6 +663,7 @@ impl Services {
                 .join("provider-copies")
                 .join(source_runner::project_key(&layout.project_dir)),
             provider_call_timeout: std::time::Duration::from_secs(60),
+            lsp_request_timeout: std::time::Duration::from_secs(30),
         };
         Self::build(layout, config, db, machine)
     }
@@ -841,6 +844,7 @@ impl Services {
                 lsp.clone(),
                 worktrees.clone(),
                 (*diagnostic_store).clone(),
+                machine.lsp_request_timeout,
             ));
         let workspace_files = Arc::new(workspace_files::WorkspaceFiles::new(
             worktrees.clone(),
@@ -1244,6 +1248,7 @@ impl Services {
             provider_copies: state_dir.join("global-config/provider-copies"),
             // A test's hung provider fails fast.
             provider_call_timeout: std::time::Duration::from_secs(2),
+            lsp_request_timeout: std::time::Duration::from_secs(2),
         };
         Self::build(layout, config, Database::in_memory(), machine)
     }

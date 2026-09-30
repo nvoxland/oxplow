@@ -116,7 +116,11 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   (`plugin::lsp_extensions`, set when it is registered; tsk556)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
-  are what the servers published (`lsp_diagnostic`), not a pull. `rename`
+  are what the servers published (`lsp_diagnostic`), not a pull. Every
+  request is bounded by `MachineEnv.lsp_request_timeout` (30 s in the
+  app, 2 s in tests): a server that never answers is a
+  `CodeIntelError::Failed` naming the language and method, not a hung
+  caller (tsk557). `rename`
   returns the edits; nothing applies them. Subscribing to diagnostics is
   the event log's `code.diagnostics.changed`.
 - **MCP**: `code_definition`, `code_references`, `code_hover`,
@@ -138,7 +142,10 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   file a configured server covers, `document_symbols` restates the file
   (a deleted one drops out), refs `symbol:<path>/<name>@snap:<id>`. It is
   bounded by config `symbolsMaxFilesPerSnapshot` (default 50; 0 turns it
-  off) — the rest are recorded as over budget, never an error — and
+  off) — the bound counts **attempts** (collected + failed), so a
+  snapshot of files that all error or time out can't cost more than the
+  bound in server time; the rest are recorded as over budget, and a
+  failed file is counted in `files_failed`, never an error — and
   **never starts a server** (`LspSessionManager::is_running`): a collector
   doesn't run programs on a person's machine, so a file whose server
   isn't running is recorded as such. Each snapshot's coverage is a
