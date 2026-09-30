@@ -2396,6 +2396,7 @@ export function App() {
             }}
             onOpenDiff={handleOpenDiff}
             onOpenSettings={() => handleOpenPage(indexRef("settings"))}
+            onOpenPage={handleOpenPage}
           />
         ),
       },

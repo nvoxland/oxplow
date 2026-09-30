@@ -31,6 +31,18 @@ mock.module("../../api.js", () => ({
     };
   },
   onRemoteReconnect: () => () => {},
+  querySql: async () => ({
+    columns: ["ref", "title", "lens", "kept_lens"],
+    rows: [["answer:7", "Churn", null, null]],
+    truncated: false,
+    reads: { models: ["v_thread_answer"], tables: [], measures: [] },
+    freshness: {},
+  }),
+  runAnswer: async () => ({
+    lens: { id: "answer/7", title: "Churn", viz: "table", columns: [], actions: [], children: [], params: [] },
+    params: {},
+    result: { columns: ["path"], rows: [["hot.rs"]], truncated: false, reads: { models: [], tables: [], measures: [] } },
+  }),
 }));
 
 const { AcpAgentView } = await import("./AcpAgentView.js");
@@ -111,5 +123,39 @@ describe("AcpAgentView", () => {
     // Another thread's event is ignored.
     expect(view.getByTestId("acp-status").textContent).toBe("Ready");
     expect(prompts).toEqual([]);
+  });
+
+  test("an agent's show_lens answer renders inline where the call is (P6.C2)", async () => {
+    const out = JSON.stringify({ answer: "answer:7", title: "Churn", text: "| path |" });
+    snapshot = {
+      ...snapshot,
+      directive: null,
+      headSeq: 2,
+      items: [
+        { id: 1, seq: 1, type: "agent", text: "Here:" },
+        {
+          id: 2,
+          seq: 2,
+          type: "tool",
+          call: {
+            id: "t9",
+            title: "mcp__oxplow__show_lens",
+            name: "mcp__oxplow__show_lens",
+            kind: "other",
+            status: "completed",
+            locations: [],
+            rawInput: null,
+            rawOutput: null,
+            diffs: [],
+            text: [out],
+          },
+        },
+      ],
+    };
+    const view = render(<AcpAgentView thread={thread} visible={true} />);
+    const item = await waitFor(() => view.getByTestId("acp-item-2"));
+    await waitFor(() => expect(item.querySelector('[data-testid="thread-answer"]')).not.toBeNull());
+    await waitFor(() => expect(item.textContent).toContain("hot.rs"));
+    expect(item.querySelector('[data-testid="thread-answer-keep"]')).not.toBeNull();
   });
 });

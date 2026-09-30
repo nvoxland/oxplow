@@ -13,7 +13,11 @@ import {
   type TranscriptItem,
 } from "../../api.js";
 import { WORKING } from "../../revision.js";
+import type { TabRef } from "../../tabs/tabState.js";
 import type { DiffSpec } from "../Diff/DiffPane.js";
+import { answerOfTool, type AnswerRow } from "../../threadAnswers.js";
+import { ThreadAnswer } from "../Answers/ThreadAnswer.js";
+import { useThreadAnswers } from "../Answers/useThreadAnswers.js";
 import { MarkdownView } from "../Wiki/MarkdownView.js";
 import { AcpPromptBox } from "./AcpPromptBox.js";
 import {
@@ -34,6 +38,8 @@ interface Props {
   /** Open a file by absolute path. */
   onOpenFile?(absPath: string): void;
   onOpenSettings?(): void;
+  /** Open a page (an answer's links). */
+  onOpenPage?(ref: TabRef): void;
 }
 
 /**
@@ -45,7 +51,7 @@ interface Props {
  * directive shows as a banner; "Put in input" only fills the draft, and
  * only the person's Enter sends (see AcpPromptBox).
  */
-export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings }: Props) {
+export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpenFile, onOpenSettings, onOpenPage }: Props) {
   const threadId = thread.id;
   const [state, setState] = useState<AcpViewState>(initialState);
   const [draft, setDraft] = useState("");
@@ -181,6 +187,7 @@ export function AcpAgentView({ thread, worktreePath, visible, onOpenDiff, onOpen
         relPath={relPath}
         onOpenDiff={onOpenDiff}
         onOpenFile={onOpenFile}
+        onOpenPage={onOpenPage}
         onError={report}
         emptyText={opening || state.status === "starting" ? "Starting the agent…" : "No messages yet."}
       />
@@ -254,6 +261,7 @@ function Transcript({
   relPath,
   onOpenDiff,
   onOpenFile,
+  onOpenPage,
   onError,
   emptyText,
 }: {
@@ -262,11 +270,14 @@ function Transcript({
   relPath(p: string): string;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenFile?(absPath: string): void;
+  onOpenPage?(ref: TabRef): void;
   onError(err: unknown): void;
   emptyText: string;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
+  const answerList = useThreadAnswers(threadId);
+  const answers = new Map(answerList.map((a) => [a.ref, a]));
   const last = items[items.length - 1];
   // Follow the conversation while the person is at the bottom.
   useEffect(() => {
@@ -292,6 +303,8 @@ function Transcript({
             <Item
               item={item}
               threadId={threadId}
+              answers={answers}
+              onOpenPage={onOpenPage}
               relPath={relPath}
               onOpenDiff={onOpenDiff}
               onOpenFile={onOpenFile}
@@ -307,6 +320,8 @@ function Transcript({
 function Item({
   item,
   threadId,
+  answers,
+  onOpenPage,
   relPath,
   onOpenDiff,
   onOpenFile,
@@ -314,6 +329,9 @@ function Item({
 }: {
   item: TranscriptItem;
   threadId: string;
+  /** The thread's answers by ref: a `show_lens` call renders its own. */
+  answers: ReadonlyMap<string, AnswerRow>;
+  onOpenPage?(ref: TabRef): void;
   relPath(p: string): string;
   onOpenDiff?(spec: DiffSpec): void;
   onOpenFile?(absPath: string): void;
@@ -345,8 +363,20 @@ function Item({
           <div style={{ whiteSpace: "pre-wrap" }}>{item.text}</div>
         </details>
       );
-    case "tool":
-      return <ToolCard call={item.call} itemId={item.id} relPath={relPath} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />;
+    case "tool": {
+      const answerRef = answerOfTool(item.call);
+      const answer = answerRef === null ? undefined : answers.get(answerRef);
+      return (
+        <>
+          <ToolCard call={item.call} itemId={item.id} relPath={relPath} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+          {answer ? (
+            <div style={{ marginTop: 6 }}>
+              <ThreadAnswer answer={answer} onOpenPage={onOpenPage} />
+            </div>
+          ) : null}
+        </>
+      );
+    }
     case "plan":
       return (
         <div style={bubble("var(--surface-card)")}>

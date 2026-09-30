@@ -275,6 +275,19 @@ lens tools in `crates/oxplow-mcp/src/lib.rs`.
       extension, created with `sharing: shared` and `engine`
       (`ManifestScaffold.shared`), and refuses one that doesn't load or
       reads beyond models.
+    - **UI** (P6.C2, `components/Answers/`): a terminal thread's
+      `AgentPage` shows the **Answers strip** above the terminal — the
+      thread's answers from `v_thread_answer` (`threadAnswers.ts`,
+      `useThreadAnswers`), newest first, hidden while there are none,
+      collapsible (Escape inside it collapses; remembered per thread in
+      `oxplow.answers.collapsed`). An ACP thread renders each answer
+      inline under the `show_lens` call that made it (`answerOfTool`
+      finds `answer:<id>` in the call's result). Each `ThreadAnswer`
+      re-runs through `run_answer` with `useRerunOnChange`, and offers
+      **Keep This** (an inline name — empty takes it from the title —
+      Enter keeps via `lens.keep`, Escape cancels) or, once it is a lens
+      (kept, or an existing lens shown), a link to it. The agent tab has
+      no route context, so `AgentPage` takes `onOpenPage`.
     - Explore Data's **Save as Lens** (`save_lens` RPC) uses the lens's
       title as a new extension's `intent.purpose`.
   - **Lens tiles.** A lens can be pinned to a dashboard: "Pin to

@@ -670,6 +670,11 @@ export async function submitLensForm(
   return unwrap(await commands.submitLensForm(id, input, params, streamId, confirmed));
 }
 
+/** Run an answer an agent showed in a thread (`answer:<id>`). */
+export async function runAnswer(answer: string): Promise<LensRun> {
+  return unwrap(await commands.runAnswer(answer));
+}
+
 /** A lens's text rendering — what Copy puts on the clipboard. */
 export async function lensText(id: string, params: Record<string, SqlCell>, streamId: string | null): Promise<string> {
   return unwrap(await commands.lensText(id, params, streamId));
